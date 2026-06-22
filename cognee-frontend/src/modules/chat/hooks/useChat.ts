@@ -1,7 +1,8 @@
 import { v4 } from "uuid";
 import { useCallback, useState } from "react";
-import { fetch, useBoolean } from "@/utils";
+import { useBoolean } from "@/utils";
 import { Dataset } from "@/modules/ingestion/useDatasets";
+import { CogneeInstance } from "@/modules/instances/types";
 
 interface ChatMessage {
   id: string;
@@ -9,13 +10,13 @@ interface ChatMessage {
   text: string;
 }
 
-const fetchMessages = () => {
-  return fetch("/v1/search/")
+const fetchMessages = (instance: CogneeInstance) => {
+  return instance.fetch("/v1/search/")
     .then(response => response.json());
 };
 
-const sendMessage = (message: string, searchType: string, topK: number) => {
-  return fetch("/v1/search/", {
+const sendMessage = (message: string, searchType: string, topK: number, instance: CogneeInstance) => {
+  return instance.fetch("/v1/search/", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -30,9 +31,7 @@ const sendMessage = (message: string, searchType: string, topK: number) => {
     .then(response => response.json());
 };
 
-// Will be used in the future.
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-export default function useChat(dataset: Dataset) {
+export default function useChat(dataset: Dataset, instance: CogneeInstance) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
 
   const {
@@ -42,9 +41,9 @@ export default function useChat(dataset: Dataset) {
   } = useBoolean(false);
 
   const refreshChat = useCallback(async () => {
-    const data = await fetchMessages();
+    const data = await fetchMessages(instance);
     return setMessages(data);
-  }, []);
+  }, [instance]);
 
   const handleMessageSending = useCallback((message: string, searchType: string, topK: number) => {
     const sentMessageId = v4();
@@ -60,7 +59,7 @@ export default function useChat(dataset: Dataset) {
 
     disableSearchRun();
 
-    return sendMessage(message, searchType, topK)
+    return sendMessage(message, searchType, topK, instance)
       .then(newMessages => {
         setMessages((messages) => [
           ...messages,
@@ -78,7 +77,7 @@ export default function useChat(dataset: Dataset) {
         throw new Error("Failed to send message. Please try again. If the issue persists, please contact support.")
       })
       .finally(() => enableSearchRun());
-  }, [disableSearchRun, enableSearchRun]);
+  }, [disableSearchRun, enableSearchRun, instance]);
 
   return {
     messages,
@@ -89,6 +88,15 @@ export default function useChat(dataset: Dataset) {
 }
 
 
+interface Node {
+  name: string;
+}
+
+interface Relationship {
+  relationship_name: string;
+}
+
+type InsightMessage = [Node, Relationship, Node];
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function convertToSearchTypeOutput(systemMessage: any[] | any, searchType: string): string {
@@ -97,6 +105,14 @@ function convertToSearchTypeOutput(systemMessage: any[] | any, searchType: strin
   }
 
   switch (searchType) {
+    case "INSIGHTS":
+      return systemMessage.map((message: InsightMessage) => {
+        const [node1, relationship, node2] = message;
+        if (node1.name && node2.name) {
+          return `${node1.name} ${relationship.relationship_name} ${node2.name}.`;
+        }
+        return "";
+      }).join("\n");
     case "SUMMARIES":
       return systemMessage.map((message: { text: string }) => message.text).join("\n");
     case "CHUNKS":

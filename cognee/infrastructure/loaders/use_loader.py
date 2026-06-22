@@ -1,7 +1,9 @@
+from cognee.infrastructure.loaders import LoaderInterface
+
 from .supported_loaders import supported_loaders
 
 
-def use_loader(loader_name: str, loader_class):
+def use_loader(loader_name: str, loader_class: type[LoaderInterface]) -> None:
     """
     Register a loader at runtime.
 

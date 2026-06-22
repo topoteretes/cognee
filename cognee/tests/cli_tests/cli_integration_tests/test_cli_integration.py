@@ -16,7 +16,7 @@ class TestCliIntegration:
     def test_cli_help(self):
         """Test that CLI help works"""
         result = subprocess.run(
-            [sys.executable, "-m", "cognee.cli._cognee", "--help"],
+            ["cognee-cli", "--help"],
             capture_output=True,
             text=True,
             cwd=Path(__file__).parent.parent.parent,  # Go to project root
@@ -29,7 +29,7 @@ class TestCliIntegration:
     def test_cli_version(self):
         """Test that CLI version works"""
         result = subprocess.run(
-            [sys.executable, "-m", "cognee.cli._cognee", "--version"],
+            ["cognee-cli", "--version"],
             capture_output=True,
             text=True,
             cwd=Path(__file__).parent.parent.parent,  # Go to project root
@@ -44,7 +44,7 @@ class TestCliIntegration:
 
         for command in commands:
             result = subprocess.run(
-                [sys.executable, "-m", "cognee.cli._cognee", command, "--help"],
+                ["cognee-cli", command, "--help"],
                 capture_output=True,
                 text=True,
                 cwd=Path(__file__).parent.parent.parent,  # Go to project root
@@ -75,7 +75,7 @@ class TestCliIntegration:
 
         try:
             result = subprocess.run(
-                [sys.executable, "-m", "cognee.cli._cognee", "add", temp_file],
+                ["cognee-cli", "add", temp_file],
                 capture_output=True,
                 text=True,
                 cwd=Path(__file__).parent.parent.parent,  # Go to project root
@@ -102,7 +102,7 @@ class TestCliIntegration:
 
         for subcommand in subcommands:
             result = subprocess.run(
-                [sys.executable, "-m", "cognee.cli._cognee", "config", subcommand, "--help"],
+                ["cognee-cli", "config", subcommand, "--help"],
                 capture_output=True,
                 text=True,
                 cwd=Path(__file__).parent.parent.parent,  # Go to project root
@@ -113,7 +113,7 @@ class TestCliIntegration:
     def test_search_command_missing_query(self):
         """Test search command fails when query is missing"""
         result = subprocess.run(
-            [sys.executable, "-m", "cognee.cli._cognee", "search"],
+            ["cognee-cli", "search"],
             capture_output=True,
             text=True,
             cwd=Path(__file__).parent.parent.parent,  # Go to project root
@@ -125,7 +125,7 @@ class TestCliIntegration:
     def test_delete_command_no_target(self):
         """Test delete command with no target specified"""
         result = subprocess.run(
-            [sys.executable, "-m", "cognee.cli._cognee", "delete"],
+            ["cognee-cli", "delete"],
             capture_output=True,
             text=True,
             cwd=Path(__file__).parent.parent.parent,  # Go to project root
@@ -178,9 +178,7 @@ class TestCliArgumentParsing:
         """Test search command with all possible options"""
         result = subprocess.run(
             [
-                sys.executable,
-                "-m",
-                "cognee.cli._cognee",
+                "cognee-cli",
                 "search",
                 "test query",
                 "--query-type",
@@ -206,9 +204,7 @@ class TestCliArgumentParsing:
         """Test cognify command with all possible options"""
         result = subprocess.run(
             [
-                sys.executable,
-                "-m",
-                "cognee.cli._cognee",
+                "cognee-cli",
                 "cognify",
                 "--datasets",
                 "dataset1",
@@ -246,9 +242,7 @@ class TestCliArgumentParsing:
         """Test delete command with force flag"""
         result = subprocess.run(
             [
-                sys.executable,
-                "-m",
-                "cognee.cli._cognee",
+                "cognee-cli",
                 "delete",
                 "--dataset-name",
                 "test_dataset",
@@ -269,7 +263,7 @@ class TestCliErrorHandling:
     def test_debug_mode_flag(self):
         """Test that debug flag is accepted"""
         result = subprocess.run(
-            [sys.executable, "-m", "cognee.cli._cognee", "--debug", "search", "test query"],
+            ["cognee-cli", "--debug", "search", "test query"],
             capture_output=True,
             text=True,
             cwd=Path(__file__).parent.parent.parent,  # Go to project root
@@ -282,7 +276,7 @@ class TestCliErrorHandling:
         """Test invalid search type handling"""
         result = subprocess.run(
             [
-                sys.executable,
+                "cognee-cli",
                 "-m",
                 "cognee.cli._cognee",
                 "search",
@@ -301,7 +295,7 @@ class TestCliErrorHandling:
     def test_invalid_chunker(self):
         """Test invalid chunker handling"""
         result = subprocess.run(
-            [sys.executable, "-m", "cognee.cli._cognee", "cognify", "--chunker", "InvalidChunker"],
+            ["cognee-cli", "cognify", "--chunker", "InvalidChunker"],
             capture_output=True,
             text=True,
             cwd=Path(__file__).parent.parent.parent,  # Go to project root
@@ -314,9 +308,7 @@ class TestCliErrorHandling:
         """Test invalid output format handling"""
         result = subprocess.run(
             [
-                sys.executable,
-                "-m",
-                "cognee.cli._cognee",
+                "cognee-cli",
                 "search",
                 "test query",
                 "--output-format",

@@ -1,10 +1,17 @@
 import asyncio
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional
+
+from cognee.modules.pipelines.tasks.task import task_summary
 from cognee.infrastructure.engine import DataPoint
-from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.databases.unified import get_unified_engine
+from cognee.infrastructure.databases.unified.capabilities import EngineCapability
+from cognee.infrastructure.databases.relational import get_async_session
 from cognee.modules.graph.methods import upsert_edges, upsert_nodes
-from cognee.modules.graph.utils import deduplicate_nodes_and_edges, get_graph_from_model
-from cognee.modules.users.models import User
+from cognee.modules.graph.utils import (
+    deduplicate_nodes_and_edges,
+    ensure_default_edge_properties,
+    get_graph_from_model,
+)
 from .index_data_points import index_data_points
 from .index_graph_edges import index_graph_edges
 from cognee.modules.engine.models import Triplet
@@ -14,51 +21,33 @@ from cognee.tasks.storage.exceptions import (
 )
 from ...modules.engine.utils import generate_node_id
 
+if TYPE_CHECKING:
+    from cognee.modules.pipelines.models import PipelineContext
+
 logger = get_logger("add_data_points")
 
 
+@task_summary("Stored {n} data point(s)")
 async def add_data_points(
     data_points: List[DataPoint],
-    context: Optional[Dict[str, Any]] = None,
     custom_edges: Optional[List] = None,
     embed_triplets: bool = False,
+    ctx: Optional["PipelineContext"] = None,
 ) -> List[DataPoint]:
     """
     Add a batch of data points to the graph database by extracting nodes and edges,
     deduplicating them, and indexing them for retrieval.
 
-    This function parallelizes the graph extraction for each data point,
-    merges the resulting nodes and edges, and ensures uniqueness before
-    committing them to the underlying graph engine. It also updates the
-    associated retrieval indices for nodes and (optionally) edges.
-
     Args:
-        data_points (List[DataPoint]):
-            A list of data points to process and insert into the graph.
-        custom_edges (List[tuple]): Custom edges between datapoints.
-        embed_triplets (bool):
-            If True, creates and indexes triplet embeddings from the graph structure.
-            Defaults to False.
-
-    Returns:
-        List[DataPoint]:
-            The original list of data points after processing and insertion.
-
-    Side Effects:
-        - Calls `get_graph_from_model` concurrently for each data point.
-        - Deduplicates nodes and edges across all results.
-        - Updates the node index via `index_data_points`.
-        - Inserts nodes and edges into the graph engine.
-        - Optionally updates the edge index via `index_graph_edges`.
+        data_points: Data points to process and insert into the graph.
+        custom_edges: Custom edges between datapoints.
+        embed_triplets: If True, creates and indexes triplet embeddings.
+        ctx: Pipeline runtime context (user, dataset, data_item).
     """
-    user: Optional[User] = None
-    data = None
-    dataset = None
-
-    if context:
-        data = context["data"]
-        dataset = context["dataset"]
-        user = context["user"]
+    user = ctx.user if ctx else None
+    data_item = ctx.data_item if ctx else None
+    dataset = ctx.dataset if ctx else None
+    pipeline_run_id = ctx.pipeline_run_id if ctx else None
 
     if not isinstance(data_points, list):
         raise InvalidDataPointsInAddDataPointsError("data_points must be a list.")
@@ -90,32 +79,89 @@ async def add_data_points(
 
     nodes, edges = deduplicate_nodes_and_edges(nodes, edges)
 
-    graph_engine = await get_graph_engine()
+    edges = ensure_default_edge_properties(edges, nodes=nodes)
+    custom_edges = (
+        ensure_default_edge_properties(custom_edges, nodes=nodes)
+        if isinstance(custom_edges, list) and custom_edges
+        else None
+    )
 
-    await graph_engine.add_nodes(nodes)
-    await index_data_points(nodes)
+    unified = await get_unified_engine()
+    graph_engine = unified.graph
+    vector_engine = unified.vector
+    use_hybrid = unified.has_capability(EngineCapability.HYBRID_WRITE)
 
-    if user and dataset and data:
-        await upsert_nodes(
-            nodes, tenant_id=user.tenant_id, user_id=user.id, dataset_id=dataset.id, data_id=data.id
+    if user and dataset and data_item:
+        # Single session for all upserts: one transaction, one commit. The
+        # rollback ledger is written BEFORE the graph/vector writes so a
+        # failed write can always be swept by the rollback handler.
+        async with get_async_session() as session:
+            await upsert_nodes(
+                nodes,
+                tenant_id=user.tenant_id,
+                user_id=user.id,
+                dataset_id=dataset.id,
+                data_id=data_item.id,
+                session=session,
+                pipeline_run_id=pipeline_run_id,
+            )
+            await upsert_edges(
+                edges,
+                tenant_id=user.tenant_id,
+                user_id=user.id,
+                dataset_id=dataset.id,
+                data_id=data_item.id,
+                session=session,
+                pipeline_run_id=pipeline_run_id,
+            )
+            if custom_edges:
+                await upsert_edges(
+                    custom_edges,
+                    tenant_id=user.tenant_id,
+                    user_id=user.id,
+                    dataset_id=dataset.id,
+                    data_id=data_item.id,
+                    session=session,
+                    pipeline_run_id=pipeline_run_id,
+                )
+            await session.commit()
+
+    if use_hybrid:
+        await graph_engine.add_nodes_with_vectors(nodes)
+    else:
+        await asyncio.gather(
+            graph_engine.add_nodes(nodes),
+            index_data_points(
+                [node.model_copy(deep=True) for node in nodes],
+                vector_engine=vector_engine,
+            ),
         )
-        await upsert_edges(
-            edges, tenant_id=user.tenant_id, user_id=user.id, dataset_id=dataset.id, data_id=data.id
+
+    if use_hybrid:
+        await graph_engine.add_edges_with_vectors(edges)
+    else:
+        await asyncio.gather(
+            graph_engine.add_edges(edges), index_graph_edges(edges, vector_engine=vector_engine)
         )
 
-    await graph_engine.add_edges(edges)
-    await index_graph_edges(edges)
-
-    if isinstance(custom_edges, list) and custom_edges:
+    if custom_edges:
         # This must be handled separately from datapoint edges, created a task in linear to dig deeper but (COG-3488)
-        await graph_engine.add_edges(custom_edges)
-        await index_graph_edges(custom_edges)
+        # Note: custom_edges is already normalized (with nodes) above, before the
+        # rollback-ledger upsert, so no second ensure_default_edge_properties here.
+        if use_hybrid:
+            await graph_engine.add_edges_with_vectors(custom_edges)
+        else:
+            await asyncio.gather(
+                graph_engine.add_edges(custom_edges),
+                index_graph_edges(custom_edges, vector_engine=vector_engine),
+            )
+
         edges.extend(custom_edges)
 
     if embed_triplets:
         triplets = _create_triplets_from_graph(nodes, edges)
         if triplets:
-            await index_data_points(triplets)
+            await index_data_points(triplets, vector_engine=vector_engine)
             logger.info(f"Created and indexed {len(triplets)} triplets from graph structure")
 
     return data_points

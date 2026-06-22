@@ -1,13 +1,12 @@
 import asyncio
 from os import path
+
 import cognee
 
 
 async def main():
-    await cognee.prune.prune_data()
-    print("Data pruned.")
-
-    await cognee.prune.prune_system(metadata=True)
+    await cognee.forget(everything=True)
+    print("Data forgotten.")
 
     extraction_rules = {
         "title": {"selector": "title"},
@@ -20,16 +19,18 @@ async def main():
         "paragraphs": {"selector": "p", "all": True},
     }
 
-    await cognee.add(
+    await cognee.remember(
         "https://en.wikipedia.org/api/rest_v1/page/html/Large_language_model",
         incremental_loading=False,
         preferred_loaders={"beautiful_soup_loader": {"extraction_rules": extraction_rules}},
+        self_improvement=False,
     )
 
-    await cognee.cognify()
     print("Knowledge graph created.")
 
-    graph_visualization_path = path.join(path.dirname(__file__), ".artifacts/web_url_example.html")
+    graph_visualization_path = path.join(
+        path.dirname(__file__), ".artifacts", "web_url_example.html"
+    )
     await cognee.visualize_graph(graph_visualization_path)
 
 

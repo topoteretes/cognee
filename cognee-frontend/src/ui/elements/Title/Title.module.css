@@ -1,0 +1,14 @@
+@font-face {
+  font-family: "Parabole Display";
+  src:
+    url("/fonts/Parabole-Display.woff2") format("woff2"),
+    url("/fonts/Parabole-Display.woff") format("woff");
+  font-weight: normal;
+  font-style: normal;
+}
+
+.title,
+.title > * {
+  font-family: "Parabole Display";
+  font-weight: normal;
+}

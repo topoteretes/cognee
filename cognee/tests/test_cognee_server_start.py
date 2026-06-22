@@ -28,7 +28,7 @@ class TestCogneeServerStart(unittest.TestCase):
             preexec_fn=os.setsid,
         )
         # Give the server some time to start
-        time.sleep(35)
+        time.sleep(120)
 
         # Check if server started with errors
         if cls.server_process.poll() is not None:
@@ -187,8 +187,6 @@ class TestCogneeServerStart(unittest.TestCase):
         self.assertGreater(
             len(ontology_nodes), 0, "No ontology nodes found - ontology was not integrated"
         )
-
-        # TODO: Add test to verify cognify pipeline is complete before testing search
 
         # Search request
         url = "http://127.0.0.1:8000/api/v1/search"

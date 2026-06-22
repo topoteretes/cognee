@@ -1,7 +1,0 @@
-.userMessage + .systemMessage {
-  margin-top: 2rem;
-}
-
-.systemMessage + .userMessage {
-  margin-top: 2rem;
-}

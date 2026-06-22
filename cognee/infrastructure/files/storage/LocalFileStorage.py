@@ -1,9 +1,10 @@
 import os
 import shutil
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import BinaryIO
 from urllib.parse import urlparse
-from contextlib import contextmanager
-from typing import BinaryIO, Optional, Union
 
 from .FileBufferedReader import FileBufferedReader
 from .storage import Storage
@@ -62,12 +63,10 @@ class LocalFileStorage(Storage):
     the filesystem.
     """
 
-    storage_path: Optional[str] = None
-
-    def __init__(self, storage_path: str):
+    def __init__(self, storage_path: str) -> None:
         self.storage_path = storage_path
 
-    def store(self, file_path: str, data: Union[BinaryIO, str], overwrite: bool = False) -> str:
+    async def store(self, file_path: str, data: BinaryIO | str, overwrite: bool = False) -> str:
         """
         Store data into a specified file path. The data can be either a string or a binary
         stream.
@@ -88,7 +87,7 @@ class LocalFileStorage(Storage):
         full_file_path = os.path.join(parsed_storage_path, file_path)
         file_dir_path = os.path.dirname(full_file_path)
 
-        self.ensure_directory_exists(file_dir_path)
+        await self.ensure_directory_exists(file_dir_path)
 
         if overwrite or not os.path.exists(full_file_path):
             if isinstance(data, str):
@@ -106,8 +105,10 @@ class LocalFileStorage(Storage):
 
         return Path(full_file_path).as_uri()
 
-    @contextmanager
-    def open(self, file_path: str, mode: str = "rb", *args, **kwargs):
+    @asynccontextmanager
+    async def open(
+        self, file_path: str, mode: str = "rb", *args, **kwargs
+    ) -> AsyncGenerator[FileBufferedReader]:
         """
         Retrieve data from a specified file path, returning the content as bytes.
 
@@ -162,7 +163,7 @@ class LocalFileStorage(Storage):
             finally:
                 file.close()
 
-    def file_exists(self, file_path: str):
+    async def file_exists(self, file_path: str) -> bool:
         """
         Check if a specified file exists in the storage.
 
@@ -180,7 +181,7 @@ class LocalFileStorage(Storage):
 
         return os.path.exists(os.path.join(parsed_storage_path, file_path))
 
-    def is_file(self, file_path: str):
+    async def is_file(self, file_path: str) -> bool:
         """
         Check if a specified file is a regular file.
 
@@ -198,7 +199,7 @@ class LocalFileStorage(Storage):
 
         return os.path.isfile(os.path.join(parsed_storage_path, file_path))
 
-    def get_size(self, file_path: str) -> int:
+    async def get_size(self, file_path: str) -> int:
         parsed_storage_path = get_parsed_path(self.storage_path)
 
         return (
@@ -207,7 +208,7 @@ class LocalFileStorage(Storage):
             else 0
         )
 
-    def ensure_directory_exists(self, directory_path: str = ""):
+    async def ensure_directory_exists(self, directory_path: str = "") -> None:
         """
         Ensure that the specified directory exists, creating it if necessary.
 
@@ -224,7 +225,7 @@ class LocalFileStorage(Storage):
         if not os.path.exists(directory_path):
             os.makedirs(directory_path, exist_ok=True)
 
-    def copy_file(self, source_file_path: str, destination_file_path: str):
+    async def copy_file(self, source_file_path: str, destination_file_path: str) -> str:
         """
         Copy a file from a source path to a destination path.
         Files need to be in the same storage.
@@ -247,7 +248,7 @@ class LocalFileStorage(Storage):
             os.path.join(parsed_storage_path, destination_file_path),
         )
 
-    def remove(self, file_path: str):
+    async def remove(self, file_path: str) -> None:
         """
         Remove the specified file from the storage if it exists.
 
@@ -262,7 +263,7 @@ class LocalFileStorage(Storage):
         if os.path.exists(full_file_path):
             os.remove(full_file_path)
 
-    def list_files(self, directory_path: str, recursive: bool = False) -> list[str]:
+    async def list_files(self, directory_path: str, recursive: bool = False) -> list[str]:
         """
         List all files in the specified directory.
 
@@ -312,7 +313,7 @@ class LocalFileStorage(Storage):
 
         return files
 
-    def remove_all(self, tree_path: str = None):
+    async def remove_all(self, root_path: str | None = None) -> None:
         """
         Remove an entire directory tree at the specified path, including all files and
         subdirectories.
@@ -328,12 +329,12 @@ class LocalFileStorage(Storage):
         """
         parsed_storage_path = get_parsed_path(self.storage_path)
 
-        if tree_path is None:
-            tree_path = parsed_storage_path
+        if root_path is None:
+            root_path = parsed_storage_path
         else:
-            tree_path = os.path.join(parsed_storage_path, tree_path)
+            root_path = os.path.join(parsed_storage_path, root_path)
 
         try:
-            return shutil.rmtree(tree_path)
+            shutil.rmtree(root_path)
         except FileNotFoundError:
             pass

@@ -1,23 +1,36 @@
 import os
+import warnings
 from contextvars import ContextVar
-from typing import Union
+from typing import Optional, Union
 from uuid import UUID
 
 from cognee.base_config import get_base_config
+from cognee.exceptions import CogneeValidationError
+from cognee.infrastructure.llm.config import LLMConfig
+from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
 from cognee.infrastructure.databases.vector.config import (
     get_vectordb_config,
     get_vectordb_context_config,
 )
-from cognee.infrastructure.databases.graph.config import get_graph_config, get_graph_context_config
-from cognee.infrastructure.databases.utils import get_or_create_dataset_database
-from cognee.infrastructure.databases.utils import resolve_dataset_database_connection_info
+
 from cognee.infrastructure.files.storage.config import file_storage_config
 from cognee.modules.users.methods import get_user
+from cognee.infrastructure.databases.graph.config import get_graph_config, get_graph_context_config
+from cognee.infrastructure.databases.utils.get_or_create_dataset_database import (
+    get_or_create_dataset_database,
+)
+from cognee.infrastructure.databases.utils.resolve_dataset_database_connection_info import (
+    resolve_dataset_database_connection_info,
+)
 
 # Note: ContextVar allows us to use different graph db configurations in Cognee
 #       for different async tasks, threads and processes
 vector_db_config = ContextVar("vector_db_config", default=None)
 graph_db_config = ContextVar("graph_db_config", default=None)
+# Note: same mechanism for LLM and embedding configs so that the LiteLLM client
+#       and the embedding engine can use per-context (e.g. per-request) configs.
+llm_config = ContextVar("llm_config", default=None)
+embedding_config = ContextVar("embedding_config", default=None)
 session_user = ContextVar("session_user", default=None)
 
 
@@ -86,95 +99,212 @@ def backend_access_control_enabled():
     return False
 
 
-VECTOR_DBS_WITH_MULTI_USER_SUPPORT = ["lancedb", "falkor"]
-GRAPH_DBS_WITH_MULTI_USER_SUPPORT = ["kuzu", "falkor"]
+VECTOR_DBS_WITH_MULTI_USER_SUPPORT = ["lancedb", "pgvector", "falkor"]
+GRAPH_DBS_WITH_MULTI_USER_SUPPORT = ["ladybug", "kuzu", "falkor", "postgres"]
 
 
-def is_multi_user_support_possible():
-    graph_config = get_graph_context_config()
-    vector_config = get_vectordb_context_config()
-    return (
-        graph_config["graph_database_provider"] in GRAPH_DBS_WITH_MULTI_USER_SUPPORT
-        and vector_config["vector_db_provider"] in VECTOR_DBS_WITH_MULTI_USER_SUPPORT
-    )
+class DatabaseContextManager:
+    """Dual-mode helper returned by :func:`set_database_global_context_variables`.
 
+    Supports both ``await`` (legacy) and ``async with`` (scoped) usage.
 
-async def set_database_global_context_variables(dataset: Union[str, UUID], user_id: UUID):
+    Note: Single-use object, should not be reused across multiple calls.
     """
-    If backend access control is enabled this function will ensure all datasets have their own databases,
-    access to which will be enforced by given permissions.
+
+    __slots__ = ("_dataset", "_user_id", "_llm_config", "_embedding_config", "_applied")
+
+    def __init__(
+        self,
+        dataset: Union[str, UUID],
+        user_id: UUID,
+        llm_config: Optional[LLMConfig] = None,
+        embedding_config: Optional[EmbeddingConfig] = None,
+    ) -> None:
+        self._dataset = dataset
+        self._user_id = user_id
+        self._llm_config = llm_config
+        self._embedding_config = embedding_config
+        self._applied = False
+
+    async def apply_database_context_variables(
+        self, dataset: Union[str, UUID], user_id: UUID
+    ) -> None:
+        # LLM and embedding configs are an explicit, caller-provided override and
+        # are intentionally applied regardless of backend access control: callers
+        # may want per-context LLM/embedding configs even in single-tenant mode.
+        if self._llm_config is not None:
+            llm_config.set(self._llm_config)
+        if self._embedding_config is not None:
+            embedding_config.set(self._embedding_config)
+
+        if not backend_access_control_enabled():
+            return
+
+        # In multi-user mode a dataset is required to resolve the per-dataset
+        # database; fail fast with a clear message instead of a downstream
+        # "user None" lookup error.
+        if dataset is None:
+            raise CogneeValidationError(
+                "A dataset must be provided when backend access control is enabled."
+            )
+
+        # Imported lazily to avoid circular imports at module load.
+        from cognee.infrastructure.databases.dataset_queue import dataset_queue
+
+        await dataset_queue().ensure_slot(dataset)
+
+        user = await get_user(user_id)
+
+        # To ensure permissions are enforced properly all datasets will have their own databases
+        dataset_database = await get_or_create_dataset_database(dataset, user)
+        # Ensure that all connection info is resolved properly
+        dataset_database = await resolve_dataset_database_connection_info(dataset_database)
+
+        base_config = get_base_config()
+        data_root_directory = os.path.join(
+            base_config.data_root_directory, str(user.tenant_id or user.id)
+        )
+        databases_directory_path = os.path.join(
+            base_config.system_root_directory, "databases", str(user.id)
+        )
+
+        # Set vector and graph database configuration based on dataset database information
+        vector_config = {
+            "vector_db_provider": dataset_database.vector_database_provider,
+            "vector_db_url": dataset_database.vector_database_url,
+            "vector_db_key": dataset_database.vector_database_key,
+            "vector_db_name": dataset_database.vector_database_name,
+            "vector_db_port": dataset_database.vector_database_connection_info.get("port", ""),
+            "vector_db_host": dataset_database.vector_database_connection_info.get("host", ""),
+            "vector_db_username": dataset_database.vector_database_connection_info.get(
+                "username", ""
+            ),
+            "vector_db_password": dataset_database.vector_database_connection_info.get(
+                "password", ""
+            ),
+            # Inherit subprocess mode from the global config so that per-dataset DB wrappers
+            # are also spawned as subprocesses when the feature is enabled.
+            "vector_db_subprocess_enabled": get_vectordb_config().vector_db_subprocess_enabled,
+        }
+
+        graph_config = {
+            "graph_database_provider": dataset_database.graph_database_provider,
+            "graph_database_url": dataset_database.graph_database_url,
+            "graph_database_name": dataset_database.graph_database_name,
+            "graph_database_key": dataset_database.graph_database_key,
+            "graph_file_path": os.path.join(
+                databases_directory_path, dataset_database.graph_database_name
+            ),
+            "graph_database_username": dataset_database.graph_database_connection_info.get(
+                "graph_database_username", ""
+            ),
+            "graph_database_password": dataset_database.graph_database_connection_info.get(
+                "graph_database_password", ""
+            ),
+            "graph_database_host": dataset_database.graph_database_connection_info.get(
+                "graph_database_host", ""
+            ),
+            "graph_database_allow_anonymous": dataset_database.graph_database_connection_info.get(
+                "graph_database_allow_anonymous",
+                get_graph_config().graph_database_allow_anonymous,
+            ),
+            "graph_dataset_database_handler": dataset_database.graph_dataset_database_handler,
+            "graph_database_port": dataset_database.graph_database_connection_info.get(
+                "graph_database_port", ""
+            ),
+            # Inherit subprocess mode and Kuzu tuning from the global config so that
+            # per-dataset DB wrappers are spawned with matching settings.
+            "graph_database_subprocess_enabled": get_graph_config().graph_database_subprocess_enabled,
+            "kuzu_num_threads": get_graph_config().kuzu_num_threads,
+            "kuzu_buffer_pool_size": get_graph_config().kuzu_buffer_pool_size,
+            "kuzu_max_db_size": get_graph_config().kuzu_max_db_size,
+        }
+
+        storage_config = {
+            "data_root_directory": data_root_directory,
+        }
+
+        # Use ContextVar to use these graph and vector configurations are used
+        # in the current async context across Cognee
+        graph_db_config.set(graph_config)
+        vector_db_config.set(vector_config)
+        file_storage_config.set(storage_config)
+
+    async def _apply(self) -> None:
+        if self._applied:
+            return
+        await self.apply_database_context_variables(self._dataset, self._user_id)
+        self._applied = True
+
+    def __await__(self):
+        # Legacy ``await set_database_global_context_variables(...)`` call shape.
+        # Deprecated — emit a warning pointing users at the ``async with`` form,
+        # which scopes the dataset queue slot to a block and releases it on exit.
+        warnings.warn(
+            "`await set_database_global_context_variables(...)` is deprecated. "
+            "Use `async with set_database_global_context_variables(...):` instead "
+            "for scoped dataset-queue slot management; the `async with` form "
+            "releases the database queue slot automatically on block exit, the deprecated method does not.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self._apply().__await__()
+
+    async def __aenter__(self) -> "DatabaseContextManager":
+        await self._apply()
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb) -> None:
+        if not backend_access_control_enabled():
+            return None
+
+        from cognee.infrastructure.databases.dataset_queue import dataset_queue
+
+        await dataset_queue().release_slot_for(self._dataset)
+
+
+def set_database_global_context_variables(
+    dataset: Union[str, UUID],
+    user_id: UUID,
+    llm_config: Optional[LLMConfig] = None,
+    embedding_config: Optional[EmbeddingConfig] = None,
+) -> "DatabaseContextManager":
+    """Returns a dual-mode helper that is both awaitable and an async context manager.
+
+    - ``await set_database_global_context_variables(ds, user_id)`` — legacy;
+      applies the context and relies on task-end queue cleanup to release the
+      slot.
+    - ``async with set_database_global_context_variables(ds, user_id):`` —
+      applies the context on enter; explicitly releases this dataset's queue
+      slot on exit. Preferred for sequential multi-dataset loops and scoped
+      operations.
+
+    If backend access control is enabled this ensures all datasets have their
+    own databases, access to which will be enforced by given permissions.
     Database name will be determined by dataset and the appropriate vector and
     graph database handlers will be enforced.
 
-    Note: This is only currently supported by the following databases:
-          Relational: SQLite, Postgres
-          Vector: LanceDB, pgvector
-          Graph: KuzuDB, neo4j_aura_dev
+    Additionally, this acts as the queue gate for dataset-level operations:
+    applying the context ensures the current asyncio task holds a
+    :class:`DatasetQueue` slot for ``dataset``. Repeated calls in the same
+    task for the same dataset are no-ops;. The dataset queue slot is released automatically when the
+    task completes (legacy mode) or on async-with exit (scoped mode).
+
+    If ``llm_config`` and/or ``embedding_config`` are provided they are set on
+    their respective ContextVars and picked up by ``get_llm_client`` (LiteLLM)
+    and ``get_embedding_engine`` in the current async context. Unlike the
+    graph/vector configs these are applied even when backend access control is
+    disabled, since they are an explicit caller-provided override.
 
     Args:
         dataset: Cognee dataset name or id
         user_id: UUID of the owner of the dataset
+        llm_config: Optional ``LLMConfig`` to use for LLM calls in this context.
+        embedding_config: Optional ``EmbeddingConfig`` to use for embedding calls
+            in this context.
 
     Returns:
-
+        A :class:`DatabaseContextManager` that can be awaited or used as an
+        async context manager.
     """
-
-    if not backend_access_control_enabled():
-        return
-
-    user = await get_user(user_id)
-
-    # To ensure permissions are enforced properly all datasets will have their own databases
-    dataset_database = await get_or_create_dataset_database(dataset, user)
-    # Ensure that all connection info is resolved properly
-    dataset_database = await resolve_dataset_database_connection_info(dataset_database)
-
-    base_config = get_base_config()
-    data_root_directory = os.path.join(
-        base_config.data_root_directory, str(user.tenant_id or user.id)
-    )
-    databases_directory_path = os.path.join(
-        base_config.system_root_directory, "databases", str(user.id)
-    )
-
-    # Set vector and graph database configuration based on dataset database information
-    # TODO: Add better handling of vector and graph config across Cognee.
-    #  LRU_CACHE takes into account order of inputs, if order of inputs is changed it will be registered as a new DB adapter
-    vector_config = {
-        "vector_db_provider": dataset_database.vector_database_provider,
-        "vector_db_url": dataset_database.vector_database_url,
-        "vector_db_key": dataset_database.vector_database_key,
-        "vector_db_name": dataset_database.vector_database_name,
-        "vector_db_port": dataset_database.vector_database_connection_info.get("port", ""),
-        "vector_db_host": dataset_database.vector_database_connection_info.get("host", ""),
-        "vector_db_username": dataset_database.vector_database_connection_info.get("username", ""),
-        "vector_db_password": dataset_database.vector_database_connection_info.get("password", ""),
-    }
-
-    graph_config = {
-        "graph_database_provider": dataset_database.graph_database_provider,
-        "graph_database_url": dataset_database.graph_database_url,
-        "graph_database_name": dataset_database.graph_database_name,
-        "graph_database_key": dataset_database.graph_database_key,
-        "graph_file_path": os.path.join(
-            databases_directory_path, dataset_database.graph_database_name
-        ),
-        "graph_database_username": dataset_database.graph_database_connection_info.get(
-            "graph_database_username", ""
-        ),
-        "graph_database_password": dataset_database.graph_database_connection_info.get(
-            "graph_database_password", ""
-        ),
-        "graph_dataset_database_handler": "",
-        "graph_database_port": "",
-    }
-
-    storage_config = {
-        "data_root_directory": data_root_directory,
-    }
-
-    # Use ContextVar to use these graph and vector configurations are used
-    # in the current async context across Cognee
-    graph_db_config.set(graph_config)
-    vector_db_config.set(vector_config)
-    file_storage_config.set(storage_config)
+    return DatabaseContextManager(dataset, user_id, llm_config, embedding_config)

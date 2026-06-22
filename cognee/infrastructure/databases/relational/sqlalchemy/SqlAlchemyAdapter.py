@@ -1,4 +1,5 @@
 import os
+import gc
 import asyncio
 from os import path
 import tempfile
@@ -78,28 +79,27 @@ class SQLAlchemyAdapter:
                 connect_args={**{"timeout": 30}, **final_connect_args},
             )
         else:
-            if pool_args is None:
-                pool_args = {}
+            # Transform pool_args from tuple into dict if provided
+            # Note: For caching purposes, pool_args is stored as a sorted tuple of key-value pairs in the config
+            pool_args = pool_args or {}
 
-            if pool_args.get("pool_size") is None:
-                pool_args["pool_size"] = 20
+            if pool_args.get("poolclass", "").lower() == "nullpool":
+                pool_args["poolclass"] = NullPool
+            else:
+                # Standard QueuePool settings
+                pool_args.setdefault("pool_size", 20)
+                pool_args.setdefault("max_overflow", 20)
+                pool_args.setdefault("pool_pre_ping", True)
+                pool_args.setdefault("pool_recycle", 280)
+                pool_args.setdefault("pool_timeout", 280)
 
-            if pool_args.get("max_overflow") is None:
-                pool_args["max_overflow"] = 20
-
-            if pool_args.get("pool_pre_ping") is None:
-                pool_args["pool_pre_ping"] = True
-
-            if pool_args.get("pool_recycle") is None:
-                pool_args["pool_recycle"] = 280
-
-            if pool_args.get("pool_timeout") is None:
-                pool_args["pool_timeout"] = 280
+            engine_kwargs = {**pool_args}
+            if final_connect_args:
+                engine_kwargs["connect_args"] = final_connect_args
 
             self.engine = create_async_engine(
                 connection_string,
-                **pool_args,
-                connect_args=final_connect_args,
+                **engine_kwargs,
             )
 
         self.sessionmaker = async_sessionmaker(bind=self.engine, expire_on_commit=False)
@@ -407,7 +407,10 @@ class SQLAlchemyAdapter:
                 # Load table information from schema into MetaData
                 await connection.run_sync(metadata.reflect, schema=schema_name)
                 # Define the full table name
-                full_table_name = f"{schema_name}.{table_name}"
+                if schema_name is None:
+                    full_table_name = table_name
+                else:
+                    full_table_name = f"{schema_name}.{table_name}"
                 # Check if table is in list of tables for the given schema
                 if full_table_name in metadata.tables:
                     return metadata.tables[full_table_name]
@@ -557,6 +560,15 @@ class SQLAlchemyAdapter:
                 await file_storage.ensure_directory_exists()
 
         async with self.engine.begin() as connection:
+            # Import here to avoid circular imports
+            from cognee.infrastructure.databases.vector.config import get_vectordb_config
+
+            vector_config = get_vectordb_config()
+            if (
+                vector_config.vector_db_provider == "pgvector"
+                and self.engine.dialect.name == "postgresql"
+            ):
+                await connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
             if len(Base.metadata.tables.keys()) > 0:
                 await connection.run_sync(Base.metadata.create_all)
 
@@ -567,12 +579,51 @@ class SQLAlchemyAdapter:
         try:
             if self.engine.dialect.name == "sqlite":
                 await self.engine.dispose(close=True)
-                # Wait for the database connections to close and release the file (Windows)
+                # The create_relational_engine() lru_cache keeps this adapter
+                # (and its AsyncEngine/sessionmaker) reachable, which on Windows
+                # keeps the underlying aiosqlite connection/background thread
+                # alive and holding the file handle. Drop that strong reference
+                # so the connection can finalize before we remove the file.
+                # Imported lazily to avoid the circular import
+                # (create_relational_engine imports this adapter).
+                from cognee.infrastructure.databases.relational.create_relational_engine import (
+                    create_relational_engine,
+                )
+
+                create_relational_engine.cache_clear()
+                gc.collect()
+                # Wait for the database connections to close and release the file.
+                # This settle also preserves teardown timing other resources
+                # (e.g. the graph DB) rely on between tests, so keep it
+                # unconditional.
                 await asyncio.sleep(2)
                 db_directory = path.dirname(self.db_path)
                 file_name = path.basename(self.db_path)
                 file_storage = get_file_storage(db_directory)
-                await file_storage.remove(file_name)
+                # On Windows the SQLite file handle can still linger after the
+                # settle above (aiosqlite closes the connection on a background
+                # thread), so os.remove fails with WinError 32. Retry with short
+                # backoff and force a GC pass to finalize lingering connection
+                # objects.
+                for attempt in range(10):
+                    try:
+                        await file_storage.remove(file_name)
+                        break
+                    except (PermissionError, OSError) as remove_error:
+                        if attempt == 9:
+                            # Best-effort cleanup: a stubborn Windows file lock
+                            # must never poison teardown/prune. No test asserts
+                            # the file is gone and every create path uses
+                            # CREATE TABLE IF NOT EXISTS, so a left-behind file
+                            # is harmless. Log and continue instead of raising.
+                            logger.warning(
+                                "Could not remove sqlite database file %s after retries: %s",
+                                file_name,
+                                remove_error,
+                            )
+                            break
+                        gc.collect()
+                        await asyncio.sleep(0.5)
             else:
                 async with self.engine.begin() as connection:
                     # Create a MetaData instance to load table information

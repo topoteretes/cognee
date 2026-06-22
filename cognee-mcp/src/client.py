@@ -33,17 +33,25 @@ async def run():
         async with ClientSession(read, write, timedelta(minutes=3)) as session:
             await session.initialize()
 
-            toolResult = await session.list_tools()
+            tools_result = await session.list_tools()
+            print(f"Available tools: {[tool.name for tool in tools_result.tools]}")
 
-            toolResult = await session.call_tool("prune", arguments={})
-
-            toolResult = await session.call_tool("cognify", arguments={})
-
-            toolResult = await session.call_tool(
-                "search", arguments={"search_type": "GRAPH_COMPLETION"}
+            session_id = "example-session"
+            remember_result = await session.call_tool(
+                "remember",
+                arguments={"data": text, "session_id": session_id},
             )
 
-            print(f"Cognify result: {toolResult.content}")
+            recall_result = await session.call_tool(
+                "recall",
+                arguments={"query": "What is artificial intelligence?", "session_id": session_id},
+            )
+
+            forget_validation_result = await session.call_tool("forget", arguments={})
+
+            print(f"Remember result: {remember_result.content}")
+            print(f"Recall result: {recall_result.content}")
+            print(f"Forget validation result: {forget_validation_result.content}")
 
 
 if __name__ == "__main__":

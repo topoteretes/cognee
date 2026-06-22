@@ -1,14 +1,15 @@
 import os
-from typing import Type
+
 from pydantic import BaseModel
-from cognee.infrastructure.llm.prompts.render_prompt import render_prompt
-from cognee.infrastructure.llm.LLMGateway import LLMGateway
+
 from cognee.infrastructure.llm.config import (
     get_llm_config,
 )
+from cognee.infrastructure.llm.LLMGateway import LLMGateway
+from cognee.infrastructure.llm.prompts.render_prompt import render_prompt
 
 
-async def extract_event_entities(content: str, response_model: Type[BaseModel]):
+async def extract_event_entities(content: str, response_model: type[BaseModel]):
     """
     Extracts event-related entities from the given content using an LLM with structured output.
 

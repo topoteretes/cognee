@@ -1,1 +1,1 @@
-from .utils.get_file_metadata import get_file_metadata, FileMetadata
+from .utils.get_file_metadata import FileMetadata, get_file_metadata

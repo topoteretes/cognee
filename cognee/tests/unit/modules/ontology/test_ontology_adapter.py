@@ -1,6 +1,9 @@
+import io
+
 import pytest
 from rdflib import Graph, Namespace, RDF, OWL, RDFS
 from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
+from cognee.modules.ontology.exceptions import OntologyInitializationError
 from cognee.modules.ontology.models import AttachedOntologyNode
 from cognee.modules.ontology.get_default_ontology_resolver import get_default_ontology_resolver
 
@@ -18,6 +21,30 @@ def test_ontology_adapter_initialization_file_not_found():
     """Test OntologyAdapter initialization with nonexistent file."""
     adapter = RDFLibOntologyResolver(ontology_file="nonexistent.owl")
     assert adapter.graph is None
+
+
+def test_ontology_adapter_initialization_turtle_file_object():
+    """Test loading Turtle ontology content from a file-like object."""
+    ontology_content = """
+    @prefix ex: <http://example.org/test#> .
+    @prefix owl: <http://www.w3.org/2002/07/owl#> .
+
+    ex:Car a owl:Class .
+    ex:Audi a ex:Car .
+    """
+
+    resolver = RDFLibOntologyResolver(ontology_file=io.StringIO(ontology_content))
+
+    assert resolver.graph is not None
+    assert "car" in resolver.lookup["classes"]
+    assert "audi" in resolver.lookup["individuals"]
+    assert resolver.find_closest_match("Audi", "individuals") == "audi"
+
+
+def test_ontology_adapter_initialization_invalid_file_object_raises():
+    """Test invalid file-like ontology content fails instead of creating an empty lookup."""
+    with pytest.raises(OntologyInitializationError):
+        RDFLibOntologyResolver(ontology_file=io.StringIO("{"))
 
 
 def test_build_lookup():

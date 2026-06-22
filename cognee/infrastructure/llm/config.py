@@ -1,11 +1,13 @@
+import json
 import os
-from typing import Optional, ClassVar, Any
 from functools import lru_cache
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from typing import Any, ClassVar
+
 from pydantic import model_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 try:
-    from baml_py import ClientRegistry
+    from baml_py import ClientRegistry  # ty:ignore[unresolved-import]
 except ImportError:
     ClientRegistry = None
 
@@ -42,8 +44,8 @@ class LLMConfig(BaseSettings):
     llm_provider: str = "openai"
     llm_model: str = "openai/gpt-5-mini"
     llm_endpoint: str = ""
-    llm_api_key: Optional[str] = None
-    llm_api_version: Optional[str] = None
+    llm_api_key: str | None = None
+    llm_api_version: str | None = None
     llm_temperature: float = 0.0
     llm_streaming: bool = False
     llm_max_completion_tokens: int = 16384
@@ -51,7 +53,7 @@ class LLMConfig(BaseSettings):
     baml_llm_provider: str = "openai"
     baml_llm_model: str = "gpt-5-mini"
     baml_llm_endpoint: str = ""
-    baml_llm_api_key: Optional[str] = None
+    baml_llm_api_key: str | None = None
     baml_llm_temperature: float = 0.0
     baml_llm_api_version: str = ""
 
@@ -62,11 +64,13 @@ class LLMConfig(BaseSettings):
     llm_rate_limit_enabled: bool = False
     llm_rate_limit_requests: int = 60
     llm_rate_limit_interval: int = 60  # in seconds (default is 60 requests per minute)
+    llm_rate_limit_tokens: int = 0  # max tokens per interval (0 = disabled)
     embedding_rate_limit_enabled: bool = False
     embedding_rate_limit_requests: int = 60
     embedding_rate_limit_interval: int = 60  # in seconds (default is 60 requests per minute)
+    embedding_rate_limit_tokens: int = 0  # max tokens per interval (0 = disabled)
 
-    llama_cpp_model_path: Optional[str] = None
+    llama_cpp_model_path: str | None = None
     llama_cpp_n_ctx: int = 2048
     llama_cpp_n_gpu_layers: int = 0
     llama_cpp_chat_format: str = "chatml"
@@ -75,7 +79,11 @@ class LLMConfig(BaseSettings):
     fallback_endpoint: str = ""
     fallback_model: str = ""
 
-    baml_registry: Optional[Any] = None
+    llm_azure_use_managed_identity: bool = False
+
+    llm_args: dict[str, Any] | None = None
+
+    baml_registry: Any | None = None
 
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
@@ -213,7 +221,7 @@ class LLMConfig(BaseSettings):
 
         return self
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         """
         Convert the LLMConfig instance into a dictionary representation.
 
@@ -248,11 +256,12 @@ class LLMConfig(BaseSettings):
             "llama_cpp_n_ctx": self.llama_cpp_n_ctx,
             "llama_cpp_n_gpu_layers": self.llama_cpp_n_gpu_layers,
             "llama_cpp_chat_format": self.llama_cpp_chat_format,
+            "llm_args": self.llm_args,
         }
 
 
 @lru_cache
-def get_llm_config():
+def get_llm_config() -> LLMConfig:
     """
     Retrieve and cache the LLM configuration.
 
@@ -267,3 +276,17 @@ def get_llm_config():
           LLM.
     """
     return LLMConfig()
+
+
+def get_llm_context_config() -> LLMConfig:
+    """Get the appropriate LLM config based on the current async context.
+
+    Mirrors the graph/vector context-config pattern: if an ``LLMConfig`` has been
+    set on the ``llm_config`` ContextVar (via
+    ``set_database_global_context_variables``), return it so that different async
+    tasks, threads and processes can use different LLM configurations. Otherwise
+    fall back to the cached global config.
+    """
+    from cognee.context_global_variables import llm_config
+
+    return llm_config.get() or get_llm_config()

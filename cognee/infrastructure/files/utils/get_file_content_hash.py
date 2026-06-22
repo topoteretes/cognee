@@ -3,11 +3,11 @@ import os
 from os import path
 from typing import BinaryIO, Union
 
-from ..storage import get_file_storage
 from ..exceptions import FileContentHashingError
+from ..storage import get_file_storage
 
 
-async def get_file_content_hash(file_obj: Union[str, BinaryIO]) -> str:
+async def get_file_content_hash(file_obj: str | BinaryIO) -> str:
     h = hashlib.md5()
 
     try:
@@ -36,5 +36,5 @@ async def get_file_content_hash(file_obj: Union[str, BinaryIO]) -> str:
                 h.update(chunk)
 
         return h.hexdigest()
-    except IOError as e:
+    except OSError as e:
         raise FileContentHashingError(message=f"Failed to hash data from {file_obj}: {e}")

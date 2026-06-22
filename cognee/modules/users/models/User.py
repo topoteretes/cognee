@@ -20,6 +20,10 @@ class User(SQLAlchemyBaseUserTableUUID, Principal):
     # Foreign key to current Tenant (Many-to-One relationship)
     tenant_id = Column(UUID, ForeignKey("tenants.id"))
 
+    # Parent user — when an agent/service user creates datasets, the parent
+    # inherits full permissions automatically. Null for regular human users.
+    parent_user_id = Column(UUID, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
     # Many-to-Many Relationship with Roles
     roles: Mapped[list["Role"]] = relationship(
         "Role",
@@ -45,10 +49,12 @@ class User(SQLAlchemyBaseUserTableUUID, Principal):
 # Keep these schemas in sync with User model
 class UserRead(schemas.BaseUser[uuid_UUID]):
     tenant_id: Optional[uuid_UUID] = None
+    parent_user_id: Optional[uuid_UUID] = None
 
 
 class UserCreate(schemas.BaseUserCreate):
     is_verified: bool = True
+    parent_user_id: Optional[uuid_UUID] = None
 
 
 class UserUpdate(schemas.BaseUserUpdate):

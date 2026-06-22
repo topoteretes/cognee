@@ -11,10 +11,9 @@ async def get_formatted_graph_data(dataset_id: UUID, user: User):
     if not dataset:
         raise DatasetNotFoundError(message="Dataset not found.")
 
-    await set_database_global_context_variables(dataset_id, dataset.owner_id)
-
-    graph_client = await get_graph_engine()
-    (nodes, edges) = await graph_client.get_graph_data()
+    async with set_database_global_context_variables(dataset_id, dataset.owner_id):
+        graph_client = await get_graph_engine()
+        (nodes, edges) = await graph_client.get_graph_data()
 
     return {
         "nodes": list(

@@ -98,6 +98,59 @@ async def add_feedback(
         return False
 
 
+async def add_frequency_weights(
+    session_id: str,
+    qa_id: str,
+    node_ids: Optional[list[str]] = None,
+    edge_ids: Optional[list[str]] = None,
+    user: Optional[User] = None,
+) -> bool:
+    """Add or update frequency weight data for a QA entry.
+
+    This function stores the graph elements (node_ids and edge_ids) that were used
+    in generating the answer for a QA entry. This data is later processed by
+    apply_frequency_weights to increment the frequency weights of those elements.
+
+    The frequency_weights_applied flag is reset to False so the entry will be
+    reprocessed by the apply_frequency_weights pipeline.
+
+    Args:
+        session_id: Session identifier.
+        qa_id: QA entry identifier.
+        node_ids: List of node IDs used in generating the answer.
+        edge_ids: List of edge IDs used in generating the answer.
+        user: User that owns the session. If None, uses session/context user or default user.
+
+    Returns:
+        True if updated, False if QA not found or cache unavailable.
+    """
+    from cognee.tasks.memify.frequency_weights_constants import (
+        MEMIFY_METADATA_FREQUENCY_WEIGHTS_APPLIED_KEY,
+    )
+
+    resolved_user = await _resolve_user(user)
+    user_id = str(resolved_user.id)
+
+    used_graph_element_ids: dict[str, list[str]] = {}
+    if node_ids:
+        used_graph_element_ids["node_ids"] = node_ids
+    if edge_ids:
+        used_graph_element_ids["edge_ids"] = edge_ids
+
+    try:
+        sm = get_session_manager()
+        return await sm.update_qa(
+            user_id=user_id,
+            session_id=session_id,
+            qa_id=qa_id,
+            used_graph_element_ids=used_graph_element_ids if used_graph_element_ids else None,
+            memify_metadata={MEMIFY_METADATA_FREQUENCY_WEIGHTS_APPLIED_KEY: False},
+        )
+    except Exception as e:
+        logger.warning("add_frequency_weights: error from SessionManager: %s", e)
+        return False
+
+
 async def delete_feedback(
     session_id: str,
     qa_id: str,

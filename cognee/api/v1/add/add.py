@@ -1,6 +1,9 @@
 from uuid import UUID
 from typing import Union, BinaryIO, List, Optional, Any
+
 from cognee.modules.users.models import User
+from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
+from cognee.infrastructure.llm.config import LLMConfig
 from cognee.modules.pipelines import Task, run_pipeline
 from cognee.modules.pipelines.layers.resolve_authorized_user_dataset import (
     resolve_authorized_user_dataset,
@@ -8,16 +11,27 @@ from cognee.modules.pipelines.layers.resolve_authorized_user_dataset import (
 from cognee.modules.pipelines.layers.reset_dataset_pipeline_run_status import (
     reset_dataset_pipeline_run_status,
 )
+from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
 from cognee.modules.engine.operations.setup import setup
 from cognee.tasks.ingestion import ingest_data, resolve_data_directories
 from cognee.tasks.ingestion.data_item import DataItem
+from cognee.tasks.ingestion.resolve_dlt_sources import resolve_dlt_sources
+from cognee.tasks.ingestion.utils import materialize_stream_for_background
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 
 
 async def add(
-    data: Union[BinaryIO, list[BinaryIO], str, list[str], DataItem, list[DataItem]],
+    data: Union[
+        BinaryIO,
+        list[BinaryIO],
+        str,
+        list[str],
+        DataItem,
+        list[DataItem],
+        Any,  # DltResource, SourceFactory, or other dlt types
+    ],
     dataset_name: str = "main_dataset",
     user: User = None,
     node_set: Optional[List[str]] = None,
@@ -27,6 +41,11 @@ async def add(
     preferred_loaders: Optional[List[Union[str, dict[str, dict[str, Any]]]]] = None,
     incremental_loading: bool = True,
     data_per_batch: Optional[int] = 20,
+    importance_weight: Optional[float] = 0.5,
+    run_in_background: bool = False,
+    llm_config: Optional[LLMConfig] = None,
+    embedding_config: Optional[EmbeddingConfig] = None,
+    **kwargs,
 ):
     """
     Add data to Cognee for knowledge graph processing.
@@ -83,6 +102,8 @@ async def add(
         vector_db_config: Optional configuration for vector database (for custom setups).
         graph_db_config: Optional configuration for graph database (for custom setups).
         dataset_id: Optional specific dataset UUID to use instead of dataset_name.
+        run_in_background: If True, starts ingestion asynchronously and returns immediately.
+                          If False (default), waits for completion before returning.
         extraction_rules: Optional dictionary of rules (e.g., CSS selectors, XPath) for extracting specific content from web pages using BeautifulSoup
         tavily_config: Optional configuration for Tavily API, including API key and extraction settings
         soup_crawler_config: Optional configuration for BeautifulSoup crawler, specifying concurrency, crawl delay, and extraction rules.
@@ -160,11 +181,22 @@ async def add(
         - LLM_MODEL: Model name (default: "gpt-5-mini")
         - DEFAULT_USER_EMAIL: Custom default user email
         - DEFAULT_USER_PASSWORD: Custom default user password
-        - VECTOR_DB_PROVIDER: "lancedb" (default), "chromadb", "pgvector"
-        - GRAPH_DATABASE_PROVIDER: "kuzu" (default), "neo4j"
+        - VECTOR_DB_PROVIDER: "lancedb" (default), "pgvector"
+        - GRAPH_DATABASE_PROVIDER: "ladybug" (default), "neo4j"
         - TAVILY_API_KEY: YOUR_TAVILY_API_KEY
 
     """
+    # Route to remote instance if connected via serve()
+    from cognee.api.v1.serve.state import get_remote_client
+
+    client = get_remote_client()
+    if client is not None:
+        result = await client.add(data, dataset_name)
+        # Wrap in a simple namespace so callers expecting .model_dump() still work
+        from types import SimpleNamespace
+
+        return SimpleNamespace(**result)
+
     if preferred_loaders is not None:
         transformed = {}
         for item in preferred_loaders:
@@ -183,6 +215,7 @@ async def add(
             node_set,
             dataset_id,
             preferred_loaders,
+            importance_weight,
         ),
     ]
 
@@ -192,13 +225,37 @@ async def add(
         dataset_name=dataset_name, dataset_id=dataset_id, user=user
     )
 
+    # Expand DLT resources (and auto-detected CSV/connection strings) into
+    # standard DataItems before the pipeline sees them. orphan_cleanup (when
+    # not None) deletes dlt rows no longer present in the source; it is
+    # deferred until after the fresh rows are committed to avoid a data-loss
+    # window on a mid-ingest failure.
+    data, orphan_cleanup = await resolve_dlt_sources(
+        data,
+        dataset_name=dataset_name,
+        user=user,
+        **kwargs,
+    )
+
+    # Background runs must not depend on caller/request-scoped stream lifetimes.
+    # Materialize stream-like inputs into owned in-memory buffers up front.
+    if run_in_background:
+        # Detached pipelines run one-at-a-time (to avoid DB write conflicts)
+        # and commit later, so we cannot safely defer cleanup past their commit
+        # from here without racing them. Run it up front instead.
+        if orphan_cleanup is not None:
+            await orphan_cleanup()
+            orphan_cleanup = None
+        data = await materialize_stream_for_background(data)
+
     await reset_dataset_pipeline_run_status(
         authorized_dataset.id, user, pipeline_names=["add_pipeline", "cognify_pipeline"]
     )
 
-    pipeline_run_info = None
+    pipeline_executor_func = get_pipeline_executor(run_in_background=run_in_background)
 
-    async for run_info in run_pipeline(
+    result = await pipeline_executor_func(
+        pipeline=run_pipeline,
         tasks=tasks,
         datasets=[authorized_dataset.id],
         data=data,
@@ -209,7 +266,13 @@ async def add(
         use_pipeline_cache=True,
         incremental_loading=incremental_loading,
         data_per_batch=data_per_batch,
-    ):
-        pipeline_run_info = run_info
+        llm_config=llm_config,
+        embedding_config=embedding_config,
+    )
 
-    return pipeline_run_info
+    # run_pipeline_blocking returns {dataset_id: PipelineRunInfo} but callers
+    # expect a single PipelineRunInfo (add always processes one dataset).
+    if isinstance(result, dict) and len(result) == 1:
+        return next(iter(result.values()))
+
+    return result

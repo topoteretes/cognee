@@ -1,15 +1,15 @@
 import os
-from pydantic import BaseModel
-from typing import Type
 
-from cognee.infrastructure.llm.prompts import render_prompt
-from cognee.infrastructure.llm.LLMGateway import LLMGateway
+from pydantic import BaseModel
+
 from cognee.infrastructure.llm.config import (
     get_llm_config,
 )
+from cognee.infrastructure.llm.LLMGateway import LLMGateway
+from cognee.infrastructure.llm.prompts import render_prompt
 
 
-async def extract_event_graph(content: str, response_model: Type[BaseModel]):
+async def extract_event_graph(content: str, response_model: type[BaseModel]) -> BaseModel:
     """
     Extracts an event graph from the given content using an LLM with a structured output format.
 

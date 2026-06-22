@@ -1,0 +1,154 @@
+<?xml version="1.0"?>
+<rdf:RDF
+    xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+    xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+    xmlns:owl="http://www.w3.org/2002/07/owl#"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema#"
+    xmlns:org="http://example.org/org#">
+
+  <owl:Ontology rdf:about="http://example.org/org">
+    <rdfs:comment>Ontology derived from employee CSV.</rdfs:comment>
+  </owl:Ontology>
+
+  <!-- Classes -->
+  <owl:Class rdf:about="http://example.org/org#Employee"/>
+  <owl:Class rdf:about="http://example.org/org#Department"/>
+  <owl:Class rdf:about="http://example.org/org#Role"/>
+  <owl:Class rdf:about="http://example.org/org#NodeSet"/>
+
+  <!-- NodeSet Individuals -->
+  <owl:NamedIndividual rdf:about="http://example.org/org#Female">
+    <rdf:type rdf:resource="http://example.org/org#NodeSet"/>
+  </owl:NamedIndividual>
+
+  <owl:NamedIndividual rdf:about="http://example.org/org#Male">
+    <rdf:type rdf:resource="http://example.org/org#NodeSet"/>
+  </owl:NamedIndividual>
+
+  <!-- Department Individuals -->
+  <owl:NamedIndividual rdf:about="http://example.org/org#Engineering">
+    <rdf:type rdf:resource="http://example.org/org#Department"/>
+  </owl:NamedIndividual>
+
+  <owl:NamedIndividual rdf:about="http://example.org/org#Marketing">
+    <rdf:type rdf:resource="http://example.org/org#Department"/>
+  </owl:NamedIndividual>
+
+  <owl:NamedIndividual rdf:about="http://example.org/org#Sales">
+    <rdf:type rdf:resource="http://example.org/org#Department"/>
+  </owl:NamedIndividual>
+
+  <!-- Role Individuals -->
+  <owl:NamedIndividual rdf:about="http://example.org/org#SeniorDeveloper">
+    <rdf:type rdf:resource="http://example.org/org#Role"/>
+  </owl:NamedIndividual>
+
+  <owl:NamedIndividual rdf:about="http://example.org/org#TechLead">
+    <rdf:type rdf:resource="http://example.org/org#Role"/>
+  </owl:NamedIndividual>
+
+  <owl:NamedIndividual rdf:about="http://example.org/org#MarketingManager">
+    <rdf:type rdf:resource="http://example.org/org#Role"/>
+  </owl:NamedIndividual>
+
+  <owl:NamedIndividual rdf:about="http://example.org/org#AccountExecutive">
+    <rdf:type rdf:resource="http://example.org/org#Role"/>
+  </owl:NamedIndividual>
+
+  <owl:NamedIndividual rdf:about="http://example.org/org#JuniorDeveloper">
+    <rdf:type rdf:resource="http://example.org/org#Role"/>
+  </owl:NamedIndividual>
+
+  <!-- Properties -->
+  <owl:DatatypeProperty rdf:about="http://example.org/org#employeeId">
+    <rdfs:domain rdf:resource="http://example.org/org#Employee"/>
+    <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#integer"/>
+  </owl:DatatypeProperty>
+
+  <owl:DatatypeProperty rdf:about="http://example.org/org#fullName">
+    <rdfs:domain rdf:resource="http://example.org/org#Employee"/>
+    <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#string"/>
+  </owl:DatatypeProperty>
+
+  <owl:DatatypeProperty rdf:about="http://example.org/org#email">
+    <rdfs:domain rdf:resource="http://example.org/org#Employee"/>
+    <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#string"/>
+  </owl:DatatypeProperty>
+
+  <owl:DatatypeProperty rdf:about="http://example.org/org#age">
+    <rdfs:domain rdf:resource="http://example.org/org#Employee"/>
+    <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#integer"/>
+  </owl:DatatypeProperty>
+
+  <owl:ObjectProperty rdf:about="http://example.org/org#hasDepartment">
+    <rdfs:domain rdf:resource="http://example.org/org#Employee"/>
+    <rdfs:range rdf:resource="http://example.org/org#Department"/>
+  </owl:ObjectProperty>
+
+  <owl:ObjectProperty rdf:about="http://example.org/org#hasRole">
+    <rdfs:domain rdf:resource="http://example.org/org#Employee"/>
+    <rdfs:range rdf:resource="http://example.org/org#Role"/>
+  </owl:ObjectProperty>
+
+  <owl:ObjectProperty rdf:about="http://example.org/org#inNodeSet">
+    <rdfs:domain rdf:resource="http://example.org/org#Employee"/>
+    <rdfs:range rdf:resource="http://example.org/org#NodeSet"/>
+  </owl:ObjectProperty>
+
+  <!-- Employees -->
+  <owl:NamedIndividual rdf:about="http://example.org/org#Alice">
+    <rdf:type rdf:resource="http://example.org/org#Employee"/>
+    <org:employeeId rdf:datatype="http://www.w3.org/2001/XMLSchema#integer">1</org:employeeId>
+    <org:fullName>Alice</org:fullName>
+    <org:email>alice@company.example</org:email>
+    <org:age rdf:datatype="http://www.w3.org/2001/XMLSchema#integer">31</org:age>
+    <org:hasDepartment rdf:resource="http://example.org/org#Engineering"/>
+    <org:hasRole rdf:resource="http://example.org/org#SeniorDeveloper"/>
+    <org:inNodeSet rdf:resource="http://example.org/org#Female"/>
+  </owl:NamedIndividual>
+
+  <owl:NamedIndividual rdf:about="http://example.org/org#Diana">
+    <rdf:type rdf:resource="http://example.org/org#Employee"/>
+    <org:employeeId rdf:datatype="http://www.w3.org/2001/XMLSchema#integer">4</org:employeeId>
+    <org:fullName>Diana</org:fullName>
+    <org:email>diana@company.example</org:email>
+    <org:age rdf:datatype="http://www.w3.org/2001/XMLSchema#integer">29</org:age>
+    <org:hasDepartment rdf:resource="http://example.org/org#Sales"/>
+    <org:hasRole rdf:resource="http://example.org/org#AccountExecutive"/>
+    <org:inNodeSet rdf:resource="http://example.org/org#Female"/>
+  </owl:NamedIndividual>
+
+  <owl:NamedIndividual rdf:about="http://example.org/org#Eve">
+    <rdf:type rdf:resource="http://example.org/org#Employee"/>
+    <org:employeeId rdf:datatype="http://www.w3.org/2001/XMLSchema#integer">5</org:employeeId>
+    <org:fullName>Eve</org:fullName>
+    <org:email>eve@company.example</org:email>
+    <org:age rdf:datatype="http://www.w3.org/2001/XMLSchema#integer">24</org:age>
+    <org:hasDepartment rdf:resource="http://example.org/org#Engineering"/>
+    <org:hasRole rdf:resource="http://example.org/org#JuniorDeveloper"/>
+    <org:inNodeSet rdf:resource="http://example.org/org#Female"/>
+  </owl:NamedIndividual>
+
+  <owl:NamedIndividual rdf:about="http://example.org/org#Bob">
+    <rdf:type rdf:resource="http://example.org/org#Employee"/>
+    <org:employeeId rdf:datatype="http://www.w3.org/2001/XMLSchema#integer">2</org:employeeId>
+    <org:fullName>Bob</org:fullName>
+    <org:email>bob@company.example</org:email>
+    <org:age rdf:datatype="http://www.w3.org/2001/XMLSchema#integer">35</org:age>
+    <org:hasDepartment rdf:resource="http://example.org/org#Engineering"/>
+    <org:hasRole rdf:resource="http://example.org/org#TechLead"/>
+    <org:inNodeSet rdf:resource="http://example.org/org#Male"/>
+  </owl:NamedIndividual>
+
+  <owl:NamedIndividual rdf:about="http://example.org/org#Charlie">
+    <rdf:type rdf:resource="http://example.org/org#Employee"/>
+    <org:employeeId rdf:datatype="http://www.w3.org/2001/XMLSchema#integer">3</org:employeeId>
+    <org:fullName>Charlie</org:fullName>
+    <org:email>charlie@company.example</org:email>
+    <org:age rdf:datatype="http://www.w3.org/2001/XMLSchema#integer">38</org:age>
+    <org:hasDepartment rdf:resource="http://example.org/org#Marketing"/>
+    <org:hasRole rdf:resource="http://example.org/org#MarketingManager"/>
+    <org:inNodeSet rdf:resource="http://example.org/org#Male"/>
+  </owl:NamedIndividual>
+
+</rdf:RDF>

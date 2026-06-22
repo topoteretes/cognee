@@ -1,8 +1,9 @@
 from jinja2 import Environment, FileSystemLoader, select_autoescape
+
 from cognee.root_dir import get_absolute_path
 
 
-def render_prompt(filename: str, context: dict, base_directory: str = None) -> str:
+def render_prompt(filename: str, context: dict, base_directory: str | None = None) -> str:
     """
     Render a Jinja2 template asynchronously.
 

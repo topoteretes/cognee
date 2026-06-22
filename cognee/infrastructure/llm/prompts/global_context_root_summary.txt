@@ -1,0 +1,29 @@
+Compress the top-level summaries into one retrieval-ready dataset summary.
+
+Output two sections only.
+
+First section:
+This dataset is about:
+- <Category>: <names or topics>
+- <Category>: <names or topics>
+
+First-section rules:
+1. List entity/topic categories that define the dataset. Do not list facts here.
+2. Use only useful categories present in the inputs.
+3. Good categories include People, Companies, Organizations, Places, Roles, Projects, Products, Systems, Concepts, Events, and Topics; prefer central concrete names.
+4. Keep category lines short. Do not include weak or generic words.
+
+Second section:
+Facts:
+- <high-level self-contained fact or tight fact group>
+- <high-level self-contained fact or tight fact group>
+
+Second-section rules:
+1. Write high-level complete sentences with clear subjects.
+2. Each fact must stand alone without the input summaries or the other facts.
+3. Order facts by: time first, category second, entity/topic third.
+4. Do not group all facts about one entity if that makes the facts jump backward or forward in time.
+5. Make sure the facts cover the important dataset-level content of the input summaries.
+6. Do not invent.
+
+Max 500 tokens.

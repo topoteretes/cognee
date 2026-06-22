@@ -6,13 +6,15 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from cognee.modules.data.methods import create_dataset
-from cognee.modules.data.methods import create_authorized_dataset
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.databases.vector import get_vectordb_config
 from cognee.infrastructure.databases.graph.config import get_graph_config
 from cognee.modules.data.methods import get_unique_dataset_id
 from cognee.modules.users.models import DatasetDatabase
 from cognee.modules.users.models import User
+from cognee.version import get_cognee_version
+from cognee.modules.migrations.migration import head_revision
+from cognee.modules.migrations.registry import MIGRATIONS
 
 
 async def _get_vector_db_info(dataset_id: UUID, user: User) -> dict:
@@ -87,6 +89,8 @@ async def get_or_create_dataset_database(
 
     # If dataset is given as name make sure the dataset is created first
     if isinstance(dataset, str):
+        from cognee.modules.data.methods import create_authorized_dataset
+
         async with db_engine.get_async_session() as session:
             if isinstance(dataset, str):
                 dataset = await create_authorized_dataset(dataset, user)
@@ -100,10 +104,20 @@ async def get_or_create_dataset_database(
     vector_config_dict = await _get_vector_db_info(dataset_id, user)
 
     async with db_engine.get_async_session() as session:
-        # If there are no existing rows build a new row
+        # If there are no existing rows build a new row. A freshly created
+        # database is stamped at the current migration head so it skips all
+        # existing migrations; cognee_version is recorded for audit only.
+        #
+        # Assumption: creating the row coincides with creating an EMPTY graph/
+        # vector DB, so head-stamping is correct. If a physical DB can outlive
+        # its dataset_database row and be re-attached (e.g. Neo4j CREATE DATABASE
+        # IF NOT EXISTS), this row would wrongly skip migrations on populated
+        # data — handle that case explicitly if/when that lifecycle is supported.
         record = DatasetDatabase(
             owner_id=user.id,
             dataset_id=dataset_id,
+            cognee_version=get_cognee_version(),
+            migration_revision=head_revision(MIGRATIONS),
             **graph_config_dict,  # Unpack graph db config
             **vector_config_dict,  # Unpack vector db config
         )

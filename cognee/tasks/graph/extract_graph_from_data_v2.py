@@ -14,10 +14,14 @@ from cognee.tasks.graph.cascade_extract.utils.extract_edge_triplets import (
 from cognee.tasks.graph.extract_graph_from_data import integrate_chunk_graphs
 
 
+from cognee.modules.pipelines.tasks.task import task_summary
+
+
+@task_summary("Extracted graph from {n} chunk(s)")
 async def extract_graph_from_data(
     data_chunks: List[DocumentChunk],
     n_rounds: int = 2,
-    ontology_adapter: BaseOntologyResolver = None,
+    ontology_resolver: BaseOntologyResolver = None,
 ) -> List[DocumentChunk]:
     """Extract and update graph data from document chunks using cascade extraction.
 
@@ -27,7 +31,7 @@ async def extract_graph_from_data(
     Args:
         data_chunks: List of document chunks to process
         n_rounds: Number of extraction rounds to perform (default: 2)
-        ontology_adapter: Resolver for validating entities against ontology
+        ontology_resolver: Resolver for validating entities against ontology
 
     Returns:
         List of updated DocumentChunk objects with extracted graph data
@@ -56,5 +60,5 @@ async def extract_graph_from_data(
         data_chunks=data_chunks,
         chunk_graphs=chunk_graphs,
         graph_model=KnowledgeGraph,
-        ontology_adapter=ontology_adapter,
+        ontology_resolver=ontology_resolver,
     )

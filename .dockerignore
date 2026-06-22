@@ -8,7 +8,7 @@ assets
 notebooks
 cognee-frontend
 
-.dlt
+examples/python/.dlt
 .venv
 .github
 

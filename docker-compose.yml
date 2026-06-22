@@ -10,6 +10,8 @@ services:
     volumes:
       - ./cognee:/app/cognee
       - .env:/app/.env
+      # Uncomment to allow ingestion of local files from host:
+      # - /path/to/your/data:/data
     environment:
       - DEBUG=false # Change to true if debugging
       - HOST=0.0.0.0
@@ -23,6 +25,12 @@ services:
     ports:
       - 8000:8000
       - 5678:5678 # Debugger port
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
     deploy:
       resources:
         limits:
@@ -43,6 +51,8 @@ services:
     volumes:
       - .env:/app/.env
       - ./cognee:/app/cognee
+      # Uncomment to allow ingestion of local files from host:
+      # - /path/to/your/data:/data
     environment:
       - DEBUG=false # Change to true if debugging
       - ENVIRONMENT=local
@@ -61,8 +71,10 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
-      - "8000:8000" # MCP port
-      - "5678:5678" # MCP debugger port
+      # Host ports differ from the main `cognee` service so both can run together
+      # (the MCP server still listens on 8000 inside the container).
+      - "8001:8000" # MCP port
+      - "5679:5678" # MCP debugger port
     deploy:
       resources:
         limits:
@@ -91,7 +103,7 @@ services:
       - cognee-network
 
   neo4j:
-    image: neo4j:latest
+    image: neo4j:5.26  # Pinned to 5.x; compatible with neo4j Python driver >=5.28,<6
     container_name: neo4j
     restart: always
     profiles:
@@ -104,25 +116,6 @@ services:
       - NEO4J_PLUGINS=["apoc", "graph-data-science"]
     networks:
       - cognee-network
-
-  chromadb:
-    image: chromadb/chroma:0.6.3
-    container_name: chromadb
-    restart: always
-    profiles:
-      - chromadb
-    environment:
-      - IS_PERSISTENT=TRUE
-      - CHROMA_SERVER_AUTH_CREDENTIALS=${VECTOR_DB_KEY}
-      - CHROMA_SERVER_AUTH_CREDENTIALS_PROVIDER=chromadb.auth.token.TokenConfigServerAuthCredentialsProvider
-      - CHROMA_SERVER_AUTH_TOKEN_TRANSPORT_HEADER=AUTHORIZATION
-      - CHROMA_SERVER_AUTH_PROVIDER=chromadb.auth.token.TokenAuthServerProvider
-    volumes:
-      - .chromadb_data/:/chroma/chroma/
-    networks:
-      - cognee-network
-    ports:
-      - "3002:8000"
 
   postgres:
     image: pgvector/pgvector:pg17
@@ -169,6 +162,5 @@ networks:
     name: cognee-network
 
 volumes:
-  chromadb_data:
   postgres_data:
   redis_data:

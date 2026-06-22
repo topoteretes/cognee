@@ -1,6 +1,6 @@
 from typing import Any, Optional, List, Union
 from cognee.shared.logging_utils import get_logger
-from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.infrastructure.databases.vector.exceptions.exceptions import CollectionNotFoundError
@@ -23,8 +23,26 @@ class ChunksRetriever(BaseRetriever):
     def __init__(
         self,
         top_k: Optional[int] = 5,
+        node_name: Optional[List[str]] = None,
+        node_name_filter_operator: str = "OR",
     ):
+        """
+        Initializes the chunk retriever.
+
+        Parameters:
+        -----------
+
+            - top_k (Optional[int]): Maximum number of chunks to retrieve.
+              Defaults to 5.
+            - node_name (Optional[List[str]]): Node names used to filter chunks by
+              their belongs_to_set relationship. Defaults to None, which applies no
+              node set filtering.
+            - node_name_filter_operator (str): Logical operator used when applying
+              multiple node_name filters, such as "OR" or "AND". Defaults to "OR".
+        """
         self.top_k = top_k
+        self.node_name = node_name
+        self.node_name_filter_operator = node_name_filter_operator
 
     async def get_completion_from_context(
         self, query: str, retrieved_objects: Any, context: Any
@@ -91,11 +109,17 @@ class ChunksRetriever(BaseRetriever):
             f"Starting chunk retrieval for query: '{query[:100]}{'...' if len(query) > 100 else ''}'"
         )
 
-        vector_engine = get_vector_engine()
+        unified = await get_unified_engine()
+        vector_engine = unified.vector
 
         try:
             found_chunks = await vector_engine.search(
-                "DocumentChunk_text", query, limit=self.top_k, include_payload=True
+                "DocumentChunk_text",
+                query,
+                limit=self.top_k,
+                include_payload=True,
+                node_name=self.node_name,
+                node_name_filter_operator=self.node_name_filter_operator,
             )
             logger.info(f"Found {len(found_chunks)} chunks from vector search")
 

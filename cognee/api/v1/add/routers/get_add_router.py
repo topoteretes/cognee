@@ -2,8 +2,9 @@ from uuid import UUID
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
-from fastapi import Form, File, UploadFile, Depends
-from typing import List, Optional, Union, Literal
+from fastapi import Form, File, UploadFile as UF, Depends, status
+from typing import List, Optional, Union, Literal, Annotated
+from pydantic import WithJsonSchema
 
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
@@ -12,21 +13,49 @@ from cognee.modules.pipelines.models import PipelineRunErrored
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.usage_logger import log_usage
 from cognee import __version__ as cognee_version
+from cognee.api.DTO import ErrorResponse
 
 logger = get_logger()
+
+# NOTE: Needed because of: https://github.com/fastapi/fastapi/discussions/14975
+#       Once issue is resolved on Swagger side it can be removed.
+UploadFile = Annotated[UF, WithJsonSchema({"type": "string", "format": "binary"})]
 
 
 def get_add_router() -> APIRouter:
     router = APIRouter()
 
-    @router.post("", response_model=dict)
+    @router.post(
+        "",
+        response_model=dict,
+        responses={
+            400: {"model": ErrorResponse},
+            403: {"model": ErrorResponse},
+            422: {"model": ErrorResponse},
+            500: {"model": ErrorResponse},
+        },
+    )
     @log_usage(function_name="POST /v1/add", log_type="api_endpoint")
     async def add(
         data: List[UploadFile] = File(default=None),
-        datasetName: Optional[str] = Form(default=None),
+        datasetName: Optional[str] = Form(
+            default=None,
+            examples=["default_dataset"],
+            description=(
+                "Name of the target dataset (created if it does not exist). "
+                "Required unless datasetId is provided."
+            ),
+        ),
         # Note: Literal is needed for Swagger use
-        datasetId: Union[UUID, Literal[""], None] = Form(default=None, examples=[""]),
+        datasetId: Union[UUID, Literal[""], None] = Form(
+            default=None,
+            examples=[""],
+            description=(
+                "Providing dataset ID is mandatory for sharing a dataset between users. Datasets provided by name will only be resolvable by dataset owner."
+            ),
+        ),
         node_set: Optional[List[str]] = Form(default=[""], example=[""]),
+        run_in_background: Optional[bool] = Form(default=False),
         user: User = Depends(get_authenticated_user),
     ):
         """
@@ -45,6 +74,7 @@ def get_add_router() -> APIRouter:
         - **datasetId** (Optional[UUID]): UUID of an already existing dataset
         - **node_set** Optional[list[str]]: List of node identifiers for graph organization and access control.
                  Used for grouping related data points in the knowledge graph.
+        - **run_in_background** (Optional[bool]): Run add pipeline asynchronously (default: False).
 
         Either datasetName or datasetId must be provided.
 
@@ -76,7 +106,12 @@ def get_add_router() -> APIRouter:
         from cognee.api.v1.add import add as cognee_add
 
         if not datasetId and not datasetName:
-            raise ValueError("Either datasetId or datasetName must be provided.")
+            return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content=ErrorResponse(
+                    error="Either datasetId or datasetName must be provided.",
+                ).model_dump(),
+            )
 
         try:
             add_run = await cognee_add(
@@ -84,15 +119,34 @@ def get_add_router() -> APIRouter:
                 datasetName,
                 user=user,
                 dataset_id=datasetId,
+                run_in_background=run_in_background or False,
                 node_set=node_set
                 if node_set != [""]
                 else None,  # Transform default node_set endpoint value to None
             )
 
             if isinstance(add_run, PipelineRunErrored):
-                return JSONResponse(status_code=420, content=add_run.model_dump(mode="json"))
+                # The failing task's error is carried on ``payload`` (set to
+                # ``repr(error)`` by the pipeline runner). Surface it directly so
+                # the client gets an actionable message instead of an empty body
+                # or the model's repr.
+                detail = add_run.payload if isinstance(add_run.payload, str) else None
+                return JSONResponse(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    content=ErrorResponse(
+                        error="Pipeline run errored",
+                        detail=detail or str(add_run),
+                    ).model_dump(),
+                )
             return add_run.model_dump()
         except Exception as error:
-            return JSONResponse(status_code=409, content={"error": str(error)})
+            logger.exception("Add failed")
+            return JSONResponse(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                content=ErrorResponse(
+                    error="Internal server error",
+                    detail=str(error),
+                ).model_dump(),
+            )
 
     return router

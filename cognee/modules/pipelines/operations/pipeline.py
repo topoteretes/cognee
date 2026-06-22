@@ -1,6 +1,6 @@
 import asyncio
 from uuid import UUID
-from typing import Dict, Optional, Union
+from typing import Awaitable, Callable, Optional, Union
 
 from cognee.modules.pipelines.layers.setup_and_check_environment import (
     setup_and_check_environment,
@@ -13,7 +13,9 @@ from cognee.modules.pipelines.operations.run_tasks import run_tasks
 from cognee.modules.pipelines.layers import validate_pipeline_tasks
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.users.models import User
-from cognee.context_global_variables import set_database_global_context_variables
+from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
+from cognee.infrastructure.llm.config import LLMConfig
+
 from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
     resolve_authorized_user_datasets,
 )
@@ -40,14 +42,18 @@ async def run_pipeline(
     vector_db_config: Optional[dict] = None,
     graph_db_config: Optional[dict] = None,
     incremental_loading: bool = False,
-    context: Optional[Dict] = None,
     data_per_batch: int = 20,
+    rollback_handler: Optional[Callable[..., Awaitable[None]]] = None,
+    llm_config: Optional[LLMConfig] = None,
+    embedding_config: Optional[EmbeddingConfig] = None,
 ):
     validate_pipeline_tasks(tasks)
     await setup_and_check_environment(vector_db_config, graph_db_config)
 
     user, authorized_datasets = await resolve_authorized_user_datasets(datasets, user)
 
+    # TODO: If multiple datasets are provided, we currently run them sequentially to avoid overwhelming the system with too many concurrent pipeline runs.
+    #       In the future, we could consider adding concurrency here with proper resource management and limits.
     for dataset in authorized_datasets:
         async for run_info in run_pipeline_per_dataset(
             dataset=dataset,
@@ -55,10 +61,12 @@ async def run_pipeline(
             tasks=tasks,
             data=data,
             pipeline_name=pipeline_name,
-            context={"dataset": dataset, "pipeline_name": pipeline_name},
             use_pipeline_cache=use_pipeline_cache,
             incremental_loading=incremental_loading,
             data_per_batch=data_per_batch,
+            rollback_handler=rollback_handler,
+            llm_config=llm_config,
+            embedding_config=embedding_config,
         ):
             yield run_info
 
@@ -71,12 +79,11 @@ async def run_pipeline_per_dataset(
     pipeline_name: str = "custom_pipeline",
     use_pipeline_cache=False,
     incremental_loading=False,
-    context: Optional[Dict] = None,
     data_per_batch: int = 20,
+    rollback_handler: Optional[Callable[..., Awaitable[None]]] = None,
+    llm_config: Optional[LLMConfig] = None,
+    embedding_config: Optional[EmbeddingConfig] = None,
 ):
-    # Will only be used if ENABLE_BACKEND_ACCESS_CONTROL is set to True
-    await set_database_global_context_variables(dataset.id, dataset.owner_id)
-
     if not data:
         data = await get_dataset_data(dataset_id=dataset.id)
 
@@ -103,9 +110,11 @@ async def run_pipeline_per_dataset(
         data,
         user,
         pipeline_name,
-        context,
-        incremental_loading,
-        data_per_batch,
+        incremental_loading=incremental_loading,
+        data_per_batch=data_per_batch,
+        rollback_handler=rollback_handler,
+        llm_config=llm_config,
+        embedding_config=embedding_config,
     )
 
     async for pipeline_run_info in pipeline_run:

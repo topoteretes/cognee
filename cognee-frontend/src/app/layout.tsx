@@ -1,12 +1,15 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
 import "./globals.css";
-
-const inter = Inter({ subsets: ["latin"] });
+import "tailwindcss";
+import "@mantine/core/styles.css";
+import "@mantine/notifications/styles.css";
+import { mantineHtmlProps, MantineProvider } from "@mantine/core";
+import theme from "@/ui/theme/theme";
+import { Notifications } from "@mantine/notifications";
 
 export const metadata: Metadata = {
   title: "Cognee",
-  description: "Cognee Dev Mexican Standoff",
+  description: "Build AI memory with knowledge graphs.",
 };
 
 export default function RootLayout({
@@ -15,8 +18,13 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body className={inter.className}>{children}</body>
+    <html lang="en" className="h-full" {...mantineHtmlProps}>
+      <body className="antialiased h-full">
+        <MantineProvider theme={theme}>
+          <Notifications position="top-right" zIndex={10001} />
+          {children}
+        </MantineProvider>
+      </body>
     </html>
   );
 }

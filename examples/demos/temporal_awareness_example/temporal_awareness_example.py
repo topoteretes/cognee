@@ -1,8 +1,9 @@
 import asyncio
-import cognee
-from cognee.shared.logging_utils import setup_logging, INFO
-from cognee.api.v1.search import SearchType
 from pathlib import Path
+
+import cognee
+from cognee import SearchType
+from cognee.shared.logging_utils import INFO, setup_logging
 
 data_dir = Path(__file__).resolve().parent / "data"
 try:
@@ -14,12 +15,14 @@ except (FileNotFoundError, OSError) as exc:
 
 async def main():
     # Step 1: Reset data and system state
-    await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata=True)
+    await cognee.forget(everything=True)
 
-    # Step 2: Add text and create knowledge graph
-    await cognee.add([biography_1, biography_2])
-    await cognee.cognify(temporal_cognify=True)
+    # Step 2: Remember text and create temporal knowledge graph memory
+    await cognee.remember(
+        [biography_1, biography_2],
+        temporal_cognify=True,
+        self_improvement=False,
+    )
 
     queries = [
         "What happened before 1980?",
@@ -32,7 +35,7 @@ async def main():
 
     # Step 3: Query insights
     for query_text in queries:
-        search_results = await cognee.search(
+        search_results = await cognee.recall(
             query_type=SearchType.TEMPORAL,
             query_text=query_text,
             top_k=15,

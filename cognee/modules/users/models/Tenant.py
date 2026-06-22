@@ -9,7 +9,7 @@ class Tenant(Principal):
     __tablename__ = "tenants"
 
     id = Column(UUID, ForeignKey("principals.id"), primary_key=True)
-    name = Column(String, unique=True, nullable=False, index=True)
+    name = Column(String, unique=False, nullable=False, index=True)
 
     owner_id = Column(UUID, index=True)
 

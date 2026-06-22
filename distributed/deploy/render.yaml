@@ -1,0 +1,59 @@
+# Render Blueprint for Cognee
+#
+# Deploy: Click "Deploy to Render" button or:
+#   render blueprint launch
+
+services:
+  - type: web
+    name: cognee-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    plan: standard
+    envVars:
+      - key: LLM_API_KEY
+        sync: false
+      - key: LLM_MODEL
+        value: openai/gpt-4o-mini
+      - key: LLM_PROVIDER
+        value: openai
+      - key: HOST
+        value: 0.0.0.0
+      - key: ENVIRONMENT
+        value: prod
+      - key: DB_PROVIDER
+        value: postgres
+      - key: DB_HOST
+        fromDatabase:
+          name: cognee-db
+          property: host
+      - key: DB_PORT
+        fromDatabase:
+          name: cognee-db
+          property: port
+      - key: DB_USERNAME
+        fromDatabase:
+          name: cognee-db
+          property: user
+      - key: DB_PASSWORD
+        fromDatabase:
+          name: cognee-db
+          property: password
+      - key: DB_NAME
+        fromDatabase:
+          name: cognee-db
+          property: database
+      - key: VECTOR_DB_PROVIDER
+        value: pgvector
+      - key: CORS_ALLOWED_ORIGINS
+        value: "*"
+    disk:
+      name: cognee-data
+      mountPath: /data
+      sizeGB: 10
+
+databases:
+  - name: cognee-db
+    plan: starter
+    postgresMajorVersion: 17
+    ipAllowList: []

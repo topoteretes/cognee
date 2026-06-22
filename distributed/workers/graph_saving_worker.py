@@ -31,7 +31,7 @@ def is_deadlock_error(error):
         ):
             return True
 
-    # Kuzu
+    # Ladybug
     if "deadlock" in str(error).lower() or "cannot acquire lock" in str(error).lower():
         return True
 

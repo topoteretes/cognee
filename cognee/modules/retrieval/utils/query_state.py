@@ -12,8 +12,12 @@ class QueryState:
         self.done = False
 
     def merge_triplets(self, new_triplets: List[Edge]):
-        """Merge new triplets with existing ones, deduplicating."""
-        self.triplets = list(dict.fromkeys(self.triplets + new_triplets))
+        """Merge new triplets with existing ones, deduplicating by identity."""
+        seen_ids = {id(t) for t in self.triplets}
+        for t in new_triplets:
+            if id(t) not in seen_ids:
+                self.triplets.append(t)
+                seen_ids.add(id(t))
 
     def check_convergence(self, prev_size: int):
         """Mark done if no new triplets were added."""

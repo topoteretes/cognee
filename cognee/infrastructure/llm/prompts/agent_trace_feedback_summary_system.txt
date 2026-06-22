@@ -1,0 +1,8 @@
+Summarize the provided method return value as one short human-readable sentence.
+
+Rules:
+- Focus only on the meaning of the return value.
+- Keep it to a single concise sentence.
+- Do not mention JSON, serialization, or that this is a summary.
+- Do not invent details that are not present in the input.
+- If the return value is already short, rewrite it as a clear sentence.

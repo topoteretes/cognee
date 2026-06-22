@@ -1,0 +1,71 @@
+# Code owners for the cognee repository.
+#
+# GitHub auto-requests reviews from these owners when a PR touches their paths.
+# Order matters: the LAST matching pattern wins. Keep most-specific rules at the
+# bottom.
+#
+# To update this file, please confirm the change with the affected owners
+# before merging. Tracking ticket: COG-4900.
+
+# -----------------------------------------------------------------------------
+# Default fallback — picked when no other rule matches.
+# -----------------------------------------------------------------------------
+*                                                  @Vasilije1990
+
+# -----------------------------------------------------------------------------
+# Public API surface (V1 + V2)
+# -----------------------------------------------------------------------------
+/cognee/api/v1/                                    @dexters1 @Vasilije1990
+/cognee/api/v1/cognify/                            @dexters1
+/cognee/api/v1/remember/                           @dexters1 @Vasilije1990
+/cognee/api/v1/recall/                             @dexters1 @Vasilije1990
+
+# -----------------------------------------------------------------------------
+# Retrieval / memory tasks (V2 memory + agentic retrievers)
+# -----------------------------------------------------------------------------
+/cognee/modules/retrieval/                         @hajdul88 @lxobr
+/cognee/tasks/memify/                              @lxobr @hajdul88
+/cognee/tasks/temporal_awareness/                  @lxobr @hajdul88
+/cognee/tasks/temporal_graph/                      @lxobr @hajdul88
+
+# -----------------------------------------------------------------------------
+# Pipelines & tasks (the cognify ECL pipeline + composable tasks)
+# -----------------------------------------------------------------------------
+/cognee/pipelines/                                 @Vasilije1990
+/cognee/tasks/                                     @Vasilije1990 @siillee
+
+# -----------------------------------------------------------------------------
+# Infrastructure adapters
+# -----------------------------------------------------------------------------
+/cognee/infrastructure/databases/vector/           @siillee @dexters1
+/cognee/infrastructure/databases/graph/            @siillee
+/cognee/infrastructure/databases/graph/ladybug/    @siillee @hajdul88
+/cognee/infrastructure/databases/cache/            @Vasilije1990
+
+# -----------------------------------------------------------------------------
+# MCP server
+# -----------------------------------------------------------------------------
+/cognee-mcp/                                       @Vasilije1990 @dexters1
+
+# -----------------------------------------------------------------------------
+# Frontend (Next.js UI)
+# -----------------------------------------------------------------------------
+/cognee-frontend/                                  @LStromann
+
+# -----------------------------------------------------------------------------
+# Build, packaging, CI
+# -----------------------------------------------------------------------------
+/Dockerfile                                        @Vasilije1990
+/distributed/Dockerfile                            @Vasilije1990
+/.github/workflows/                                @dexters1 @siillee
+/.github/actions/                                  @dexters1
+/pyproject.toml                                    @Vasilije1990 @dexters1
+/uv.lock                                           @Vasilije1990 @dexters1
+
+# -----------------------------------------------------------------------------
+# Contributor experience (this file, CONTRIBUTING.md, AGENTS.md, CLAUDE.md)
+# -----------------------------------------------------------------------------
+/.github/CODEOWNERS                                @Vasilije1990
+/CONTRIBUTING.md                                   @Vasilije1990
+/AGENTS.md                                         @Vasilije1990
+/CLAUDE.md                                         @Vasilije1990

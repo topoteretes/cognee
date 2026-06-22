@@ -99,16 +99,23 @@ async def main():
     from cognee.infrastructure.databases.graph import get_graph_config
 
     graph_config = get_graph_config()
-    # For Kuzu v0.11.0+, check if database file doesn't exist (single-file format with .kuzu extension)
+    # For Ladybug/Kuzu, check if database file doesn't exist.
     # For older versions or other providers, check if directory is empty
-    if graph_config.graph_database_provider.lower() == "kuzu":
-        assert not os.path.exists(graph_config.graph_file_path), (
-            "Kuzu graph database file still exists"
+    if graph_config.graph_database_provider.lower() in ("ladybug", "kuzu"):
+        graph_dir = os.path.dirname(graph_config.graph_file_path)
+        graph_file = os.path.basename(graph_config.graph_file_path)
+        graph_storage = get_file_storage(graph_dir)
+        assert not await graph_storage.file_exists(graph_file), (
+            "Ladybug graph database file still exists"
         )
     else:
-        assert not os.path.exists(graph_config.graph_file_path) or not os.listdir(
-            graph_config.graph_file_path
-        ), "Graph database directory is not empty"
+        graph_storage = get_file_storage(graph_config.graph_file_path)
+        graph_exists = await graph_storage.file_exists("")
+        graph_is_file = await graph_storage.is_file("")
+        graph_files = await graph_storage.list_files("", recursive=True)
+        assert not graph_exists or (not graph_is_file and not graph_files), (
+            "Graph database directory is not empty"
+        )
 
 
 if __name__ == "__main__":

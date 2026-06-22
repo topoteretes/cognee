@@ -7,27 +7,32 @@ from cognee.infrastructure.engine import DataPoint
 logger = get_logger("index_data_points")
 
 
-async def index_data_points(data_points: list[DataPoint]):
+async def index_data_points(data_points: list[DataPoint], vector_engine=None):
     """Index data points in the vector engine by creating embeddings for specified fields.
 
-    Process:
-    1. Groups data points into a nested dict: {type_name: {field_name: [points]}}
-    2. Creates vector indexes for each (type, field) combination on first encounter
-    3. Batches points per (type, field) and creates async indexing tasks
-    4. Executes all indexing tasks in parallel for efficient embedding generation
+    Each data point is indexed individually. A semaphore (sized to the embedding
+    engine's batch_size) keeps that many calls in flight at all times, so as one
+    completes the next starts immediately without waiting for an entire batch to drain.
 
     Args:
         data_points: List of DataPoint objects to index. Each DataPoint's metadata must
                      contain an 'index_fields' list specifying which fields to embed.
+        vector_engine: Optional pre-created vector engine. Falls back to
+                       ``get_vector_engine()`` when not supplied.
 
     Returns:
         The original data_points list.
     """
     data_points_by_type = {}
 
-    vector_engine = get_vector_engine()
+    vector_engine = vector_engine or get_vector_engine()
 
     for data_point in data_points:
+        # Skip non-DataPoint objects (e.g. CogneeGraph) that may be
+        # passed through the memify pipeline without metadata.
+        if not hasattr(data_point, "metadata") or not data_point.metadata:
+            continue
+
         data_point_type = type(data_point)
         type_name = data_point_type.__name__
 
@@ -47,18 +52,18 @@ async def index_data_points(data_points: list[DataPoint]):
             data_points_by_type[type_name][field_name].append(indexed_data_point)
 
     batch_size = vector_engine.embedding_engine.get_batch_size()
+    semaphore = asyncio.Semaphore(4)
 
-    batches = (
-        (type_name, field_name, points[i : i + batch_size])
-        for type_name, fields in data_points_by_type.items()
-        for field_name, points in fields.items()
-        for i in range(0, len(points), batch_size)
-    )
+    async def _index_batch(type_name, field_name, batch):
+        async with semaphore:
+            await vector_engine.index_data_points(type_name, field_name, batch)
 
-    tasks = [
-        asyncio.create_task(vector_engine.index_data_points(type_name, field_name, batch_points))
-        for type_name, field_name, batch_points in batches
-    ]
+    tasks = []
+    for type_name, fields in data_points_by_type.items():
+        for field_name, points in fields.items():
+            for i in range(0, len(points), batch_size):
+                batch = points[i : i + batch_size]
+                tasks.append(asyncio.create_task(_index_batch(type_name, field_name, batch)))
 
     await asyncio.gather(*tasks)
 

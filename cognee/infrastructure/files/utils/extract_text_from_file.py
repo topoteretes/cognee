@@ -1,9 +1,10 @@
 from typing import BinaryIO
-from pypdf import PdfReader
+
 import filetype
+from pypdf import PdfReader
 
 
-def extract_text_from_file(file: BinaryIO, file_type: filetype.Type) -> str:
+def extract_text_from_file(file: BinaryIO, file_type: filetype.Type) -> str | None:
     """
     Extract text from a file based on its type.
 

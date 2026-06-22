@@ -12,7 +12,7 @@ function useNotebooks(instance: CogneeInstance) {
 
   const addNotebook = useCallback((notebookName: string) => {
     return createNotebook(notebookName, instance)
-      .then((notebook: Notebook) => {
+      .then((notebook) => {
         setNotebooks((notebooks) => [
           ...notebooks,
           notebook,
@@ -39,8 +39,8 @@ function useNotebooks(instance: CogneeInstance) {
       return notebooks;
     })
     .catch((error) => {
-      console.error("Error fetching notebooks:", error.detail);
-      throw error
+      console.error("Error fetching notebooks:", error.detail || error.message);
+      return [] as Notebook[];
     });
   }, [instance]);
 

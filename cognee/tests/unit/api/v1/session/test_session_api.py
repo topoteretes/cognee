@@ -46,11 +46,12 @@ def session_user_ctx():
 
 @pytest.fixture
 def sm():
-    """Minimal SessionManager: only get_session, add_feedback, delete_feedback."""
+    """Minimal SessionManager: only get_session, add_feedback, delete_feedback, update_qa."""
     s = SimpleNamespace()
     s.get_session = AsyncMock(return_value=[])
     s.add_feedback = AsyncMock(return_value=True)
     s.delete_feedback = AsyncMock(return_value=True)
+    s.update_qa = AsyncMock(return_value=True)
     with patch.object(_session_module(), "get_session_manager", return_value=s):
         yield s
 
@@ -343,6 +344,104 @@ class TestAddFeedback:
         assert kw["feedback_score"] is None
 
 
+# add_frequency_weights
+
+
+class TestAddFrequencyWeights:
+    """Tests for add_frequency_weights."""
+
+    @pytest.mark.asyncio
+    async def test_returns_true_on_success(self, session_user_ctx, sm):
+        from cognee.api.v1.session.session import add_frequency_weights
+
+        result = await add_frequency_weights(
+            session_id="s1",
+            qa_id="q1",
+            node_ids=["node1", "node2"],
+            edge_ids=["edge1"],
+        )
+        assert result is True
+        kw = sm.update_qa.call_args.kwargs
+        assert kw["user_id"] == "ctx-user-id"
+        assert kw["session_id"] == "s1"
+        assert kw["qa_id"] == "q1"
+        assert kw["used_graph_element_ids"] == {
+            "node_ids": ["node1", "node2"],
+            "edge_ids": ["edge1"],
+        }
+        assert kw["memify_metadata"] == {"frequency_weights_applied": False}
+
+    @pytest.mark.asyncio
+    async def test_returns_true_with_only_node_ids(self, session_user_ctx, sm):
+        from cognee.api.v1.session.session import add_frequency_weights
+
+        result = await add_frequency_weights(
+            session_id="s1",
+            qa_id="q1",
+            node_ids=["node1"],
+        )
+        assert result is True
+        kw = sm.update_qa.call_args.kwargs
+        assert kw["used_graph_element_ids"] == {"node_ids": ["node1"]}
+        assert kw["memify_metadata"] == {"frequency_weights_applied": False}
+
+    @pytest.mark.asyncio
+    async def test_returns_true_with_only_edge_ids(self, session_user_ctx, sm):
+        from cognee.api.v1.session.session import add_frequency_weights
+
+        result = await add_frequency_weights(
+            session_id="s1",
+            qa_id="q1",
+            edge_ids=["edge1"],
+        )
+        assert result is True
+        kw = sm.update_qa.call_args.kwargs
+        assert kw["used_graph_element_ids"] == {"edge_ids": ["edge1"]}
+        assert kw["memify_metadata"] == {"frequency_weights_applied": False}
+
+    @pytest.mark.asyncio
+    async def test_returns_false_when_qa_not_found(self, session_user_ctx, sm):
+        from cognee.api.v1.session.session import add_frequency_weights
+
+        sm.update_qa.return_value = False
+        result = await add_frequency_weights(session_id="s1", qa_id="nonexistent", node_ids=["n1"])
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_returns_false_on_session_manager_exception(self, session_user_ctx, sm):
+        from cognee.api.v1.session.session import add_frequency_weights
+
+        sm.update_qa.side_effect = RuntimeError("cache error")
+        result = await add_frequency_weights(session_id="s1", qa_id="q1", node_ids=["n1"])
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_uses_explicit_user(self, session_user_ctx, sm):
+        from cognee.api.v1.session.session import add_frequency_weights
+
+        await add_frequency_weights(
+            session_id="s1",
+            qa_id="q1",
+            node_ids=["node1"],
+            user=_user("explicit-user"),
+        )
+        kw = sm.update_qa.call_args.kwargs
+        assert kw["user_id"] == "explicit-user"
+
+    @pytest.mark.asyncio
+    async def test_resets_frequency_weights_applied_flag(self, session_user_ctx, sm):
+        from cognee.api.v1.session.session import add_frequency_weights
+
+        await add_frequency_weights(
+            session_id="s1",
+            qa_id="q1",
+            node_ids=["node1"],
+        )
+        kw = sm.update_qa.call_args.kwargs
+        # The memify_metadata should have frequency_weights_applied set to False
+        assert kw["memify_metadata"]["frequency_weights_applied"] is False
+
+
 # delete_feedback
 
 
@@ -390,15 +489,17 @@ class TestSessionNamespace:
     """Session namespace and package exports."""
 
     def test_session_has_get_session_add_feedback_delete_feedback(self):
-        """cognee.session exposes get_session, add_feedback, delete_feedback."""
+        """cognee.session exposes get_session, add_feedback, delete_feedback, add_frequency_weights."""
         from cognee.api.v1.session import session
 
         assert hasattr(session, "get_session")
         assert hasattr(session, "add_feedback")
         assert hasattr(session, "delete_feedback")
+        assert hasattr(session, "add_frequency_weights")
         assert callable(session.get_session)
         assert callable(session.add_feedback)
         assert callable(session.delete_feedback)
+        assert callable(session.add_frequency_weights)
 
     def test_session_qa_entry_exported(self):
         """SessionQAEntry is exported from session package."""

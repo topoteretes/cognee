@@ -1,24 +1,18 @@
 import asyncio
-import time
-from cognee.infrastructure.databases.graph.kuzu.adapter import KuzuAdapter
 
-# This will create the test.db if it doesn't exist
+from cognee.infrastructure.databases.graph.ladybug.adapter import LadybugAdapter
+from common import get_kuzu_db_path
 
 
 async def main():
-    adapter = KuzuAdapter("test.db")
-    result = await adapter.query("MATCH (n:Node) RETURN COUNT(n)")
-    print(f"Reader: Found {result[0][0]} nodes")
-    result = await adapter.query("MATCH (n:Node) RETURN COUNT(n)")
-    print(f"Reader: Found {result[0][0]} nodes")
-    result = await adapter.query("MATCH (n:Node) RETURN COUNT(n)")
-    print(f"Reader: Found {result[0][0]} nodes")
-    result = await adapter.query("MATCH (n:Node) RETURN COUNT(n)")
-    print(f"Reader: Found {result[0][0]} nodes")
+    adapter = LadybugAdapter(get_kuzu_db_path())
+
+    for _ in range(5):
+        result = await adapter.query("MATCH (n:Node) RETURN COUNT(n)")
+        print(f"Reader: Found {result[0][0]} nodes")
+
     result = await adapter.query("MATCH (n:Node) RETURN COUNT(n)")
     print(f"Reader: Found {result} nodes")
-    result = await adapter.query("MATCH (n:Node) RETURN COUNT(n)")
-    print(f"Reader: Found {result[0][0]} nodes")
 
 
 if __name__ == "__main__":

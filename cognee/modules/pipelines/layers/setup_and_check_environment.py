@@ -46,10 +46,12 @@ async def setup_and_check_environment(
                 )
             else:
                 from cognee.infrastructure.llm.utils import (
+                    determine_embedding_dimensions,
                     test_llm_connection,
                     test_embedding_connection,
                 )
 
                 await test_llm_connection()
-                await test_embedding_connection()
+                detected_embedding_dimensions = await test_embedding_connection()
+                determine_embedding_dimensions(detected_embedding_dimensions)
             _first_run_done = True

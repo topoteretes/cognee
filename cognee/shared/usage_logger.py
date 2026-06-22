@@ -1,16 +1,17 @@
 import asyncio
 import inspect
 import os
+from collections.abc import Callable
 from datetime import datetime, timezone
 from functools import singledispatch, wraps
-from typing import Any, Callable, Optional
+from typing import Any
 from uuid import UUID
 
+from cognee import __version__ as cognee_version
 from cognee.infrastructure.databases.cache.config import get_cache_config
 from cognee.infrastructure.databases.cache.get_cache_engine import get_cache_engine
 from cognee.shared.exceptions import UsageLoggerError
 from cognee.shared.logging_utils import get_logger
-from cognee import __version__ as cognee_version
 
 logger = get_logger("usage_logger")
 
@@ -102,7 +103,15 @@ def _get_param_defaults(func: Callable) -> dict[str, Any]:
         return {}
 
 
-def _extract_user_id(args: tuple, kwargs: dict, param_names: list[str]) -> Optional[str]:
+def _get_callable_name(func: Callable) -> str:
+    """Return a stable display name for functions and callable objects."""
+    name = getattr(func, "__name__", None)
+    if isinstance(name, str):
+        return name
+    return func.__class__.__name__
+
+
+def _extract_user_id(args: tuple, kwargs: dict, param_names: list[str]) -> str | None:
     """Extract user_id from function arguments if available."""
     try:
         if "user" in kwargs and kwargs["user"] is not None:
@@ -148,15 +157,15 @@ def _extract_parameters(args: tuple, kwargs: dict, param_names: list[str], func:
 async def _log_usage_async(
     function_name: str,
     log_type: str,
-    user_id: Optional[str],
+    user_id: str | None,
     parameters: dict,
     result: Any,
     success: bool,
-    error: Optional[str],
+    error: str | None,
     duration_ms: float,
     start_time: datetime,
     end_time: datetime,
-):
+) -> None:
     """Asynchronously log function usage to Redis.
 
     Args:
@@ -225,7 +234,7 @@ async def _log_usage_async(
         logger.error(f"Failed to log usage for {function_name}: {str(e)}", exc_info=True)
 
 
-def log_usage(function_name: Optional[str] = None, log_type: str = "function"):
+def log_usage(function_name: str | None = None, log_type: str = "function"):
     """
     Decorator to log function usage to Redis.
 
@@ -260,8 +269,11 @@ def log_usage(function_name: Optional[str] = None, log_type: str = "function"):
         """
         if not inspect.iscoroutinefunction(func):
             raise UsageLoggerError(
-                f"@log_usage requires an async function. Got {func.__name__} which is not async."
+                f"@log_usage requires an async function. Got {_get_callable_name(func)} "
+                "which is not async."
             )
+
+        resolved_function_name = function_name or _get_callable_name(func)
 
         @wraps(func)
         async def async_wrapper(*args, **kwargs):
@@ -310,7 +322,7 @@ def log_usage(function_name: Optional[str] = None, log_type: str = "function"):
 
                 try:
                     await _log_usage_async(
-                        function_name=function_name or func.__name__,
+                        function_name=resolved_function_name,
                         log_type=log_type,
                         user_id=user_id,
                         parameters=parameters,
@@ -323,7 +335,7 @@ def log_usage(function_name: Optional[str] = None, log_type: str = "function"):
                     )
                 except Exception as e:
                     logger.error(
-                        f"Failed to log usage for {function_name or func.__name__}: {str(e)}",
+                        f"Failed to log usage for {resolved_function_name}: {str(e)}",
                         exc_info=True,
                     )
 

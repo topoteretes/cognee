@@ -2,6 +2,10 @@ import asyncio
 from typing import Any, AsyncIterable, AsyncGenerator, Callable, Dict, Union, Awaitable
 from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunCompleted, PipelineRunErrored
 from cognee.modules.pipelines.queues.pipeline_run_info_queues import push_to_queue
+from cognee.modules.users.methods.get_default_user import get_default_user
+from cognee.modules.data.methods.get_authorized_existing_datasets import (
+    get_authorized_existing_datasets,
+)
 
 AsyncGenLike = Union[
     AsyncIterable[Any],
@@ -9,6 +13,12 @@ AsyncGenLike = Union[
     Callable[..., AsyncIterable[Any]],
     Callable[..., AsyncGenerator[Any, None]],
 ]
+
+# Strong refs for fire-and-forget background pipeline tasks. The event loop only
+# keeps weak references to tasks, so without anchoring here Python's gc can collect
+# an in-flight task before it completes, silently aborting the background run. Tasks
+# remove themselves on done, so this set's size tracks currently-running pipelines.
+_BACKGROUND_PIPELINE_TASKS: set[asyncio.Task] = set()
 
 
 async def run_pipeline_blocking(pipeline: AsyncGenLike, **params) -> Dict[str, Any]:
@@ -66,7 +76,14 @@ async def run_pipeline_as_background_process(
 
     datasets = params.get("datasets", None)
 
-    if isinstance(datasets, str):
+    if not datasets:
+        # If no datasets are provided, get all datasets user has write access to and run pipelines for all of them
+        user = params.get("user", None)
+        if user is None:
+            user = await get_default_user()
+        dataset_objects = await get_authorized_existing_datasets(None, "write", user)
+        datasets = [dataset.id for dataset in dataset_objects]
+    elif isinstance(datasets, str):
         datasets = [datasets]
 
     pipeline_run_started_info = {}
@@ -78,13 +95,7 @@ async def run_pipeline_as_background_process(
             while True:
                 try:
                     pipeline_run_info = await anext(pipeline)
-
                     push_to_queue(pipeline_run_info.pipeline_run_id, pipeline_run_info)
-
-                    if isinstance(pipeline_run_info, PipelineRunCompleted) or isinstance(
-                        pipeline_run_info, PipelineRunErrored
-                    ):
-                        break
                 except StopAsyncIteration:
                     break
 
@@ -109,7 +120,9 @@ async def run_pipeline_as_background_process(
         pipeline_list.append(pipeline_run)
 
     # Send all started pipelines to execute one by one in background
-    asyncio.create_task(handle_rest_of_the_run(pipeline_list=pipeline_list))
+    task = asyncio.create_task(handle_rest_of_the_run(pipeline_list=pipeline_list))
+    _BACKGROUND_PIPELINE_TASKS.add(task)
+    task.add_done_callback(_BACKGROUND_PIPELINE_TASKS.discard)
 
     return pipeline_run_started_info
 

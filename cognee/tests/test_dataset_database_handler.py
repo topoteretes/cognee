@@ -1,9 +1,6 @@
-import asyncio
 import os
 
-# Set custom dataset database handler environment variable
-os.environ["VECTOR_DATASET_DATABASE_HANDLER"] = "custom_lancedb_handler"
-os.environ["GRAPH_DATASET_DATABASE_HANDLER"] = "custom_kuzu_handler"
+import pytest
 
 import cognee
 from cognee.modules.users.methods import get_default_user
@@ -37,22 +34,31 @@ class LanceDBTestDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
         }
 
 
-class KuzuTestDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
+class LadybugTestDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
     @classmethod
     async def create_dataset(cls, dataset_id, user):
-        databases_directory_path = os.path.join("databases", str(user.id))
+        import pathlib
+
+        cognee_directory_path = str(
+            pathlib.Path(
+                os.path.join(
+                    pathlib.Path(__file__).parent, ".cognee_system/test_dataset_database_handler"
+                )
+            ).resolve()
+        )
+        databases_directory_path = os.path.join(cognee_directory_path, "databases", str(user.id))
         os.makedirs(databases_directory_path, exist_ok=True)
 
-        graph_db_name = "test.kuzu"
+        graph_db_name = "test.lbug"
         return {
-            "graph_dataset_database_handler": "custom_kuzu_handler",
+            "graph_dataset_database_handler": "custom_ladybug_handler",
             "graph_database_name": graph_db_name,
             "graph_database_url": os.path.join(databases_directory_path, graph_db_name),
-            "graph_database_provider": "kuzu",
+            "graph_database_provider": "ladybug",
         }
 
 
-async def main():
+async def _run_custom_dataset_database_handler_flow():
     import pathlib
 
     data_directory_path = str(
@@ -80,7 +86,9 @@ async def main():
     use_dataset_database_handler(
         "custom_lancedb_handler", LanceDBTestDatasetDatabaseHandler, "lancedb"
     )
-    use_dataset_database_handler("custom_kuzu_handler", KuzuTestDatasetDatabaseHandler, "kuzu")
+    use_dataset_database_handler(
+        "custom_ladybug_handler", LadybugTestDatasetDatabaseHandler, "ladybug"
+    )
 
     # Create a clean slate for cognee -- reset data and system state
     print("Resetting cognee data...")
@@ -120,18 +128,26 @@ async def main():
     default_user = await get_default_user()
     # Assert that the custom database files were created based on the custom dataset database handlers
     assert os.path.exists(
-        os.path.join(cognee_directory_path, "databases", str(default_user.id), "test.kuzu")
+        os.path.join(cognee_directory_path, "databases", str(default_user.id), "test.lbug")
     ), "Graph database file not found."
     assert os.path.exists(
         os.path.join(cognee_directory_path, "databases", str(default_user.id), "test.lance.db")
     ), "Vector database file not found."
 
 
+@pytest.mark.asyncio
+async def test_custom_dataset_database_handlers(monkeypatch):
+    monkeypatch.setenv("VECTOR_DATASET_DATABASE_HANDLER", "custom_lancedb_handler")
+    monkeypatch.setenv("GRAPH_DATASET_DATABASE_HANDLER", "custom_ladybug_handler")
+
+    await _run_custom_dataset_database_handler_flow()
+
+
 if __name__ == "__main__":
-    logger = setup_logging(log_level=ERROR)
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    try:
-        loop.run_until_complete(main())
-    finally:
-        loop.run_until_complete(loop.shutdown_asyncgens())
+    import asyncio
+
+    os.environ["VECTOR_DATASET_DATABASE_HANDLER"] = "custom_lancedb_handler"
+    os.environ["GRAPH_DATASET_DATABASE_HANDLER"] = "custom_ladybug_handler"
+
+    setup_logging(log_level=ERROR)
+    asyncio.run(_run_custom_dataset_database_handler_flow())

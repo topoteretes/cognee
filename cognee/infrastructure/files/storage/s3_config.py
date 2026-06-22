@@ -1,16 +1,17 @@
-from typing import Optional
 from functools import lru_cache
+from typing import Optional
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class S3Config(BaseSettings):
-    aws_region: Optional[str] = None
-    aws_endpoint_url: Optional[str] = None
-    aws_access_key_id: Optional[str] = None
-    aws_secret_access_key: Optional[str] = None
-    aws_session_token: Optional[str] = None
-    aws_profile_name: Optional[str] = None
-    aws_bedrock_runtime_endpoint: Optional[str] = None
+    aws_region: str | None = None
+    aws_endpoint_url: str | None = None
+    aws_access_key_id: str | None = None
+    aws_secret_access_key: str | None = None
+    aws_session_token: str | None = None
+    aws_profile_name: str | None = None
+    aws_bedrock_runtime_endpoint: str | None = None
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
 

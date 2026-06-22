@@ -1,10 +1,12 @@
-from typing import Dict
+from typing import Any
 
-
+from cognee.infrastructure.data.chunking.DefaultChunkEngine import DefaultChunkEngine
+from cognee.infrastructure.data.chunking.HaystackChunkEngine import HaystackChunkEngine
+from cognee.infrastructure.data.chunking.LangchainChunkingEngine import LangchainChunkEngine
 from cognee.shared.data_models import ChunkEngine
 
 
-class ChunkingConfig(Dict):
+class ChunkingConfig(dict):
     """
     Represent configuration settings for chunking operations, inheriting from the built-in
     Dict class. The class contains the following public attributes:
@@ -19,7 +21,9 @@ class ChunkingConfig(Dict):
     vector_db_provider: str
 
 
-def create_chunking_engine(config: ChunkingConfig):
+def create_chunking_engine(
+    config: dict[str, Any],
+) -> LangchainChunkEngine | DefaultChunkEngine | HaystackChunkEngine | None:
     """
     Create a chunking engine based on the provided configuration.
 

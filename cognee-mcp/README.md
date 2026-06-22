@@ -38,12 +38,13 @@ Build memory for Agents and query from any client that speaks MCP – in your t
 ## ✨ Features
 
 - Multiple transports – choose Streamable HTTP --transport http (recommended for web deployments), SSE --transport sse (real‑time streaming), or stdio (classic pipe, default)
-- **API Mode** – connect to an already running Cognee FastAPI server instead of using cognee directly (see [API Mode](#-api-mode) below)
+- **Cloud Mode** – connect to [Cognee Cloud](https://www.cognee.ai) via `--serve-url` or `COGNEE_SERVICE_URL` env var (see [Connection Modes](#-connection-modes))
+- **API Mode** – connect to an already running Cognee FastAPI server (see [Connection Modes](#-connection-modes))
+- **Minimal Memory API** – exposes only `remember`, `recall`, and `forget` for agent memory workflows
 - Integrated logging – all actions written to a rotating file (see get_log_file_location()) and mirrored to console in dev
-- Local file ingestion – feed .md, source files, Cursor rule‑sets, etc. straight from disk
-- Background pipelines – long‑running cognify & codify jobs spawn off‑thread; check progress with status tools
-- Developer rules bootstrap – one call indexes .cursorrules, .cursor/rules, AGENT.md, and friends into the developer_rules nodeset
-- Prune & reset – wipe memory clean with a single prune call when you want to start fresh
+- Session-aware memory – store fast session cache entries or permanent graph memory through one `remember` tool
+- Focused recall – query memory through one `recall` tool with optional session and search controls
+- Simple deletion – remove a dataset or all owned memory through one `forget` tool
 
 Please refer to our documentation [here](https://docs.cognee.ai/how-to-guides/deployment/mcp) for further information.
 
@@ -73,7 +74,12 @@ Please refer to our documentation [here](https://docs.cognee.ai/how-to-guides/de
     ```
     LLM_API_KEY="YOUR_OPENAI_API_KEY"
     ```
-7. Run cognee mcp server with stdio (default)
+7. (Optional — running from source only) Build the MCP App workspace UI bundle. Requires Node.js. Docker users skip this; the image build runs it automatically.
+    ```
+    cd apps-src && npm install && npm run build && cd ..
+    ```
+    This produces `src/app_bundles/visualize-graph.html`, which is gitignored. If you skip this step, `visualize_graph_ui` and the workspace tools will raise a clear error pointing back to this command.
+8. Run cognee mcp server with stdio (default)
     ```
     python src/server.py
     ```
@@ -152,6 +158,16 @@ If you'd rather run cognee-mcp in a container, you have two options:
       - `redis` - Redis support
       - And more (see [pyproject.toml](https://github.com/topoteretes/cognee/blob/main/pyproject.toml) for full list)
 2. **Pull from Docker Hub** (no build required):
+
+   The image is published to Docker Hub on every push to `main`. If you have **not** cloned the
+   repo, create the `.env` file the run commands expect first — it needs at least your LLM key:
+   ```bash
+   # Pull the prebuilt image
+   docker pull cognee/cognee-mcp:main
+
+   # Create a minimal .env in the current directory (no repo checkout required)
+   echo 'LLM_API_KEY="YOUR_OPENAI_API_KEY"' > .env
+   ```
    ```bash
    # With HTTP transport (recommended for web deployments)
    docker run -e TRANSPORT_MODE=http --env-file ./.env -p 8000:8000 --rm -it cognee/cognee-mcp:main
@@ -366,12 +382,43 @@ You can configure both transports simultaneously for testing:
 
 **Note:** Only enable the server you're actually running to avoid connection errors.
 
-## 🌐 API Mode
+## 🌐 Connection Modes
 
-The MCP server can operate in two modes:
+The MCP server supports three connection modes:
 
 ### **Direct Mode** (Default)
-The MCP server directly imports and uses the cognee library. This is the default mode with full feature support.
+The MCP server directly imports and uses the cognee library with local databases (SQLite, LanceDB, Ladybug). This is the default mode with full feature support.
+
+### **Cloud Mode**
+Connect to [Cognee Cloud](https://www.cognee.ai) or a remote Cognee instance. The server calls `cognee.serve()` at startup, and all SDK operations transparently route to the cloud. No local databases needed.
+
+**Via CLI flags:**
+```bash
+python src/server.py --serve-url https://your-instance.cognee.ai --serve-api-key ck_...
+```
+
+**Via environment variables (zero-config):**
+```bash
+export COGNEE_SERVICE_URL="https://your-instance.cognee.ai"
+export COGNEE_API_KEY="ck_..."
+python src/server.py
+```
+
+**Cloud Mode with Docker:**
+```bash
+docker run \
+  -e TRANSPORT_MODE=sse \
+  -e COGNEE_SERVICE_URL=https://your-instance.cognee.ai \
+  -e COGNEE_API_KEY=ck_... \
+  -p 8000:8000 \
+  --rm -it cognee/cognee-mcp:main
+```
+
+**Cloud Mode arguments / environment variables:**
+- `--serve-url` / `COGNEE_SERVICE_URL`: Cognee Cloud or remote instance URL
+- `--serve-api-key` / `COGNEE_API_KEY`: API key for the instance
+
+Database migrations are automatically skipped in Cloud mode.
 
 ### **API Mode**
 The MCP server connects to an already running Cognee FastAPI server via HTTP requests. This is useful when:
@@ -426,15 +473,11 @@ docker run \
 - `API_URL`: Base URL of the running Cognee FastAPI server
 - `API_TOKEN`: Authentication token (optional, required if API has authentication enabled)
 
-**API Mode limitations:**
-Some features are only available in direct mode:
-- `codify` (code graph pipeline)
-- `cognify_status` / `codify_status` (pipeline status tracking)
-- `prune` (data reset)
-- `get_developer_rules` (developer rules retrieval)
-- `list_data` with specific dataset_id (detailed data listing)
-
-Basic operations like `cognify`, `search`, `delete`, and `list_data` (all datasets) work in both modes.
+**API Mode behavior:**
+The MCP server intentionally exposes only the memory API: `remember`, `recall`, and `forget`.
+In API mode these tools call the Cognee API server endpoints directly. Operational helpers such as
+`cognify`, `search`, `list_data`, `delete`, `prune`, `improve`, and document retrieval helpers are
+kept internal and are not exposed as MCP tools.
 
 ## 💻 Basic Usage
 
@@ -443,39 +486,69 @@ The MCP server exposes its functionality through tools. Call them from any MCP c
 
 ### Available Tools
 
-- **cognify**: Turns your data into a structured knowledge graph and stores it in memory
+The MCP server exposes three tools:
 
-- **cognee_add_developer_rules**: Ingest core developer rule files into memory
+- **remember**: Store data in memory. With `session_id`: fast session cache. Without `session_id`: permanent graph memory
+- **recall**: Search memory with auto-routing. Searches session cache first when `session_id` is provided, then falls through to the permanent graph
+- **forget**: Delete memory by dataset name, or delete all owned memory with `everything=True`
 
-- **codify**: Analyse a code repository, build a code graph, stores it in memory
+**Workspace UI Tools** (MCP Apps — Cursor, Claude Desktop, etc.):
 
-- **delete**: Delete specific data from a dataset (supports soft/hard deletion modes)
+- **visualize_graph_ui**: Open the workspace and render the current knowledge graph
+- **upload_file_ui**: Open the workspace for file upload
+- **open_cognee_workspace**: Generic "open the cognee UI" entry point
+- **cognify_file**: Ingest an uploaded file (used by the workspace; accepts base64 content)
+- **list_datasets_json / list_dataset_data_json / create_dataset_json / get_client_info_json**: Structured-JSON helpers powering the workspace dropdown
 
-- **get_developer_rules**: Retrieve all developer rules that were generated based on previous interactions
+The workspace lets you create/switch/delete datasets, upload files, add text, search, and view the graph from one inline panel.
 
-- **list_data**: List all datasets and their data items with IDs for deletion operations
+The bundle that powers the workspace lives at `cognee-mcp/src/app_bundles/visualize-graph.html`. It is built from `cognee-mcp/apps-src/` via `npm run build` and is gitignored. The Docker image builds it as part of the image; PyPI wheels carry it (the maintainer runs `npm run build` before `uv build`); from-source users build it manually (see [Quick Start](#-quick-start) step 7). If the bundle is missing at runtime, the workspace tools raise a `FileNotFoundError` pointing back to the build command.
 
-- **save_interaction**: Logs user-agent interactions and query-answer pairs
+### Agent Scoping (per-client default datasets)
 
-- **prune**: Reset cognee for a fresh start (removes all data)
+By default, each MCP client gets its own auto-named dataset (e.g. Cursor → `cursor_vscode_memory`, Claude Code → `claude_code_memory`) so different agents don't share memory unintentionally. The dataset is created on demand the first time a client calls a workspace tool.
 
-- **search**: Query memory – supports GRAPH_COMPLETION, RAG_COMPLETION, CODE, CHUNKS, SUMMARIES, CYPHER, and FEELING_LUCKY
+LLM-direct calls to `cognify`, `remember`, `improve`, `cognify_status`, and `cognify_file` route to the agent-scoped dataset when `dataset_name` is omitted. Pass `dataset_name` explicitly to override (e.g. `dataset_name="main_dataset"` still works).
 
-- **cognify_status / codify_status**: Track pipeline progress
+To disable agent scoping and have all clients share `main_dataset` as the default, set in `.env`:
 
-**Data Management Examples:**
 ```bash
-# List all available datasets and data items
-list_data()
+COGNEE_MCP_AGENT_SCOPED=false
+```
 
-# List data items in a specific dataset
-list_data(dataset_id="your-dataset-id-here")
+When disabled, the workspace UI header shows `(agent scoping off)` and no per-client datasets are autocreated.
 
-# Delete specific data (soft deletion - safer, preserves shared entities)
-delete(data_id="data-uuid", dataset_id="dataset-uuid", mode="soft")
+### Per-dataset isolation (`ENABLE_BACKEND_ACCESS_CONTROL`)
 
-# Delete specific data (hard deletion - removes orphaned entities)
-delete(data_id="data-uuid", dataset_id="dataset-uuid", mode="hard")
+Agent scoping decides which dataset *name* a tool defaults to. Whether two datasets are actually isolated at the storage layer is governed by cognee's `ENABLE_BACKEND_ACCESS_CONTROL` flag:
+
+- **`true` (default)** — each `(user, dataset)` pair gets its own per-dataset Kuzu + LanceDB under `.cognee_system/databases/<dataset_uuid>/`. `visualize_graph_ui` and search become strictly per-dataset because the workspace passes `dataset_name` and the server routes the visualization through cognee's `visualize_multi_user_graph` to set the right DB context.
+- **`false`** — all datasets share one Kuzu graph DB and one LanceDB. The dataset filter is honored for top-level data points, but `GRAPH_COMPLETION` traversal can pull connected nodes from any dataset, and `visualize_graph_ui` reflects the full shared graph. Use for single-user local dev; also disables the API auth requirement unless `REQUIRE_AUTHENTICATION=true` is set explicitly.
+
+**Switching modes wipes nothing automatically — but data does not migrate.** Data ingested in one mode lives at a different on-disk path than the other and won't be visible after the flip. Clean-slate when changing the flag:
+
+```bash
+# Stop server, then:
+DATA_ROOT="/absolute/path/to/data-root"
+rm -rf "$DATA_ROOT/.cognee_system" "$DATA_ROOT/.data_storage"
+# Edit .env to flip ENABLE_BACKEND_ACCESS_CONTROL, restart, re-cognify.
+```
+
+(Set `DATA_ROOT` to whatever you used for `DATA_ROOT_DIRECTORY` / `SYSTEM_ROOT_DIRECTORY`, or your cognee install dir if you didn't set those.)
+
+**Examples:**
+```bash
+# Store permanent memory
+remember(data="Cognee MCP now exposes a focused memory API.", dataset_name="main_dataset")
+
+# Store session memory
+remember(data="Temporary working note", session_id="agent-session-1")
+
+# Recall from memory
+recall(query="What changed in the MCP server?", session_id="agent-session-1")
+
+# Delete one dataset
+forget(dataset="main_dataset")
 ```
 
 

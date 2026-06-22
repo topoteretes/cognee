@@ -14,4 +14,5 @@ from .exceptions import (
     CacheConnectionError,
     SessionQAEntryValidationError,
     SessionParameterValidationError,
+    DatabaseCredentialsError,
 )

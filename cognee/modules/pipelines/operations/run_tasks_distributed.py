@@ -3,7 +3,7 @@ try:
 except ModuleNotFoundError:
     modal = None
 
-from typing import Any, List, Optional
+from typing import Any, Awaitable, Callable, List, Optional
 from uuid import UUID
 
 from cognee.infrastructure.databases.relational import get_relational_engine
@@ -25,6 +25,9 @@ from cognee.shared.logging_utils import get_logger
 from cognee.modules.users.models import User
 from cognee.modules.pipelines.exceptions import PipelineRunFailedError
 from cognee.tasks.ingestion import resolve_data_directories
+from cognee.context_global_variables import set_database_global_context_variables
+from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
+from cognee.infrastructure.llm.config import LLMConfig
 from .run_tasks_data_item import run_tasks_data_item
 
 logger = get_logger("run_tasks_distributed()")
@@ -50,7 +53,7 @@ if modal:
         pipeline_name: str,
         pipeline_id: str,
         pipeline_run_id: str,
-        context: Optional[dict],
+        ctx,
         user: User,
         incremental_loading: bool,
     ):
@@ -58,7 +61,7 @@ if modal:
         Wrapper that runs the run_tasks_data_item function.
         This is the function/code that runs on modal executor and produces the graph/vector db objects
         """
-        from cognee.infrastructure.databases.relational import get_relational_engine
+        from cognee.modules.pipelines.models import PipelineContext
 
         result = await run_tasks_data_item(
             data_item=data_item,
@@ -67,12 +70,13 @@ if modal:
             pipeline_name=pipeline_name,
             pipeline_id=pipeline_id,
             pipeline_run_id=pipeline_run_id,
-            context={
-                **(context or {}),
-                "user": user,
-                "data": data_item,
-                "dataset": dataset,
-            },
+            ctx=PipelineContext(
+                user=user,
+                data_item=data_item,
+                dataset=dataset,
+                pipeline_run_id=pipeline_run_id,
+                pipeline_name=pipeline_name,
+            ),
             user=user,
             incremental_loading=incremental_loading,
         )
@@ -86,9 +90,11 @@ async def run_tasks_distributed(
     data: Optional[List[Any]] = None,
     user: Optional[User] = None,
     pipeline_name: str = "unknown_pipeline",
-    context: Optional[dict] = None,
     incremental_loading: bool = False,
     data_per_batch: int = 20,
+    rollback_handler: Optional[Callable[..., Awaitable[None]]] = None,
+    llm_config: Optional[LLMConfig] = None,
+    embedding_config: Optional[EmbeddingConfig] = None,
 ):
     if not user:
         user = await get_default_user()
@@ -109,67 +115,90 @@ async def run_tasks_distributed(
         payload=data,
     )
 
-    try:
-        if not isinstance(data, list):
-            data = [data]
+    async with set_database_global_context_variables(
+        dataset.id,
+        dataset.owner_id,
+        llm_config=llm_config,
+        embedding_config=embedding_config,
+    ):
+        try:
+            if not isinstance(data, list):
+                data = [data]
 
-        data = await resolve_data_directories(data)
+            data = await resolve_data_directories(data)
 
-        number_of_data_items = len(data) if isinstance(data, list) else 1
+            number_of_data_items = len(data) if isinstance(data, list) else 1
 
-        data_item_tasks = [
-            data,
-            [dataset] * number_of_data_items,
-            [tasks] * number_of_data_items,
-            [pipeline_name] * number_of_data_items,
-            [pipeline_id] * number_of_data_items,
-            [pipeline_run_id] * number_of_data_items,
-            [context] * number_of_data_items,
-            [user] * number_of_data_items,
-            [incremental_loading] * number_of_data_items,
-        ]
+            data_item_tasks = [
+                data,
+                [dataset] * number_of_data_items,
+                [tasks] * number_of_data_items,
+                [pipeline_name] * number_of_data_items,
+                [pipeline_id] * number_of_data_items,
+                [pipeline_run_id] * number_of_data_items,
+                [None] * number_of_data_items,
+                [user] * number_of_data_items,
+                [incremental_loading] * number_of_data_items,
+            ]
 
-        results = []
-        async for result in run_tasks_on_modal.map.aio(*data_item_tasks):
-            if not result:
-                continue
-            results.append(result)
+            results = []
+            async for result in run_tasks_on_modal.map.aio(*data_item_tasks):
+                if not result:
+                    continue
+                results.append(result)
 
-        # Remove skipped results
-        results = [r for r in results if r]
+            # Remove skipped results
+            results = [r for r in results if r]
 
-        # If any data item failed, raise PipelineRunFailedError
-        errored = [
-            r
-            for r in results
-            if r and r.get("run_info") and isinstance(r["run_info"], PipelineRunErrored)
-        ]
-        if errored:
-            raise PipelineRunFailedError("Pipeline run failed. Data item could not be processed.")
+            # If any data item failed, raise PipelineRunFailedError
+            errored = [
+                r
+                for r in results
+                if r and r.get("run_info") and isinstance(r["run_info"], PipelineRunErrored)
+            ]
+            if errored:
+                raise PipelineRunFailedError(
+                    "Pipeline run failed. Data item could not be processed."
+                )
 
-        await log_pipeline_run_complete(
-            pipeline_run_id, pipeline_id, pipeline_name, dataset.id, data
-        )
+            await log_pipeline_run_complete(
+                pipeline_run_id, pipeline_id, pipeline_name, dataset.id, data
+            )
 
-        yield PipelineRunCompleted(
-            pipeline_run_id=pipeline_run_id,
-            dataset_id=dataset.id,
-            dataset_name=dataset.name,
-            data_ingestion_info=results,
-        )
+            yield PipelineRunCompleted(
+                pipeline_run_id=pipeline_run_id,
+                dataset_id=dataset.id,
+                dataset_name=dataset.name,
+                data_ingestion_info=results,
+            )
 
-    except Exception as error:
-        await log_pipeline_run_error(
-            pipeline_run_id, pipeline_id, pipeline_name, dataset.id, data, error
-        )
+        except Exception as error:
+            if callable(rollback_handler):
+                try:
+                    await rollback_handler(
+                        pipeline_run_id=pipeline_run_id,
+                        pipeline_id=pipeline_id,
+                        pipeline_name=pipeline_name,
+                        dataset=dataset,
+                        user=user,
+                        data=data,
+                        data_ingestion_info=locals().get("results"),
+                        error=error,
+                    )
+                except Exception as rollback_error:
+                    logger.error("Rollback errored: %s", rollback_error, exc_info=True)
 
-        yield PipelineRunErrored(
-            pipeline_run_id=pipeline_run_id,
-            payload=repr(error),
-            dataset_id=dataset.id,
-            dataset_name=dataset.name,
-            data_ingestion_info=locals().get("results"),
-        )
+            await log_pipeline_run_error(
+                pipeline_run_id, pipeline_id, pipeline_name, dataset.id, data, error
+            )
 
-        if not isinstance(error, PipelineRunFailedError):
-            raise
+            yield PipelineRunErrored(
+                pipeline_run_id=pipeline_run_id,
+                payload=repr(error),
+                dataset_id=dataset.id,
+                dataset_name=dataset.name,
+                data_ingestion_info=locals().get("results"),
+            )
+
+            if not isinstance(error, PipelineRunFailedError):
+                raise

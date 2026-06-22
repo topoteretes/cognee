@@ -1,9 +1,11 @@
+import { tokens } from "@/ui/theme/tokens";
+
 export default function StatusIndicator({ status }: { status: "DATASET_PROCESSING_COMPLETED" | string }) {
   const statusColor = {
-    DATASET_PROCESSING_STARTED: "#ffd500",
-    DATASET_PROCESSING_INITIATED: "#ffd500",
-    DATASET_PROCESSING_COMPLETED: "#53ff24",
-    DATASET_PROCESSING_ERRORED: "#ff5024",
+    DATASET_PROCESSING_STARTED: tokens.statusProcessing,
+    DATASET_PROCESSING_INITIATED: tokens.statusProcessing,
+    DATASET_PROCESSING_COMPLETED: tokens.statusSuccess,
+    DATASET_PROCESSING_ERRORED: tokens.statusError,
   };
 
   const isSuccess = status === "DATASET_PROCESSING_COMPLETED";

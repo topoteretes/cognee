@@ -1,16 +1,11 @@
 import cognee
-from cognee.modules.users.tenants.methods import select_tenant
-from cognee.shared.logging_utils import get_logger
-from cognee.modules.search.types import SearchType
-from cognee.modules.users.methods import create_user
-from cognee.modules.users.permissions.methods import authorized_give_permission_on_datasets
-from cognee.modules.users.roles.methods import add_user_to_role
-from cognee.modules.users.roles.methods import create_role
-from cognee.modules.users.tenants.methods import create_tenant
-from cognee.modules.users.tenants.methods import add_user_to_tenant
+from cognee import SearchType
 from cognee.modules.engine.operations.setup import setup
-from cognee.shared.logging_utils import setup_logging, CRITICAL
-from cognee.modules.users.methods import get_user
+from cognee.modules.users.methods import create_user, get_user
+from cognee.modules.users.permissions.methods import authorized_give_permission_on_datasets
+from cognee.modules.users.roles.methods import add_user_to_role, create_role
+from cognee.modules.users.tenants.methods import add_user_to_tenant, create_tenant, select_tenant
+from cognee.shared.logging_utils import CRITICAL, get_logger, setup_logging
 
 logger = get_logger()
 
@@ -21,17 +16,18 @@ preparation and manipulation of quantum states.
 """
 
 
-# Extract dataset_ids from cognify results
-def extract_dataset_id_from_cognify(cognify_result):
-    """Extract dataset_id from cognify output dictionary"""
-    return next(iter(cognify_result), None)  # Return the first dataset_id
+def get_dataset_id(remember_result):
+    """Extract dataset_id from remember output."""
+    from uuid import UUID
+
+    return UUID(remember_result.dataset_id)
 
 
 async def tenant_and_role_setup_example():
-    # NOTE: When a document is added in Cognee with permissions enabled only the owner of the document has permissions
+    # NOTE: When a document is remembered in Cognee with permissions enabled only the owner of the document has permissions
     # to work with the document initially.
 
-    # Add document for user_1, add it under dataset name QUANTUM
+    # Create user_1 before remembering data under the CogneeLab tenant.
     print("\nCreating user_1: user_1@example.com")
     user_1 = await create_user("user_1@example.com", "example")
 
@@ -63,12 +59,13 @@ async def tenant_and_role_setup_example():
 
     # Note: We need to update user_1 from the database to refresh its tenant context changes
     user_1 = await get_user(user_1.id)
-    await cognee.add([text], dataset_name="QUANTUM_COGNEE_LAB", user=user_1)
-    quantum_cognee_lab_cognify_result = await cognee.cognify(["QUANTUM_COGNEE_LAB"], user=user_1)
-
-    quantum_cognee_lab_dataset_id = extract_dataset_id_from_cognify(
-        quantum_cognee_lab_cognify_result
+    quantum_cognee_lab_remember_result = await cognee.remember(
+        [text],
+        dataset_name="QUANTUM_COGNEE_LAB",
+        user=user_1,
+        self_improvement=False,
     )
+    quantum_cognee_lab_dataset_id = get_dataset_id(quantum_cognee_lab_remember_result)
     print(
         "\nOperation started as user_1, with CogneeLab as its active tenant, to give read permission to Researcher role for the dataset QUANTUM owned by the CogneeLab tenant"
     )
@@ -80,14 +77,14 @@ async def tenant_and_role_setup_example():
     )
 
     # Now user_2 can read from QUANTUM dataset as part of the Researcher role after proper permissions have been assigned by the QUANTUM dataset owner, user_1.
-    print("\nSearch result as user_2 on the QUANTUM dataset owned by the CogneeLab organization:")
-    search_results = await cognee.search(
+    print("\nRecall result as user_2 on the QUANTUM dataset owned by the CogneeLab organization:")
+    recall_results = await cognee.recall(
         query_type=SearchType.GRAPH_COMPLETION,
         query_text="What is in the document?",
         user=user_2,
         dataset_ids=[quantum_cognee_lab_dataset_id],
     )
-    for result in search_results:
+    for result in recall_results:
         print(f"{result}\n")
 
 
@@ -104,8 +101,8 @@ async def main():
 
 
 # Please set ENABLE_BACKEND_ACCESS_CONTROL=True in .env file
-# Note: When ENABLE_BACKEND_ACCESS_CONTROL is enabled vector provider is automatically set to use LanceDB
-# and graph provider is set to use Kuzu.
+# Note: When ENABLE_BACKEND_ACCESS_CONTROL is enabled, vector provider is automatically set to use LanceDB.
+# The default graph provider is Ladybug (can be overridden via GRAPH_DATABASE_PROVIDER env var).
 if __name__ == "__main__":
     import asyncio
 

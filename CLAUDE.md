@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Cognee is an open-source AI memory platform that transforms raw data into persistent knowledge graphs for AI agents. It replaces traditional RAG (Retrieval-Augmented Generation) with an ECL (Extract, Cognify, Load) pipeline combining vector search, graph databases, and LLM-powered entity extraction.
 
-**Requirements**: Python 3.9 - 3.12
+**Requirements**: Python 3.10 - 3.14
 
 ## Development Commands
 
@@ -29,7 +29,7 @@ pre-commit install
 ```
 
 ### Available Installation Extras
-- **postgres** / **postgres-binary** - PostgreSQL + PGVector support
+- **postgres** / **postgres-binary** - PostgreSQL + PGVector support (also enables the Postgres session-cache backend, `CACHE_BACKEND=postgres`)
 - **neo4j** - Neo4j graph database support
 - **neptune** - AWS Neptune support
 - **chromadb** - ChromaDB vector database
@@ -56,7 +56,7 @@ pre-commit install
 - **posthog** - PostHog analytics
 - **monitoring** - Sentry + Langfuse observability
 - **distributed** - Modal distributed execution
-- **dev** - All development tools (pytest, mypy, ruff, etc.)
+- **dev** - All development tools (pytest, ty, ruff, etc.)
 - **debug** - Debugpy for debugging
 
 ### Testing
@@ -94,11 +94,8 @@ ruff format .
 # Run both linting and formatting (pre-commit)
 pre-commit run --all-files
 
-# Type checking with mypy
-mypy cognee/
-
-# Run pylint
-pylint cognee/
+# Type checking with ty
+ty check .
 ```
 
 ### Running Cognee
@@ -132,7 +129,7 @@ All data flows through task-based pipelines (`cognee/modules/pipelines/`). Tasks
 
 #### 2. Interface-Based Database Adapters
 Multiple backends are supported through adapter interfaces:
-- **Graph**: Kuzu (default), Neo4j, Neptune via `GraphDBInterface`
+- **Graph**: Ladybug (default), Neo4j, Neptune, Postgres via `GraphDBInterface`
 - **Vector**: LanceDB (default), ChromaDB, PGVector via `VectorDBInterface`
 - **Relational**: SQLite (default), PostgreSQL
 
@@ -141,7 +138,7 @@ Key files:
 - `cognee/infrastructure/databases/vector/vector_db_interface.py`
 
 #### 3. Multi-Tenant Access Control
-User → Dataset → Data hierarchy with permission-based filtering. Enable with `ENABLE_BACKEND_ACCESS_CONTROL=True`. Each user+dataset combination can have isolated graph/vector databases (when using supported backends: Kuzu, LanceDB, SQLite, Postgres).
+User → Dataset → Data hierarchy with permission-based filtering. Enable with `ENABLE_BACKEND_ACCESS_CONTROL=True`. Each user+dataset combination can have isolated graph/vector databases (when using supported backends: Ladybug, LanceDB, SQLite, Postgres).
 
 ### Layer Structure
 
@@ -158,7 +155,7 @@ Domain Modules (graph, retrieval, ingestion, etc.)
     ↓
 Infrastructure Adapters (LLM, databases)
     ↓
-External Services (OpenAI, Kuzu, LanceDB, etc.)
+External Services (OpenAI, Ladybug, LanceDB, etc.)
 ```
 
 ### Critical Data Flow Paths
@@ -231,7 +228,7 @@ Copy `.env.template` to `.env` and configure:
 ```bash
 # Minimal setup (defaults to OpenAI + local file-based databases)
 LLM_API_KEY="your_openai_api_key"
-LLM_MODEL="openai/gpt-4o-mini"  # Default model
+LLM_MODEL="openai/gpt-5-mini"  # Default model
 ```
 
 **Important**: If you configure only LLM or only embeddings, the other defaults to OpenAI. Ensure you have a working OpenAI API key, or configure both to avoid unexpected defaults.
@@ -239,7 +236,7 @@ LLM_MODEL="openai/gpt-4o-mini"  # Default model
 Default databases (no extra setup needed):
 - **Relational**: SQLite (metadata and state storage)
 - **Vector**: LanceDB (embeddings for semantic search)
-- **Graph**: Kuzu (knowledge graph and relationships)
+- **Graph**: Ladybug (knowledge graph and relationships)
 
 All stored in `.venv` by default. Override with `DATA_ROOT_DIRECTORY` and `SYSTEM_ROOT_DIRECTORY`.
 
@@ -268,7 +265,7 @@ VECTOR_DB_URL=postgresql://cognee:cognee@localhost:5432/cognee_db
 ```
 
 #### Graph Databases
-Supported: kuzu (default), neo4j, neptune, kuzu-remote
+Supported: ladybug (default), neo4j, neptune, ladybug-remote, postgres
 ```bash
 # Neo4j (requires neo4j extra: pip install cognee[neo4j])
 GRAPH_DATABASE_PROVIDER=neo4j
@@ -277,11 +274,24 @@ GRAPH_DATABASE_NAME=neo4j
 GRAPH_DATABASE_USERNAME=neo4j
 GRAPH_DATABASE_PASSWORD=yourpassword
 
-# Remote Kuzu
-GRAPH_DATABASE_PROVIDER=kuzu-remote
+# Remote Ladybug
+GRAPH_DATABASE_PROVIDER=ladybug-remote
 GRAPH_DATABASE_URL=http://localhost:8000
 GRAPH_DATABASE_USERNAME=your_username
 GRAPH_DATABASE_PASSWORD=your_password
+
+# Postgres (requires postgres extra: pip install cognee[postgres])
+# Does not support raw Cypher queries, natural language search, or Graphiti.
+GRAPH_DATABASE_PROVIDER=postgres
+GRAPH_DATABASE_URL=postgresql+asyncpg://cognee:cognee@localhost:5432/cognee_db
+```
+
+#### Session Cache
+```bash
+# Session/conversation cache backend: sqlite (default), postgres, redis, fs, tapes
+CACHE_BACKEND=sqlite
+# Optional explicit SQLAlchemy URL for sqlite/postgres cache backends (overrides defaults)
+CACHE_DB_URL=postgresql+asyncpg://cognee:cognee@localhost:5432/cognee_db
 ```
 
 ### LLM Provider Configuration
@@ -291,7 +301,7 @@ Supported providers: OpenAI (default), Azure OpenAI, Google Gemini, Anthropic, A
 #### OpenAI (Recommended - Minimal Setup)
 ```bash
 LLM_API_KEY="your_openai_api_key"
-LLM_MODEL="openai/gpt-4o-mini"  # or gpt-4o, gpt-4-turbo, etc.
+LLM_MODEL="openai/gpt-5-mini"  # default; or gpt-5, gpt-4o, gpt-4o-mini, etc.
 LLM_PROVIDER="openai"
 ```
 
@@ -430,7 +440,7 @@ git checkout -b feature/your-feature-name
 - **Line length**: 100 characters
 - **String quotes**: Use double quotes `"` not single quotes `'` (enforced by ruff-format)
 - **Pre-commit hooks**: Run ruff linting and formatting automatically
-- **Type hints**: Encouraged (mypy checks enabled)
+- **Type hints**: Encouraged (ty checks enabled)
 - **Important**: Always run `pre-commit run --all-files` before committing to catch formatting issues
 
 ## Testing Strategy
@@ -451,7 +461,7 @@ FastAPI application with versioned routes under `cognee/api/v1/`:
 - `/search` - Query interface
 - `/memify` - Graph enrichment
 - `/datasets` - Dataset management
-- `/users` - Authentication (if `REQUIRE_AUTHENTICATION=True`)
+- `/users` - Authentication (when `REQUIRE_AUTHENTICATION` is effectively true; see auth posture below)
 - `/visualize` - Graph visualization server
 
 ## Python SDK Entry Points
@@ -473,8 +483,8 @@ Several security environment variables in `.env`:
 - `ACCEPT_LOCAL_FILE_PATH` - Allow local file paths (default: True)
 - `ALLOW_HTTP_REQUESTS` - Allow HTTP requests from Cognee (default: True)
 - `ALLOW_CYPHER_QUERY` - Allow raw Cypher queries (default: True)
-- `REQUIRE_AUTHENTICATION` - Enable API authentication (default: False)
-- `ENABLE_BACKEND_ACCESS_CONTROL` - Multi-tenant isolation (default: True)
+- `ENABLE_BACKEND_ACCESS_CONTROL` - Multi-tenant isolation (default: True). When `true`, API auth is required and per-user/dataset DB isolation is enabled. When `false`, single-user mode: shared DBs and auth off unless overridden.
+- `REQUIRE_AUTHENTICATION` - Explicit auth override. Unset (default): follows `ENABLE_BACKEND_ACCESS_CONTROL`. `false` is ignored when `ENABLE_BACKEND_ACCESS_CONTROL=true`. For a single-user deployment with auth off, set `ENABLE_BACKEND_ACCESS_CONTROL=false` (and optionally `REQUIRE_AUTHENTICATION=false`).
 
 For production deployments, review and tighten these settings.
 
@@ -532,7 +542,7 @@ Atomic knowledge units that form the foundation of graph structures. All graph n
 Multi-tenant architecture with users, roles, and Access Control Lists (ACLs):
 - Read, write, delete, and share permissions per dataset
 - Enable with `ENABLE_BACKEND_ACCESS_CONTROL=True`
-- Supports isolated databases per user+dataset (Kuzu, LanceDB, SQLite, Postgres)
+- Supports isolated databases per user+dataset (Ladybug, LanceDB, SQLite, Postgres)
 
 ### Graph Visualization
 Launch visualization server:

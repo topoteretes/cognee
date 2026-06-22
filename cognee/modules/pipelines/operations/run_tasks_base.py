@@ -1,17 +1,55 @@
-import inspect
+from typing import Optional
+
+from cognee.modules.observability import OtelStatusCode as StatusCode
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.users.models import User
 from cognee.shared.utils import send_telemetry
 from cognee import __version__ as cognee_version
-
+from cognee.modules.pipelines.models import PipelineContext
+from cognee.modules.observability import (
+    new_span,
+    COGNEE_PIPELINE_TASK_NAME,
+    COGNEE_RESULT_SUMMARY,
+    COGNEE_RESULT_COUNT,
+)
 from cognee.infrastructure.engine import DataPoint
 from ..tasks.task import Task
 
 logger = get_logger("run_tasks_base")
 
 
-def _stamp_provenance(data, pipeline_name, task_name, visited=None, node_set=None, user_label=None):
-    """Recursively stamp DataPoints with provenance. Only sets if currently None."""
+def _build_result_summary(executable, task_name: str, count: int) -> str:
+    """Build a human-readable result summary for a completed task.
+
+    Reads the ``__task_summary__`` attribute set by the ``@task_summary``
+    decorator.  Falls back to a generic message when no template is defined.
+    """
+    template = getattr(executable, "__task_summary__", None)
+    if template:
+        return template.format(n=count)
+    return f"{task_name} produced {count} result(s)"
+
+
+def _stamp_provenance(
+    data,
+    pipeline_name,
+    task_name,
+    visited=None,
+    node_set=None,
+    user_label=None,
+    content_hash=None,
+    task_index=None,
+):
+    """Recursively stamp DataPoints with provenance. Only sets if currently None.
+
+    The ``visited`` set should be persisted across task calls (via
+    PipelineContext._provenance_visited) so that DataPoints stamped in
+    earlier stages are skipped in later ones.
+
+    ``task_index`` (when provided and > 0) is written to ``topological_rank``
+    for any DataPoint whose rank is the default sentinel (None or 0). This lets
+    the visualization lay nodes out in pipeline order.
+    """
     if visited is None:
         visited = set()
 
@@ -28,12 +66,27 @@ def _stamp_provenance(data, pipeline_name, task_name, visited=None, node_set=Non
         if data.source_user is None and user_label is not None:
             data.source_user = user_label
 
+        # topological_rank defaults to 0 on DataPoint; treat 0 the same as
+        # None (unset) so legacy pipelines that already produced rank-0 nodes
+        # get a real value the first time they pass through this stamper.
+        if task_index is not None and task_index > 0:
+            current_rank = getattr(data, "topological_rank", None)
+            if current_rank is None or current_rank == 0:
+                data.topological_rank = task_index
+
         # Propagate node_set from parent or pick up from this data point
         current_node_set = node_set
         if data.source_node_set is not None:
             current_node_set = data.source_node_set
         elif current_node_set is not None and data.source_node_set is None:
             data.source_node_set = current_node_set
+
+        # Propagate content_hash from parent or pick up from this data point
+        current_hash = content_hash
+        if data.source_content_hash is not None:
+            current_hash = data.source_content_hash
+        elif current_hash is not None and data.source_content_hash is None:
+            data.source_content_hash = current_hash
 
         # Recurse into DataPoint model fields to stamp nested DataPoints
         for field_name in data.model_fields:
@@ -46,11 +99,22 @@ def _stamp_provenance(data, pipeline_name, task_name, visited=None, node_set=Non
                     visited,
                     current_node_set,
                     user_label,
+                    current_hash,
+                    task_index,
                 )
 
     elif isinstance(data, (list, tuple)):
         for item in data:
-            _stamp_provenance(item, pipeline_name, task_name, visited, node_set, user_label)
+            _stamp_provenance(
+                item,
+                pipeline_name,
+                task_name,
+                visited,
+                node_set,
+                user_label,
+                content_hash,
+                task_index,
+            )
 
 
 def _extract_node_set(args):
@@ -65,15 +129,33 @@ def _extract_node_set(args):
     return None
 
 
+def _extract_content_hash(args):
+    """Extract content_hash from input Data items to propagate to output DataPoints."""
+    from cognee.modules.data.models.Data import Data
+
+    for arg in args:
+        if isinstance(arg, Data) and arg.content_hash is not None:
+            return arg.content_hash
+        if isinstance(arg, DataPoint) and arg.source_content_hash is not None:
+            return arg.source_content_hash
+        if isinstance(arg, (list, tuple)):
+            for item in arg:
+                if isinstance(item, Data) and item.content_hash is not None:
+                    return item.content_hash
+                if isinstance(item, DataPoint) and item.source_content_hash is not None:
+                    return item.source_content_hash
+    return None
+
+
 async def handle_task(
     running_task: Task,
     args: list,
     leftover_tasks: list[Task],
     next_task_batch_size: int,
     user: User,
-    context: dict = None,
+    ctx: Optional[PipelineContext] = None,
 ):
-    """Handle common task workflow with logging, telemetry, and error handling around the core execution logic."""
+    """Handle common task workflow with logging, telemetry, and error handling."""
     task_type = running_task.task_type
 
     logger.info(f"{task_type} task started: `{running_task.executable.__name__}`")
@@ -87,60 +169,102 @@ async def handle_task(
         },
     )
 
-    has_context = any(
-        [key == "context" for key in inspect.signature(running_task.executable).parameters.keys()]
-    )
-
+    # Pass ctx only to tasks that declare it in their signature.
+    # Task caches this check as accepts_ctx at construction time.
     kwargs = {}
+    if ctx is not None and running_task.accepts_ctx:
+        kwargs["ctx"] = ctx
 
-    if has_context:
-        kwargs["context"] = context
+    task_name = running_task.executable.__name__
 
-    try:
-        task_name = running_task.executable.__name__
-        pipe_name = context.get("pipeline_name") if isinstance(context, dict) else None
-        input_node_set = _extract_node_set(args)
-        user_label = getattr(user, "email", None) or (str(user.id) if user else None)
+    # Stamp a 1-based pipeline-stage index onto every DataPoint produced by
+    # this task. Used by visualization to lay out nodes left-to-right in
+    # pipeline order. handle_task can be called many times for one task when
+    # an upstream task streams multiple results, so rank is "position in the
+    # pipeline" (deduplicated) rather than invocation count. ctx may be None
+    # for non-context pipelines; topological_rank is then not written.
+    task_index = None
+    if ctx is not None:
+        if task_name not in ctx.task_sequence:
+            ctx.task_sequence.append(task_name)
+        task_index = ctx.task_sequence.index(task_name) + 1
 
-        async for result_data in running_task.execute(args, kwargs, next_task_batch_size):
-            _stamp_provenance(
-                result_data,
-                pipe_name,
-                task_name,
-                node_set=input_node_set,
-                user_label=user_label,
+    with new_span(f"cognee.pipeline.task.{task_name}") as span:
+        span.set_attribute(COGNEE_PIPELINE_TASK_NAME, task_name)
+
+        try:
+            result_count = 0
+            pipe_name = ctx.pipeline_name if ctx else None
+            input_node_set = _extract_node_set(args)
+            input_content_hash = _extract_content_hash(args)
+            user_label = getattr(user, "email", None) or (str(user.id) if user else None)
+            # Reuse the visited set across tasks so already-stamped
+            # DataPoints are skipped in subsequent pipeline stages.
+            provenance_visited = ctx._provenance_visited if ctx else None
+
+            async for result_data in running_task.execute(args, kwargs, next_task_batch_size):
+                if isinstance(result_data, list):
+                    result_count += len(result_data)
+                else:
+                    result_count += 1
+
+                _stamp_provenance(
+                    result_data,
+                    pipe_name,
+                    task_name,
+                    visited=provenance_visited,
+                    node_set=input_node_set,
+                    user_label=user_label,
+                    content_hash=input_content_hash,
+                    task_index=task_index,
+                )
+
+                async for result in run_tasks_base(leftover_tasks, result_data, user, ctx):
+                    yield result
+
+            span.set_attribute(COGNEE_RESULT_COUNT, result_count)
+            span.set_attribute(
+                COGNEE_RESULT_SUMMARY,
+                _build_result_summary(running_task.executable, task_name, result_count),
             )
-            async for result in run_tasks_base(leftover_tasks, result_data, user, context):
-                yield result
 
-        logger.info(f"{task_type} task completed: `{running_task.executable.__name__}`")
-        send_telemetry(
-            f"{task_type} Task Completed",
-            user_id=user.id,
-            additional_properties={
-                "task_name": running_task.executable.__name__,
-                "cognee_version": cognee_version,
-                "tenant_id": str(user.tenant_id) if user.tenant_id else "Single User Tenant",
-            },
-        )
-    except Exception as error:
-        logger.error(
-            f"{task_type} task errored: `{running_task.executable.__name__}`\n{str(error)}\n",
-            exc_info=True,
-        )
-        send_telemetry(
-            f"{task_type} Task Errored",
-            user_id=user.id,
-            additional_properties={
-                "task_name": running_task.executable.__name__,
-                "cognee_version": cognee_version,
-                "tenant_id": str(user.tenant_id) if user.tenant_id else "Single User Tenant",
-            },
-        )
-        raise error
+            logger.info(f"{task_type} task completed: `{task_name}`")
+            send_telemetry(
+                f"{task_type} Task Completed",
+                user_id=user.id,
+                additional_properties={
+                    "task_name": task_name,
+                    "cognee_version": cognee_version,
+                    "tenant_id": str(user.tenant_id) if user.tenant_id else "Single User Tenant",
+                },
+            )
+
+        except Exception as error:
+            span.set_status(StatusCode.ERROR, str(error))
+            span.record_exception(error)
+
+            logger.error(
+                f"{task_type} task errored: `{task_name}`\n{str(error)}\n",
+                exc_info=True,
+            )
+            send_telemetry(
+                f"{task_type} Task Errored",
+                user_id=user.id,
+                additional_properties={
+                    "task_name": task_name,
+                    "cognee_version": cognee_version,
+                    "tenant_id": str(user.tenant_id) if user.tenant_id else "Single User Tenant",
+                },
+            )
+            raise error
 
 
-async def run_tasks_base(tasks: list[Task], data=None, user: User = None, context: dict = None):
+async def run_tasks_base(
+    tasks: list[Task],
+    data=None,
+    user: User = None,
+    ctx: Optional[PipelineContext] = None,
+):
     """Base function to execute tasks in a pipeline, handling task type detection and execution."""
     if len(tasks) == 0:
         yield data
@@ -154,6 +278,6 @@ async def run_tasks_base(tasks: list[Task], data=None, user: User = None, contex
     next_task_batch_size = next_task.task_config["batch_size"] if next_task else 1
 
     async for result in handle_task(
-        running_task, args, leftover_tasks, next_task_batch_size, user, context
+        running_task, args, leftover_tasks, next_task_batch_size, user, ctx
     ):
         yield result

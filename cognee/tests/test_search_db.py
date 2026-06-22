@@ -14,6 +14,9 @@ from cognee.modules.retrieval.graph_completion_context_extension_retriever impor
     GraphCompletionContextExtensionRetriever,
 )
 from cognee.modules.retrieval.graph_completion_cot_retriever import GraphCompletionCotRetriever
+from cognee.modules.retrieval.graph_completion_decomposition_retriever import (
+    GraphCompletionDecompositionRetriever,
+)
 from cognee.modules.retrieval.graph_summary_completion_retriever import (
     GraphSummaryCompletionRetriever,
 )
@@ -99,6 +102,27 @@ def event_loop():
         loop.close()
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _disable_session_turn_gating():
+    """Disable session-turn gating (auto_feedback) so retrieval answers directly.
+
+    These tests exercise pure retrieval. The session-turn analysis runs on every non-only_context
+    search when caching + auto_feedback are enabled (both default True) and can intercept
+    multi-turn queries with a clarifying acknowledgement instead of an answer, making the
+    retrieval assertions non-deterministic. That layer has its own dedicated tests
+    (e.g. test_session_context_turn_flow.py), so it is turned off here.
+    """
+    prev = os.environ.get("AUTO_FEEDBACK")
+    os.environ["AUTO_FEEDBACK"] = "False"
+    try:
+        yield
+    finally:
+        if prev is None:
+            os.environ.pop("AUTO_FEEDBACK", None)
+        else:
+            os.environ["AUTO_FEEDBACK"] = prev
+
+
 async def setup_test_environment():
     """Helper function to set up test environment with data, cognify, and triplet embeddings."""
     # This test runs for multiple db settings, to run this locally set the corresponding db envs
@@ -136,7 +160,7 @@ async def _get_retriever_context(retriever, query: str):
 
 
 @pytest_asyncio.fixture(scope="session")
-async def e2e_state():
+async def e2e_state(_disable_session_turn_gating):
     """Compute E2E artifacts once; tests only assert.
 
     This avoids repeating expensive setup and LLM calls across multiple tests.
@@ -159,6 +183,13 @@ async def e2e_state():
 
     contexts = {
         "graph_completion": await _get_retriever_context(GraphCompletionRetriever(), query=query),
+        "graph_completion_decomposition_answer_per_subquery": await _get_retriever_context(
+            GraphCompletionDecompositionRetriever(), query=query
+        ),
+        "graph_completion_decomposition_combined_triplets": await _get_retriever_context(
+            GraphCompletionDecompositionRetriever(decomposition_mode="combined_triplets_context"),
+            query=query,
+        ),
         "graph_completion_cot": await _get_retriever_context(
             GraphCompletionCotRetriever(), query=query
         ),
@@ -192,6 +223,17 @@ async def e2e_state():
         query_type=SearchType.GRAPH_COMPLETION,
         query_text="Where is germany located, next to which country?",
         verbose=True,
+    )
+    completion_decomposition_answer_per_subquery = await cognee.search(
+        query_type=SearchType.GRAPH_COMPLETION_DECOMPOSITION,
+        query_text="Where is germany located, next to which country?",
+        verbose=True,
+    )
+    completion_decomposition_combined_triplets = await cognee.search(
+        query_type=SearchType.GRAPH_COMPLETION_DECOMPOSITION,
+        query_text="Where is germany located, next to which country?",
+        verbose=True,
+        retriever_specific_config={"decomposition_mode": "combined_triplets_context"},
     )
     completion_cot = await cognee.search(
         query_type=SearchType.GRAPH_COMPLETION_COT,
@@ -247,6 +289,12 @@ async def e2e_state():
         "triplets": triplets,
         "search_results": {
             "graph_completion": completion_gk,
+            "graph_completion_decomposition_answer_per_subquery": (
+                completion_decomposition_answer_per_subquery
+            ),
+            "graph_completion_decomposition_combined_triplets": (
+                completion_decomposition_combined_triplets
+            ),
             "graph_completion_cot": completion_cot,
             "graph_completion_context_extension": completion_ext,
             "graph_summary_completion": completion_sum,
@@ -273,6 +321,8 @@ async def test_e2e_retriever_contexts(e2e_state):
 
     for name in [
         "graph_completion",
+        "graph_completion_decomposition_answer_per_subquery",
+        "graph_completion_decomposition_combined_triplets",
         "graph_completion_cot",
         "graph_completion_context_extension",
         "graph_summary_completion",
@@ -363,6 +413,8 @@ async def test_e2e_search_results_and_wrappers(e2e_state):
     # Completion-like search types: validate wrapper + content
     for name in [
         "graph_completion",
+        "graph_completion_decomposition_answer_per_subquery",
+        "graph_completion_decomposition_combined_triplets",
         "graph_completion_cot",
         "graph_completion_context_extension",
         "graph_summary_completion",

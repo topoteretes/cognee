@@ -1,30 +1,92 @@
-from typing import Optional
+from pydantic import BaseModel, Field, field_validator
 
-from pydantic import BaseModel, Field
+from cognee.infrastructure.session.session_context_models import (
+    CandidateContextUpdate,
+    CandidateContextUpdateVariant,
+    ServedContextRating,
+)
 
 
-class FeedbackDetectionResult(BaseModel):
+class SessionTurnAnalysis(BaseModel):
     """
-    Result of analyzing a user message for feedback about a previous response.
+    Result of analyzing a user message for answer routing and durable guidance.
     """
 
-    feedback_detected: bool = Field(
-        default=False,
-        description="True if the message is (wholly or partly) feedback about the last answer.",
-    )
-    feedback_text: Optional[str] = Field(
+    response_to_user: str | None = Field(
         default=None,
-        description="When feedback_detected is True: required, must never be empty. Short description that includes or summarizes the user's message (e.g. 'User gave a positive rating' for '5/5').",
+        description="Brief acknowledgement when no answer should be generated.",
     )
-    feedback_score: Optional[float] = Field(
+    query_to_answer: str | None = Field(
         default=None,
-        description="When feedback_detected is True: required. Numeric score 1-5 (1=negative, 5=positive); normalized to int when persisting.",
+        description="The question/request to answer now, or null when there is none.",
     )
-    response_to_user: Optional[str] = Field(
-        default=None,
-        description="When feedback_detected is True: required. Brief, friendly message to show the user (e.g. thanking them for feedback). One sentence; can adapt tone or language to the user's message.",
+    served_context_ratings: list[ServedContextRating] = Field(
+        default_factory=list,
+        description="Up to 3 ratings of session-context entries served to the previous answer.",
     )
-    contains_followup_question: bool = Field(
-        default=False,
-        description="True if the message contains both feedback and a new or follow-up question that should be answered (e.g. 'that was wrong, but what about X?'). Set to false when the message is only feedback with no question.",
+    candidate_context_updates: list[CandidateContextUpdateVariant] = Field(
+        default_factory=list,
+        description=(
+            "Up to 3 proposed session-context updates. Each item must be one of the "
+            "section-specific candidate update types."
+        ),
     )
+
+    @field_validator("response_to_user", "query_to_answer")
+    @classmethod
+    def normalize_optional_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError("value must be a string")
+        stripped = value.strip()
+        return stripped or None
+
+    @field_validator("candidate_context_updates", mode="before")
+    @classmethod
+    def normalize_candidate_context_updates(cls, value):
+        if not isinstance(value, list):
+            return []
+
+        normalized = []
+        for item in value:
+            if isinstance(item, CandidateContextUpdate):
+                item = item.model_dump()
+
+            if isinstance(item, dict):
+                item = dict(item)
+                section = item.get("section")
+                if isinstance(section, str):
+                    item["section"] = section.strip().lower()
+
+            normalized.append(item)
+
+        return normalized
+
+    @field_validator("served_context_ratings", "candidate_context_updates", mode="after")
+    @classmethod
+    def cap_three(cls, v: list) -> list:
+        """Truncate the list to the first 3 items; never raises (non-blocking contract)."""
+        if not isinstance(v, list):
+            return []
+        return v[:3]
+
+
+# Backwards-compatible import name for existing internal imports.
+FeedbackDetectionResult = SessionTurnAnalysis
+
+
+class AgentTraceFeedbackSummary(BaseModel):
+    """One-sentence summary generated from an agent trace step return value."""
+
+    session_feedback: str = Field(
+        default="",
+        description="One short human-readable sentence summarizing the method return value.",
+    )
+
+    @field_validator("session_feedback")
+    @classmethod
+    def normalize_feedback(cls, value: str) -> str:
+        if not isinstance(value, str):
+            raise ValueError("session_feedback must be a string")
+        return value.strip()

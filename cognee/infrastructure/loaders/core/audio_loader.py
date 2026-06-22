@@ -1,9 +1,10 @@
 import os
-from typing import List
-from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface
-from cognee.infrastructure.llm.LLMGateway import LLMGateway
+from typing import Any
+
 from cognee.infrastructure.files.storage import get_file_storage, get_storage_config
 from cognee.infrastructure.files.utils.get_file_metadata import get_file_metadata
+from cognee.infrastructure.llm.LLMGateway import LLMGateway
+from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface
 
 
 class AudioLoader(LoaderInterface):
@@ -14,8 +15,10 @@ class AudioLoader(LoaderInterface):
     text-based files when no specialized loader is available.
     """
 
+    loader_name = "audio_loader"
+
     @property
-    def supported_extensions(self) -> List[str]:
+    def supported_extensions(self) -> list[str]:
         """Supported text file extensions."""
         return [
             "aac",  # Audio documents
@@ -30,7 +33,7 @@ class AudioLoader(LoaderInterface):
         ]
 
     @property
-    def supported_mime_types(self) -> List[str]:
+    def supported_mime_types(self) -> list[str]:
         """Supported MIME types for text content."""
         return [
             "audio/aac",
@@ -44,11 +47,6 @@ class AudioLoader(LoaderInterface):
             "audio/aiff",
             "audio/x-wav",
         ]
-
-    @property
-    def loader_name(self) -> str:
-        """Unique identifier for this loader."""
-        return "audio_loader"
 
     def can_handle(self, extension: str, mime_type: str) -> bool:
         """
@@ -65,7 +63,7 @@ class AudioLoader(LoaderInterface):
             return True
         return False
 
-    async def load(self, file_path: str, **kwargs):
+    async def load(self, file_path: str, **kwargs: Any) -> str:
         """
         Load and process the audio file.
 
@@ -89,6 +87,12 @@ class AudioLoader(LoaderInterface):
         storage_file_name = "text_" + file_metadata["content_hash"] + ".txt"
 
         result = await LLMGateway.create_transcript(file_path)
+
+        if result is None:
+            return ""
+
+        if not kwargs.get("persist", True):
+            return result.text
 
         storage_config = get_storage_config()
         data_root_directory = storage_config["data_root_directory"]

@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="en" class="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cognee Knowledge Graph</title>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#000000;--bg2:#323332;--surface:rgba(255,255,255,0.06);
+  --border:rgba(219,216,216,0.12);--text:#F4F4F4;--text2:#DBD8D8;
+  --accent:#6510F4;--accent2:#A550FF;--green:#0DFF00;
+  --schema-node:#1a1a2e;--schema-stroke:#A550FF;--schema-link:#555;
+}
+html.light{
+  --bg:#f5f5f5;--bg2:#e8e8e8;--surface:rgba(0,0,0,0.04);
+  --border:rgba(0,0,0,0.12);--text:#1a1a1a;--text2:#555555;
+  --accent:#6510F4;--accent2:#7c3aed;--green:#16a34a;
+  --schema-node:#ffffff;--schema-stroke:#6510F4;--schema-link:#999;
+}
+html.light body,html.light{background:var(--bg);color:var(--text)}
+@font-face{font-family:'Inter';src:local('Inter'),local('Inter-Regular');font-display:swap}
+body,html{width:100%;height:100%;overflow:hidden;background:#000000;color:#F4F4F4;font-family:'Inter',system-ui,-apple-system,sans-serif}
+canvas{display:block;width:100vw;height:100vh;cursor:grab}
+canvas:active{cursor:grabbing}
+
+#header{
+  position:fixed;top:0;left:0;right:0;height:48px;
+  display:flex;align-items:center;justify-content:space-between;
+  padding:0 20px;z-index:100;
+  background:none;
+  pointer-events:none;
+}
+#header>*{pointer-events:auto}
+.logo{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;letter-spacing:0.02em;color:var(--text)}
+.logo img{height:28px;width:auto}
+.stats{display:flex;gap:16px;font-size:11px;color:var(--text2);font-variant-numeric:tabular-nums}
+.stats span{display:flex;align-items:center;gap:4px}
+.stats .dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+
+#controls{
+  position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:100;
+  display:flex;gap:2px;padding:4px;
+  background:var(--bg2);border:1px solid var(--border);border-radius:10px;
+}
+.ctrl-btn{
+  padding:6px 14px;font-size:11px;font-weight:500;font-family:inherit;
+  color:var(--text2);background:transparent;border:none;border-radius:7px;
+  cursor:pointer;transition:all 0.15s ease;white-space:nowrap;
+}
+.ctrl-btn:hover{color:var(--text);background:var(--surface)}
+.ctrl-btn.active{color:#F4F4F4;background:rgba(101,16,244,0.2)}
+.ctrl-btn:disabled{opacity:0.35;cursor:not-allowed}
+.ctrl-btn:disabled:hover{color:var(--text2);background:transparent}
+.ctrl-sep{width:1px;background:var(--border);margin:2px 4px}
+
+#search-box{
+  position:fixed;top:56px;left:20px;z-index:100;width:280px;
+}
+#search-input{
+  width:100%;padding:8px 64px 8px 32px;
+  font-size:12px;font-family:inherit;color:var(--text);
+  background:var(--bg2);border:1px solid var(--border);border-radius:8px;
+  outline:none;transition:border-color 0.15s;
+}
+#search-count{
+  position:absolute;right:10px;top:50%;transform:translateY(-50%);
+  font-size:10.5px;color:var(--text2);pointer-events:none;
+  font-variant-numeric:tabular-nums;white-space:nowrap;
+}
+#search-input:focus{border-color:var(--accent)}
+#search-input::placeholder{color:var(--text2)}
+.search-icon{position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text2);pointer-events:none}
+
+#info-panel{
+  position:fixed;top:56px;right:20px;width:320px;max-height:calc(100vh - 80px);
+  overflow-y:auto;z-index:100;
+  background:var(--bg2);border:1px solid var(--border);border-radius:12px;
+  padding:16px;opacity:0;transform:translateX(8px);
+  transition:opacity 0.2s ease,transform 0.2s ease;
+}
+#info-panel.visible{opacity:1;transform:translateX(0)}
+#info-panel::-webkit-scrollbar{width:4px}
+#info-panel::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+.panel-header{display:flex;align-items:center;gap:8px;margin-bottom:12px}
+.panel-type{
+  font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;
+  padding:2px 6px;border-radius:4px;background:rgba(101,16,244,0.2);color:#A550FF;
+}
+.panel-title{font-size:14px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.panel-section{margin-top:12px;padding-top:12px;border-top:1px solid var(--border)}
+.panel-section-title{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:var(--text2);margin-bottom:8px}
+.panel-row{display:flex;justify-content:space-between;align-items:flex-start;padding:3px 0;font-size:12px;gap:12px}
+.panel-row .k{color:var(--text2);flex-shrink:0}
+.panel-row .v{color:var(--text);text-align:right;word-break:break-word;max-width:200px}
+
+/* ── Legend (Phase 1 polish) ─────────────────────────────────────
+   Bottom-left floating card explaining the encodings: node colors by
+   stage, the ontology-valid green ring, and the importance-weight node-
+   size scale. Populated by JS so only stages actually present in the
+   graph appear. */
+#legend{
+  position:fixed;bottom:20px;left:20px;z-index:90;
+  background:var(--bg2);border:1px solid var(--border);border-radius:10px;
+  padding:10px 14px;font-size:11px;line-height:1.5;color:var(--text2);
+  max-width:380px;
+  display:flex;gap:14px;align-items:center;flex-wrap:wrap;
+}
+.legend-section{display:flex;align-items:center;gap:8px;}
+.legend-title{font-size:9.5px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--text2);opacity:0.75;margin-right:2px;}
+.legend-items{display:flex;gap:9px;align-items:center;flex-wrap:wrap;}
+.legend-item{display:inline-flex;align-items:center;gap:4px;color:var(--text);}
+.legend-dot{display:inline-block;width:8px;height:8px;border-radius:50%;flex-shrink:0;}
+.legend-ring{
+  display:inline-block;width:11px;height:11px;border-radius:50%;
+  background:var(--bg);border:2px solid #0DFF00;flex-shrink:0;
+}
+.legend-ring.memory{border:2px dashed #FFC53D;}
+.legend-sizes{display:inline-flex;align-items:center;gap:4px;}
+.legend-sizes .legend-dot{background:var(--text);}
+.legend-sep{width:1px;height:18px;background:var(--border);}
+
+.empty-state{
+  position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
+  text-align:center;color:var(--text2);font-size:14px;
+}
+
+#loading-overlay{
+  position:fixed;top:0;left:0;right:0;bottom:0;z-index:200;
+  background:rgba(0,0,0,0.92);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  transition:opacity 0.4s ease;
+}
+#loading-overlay.hidden{opacity:0;pointer-events:none}
+#loading-text{font-size:14px;color:var(--text2);margin-bottom:16px}
+#loading-bar-bg{width:240px;height:4px;background:var(--bg2);border-radius:2px;overflow:hidden}
+#loading-bar{width:0%;height:100%;background:var(--accent);border-radius:2px;transition:width 0.15s linear}
+#loading-stats{font-size:11px;color:var(--text2);margin-top:10px;opacity:0.7}
+
+#minimap-container{
+  position:fixed;bottom:64px;right:20px;z-index:100;
+  border:1px solid var(--border);border-radius:8px;overflow:hidden;
+  background:rgba(0,0,0,0.7);cursor:pointer;display:none;
+}
+#minimap-canvas{display:block}
+
+#fps-counter{
+  position:fixed;top:12px;right:180px;z-index:100;
+  font-size:10px;color:var(--text2);font-variant-numeric:tabular-nums;
+  display:none;pointer-events:none;
+}
+</style>
+</head>
+<body>
+
+<div id="view-tabs" style="position:fixed;top:0;left:50%;transform:translateX(-50%);z-index:1100;display:flex;gap:2px;align-items:center;background:var(--bg);border:1px solid var(--border);border-top:none;border-radius:0 0 8px 8px;padding:2px 6px;">
+  <button class="tab-btn active" data-view="graph" style="background:#1F9E6E;color:#fff;border:none;padding:6px 18px;border-radius:6px 6px 0 0;cursor:pointer;font-size:12px;font-weight:600;">Graph</button>
+  <button class="tab-btn" data-view="schema" style="background:transparent;color:var(--text2);border:none;padding:6px 18px;border-radius:6px 6px 0 0;cursor:pointer;font-size:12px;font-weight:600;">Schema</button>
+  <button class="tab-btn" data-view="memory" style="background:transparent;color:var(--text2);border:none;padding:6px 18px;border-radius:6px 6px 0 0;cursor:pointer;font-size:12px;font-weight:600;">Memory</button>
+</div>
+
+<button id="theme-toggle" style="position:fixed;top:12px;right:20px;z-index:1200;background:var(--bg2);border:1px solid var(--border);cursor:pointer;font-size:12px;padding:6px 14px;border-radius:8px;color:var(--text);font-family:inherit;font-weight:500;transition:all 0.15s;">Dark mode</button>
+
+<div id="graph-view">
+<div id="header">
+  <div class="logo">
+    <img src="data:image/png;base64,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" alt="Cognee">
+  </div>
+  <div class="stats" id="stats"></div>
+</div>
+
+<div id="search-box">
+  <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+  <input type="text" id="search-input" placeholder="Search nodes... (Enter jumps to match)" autocomplete="off" spellcheck="false">
+  <span id="search-count"></span>
+</div>
+
+<div id="controls">
+  <button class="ctrl-btn active" data-labelbudget="key" title="Labels: landmark nodes + high-importance entities">Key</button>
+  <button class="ctrl-btn" data-labelbudget="all" title="Labels: every node">All</button>
+  <button class="ctrl-btn" data-labelbudget="off" title="Labels: hidden (hover to peek)">Off</button>
+  <div class="ctrl-sep"></div>
+  <button class="ctrl-btn active" data-layout="story" title="Story: fixed pipeline columns (Documents &rarr; Chunks &rarr; Entities &rarr; Types &rarr; Summaries). Nodes stay pinned in a readable grid.">Story</button>
+  <button class="ctrl-btn" data-layout="ranked" title="Flow: columns by processing order; vertical position settles by connectivity, so related nodes drift together.">Flow</button>
+  <button class="ctrl-btn" data-layout="organic" title="Force: no columns &mdash; a physics simulation pulls connected nodes together so clusters emerge. Drag nodes to rearrange.">Force</button>
+  <div class="ctrl-sep"></div>
+  <button class="ctrl-btn active" data-colorby="type" title="Color by node type">Type</button>
+  <button class="ctrl-btn" data-colorby="nodeset" title="Color by source node set">Node set</button>
+  <button class="ctrl-btn" data-colorby="user" title="Color by source user">User</button>
+  <div class="ctrl-sep"></div>
+  <button class="ctrl-btn" id="btn-zoom-out" title="Zoom out (-)">&#x2212;</button>
+  <button class="ctrl-btn" id="btn-zoom-in" title="Zoom in (+)">+</button>
+  <button class="ctrl-btn" id="btn-fit" title="Fit to view (F)">Fit</button>
+</div>
+<!-- Legacy data-layer buttons (Nodes/Edges/Labels/Heatmap/Type Clouds)
+     removed for simplicity. The label visibility is fully controlled by
+     the Key/All/Off budget above; node/edge visibility were never useful
+     toggles in practice; heatmap and type-cloud layers stay reachable
+     via the layers={} state object for power users / URL hash. -->
+<button data-layer="heatmap" hidden></button>
+<button data-layer="typeclouds" hidden></button>
+
+<div id="info-panel"></div>
+<div id="legend"></div>
+
+<div id="loading-overlay">
+  <div id="loading-text">Laying out graph...</div>
+  <div id="loading-bar-bg"><div id="loading-bar"></div></div>
+  <div id="loading-stats"></div>
+</div>
+
+<div id="minimap-container"><canvas id="minimap-canvas"></canvas></div>
+<div id="fps-counter"></div>
+
+<canvas id="canvas"></canvas>
+</div><!-- end graph-view -->
+
+<div id="schema-view" style="display:none;position:fixed;inset:0;background:#F7F8FA;color:#1A1F36;font-family:'Inter',system-ui,-apple-system,'Segoe UI',sans-serif;padding:56px 0 0;overflow:hidden;z-index:900;">
+  <div id="schema-header" style="position:absolute;top:56px;left:0;right:0;padding:16px 28px 12px;display:flex;align-items:center;gap:16px;">
+    <div id="schema-selection" style="font-size:13px;color:#8792A2;min-height:16px;"></div>
+  </div>
+  <div id="schema-diagram-section" style="position:absolute;top:104px;left:0;right:0;bottom:0;overflow:hidden;background:#F7F8FA;">
+    <svg id="schema-svg" style="display:block;width:100%;height:100%;cursor:grab;"></svg>
+  </div>
+  <div id="schema-zoom" style="position:absolute;left:20px;bottom:20px;z-index:6;display:flex;gap:4px;background:#fff;border:1px solid #E6E8EB;border-radius:10px;padding:4px;box-shadow:0 2px 8px rgba(16,24,40,0.10);">
+    <button id="schema-zoom-out" title="Zoom out" style="width:30px;height:30px;border:none;background:transparent;border-radius:7px;cursor:pointer;font-size:18px;color:#4A5568;">&minus;</button>
+    <button id="schema-zoom-in" title="Zoom in" style="width:30px;height:30px;border:none;background:transparent;border-radius:7px;cursor:pointer;font-size:18px;color:#4A5568;">+</button>
+    <button id="schema-zoom-fit" title="Fit to view" style="height:30px;padding:0 12px;border:none;background:transparent;border-radius:7px;cursor:pointer;font-size:12px;font-weight:600;color:#4A5568;">Fit</button>
+  </div>
+  <button id="schema-ops-toggle" title="Show how operations (cognify, memify, improve, forget) transform the schema" style="position:absolute;left:20px;bottom:62px;z-index:6;background:#fff;border:1px solid #E6E8EB;border-radius:10px;padding:7px 14px;cursor:pointer;font-size:12px;font-weight:600;color:#4A5568;box-shadow:0 2px 8px rgba(16,24,40,0.10);">Transformations</button>
+  <div id="schema-legend" style="display:none;position:absolute;left:20px;bottom:106px;z-index:6;background:#fff;border:1px solid #E6E8EB;border-radius:10px;padding:10px 13px;box-shadow:0 2px 8px rgba(16,24,40,0.10);font-size:11px;color:#4A5568;line-height:1.7;">
+    <div style="font-weight:700;color:#1A1F36;margin-bottom:4px;">Operation impact</div>
+    <div><span style="color:#1F9E6E;font-size:14px;">&#9679;</span> produces &nbsp;&nbsp;<span style="color:#2F80ED;font-size:14px;">&#9679;</span> enriches</div>
+    <div><span style="color:#F2994A;font-size:14px;">&#9679;</span> modifies &nbsp;&nbsp;<span style="color:#EB5757;font-size:14px;">&#9679;</span> removes</div>
+    <div style="margin-top:4px;color:#8792A2;">Click an operation to trace its impact.</div>
+  </div>
+  <div id="schema-empty" style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;">
+    <div style="color:#8792A2;text-align:center;font-size:16px;">No schema configured for this dataset.</div>
+  </div>
+  <div id="schema-side-panel" style="display:none;position:absolute;top:104px;right:0;bottom:0;width:344px;background:#FFFFFF;border-left:1px solid #E6E8EB;box-shadow:-12px 0 32px rgba(16,24,40,0.08);padding:26px 24px;overflow-y:auto;z-index:5;">
+    <!-- PR3: schema type details (count, sample chips, relationships) render here -->
+  </div>
+</div>
+
+<!-- Memory tab: deterministic column map of the memory (documents → entities
+     → summaries → global context) with a run/search timeline rail. Rendered
+     lazily by views/memory_map.js into #memory-svg. -->
+<div id="memory-view" style="display:none;position:fixed;inset:0;padding:56px 0 0;overflow:hidden;z-index:900;">
+  <div id="memory-header"><div id="memory-status"></div></div>
+  <div id="memory-diagram-section">
+    <svg id="memory-svg"></svg>
+  </div>
+  <div id="memory-zoom">
+    <button id="memory-zoom-out" title="Zoom out">&minus;</button>
+    <button id="memory-zoom-in" title="Zoom in">+</button>
+    <button id="memory-zoom-fit" title="Fit to view">Fit</button>
+  </div>
+  <div id="memory-empty"><div>No memory content to map yet. Run <b>cognify</b> first.</div></div>
+  <div id="memory-side-panel"></div>
+  <div id="memory-timeline"></div>
+</div>
+<style>
+/* ── Schema diagram ─────────────────────────────────────────────── */
+#schema-svg{font-family:'Inter',system-ui,sans-serif;}
+.sd-node-box{cursor:pointer;transition:filter 0.18s ease;}
+.sd-node-box:hover{filter:drop-shadow(0 6px 16px rgba(16,24,40,0.16));}
+.sd-node-box.is-dim{opacity:0.3;}
+.sd-mini-card{cursor:pointer;}
+.sd-mini-card rect{transition:fill .12s,stroke .12s;}
+.sd-mini-card:hover rect{fill:#E8F6F0;stroke:#9FE3C6;}
+/* Spotlight: focus an instance and trace its connections in place. */
+.sd-node-box,.sd-mini-card,.sd-edge-path,.sd-edge-label-bg,.sd-edge-label{transition:opacity .18s;}
+.sd-mini-card.is-dim{opacity:0.25;}
+.sd-mini-card.is-spotlit rect{fill:#E8F6F0;stroke:#1F9E6E;stroke-width:2;}
+.sd-mini-card.is-linked rect{fill:#FFFFFF;stroke:#9FE3C6;stroke-width:1.5;}
+.sd-spotlight-edge{fill:none;stroke-width:2.4;stroke-linecap:round;opacity:0.95;}
+.sd-spotlight-edge-halo{fill:none;stroke-width:9;stroke-linecap:round;opacity:0.16;}
+.sd-spotlight-label{font-size:10.5px;font-weight:600;font-family:'Inter',system-ui,sans-serif;paint-order:stroke;stroke:#FFFFFF;stroke-width:3px;stroke-linejoin:round;}
+.sd-expand-toggle{cursor:pointer;}
+.sd-expand-toggle:hover text{fill:#18815B;}
+#schema-zoom button:hover{background:#F1F4F7;color:#1A1F36;}
+#schema-svg.is-panning{cursor:grabbing;}
+#schema-ops-toggle.active{background:#1F9E6E;color:#fff;border-color:#1F9E6E;}
+.sd-op-chip{cursor:pointer;}
+.sd-op-chip.is-dim{opacity:0.3;}
+.sd-op-chip.is-spotlit rect{stroke-width:2.5;}
+.sd-op-edge{stroke-width:2.2;stroke-linecap:round;opacity:0.95;}
+.sd-edge-path{fill:none;stroke-width:1.6;stroke-linecap:round;opacity:0.85;transition:opacity 0.15s,stroke-width 0.15s;}
+.sd-edge-path.is-hot{stroke-width:2.6;opacity:1;}
+.sd-edge-path.is-dim{opacity:0.12;}
+.sd-edge-label-bg{fill:#FFFFFF;stroke:#E6E8EB;stroke-width:1;}
+.sd-edge-label-bg.is-hot{stroke:#1F9E6E;}
+.sd-edge-label-bg.is-dim{opacity:0.2;}
+.sd-edge-label{font-size:10.5px;font-weight:500;fill:#5A6472;font-family:'Inter',system-ui,sans-serif;}
+.sd-edge-label.is-hot{fill:#16805B;}
+.sd-edge-label.is-dim{opacity:0.3;}
+.sd-edge-count{font-size:9.5px;fill:var(--text2);font-variant-numeric:tabular-nums;}
+.sd-stage-header{font-size:10px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;fill:#8792A2;}
+
+/* ── Schema dark theme ── card/chip colors come from the JS palette (re-rendered
+   on toggle); these override the CSS-styled and inline-styled chrome. */
+html:not(.light) #schema-view{background:#15181D !important;color:#E4E8EE !important;}
+html:not(.light) #schema-diagram-section{background:#15181D !important;}
+html:not(.light) .sd-edge-label-bg{fill:#23272F;stroke:#3A4049;}
+html:not(.light) .sd-edge-label{fill:#AEB7C2;}
+html:not(.light) .sd-edge-label.is-hot{fill:#3DD68C;}
+html:not(.light) .sd-stage-header{fill:#7E8894;}
+html:not(.light) .sd-node-box:hover{filter:drop-shadow(0 6px 16px rgba(0,0,0,0.55));}
+html:not(.light) .sd-mini-card:hover rect{fill:#1E3A2E;stroke:#2E6B4F;}
+html:not(.light) .sd-mini-card.is-spotlit rect{fill:#1E3A2E;stroke:#1F9E6E;}
+html:not(.light) .sd-mini-card.is-linked rect{fill:#23272F;stroke:#2E6B4F;}
+html:not(.light) .sd-spotlight-label{stroke:#15181D;}
+html:not(.light) #schema-zoom{background:#23272F !important;border-color:#3A4049 !important;}
+html:not(.light) #schema-zoom button{color:#C3CAD4 !important;}
+html:not(.light) #schema-zoom button:hover{background:#2E333C;color:#ECEFF4;}
+html:not(.light) #schema-ops-toggle{background:#23272F !important;border-color:#3A4049 !important;color:#C3CAD4 !important;}
+html:not(.light) #schema-ops-toggle.active{background:#1F9E6E !important;color:#fff !important;border-color:#1F9E6E !important;}
+html:not(.light) #schema-legend{background:#23272F !important;border-color:#3A4049 !important;color:#C3CAD4 !important;}
+html:not(.light) #schema-side-panel{background:#1B1F25 !important;border-left-color:#3A4049 !important;color:#E4E8EE;box-shadow:-12px 0 32px rgba(0,0,0,0.45) !important;}
+html:not(.light) .si-title{color:#ECEFF4;}
+html:not(.light) .si-close:hover{background:#2A2F37;color:#ECEFF4;}
+html:not(.light) .si-chip{background:#2A2F37;border-color:#3A4049;color:#E4E8EE;}
+html:not(.light) .si-chip:hover{background:#1E3A2E;border-color:#2E6B4F;color:#3DD68C;}
+html:not(.light) .si-rel{border-bottom-color:#2E333C;}
+
+/* ── Schema inspector side panel (PR3) — clean & airy Segment style ── */
+#schema-side-panel{font-family:'Inter',system-ui,-apple-system,'Segoe UI',sans-serif;font-size:13px;color:#1A1F36;}
+.si-close{position:absolute;top:14px;right:16px;width:24px;height:24px;display:flex;align-items:center;justify-content:center;border-radius:6px;color:#8792A2;font-size:18px;line-height:1;cursor:pointer;transition:background .12s,color .12s;}
+.si-close:hover{background:#F1F4F7;color:#1A1F36;}
+.si-title{font-size:19px;font-weight:700;letter-spacing:-0.02em;color:#1A1F36;margin:0 0 4px;}
+.si-count{display:inline-flex;align-items:center;gap:7px;font-size:12px;color:#8792A2;font-variant-numeric:tabular-nums;margin-bottom:6px;}
+.si-heading{font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:#8792A2;margin:22px 0 11px;}
+.si-chips{display:flex;flex-wrap:wrap;gap:8px;}
+.si-chip{background:#F6F8FA;border:1px solid #E6E8EB;border-radius:14px;padding:5px 13px;font-size:12.5px;color:#1A1F36;transition:background .12s,border-color .12s,color .12s;}
+.si-chip:hover{background:#E8F6F0;border-color:#9FE3C6;color:#16805B;}
+.si-chip-link{cursor:pointer;}
+.si-crumb{display:inline-flex;align-items:center;gap:4px;color:#1F9E6E;font-size:12px;font-weight:600;cursor:pointer;margin:0 0 12px;}
+.si-crumb:hover{color:#18815B;text-decoration:underline;}
+.si-irel{margin:0 0 14px;}
+.si-irel-head{display:flex;align-items:center;gap:7px;margin:0 0 7px;}
+.si-more{font-size:12px;color:#8792A2;align-self:center;}
+.si-showall{background:none;border:none;color:#1F9E6E;cursor:pointer;font-size:12px;font-weight:600;font-family:inherit;padding:11px 0 0;}
+.si-showall:hover{color:#18815B;text-decoration:underline;}
+.si-rel{display:flex;align-items:center;gap:9px;padding:9px 0;border-bottom:1px solid #EEF1F4;}
+.si-rel:last-of-type{border-bottom:none;}
+.si-rel-name{font-family:'SF Mono',ui-monospace,'Menlo',monospace;font-size:12px;font-weight:500;color:#1A1F36;}
+.si-rel-to{color:#8792A2;font-size:12.5px;}
+.si-rel-count{margin-left:auto;background:#EEF1F4;color:#4A5568;border-radius:10px;padding:1px 9px;font-size:11.5px;font-weight:600;font-variant-numeric:tabular-nums;}
+.si-highlight{margin-top:24px;width:100%;background:#1F9E6E;color:#fff;border:none;border-radius:8px;padding:11px 0;cursor:pointer;font-size:13px;font-weight:600;font-family:inherit;box-shadow:0 1px 2px rgba(16,24,40,0.12);transition:background .12s;}
+.si-highlight:hover{background:#18815B;}
+.si-empty{color:#8792A2;font-size:12px;}
+
+/* ── Memory map ──────────────────────────────────────────────────
+   All colors flow through --mm-* vars so both themes work without a
+   re-render: light defaults here, dark overrides under html:not(.light). */
+#memory-view{
+  --mm-bg:#F7F8FA;--mm-card:#FFFFFF;--mm-card2:#F2F5F8;--mm-border:#E6E8EB;
+  --mm-text:#1A1F36;--mm-muted:#8792A2;--mm-accent:#1F9E6E;--mm-spot:#6510F4;
+  --mm-edge:#A9B4C0;--mm-sem:#C2C9D1;--mm-chunk:#EDF4FB;--mm-chunk-stroke:#C8DCEF;
+  background:var(--mm-bg);color:var(--mm-text);
+  font-family:'Inter',system-ui,-apple-system,'Segoe UI',sans-serif;
+}
+html:not(.light) #memory-view{
+  --mm-bg:#15181D;--mm-card:#23272F;--mm-card2:#1C2026;--mm-border:#3A4049;
+  --mm-text:#E4E8EE;--mm-muted:#7E8894;--mm-accent:#3DD68C;--mm-spot:#A550FF;
+  --mm-edge:#4A515B;--mm-sem:#3A4049;--mm-chunk:#1E2A38;--mm-chunk-stroke:#2C3E52;
+}
+#memory-header{position:absolute;top:56px;left:0;right:0;padding:14px 28px 10px;display:flex;align-items:center;gap:16px;}
+#memory-status{font-size:13px;color:var(--mm-muted);min-height:16px;}
+#memory-diagram-section{position:absolute;top:96px;left:0;right:0;bottom:64px;overflow:hidden;}
+#memory-svg{display:block;width:100%;height:100%;cursor:grab;font-family:'Inter',system-ui,sans-serif;}
+#memory-svg.is-panning{cursor:grabbing;}
+#memory-zoom{position:absolute;left:20px;bottom:84px;z-index:6;display:flex;gap:4px;background:var(--mm-card);border:1px solid var(--mm-border);border-radius:10px;padding:4px;box-shadow:0 2px 8px rgba(16,24,40,0.10);}
+#memory-zoom button{height:30px;min-width:30px;padding:0 10px;border:none;background:transparent;border-radius:7px;cursor:pointer;font-size:15px;font-weight:600;color:var(--mm-muted);font-family:inherit;}
+#memory-zoom button:hover{background:var(--mm-card2);color:var(--mm-text);}
+#memory-empty{display:none;position:absolute;inset:96px 0 64px;align-items:center;justify-content:center;}
+#memory-empty div{color:var(--mm-muted);text-align:center;font-size:15px;}
+#memory-side-panel{display:none;position:absolute;top:96px;right:0;bottom:64px;width:344px;background:var(--mm-card);border-left:1px solid var(--mm-border);box-shadow:-12px 0 32px rgba(16,24,40,0.08);padding:26px 24px;overflow-y:auto;z-index:5;font-size:13px;}
+#memory-timeline{position:absolute;left:0;right:0;bottom:0;height:64px;background:var(--mm-card);border-top:1px solid var(--mm-border);display:flex;align-items:center;gap:8px;padding:0 16px;overflow-x:auto;overflow-y:hidden;z-index:6;}
+.mm-rail-label{flex:0 0 auto;font-size:10px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:var(--mm-muted);margin-right:6px;}
+.mm-rail-item{flex:0 0 auto;display:flex;flex-direction:column;align-items:flex-start;gap:1px;padding:5px 12px;border:1px solid var(--mm-border);border-radius:8px;background:var(--mm-card2);cursor:pointer;font-size:11px;font-weight:600;color:var(--mm-text);font-family:inherit;line-height:1.3;text-align:left;}
+.mm-rail-item .t{color:var(--mm-muted);font-size:10px;font-weight:500;font-variant-numeric:tabular-nums;}
+.mm-rail-item:hover{border-color:var(--mm-accent);}
+.mm-rail-item.active{border-color:var(--mm-accent);box-shadow:0 0 0 1px var(--mm-accent);}
+.mm-rail-search{border-radius:16px;background:rgba(101,16,244,0.08);}
+.mm-rail-search:hover{border-color:var(--mm-spot);}
+.mm-rail-search.active{border-color:var(--mm-spot);box-shadow:0 0 0 1px var(--mm-spot);}
+/* SVG element styling */
+.mm-band-header{font-size:12px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;fill:var(--mm-muted);}
+.mm-band-sub{font-size:10px;fill:var(--mm-muted);opacity:0.8;}
+.mm-node{cursor:pointer;}
+.mm-unit{transition:opacity 0.18s ease;}
+.mm-frame{fill:var(--mm-card);stroke:var(--mm-border);}
+.mm-title{font-size:12px;font-weight:600;fill:var(--mm-text);}
+.mm-sub{font-size:10px;fill:var(--mm-muted);}
+.mm-cell .mm-box{fill:var(--mm-chunk);stroke:var(--mm-chunk-stroke);}
+.mm-cell:hover .mm-box{stroke:var(--mm-accent);}
+.mm-cell text{font-size:10.5px;fill:var(--mm-text);}
+.mm-row .mm-box{fill:transparent;stroke:transparent;}
+.mm-row:hover .mm-box{fill:var(--mm-card2);}
+.mm-row text{font-size:11px;fill:var(--mm-text);}
+.mm-row .mm-dot{fill:var(--mm-accent);}
+.mm-pill .mm-box{fill:var(--mm-card2);stroke:var(--mm-border);}
+.mm-pill:hover .mm-box{stroke:var(--mm-accent);}
+.mm-pill text{font-size:10px;fill:var(--mm-muted);}
+.mm-count{font-size:10px;fill:var(--mm-muted);font-variant-numeric:tabular-nums;}
+.mm-sum .mm-box{fill:var(--mm-card);stroke:var(--mm-border);}
+.mm-sum:hover .mm-box{stroke:var(--mm-accent);}
+.mm-sum text{font-size:10.5px;fill:var(--mm-text);}
+.mm-ctx-empty rect{fill:none;stroke:var(--mm-muted);stroke-dasharray:5 4;opacity:0.55;}
+.mm-ctx-empty text{font-size:11px;fill:var(--mm-muted);}
+.mm-edge{fill:none;stroke:var(--mm-edge);stroke-width:1.1;opacity:0.20;transition:opacity 0.18s ease;}
+.mm-edge-semantic{stroke:var(--mm-sem);opacity:0.10;}
+.mm-edge-made_from{opacity:0.38;}
+.mm-node.is-selected .mm-box,.mm-node.is-selected .mm-frame{stroke:var(--mm-accent);stroke-width:2;}
+.mm-future{opacity:0.06 !important;pointer-events:none;}
+/* Search overlay: dim base, spotlight retrieved set — classes/opacity only,
+   never positions. */
+#memory-svg.mm-searching .mm-unit{opacity:0.14;}
+#memory-svg.mm-searching .mm-edge{opacity:0.03;}
+#memory-svg.mm-searching .mm-unit.is-spotlit{opacity:1;}
+.mm-unit.is-spotlit .mm-box,.mm-unit.is-spotlit .mm-frame{stroke:var(--mm-spot);stroke-width:2;}
+#memory-svg.mm-searching .mm-edge.is-trail{stroke:var(--mm-spot);opacity:0.45;stroke-width:1.4;}
+#memory-svg.mm-searching .mm-edge.is-spotlit-edge{stroke:var(--mm-spot);opacity:0.95;stroke-width:2;}
+/* Reinforcement (improve) overlay: feedback valence on the same layout —
+   green = weights up from a positive rating, amber = weights down. */
+#memory-svg.mm-reinforcing .mm-unit.is-reinforced,
+#memory-svg.mm-reinforcing .mm-unit.is-weakened{opacity:1;}
+.mm-unit.is-reinforced .mm-box,.mm-unit.is-reinforced .mm-frame{stroke:#1F9E6E;stroke-width:2.2;}
+.mm-unit.is-weakened .mm-box,.mm-unit.is-weakened .mm-frame{stroke:#E2A33B;stroke-width:2.2;}
+.mm-rail-improve{border-radius:16px;background:rgba(31,158,110,0.10);}
+html:not(.light) .mm-rail-improve{background:rgba(31,158,110,0.18);}
+/* Memory side panel: dark-theme parity with the schema drawer. */
+html:not(.light) #memory-side-panel{box-shadow:-12px 0 32px rgba(0,0,0,0.45);}
+#memory-side-panel .si-title{color:var(--mm-text);}
+#memory-side-panel .si-chip{background:var(--mm-card2);border-color:var(--mm-border);color:var(--mm-text);}
+#memory-side-panel .si-rel-name{color:var(--mm-text);}
+#memory-side-panel .mm-panel-text{font-size:12.5px;line-height:1.55;color:var(--mm-text);white-space:pre-wrap;word-break:break-word;background:var(--mm-card2);border:1px solid var(--mm-border);border-radius:8px;padding:10px 12px;}
+#memory-side-panel .panel-row .k{color:var(--mm-muted);}
+#memory-side-panel .panel-row .v{color:var(--mm-text);}
+</style>
+
+
+<script>
+__UI_CHROME_JS__
+
+__SCHEMA_VIEW_JS__
+</script>
+
+<script>
+__STORY_VIEW_JS__
+__PIPELINE_LAYOUT_JS__
+__INSPECTOR_JS__
+__MEMORY_VIEW_JS__
+</script>
+</body>
+</html>

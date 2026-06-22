@@ -8,11 +8,11 @@ DEFAULT_JITTER = 0.1  # 10% jitter to avoid thundering herd
 
 
 def calculate_backoff(
-    attempt,
-    initial_backoff=DEFAULT_INITIAL_BACKOFF,
-    backoff_factor=DEFAULT_BACKOFF_FACTOR,
-    jitter=DEFAULT_JITTER,
-):
+    attempt: int,
+    initial_backoff: float = DEFAULT_INITIAL_BACKOFF,
+    backoff_factor: float = DEFAULT_BACKOFF_FACTOR,
+    jitter: float = DEFAULT_JITTER,
+) -> float:
     """
     Calculate the backoff time for a retry attempt with jitter.
 

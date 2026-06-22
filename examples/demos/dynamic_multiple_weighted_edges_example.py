@@ -1,12 +1,19 @@
+import os
 import asyncio
 from os import path
+
+# Note: OS environment variables need to be set before Cognee import
+os.environ["ENABLE_BACKEND_ACCESS_CONTROL"] = "False"
+
 from typing import Any
+
 from pydantic import SkipValidation
-from cognee.api.v1.visualize.visualize import visualize_graph
+
+import cognee
+from cognee import visualize_graph
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.models.Edge import Edge
 from cognee.tasks.storage import add_data_points
-import cognee
 
 
 class Employee(DataPoint):
@@ -22,8 +29,7 @@ class Company(DataPoint):
 
 async def main():
     # Clear the database for a clean state
-    await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata=True)
+    await cognee.forget(everything=True)
 
     # Create employees
     michael = Employee(name="Michael", role="Regional Manager")
@@ -98,7 +104,7 @@ async def main():
 
     # Visualize the graph
     graph_visualization_path = path.join(
-        path.dirname(__file__), "dunder_mifflin_company_graph.html"
+        path.dirname(__file__), ".artifacts", "dunder_mifflin_company_graph.html"
     )
     await visualize_graph(graph_visualization_path)
 

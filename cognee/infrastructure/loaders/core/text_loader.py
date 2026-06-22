@@ -1,8 +1,9 @@
 import os
-from typing import List
-from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface
+from typing import Any
+
 from cognee.infrastructure.files.storage import get_file_storage, get_storage_config
 from cognee.infrastructure.files.utils.get_file_metadata import get_file_metadata
+from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface
 
 
 class TextLoader(LoaderInterface):
@@ -13,13 +14,15 @@ class TextLoader(LoaderInterface):
     text-based files when no specialized loader is available.
     """
 
+    loader_name = "text_loader"
+
     @property
-    def supported_extensions(self) -> List[str]:
+    def supported_extensions(self) -> list[str]:
         """Supported text file extensions."""
         return ["txt", "md", "json", "xml", "yaml", "yml", "log"]
 
     @property
-    def supported_mime_types(self) -> List[str]:
+    def supported_mime_types(self) -> list[str]:
         """Supported MIME types for text content."""
         return [
             "text/plain",
@@ -30,11 +33,6 @@ class TextLoader(LoaderInterface):
             "text/yaml",
             "application/yaml",
         ]
-
-    @property
-    def loader_name(self) -> str:
-        """Unique identifier for this loader."""
-        return "text_loader"
 
     def can_handle(self, extension: str, mime_type: str) -> bool:
         """
@@ -52,7 +50,7 @@ class TextLoader(LoaderInterface):
 
         return False
 
-    async def load(self, file_path: str, encoding: str = "utf-8", **kwargs):
+    async def load(self, file_path: str, encoding: str = "utf-8", **kwargs: Any) -> str:
         """
         Load and process the text file.
 
@@ -77,8 +75,11 @@ class TextLoader(LoaderInterface):
         # Name ingested file of current loader based on original file content hash
         storage_file_name = "text_" + file_metadata["content_hash"] + ".txt"
 
-        with open(file_path, "r", encoding=encoding) as f:
+        with open(file_path, encoding=encoding) as f:
             content = f.read()
+
+        if not kwargs.get("persist", True):
+            return content
 
         storage_config = get_storage_config()
         data_root_directory = storage_config["data_root_directory"]

@@ -5,6 +5,7 @@ from cognee.shared.logging_utils import get_logger
 from typing import List, Optional
 import numpy as np
 import math
+import re
 from tenacity import (
     retry,
     stop_after_delay,
@@ -18,6 +19,7 @@ from urllib.parse import urlparse
 import httpx
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
 from cognee.infrastructure.databases.exceptions import EmbeddingException
+
 from cognee.infrastructure.llm.tokenizer.HuggingFace import (
     HuggingFaceTokenizer,
 )
@@ -28,9 +30,20 @@ from cognee.infrastructure.llm.tokenizer.TikToken import (
     TikTokenTokenizer,
 )
 from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager
+from cognee.infrastructure.databases.vector.embeddings.utils import (
+    sanitize_embedding_text_inputs,
+    handle_embedding_response,
+)
 
 litellm.set_verbose = False
 logger = get_logger("LiteLLMEmbeddingEngine")
+
+# Over-length embedding input: litellm maps chat "context length" 400s to
+# ContextWindowExceededError, but the embeddings API returns a plain
+# BadRequestError (e.g. OpenAI 400 "maximum input length is 8192 tokens"). Match
+# those by message so the split/pool recovery below can handle them too. Kept
+# narrow to length/token-limit phrasings so genuinely-bad requests still fail fast.
+_EMBED_LENGTH_ERROR_RE = re.compile(r"maximum\s+input\s+length", re.IGNORECASE)
 
 
 class LiteLLMEmbeddingEngine(EmbeddingEngine):
@@ -100,8 +113,10 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
     @retry(
         stop=stop_after_delay(128),
         wait=wait_exponential_jitter(2, 128),
-        retry=retry_if_not_exception_type((litellm.exceptions.NotFoundError)),
-        before_sleep=before_sleep_log(logger, logging.DEBUG),
+        retry=retry_if_not_exception_type(
+            (litellm.exceptions.NotFoundError, asyncio.CancelledError)
+        ),
+        before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
     async def embed_text(self, text: List[str]) -> List[List[float]]:
@@ -123,15 +138,20 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
 
             - List[List[float]]: A list of vectors representing the embedded texts.
         """
+
+        sanitized_text_input = sanitize_embedding_text_inputs(text)
+
         try:
             if self.mock:
-                response = {"data": [{"embedding": [0.0] * self.dimensions} for _ in text]}
+                response = {
+                    "data": [{"embedding": [0.0] * self.dimensions} for _ in sanitized_text_input]
+                }
                 return [data["embedding"] for data in response["data"]]
             else:
                 async with embedding_rate_limiter_context_manager():
                     embedding_kwargs = {
                         "model": self.model,
-                        "input": text,
+                        "input": sanitized_text_input,
                         "api_key": self.api_key,
                         "api_base": self.endpoint,
                         "api_version": self.api_version,
@@ -146,9 +166,20 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                         timeout=30.0,
                     )
 
-                return [data["embedding"] for data in response.data]
+                embedding_response = [data["embedding"] for data in response.data]
+                return handle_embedding_response(text, embedding_response, self.dimensions)
 
-        except litellm.exceptions.ContextWindowExceededError as error:
+        except litellm.exceptions.BadRequestError as error:
+            # ContextWindowExceededError subclasses BadRequestError. litellm raises
+            # it for chat context-length errors, but the embeddings API returns a
+            # plain BadRequestError for over-length input (OpenAI 400: "maximum input
+            # length is 8192 tokens"). Recover (split + pool) for both; re-raise any
+            # other BadRequest unchanged so genuinely bad requests still fail fast.
+            if not (
+                isinstance(error, litellm.exceptions.ContextWindowExceededError)
+                or _EMBED_LENGTH_ERROR_RE.search(str(error))
+            ):
+                raise
             if isinstance(text, list) and len(text) > 1:
                 mid = math.ceil(len(text) / 2)
                 left, right = text[:mid], text[mid:]
@@ -178,7 +209,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                 pooled = (np.array(left_vec) + np.array(right_vec)) / 2
                 return [pooled.tolist()]
 
-            logger.error("Context window exceeded for embedding text: %s", str(error))
+            logger.error("Embedding input exceeds the model's max length: %s", str(error))
             raise error
 
         except asyncio.TimeoutError as e:

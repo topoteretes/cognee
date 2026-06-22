@@ -5,13 +5,13 @@ This module provides cache functionality that works with both local and cloud st
 backends (like S3) through the StorageManager abstraction.
 """
 
-import hashlib
-import zipfile
 import asyncio
-from typing import Optional, Tuple
-import aiohttp
+import hashlib
 import logging
+import zipfile
 from io import BytesIO
+
+import aiohttp
 
 from cognee.base_config import get_base_config
 from cognee.infrastructure.files.storage.get_file_storage import get_file_storage
@@ -26,7 +26,7 @@ class StorageAwareCache:
     A cache manager that works with different storage backends (local, S3, etc.)
     """
 
-    def __init__(self, cache_subdir: str = "cache"):
+    def __init__(self, cache_subdir: str = "cache") -> None:
         """
         Initialize the cache manager.
 
@@ -73,7 +73,7 @@ class StorageAwareCache:
             # Fallback for other storage types
             return cache_path
 
-    async def delete_cache(self):
+    async def delete_cache(self) -> None:
         """Delete the entire cache directory."""
         logger.info("Deleting cache...")
         try:
@@ -107,7 +107,7 @@ class StorageAwareCache:
 
     async def _check_remote_content_freshness(
         self, url: str, cache_dir: str
-    ) -> Tuple[bool, Optional[str]]:
+    ) -> tuple[bool, str | None]:
         """
         Check if remote content is fresher than cached version using HTTP headers.
 
@@ -244,7 +244,7 @@ class StorageAwareCache:
         """Read a file from cache storage."""
         return self.storage_manager.open(file_path, encoding=encoding)
 
-    async def list_files(self, directory_path: str):
+    async def list_files(self, directory_path: str) -> list[str]:
         """List files in a cache directory."""
         try:
             file_list = await self.storage_manager.list_files(directory_path)
@@ -296,7 +296,7 @@ def generate_content_hash(url: str, additional_data: str = "") -> str:
 
 
 # Async wrapper functions for backward compatibility
-async def delete_cache():
+async def delete_cache() -> None:
     """Delete the Cognee cache directory."""
     cache_manager = get_cache_manager()
     await cache_manager.delete_cache()
@@ -340,7 +340,7 @@ async def read_cache_file(file_path: str, encoding: str = "utf-8"):
     return await cache_manager.read_file(file_path, encoding)
 
 
-async def list_cache_files(directory_path: str):
+async def list_cache_files(directory_path: str) -> list[str]:
     """List files in a cache directory."""
     cache_manager = get_cache_manager()
     return await cache_manager.list_files(directory_path)

@@ -2,6 +2,8 @@ import uuid
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
 
+from cognee.infrastructure.databases.cache.models import SessionAgentTraceEntry, SessionQAEntry
+
 
 class CacheDBInterface(ABC):
     """
@@ -12,6 +14,7 @@ class CacheDBInterface(ABC):
     def __init__(
         self, host: str, port: int, lock_key: str = "default_lock", log_key: str = "usage_logs"
     ):
+        """Store shared cache/lock configuration for concrete adapter implementations."""
         self.host = host
         self.port = port
         self.lock_key = lock_key
@@ -27,7 +30,7 @@ class CacheDBInterface(ABC):
         pass
 
     @abstractmethod
-    def release_lock(self):
+    def release_lock(self, lock=None):
         """
         Release the lock if it is held.
         Must be implemented by subclasses.
@@ -39,11 +42,11 @@ class CacheDBInterface(ABC):
         """
         Context manager for safely acquiring and releasing the lock.
         """
-        self.acquire()
+        lock = self.acquire_lock()
         try:
             yield
         finally:
-            self.release()
+            self.release_lock(lock)
 
     async def add_qa(
         self,
@@ -74,32 +77,55 @@ class CacheDBInterface(ABC):
         qa_id: str,
         feedback_text: str | None = None,
         feedback_score: int | None = None,
-    ):
+        used_graph_element_ids: dict | None = None,
+        memify_metadata: dict | None = None,
+        used_session_context_ids: list | None = None,
+    ) -> None:
         """
         Add a Q/A/context triplet to a cache session.
         Uses the same QA fields as update_qa_entry for consistent structure.
+        used_graph_element_ids: Optional dict with keys "node_ids" and "edge_ids" (lists of str).
+        memify_metadata: Optional dict with status keys (e.g. "feedback_weights_applied") and bool values.
+        used_session_context_ids: Optional list of session-context entry ids served to this answer.
         """
         pass
 
-    async def get_latest_qa(self, user_id: str, session_id: str, last_n: int = 5):
+    async def get_latest_qa(
+        self, user_id: str, session_id: str, last_n: int = 5
+    ) -> list[SessionQAEntry]:
         """Backward-compat: delegates to get_latest_qa_entries. :TODO: delete when retrievers are updated"""
         return await self.get_latest_qa_entries(user_id, session_id, last_n)
 
     @abstractmethod
-    async def get_latest_qa_entries(self, user_id: str, session_id: str, last_n: int = 5):
+    async def get_latest_qa_entries(
+        self, user_id: str, session_id: str, last_n: int = 5
+    ) -> list[SessionQAEntry]:
         """
         Retrieve the most recent Q/A/context triplets for a session.
         """
         pass
 
-    async def get_all_qas(self, user_id: str, session_id: str):
+    async def get_all_qas(self, user_id: str, session_id: str) -> list[SessionQAEntry]:
         """Backward-compat: delegates to get_all_qa_entries. :TODO: delete when retrievers are updated"""
         return await self.get_all_qa_entries(user_id, session_id)
 
     @abstractmethod
-    async def get_all_qa_entries(self, user_id: str, session_id: str):
+    async def get_all_qa_entries(self, user_id: str, session_id: str) -> list[SessionQAEntry]:
         """
         Retrieve all Q/A/context triplets for the given session.
+        """
+        pass
+
+    @abstractmethod
+    async def get_qa_entries_by_ids(
+        self,
+        user_id: str,
+        session_id: str,
+        qa_ids: list[str],
+    ) -> list[SessionQAEntry]:
+        """
+        Retrieve Q/A/context triplets matching qa_ids for the given session.
+        Results are returned in chronological order.
         """
         pass
 
@@ -114,6 +140,9 @@ class CacheDBInterface(ABC):
         answer: str | None = None,
         feedback_text: str | None = None,
         feedback_score: int | None = None,
+        used_graph_element_ids: dict | None = None,
+        memify_metadata: dict | None = None,
+        used_session_context_ids: list | None = None,
     ) -> bool:
         """
         Update a QA entry by qa_id. Same QA fields as create_qa_entry.
@@ -143,6 +172,120 @@ class CacheDBInterface(ABC):
         """
         Delete the entire session and all its QA entries.
         Returns True if deleted, False if session did not exist.
+        """
+        pass
+
+    async def get_value(self, key: str) -> str | None:
+        """
+        Retrieve a raw string value stored under the given key, or None if absent/expired.
+
+        Used for session-scoped key/value payloads such as graph context snapshots
+        (``graph_knowledge:{user_id}:{session_id}``) and graph sync checkpoints
+        (``graph_sync_checkpoint:...``). Adapters that do not support generic
+        key/value storage may leave this unimplemented.
+        """
+        raise NotImplementedError("This cache adapter does not support key/value storage.")
+
+    async def set_value(self, key: str, value: str, ttl: int | None = None) -> None:
+        """
+        Store a raw string value under the given key, optionally expiring after ttl seconds.
+
+        Used for session-scoped key/value payloads such as graph context snapshots
+        (``graph_knowledge:{user_id}:{session_id}``) and graph sync checkpoints
+        (``graph_sync_checkpoint:...``). Adapters that do not support generic
+        key/value storage may leave this unimplemented.
+        """
+        raise NotImplementedError("This cache adapter does not support key/value storage.")
+
+    async def delete_value(self, key: str) -> None:
+        """
+        Delete the value stored under the given key, if present.
+
+        Used for session-scoped key/value payloads such as graph context snapshots
+        (``graph_knowledge:{user_id}:{session_id}``) and graph sync checkpoints
+        (``graph_sync_checkpoint:...``). Adapters that do not support generic
+        key/value storage may leave this unimplemented.
+        """
+        raise NotImplementedError("This cache adapter does not support key/value storage.")
+
+    @abstractmethod
+    async def append_agent_trace_step(
+        self,
+        user_id: str,
+        session_id: str,
+        trace_id: str,
+        origin_function: str,
+        status: str,
+        memory_query: str = "",
+        memory_context: str = "",
+        method_params: dict | None = None,
+        method_return_value=None,
+        error_message: str = "",
+        session_feedback: str = "",
+    ) -> None:
+        """
+        Append one agent trace step to the session-scoped trace list.
+        """
+        pass
+
+    @abstractmethod
+    async def get_agent_trace_session(
+        self, user_id: str, session_id: str, last_n: int | None = None
+    ) -> list[SessionAgentTraceEntry]:
+        """
+        Retrieve agent trace steps for the given session.
+        """
+        pass
+
+    @abstractmethod
+    async def get_agent_trace_feedback(
+        self, user_id: str, session_id: str, last_n: int | None = None
+    ) -> list[str]:
+        """
+        Retrieve per-step feedback strings for the given trace session.
+        """
+        pass
+
+    @abstractmethod
+    async def get_agent_trace_count(self, user_id: str, session_id: str) -> int:
+        """
+        Retrieve the number of trace steps stored for the given trace session.
+        """
+        pass
+
+    @abstractmethod
+    async def create_session_context_entry(
+        self, user_id: str, session_id: str, entry_dump: dict
+    ) -> None:
+        """
+        Append one session-context entry (a plain dict carrying a "kind" field) to the
+        session-scoped context list. Entries are validated by the caller; the interface
+        stays dict-based to avoid importing session-layer models.
+        """
+        pass
+
+    @abstractmethod
+    async def get_session_context_entries(self, user_id: str, session_id: str) -> list[dict]:
+        """
+        Retrieve all stored session-context entries (both "context" and "feedback" kinds).
+        """
+        pass
+
+    @abstractmethod
+    async def update_session_context_entry(
+        self, user_id: str, session_id: str, entry_id: str, merge: dict
+    ) -> bool:
+        """
+        Shallow-merge updates into the session-context entry matching entry["id"].
+        Returns True if updated, False if entry_id not found.
+        """
+        pass
+
+    @abstractmethod
+    async def delete_session_context(self, user_id: str, session_id: str) -> bool:
+        """
+        Delete the entire session-context list for the given session.
+        Returns True if any context data existed, False otherwise.
         """
         pass
 

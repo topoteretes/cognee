@@ -59,7 +59,7 @@ runs:
             EXTRA_ARGS="$EXTRA_ARGS --extra $extra"
           done
         fi
-        uv sync --extra api --extra docs --extra evals --extra codegraph --extra ollama --extra dev --extra neo4j --extra redis $EXTRA_ARGS
+        uv sync --extra api --extra docs --extra evals --extra codegraph --extra ollama --extra dev --extra neo4j --extra redis --extra tracing $EXTRA_ARGS
 
     - name: Install dependencies (container - link project only)
       if: steps.detect-env.outputs.in-container == 'true'

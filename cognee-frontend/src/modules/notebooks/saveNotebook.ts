@@ -1,4 +1,4 @@
-import { CogneeInstance } from "@/modules/instances/types";
+import { CogneeInstance } from "../instances/types";
 
 export default function saveNotebook(notebookId: string, notebookData: object, instance: CogneeInstance) {
   return instance.fetch(`/v1/notebooks/${notebookId}`, {
@@ -7,7 +7,5 @@ export default function saveNotebook(notebookId: string, notebookData: object, i
     headers: {
       "Content-Type": "application/json",
     },
-  }).then((response: Response) =>
-    response.ok ? response.json() : Promise.reject(response)
-  );
+  }).then((response) => response.json());
 }

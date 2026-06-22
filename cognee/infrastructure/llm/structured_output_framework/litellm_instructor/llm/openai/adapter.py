@@ -1,33 +1,33 @@
-import litellm
-import instructor
-from typing import Type
-from pydantic import BaseModel
-from openai import ContentFilterFinishReasonError
-from litellm.exceptions import ContentPolicyViolationError
-from instructor.core import InstructorRetryException
-
 import logging
+from typing import Any
+
+import instructor
+import litellm
+from instructor.core import InstructorRetryException
+from litellm.exceptions import ContentPolicyViolationError
+from openai import ContentFilterFinishReasonError
+from pydantic import BaseModel
 from tenacity import (
-    retry,
-    stop_after_delay,
-    wait_exponential_jitter,
-    retry_if_not_exception_type,
     before_sleep_log,
+    retry,
+    retry_if_not_exception_type,
+    stop_after_attempt,
+    wait_exponential_jitter,
 )
 
-from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.generic_llm_api.adapter import (
-    GenericAPIAdapter,
-)
+from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.llm.exceptions import (
     ContentPolicyFilterError,
 )
-from cognee.shared.rate_limiting import llm_rate_limiter_context_manager
-from cognee.infrastructure.files.utils.open_data_file import open_data_file
-from cognee.modules.observability.get_observe import get_observe
-from cognee.shared.logging_utils import get_logger
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.generic_llm_api.adapter import (
+    GenericAPIAdapter,
+)
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.types import (
     TranscriptionReturnType,
 )
+from cognee.modules.observability.get_observe import get_observe
+from cognee.shared.logging_utils import get_logger
+from cognee.shared.rate_limiting import llm_rate_limiter_context_manager
 
 logger = get_logger()
 
@@ -56,7 +56,7 @@ class OpenAIAdapter(GenericAPIAdapter):
     """
 
     default_instructor_mode = "json_schema_mode"
-    MAX_RETRIES = 5
+    MAX_RETRIES = 2
 
     """Adapter for OpenAI's GPT-3, GPT=4 API"""
 
@@ -65,15 +65,16 @@ class OpenAIAdapter(GenericAPIAdapter):
         api_key: str,
         model: str,
         max_completion_tokens: int,
-        endpoint: str = None,
-        api_version: str = None,
-        transcription_model: str = None,
-        instructor_mode: str = None,
+        endpoint: str | None = None,
+        api_version: str | None = None,
+        transcription_model: str | None = None,
+        instructor_mode: str | None = None,
         streaming: bool = False,
-        fallback_model: str = None,
-        fallback_api_key: str = None,
-        fallback_endpoint: str = None,
-    ):
+        fallback_model: str | None = None,
+        fallback_api_key: str | None = None,
+        fallback_endpoint: str | None = None,
+        llm_args: dict[str, Any] | None = None,
+    ) -> None:
         super().__init__(
             api_key=api_key,
             model=model,
@@ -85,11 +86,14 @@ class OpenAIAdapter(GenericAPIAdapter):
             fallback_model=fallback_model,
             fallback_api_key=fallback_api_key,
             fallback_endpoint=fallback_endpoint,
+            llm_args=llm_args,
         )
+        self.llm_args: dict[str, Any] = llm_args or {}
+        explicit_instructor_mode = bool(instructor_mode)
         self.instructor_mode = instructor_mode if instructor_mode else self.default_instructor_mode
         # TODO: With gpt5 series models OpenAI expects JSON_SCHEMA as a mode for structured outputs.
         #       Make sure all new gpt models will work with this mode as well.
-        if "gpt-5" in model:
+        if "gpt-5" in model or explicit_instructor_mode:
             self.aclient = instructor.from_litellm(
                 litellm.acompletion, mode=instructor.Mode(self.instructor_mode)
             )
@@ -104,16 +108,16 @@ class OpenAIAdapter(GenericAPIAdapter):
 
     @observe(as_type="generation")
     @retry(
-        stop=stop_after_delay(128),
+        stop=stop_after_attempt(3),
         wait=wait_exponential_jitter(8, 128),
         retry=retry_if_not_exception_type(
             (litellm.exceptions.NotFoundError, litellm.exceptions.AuthenticationError)
         ),
-        before_sleep=before_sleep_log(logger, logging.DEBUG),
+        before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
     async def acreate_structured_output(
-        self, text_input: str, system_prompt: str, response_model: Type[BaseModel], **kwargs
+        self, text_input: str, system_prompt: str, response_model: type[BaseModel], **kwargs: Any
     ) -> BaseModel:
         """
         Generate a response from a user query.
@@ -136,18 +140,24 @@ class OpenAIAdapter(GenericAPIAdapter):
               BaseModel.
         """
 
+        merged_kwargs = {**self.llm_args, **kwargs}
+
+        # A plain string needs no schema — skip instructor (see acreate_str_output).
+        if response_model is str:
+            return await self.acreate_str_output(text_input, system_prompt, **merged_kwargs)
+
         try:
             async with llm_rate_limiter_context_manager():
                 return await self.aclient.chat.completions.create(
                     model=self.model,
                     messages=[
                         {
-                            "role": "user",
-                            "content": f"""{text_input}""",
-                        },
-                        {
                             "role": "system",
                             "content": system_prompt,
+                        },
+                        {
+                            "role": "user",
+                            "content": f"""{text_input}""",
                         },
                     ],
                     api_key=self.api_key,
@@ -155,7 +165,7 @@ class OpenAIAdapter(GenericAPIAdapter):
                     api_version=self.api_version,
                     response_model=response_model,
                     max_retries=self.MAX_RETRIES,
-                    **kwargs,
+                    **merged_kwargs,
                 )
         except (
             ContentFilterFinishReasonError,
@@ -170,19 +180,19 @@ class OpenAIAdapter(GenericAPIAdapter):
                         model=self.fallback_model,
                         messages=[
                             {
-                                "role": "user",
-                                "content": f"""{text_input}""",
-                            },
-                            {
                                 "role": "system",
                                 "content": system_prompt,
                             },
+                            {
+                                "role": "user",
+                                "content": f"""{text_input}""",
+                            },
                         ],
                         api_key=self.fallback_api_key,
-                        # api_base=self.fallback_endpoint,
+                        api_base=self.fallback_endpoint,
                         response_model=response_model,
                         max_retries=self.MAX_RETRIES,
-                        **kwargs,
+                        **merged_kwargs,
                     )
             except (
                 ContentFilterFinishReasonError,
@@ -201,12 +211,12 @@ class OpenAIAdapter(GenericAPIAdapter):
 
     @observe(as_type="transcription")
     @retry(
-        stop=stop_after_delay(128),
+        stop=stop_after_attempt(3),
         wait=wait_exponential_jitter(2, 128),
         retry=retry_if_not_exception_type(
             (litellm.exceptions.NotFoundError, litellm.exceptions.AuthenticationError)
         ),
-        before_sleep=before_sleep_log(logger, logging.DEBUG),
+        before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
     async def create_transcript(self, input, **kwargs) -> TranscriptionReturnType:

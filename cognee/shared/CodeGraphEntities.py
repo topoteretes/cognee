@@ -1,4 +1,3 @@
-from typing import List, Optional
 from cognee.low_level import DataPoint
 
 
@@ -12,7 +11,7 @@ class ImportStatement(DataPoint):
     start_point: tuple
     end_point: tuple
     source_code: str
-    file_path: Optional[str] = None
+    file_path: str | None = None
 
 
 class FunctionDefinition(DataPoint):
@@ -20,7 +19,7 @@ class FunctionDefinition(DataPoint):
     start_point: tuple
     end_point: tuple
     source_code: str
-    file_path: Optional[str] = None
+    file_path: str | None = None
     metadata: dict = {"index_fields": ["source_code"]}
 
 
@@ -29,32 +28,32 @@ class ClassDefinition(DataPoint):
     start_point: tuple
     end_point: tuple
     source_code: str
-    file_path: Optional[str] = None
+    file_path: str | None = None
     metadata: dict = {"index_fields": ["source_code"]}
 
 
 class CodeFile(DataPoint):
     name: str
     file_path: str
-    language: Optional[str] = None  # e.g., 'python', 'javascript', 'java', etc.
-    source_code: Optional[str] = None
-    part_of: Optional[Repository] = None
-    depends_on: Optional[List["ImportStatement"]] = []
-    provides_function_definition: Optional[List["FunctionDefinition"]] = []
-    provides_class_definition: Optional[List["ClassDefinition"]] = []
+    language: str | None = None  # e.g., 'python', 'javascript', 'java', etc.
+    source_code: str | None = None
+    part_of: Repository | None = None
+    depends_on: list["ImportStatement"] | None = []
+    provides_function_definition: list["FunctionDefinition"] | None = []
+    provides_class_definition: list["ClassDefinition"] | None = []
     metadata: dict = {"index_fields": ["name"]}
 
 
 class CodePart(DataPoint):
     file_path: str
-    source_code: Optional[str] = None
+    source_code: str | None = None
     metadata: dict = {"index_fields": []}
 
 
 class SourceCodeChunk(DataPoint):
-    code_chunk_of: Optional[CodePart] = None
-    source_code: Optional[str] = None
-    previous_chunk: Optional["SourceCodeChunk"] = None
+    code_chunk_of: CodePart | None = None
+    source_code: str | None = None
+    previous_chunk: "SourceCodeChunk | None" = None
     metadata: dict = {"index_fields": ["source_code"]}
 
 

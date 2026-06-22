@@ -41,6 +41,7 @@ class GraphDBInterface(ABC):
 
     @abstractmethod
     async def is_empty(self) -> bool:
+        """Return True when the graph contains no nodes."""
         logger.warning("is_empty() is not implemented")
         return True
 
@@ -108,6 +109,27 @@ class GraphDBInterface(ABC):
             - node_ids (List[str]): A list of unique identifiers for the nodes to delete.
         """
         raise NotImplementedError
+
+    async def remove_belongs_to_set_tags(
+        self,
+        tags: List[str],
+        node_ids: Optional[List[str]] = None,
+    ) -> None:
+        """
+        Remove the given tag names from every node's `belongs_to_set` property
+        array. Keeps the property consistent with the additive
+        `belongs_to_set` edges after a NodeSet or its containing dataset is
+        deleted.
+
+        When `node_ids` is provided, the detag only applies to nodes whose
+        id appears in the list — used to reconcile shared nodes that lose
+        membership in one dataset without disturbing unrelated nodes that
+        legitimately still carry the tag.
+
+        Default no-op; only Neo4j overrides this today. Other
+        list-property-storing adapters are free to implement it later.
+        """
+        return None
 
     @abstractmethod
     async def get_node(self, node_id: str) -> Optional[NodeData]:
@@ -250,7 +272,7 @@ class GraphDBInterface(ABC):
 
     @abstractmethod
     async def get_nodeset_subgraph(
-        self, node_type: Type[Any], node_name: List[str]
+        self, node_type: Type[Any], node_name: List[str], node_name_filter_operator: str = "OR"
     ) -> Tuple[List[Tuple[int, dict]], List[Tuple[int, int, str, dict]]]:
         """
         Fetch a subgraph consisting of a specific set of nodes and their relationships.
@@ -278,6 +300,30 @@ class GraphDBInterface(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    async def get_neighborhood(
+        self,
+        node_ids: List[str],
+        depth: int = 1,
+        edge_types: Optional[List[str]] = None,
+    ) -> Tuple[List[Node], List[EdgeData]]:
+        """
+        Get the k-hop neighborhood subgraph around a set of seed nodes.
+
+        Returns all nodes and edges within `depth` hops of any seed node,
+        in the same format as get_graph_data().
+        Optional edge_type filtering to constrain traversal paths.
+
+        Parameters:
+        -----------
+
+            - node_ids (List[str]): Seed node identifiers to start traversal from.
+            - depth (int): Number of hops to traverse from each seed node. (default 1)
+            - edge_types (Optional[List[str]]): If provided, only traverse edges of these
+              relationship types. (default None)
+        """
+        raise NotImplementedError
+
+    @abstractmethod
     async def get_filtered_graph_data(
         self, attribute_filters: List[Dict[str, List[Union[str, int]]]]
     ) -> Tuple[List[Node], List[EdgeData]]:
@@ -291,3 +337,81 @@ class GraphDBInterface(ABC):
               are lists of attribute values to filter by.
         """
         raise NotImplementedError
+
+    async def get_node_feedback_weights(self, node_ids: List[str]) -> Dict[str, float]:
+        """
+        Retrieve node feedback weights for multiple node ids.
+        Returns only found node ids.
+        """
+        raise NotImplementedError("get_node_feedback_weights is not implemented for this adapter")
+
+    async def set_node_feedback_weights(
+        self, node_feedback_weights: Dict[str, float]
+    ) -> Dict[str, bool]:
+        """
+        Persist node feedback weights for multiple node ids.
+        Returns per-id update success.
+        """
+        raise NotImplementedError("set_node_feedback_weights is not implemented for this adapter")
+
+    async def get_edge_feedback_weights(self, edge_object_ids: List[str]) -> Dict[str, float]:
+        """
+        Retrieve edge feedback weights for multiple edge_object_ids.
+        Returns only found edge ids.
+        """
+        raise NotImplementedError("get_edge_feedback_weights is not implemented for this adapter")
+
+    async def set_edge_feedback_weights(
+        self, edge_feedback_weights: Dict[str, float]
+    ) -> Dict[str, bool]:
+        """
+        Persist edge feedback weights for multiple edge_object_ids.
+        Returns per-id update success.
+        """
+        raise NotImplementedError("set_edge_feedback_weights is not implemented for this adapter")
+
+    async def get_triplets_batch(self, offset: int, limit: int) -> List[Dict[str, Any]]:
+        """Retrieve a batch of triplets (source, edge, target).
+
+        Optional extension — implemented by PostgresAdapter, Neo4jAdapter,
+        and LadybugAdapter but not NeptuneGraphDB.
+
+        Parameters
+        ----------
+
+            - offset: Number of triplets to skip.
+            - limit: Maximum number of triplets to return.
+        """
+        raise NotImplementedError("get_triplets_batch is not implemented for this adapter")
+
+    async def get_node_frequency_weights(self, node_ids: List[str]) -> Dict[str, float]:
+        """
+        Retrieve node frequency weights for multiple node ids.
+        Returns only found node ids.
+        """
+        raise NotImplementedError("get_node_frequency_weights is not implemented for this adapter")
+
+    async def set_node_frequency_weights(
+        self, node_frequency_weights: Dict[str, float]
+    ) -> Dict[str, bool]:
+        """
+        Persist node frequency weights for multiple node ids.
+        Returns per-id update success.
+        """
+        raise NotImplementedError("set_node_frequency_weights is not implemented for this adapter")
+
+    async def get_edge_frequency_weights(self, edge_object_ids: List[str]) -> Dict[str, float]:
+        """
+        Retrieve edge frequency weights for multiple edge_object_ids.
+        Returns only found edge ids.
+        """
+        raise NotImplementedError("get_edge_frequency_weights is not implemented for this adapter")
+
+    async def set_edge_frequency_weights(
+        self, edge_frequency_weights: Dict[str, float]
+    ) -> Dict[str, bool]:
+        """
+        Persist edge frequency weights for multiple edge_object_ids.
+        Returns per-id update success.
+        """
+        raise NotImplementedError("set_edge_frequency_weights is not implemented for this adapter")

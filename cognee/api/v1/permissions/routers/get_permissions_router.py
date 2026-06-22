@@ -1,7 +1,7 @@
 from typing import List, Union
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Body, Depends, Query
 from fastapi.responses import JSONResponse
 
 from cognee import __version__ as cognee_version
@@ -35,9 +35,20 @@ def get_permissions_router() -> APIRouter:
 
     @permissions_router.post("/datasets/{principal_id}")
     async def give_datasets_permission_to_principal(
-        permission_name: str,
-        dataset_ids: List[UUID],
         principal_id: UUID,
+        permission_name: str = Query(
+            ...,
+            examples=["read"],
+            description="Permission to grant. One of 'read', 'write', 'delete', 'share'.",
+        ),
+        dataset_ids: List[UUID] = Body(
+            ...,
+            examples=[["a1b2c3d4-5717-4562-b3fc-2c963f66afa6"]],
+            description=(
+                "Dataset UUIDs to grant permission on. "
+                "List your datasets via GET /api/v1/datasets to get real ids."
+            ),
+        ),
         user: User = Depends(get_authenticated_user),
     ):
         """
@@ -51,8 +62,8 @@ def get_permissions_router() -> APIRouter:
         - **principal_id** (UUID): The UUID of the principal (user or role) to grant permission to
 
         ## Request Parameters
-        - **permission_name** (str): The name of the permission to grant (e.g., "read", "write", "delete")
-        - **dataset_ids** (List[UUID]): List of dataset UUIDs to grant permission on
+        - **permission_name** (str, query): Permission to grant. One of "read", "write", "delete", "share".
+        - **dataset_ids** (List[UUID], JSON body): Array of dataset UUIDs to grant permission on.
 
         ## Response
         Returns a success message indicating permission was assigned.
@@ -86,8 +97,58 @@ def get_permissions_router() -> APIRouter:
             status_code=200, content={"message": "Permission assigned to principal"}
         )
 
+    @permissions_router.delete("/datasets/{principal_id}")
+    async def revoke_datasets_permission_from_principal(
+        permission_name: str,
+        dataset_ids: List[UUID],
+        principal_id: UUID,
+        user: User = Depends(get_authenticated_user),
+    ):
+        """
+        Revoke permission on datasets from a principal (user or role).
+
+        ## Path Parameters
+        - **principal_id** (UUID): The UUID of the principal to revoke permission from
+
+        ## Request Parameters
+        - **permission_name** (str): The name of the permission to revoke (e.g., "read", "write", "delete")
+        - **dataset_ids** (List[UUID]): List of dataset UUIDs to revoke permission on
+        """
+        send_telemetry(
+            "Permissions API Endpoint Invoked",
+            user.id,
+            additional_properties={
+                "endpoint": f"DELETE /v1/permissions/datasets/{str(principal_id)}",
+                "dataset_ids": str(dataset_ids),
+                "principal_id": str(principal_id),
+                "cognee_version": cognee_version,
+            },
+        )
+
+        from cognee.modules.users.permissions.methods import (
+            authorized_revoke_permission_on_datasets,
+        )
+
+        await authorized_revoke_permission_on_datasets(
+            principal_id,
+            [dataset_id for dataset_id in dataset_ids],
+            permission_name,
+            user.id,
+        )
+
+        return JSONResponse(
+            status_code=200, content={"message": "Permission revoked from principal"}
+        )
+
     @permissions_router.post("/roles")
-    async def create_role(role_name: str, user: User = Depends(get_authenticated_user)):
+    async def create_role(
+        role_name: str = Query(
+            ...,
+            examples=["engineering"],
+            description="Name of the role to create. Must be unique within the caller's tenant.",
+        ),
+        user: User = Depends(get_authenticated_user),
+    ):
         """
         Create a new role.
 
@@ -129,9 +190,46 @@ def get_permissions_router() -> APIRouter:
             },
         )
 
+    @permissions_router.delete("/roles/{role_id}")
+    async def delete_role_endpoint(role_id: UUID, user: User = Depends(get_authenticated_user)):
+        """
+        Delete a role and all its associations.
+
+        Removes all user-role memberships and ACL entries for this role,
+        then deletes the role. The authenticated user must be able to manage
+        users in the tenant.
+
+        ## Path Parameters
+        - **role_id** (UUID): The UUID of the role to delete
+        """
+        send_telemetry(
+            "Permissions API Endpoint Invoked",
+            user.id,
+            additional_properties={
+                "endpoint": f"DELETE /v1/permissions/roles/{str(role_id)}",
+                "role_id": str(role_id),
+                "cognee_version": cognee_version,
+            },
+        )
+
+        from cognee.modules.users.roles.methods import delete_role as delete_role_method
+
+        await delete_role_method(role_id=role_id, owner_id=user.id)
+
+        return JSONResponse(status_code=200, content={"message": "Role deleted"})
+
     @permissions_router.post("/users/{user_id}/roles")
     async def add_user_to_role(
-        user_id: UUID, role_id: UUID, user: User = Depends(get_authenticated_user)
+        user_id: UUID,
+        role_id: UUID = Query(
+            ...,
+            examples=["b2c3d4e5-6717-4562-b3fc-2c963f66afa7"],
+            description=(
+                "UUID of the role to assign. Returned by POST /api/v1/permissions/roles "
+                "or GET /api/v1/permissions/tenants/{tenant_id}/roles."
+            ),
+        ),
+        user: User = Depends(get_authenticated_user),
     ):
         """
         Add a user to a role.
@@ -144,7 +242,7 @@ def get_permissions_router() -> APIRouter:
         - **user_id** (UUID): The UUID of the user to add to the role
 
         ## Request Parameters
-        - **role_id** (UUID): The UUID of the role to assign the user to
+        - **role_id** (UUID, query): The UUID of the role to assign the user to
 
         ## Response
         Returns a success message indicating the user was added to the role.
@@ -171,6 +269,40 @@ def get_permissions_router() -> APIRouter:
         await add_user_to_role_method(user_id=user_id, role_id=role_id, owner_id=user.id)
 
         return JSONResponse(status_code=200, content={"message": "User added to role"})
+
+    @permissions_router.delete("/users/{user_id}/roles")
+    async def remove_user_from_role_endpoint(
+        user_id: UUID, role_id: UUID, user: User = Depends(get_authenticated_user)
+    ):
+        """
+        Remove a user from a role.
+
+        The authenticated user must be able to manage users in the tenant.
+
+        ## Path Parameters
+        - **user_id** (UUID): The UUID of the user to remove from the role
+
+        ## Request Parameters
+        - **role_id** (UUID): The UUID of the role to remove the user from
+        """
+        send_telemetry(
+            "Permissions API Endpoint Invoked",
+            user.id,
+            additional_properties={
+                "endpoint": f"DELETE /v1/permissions/users/{str(user_id)}/roles",
+                "user_id": str(user_id),
+                "role_id": str(role_id),
+                "cognee_version": cognee_version,
+            },
+        )
+
+        from cognee.modules.users.roles.methods import (
+            remove_user_from_role as remove_user_from_role_method,
+        )
+
+        await remove_user_from_role_method(user_id=user_id, role_id=role_id, owner_id=user.id)
+
+        return JSONResponse(status_code=200, content={"message": "User removed from role"})
 
     @permissions_router.post("/users/{user_id}/tenants")
     async def add_user_to_tenant(
@@ -337,6 +469,21 @@ def get_permissions_router() -> APIRouter:
         tenant_id: UUID,
         user: User = Depends(get_authenticated_user),
     ):
+        """
+        List all roles in a tenant.
+
+        The authenticated user must be the tenant owner or have user-management
+        permission (e.g. Admin role) in the tenant.
+
+        ## Path Parameters
+        - **tenant_id** (UUID): The UUID of the tenant (find yours via GET /api/v1/permissions/tenants/me)
+
+        ## Response
+        Returns a JSON list of roles: [{"id", "name", "description", "user_count"}].
+
+        ## Error Codes
+        - **403 Forbidden**: Caller lacks user-management permission in the tenant
+        """
         role_list = await method_get_tenant_roles(tenant_id=tenant_id, user=user)
 
         return JSONResponse(status_code=200, content=role_list)
@@ -347,6 +494,21 @@ def get_permissions_router() -> APIRouter:
         role_id: UUID,
         user: User = Depends(get_authenticated_user),
     ):
+        """
+        List the users assigned to a role.
+
+        The authenticated user must have user-management permission in the tenant.
+
+        ## Path Parameters
+        - **tenant_id** (UUID): The UUID of the tenant
+        - **role_id** (UUID): The UUID of the role (list roles via GET /api/v1/permissions/tenants/{tenant_id}/roles)
+
+        ## Response
+        Returns a JSON list of users: [{"id", "name"}] (name is the user's email).
+
+        ## Error Codes
+        - **403 Forbidden**: Caller lacks user-management permission in the tenant
+        """
         user_list = await method_get_users_in_roles(tenant_id=tenant_id, role_id=role_id, user=user)
         return JSONResponse(status_code=200, content=user_list)
 
@@ -356,6 +518,21 @@ def get_permissions_router() -> APIRouter:
         user_id: UUID,
         user: User = Depends(get_authenticated_user),
     ):
+        """
+        List the roles assigned to a specific user.
+
+        The authenticated user must have user-management permission in the tenant.
+
+        ## Path Parameters
+        - **tenant_id** (UUID): The UUID of the tenant
+        - **user_id** (UUID): The UUID of the user whose roles to list (find user ids via GET /api/v1/permissions/tenants/{tenant_id}/users)
+
+        ## Response
+        Returns a JSON list of roles: [{"id", "name"}].
+
+        ## Error Codes
+        - **403 Forbidden**: Caller lacks user-management permission in the tenant
+        """
         role_list = await method_get_user_roles(tenant_id=tenant_id, user_id=user_id, user=user)
         return JSONResponse(status_code=200, content=role_list)
 
@@ -364,6 +541,21 @@ def get_permissions_router() -> APIRouter:
         tenant_id: UUID,
         user: User = Depends(get_authenticated_user),
     ):
+        """
+        List all users in a tenant, with their roles.
+
+        The authenticated user must be the tenant owner or have user-management
+        permission (e.g. Admin role) in the tenant.
+
+        ## Path Parameters
+        - **tenant_id** (UUID): The UUID of the tenant (find yours via GET /api/v1/permissions/tenants/me)
+
+        ## Response
+        Returns a JSON list of users: [{"id", "email", "roles": [{"id", "name"}]}].
+
+        ## Error Codes
+        - **403 Forbidden**: Caller lacks user-management permission in the tenant
+        """
         user_list = await method_get_users_in_tenant(tenant_id=tenant_id, user=user)
 
         return JSONResponse(status_code=200, content=user_list)
@@ -372,6 +564,15 @@ def get_permissions_router() -> APIRouter:
     async def get_my_tenants(
         user: User = Depends(get_authenticated_user),
     ):
+        """
+        List the tenants the authenticated user belongs to.
+
+        Use the returned ids as the tenant_id path parameter for the other
+        /permissions/tenants/... endpoints.
+
+        ## Response
+        Returns a JSON list of tenants: [{"id", "name"}].
+        """
         tenants_list = await method_get_user_tenants(user=user)
         return JSONResponse(status_code=200, content=tenants_list)
 

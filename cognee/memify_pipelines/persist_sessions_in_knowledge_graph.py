@@ -46,23 +46,22 @@ async def persist_sessions_in_knowledge_graph_pipeline(
             log=False,
         )
 
-    await set_database_global_context_variables(
+    async with set_database_global_context_variables(
         dataset_to_write[0].id, dataset_to_write[0].owner_id
-    )
+    ):
+        extraction_tasks = [Task(extract_user_sessions, session_ids=session_ids)]
 
-    extraction_tasks = [Task(extract_user_sessions, session_ids=session_ids)]
+        enrichment_tasks = [
+            Task(cognify_session, dataset_id=dataset_to_write[0].id),
+        ]
 
-    enrichment_tasks = [
-        Task(cognify_session, dataset_id=dataset_to_write[0].id),
-    ]
-
-    result = await memify(
-        extraction_tasks=extraction_tasks,
-        enrichment_tasks=enrichment_tasks,
-        dataset=dataset_to_write[0].id,
-        data=[{}],
-        run_in_background=run_in_background,
-    )
+        result = await memify(
+            extraction_tasks=extraction_tasks,
+            enrichment_tasks=enrichment_tasks,
+            dataset=dataset_to_write[0].id,
+            data=[{}],
+            run_in_background=run_in_background,
+        )
 
     logger.info("Session persistence pipeline completed")
     return result

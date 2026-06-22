@@ -1,6 +1,6 @@
-from cognee.infrastructure.databases.vector.embeddings.config import get_embedding_config
+from cognee.infrastructure.databases.vector.embeddings.config import get_embedding_context_config
 from cognee.infrastructure.llm.config import (
-    get_llm_config,
+    get_llm_context_config,
 )
 from .EmbeddingEngine import EmbeddingEngine
 from functools import lru_cache
@@ -20,8 +20,8 @@ def get_embedding_engine() -> EmbeddingEngine:
         - EmbeddingEngine: An instance of the embedding engine configured based on the
           retrieved settings.
     """
-    config = get_embedding_config()
-    llm_config = get_llm_config()
+    config = get_embedding_context_config()
+    llm_config = get_llm_context_config()
     # Embedding engine has to be a singleton based on configuration to ensure too many requests won't be sent to HuggingFace
     return create_embedding_engine(
         config.embedding_provider,
@@ -98,6 +98,18 @@ def create_embedding_engine(
             max_completion_tokens=embedding_max_completion_tokens,
             endpoint=embedding_endpoint,
             huggingface_tokenizer=huggingface_tokenizer,
+            batch_size=embedding_batch_size,
+        )
+
+    if embedding_provider == "openai_compatible":
+        from .OpenAICompatibleEmbeddingEngine import OpenAICompatibleEmbeddingEngine
+
+        return OpenAICompatibleEmbeddingEngine(
+            model=embedding_model,
+            dimensions=embedding_dimensions,
+            max_completion_tokens=embedding_max_completion_tokens,
+            endpoint=embedding_endpoint,
+            api_key=embedding_api_key or llm_api_key,
             batch_size=embedding_batch_size,
         )
 

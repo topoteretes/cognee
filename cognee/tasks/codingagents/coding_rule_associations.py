@@ -10,7 +10,7 @@ from cognee.shared.logging_utils import get_logger
 from cognee.modules.engine.models import NodeSet
 from cognee.modules.graph.methods import upsert_edges
 from cognee.tasks.storage import add_data_points, index_graph_edges
-from typing import Dict, Optional, List, Any
+from typing import Optional, List, Any
 from pydantic import Field
 
 logger = get_logger("coding_rule_association")
@@ -95,7 +95,7 @@ async def add_rule_associations(
     rules_nodeset_name: str,
     user_prompt_location: str = "coding_rule_association_agent_user.txt",
     system_prompt_location: str = "coding_rule_association_agent_system.txt",
-    context: Optional[Dict] = None,
+    ctx=None,
 ):
     if isinstance(data, list):
         # If data is a list of strings join all strings in list
@@ -127,12 +127,12 @@ async def add_rule_associations(
     if len(edges_to_save) > 0:
         await graph_engine.add_edges(edges_to_save)
 
-        if context and hasattr(context["data"], "id"):
+        if ctx and ctx.user and ctx.data_item and hasattr(ctx.data_item, "id"):
             await upsert_edges(
                 edges_to_save,
-                tenant_id=context["user"].tenant_id,
-                user_id=context["user"].id,
-                dataset_id=context["dataset"].id,
-                data_id=context["data"].id,
+                tenant_id=ctx.user.tenant_id,
+                user_id=ctx.user.id,
+                dataset_id=ctx.dataset.id,
+                data_id=ctx.data_item.id,
             )
         await index_graph_edges(edges_to_save)

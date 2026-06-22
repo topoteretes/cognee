@@ -1,7 +1,7 @@
 "use client";
 
 import { useBoolean, useOutsideClick } from "@/utils";
-import { MenuIcon } from "@/ui/Icons";
+import { MenuIcon } from "@/ui/icons";
 import { IconButton } from "@/ui/elements";
 import classNames from 'classnames';
 
@@ -29,16 +29,15 @@ export default function PopupMenu({ triggerElement, triggerClassName, children, 
 
       {isMenuOpen && (
         <div
-          className={
-            classNames(
-              "absolute top-full flex flex-col gap-4 pl-1 py-3 pr-4",
-              "whitespace-nowrap bg-white border-1 border-gray-100 z-10",
-              {
-                "left-0": openToRight,
-                "right-0": !openToRight,
-              },
-            )
-          }
+          className={classNames(
+            "absolute top-full mt-1 flex flex-col p-1.5",
+            "bg-white border border-cognee-border-light rounded-[10px]",
+            "shadow-[0px_8px_30px_rgba(0,0,0,0.08)] z-10",
+            {
+              "left-0": openToRight,
+              "right-0": !openToRight,
+            },
+          )}
         >
           {children}
         </div>

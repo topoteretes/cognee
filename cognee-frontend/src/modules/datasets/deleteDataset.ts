@@ -1,7 +1,7 @@
-import { fetch } from '@/utils';
+import { CogneeInstance } from "../instances/types";
 
-export default function deleteDataset(dataset: { id: string }) {
-  return fetch(`/v1/datasets/${dataset.id}`, {
-    method: 'DELETE',
+export default function deleteDataset(datasetId: string, instance: CogneeInstance) {
+  return instance.fetch(`/v1/datasets/${datasetId}`, {
+    method: "DELETE",
   })
 }

@@ -1,7 +1,7 @@
 """Web scraping tasks for storing scraped data in a graph database.
 
 This module provides functions to scrape web content, create or update WebPage, WebSite,
-and ScrapingJob data points, and store them in a Kuzu graph database. It supports
+and ScrapingJob data points, and store them in a Ladybug graph database. It supports
 scheduled scraping tasks and ensures that node updates preserve existing graph edges.
 """
 

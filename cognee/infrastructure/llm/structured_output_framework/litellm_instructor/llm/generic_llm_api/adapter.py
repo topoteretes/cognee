@@ -1,38 +1,58 @@
 """Adapter for Generic API LLM provider API"""
 
 import base64
+import logging
 import mimetypes
-import litellm
-import instructor
-from typing import Type, Optional
-from pydantic import BaseModel
-from openai import ContentFilterFinishReasonError
-from litellm.exceptions import ContentPolicyViolationError
-from instructor.core import InstructorRetryException
+from typing import Any
 
+import instructor
+import litellm
+from instructor.core import InstructorRetryException
+from litellm.exceptions import ContentPolicyViolationError
+from openai import ContentFilterFinishReasonError
+from pydantic import BaseModel
+from tenacity import (
+    before_sleep_log,
+    retry,
+    retry_if_not_exception_type,
+    stop_after_attempt,
+    wait_exponential_jitter,
+)
+
+from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.llm.exceptions import ContentPolicyFilterError
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.llm_interface import (
     LLMInterface,
 )
-from cognee.infrastructure.files.utils.open_data_file import open_data_file
-from cognee.modules.observability.get_observe import get_observe
-import logging
-from cognee.shared.rate_limiting import llm_rate_limiter_context_manager
-from cognee.shared.logging_utils import get_logger
-from tenacity import (
-    retry,
-    stop_after_delay,
-    wait_exponential_jitter,
-    retry_if_not_exception_type,
-    before_sleep_log,
-)
-
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.types import (
     TranscriptionReturnType,
 )
+from cognee.modules.observability.get_observe import get_observe
+from cognee.shared.logging_utils import get_logger
+from cognee.shared.rate_limiting import llm_rate_limiter_context_manager
 
 logger = get_logger()
 observe = get_observe()
+
+
+def _enrich_llm_span(model: str, name: str) -> None:
+    """Set LLM attributes on the current OTEL span, if tracing is enabled."""
+    from cognee.modules.observability.trace_context import is_tracing_enabled
+
+    if not is_tracing_enabled():
+        return
+
+    try:
+        from opentelemetry import trace as otel_trace  # ty:ignore[unresolved-import]
+
+        from cognee.modules.observability.tracing import COGNEE_LLM_MODEL, COGNEE_LLM_PROVIDER
+
+        current_span = otel_trace.get_current_span()
+        if current_span and current_span.is_recording():
+            current_span.set_attribute(COGNEE_LLM_MODEL, model)
+            current_span.set_attribute(COGNEE_LLM_PROVIDER, name)
+    except Exception:
+        pass
 
 
 class GenericAPIAdapter(LLMInterface):
@@ -48,7 +68,7 @@ class GenericAPIAdapter(LLMInterface):
     Type[BaseModel]) -> BaseModel
     """
 
-    MAX_RETRIES = 5
+    MAX_RETRIES = 2
     default_instructor_mode = "json_mode"
 
     def __init__(
@@ -57,15 +77,16 @@ class GenericAPIAdapter(LLMInterface):
         model: str,
         max_completion_tokens: int,
         name: str,
-        endpoint: str = None,
-        api_version: str = None,
-        transcription_model: str = None,
-        image_transcribe_model: str = None,
-        instructor_mode: str = None,
-        fallback_model: str = None,
-        fallback_api_key: str = None,
-        fallback_endpoint: str = None,
-    ):
+        endpoint: str | None = None,
+        api_version: str | None = None,
+        transcription_model: str | None = None,
+        image_transcribe_model: str | None = None,
+        instructor_mode: str | None = None,
+        fallback_model: str | None = None,
+        fallback_api_key: str | None = None,
+        fallback_endpoint: str | None = None,
+        llm_args: dict[str, Any] | None = None,
+    ) -> None:
         self.name = name
         self.model = model
         self.api_key = api_key
@@ -77,6 +98,8 @@ class GenericAPIAdapter(LLMInterface):
         self.fallback_model = fallback_model
         self.fallback_api_key = fallback_api_key
         self.fallback_endpoint = fallback_endpoint
+        self._base_llm_args: dict[str, Any] = llm_args or {}
+        self.llm_args = self._base_llm_args
 
         self.instructor_mode = instructor_mode if instructor_mode else self.default_instructor_mode
 
@@ -84,19 +107,47 @@ class GenericAPIAdapter(LLMInterface):
             litellm.acompletion, mode=instructor.Mode(self.instructor_mode)
         )
 
+    async def acreate_str_output(
+        self, text_input: str, system_prompt: str, **merged_kwargs: Any
+    ) -> str:
+        """Plain-text completion that skips instructor.
+
+        Instructor wraps the call in JSON/tool-call schemas that local
+        llama.cpp-compatible servers don't honour, causing repeated parse
+        failures and retry storms. A plain string needs no schema, so call
+        litellm directly using this adapter's own connection config.
+        """
+        async with llm_rate_limiter_context_manager():
+            response = await litellm.acompletion(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": text_input},
+                ],
+                api_key=self.api_key,
+                api_base=self.endpoint,
+                api_version=self.api_version,
+                **merged_kwargs,
+            )
+        return response.choices[0].message.content or ""
+
     @observe(as_type="generation")
     @retry(
-        stop=stop_after_delay(128),
+        stop=stop_after_attempt(4),
         wait=wait_exponential_jitter(8, 128),
         retry=retry_if_not_exception_type(
             (litellm.exceptions.NotFoundError, litellm.exceptions.AuthenticationError)
         ),
-        before_sleep=before_sleep_log(logger, logging.DEBUG),
+        before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
     async def acreate_structured_output(
-        self, text_input: str, system_prompt: str, response_model: Type[BaseModel], **kwargs
-    ) -> BaseModel:
+        self,
+        text_input: str,
+        system_prompt: str,
+        response_model: type[BaseModel | str],
+        **kwargs: Any,
+    ) -> BaseModel | str:
         """
         Generate a response from a user query.
 
@@ -120,25 +171,34 @@ class GenericAPIAdapter(LLMInterface):
               output from the language model.
         """
 
+        merged_kwargs = {**self.llm_args, **kwargs}
+
+        # A plain string needs no schema — skip instructor (see acreate_str_output).
+        if response_model is str:
+            return await self.acreate_str_output(text_input, system_prompt, **merged_kwargs)
+
         try:
             async with llm_rate_limiter_context_manager():
-                return await self.aclient.chat.completions.create(
+                result = await self.aclient.chat.completions.create(
                     model=self.model,
                     messages=[
-                        {
-                            "role": "user",
-                            "content": f"""{text_input}""",
-                        },
                         {
                             "role": "system",
                             "content": system_prompt,
                         },
+                        {
+                            "role": "user",
+                            "content": f"""{text_input}""",
+                        },
                     ],
-                    max_retries=2,
+                    max_retries=1,
                     api_key=self.api_key,
                     api_base=self.endpoint,
                     response_model=response_model,
+                    **merged_kwargs,
                 )
+                _enrich_llm_span(self.model, self.name)
+                return result
         except (
             ContentFilterFinishReasonError,
             ContentPolicyViolationError,
@@ -155,24 +215,28 @@ class GenericAPIAdapter(LLMInterface):
                     f"The provided input contains content that is not aligned with our content policy: {text_input}"
                 ) from error
 
+            fallback_model = self.fallback_model
+            fallback_llm_args = {**self._base_llm_args, **kwargs}
+
             try:
                 async with llm_rate_limiter_context_manager():
                     return await self.aclient.chat.completions.create(
-                        model=self.fallback_model,
+                        model=fallback_model,
                         messages=[
-                            {
-                                "role": "user",
-                                "content": f"""{text_input}""",
-                            },
                             {
                                 "role": "system",
                                 "content": system_prompt,
                             },
+                            {
+                                "role": "user",
+                                "content": f"""{text_input}""",
+                            },
                         ],
-                        max_retries=2,
+                        max_retries=1,
                         api_key=self.fallback_api_key,
                         api_base=self.fallback_endpoint,
                         response_model=response_model,
+                        **fallback_llm_args,
                     )
             except (
                 ContentFilterFinishReasonError,
@@ -191,15 +255,15 @@ class GenericAPIAdapter(LLMInterface):
 
     @observe(as_type="transcription")
     @retry(
-        stop=stop_after_delay(128),
+        stop=stop_after_attempt(3),
         wait=wait_exponential_jitter(2, 128),
         retry=retry_if_not_exception_type(
             (litellm.exceptions.NotFoundError, litellm.exceptions.AuthenticationError)
         ),
-        before_sleep=before_sleep_log(logger, logging.DEBUG),
+        before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
-    async def create_transcript(self, input) -> TranscriptionReturnType:
+    async def create_transcript(self, input: str) -> TranscriptionReturnType:
         """
         Generate an audio transcript from a user query.
 
@@ -243,19 +307,21 @@ class GenericAPIAdapter(LLMInterface):
             max_retries=self.MAX_RETRIES,
         )
 
+        if not response.choices or response.choices[0].message is None:
+            raise ValueError("Transcription failed. No response received.")
         return TranscriptionReturnType(response.choices[0].message.content, response)
 
     @observe(as_type="transcribe_image")
     @retry(
-        stop=stop_after_delay(128),
+        stop=stop_after_attempt(3),
         wait=wait_exponential_jitter(2, 128),
         retry=retry_if_not_exception_type(
             (litellm.exceptions.NotFoundError, litellm.exceptions.AuthenticationError)
         ),
-        before_sleep=before_sleep_log(logger, logging.DEBUG),
+        before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
-    async def transcribe_image(self, input) -> BaseModel:
+    async def transcribe_image(self, input: str) -> litellm.ModelResponse:
         """
         Generate a transcription of an image from a user query.
 
@@ -278,7 +344,7 @@ class GenericAPIAdapter(LLMInterface):
             raise ValueError(
                 f"Could not determine MIME type for image file: {input}. Is the extension correct?"
             )
-        response = await litellm.acompletion(
+        response: litellm.ModelResponse = await litellm.acompletion(
             model=self.image_transcribe_model,
             messages=[
                 {

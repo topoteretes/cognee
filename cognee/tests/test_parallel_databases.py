@@ -43,12 +43,12 @@ async def main():
     }
 
     task_1_graph_config = {
-        "graph_database_provider": "kuzu",
-        "graph_file_path": "kuzu1.db",
+        "graph_database_provider": "ladybug",
+        "graph_file_path": "ladybug1.db",
     }
     task_2_graph_config = {
-        "graph_database_provider": "kuzu",
-        "graph_file_path": "kuzu2.db",
+        "graph_database_provider": "ladybug",
+        "graph_file_path": "ladybug2.db",
     }
 
     # schedule both cognify calls concurrently

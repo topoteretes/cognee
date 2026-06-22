@@ -1,26 +1,34 @@
+import asyncio
 import base64
-import litellm
 import logging
-import instructor
-from typing import Type
-from openai import OpenAI
-from pydantic import BaseModel
+from typing import Any
 
+import instructor
+import litellm
+from openai import AsyncOpenAI
+from pydantic import BaseModel
+from tenacity import (
+    before_sleep_log,
+    retry,
+    retry_if_not_exception_type,
+    stop_after_attempt,
+    wait_exponential_jitter,
+)
+
+from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.llm_interface import (
     LLMInterface,
 )
-from cognee.infrastructure.files.utils.open_data_file import open_data_file
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.types import (
+    TranscriptionReturnType,
+)
+from cognee.modules.observability.get_observe import get_observe
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.rate_limiting import llm_rate_limiter_context_manager
-from tenacity import (
-    retry,
-    stop_after_delay,
-    wait_exponential_jitter,
-    retry_if_not_exception_type,
-    before_sleep_log,
-)
 
 logger = get_logger()
+
+observe = get_observe()
 
 
 class OllamaAPIAdapter(LLMInterface):
@@ -52,32 +60,43 @@ class OllamaAPIAdapter(LLMInterface):
         model: str,
         name: str,
         max_completion_tokens: int,
-        instructor_mode: str = None,
-    ):
+        instructor_mode: str | None = None,
+        llm_args: dict[str, Any] | None = None,
+    ) -> None:
         self.name = name
         self.model = model
         self.api_key = api_key
         self.endpoint = endpoint
         self.max_completion_tokens = max_completion_tokens
+        self.llm_args: dict[str, Any] = llm_args or {}
 
         self.instructor_mode = instructor_mode if instructor_mode else self.default_instructor_mode
 
+        # Async client (native async I/O — no sync-call-in-event-loop blocking).
+        # ``self.client`` is the raw client for plain-text/transcription calls;
+        # ``self.aclient`` adds instructor's structured-output layer on top.
+        self.client = AsyncOpenAI(base_url=self.endpoint, api_key=self.api_key)
         self.aclient = instructor.from_openai(
-            OpenAI(base_url=self.endpoint, api_key=self.api_key),
+            self.client,
             mode=instructor.Mode(self.instructor_mode),
         )
 
+    @observe(as_type="generation")
     @retry(
-        stop=stop_after_delay(128),
+        stop=stop_after_attempt(3),
         wait=wait_exponential_jitter(8, 128),
         retry=retry_if_not_exception_type(
-            (litellm.exceptions.NotFoundError, litellm.exceptions.AuthenticationError)
+            (
+                litellm.exceptions.NotFoundError,
+                litellm.exceptions.AuthenticationError,
+                asyncio.CancelledError,
+            )
         ),
-        before_sleep=before_sleep_log(logger, logging.DEBUG),
+        before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
     async def acreate_structured_output(
-        self, text_input: str, system_prompt: str, response_model: Type[BaseModel], **kwargs
+        self, text_input: str, system_prompt: str, response_model: type[BaseModel], **kwargs
     ) -> BaseModel:
         """
         Generate a structured output from the LLM using the provided text and system prompt.
@@ -98,35 +117,58 @@ class OllamaAPIAdapter(LLMInterface):
 
             - BaseModel: A structured output that conforms to the specified response model.
         """
+        merged_kwargs = {**self.llm_args, **kwargs}
+
+        # A plain string needs no schema — skip instructor and hit the OpenAI-
+        # compatible endpoint directly. Instructor's JSON/tool-call schemas cause
+        # parse failures and retry storms on local llama.cpp-compatible servers.
+        if response_model is str:
+            async with llm_rate_limiter_context_manager():
+                response = await self.client.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": text_input},
+                    ],
+                    **merged_kwargs,
+                )
+            return response.choices[0].message.content or ""
+
         async with llm_rate_limiter_context_manager():
-            response = self.aclient.chat.completions.create(
+            response = await self.aclient.chat.completions.create(
                 model=self.model,
                 messages=[
-                    {
-                        "role": "user",
-                        "content": f"{text_input}",
-                    },
                     {
                         "role": "system",
                         "content": system_prompt,
                     },
+                    {
+                        "role": "user",
+                        "content": f"{text_input}",
+                    },
                 ],
                 max_retries=2,
                 response_model=response_model,
+                **merged_kwargs,
             )
 
         return response
 
+    @observe(as_type="transcription")
     @retry(
-        stop=stop_after_delay(128),
+        stop=stop_after_attempt(3),
         wait=wait_exponential_jitter(8, 128),
         retry=retry_if_not_exception_type(
-            (litellm.exceptions.NotFoundError, litellm.exceptions.AuthenticationError)
+            (
+                litellm.exceptions.NotFoundError,
+                litellm.exceptions.AuthenticationError,
+                asyncio.CancelledError,
+            )
         ),
-        before_sleep=before_sleep_log(logger, logging.DEBUG),
+        before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
-    async def create_transcript(self, input: str, **kwargs) -> str:
+    async def create_transcript(self, input: str, **kwargs: Any) -> TranscriptionReturnType:
         """
         Generate an audio transcript from a user query.
 
@@ -146,7 +188,7 @@ class OllamaAPIAdapter(LLMInterface):
         """
 
         async with open_data_file(input, mode="rb") as audio_file:
-            transcription = self.aclient.audio.transcriptions.create(
+            transcription = await self.client.audio.transcriptions.create(
                 model="whisper-1",  # Ensure the correct model for transcription
                 file=audio_file,
                 language="en",
@@ -156,18 +198,22 @@ class OllamaAPIAdapter(LLMInterface):
         if not hasattr(transcription, "text"):
             raise ValueError("Transcription failed. No text returned.")
 
-        return transcription.text
+        return TranscriptionReturnType(transcription.text, transcription)
 
     @retry(
-        stop=stop_after_delay(128),
+        stop=stop_after_attempt(3),
         wait=wait_exponential_jitter(2, 128),
         retry=retry_if_not_exception_type(
-            (litellm.exceptions.NotFoundError, litellm.exceptions.AuthenticationError)
+            (
+                litellm.exceptions.NotFoundError,
+                litellm.exceptions.AuthenticationError,
+                asyncio.CancelledError,
+            )
         ),
-        before_sleep=before_sleep_log(logger, logging.DEBUG),
+        before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
-    async def transcribe_image(self, input: str, **kwargs) -> str:
+    async def transcribe_image(self, input: str, **kwargs: Any) -> str:
         """
         Transcribe content from an image using base64 encoding.
 
@@ -190,7 +236,7 @@ class OllamaAPIAdapter(LLMInterface):
         async with open_data_file(input, mode="rb") as image_file:
             encoded_image = base64.b64encode(image_file.read()).decode("utf-8")
 
-        response = self.aclient.chat.completions.create(
+        response = await self.client.chat.completions.create(
             model=self.model,
             messages=[
                 {
@@ -205,10 +251,14 @@ class OllamaAPIAdapter(LLMInterface):
                 }
             ],
             max_completion_tokens=300,
-        )
+        )  # ty:ignore[no-matching-overload]
 
         # Ensure response is valid before accessing .choices[0].message.content
-        if not hasattr(response, "choices") or not response.choices:
+        if (
+            not hasattr(response, "choices")
+            or not response.choices
+            or response.choices[0].message is None
+        ):
             raise ValueError("Image transcription failed. No response received.")
 
         return response.choices[0].message.content

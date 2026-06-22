@@ -1,18 +1,20 @@
-from pathlib import Path
 import asyncio
 import os
+from pathlib import Path
+
+# Disable backend access control to avoid dataset handler mismatch
+os.environ["ENABLE_BACKEND_ACCESS_CONTROL"] = "False"
 
 import cognee
-from cognee.infrastructure.databases.relational.config import get_migration_config
+from cognee import SearchType, visualize_graph
 from cognee.infrastructure.databases.graph import get_graph_engine
-from cognee.api.v1.visualize.visualize import visualize_graph
-from cognee.infrastructure.databases.relational import (
-    get_migration_relational_engine,
-)
-from cognee.modules.search.types import SearchType
 from cognee.infrastructure.databases.relational import (
     create_db_and_tables as create_relational_db_and_tables,
 )
+from cognee.infrastructure.databases.relational import (
+    get_migration_relational_engine,
+)
+from cognee.infrastructure.databases.relational.config import get_migration_config
 from cognee.infrastructure.databases.vector.pgvector import (
     create_db_and_tables as create_vector_db_and_tables,
 )
@@ -32,8 +34,7 @@ from cognee.infrastructure.databases.vector.pgvector import (
 
 async def main():
     # Clean all data stored in Cognee
-    await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata=True)
+    await cognee.forget(everything=True)
 
     # Needed to create appropriate database tables only on the Cognee side
     await create_relational_db_and_tables()
@@ -65,9 +66,9 @@ async def main():
     await migrate_relational_database(graph, schema=schema)
     print("Relational database migration complete.")
 
-    # Make sure to set top_k at a high value for a broader search, the default value is only 10!
+    # Make sure to set top_k at a high value for a broader search, the default value is only 15!
     # top_k represent the number of graph tripplets to supply to the LLM to answer your question
-    search_results = await cognee.search(
+    search_results = await cognee.recall(
         query_type=SearchType.GRAPH_COMPLETION,
         query_text="What kind of data do you contain?",
         top_k=200,
@@ -76,14 +77,14 @@ async def main():
 
     # Having a top_k value set to too high might overwhelm the LLM context when specific questions need to be answered.
     # For this kind of question we've set the top_k to 50
-    search_results = await cognee.search(
+    search_results = await cognee.recall(
         query_type=SearchType.GRAPH_COMPLETION,
         query_text="What invoices are related to Leonie Köhler?",
         top_k=50,
     )
     print(f"Search results: {search_results}")
 
-    search_results = await cognee.search(
+    search_results = await cognee.recall(
         query_type=SearchType.GRAPH_COMPLETION,
         query_text="What invoices are related to Luís Gonçalves?",
         top_k=50,

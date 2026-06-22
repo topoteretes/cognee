@@ -47,8 +47,16 @@ async def run_corpus_builder(
         except KeyError:
             raise ValueError(f"Invalid task getter type: {params.get('task_getter_type')}")
 
+        # Allow passing a pre-configured adapter instance (e.g., BEAM with max_batches)
+        benchmark_arg = params["benchmark"]
+        beam_max_batches = params.get("_beam_max_batches")
+        if benchmark_arg == "BEAM" and beam_max_batches is not None:
+            from cognee.eval_framework.benchmark_adapters.beam_adapter import BEAMAdapter
+
+            benchmark_arg = BEAMAdapter(max_batches=beam_max_batches)
+
         corpus_builder = CorpusBuilderExecutor(
-            benchmark=params["benchmark"],
+            benchmark=benchmark_arg,
             task_getter=task_getter,
         )
         questions = await corpus_builder.build_corpus(

@@ -1,0 +1,1 @@
+MEMIFY_METADATA_FREQUENCY_WEIGHTS_APPLIED_KEY = "frequency_weights_applied"

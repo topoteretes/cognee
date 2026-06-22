@@ -1,4 +1,4 @@
-import { CogneeInstance } from "@/modules/instances/types";
+import { CogneeInstance } from "../instances/types";
 
 export default function getNotebooks(instance: CogneeInstance) {
   return instance.fetch("/v1/notebooks/", {
@@ -6,7 +6,5 @@ export default function getNotebooks(instance: CogneeInstance) {
     headers: {
       "Content-Type": "application/json",
     },
-  }).then((response: Response) =>
-    response.ok ? response.json() : Promise.reject(response)
-  );
+  }).then((response) => response.json());
 }

@@ -6,6 +6,8 @@ from fastapi.testclient import TestClient
 
 import cognee
 from cognee.api.client import app
+from cognee.infrastructure.databases.cache.config import get_cache_config
+from cognee.infrastructure.databases.cache.get_cache_engine import create_cache_engine
 from cognee.modules.users.methods import get_default_user, get_authenticated_user
 
 
@@ -40,11 +42,15 @@ def e2e_config():
     original_env = os.environ.copy()
     os.environ["USAGE_LOGGING"] = "true"
     os.environ["CACHE_BACKEND"] = "redis"
-    os.environ["CACHE_HOST"] = "localhost"
-    os.environ["CACHE_PORT"] = "6379"
+    os.environ.setdefault("CACHE_HOST", "localhost")
+    os.environ.setdefault("CACHE_PORT", "6379")
+    get_cache_config.cache_clear()
+    create_cache_engine.cache_clear()
     yield
     os.environ.clear()
     os.environ.update(original_env)
+    get_cache_config.cache_clear()
+    create_cache_engine.cache_clear()
 
 
 @pytest.fixture(scope="session")
@@ -102,7 +108,6 @@ def test_client():
 async def cache_engine(e2e_config):
     """Get cache engine for log verification in test's event loop."""
     from cognee.infrastructure.databases.cache.redis.RedisAdapter import RedisAdapter
-    from cognee.infrastructure.databases.cache.config import get_cache_config
 
     config = get_cache_config()
     if not config.usage_logging or config.cache_backend != "redis":

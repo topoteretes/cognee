@@ -1,0 +1,29 @@
+R01. A carrier shall serve the package shipping range before it may be selected.
+R02. A carrier and transport mode shall support the package weight before they may be selected.
+R03. A perishable package shall be assigned only to a temperature-controlled carrier.
+R04. A hazardous package shall be assigned only to a carrier with hazardous-material certification.
+R05. An intercontinental package shall be assigned only to flight or shipment transport modes.
+R06. A fragile package shall not be assigned to the shipment transport mode.
+R07. An express package shall not be assigned to the shipment transport mode.
+R08. A package already delivered to the recipient shall not receive a new transport assignment.
+R09. Retailer and user regions shall contribute to both delivery-time estimation and transport-price estimation.
+R10. Region distance shall be computed as the absolute difference between origin and destination region distance scores, plus 1, with an additional penalty of 2 when crossing between US and non-US regions.
+R11. Estimated delivery days shall equal retailer processing days plus shipping-range distance score plus region distance plus mode transit days plus carrier base delay days.
+R12. A weekend-eligible user shall receive a one-day reduction in estimated delivery time when the selected carrier operates on weekends.
+R13. A user tier priority bonus shall reduce estimated delivery days.
+R14. An express package assigned to flight or truck shall receive a one-day reduction in estimated delivery time, and an economy package assigned to shipment or freight rail shall incur a one-day increase.
+R15. Estimated delivery time shall not be less than one day.
+R16. Estimated transport price shall equal handling fee + region distance x 3.0 + weight in kg x 0.08 + shipping-range score x 2.5 + mode cost score + max(0, 6 - carrier reliability score) x 0.5, then +8.0 for express or -1.5 for economy.
+R17. Estimated transport price shall not be less than 4.0 after rounding to two decimals.
+R18. Route construction shall include the retailer origin warehouse when available and each post office recorded in the package route.
+R19. Route construction shall start with the retailer, preserve the recorded post-office order without duplicates, and end with the user.
+R20. User tier and package priority shall influence transport scoring.
+R21. Transport scoring shall equal estimated delivery days times combined speed weight plus estimated transport price plus mode cost score times package cost weight minus carrier reliability score times 0.5.
+R22. If no valid transport option exists, the computed outcome shall be infinite delivery time unless the package has already been received, in which case the outcome shall be 0.0.
+R23. Mode selection shall align with the package priority profile, with faster modes favoring express deliveries and slower modes better fitting economy deliveries.
+R24. Shipping-range distance scores shall be fixed as follows: domestic = 0, regional = 2, intercontinental = 6.
+R25. Region distance scores shall be fixed as follows: US North = 4, US South = 0, US East = 3, US West = 1, US Central = 2, Germany = 2, France = 2, Netherlands = 1, Spain = 0, Italy = 1, Poland = 3.
+R26. Carrier base delay days shall be treated as carrier-specific values and added directly to estimated delivery days.
+R27. Carrier reliability scores shall be treated as carrier-specific values, shall reduce transport scoring by 0.5 per point, and shall increase transport price through the term max(0, 6 - carrier reliability score) times 0.5.
+R28. Mode cost scores shall be fixed as follows: flight = 5, shipment = 1, freight rail = 2, truck = 3.
+R29. Mode transit days shall be fixed as follows: flight = 1, shipment = 7, freight rail = 4, truck = 3.

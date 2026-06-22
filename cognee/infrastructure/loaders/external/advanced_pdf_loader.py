@@ -2,23 +2,23 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
 import asyncio
+from dataclasses import dataclass
+from typing import Any
+
 from cognee.infrastructure.files.storage import get_file_storage, get_storage_config
 from cognee.infrastructure.files.utils.get_file_metadata import get_file_metadata
+from cognee.infrastructure.loaders.external.pypdf_loader import PyPdfLoader
 from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface
 from cognee.shared.logging_utils import get_logger
-
-from cognee.infrastructure.loaders.external.pypdf_loader import PyPdfLoader
 
 logger = get_logger(__name__)
 
 
 @dataclass
 class _PageBuffer:
-    page_num: Optional[int]
-    segments: List[str]
+    page_num: int | None
+    segments: list[str]
 
 
 class AdvancedPdfLoader(LoaderInterface):
@@ -29,17 +29,15 @@ class AdvancedPdfLoader(LoaderInterface):
     structured page information and handling PDF-specific errors.
     """
 
+    loader_name = "advanced_pdf_loader"
+
     @property
-    def supported_extensions(self) -> List[str]:
+    def supported_extensions(self) -> list[str]:
         return ["pdf"]
 
     @property
-    def supported_mime_types(self) -> List[str]:
+    def supported_mime_types(self) -> list[str]:
         return ["application/pdf"]
-
-    @property
-    def loader_name(self) -> str:
-        return "advanced_pdf_loader"
 
     def can_handle(self, extension: str, mime_type: str) -> bool:
         """Check if file can be handled by this loader."""
@@ -71,7 +69,7 @@ class AdvancedPdfLoader(LoaderInterface):
             storage_file_name = "text_" + file_metadata["content_hash"] + ".txt"
 
             # Set partitioning parameters
-            partition_kwargs: Dict[str, Any] = {
+            partition_kwargs: dict[str, Any] = {
                 "filename": file_path,
                 "strategy": strategy,
                 "infer_table_structure": True,
@@ -80,7 +78,7 @@ class AdvancedPdfLoader(LoaderInterface):
                 **kwargs,
             }
             # Use partition to extract elements
-            from unstructured.partition.pdf import partition_pdf
+            from unstructured.partition.pdf import partition_pdf  # ty:ignore[unresolved-import]
 
             elements = partition_pdf(**partition_kwargs)
 
@@ -96,6 +94,9 @@ class AdvancedPdfLoader(LoaderInterface):
 
             # Combine all page outputs
             full_content = "\n".join(page_contents)
+
+            if not kwargs.get("persist", True):
+                return full_content
 
             # Store the content
             storage_config = get_storage_config()
@@ -115,9 +116,9 @@ class AdvancedPdfLoader(LoaderInterface):
         fallback_loader = PyPdfLoader()
         return await fallback_loader.load(file_path, **kwargs)
 
-    def _format_elements_by_page(self, elements: List[Any]) -> List[str]:
+    def _format_elements_by_page(self, elements: list[Any]) -> list[str]:
         """Format elements by page."""
-        page_buffers: List[_PageBuffer] = []
+        page_buffers: list[_PageBuffer] = []
         current_buffer = _PageBuffer(page_num=None, segments=[])
 
         for element in elements:
@@ -138,7 +139,7 @@ class AdvancedPdfLoader(LoaderInterface):
         if current_buffer.segments:
             page_buffers.append(current_buffer)
 
-        page_contents: List[str] = []
+        page_contents: list[str] = []
         for buffer in page_buffers:
             header = f"Page {buffer.page_num}:\n" if buffer.page_num is not None else "Page:"
             content = header + "\n\n".join(buffer.segments) + "\n"
@@ -147,10 +148,10 @@ class AdvancedPdfLoader(LoaderInterface):
 
     def _format_element(
         self,
-        element: Dict[str, Any],
+        element: dict[str, Any],
     ) -> str:
         """Format element."""
-        element_type = element.get("type")
+        element_type = element["type"]
         text = self._clean_text(element.get("text", ""))
         metadata = element.get("metadata", {})
 
@@ -167,7 +168,7 @@ class AdvancedPdfLoader(LoaderInterface):
 
         return text
 
-    def _format_table_element(self, element: Dict[str, Any]) -> str:
+    def _format_table_element(self, element: dict[str, Any]) -> str:
         """Format table element."""
         metadata = element.get("metadata", {})
         text = self._clean_text(element.get("text", ""))
@@ -178,7 +179,7 @@ class AdvancedPdfLoader(LoaderInterface):
 
         return text
 
-    def _format_image_element(self, metadata: Dict[str, Any]) -> str:
+    def _format_image_element(self, metadata: dict[str, Any]) -> str:
         """Format image."""
         placeholder = "[Image omitted]"
         image_text = placeholder
@@ -206,7 +207,7 @@ class AdvancedPdfLoader(LoaderInterface):
 
         return image_text
 
-    def _safe_to_dict(self, element: Any) -> Dict[str, Any]:
+    def _safe_to_dict(self, element: Any) -> dict[str, Any]:
         """Safe to dict."""
         try:
             if hasattr(element, "to_dict"):

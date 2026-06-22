@@ -20,6 +20,16 @@ async def index_and_transform_graphiti_nodes_and_edges():
         logger.error("Failed to initialize engines: %s", e)
         raise RuntimeError("Initialization error") from e
 
+    # Graphiti integration requires Neo4j (it writes directly to Neo4j,
+    # and these queries use Neo4j-specific Cypher to normalize its schema)
+    from cognee.infrastructure.databases.graph.neo4j_driver.adapter import Neo4jAdapter
+
+    if not isinstance(graph_engine, Neo4jAdapter):
+        raise RuntimeError(
+            "Graphiti temporal awareness requires Neo4j. "
+            "Set GRAPH_DATABASE_PROVIDER=neo4j to use this feature."
+        )
+
     await graph_engine.query("""MATCH (n) SET n.id = n.uuid RETURN n""", params={})
     await graph_engine.query(
         """MATCH (source)-[r]->(target) SET r.source_node_id = source.id,

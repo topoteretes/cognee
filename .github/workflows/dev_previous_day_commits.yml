@@ -1,0 +1,351 @@
+name: automation | Draft Docs PRs For Previous Day Dev PRs
+
+on:
+  workflow_dispatch:
+    inputs:
+      lookback_days:
+        description: Number of UTC calendar days to look back when scanning merged PRs
+        required: false
+        default: "1"
+      anchor_date:
+        description: Optional UTC date to scan, in YYYY-MM-DD format
+        required: false
+        default: ""
+  schedule:
+    - cron: "59 23 * * *"
+
+permissions:
+  contents: read
+  pull-requests: read
+
+env:
+  lookback_days: ${{ github.event.inputs.lookback_days || vars.lookback_days || '1' }}
+
+jobs:
+  prepare-merged-branches:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    outputs:
+      start_date: ${{ steps.prepare.outputs.start_date }}
+      end_date: ${{ steps.prepare.outputs.end_date }}
+      has_merges: ${{ steps.prepare.outputs.has_merges }}
+      merge_summary: ${{ steps.prepare.outputs.merge_summary }}
+      matrix: ${{ steps.prepare.outputs.matrix }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Fetch latest dev branch
+        run: git fetch origin dev:refs/remotes/origin/dev --no-tags
+
+      - name: Prepare merged PRs
+        id: prepare
+        shell: bash
+        env:
+          INPUT_ANCHOR_DATE: ${{ github.event.inputs.anchor_date || '' }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          args=(
+            --branch origin/dev
+            --lookback-days "${lookback_days}"
+          )
+
+          anchor_date="${INPUT_ANCHOR_DATE}"
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            anchor_date="$(date -u -d 'yesterday' +%F)"
+          fi
+
+          if [ -n "${anchor_date}" ]; then
+            echo "Using anchor date ${anchor_date}"
+            args+=(--anchor-date "${anchor_date}")
+          fi
+
+          python3 tools/prepare_merged_branches.py "${args[@]}"
+
+  create-docs-prs:
+    needs:
+      - prepare-merged-branches
+    if: ${{ needs.prepare-merged-branches.outputs.has_merges == 'true' }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.prepare-merged-branches.outputs.matrix) }}
+
+    steps:
+      - name: Check out core repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Install workflow dependencies
+        run: uv sync --locked
+
+      - name: Fetch latest dev branch
+        run: git fetch origin dev:refs/remotes/origin/dev --no-tags
+
+      - name: Prepare branch note paths
+        id: branch_paths
+        run: |
+          OUTPUT_DIR="branch-dev-notes/${{ matrix.safe_branch }}-${{ matrix.short_sha }}"
+          mkdir -p "${OUTPUT_DIR}"
+          echo "output_dir=${OUTPUT_DIR}" >> "${GITHUB_OUTPUT}"
+          echo "notes_json=${OUTPUT_DIR}/branch_notes.json" >> "${GITHUB_OUTPUT}"
+          echo "notes_markdown=${OUTPUT_DIR}/branch_notes.md" >> "${GITHUB_OUTPUT}"
+          echo "assessment_json=${OUTPUT_DIR}/docs_assessment.json" >> "${GITHUB_OUTPUT}"
+          echo "assessment_markdown=${OUTPUT_DIR}/docs_assessment.md" >> "${GITHUB_OUTPUT}"
+          echo "docs_edit_scope_json=${OUTPUT_DIR}/docs_edit_scope.json" >> "${GITHUB_OUTPUT}"
+          echo "docs_edit_scope_markdown=${OUTPUT_DIR}/docs_edit_scope.md" >> "${GITHUB_OUTPUT}"
+          echo "docs_scope_plan=${OUTPUT_DIR}/docs_scope_plan.md" >> "${GITHUB_OUTPUT}"
+
+      - name: Generate branch notes
+        env:
+          LLM_API_KEY: ${{ secrets.OPENAI_API_KEY || secrets.LLM_API_KEY }}
+          LLM_ARGS: ${{ secrets.LLM_ARGS }}
+          LLM_MODEL: ${{ vars.LLM_MODEL || secrets.LLM_MODEL || 'openai/gpt-4o-mini' }}
+          NOTES_JSON: ${{ steps.branch_paths.outputs.notes_json }}
+          NOTES_MARKDOWN: ${{ steps.branch_paths.outputs.notes_markdown }}
+          PR_NUMBER: ${{ matrix.pr_number }}
+          PR_TITLE: ${{ matrix.pr_title }}
+          PR_BODY_B64: ${{ matrix.pr_body_b64 }}
+          PR_URL: ${{ matrix.pr_url }}
+        run: |
+          uv run python tools/generate_branch_notes.py \
+            --branch-name "${{ matrix.branch_name }}" \
+            --merge-sha "${{ matrix.merge_sha }}" \
+            --first-parent "${{ matrix.first_parent }}" \
+            --second-parent "${{ matrix.second_parent }}" \
+            --pr-number "${PR_NUMBER}" \
+            --pr-title "${PR_TITLE}" \
+            --pr-body-base64 "${PR_BODY_B64}" \
+            --pr-url "${PR_URL}" \
+            --json-output "${NOTES_JSON}" \
+            --markdown-output "${NOTES_MARKDOWN}"
+
+      - name: Assess documentation impact for branch
+        id: assessment
+        env:
+          LLM_API_KEY: ${{ secrets.OPENAI_API_KEY || secrets.LLM_API_KEY }}
+          LLM_ARGS: ${{ secrets.LLM_ARGS }}
+          LLM_MODEL: ${{ vars.LLM_MODEL || secrets.LLM_MODEL || 'openai/gpt-4o-mini' }}
+          NOTES_JSON: ${{ steps.branch_paths.outputs.notes_json }}
+          NOTES_MARKDOWN: ${{ steps.branch_paths.outputs.notes_markdown }}
+          ASSESSMENT_JSON: ${{ steps.branch_paths.outputs.assessment_json }}
+          ASSESSMENT_MARKDOWN: ${{ steps.branch_paths.outputs.assessment_markdown }}
+        run: |
+          uv run python tools/assess_branch_notes.py \
+            --notes-json "${NOTES_JSON}" \
+            --notes-markdown "${NOTES_MARKDOWN}" \
+            --json-output "${ASSESSMENT_JSON}" \
+            --markdown-output "${ASSESSMENT_MARKDOWN}"
+
+          python3 tools/write_docs_assessment_outputs.py \
+            --assessment-json "${ASSESSMENT_JSON}" \
+            --branch-slug "${{ matrix.safe_branch }}" \
+            --short-sha "${{ matrix.short_sha }}" \
+            --pr-number "${{ matrix.pr_number }}"
+
+      - name: Check out docs repository
+        if: ${{ steps.assessment.outputs.needs_update == 'true' }}
+        uses: actions/checkout@v6
+        with:
+          repository: topoteretes/cognee-docs
+          token: ${{ secrets.REPO_DISPATCH_PAT_TOKEN }}
+          ref: main
+          path: docs-repo
+
+      - name: Prepare docs branch
+        if: ${{ steps.assessment.outputs.needs_update == 'true' }}
+        working-directory: docs-repo
+        run: |
+          git fetch origin "${{ steps.assessment.outputs.docs_branch }}" || true
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git show-ref --verify --quiet "refs/remotes/origin/${{ steps.assessment.outputs.docs_branch }}"; then
+            git checkout -B "${{ steps.assessment.outputs.docs_branch }}" "origin/${{ steps.assessment.outputs.docs_branch }}"
+          else
+            git checkout -B "${{ steps.assessment.outputs.docs_branch }}"
+          fi
+
+      - name: Prepare docs edit scope
+        if: ${{ steps.assessment.outputs.needs_update == 'true' }}
+        id: docs_scope
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python3 tools/prepare_docs_edit_scope.py \
+            --repo "${{ github.repository }}" \
+            --pr-number "${{ matrix.pr_number }}" \
+            --docs-root docs-repo \
+            --notes-json "${{ steps.branch_paths.outputs.notes_json }}" \
+            --assessment-json "${{ steps.branch_paths.outputs.assessment_json }}" \
+            --scope-json-output "${{ steps.branch_paths.outputs.docs_edit_scope_json }}" \
+            --scope-markdown-output "${{ steps.branch_paths.outputs.docs_edit_scope_markdown }}"
+
+      - name: Plan docs changes with Claude
+        if: ${{ steps.assessment.outputs.needs_update == 'true' }}
+        id: claude_scope
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          prompt: |
+            Read and follow `.github/prompts/docs_scope_plan.md`.
+
+            - Branch: `${{ matrix.branch_name }}`
+            - PR: `#${{ matrix.pr_number }} ${{ matrix.pr_title }}`
+            - Merge SHA: `${{ matrix.merge_sha }}`
+            - Short SHA: `${{ matrix.short_sha }}`
+            - First parent: `${{ matrix.first_parent }}`
+            - Second parent: `${{ matrix.second_parent }}`
+            - Scope plan output: `./${{ steps.branch_paths.outputs.docs_scope_plan }}`
+
+            - **Prepared documentation edit scope** (`./${{ steps.branch_paths.outputs.docs_edit_scope_markdown }}`): Curated source files, docs candidates, assessment summary, and out-of-scope files.
+            - **Prepared documentation edit scope JSON** (`./${{ steps.branch_paths.outputs.docs_edit_scope_json }}`): Machine-readable copy of the prepared scope.
+          claude_args: "--allowed-tools Read,Write,Glob,Grep --max-turns 35"
+
+      - name: Validate docs scope plan
+        if: ${{ steps.assessment.outputs.needs_update == 'true' }}
+        run: |
+          test -s "${{ steps.branch_paths.outputs.docs_scope_plan }}"
+          if [ -n "$(git -C docs-repo status --short)" ]; then
+            echo "The docs planning step modified docs-repo, but planning must not edit documentation." >&2
+            git -C docs-repo status --short >&2
+            exit 1
+          fi
+
+      - name: Read docs scope plan outputs
+        if: ${{ steps.assessment.outputs.needs_update == 'true' }}
+        id: scope_plan
+        run: |
+          python3 tools/write_docs_scope_plan_outputs.py \
+            --scope-plan "${{ steps.branch_paths.outputs.docs_scope_plan }}"
+
+      - name: Generate docs changes with Claude
+        if: ${{ steps.assessment.outputs.needs_update == 'true' && steps.scope_plan.outputs.docs_needed == 'true' }}
+        id: claude
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          prompt: |
+            Read and follow `.github/prompts/docs_edit.md`.
+
+            - Branch: `${{ matrix.branch_name }}`
+            - PR: `#${{ matrix.pr_number }} ${{ matrix.pr_title }}`
+            - Merge SHA: `${{ matrix.merge_sha }}`
+            - Short SHA: `${{ matrix.short_sha }}`
+            - First parent: `${{ matrix.first_parent }}`
+            - Second parent: `${{ matrix.second_parent }}`
+
+            ## Required inputs
+
+            Read these first:
+
+            - **Documentation scope plan** (`./${{ steps.branch_paths.outputs.docs_scope_plan }}`)
+            - **Branch notes** (`./${{ steps.branch_paths.outputs.notes_markdown }}`)
+            - **Documentation assessment** (`./${{ steps.branch_paths.outputs.assessment_markdown }}`)
+          claude_args: "--allowed-tools Read,Edit,Write,Glob,Grep,Bash --max-turns 50"
+
+      - name: Prepare docs PR content
+        if: ${{ steps.assessment.outputs.needs_update == 'true' && steps.scope_plan.outputs.docs_needed == 'true' }}
+        id: pr_content
+        env:
+          NOTES_JSON: ${{ steps.branch_paths.outputs.notes_json }}
+          ASSESSMENT_JSON: ${{ steps.branch_paths.outputs.assessment_json }}
+          BRANCH_NAME: ${{ matrix.branch_name }}
+          SHORT_SHA: ${{ matrix.short_sha }}
+          DEFAULT_PR_TITLE: ${{ steps.assessment.outputs.pr_title }}
+        run: |
+          python3 tools/prepare_docs_pr_content.py \
+            --notes-json "${NOTES_JSON}" \
+            --assessment-json "${ASSESSMENT_JSON}" \
+            --branch-name "${BRANCH_NAME}" \
+            --short-sha "${SHORT_SHA}" \
+            --default-pr-title "${DEFAULT_PR_TITLE}" \
+            --docs-root docs-repo
+
+      - name: Create docs draft commit
+        if: ${{ steps.assessment.outputs.needs_update == 'true' && steps.scope_plan.outputs.docs_needed == 'true' }}
+        id: commit_docs
+        working-directory: docs-repo
+        run: |
+          git add -A
+
+          if git diff --cached --quiet; then
+            echo "changes_made=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git commit -m "${{ steps.pr_content.outputs.pr_title }}"
+          echo "changes_made=true" >> "$GITHUB_OUTPUT"
+
+      - name: Push docs draft branch
+        if: ${{ steps.assessment.outputs.needs_update == 'true' && steps.scope_plan.outputs.docs_needed == 'true' && steps.commit_docs.outputs.changes_made == 'true' }}
+        working-directory: docs-repo
+        run: git push --force-with-lease origin "${{ steps.assessment.outputs.docs_branch }}"
+
+      - name: Create or update docs pull request
+        if: ${{ steps.assessment.outputs.needs_update == 'true' && steps.scope_plan.outputs.docs_needed == 'true' }}
+        id: manage_pr
+        env:
+          GH_TOKEN: ${{ secrets.REPO_DISPATCH_PAT_TOKEN }}
+          HEAD_BRANCH: ${{ steps.assessment.outputs.docs_branch }}
+          PR_TITLE: ${{ steps.pr_content.outputs.pr_title }}
+          PR_BODY: ${{ steps.pr_content.outputs.pr_body }}
+          CHANGES_MADE: ${{ steps.commit_docs.outputs.changes_made }}
+        run: |
+          python3 tools/manage_docs_pr.py \
+            --target-repo topoteretes/cognee-docs \
+            --head-branch "${HEAD_BRANCH}" \
+            --pr-title "${PR_TITLE}" \
+            --pr-body "${PR_BODY}" \
+            --changes-made "${CHANGES_MADE}"
+
+      - name: Summarize docs PR result
+        if: ${{ steps.assessment.outputs.needs_update == 'true' && steps.scope_plan.outputs.docs_needed == 'true' }}
+        env:
+          CHANGED_FILES: ${{ steps.pr_content.outputs.changed_files }}
+        run: |
+          {
+            echo "## PR docs review: #${{ matrix.pr_number }} ${{ matrix.pr_title }}"
+            echo
+            echo "- Branch: \`${{ matrix.branch_name }}\`"
+            echo "- Merge commit: \`${{ matrix.merge_sha }}\`"
+            echo "- Needs documentation update: \`${{ steps.assessment.outputs.needs_update }}\`"
+            if [ "${{ steps.assessment.outputs.needs_update }}" = "true" ]; then
+              echo "- Docs branch: \`${{ steps.assessment.outputs.docs_branch }}\`"
+              if [ -n "${CHANGED_FILES}" ]; then
+                echo "- Updated docs files:"
+                printf '%s\n' "${CHANGED_FILES}" | while IFS= read -r changed_file; do
+                  [ -n "${changed_file}" ] || continue
+                  echo "  - \`${changed_file}\`"
+                done
+              else
+                echo "- Updated docs files: none"
+              fi
+              if [ -n "${{ steps.manage_pr.outputs.pr_url }}" ]; then
+                echo "- Pull request: ${{ steps.manage_pr.outputs.pr_url }}"
+              else
+                echo "- Pull request: not created"
+              fi
+            fi
+            echo
+            echo "### Documentation assessment"
+            echo
+            cat "${{ steps.branch_paths.outputs.assessment_markdown }}"
+          } >> "${GITHUB_STEP_SUMMARY}"

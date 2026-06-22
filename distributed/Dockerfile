@@ -24,6 +24,7 @@ RUN uv sync --frozen --no-dev --extra neo4j --extra postgres --extra aws --extra
 
 COPY cognee/ /app/cognee
 COPY distributed/ /app/distributed
+COPY kuzu/ /app/kuzu
 
 # Modal's post-build steps require pip available on the default Python
 RUN uv pip install pip wheel

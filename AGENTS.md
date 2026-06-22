@@ -59,9 +59,9 @@ uv run ruff check .
 uv run ruff format .
 ```
 
-- Optional static type checks (mypy):
+- Optional static type checks (ty):
 ```bash
-uv run mypy cognee/
+uv run ty check .
 ```
 
 MCP Server (`cognee-mcp/`):
@@ -98,7 +98,7 @@ npm run build && npm start
 
 Python:
 - 4-space indentation, modules and functions in `snake_case`, classes in `PascalCase`.
-- Public APIs should be type-annotated where practical.
+- Public APIs should be type-annotated where practical. Make sure type defined in API signature will be properly displayed in Swagger UI docs. For example this definition: content_type: Optional[str] = Form(default=None) maps to "string" as the default in Swagger docs for content_type, but it should be None/null instead.
 - Use `ruff format` before committing; `ruff check` enforces import hygiene and style (line-length 100 configured in `pyproject.toml`).
 - Prefer explicit, structured error handling. Use shared logging utilities in `cognee.shared.logging_utils`.
 

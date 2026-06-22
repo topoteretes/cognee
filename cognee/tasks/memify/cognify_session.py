@@ -1,3 +1,6 @@
+from typing import Optional
+from uuid import UUID
+
 import cognee
 
 from cognee.exceptions import CogneeValidationError, CogneeSystemError
@@ -6,7 +9,7 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger("cognify_session")
 
 
-async def cognify_session(data, dataset_id=None):
+async def cognify_session(data: str, dataset_id: Optional[UUID | str] = None) -> None:
     """
     Process and cognify session data into the knowledge graph.
 

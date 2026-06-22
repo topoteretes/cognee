@@ -1,7 +1,8 @@
 import asyncio
+
 import cognee
-from cognee.shared.logging_utils import setup_logging, ERROR
-from cognee.api.v1.search import SearchType
+from cognee import SearchType
+from cognee.shared.logging_utils import ERROR, setup_logging
 
 # Prerequisites:
 # 1. Copy `.env.template` and rename it to `.env`.
@@ -10,20 +11,18 @@ from cognee.api.v1.search import SearchType
 
 
 async def main():
-    # Prune data/system, add conversation, cognify.
-    await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata=True)
+    # Start clean, then remember knowledge with the v1.0 memory API.
+    await cognee.forget(everything=True)
     text = """
     Natural language processing (NLP) is an interdisciplinary
     subfield of computer science and information retrieval.
     """
-    await cognee.add(text)
-    await cognee.cognify()
+
+    await cognee.remember(text, self_improvement=False)
 
     query_text = "Tell me about NLP"
     print(f"Searching cognee for insights with query: '{query_text}'")
-    # Query cognee for insights on the added text
-    search_results = await cognee.search(
+    search_results = await cognee.recall(
         query_type=SearchType.GRAPH_COMPLETION, query_text=query_text
     )
 

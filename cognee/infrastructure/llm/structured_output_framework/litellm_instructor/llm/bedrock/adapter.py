@@ -1,24 +1,28 @@
-import litellm
-import instructor
-from typing import Type
-from pydantic import BaseModel
-from litellm.exceptions import ContentPolicyViolationError
-from instructor.exceptions import InstructorRetryException
+from typing import Any
 
-from cognee.infrastructure.llm.LLMGateway import LLMGateway
-from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.llm_interface import (
-    LLMInterface,
-)
+import instructor
+import litellm
+from instructor.exceptions import InstructorRetryException
+from litellm.exceptions import ContentPolicyViolationError
+from pydantic import BaseModel
+
+from cognee.infrastructure.files.storage.s3_config import get_s3_config
 from cognee.infrastructure.llm.exceptions import (
     ContentPolicyFilterError,
     MissingSystemPromptPathError,
 )
-from cognee.infrastructure.files.storage.s3_config import get_s3_config
+from cognee.infrastructure.llm.prompts.read_query_prompt import read_query_prompt
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.llm_interface import (
+    LLMInterface,
+)
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.rate_limiter import (
     rate_limit_async,
     rate_limit_sync,
     sleep_and_retry_async,
     sleep_and_retry_sync,
+)
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.types import (
+    TranscriptionReturnType,
 )
 from cognee.modules.observability.get_observe import get_observe
 
@@ -34,20 +38,19 @@ class BedrockAdapter(LLMInterface):
     """
 
     name = "Bedrock"
-    model: str
-    api_key: str
     default_instructor_mode = "json_schema_mode"
 
-    MAX_RETRIES = 5
+    MAX_RETRIES = 2
 
     def __init__(
         self,
         model: str,
-        api_key: str = None,
+        api_key: str | None = None,
         max_completion_tokens: int = 16384,
         streaming: bool = False,
-        instructor_mode: str = None,
-    ):
+        instructor_mode: str | None = None,
+        llm_args: dict[str, Any] | None = None,
+    ) -> None:
         self.instructor_mode = instructor_mode if instructor_mode else self.default_instructor_mode
 
         self.aclient = instructor.from_litellm(
@@ -58,24 +61,26 @@ class BedrockAdapter(LLMInterface):
         self.api_key = api_key
         self.max_completion_tokens = max_completion_tokens
         self.streaming = streaming
+        self.llm_args: dict[str, Any] = llm_args or {}
 
     def _create_bedrock_request(
-        self, text_input: str, system_prompt: str, response_model: Type[BaseModel]
-    ) -> dict:
+        self, text_input: str, system_prompt: str, response_model: type[BaseModel], **kwargs: Any
+    ) -> dict[str, Any]:
         """Create Bedrock request with authentication."""
 
+        merged_kwargs = {**self.llm_args, **kwargs}
         request_params = {
             "model": self.model,
             "custom_llm_provider": "bedrock",
             "drop_params": True,
             "messages": [
-                {"role": "user", "content": text_input},
                 {"role": "system", "content": system_prompt},
+                {"role": "user", "content": text_input},
             ],
             "response_model": response_model,
             "max_retries": self.MAX_RETRIES,
-            "max_completion_tokens": self.max_completion_tokens,
             "stream": self.streaming,
+            **merged_kwargs,
         }
 
         s3_config = get_s3_config()
@@ -104,12 +109,14 @@ class BedrockAdapter(LLMInterface):
     @sleep_and_retry_async()
     @rate_limit_async
     async def acreate_structured_output(
-        self, text_input: str, system_prompt: str, response_model: Type[BaseModel]
+        self, text_input: str, system_prompt: str, response_model: type[BaseModel], **kwargs: Any
     ) -> BaseModel:
         """Generate structured output from AWS Bedrock API."""
 
         try:
-            request_params = self._create_bedrock_request(text_input, system_prompt, response_model)
+            request_params = self._create_bedrock_request(
+                text_input, system_prompt, response_model, **kwargs
+            )
             return await self.aclient.chat.completions.create(**request_params)
 
         except (
@@ -126,24 +133,19 @@ class BedrockAdapter(LLMInterface):
                 f"The provided input contains content that is not aligned with our content policy: {text_input}"
             )
 
-    @observe
-    @sleep_and_retry_sync()
-    @rate_limit_sync
-    def create_structured_output(
-        self, text_input: str, system_prompt: str, response_model: Type[BaseModel]
-    ) -> BaseModel:
-        """Generate structured output from AWS Bedrock API (synchronous)."""
+    async def create_transcript(self, input: str) -> TranscriptionReturnType | None:
+        raise NotImplementedError
 
-        request_params = self._create_bedrock_request(text_input, system_prompt, response_model)
-        return self.client.chat.completions.create(**request_params)
+    async def transcribe_image(self, input: str) -> Any:
+        raise NotImplementedError
 
-    def show_prompt(self, text_input: str, system_prompt: str) -> str:
+    def show_prompt(self, text_input: str, system_prompt: str) -> str | None:
         """Format and display the prompt for a user query."""
         if not text_input:
             text_input = "No user input provided."
         if not system_prompt:
             raise MissingSystemPromptPathError()
-        system_prompt = LLMGateway.read_query_prompt(system_prompt)
+        system_prompt: str | None = read_query_prompt(system_prompt)
 
         formatted_prompt = (
             f"""System Prompt:\n{system_prompt}\n\nUser Input:\n{text_input}\n"""

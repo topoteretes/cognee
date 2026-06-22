@@ -6,6 +6,10 @@ from cognee.tasks.temporal_graph.models import EventList
 from cognee.modules.engine.utils.generate_event_datapoint import generate_event_datapoint
 
 
+from cognee.modules.pipelines.tasks.task import task_summary
+
+
+@task_summary("Extracted events from {n} chunk(s)")
 async def extract_events_and_timestamps(data_chunks: List[DocumentChunk]) -> List[DocumentChunk]:
     """
     Extracts events and their timestamps from document chunks using an LLM.

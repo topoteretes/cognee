@@ -42,6 +42,7 @@ async def test_init_custom_params():
         validation_system_prompt_path="custom_validation_system.txt",
         followup_system_prompt_path="custom_followup_system.txt",
         followup_user_prompt_path="custom_followup_user.txt",
+        feedback_influence=0.25,
     )
 
     assert retriever.top_k == 10
@@ -51,6 +52,7 @@ async def test_init_custom_params():
     assert retriever.validation_system_prompt_path == "custom_validation_system.txt"
     assert retriever.followup_system_prompt_path == "custom_followup_system.txt"
     assert retriever.followup_user_prompt_path == "custom_followup_user.txt"
+    assert retriever.feedback_influence == 0.25
 
 
 @pytest.mark.asyncio
@@ -256,12 +258,16 @@ async def test_get_completion(mock_edge):
     mock_graph_engine = AsyncMock()
     mock_graph_engine.is_empty = AsyncMock(return_value=False)
 
+    unified_mock = AsyncMock()
+    unified_mock.graph = mock_graph_engine
+    unified_mock.vector = MagicMock()
+
     retriever = GraphCompletionCotRetriever(max_iter=1)
 
     with (
         patch(
-            "cognee.modules.retrieval.graph_completion_retriever.get_graph_engine",
-            return_value=mock_graph_engine,
+            "cognee.modules.retrieval.graph_completion_retriever.get_unified_engine",
+            return_value=unified_mock,
         ),
         patch(
             "cognee.modules.retrieval.graph_completion_retriever.brute_force_triplet_search",
@@ -326,6 +332,10 @@ async def test_get_completion_with_session(mock_edge):
     mock_graph_engine = AsyncMock()
     mock_graph_engine.is_empty = AsyncMock(return_value=False)
 
+    unified_mock = AsyncMock()
+    unified_mock.graph = mock_graph_engine
+    unified_mock.vector = MagicMock()
+
     retriever = GraphCompletionCotRetriever(session_id="test_session", max_iter=1)
 
     mock_user = MagicMock()
@@ -333,8 +343,8 @@ async def test_get_completion_with_session(mock_edge):
 
     with (
         patch(
-            "cognee.modules.retrieval.graph_completion_retriever.get_graph_engine",
-            return_value=mock_graph_engine,
+            "cognee.modules.retrieval.graph_completion_retriever.get_unified_engine",
+            return_value=unified_mock,
         ),
         patch(
             "cognee.modules.retrieval.graph_completion_retriever.brute_force_triplet_search",
@@ -412,12 +422,16 @@ async def test_get_completion_with_response_model(mock_edge):
     mock_graph_engine = AsyncMock()
     mock_graph_engine.is_empty = AsyncMock(return_value=False)
 
+    unified_mock = AsyncMock()
+    unified_mock.graph = mock_graph_engine
+    unified_mock.vector = MagicMock()
+
     retriever = GraphCompletionCotRetriever(response_model=TestModel, max_iter=1)
 
     with (
         patch(
-            "cognee.modules.retrieval.graph_completion_retriever.get_graph_engine",
-            return_value=mock_graph_engine,
+            "cognee.modules.retrieval.graph_completion_retriever.get_unified_engine",
+            return_value=unified_mock,
         ),
         patch(
             "cognee.modules.retrieval.graph_completion_retriever.brute_force_triplet_search",
@@ -458,12 +472,16 @@ async def test_get_completion_with_session_no_user_id(mock_edge):
     mock_graph_engine = AsyncMock()
     mock_graph_engine.is_empty = AsyncMock(return_value=False)
 
+    unified_mock = AsyncMock()
+    unified_mock.graph = mock_graph_engine
+    unified_mock.vector = MagicMock()
+
     retriever = GraphCompletionCotRetriever(max_iter=1)
 
     with (
         patch(
-            "cognee.modules.retrieval.graph_completion_retriever.get_graph_engine",
-            return_value=mock_graph_engine,
+            "cognee.modules.retrieval.graph_completion_retriever.get_unified_engine",
+            return_value=unified_mock,
         ),
         patch(
             "cognee.modules.retrieval.graph_completion_retriever.brute_force_triplet_search",
@@ -551,12 +569,16 @@ async def test_get_completion_batch_queries(mock_edge):
     mock_graph_engine = AsyncMock()
     mock_graph_engine.is_empty = AsyncMock(return_value=False)
 
+    unified_mock = AsyncMock()
+    unified_mock.graph = mock_graph_engine
+    unified_mock.vector = MagicMock()
+
     retriever = GraphCompletionCotRetriever(max_iter=1)
 
     with (
         patch(
-            "cognee.modules.retrieval.graph_completion_retriever.get_graph_engine",
-            return_value=mock_graph_engine,
+            "cognee.modules.retrieval.graph_completion_retriever.get_unified_engine",
+            return_value=unified_mock,
         ),
         patch(
             "cognee.modules.retrieval.graph_completion_retriever.brute_force_triplet_search",
@@ -570,7 +592,14 @@ async def test_get_completion_batch_queries(mock_edge):
             "cognee.modules.retrieval.utils.completion.generate_completion",
             return_value="Generated answer",
         ),
+        patch(
+            "cognee.modules.retrieval.graph_completion_retriever.CacheConfig"
+        ) as mock_cache_config,
     ):
+        mock_config = MagicMock()
+        mock_config.caching = False
+        mock_cache_config.return_value = mock_config
+
         objects = await retriever.get_retrieved_objects(
             query_batch=["test query 1", "test query 2"]
         )
@@ -598,12 +627,16 @@ async def test_get_completion_batch_queries_with_response_model(mock_edge):
     mock_graph_engine = AsyncMock()
     mock_graph_engine.is_empty = AsyncMock(return_value=False)
 
+    unified_mock = AsyncMock()
+    unified_mock.graph = mock_graph_engine
+    unified_mock.vector = MagicMock()
+
     retriever = GraphCompletionCotRetriever(response_model=TestModel, max_iter=1)
 
     with (
         patch(
-            "cognee.modules.retrieval.graph_completion_retriever.get_graph_engine",
-            return_value=mock_graph_engine,
+            "cognee.modules.retrieval.graph_completion_retriever.get_unified_engine",
+            return_value=unified_mock,
         ),
         patch(
             "cognee.modules.retrieval.graph_completion_retriever.brute_force_triplet_search",
@@ -646,12 +679,16 @@ async def test_get_completion_batch_queries_duplicate_queries(mock_edge):
     mock_graph_engine = AsyncMock()
     mock_graph_engine.is_empty = AsyncMock(return_value=False)
 
+    unified_mock = AsyncMock()
+    unified_mock.graph = mock_graph_engine
+    unified_mock.vector = MagicMock()
+
     retriever = GraphCompletionCotRetriever()
 
     with (
         patch(
-            "cognee.modules.retrieval.graph_completion_retriever.get_graph_engine",
-            return_value=mock_graph_engine,
+            "cognee.modules.retrieval.graph_completion_retriever.get_unified_engine",
+            return_value=unified_mock,
         ),
         patch(
             "cognee.modules.retrieval.graph_completion_retriever.brute_force_triplet_search",
@@ -665,7 +702,14 @@ async def test_get_completion_batch_queries_duplicate_queries(mock_edge):
             "cognee.modules.retrieval.utils.completion.generate_completion",
             return_value="Generated answer",
         ),
+        patch(
+            "cognee.modules.retrieval.graph_completion_retriever.CacheConfig"
+        ) as mock_cache_config,
     ):
+        mock_config = MagicMock()
+        mock_config.caching = False
+        mock_cache_config.return_value = mock_config
+
         objects = await retriever.get_retrieved_objects(
             query_batch=["test query 1", "test query 1"]
         )

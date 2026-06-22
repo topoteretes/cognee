@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Any, Optional, Type, List, Union
+from typing import Any, Dict, List, Optional, Union
 
 
 class BaseRetriever(ABC):
@@ -70,6 +70,33 @@ class BaseRetriever(ABC):
             List[Any]: A list containing the generated completions or response objects.
         """
         pass
+
+    def _extract_context_object_ids(self, retrieved_objects: Any) -> Optional[Dict[str, List[str]]]:
+        """
+        Extract node_ids and edge_ids from retrieved_objects for session QA.
+        Override in retrievers that use session and have graph elements to store.
+        Only called when session is enabled.
+        """
+        return None
+
+    async def prepare_session_turn_for_retrieval(self, query: str):
+        """Analyze a session turn before retrieval and fail open to the original query."""
+        try:
+            from cognee.infrastructure.session.get_session_manager import get_session_manager
+            from cognee.infrastructure.session.session_manager import SessionTurnPreparation
+
+            if not query:
+                return SessionTurnPreparation(should_answer=True, effective_query=query or "")
+
+            session_manager = get_session_manager()
+            return await session_manager.prepare_session_turn(
+                session_id=getattr(self, "session_id", None),
+                query=query,
+            )
+        except Exception:
+            from cognee.infrastructure.session.session_manager import SessionTurnPreparation
+
+            return SessionTurnPreparation(should_answer=True, effective_query=query or "")
 
     async def get_completion(self, query: str) -> Union[List[str], List[dict]]:
         """

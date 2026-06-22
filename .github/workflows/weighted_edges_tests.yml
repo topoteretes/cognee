@@ -33,6 +33,7 @@ jobs:
       LLM_PROVIDER: openai
       LLM_MODEL: gpt-5-mini
       LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      LLM_ARGS: ${{ secrets.LLM_ARGS }}
 
     steps:
       - name: Check out repository
@@ -69,12 +70,11 @@ jobs:
       LLM_MODEL: gpt-5-mini
       LLM_ENDPOINT: https://api.openai.com/v1
       LLM_API_KEY: ${{ secrets.OPENAI_API_KEY  }}
+      LLM_ARGS: ${{ secrets.LLM_ARGS }}
       LLM_API_VERSION: "2024-02-01"
       EMBEDDING_DIMENSIONS: 300
       EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-      EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
       EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-      EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -111,12 +111,11 @@ jobs:
       LLM_MODEL: gpt-5-mini
       LLM_ENDPOINT: https://api.openai.com/v1
       LLM_API_KEY: ${{ secrets.OPENAI_API_KEY  }}
+      LLM_ARGS: ${{ secrets.LLM_ARGS }}
       LLM_API_VERSION: "2024-02-01"
       EMBEDDING_DIMENSIONS: 300
       EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-      EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
       EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-      EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
 
     steps:
       - name: Check out repository
@@ -135,9 +134,9 @@ jobs:
 
       - name: Verify Visualization File Created
         run: |
-          if [ -f "examples/demos/dunder_mifflin_company_graph.html" ]; then
+          if [ -f "examples/demos/.artifacts/dunder_mifflin_company_graph.html" ]; then
             echo "✅ Visualization file created successfully"
-            ls -la examples/demos/dunder_mifflin_company_graph.html
+            ls -la examples/demos/.artifacts/dunder_mifflin_company_graph.html
           else
             echo "❌ Visualization file not found"
             exit 1

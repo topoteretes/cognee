@@ -1,8 +1,11 @@
+from typing import Any
+
 import filetype
-from typing import Dict, List, Optional, Any
-from .LoaderInterface import LoaderInterface
+
 from cognee.infrastructure.files.utils.guess_file_type import guess_file_type
 from cognee.shared.logging_utils import get_logger
+
+from .LoaderInterface import LoaderInterface
 
 logger = get_logger(__name__)
 
@@ -15,16 +18,16 @@ class LoaderEngine:
     providing a centralized system for file loading operations.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """
         Initialize the loader engine.
 
         Args:
             default_loader_priority: Priority order for loader selection
         """
-        self._loaders: Dict[str, LoaderInterface] = {}
-        self._extension_map: Dict[str, List[LoaderInterface]] = {}
-        self._mime_type_map: Dict[str, List[LoaderInterface]] = {}
+        self._loaders: dict[str, LoaderInterface] = {}
+        self._extension_map: dict[str, list[LoaderInterface]] = {}
+        self._mime_type_map: dict[str, list[LoaderInterface]] = {}
 
         self.default_loader_priority = [
             "text_loader",
@@ -34,6 +37,7 @@ class LoaderEngine:
             "csv_loader",
             "unstructured_loader",
             "advanced_pdf_loader",
+            "docling_loader",
         ]
 
     def register_loader(self, loader: LoaderInterface) -> bool:
@@ -68,8 +72,8 @@ class LoaderEngine:
     def get_loader(
         self,
         file_path: str,
-        preferred_loaders: dict[str, dict[str, Any]],
-    ) -> Optional[LoaderInterface]:
+        preferred_loaders: dict[str, dict[str, Any]] | None,
+    ) -> LoaderInterface | None:
         """
         Get appropriate loader for a file.
 
@@ -82,7 +86,7 @@ class LoaderEngine:
         """
         from pathlib import Path
 
-        file_info = guess_file_type(file_path)
+        file_info = guess_file_type(file_path)  # ty:ignore[invalid-argument-type]
 
         path_extension = Path(file_path).suffix.lstrip(".")
 
@@ -120,9 +124,9 @@ class LoaderEngine:
     async def load_file(
         self,
         file_path: str,
-        preferred_loaders: dict[str, dict[str, Any]] = None,
-        **kwargs,
-    ):
+        preferred_loaders: dict[str, dict[str, Any]] | None = None,
+        **kwargs: Any,
+    ) -> str:
         """
         Load file using appropriate loader.
 
@@ -137,7 +141,7 @@ class LoaderEngine:
         """
         loader = self.get_loader(file_path, preferred_loaders)
         if not loader:
-            raise ValueError(f"No loader found for file: {file_path}")
+            raise ValueError(self._no_loader_message(file_path))
 
         logger.debug(f"Loading {file_path} with {loader.loader_name}")
 
@@ -151,7 +155,55 @@ class LoaderEngine:
 
         return await loader.load(file_path, **merged_kwargs)
 
-    def get_available_loaders(self) -> List[str]:
+    # Extensions handled only by optional document loaders, mapped to the
+    # cognee extra that provides the loader. Used to turn an opaque
+    # "no loader found" into an actionable install hint.
+    _OPTIONAL_FORMAT_EXTRAS = {
+        "pptx": "docling",
+        "ppt": "docling",
+        "odp": "docling",
+        "docx": "docling",
+        "doc": "docling",
+        "odt": "docling",
+        "xlsx": "docling",
+        "xls": "docling",
+        "ods": "docling",
+        "rtf": "docling",
+        "html": "docling",
+        "htm": "docling",
+        "eml": "docling",
+        "msg": "docling",
+        "epub": "docling",
+    }
+
+    def _no_loader_message(self, file_path: str) -> str:
+        """Build an actionable error for a file no registered loader can handle.
+
+        Names the extension, lists the currently supported extensions, and — for
+        office/document formats that only ship via an optional loader — tells the
+        user which extra to install (e.g. ``.pptx`` needs ``cognee[docling]``).
+        """
+        from pathlib import Path
+
+        ext = Path(file_path).suffix.lstrip(".").lower()
+        supported = ", ".join(sorted(self._extension_map.keys())) or "none"
+
+        message = f"No loader found for file '{file_path}'"
+        if ext:
+            message += f" (extension '.{ext}')"
+        message += "."
+
+        extra = self._OPTIONAL_FORMAT_EXTRAS.get(ext)
+        if extra:
+            message += (
+                f" '.{ext}' files need an optional document loader that is not installed. "
+                f"Install it with `pip install cognee[{extra}]` (or `cognee[unstructured]`) and retry."
+            )
+
+        message += f" Supported extensions: {supported}."
+        return message
+
+    def get_available_loaders(self) -> list[str]:
         """
         Get list of available loader names.
 
@@ -160,7 +212,7 @@ class LoaderEngine:
         """
         return list(self._loaders.keys())
 
-    def get_loader_info(self, loader_name: str) -> Dict[str, any]:
+    def get_loader_info(self, loader_name: str) -> dict[str, Any]:
         """
         Get information about a specific loader.
 

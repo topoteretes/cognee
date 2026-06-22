@@ -15,6 +15,9 @@ from cognee.shared.logging_utils import setup_logging
 
 logger = setup_logging()
 
+# ---------------------------------------------------------------------------
+# V1 API
+# ---------------------------------------------------------------------------
 from .api.v1.add import add
 from .api.v1.delete import delete
 from .api.v1.cognify import cognify
@@ -23,9 +26,16 @@ from .modules.run_custom_pipeline import run_custom_pipeline
 from .api.v1.update import update
 from .api.v1.config.config import config
 from .api.v1.datasets.datasets import datasets
+from .api.v1.agents.agents import agents
 from .api.v1.prune import prune
 from .api.v1.search import SearchType, search
-from .api.v1.visualize import visualize_graph, start_visualization_server
+from .api.v1.visualize import (
+    visualize_graph,
+    start_visualization_server,
+    get_schema_inventory,
+    get_memory_provenance_graph,
+    visualize_memory_provenance,
+)
 from cognee.modules.visualization.cognee_network_visualization import (
     cognee_network_visualization,
 )
@@ -34,5 +44,46 @@ from .api.v1.session import session
 
 # Pipelines
 from .modules import pipelines
+from .pipelines import Drop
 
+# Migrations
 from cognee.run_migrations import run_migrations
+
+# ---------------------------------------------------------------------------
+# V2 memory-oriented API
+# ---------------------------------------------------------------------------
+from .api.v1 import (
+    remember,
+    RememberResult,
+    recall,
+    improve,
+    forget,
+    serve,
+    disconnect,
+    visualize,
+    push,
+    PushResult,
+    export,
+    ExportResult,
+)
+from .memory import MemoryEntry, QAEntry, TraceEntry, FeedbackEntry
+
+# Memory migration (cognee.migration has the provider sources:
+# Mem0Source, ZepSource/GraphitiSource, LettaSource, COGXArchiveSource)
+from . import migration
+
+# Tracing / Observability
+from cognee.modules.observability.trace_context import (
+    enable_tracing,
+    disable_tracing,
+    get_last_trace,
+    get_all_traces,
+    clear_traces,
+)
+
+# Agent memory
+from cognee.modules.agent_memory import agent_memory
+
+# Relational DB models
+from cognee.modules.session_lifecycle.models import SessionModelUsage, SessionRecord
+import cognee.modules.migrations.models  # noqa: F401  (registers global_database_version)

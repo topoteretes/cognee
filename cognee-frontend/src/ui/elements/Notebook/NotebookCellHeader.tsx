@@ -4,10 +4,10 @@ import { useState } from "react";
 import classNames from "classnames";
 
 import { isCloudEnvironment, useBoolean } from "@/utils";
-import { PlayIcon } from "@/ui/Icons";
+import { PlayIcon } from "@/ui/icons";
 import PopupMenu from "@/ui/elements/PopupMenu";
 import { IconButton } from "@/ui/elements";
-import { LoadingIndicator } from "@/ui/App";
+import { LoadingIndicator } from "@/ui/app";
 
 import { Cell } from "./types";
 

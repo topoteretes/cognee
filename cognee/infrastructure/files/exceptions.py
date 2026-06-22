@@ -8,6 +8,6 @@ class FileContentHashingError(Exception):
         self,
         message: str = "Failed to hash content of the file.",
         name: str = "FileContentHashingError",
-        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-    ):
+        status_code: int = status.HTTP_422_UNPROCESSABLE_CONTENT,
+    ) -> None:
         super().__init__(message, name, status_code)

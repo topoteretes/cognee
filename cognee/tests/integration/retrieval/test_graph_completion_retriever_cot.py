@@ -156,7 +156,7 @@ async def setup_test_environment_empty():
 @pytest.mark.asyncio
 async def test_graph_completion_cot_context_simple(setup_test_environment_simple):
     """Integration test: verify GraphCompletionCotRetriever can retrieve context (simple)."""
-    retriever = GraphCompletionCotRetriever()
+    retriever = GraphCompletionCotRetriever(max_iter=2)
     query = "Who works at Canva?"
 
     triplets = await retriever.get_retrieved_objects(query)
@@ -179,7 +179,7 @@ async def test_graph_completion_cot_context_simple(setup_test_environment_simple
 @pytest.mark.asyncio
 async def test_graph_completion_cot_context_complex(setup_test_environment_complex):
     """Integration test: verify GraphCompletionCotRetriever can retrieve context (complex)."""
-    retriever = GraphCompletionCotRetriever(top_k=20)
+    retriever = GraphCompletionCotRetriever(top_k=20, max_iter=2)
     query = "Who works at Figma?"
 
     triplets = await retriever.get_retrieved_objects(query)
@@ -203,7 +203,7 @@ async def test_graph_completion_cot_context_complex(setup_test_environment_compl
 @pytest.mark.asyncio
 async def test_get_graph_completion_cot_context_on_empty_graph(setup_test_environment_empty):
     """Integration test: verify GraphCompletionCotRetriever handles empty graph correctly."""
-    retriever = GraphCompletionCotRetriever()
+    retriever = GraphCompletionCotRetriever(max_iter=2)
     query = "Who works at Figma?"
 
     triplets = await retriever.get_retrieved_objects(query)
@@ -215,7 +215,7 @@ async def test_get_graph_completion_cot_context_on_empty_graph(setup_test_enviro
 @pytest.mark.asyncio
 async def test_graph_completion_cot_batch_queries_context_simple(setup_test_environment_simple):
     """Integration test: verify GraphCompletionCotRetriever can retrieve context for multiple queries (simple)."""
-    retriever = GraphCompletionCotRetriever()
+    retriever = GraphCompletionCotRetriever(max_iter=2)
     query_batch = ["Who works at Canva?", "Who works at Figma?"]
 
     triplets = await retriever.get_retrieved_objects(query_batch=query_batch)
@@ -246,7 +246,7 @@ async def test_graph_completion_cot_batch_queries_context_simple(setup_test_envi
 @pytest.mark.asyncio
 async def test_graph_completion_cot_batch_queries_context_complex(setup_test_environment_complex):
     """Integration test: verify GraphCompletionCotRetriever can retrieve context for multiple queries (complex)."""
-    retriever = GraphCompletionCotRetriever(top_k=20)
+    retriever = GraphCompletionCotRetriever(top_k=20, max_iter=2)
     query_batch = ["Who works at Canva?", "Who works at Figma?"]
 
     triplets = await retriever.get_retrieved_objects(query_batch=query_batch)
@@ -279,7 +279,7 @@ async def test_get_graph_completion_cot_batch_queries_context_on_empty_graph(
     setup_test_environment_empty,
 ):
     """Integration test: verify GraphCompletionCotRetriever handles empty graph correctly for multiple queries."""
-    retriever = GraphCompletionCotRetriever()
+    retriever = GraphCompletionCotRetriever(max_iter=2)
     query_batch = ["Who works at Canva?", "Who works at Figma?"]
 
     triplets = await retriever.get_retrieved_objects(query_batch=query_batch)
@@ -298,7 +298,7 @@ async def test_graph_completion_cot_context_complex_duplicate_queries(
     setup_test_environment_complex,
 ):
     """Integration test: verify GraphCompletionCotRetriever can retrieve context for duplicate queries (complex)."""
-    retriever = GraphCompletionCotRetriever(top_k=20)
+    retriever = GraphCompletionCotRetriever(top_k=20, max_iter=2)
     query_batch = ["Who works at Figma?", "Who works at Figma?"]
 
     triplets = await retriever.get_retrieved_objects(query_batch=query_batch)

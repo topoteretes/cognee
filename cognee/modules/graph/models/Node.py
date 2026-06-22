@@ -3,7 +3,7 @@ from sqlalchemy import (
     DateTime,
     Index,
     # event,
-    String,
+    Text,
     JSON,
     UUID,
 )
@@ -26,9 +26,12 @@ class Node(Base):
     data_id: Mapped[UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
 
     dataset_id: Mapped[UUID] = mapped_column(UUID(as_uuid=True), index=True, nullable=False)
+    pipeline_run_id: Mapped[UUID | None] = mapped_column(
+        UUID(as_uuid=True), index=True, nullable=True
+    )
 
-    label: Mapped[str | None] = mapped_column(String(255))
-    type: Mapped[str] = mapped_column(String(255), nullable=False)
+    label: Mapped[str | None] = mapped_column(Text)
+    type: Mapped[str] = mapped_column(Text, nullable=False)
     indexed_fields: Mapped[list] = mapped_column(JSON, nullable=False)
 
     attributes: Mapped[dict | None] = mapped_column(JSON)
