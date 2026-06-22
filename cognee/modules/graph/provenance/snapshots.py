@@ -49,6 +49,9 @@ class NodeDeleteData:
             remaining source ref.
         source_run_refs: Source-run refs (see refs.make_source_run_ref) that
             touched the node. Used by rollback to scope removal to one run.
+        dataset_ids: Dataset ids (stringified) the node belongs to. Used by
+            dataset-scoped delete to decide survival: a node shared across
+            datasets survives a single-dataset delete.
     """
 
     node_id: str
@@ -57,6 +60,7 @@ class NodeDeleteData:
     indexed_fields: tuple[str, ...] = ()
     source_refs: tuple[str, ...] = ()
     source_run_refs: tuple[str, ...] = ()
+    dataset_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -72,12 +76,14 @@ class EdgeDeleteData:
             no distinct retrieval text was stored.
         source_refs: Source refs the edge belongs to (see NodeDeleteData).
         source_run_refs: Source-run refs that touched the edge (see NodeDeleteData).
+        dataset_ids: Dataset ids (stringified) the edge belongs to (see NodeDeleteData).
     """
 
     identity: EdgeIdentity
     edge_retrieval_text: str | None = None
     source_refs: tuple[str, ...] = ()
     source_run_refs: tuple[str, ...] = ()
+    dataset_ids: tuple[str, ...] = ()
 
 
 __all__ = ["EdgeIdentity", "NodeDeleteData", "EdgeDeleteData"]

@@ -100,6 +100,16 @@ async def test_cognify_rollback_deletes_graph_before_relational(monkeypatch):
     async def _has_edges_in_legacy_ledger(_edges):
         return []
 
+    # Pin the graph as non-graph-native so rollback takes the relational-ledger
+    # path (the bare stub has no get_node, so is_graph_native_graph fails safe).
+    async def _get_graph_engine():
+        return SimpleNamespace()
+
+    async def _get_unified_engine():
+        return SimpleNamespace()
+
+    monkeypatch.setattr(rollback_module, "get_graph_engine", _get_graph_engine)
+    monkeypatch.setattr(rollback_module, "get_unified_engine", _get_unified_engine)
     monkeypatch.setattr(rollback_module, "get_relational_engine", lambda: engine)
     monkeypatch.setattr(rollback_module, "multi_user_support_possible", lambda: False)
     monkeypatch.setattr(rollback_module, "has_nodes_in_legacy_ledger", _has_nodes_in_legacy_ledger)
@@ -149,6 +159,14 @@ async def test_cognify_rollback_keeps_relational_rows_if_graph_delete_fails(monk
     async def _has_edges_in_legacy_ledger(_edges):
         return []
 
+    async def _get_graph_engine():
+        return SimpleNamespace()
+
+    async def _get_unified_engine():
+        return SimpleNamespace()
+
+    monkeypatch.setattr(rollback_module, "get_graph_engine", _get_graph_engine)
+    monkeypatch.setattr(rollback_module, "get_unified_engine", _get_unified_engine)
     monkeypatch.setattr(rollback_module, "get_relational_engine", lambda: engine)
     monkeypatch.setattr(rollback_module, "multi_user_support_possible", lambda: False)
     monkeypatch.setattr(rollback_module, "has_nodes_in_legacy_ledger", _has_nodes_in_legacy_ledger)

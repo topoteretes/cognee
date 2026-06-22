@@ -179,7 +179,17 @@ class datasets:
             raise UnauthorizedDataAccessError(f"Data {data_id} not accessible.")
 
         async with set_database_global_context_variables(dataset_id, dataset.owner_id):
-            if not await has_data_related_nodes(dataset_id, data_id):
+            from cognee.infrastructure.databases.graph import get_graph_engine
+            from cognee.modules.graph.provenance.markers import is_graph_native_graph
+
+            # Graph-native graphs keep no relational nodes/edges rows, so the
+            # has_data_related_nodes gate would wrongly route them to
+            # legacy_delete. Route them straight to delete_data_nodes_and_edges,
+            # which dispatches to the unified graph-native path.
+            graph_engine = await get_graph_engine()
+            if await is_graph_native_graph(graph_engine):
+                await delete_data_nodes_and_edges(dataset_id, data_id, user.id)
+            elif not await has_data_related_nodes(dataset_id, data_id):
                 await legacy_delete(data, "soft")
             else:
                 await delete_data_nodes_and_edges(dataset_id, data_id, user.id)

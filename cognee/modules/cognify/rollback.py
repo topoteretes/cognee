@@ -5,8 +5,11 @@ from sqlalchemy import and_, delete, distinct, select
 from sqlalchemy.orm import aliased, attributes as orm_attributes
 
 from cognee.context_global_variables import multi_user_support_possible
+from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.modules.data.models import Data
+from cognee.modules.graph.provenance.markers import is_graph_native_graph
 from cognee.modules.graph.legacy.has_edges_in_legacy_ledger import has_edges_in_legacy_ledger
 from cognee.modules.graph.legacy.has_nodes_in_legacy_ledger import has_nodes_in_legacy_ledger
 from cognee.modules.graph.methods.delete_from_graph_and_vector import delete_from_graph_and_vector
@@ -39,6 +42,31 @@ def _extract_data_ids(data_ingestion_info: Any) -> set[UUID]:
     return data_ids
 
 
+async def _reset_cognify_pipeline_status(session, target_data_ids, dataset_id) -> None:
+    """Clear the cognify_pipeline status for the given data ids in this dataset.
+
+    Shared by the graph-native and relational-ledger rollback paths. Does not
+    commit — the caller owns the transaction.
+    """
+    dataset_id_str = str(dataset_id)
+    if not target_data_ids:
+        return
+    data_records = (
+        (await session.execute(select(Data).where(Data.id.in_(list(target_data_ids)))))
+        .scalars()
+        .all()
+    )
+    for data_record in data_records:
+        if not data_record.pipeline_status:
+            continue
+        if (
+            "cognify_pipeline" in data_record.pipeline_status
+            and dataset_id_str in data_record.pipeline_status["cognify_pipeline"]
+        ):
+            del data_record.pipeline_status["cognify_pipeline"][dataset_id_str]
+            orm_attributes.flag_modified(data_record, "pipeline_status")
+
+
 async def cognify_rollback_handler(
     pipeline_run_id: UUID,
     dataset: Any,
@@ -58,6 +86,27 @@ async def cognify_rollback_handler(
 
     user_id = getattr(user, "id", None)
     db_engine = get_relational_engine()
+
+    # Graph-native graphs carry provenance on the graph; route rollback through
+    # the unified boundary by the run's source-run ref, then reset pipeline
+    # status. Old/unmarked graphs (the default until Part 1) fall through to the
+    # relational-ledger rollback below.
+    graph_engine = await get_graph_engine()
+    unified = await get_unified_engine()
+    if await is_graph_native_graph(graph_engine) and unified.supports_graph_native_delete():
+        await unified.rollback_by_pipeline_run_id(pipeline_run_id, dataset_id)
+        target_data_ids = _extract_data_ids(data_ingestion_info)
+        if target_data_ids:
+            async with db_engine.get_async_session() as session:
+                await _reset_cognify_pipeline_status(session, target_data_ids, dataset_id)
+                await session.commit()
+        logger.info(
+            "Graph-native cognify rollback completed for run %s (dataset=%s, user=%s).",
+            pipeline_run_id,
+            dataset_id,
+            user_id,
+        )
+        return
 
     async with db_engine.get_async_session() as session:
         target_nodes = (

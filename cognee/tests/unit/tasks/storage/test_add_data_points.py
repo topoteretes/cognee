@@ -63,6 +63,9 @@ def _make_unified_mock():
     unified.graph = graph_engine
     unified.vector = vector_engine
     unified.has_capability = MagicMock(return_value=False)
+    # Default-stack backend is not graph-native (until Part 1), so add_data_points
+    # takes the relational-ledger path. supports_* is a sync bool, not a coroutine.
+    graph_engine.supports_graph_native_provenance = MagicMock(return_value=False)
     return unified, graph_engine, vector_engine
 
 
