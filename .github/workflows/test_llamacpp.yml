@@ -26,18 +26,21 @@ jobs:
         run: |
           uv add torch
 
-      - name: Download Phi-3.5 GGUF model from HuggingFace
-        # huggingface.co/bartowski/Phi-3.5-mini-instruct-GGUF (MIT).
+      - name: Download Phi-3.5 GGUF model from S3
+        # Mirrored from huggingface.co/bartowski/Phi-3.5-mini-instruct-GGUF (MIT)
+        # into our bucket to avoid HuggingFace 429 rate limits in CI.
         # Phi-3.5-mini reliably emits the required per-node `description`;
         # the previous Phi-3-mini-q4 dropped it, failing extraction.
-        # Pinned by sha256; --retry guards transient 429s on the single nightly pull.
         env:
-          MODEL_URL: https://huggingface.co/bartowski/Phi-3.5-mini-instruct-GGUF/resolve/main/Phi-3.5-mini-instruct-Q4_K_M.gguf
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_S3_DEV_USER_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_S3_DEV_USER_SECRET_KEY }}
+          AWS_DEFAULT_REGION: eu-west-1
+          BUCKET: github-runner-cognee-tests
+          MODEL_KEY: nightly_ci_artifacts/huggingface_models/Phi-3.5-mini-instruct-Q4_K_M.gguf
           MODEL_SHA256: e4165e3a71af97f1b4820da61079826d8752a2088e313af0c7d346796c38eff5
         run: |
           set -euo pipefail
-          curl -fL --retry 5 --retry-delay 15 --retry-all-errors \
-            -o ./Phi-3.5-mini-instruct-Q4_K_M.gguf "$MODEL_URL"
+          aws s3 cp "s3://$BUCKET/$MODEL_KEY" ./Phi-3.5-mini-instruct-Q4_K_M.gguf
           echo "$MODEL_SHA256  ./Phi-3.5-mini-instruct-Q4_K_M.gguf" | sha256sum -c -
 
       - name: Run example test
