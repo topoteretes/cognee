@@ -1,8 +1,6 @@
 import re
-from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
 
 from cognee.context_global_variables import set_session_user_context_variable
@@ -32,8 +30,7 @@ from cognee.modules.recall.types.RecallResponse import (
     ResponseQAEntry,
 )
 from cognee.modules.recall.types.SearchResultItem import SearchResultItem
-from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
-from cognee.modules.search.types import SearchResult, SearchType
+from cognee.modules.search.types import  SearchType
 from cognee.modules.users.exceptions.exceptions import UserNotFoundError
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
