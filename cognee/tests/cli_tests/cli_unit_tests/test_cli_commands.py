@@ -144,7 +144,7 @@ class TestSearchCommand:
         assert "output_format" in actions
 
         # Check default values
-        assert actions["query_type"].default == "GRAPH_COMPLETION"
+        assert actions["query_type"].default == "HYBRID_COMPLETION"
         assert actions["top_k"].default == 10
         assert actions["output_format"].default == "pretty"
 

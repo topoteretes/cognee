@@ -6,13 +6,13 @@ from cognee.modules.search.types import SearchType
 
 class TestFactualQueries:
     def test_simple_who(self):
-        assert route_query("Who won Nobel Prizes?").search_type == SearchType.GRAPH_COMPLETION
+        assert route_query("Who won Nobel Prizes?").search_type == SearchType.HYBRID_COMPLETION
 
     def test_simple_what(self):
-        assert route_query("What did Einstein discover?").search_type == SearchType.GRAPH_COMPLETION
+        assert route_query("What did Einstein discover?").search_type == SearchType.HYBRID_COMPLETION
 
     def test_short_list(self):
-        assert route_query("List all scientists").search_type == SearchType.GRAPH_COMPLETION
+        assert route_query("List all scientists").search_type == SearchType.HYBRID_COMPLETION
 
 
 class TestCypherQueries:
@@ -134,7 +134,7 @@ class TestConfidence:
 
     def test_default_has_base_confidence(self):
         r = route_query("Tell me something interesting")
-        assert r.search_type == SearchType.GRAPH_COMPLETION
+        assert r.search_type == SearchType.HYBRID_COMPLETION
         assert r.confidence >= 0
 
 
@@ -148,7 +148,7 @@ class TestAmbiguousQueries:
         assert r.search_type == SearchType.GRAPH_SUMMARY_COMPLETION
 
     def test_default_for_vague_query(self):
-        assert route_query("Tell me something").search_type == SearchType.GRAPH_COMPLETION
+        assert route_query("Tell me something").search_type == SearchType.HYBRID_COMPLETION
 
 
 class TestOverrideTracking:
