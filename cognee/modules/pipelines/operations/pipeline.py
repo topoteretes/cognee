@@ -22,14 +22,30 @@ from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
 from cognee.modules.pipelines.layers.check_pipeline_run_qualification import (
     check_pipeline_run_qualification,
 )
-from cognee.modules.pipelines.models.PipelineRunInfo import (
-    PipelineRunStarted,
-)
 from typing import Any
 
 logger = get_logger("cognee.pipeline")
 
 update_status_lock = asyncio.Lock()
+
+# Per-dataset locks so concurrent pipeline runs on the SAME dataset are serialized:
+# a run waits until any in-flight run for that dataset finishes, while different
+# datasets still run in parallel.
+# NOTE: process-local only (asyncio) — this does NOT protect against multiple
+# processes/workers running against the same dataset. To be replaced by a
+# cross-process mechanism (e.g. DB-backed lock) later.
+_dataset_locks: dict[UUID, asyncio.Lock] = {}
+_dataset_locks_guard = asyncio.Lock()
+
+
+async def _get_dataset_lock(dataset_id: UUID) -> asyncio.Lock:
+    """Return the asyncio.Lock for a dataset, creating it on first use."""
+    async with _dataset_locks_guard:
+        lock = _dataset_locks.get(dataset_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            _dataset_locks[dataset_id] = lock
+        return lock
 
 
 async def run_pipeline(
@@ -84,38 +100,38 @@ async def run_pipeline_per_dataset(
     llm_config: Optional[LLMConfig] = None,
     embedding_config: Optional[EmbeddingConfig] = None,
 ):
-    if not data:
-        data = await get_dataset_data(dataset_id=dataset.id)
+    # Serialize concurrent runs for the same dataset: hold the per-dataset lock
+    # across the whole run so a second run for this dataset waits here until the
+    # current one finishes.
+    dataset_lock = await _get_dataset_lock(dataset.id)
+    async with dataset_lock:
+        if not data:
+            data = await get_dataset_data(dataset_id=dataset.id)
 
-    process_pipeline_status = await check_pipeline_run_qualification(dataset, data, pipeline_name)
-    if process_pipeline_status:
-        # If pipeline was already processed or is currently being processed
-        # return status information to async generator and finish execution
         if use_pipeline_cache:
-            # If pipeline caching is enabled we do not proceed with re-processing
-            yield process_pipeline_status
-            return
-        else:
-            # If pipeline caching is disabled we always return pipeline started information and proceed with re-processing
-            yield PipelineRunStarted(
-                pipeline_run_id=process_pipeline_status.pipeline_run_id,
-                dataset_id=dataset.id,
-                dataset_name=dataset.name,
-                payload=data,
+            # Caching path: if this dataset's pipeline is already running or has
+            # already completed, return that status instead of re-processing.
+            # When caching is disabled the run always proceeds — concurrent runs
+            # are kept safe by the per-dataset lock above, not by this check.
+            process_pipeline_status = await check_pipeline_run_qualification(
+                dataset, data, pipeline_name
             )
+            if process_pipeline_status:
+                yield process_pipeline_status
+                return
 
-    pipeline_run = run_tasks(
-        tasks,
-        dataset.id,
-        data,
-        user,
-        pipeline_name,
-        incremental_loading=incremental_loading,
-        data_per_batch=data_per_batch,
-        rollback_handler=rollback_handler,
-        llm_config=llm_config,
-        embedding_config=embedding_config,
-    )
+        pipeline_run = run_tasks(
+            tasks,
+            dataset.id,
+            data,
+            user,
+            pipeline_name,
+            incremental_loading=incremental_loading,
+            data_per_batch=data_per_batch,
+            rollback_handler=rollback_handler,
+            llm_config=llm_config,
+            embedding_config=embedding_config,
+        )
 
-    async for pipeline_run_info in pipeline_run:
-        yield pipeline_run_info
+        async for pipeline_run_info in pipeline_run:
+            yield pipeline_run_info

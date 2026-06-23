@@ -270,7 +270,10 @@ async def cognify(
             vector_db_config=vector_db_config,
             graph_db_config=graph_db_config,
             incremental_loading=incremental_loading,
-            use_pipeline_cache=True,
+            # Cognify is no longer gated by check_pipeline_run_qualification:
+            # the per-dataset async lock in run_pipeline_per_dataset serializes
+            # concurrent runs, and each call re-processes rather than short-circuiting.
+            use_pipeline_cache=False,
             pipeline_name="cognify_pipeline",
             data_per_batch=data_per_batch,
             rollback_handler=cognify_rollback_handler,
