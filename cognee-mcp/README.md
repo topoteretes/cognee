@@ -154,7 +154,7 @@ If you'd rather run cognee-mcp in a container, you have two options:
       - `ollama` / `huggingface` - Local model support
       - `docs` - Document processing
       - `codegraph` - Code analysis
-      - `monitoring` - Sentry & Langfuse monitoring
+      - `tracing` - OpenTelemetry tracing
       - `redis` - Redis support
       - And more (see [pyproject.toml](https://github.com/topoteretes/cognee/blob/main/pyproject.toml) for full list)
 2. **Pull from Docker Hub** (no build required):
