@@ -54,7 +54,7 @@ pre-commit install
 - **evals** - Evaluation tools
 - **deepeval** - DeepEval testing framework
 - **posthog** - PostHog analytics
-- **monitoring** - Sentry + Langfuse observability
+- **tracing** - OpenTelemetry tracing
 - **distributed** - Modal distributed execution
 - **dev** - All development tools (pytest, ty, ruff, etc.)
 - **debug** - Debugpy for debugging
