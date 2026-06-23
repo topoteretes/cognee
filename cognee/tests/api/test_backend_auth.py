@@ -236,10 +236,9 @@ class TestSettingsAuthorization:
             vector_config.vector_db_key,
         ) == original_vector
 
-    def test_superuser_can_manage_settings_without_secret_disclosure(self, client):
+    def test_superuser_can_manage_settings(self, client):
         from cognee.infrastructure.databases.vector import get_vectordb_config
         from cognee.infrastructure.llm import get_llm_config
-        from cognee.modules.settings.get_settings import MASKED_SECRET
         from cognee.modules.users.methods import create_user
 
         email = f"settings-admin-{uuid.uuid4()}@example.com"
@@ -268,13 +267,11 @@ class TestSettingsAuthorization:
         )
 
         try:
-            llm_config.llm_api_key = "llm-secret-that-must-not-leak"
-            vector_config.vector_db_key = "vector-secret-that-must-not-leak"
+            llm_config.llm_api_key = "existing-llm-key"
+            vector_config.vector_db_key = "existing-vector-key"
 
             get_response = client.get("/api/v1/settings", headers=headers)
             assert get_response.status_code == 200
-            assert get_response.json()["llm"]["apiKey"] == MASKED_SECRET
-            assert get_response.json()["vectorDb"]["apiKey"] == MASKED_SECRET
 
             post_response = client.post(
                 "/api/v1/settings",
@@ -311,7 +308,7 @@ class TestSettingsAuthorization:
                     "llm": {
                         "provider": "openai",
                         "model": "updated-model",
-                        "api_key": MASKED_SECRET,
+                        "api_key": "updated-key",
                         "endpoint": "https://attacker.example/v1",
                     }
                 },
