@@ -176,7 +176,7 @@ docker-compose --profile ui up
 
 4. **Configure rate limiting**: Set `LLM_RATE_LIMIT_ENABLED=true` to avoid hitting provider limits.
 
-5. **Monitor**: Set `SENTRY_REPORTING_URL` for error tracking. Install with `pip install cognee[monitoring]`.
+5. **Trace**: Enable OpenTelemetry tracing with `COGNEE_TRACING_ENABLED=true` and an OTLP endpoint. Install with `pip install cognee[tracing]`.
 
 ---
 
