@@ -17,9 +17,7 @@ services:
         value: openai/gpt-4o-mini
       - key: LLM_PROVIDER
         value: openai
-      - key: HOST
-        value: 0.0.0.0
-      - key: ENVIRONMENT
+      - key: ENV
         value: prod
       - key: DB_PROVIDER
         value: postgres
