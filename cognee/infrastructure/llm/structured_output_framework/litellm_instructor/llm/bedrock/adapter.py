@@ -40,7 +40,7 @@ class BedrockAdapter(LLMInterface):
     name = "Bedrock"
     default_instructor_mode = "json_schema_mode"
 
-    MAX_RETRIES = 5
+    MAX_RETRIES = 2
 
     def __init__(
         self,

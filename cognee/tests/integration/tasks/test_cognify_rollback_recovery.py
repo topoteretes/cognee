@@ -46,6 +46,7 @@ async def clean_test_environment(request, tmp_path, monkeypatch):
     monkeypatch.setenv("ENABLE_BACKEND_ACCESS_CONTROL", "false")
     monkeypatch.setenv("GRAPH_DATASET_DATABASE_HANDLER", "ladybug")
     monkeypatch.setenv("VECTOR_DATASET_DATABASE_HANDLER", "lancedb")
+    monkeypatch.setenv("RAISE_INCREMENTAL_LOADING_ERRORS", "false")
     test_id = request.node.name
     root = pathlib.Path(tmp_path) / test_id
     system_directory_path = str(root / "system")
@@ -170,7 +171,12 @@ async def _dataset_context(dataset_id, owner_id):
         yield
 
 
-async def _mock_structured_output(self, _text_input: str, _system_prompt: str, response_model):
+async def _mock_structured_output(
+    _text_input: str,
+    _system_prompt: str,
+    response_model,
+    **_kwargs,
+):
     from cognee.shared.data_models import Edge as KGEdge
     from cognee.shared.data_models import KnowledgeGraph, Node as KGNode, SummarizedContent
 

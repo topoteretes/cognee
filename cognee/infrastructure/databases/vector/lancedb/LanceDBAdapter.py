@@ -1248,7 +1248,9 @@ class LanceDBAdapter(VectorDBInterface):
             await collection.delete("id IS NOT NULL")
             await connection.drop_table(collection_name)
 
-        if self.url.startswith("/"):
+        if self.url and not self.url.startswith(
+            ("db://", "http://", "https://", "s3://", "gs://", "az://")
+        ):
             db_dir_path = path.dirname(self.url)
             db_file_name = path.basename(self.url)
             await get_file_storage(db_dir_path).remove_all(db_file_name)

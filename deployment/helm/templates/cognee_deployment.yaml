@@ -22,10 +22,8 @@ spec:
           env:
             - name: ENABLE_BACKEND_ACCESS_CONTROL
               value: "false"
-            - name: HOST
-              value: {{ .Values.cognee.env.HOST }}
-            - name: ENVIRONMENT
-              value: {{ .Values.cognee.env.ENVIRONMENT }}
+            - name: ENV
+              value: {{ .Values.cognee.env.ENV }}
             - name: PYTHONPATH
               value: {{ .Values.cognee.env.PYTHONPATH }}
             - name: VECTOR_DB_PROVIDER

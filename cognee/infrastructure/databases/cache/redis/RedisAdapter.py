@@ -336,6 +336,24 @@ class RedisAdapter(CacheDBInterface):
         session_key = self._session_key(user_id, session_id)
         return [SessionQAEntry(**entry) for entry in await self._load_entries(session_key)]
 
+    async def get_qa_entries_by_ids(
+        self,
+        user_id: str,
+        session_id: str,
+        qa_ids: list[str],
+    ) -> list[SessionQAEntry]:
+        """Return matching QA entries for the given session, oldest first."""
+        wanted_ids = set(qa_ids)
+        if not wanted_ids:
+            return []
+
+        session_key = self._session_key(user_id, session_id)
+        return [
+            SessionQAEntry(**entry)
+            for entry in await self._load_entries(session_key)
+            if entry.get("qa_id") in wanted_ids
+        ]
+
     async def update_qa_entry(
         self,
         user_id: str,
