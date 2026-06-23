@@ -48,7 +48,7 @@ async def _make_engine():
 
 
 @pytest.mark.asyncio
-async def test_name_filter_keeps_acl_shared_dataset_documents(monkeypatch):
+async def test_id_filter_keeps_acl_shared_dataset_documents(monkeypatch):
     engine, db_path = await _make_engine()
     # Both the lookup and its get_dataset_data helper must use the test engine.
     monkeypatch.setattr(gdifu, "get_relational_engine", lambda: engine)
@@ -57,11 +57,12 @@ async def test_name_filter_keeps_acl_shared_dataset_documents(monkeypatch):
         unfiltered = await get_document_ids_for_user(READER_ID)
         assert [str(i) for i in unfiltered] == [str(DATA_ID)]
 
-        # filtering by the shared dataset's name must not drop it.
-        by_name = await get_document_ids_for_user(READER_ID, datasets=[DATASET_NAME])
-        assert [str(i) for i in by_name] == [str(DATA_ID)], (
-            "documents of an ACL-shared dataset must survive a name filter; "
-            f"got {[str(i) for i in by_name]}"
+        # filtering by the shared dataset's id must not drop it, even though the
+        # reader is not its owner.
+        by_id = await get_document_ids_for_user(READER_ID, dataset_ids=[DATASET_ID])
+        assert [str(i) for i in by_id] == [str(DATA_ID)], (
+            "documents of an ACL-shared dataset must survive an id filter; "
+            f"got {[str(i) for i in by_id]}"
         )
     finally:
         await engine.engine.dispose()
