@@ -49,7 +49,7 @@ async def get_document_ids_for_user(user_id: UUID, datasets: list[str] = None) -
                         await session.scalars(
                             select(Dataset.id).where(
                                 Dataset.name == dataset,
-                                Dataset.owner_id == user_id,
+                                Dataset.id.in_(dataset_ids),
                             )
                         )
                     ).one_or_none()
