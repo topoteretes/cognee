@@ -5,6 +5,13 @@ from cognee.modules.pipelines.tasks.task import task_summary
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.infrastructure.databases.unified.capabilities import EngineCapability
+from cognee.infrastructure.databases.provenance import (
+    EdgeIdentity,
+    make_source_ref_key,
+)
+from cognee.infrastructure.databases.provenance.markers import (
+    ensure_graph_native_for_new_graph,
+)
 from cognee.infrastructure.databases.relational import get_async_session
 from cognee.modules.graph.methods import upsert_edges, upsert_nodes
 from cognee.modules.graph.utils import (
@@ -91,32 +98,22 @@ async def add_data_points(
     vector_engine = unified.vector
     use_hybrid = unified.has_capability(EngineCapability.HYBRID_WRITE)
 
+    is_graph_native = False
     if user and dataset and data_item:
-        # Single session for all upserts: one transaction, one commit. The
-        # rollback ledger is written BEFORE the graph/vector writes so a
-        # failed write can always be swept by the rollback handler.
-        async with get_async_session() as session:
-            await upsert_nodes(
-                nodes,
-                tenant_id=user.tenant_id,
-                user_id=user.id,
-                dataset_id=dataset.id,
-                data_id=data_item.id,
-                session=session,
-                pipeline_run_id=pipeline_run_id,
-            )
-            await upsert_edges(
-                edges,
-                tenant_id=user.tenant_id,
-                user_id=user.id,
-                dataset_id=dataset.id,
-                data_id=data_item.id,
-                session=session,
-                pipeline_run_id=pipeline_run_id,
-            )
-            if custom_edges:
-                await upsert_edges(
-                    custom_edges,
+        # Graph-native graphs (empty graphs marked via graph metadata) carry
+        # their provenance in the graph itself, so they skip the relational
+        # rollback ledger entirely. On the default/pre-Part-1 stack marking is
+        # impossible (set_graph_metadata raises), so this stays False and the
+        # ledger path below runs unchanged.
+        is_graph_native = await ensure_graph_native_for_new_graph(graph_engine)
+
+        if not is_graph_native:
+            # Single session for all upserts: one transaction, one commit. The
+            # rollback ledger is written BEFORE the graph/vector writes so a
+            # failed write can always be swept by the rollback handler.
+            async with get_async_session() as session:
+                await upsert_nodes(
+                    nodes,
                     tenant_id=user.tenant_id,
                     user_id=user.id,
                     dataset_id=dataset.id,
@@ -124,7 +121,26 @@ async def add_data_points(
                     session=session,
                     pipeline_run_id=pipeline_run_id,
                 )
-            await session.commit()
+                await upsert_edges(
+                    edges,
+                    tenant_id=user.tenant_id,
+                    user_id=user.id,
+                    dataset_id=dataset.id,
+                    data_id=data_item.id,
+                    session=session,
+                    pipeline_run_id=pipeline_run_id,
+                )
+                if custom_edges:
+                    await upsert_edges(
+                        custom_edges,
+                        tenant_id=user.tenant_id,
+                        user_id=user.id,
+                        dataset_id=dataset.id,
+                        data_id=data_item.id,
+                        session=session,
+                        pipeline_run_id=pipeline_run_id,
+                    )
+                await session.commit()
 
     if use_hybrid:
         await graph_engine.add_nodes_with_vectors(nodes)
@@ -157,6 +173,22 @@ async def add_data_points(
             )
 
         edges.extend(custom_edges)
+
+    if is_graph_native and user and dataset and data_item:
+        # Graph-native provenance: now that the graph (and vector) writes have
+        # succeeded, stamp the source refs onto the written nodes/edges. A
+        # single attach call per artifact kind — the adapter derives the
+        # dataset_ids / run_ids / run_refs from the source ref key + run id.
+        source_ref_key = make_source_ref_key(dataset.id, data_item.id)
+        run_arg = str(pipeline_run_id) if pipeline_run_id else None
+
+        node_ids = [str(node.id) for node in nodes]
+        edge_ids = [EdgeIdentity(str(edge[0]), str(edge[1]), edge[2]) for edge in edges]
+
+        if node_ids:
+            await graph_engine.attach_node_source_refs(node_ids, [source_ref_key], run_arg)
+        if edge_ids:
+            await graph_engine.attach_edge_source_refs(edge_ids, [source_ref_key], run_arg)
 
     if embed_triplets:
         triplets = _create_triplets_from_graph(nodes, edges)

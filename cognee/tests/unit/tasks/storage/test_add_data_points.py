@@ -63,6 +63,10 @@ def _make_unified_mock():
     unified.graph = graph_engine
     unified.vector = vector_engine
     unified.has_capability = MagicMock(return_value=False)
+    # Default-stack backend is not graph-native (until Part 1): a non-empty/
+    # unmarked graph keeps add_data_points on the relational-ledger path.
+    graph_engine.is_empty = AsyncMock(return_value=False)
+    graph_engine.get_graph_metadata = AsyncMock(return_value={})
     return unified, graph_engine, vector_engine
 
 
