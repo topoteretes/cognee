@@ -42,11 +42,13 @@ class CacheDBInterface(ABC):
         """
         Context manager for safely acquiring and releasing the lock.
         """
-        lock = self.acquire_lock()
+        lock = None
         try:
+            lock = self.acquire_lock()
             yield
         finally:
-            self.release_lock(lock)
+            if lock is not None:
+                self.release_lock(lock)
 
     async def add_qa(
         self,

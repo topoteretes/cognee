@@ -202,3 +202,76 @@ async def test_redis_graph_context_key_string_unchanged(redis_adapter, redis_sto
     assert redis_store.expire_calls == [("graph_knowledge:u1:s1", 604800)]
 
     assert await session_manager.get_graph_context(user_id="u1", session_id="s1") == "ctx"
+
+
+def test_hold_lock_context_manager():
+    """Test that hold_lock correctly acquires and releases the lock, and handles None or exceptions."""
+    from cognee.infrastructure.databases.cache.cache_db_interface import CacheDBInterface
+
+    class DummyCacheAdapter(CacheDBInterface):
+        def __init__(self):
+            super().__init__(host="localhost", port=1234)
+            self.acquired_calls = 0
+            self.released_locks = []
+            self.should_raise_on_acquire = False
+            self.acquire_return_value = "lock_handle_123"
+
+        def acquire_lock(self):
+            self.acquired_calls += 1
+            if self.should_raise_on_acquire:
+                raise RuntimeError("Failed to acquire lock")
+            return self.acquire_return_value
+
+        def release_lock(self, lock=None):
+            self.released_locks.append(lock)
+
+        # Implement other required abstract methods as no-ops
+        async def create_qa_entry(self, *args, **kwargs): pass
+        async def get_latest_qa_entries(self, *args, **kwargs): return []
+        async def get_all_qa_entries(self, *args, **kwargs): return []
+        async def get_qa_entries_by_ids(self, *args, **kwargs): return []
+        async def update_qa_entry(self, *args, **kwargs): return False
+        async def delete_feedback(self, *args, **kwargs): return False
+        async def delete_qa_entry(self, *args, **kwargs): return False
+        async def delete_session(self, *args, **kwargs): return False
+        async def append_agent_trace_step(self, *args, **kwargs): pass
+        async def get_agent_trace_session(self, *args, **kwargs): return []
+        async def get_agent_trace_feedback(self, *args, **kwargs): return []
+        async def get_agent_trace_count(self, *args, **kwargs): return 0
+        async def create_session_context_entry(self, *args, **kwargs): pass
+        async def get_session_context_entries(self, *args, **kwargs): return []
+        async def update_session_context_entry(self, *args, **kwargs): return False
+        async def delete_session_context(self, *args, **kwargs): return False
+        async def prune(self): pass
+        async def close(self): pass
+        async def log_usage(self, *args, **kwargs): pass
+        async def get_usage_logs(self, *args, **kwargs): return []
+
+    adapter = DummyCacheAdapter()
+
+    # 1. Normal successful acquisition
+    with adapter.hold_lock():
+        assert adapter.acquired_calls == 1
+        assert len(adapter.released_locks) == 0
+    assert len(adapter.released_locks) == 1
+    assert adapter.released_locks[0] == "lock_handle_123"
+
+    # 2. Acquire lock returns None (e.g. not acquired/disabled)
+    adapter.acquired_calls = 0
+    adapter.released_locks = []
+    adapter.acquire_return_value = None
+    with adapter.hold_lock():
+        assert adapter.acquired_calls == 1
+        assert len(adapter.released_locks) == 0
+    # It should not call release_lock with None
+    assert len(adapter.released_locks) == 0
+
+    # 3. Acquire lock raises exception
+    adapter.acquired_calls = 0
+    adapter.released_locks = []
+    adapter.should_raise_on_acquire = True
+    with pytest.raises(RuntimeError, match="Failed to acquire lock"):
+        with adapter.hold_lock():
+            pass
+    assert adapter.acquired_calls == 1
+    assert len(adapter.released_locks) == 0
