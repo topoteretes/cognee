@@ -9,7 +9,9 @@ class TestFactualQueries:
         assert route_query("Who won Nobel Prizes?").search_type == SearchType.HYBRID_COMPLETION
 
     def test_simple_what(self):
-        assert route_query("What did Einstein discover?").search_type == SearchType.HYBRID_COMPLETION
+        assert (
+            route_query("What did Einstein discover?").search_type == SearchType.HYBRID_COMPLETION
+        )
 
     def test_short_list(self):
         assert route_query("List all scientists").search_type == SearchType.HYBRID_COMPLETION
