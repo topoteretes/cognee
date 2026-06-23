@@ -18,6 +18,8 @@ from tenacity import (
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.llm.exceptions import (
     ContentPolicyFilterError,
+    LLMPaymentRequiredError,
+    is_budget_exhausted_error,
 )
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.generic_llm_api.adapter import (
     GenericAPIAdapter,
@@ -111,7 +113,11 @@ class OpenAIAdapter(GenericAPIAdapter):
         stop=stop_after_attempt(3),
         wait=wait_exponential_jitter(8, 128),
         retry=retry_if_not_exception_type(
-            (litellm.exceptions.NotFoundError, litellm.exceptions.AuthenticationError)
+            (
+                litellm.exceptions.NotFoundError,
+                litellm.exceptions.AuthenticationError,
+                LLMPaymentRequiredError,
+            )
         ),
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
@@ -208,6 +214,10 @@ class OpenAIAdapter(GenericAPIAdapter):
                     raise ContentPolicyFilterError(
                         f"The provided input contains content that is not aligned with our content policy: {text_input}"
                     ) from error
+        except Exception as e:
+            if is_budget_exhausted_error(e):
+                raise LLMPaymentRequiredError() from e
+            raise
 
     @observe(as_type="transcription")
     @retry(
