@@ -27,7 +27,9 @@ class CacheDBInterface(ABC):
         Acquire a lock on the given key.
         Must be implemented by subclasses.
         """
-        pass
+        raise NotImplementedError(
+            "acquire_lock() must be implemented by the concrete cache adapter."
+        )
 
     @abstractmethod
     def release_lock(self, lock=None):
@@ -35,7 +37,9 @@ class CacheDBInterface(ABC):
         Release the lock if it is held.
         Must be implemented by subclasses.
         """
-        pass
+        raise NotImplementedError(
+            "release_lock() must be implemented by the concrete cache adapter."
+        )
 
     @contextmanager
     def hold_lock(self):
@@ -88,7 +92,9 @@ class CacheDBInterface(ABC):
         memify_metadata: Optional dict with status keys (e.g. "feedback_weights_applied") and bool values.
         used_session_context_ids: Optional list of session-context entry ids served to this answer.
         """
-        pass
+        raise NotImplementedError(
+            "create_qa_entry() must be implemented by the concrete cache adapter."
+        )
 
     async def get_latest_qa(
         self, user_id: str, session_id: str, last_n: int = 5
@@ -103,7 +109,9 @@ class CacheDBInterface(ABC):
         """
         Retrieve the most recent Q/A/context triplets for a session.
         """
-        pass
+        raise NotImplementedError(
+            "get_latest_qa_entries() must be implemented by the concrete cache adapter."
+        )
 
     async def get_all_qas(self, user_id: str, session_id: str) -> list[SessionQAEntry]:
         """Backward-compat: delegates to get_all_qa_entries. :TODO: delete when retrievers are updated"""
@@ -114,7 +122,9 @@ class CacheDBInterface(ABC):
         """
         Retrieve all Q/A/context triplets for the given session.
         """
-        pass
+        raise NotImplementedError(
+            "get_all_qa_entries() must be implemented by the concrete cache adapter."
+        )
 
     @abstractmethod
     async def get_qa_entries_by_ids(
@@ -127,7 +137,9 @@ class CacheDBInterface(ABC):
         Retrieve Q/A/context triplets matching qa_ids for the given session.
         Results are returned in chronological order.
         """
-        pass
+        raise NotImplementedError(
+            "get_qa_entries_by_ids() must be implemented by the concrete cache adapter."
+        )
 
     @abstractmethod
     async def update_qa_entry(
@@ -149,7 +161,9 @@ class CacheDBInterface(ABC):
         Only passed fields are updated; None/default preserves existing values.
         Returns True if updated, False if qa_id not found.
         """
-        pass
+        raise NotImplementedError(
+            "update_qa_entry() must be implemented by the concrete cache adapter."
+        )
 
     @abstractmethod
     async def delete_feedback(self, user_id: str, session_id: str, qa_id: str) -> bool:
@@ -157,7 +171,9 @@ class CacheDBInterface(ABC):
         Set feedback_text and feedback_score to None for a QA entry (clears feedback).
         Returns True if updated, False if qa_id not found.
         """
-        pass
+        raise NotImplementedError(
+            "delete_feedback() must be implemented by the concrete cache adapter."
+        )
 
     @abstractmethod
     async def delete_qa_entry(self, user_id: str, session_id: str, qa_id: str) -> bool:
@@ -165,7 +181,9 @@ class CacheDBInterface(ABC):
         Delete a single QA entry by qa_id.
         Returns True if deleted, False if qa_id not found.
         """
-        pass
+        raise NotImplementedError(
+            "delete_qa_entry() must be implemented by the concrete cache adapter."
+        )
 
     @abstractmethod
     async def delete_session(self, user_id: str, session_id: str) -> bool:
@@ -173,7 +191,9 @@ class CacheDBInterface(ABC):
         Delete the entire session and all its QA entries.
         Returns True if deleted, False if session did not exist.
         """
-        pass
+        raise NotImplementedError(
+            "delete_session() must be implemented by the concrete cache adapter."
+        )
 
     async def get_value(self, key: str) -> str | None:
         """
@@ -226,7 +246,9 @@ class CacheDBInterface(ABC):
         """
         Append one agent trace step to the session-scoped trace list.
         """
-        pass
+        raise NotImplementedError(
+            "append_agent_trace_step() must be implemented by the concrete cache adapter."
+        )
 
     @abstractmethod
     async def get_agent_trace_session(
@@ -235,7 +257,9 @@ class CacheDBInterface(ABC):
         """
         Retrieve agent trace steps for the given session.
         """
-        pass
+        raise NotImplementedError(
+            "get_agent_trace_session() must be implemented by the concrete cache adapter."
+        )
 
     @abstractmethod
     async def get_agent_trace_feedback(
@@ -244,14 +268,18 @@ class CacheDBInterface(ABC):
         """
         Retrieve per-step feedback strings for the given trace session.
         """
-        pass
+        raise NotImplementedError(
+            "get_agent_trace_feedback() must be implemented by the concrete cache adapter."
+        )
 
     @abstractmethod
     async def get_agent_trace_count(self, user_id: str, session_id: str) -> int:
         """
         Retrieve the number of trace steps stored for the given trace session.
         """
-        pass
+        raise NotImplementedError(
+            "get_agent_trace_count() must be implemented by the concrete cache adapter."
+        )
 
     @abstractmethod
     async def create_session_context_entry(
@@ -262,14 +290,18 @@ class CacheDBInterface(ABC):
         session-scoped context list. Entries are validated by the caller; the interface
         stays dict-based to avoid importing session-layer models.
         """
-        pass
+        raise NotImplementedError(
+            "create_session_context_entry() must be implemented by the concrete cache adapter."
+        )
 
     @abstractmethod
     async def get_session_context_entries(self, user_id: str, session_id: str) -> list[dict]:
         """
         Retrieve all stored session-context entries (both "context" and "feedback" kinds).
         """
-        pass
+        raise NotImplementedError(
+            "get_session_context_entries() must be implemented by the concrete cache adapter."
+        )
 
     @abstractmethod
     async def update_session_context_entry(
@@ -279,7 +311,9 @@ class CacheDBInterface(ABC):
         Shallow-merge updates into the session-context entry matching entry["id"].
         Returns True if updated, False if entry_id not found.
         """
-        pass
+        raise NotImplementedError(
+            "update_session_context_entry() must be implemented by the concrete cache adapter."
+        )
 
     @abstractmethod
     async def delete_session_context(self, user_id: str, session_id: str) -> bool:
@@ -287,7 +321,9 @@ class CacheDBInterface(ABC):
         Delete the entire session-context list for the given session.
         Returns True if any context data existed, False otherwise.
         """
-        pass
+        raise NotImplementedError(
+            "delete_session_context() must be implemented by the concrete cache adapter."
+        )
 
     @abstractmethod
     async def prune(self) -> None:
@@ -295,14 +331,18 @@ class CacheDBInterface(ABC):
         Delete the entire cache (flush Redis db or delete FS cache directory).
         In Cognee, prune means wiping the whole cache storage.
         """
-        pass
+        raise NotImplementedError(
+            "prune() must be implemented by the concrete cache adapter."
+        )
 
     @abstractmethod
     async def close(self):
         """
         Gracefully close any async connections.
         """
-        pass
+        raise NotImplementedError(
+            "close() must be implemented by the concrete cache adapter."
+        )
 
     @abstractmethod
     async def log_usage(
@@ -322,7 +362,9 @@ class CacheDBInterface(ABC):
         Raises:
             CacheConnectionError: If cache connection fails or times out.
         """
-        pass
+        raise NotImplementedError(
+            "log_usage() must be implemented by the concrete cache adapter."
+        )
 
     @abstractmethod
     async def get_usage_logs(self, user_id: str, limit: int = 100):
@@ -336,4 +378,6 @@ class CacheDBInterface(ABC):
         Returns:
             List of usage log entries, most recent first.
         """
-        pass
+        raise NotImplementedError(
+            "get_usage_logs() must be implemented by the concrete cache adapter."
+        )
