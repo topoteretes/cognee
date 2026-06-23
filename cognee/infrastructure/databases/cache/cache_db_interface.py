@@ -41,12 +41,18 @@ class CacheDBInterface(ABC):
     def hold_lock(self):
         """
         Context manager for safely acquiring and releasing the lock.
+
+        ``release_lock`` is only invoked when ``acquire_lock`` actually returned a
+        valid (truthy) lock handle, so a failed/partial acquisition (e.g. ``None``
+        returned, or an exception raised after partially acquiring) can never
+        result in releasing an invalid or wrong lock.
         """
         lock = self.acquire_lock()
         try:
-            yield
+            yield lock
         finally:
-            self.release_lock(lock)
+            if lock:
+                self.release_lock(lock)
 
     async def add_qa(
         self,
