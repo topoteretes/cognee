@@ -50,8 +50,8 @@ Search Types & Use Cases:
             "--query-type",
             "-t",
             choices=SEARCH_TYPE_CHOICES,
-            default="GRAPH_COMPLETION",
-            help="Search mode (default: GRAPH_COMPLETION for conversational AI responses)",
+            default="HYBRID_COMPLETION",
+            help="Search mode (default: HYBRID_COMPLETION for conversational AI responses)",
         )
         parser.add_argument(
             "--datasets",

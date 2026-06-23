@@ -24,9 +24,10 @@ from cognee.shared.utils import send_telemetry
 #       To search for datasets not owned by the request sender dataset UUID is needed
 class SearchPayloadDTO(InDTO):
     search_type: SearchType = Field(
-        default=SearchType.GRAPH_COMPLETION,
+        default=SearchType.HYBRID_COMPLETION,
         description=(
-            "Retrieval strategy. Common values: GRAPH_COMPLETION (default, graph context + LLM"
+            "Retrieval strategy. Common values: HYBRID_COMPLETION (default, chunk + entity +"
+            " optional global context + LLM answer), GRAPH_COMPLETION (graph context + LLM"
             " answer), RAG_COMPLETION, CHUNKS, SUMMARIES, TEMPORAL, FEELING_LUCKY (auto-select),"
             " AGENTIC_COMPLETION (enables skills/tools/max_iter)."
         ),
@@ -170,7 +171,7 @@ def get_search_router() -> APIRouter:
         types and can be scoped to specific datasets.
 
         ## Request Parameters
-        - **search_type** (SearchType): Type of search to perform (default: GRAPH_COMPLETION). Use AGENTIC_COMPLETION to enable skills, tools and max_iter.
+        - **search_type** (SearchType): Type of search to perform (default: HYBRID_COMPLETION). Use AGENTIC_COMPLETION to enable skills, tools and max_iter.
         - **datasets** (Optional[List[str]]): List of dataset names to search within
         - **dataset_ids** (Optional[List[UUID]]): List of dataset UUIDs to search within
         - **query** (str): The search query string

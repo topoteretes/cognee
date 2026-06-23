@@ -320,7 +320,7 @@ async def recall(
     datasets: list[str] | None = None,
     dataset_ids: list[UUID] | None = None,
     top_k: int = 15,
-    auto_route: bool = True,
+    auto_route: bool = False,
     scope: str | list[str] | None = None,
     system_prompt: str | None = None,
     system_prompt_path: str = "answer_simple_question.txt",
@@ -351,10 +351,10 @@ async def recall(
     Each result dict includes a ``_source`` key (``"session"`` or
     ``"graph"``) so callers can tell where the result came from.
 
-    When ``query_type`` is omitted and ``auto_route`` is True (default),
-    a lightweight rule-based classifier picks the best search strategy.
-    Set ``auto_route=False`` to skip the classifier and use
-    GRAPH_COMPLETION as the default, or pass ``query_type`` explicitly.
+    When ``query_type`` is omitted and ``auto_route`` is False (default),
+    recall uses HYBRID_COMPLETION. Set ``auto_route=True`` to run a
+    lightweight rule-based classifier that picks the best search strategy
+    per query, or pass ``query_type`` explicitly to choose one.
 
     Args:
         query_text: Natural-language query.
@@ -363,7 +363,7 @@ async def recall(
         dataset_ids: Dataset UUIDs to search within. Takes precedence over datasets.
         top_k: Maximum results to return (default *15*).
         auto_route: If True and query_type is None, classify the query
-            automatically. If False, fall back to GRAPH_COMPLETION.
+            automatically. If False (default), use HYBRID_COMPLETION.
 
     Returns:
         Search results. When searching session-only, returns a list of
@@ -517,7 +517,7 @@ async def recall(
                 result = route_query(query_text)
                 local_query_type = result.search_type
             else:
-                local_query_type = SearchType.GRAPH_COMPLETION
+                local_query_type = SearchType.HYBRID_COMPLETION
 
             span.set_attribute(
                 COGNEE_SEARCH_TYPE,

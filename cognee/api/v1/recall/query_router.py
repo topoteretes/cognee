@@ -20,7 +20,7 @@ class RouteResult:
 
     search_type: SearchType
     confidence: float
-    runner_up: SearchType = SearchType.GRAPH_COMPLETION
+    runner_up: SearchType = SearchType.HYBRID_COMPLETION
     runner_up_score: float = 0.0
     all_scores: dict = field(default_factory=dict)
 
@@ -146,7 +146,7 @@ _RULES: list[tuple[re.Pattern, SearchType, float]] = [
     ),
 ]
 
-_DEFAULT = SearchType.GRAPH_COMPLETION
+_DEFAULT = SearchType.HYBRID_COMPLETION
 _DEFAULT_BASE_SCORE = 2.0
 
 # Track explicit user overrides to surface misrouting patterns.
