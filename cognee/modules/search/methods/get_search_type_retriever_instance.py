@@ -30,7 +30,8 @@ from cognee.modules.retrieval.graph_completion_context_extension_retriever impor
 )
 from cognee.modules.retrieval.cypher_search_retriever import CypherSearchRetriever
 from cognee.modules.retrieval.natural_language_retriever import NaturalLanguageRetriever
-from cognee.modules.retrieval.agentic_retriever import AgenticRetriever
+from cognee.modules.retrieval.agentic_retriever import AgenticRetriever 
+from cognee.modules.retrieval.graph_aggregation_retriever import GraphAggregationRetriever
 from cognee.context_global_variables import session_user
 
 
@@ -300,6 +301,7 @@ async def get_search_type_retriever_instance(
             CodingRulesRetriever,
             {"rules_nodeset_name": node_name},
         ),
+        SearchType.GRAPH_AGGREGATION: (GraphAggregationRetriever,{}),
     }
 
     # Build AgenticRetriever only when explicitly requested. Other graph-completion

@@ -88,6 +88,16 @@ Here are the available `SearchType` tools and their specific functions:
   - Performing advanced graph operations like filtering and aggregating data using natural language.
   - Asking precise, database-style questions without needing to write Cypher.
 
+* **`GRAPH_AGGREGATION`**: The `GRAPH_AGGREGATION` search type performs graph-level analytics and aggregation over the entire knowledge graph.
+
+  **Best for:**
+
+  - Counting nodes, edges, and graph elements
+  - Finding node type distributions
+  - Identifying highly connected nodes
+  - Graph statistics and metrics
+  - High-level graph summaries and analytics
+
 **Examples:**
 
 Query: "Summarize the key findings from these research papers"
@@ -120,6 +130,17 @@ Response: `CYPHER`
 Query: "Get all nodes connected to John"
 Response: `NATURAL_LANGUAGE`
 
+Query: "How many nodes are in the graph?"
+Response: `GRAPH_AGGREGATION`
+
+Query: "What types of nodes exist in the graph?"
+Response: `GRAPH_AGGREGATION`
+
+Query: "Which node is the most connected?"
+Response: `GRAPH_AGGREGATION`
+
+Query: "Give me statistics about the graph"
+Response: `GRAPH_AGGREGATION`
 
 
 Your response MUST be a single word, consisting of only the chosen `SearchType` name. Do not provide any explanation.
