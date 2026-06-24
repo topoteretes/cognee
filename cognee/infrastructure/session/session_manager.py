@@ -217,7 +217,49 @@ class SessionManager:
             session_feedback=session_feedback,
         )
         await record_session_activity(user_id, session_id, errored=status == "error")
+        await self._maybe_extract_agent_context(
+            user_id=user_id,
+            session_id=session_id,
+            trace_id=trace_id,
+            origin_function=origin_function,
+            status=status,
+            error_message=error_message,
+        )
         return trace_id
+
+    async def _maybe_extract_agent_context(
+        self,
+        *,
+        user_id: str,
+        session_id: str,
+        trace_id: str,
+        origin_function: str,
+        status: str,
+        error_message: str,
+    ) -> None:
+        """Derive agent-profile lessons from a just-stored trace step. Gated and fail-open.
+
+        Runs only when automatic session context is enabled, and never lets an extraction
+        failure escape — the trace row is already saved by the time this runs.
+        """
+        if not self.is_auto_feedback_enabled():
+            return
+        try:
+            from cognee.infrastructure.session.agent_context_extraction import (
+                extract_live_agent_context,
+            )
+
+            await extract_live_agent_context(
+                session_manager=self,
+                user_id=user_id,
+                session_id=session_id,
+                trace_id=trace_id,
+                origin_function=origin_function,
+                status=status,
+                error_message=error_message,
+            )
+        except Exception as error:
+            logger.warning("Live agent-context extraction skipped: %s", error)
 
     def is_session_available_for_completion(self, user_id: str | None) -> bool:
         """Return True if session (history + save) is available for completion."""
