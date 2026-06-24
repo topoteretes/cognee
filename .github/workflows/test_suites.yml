@@ -299,30 +299,34 @@ jobs:
     steps:
       - name: Check Status
         run: |
-          if [[ "${{ needs.pre-test.result }}" == "success" &&
-                "${{ needs.basic-tests.result }}" == "success" &&
-                "${{ needs.e2e-tests.result }}" == "success" &&
-                "${{ needs.cli-tests.result }}" == "success" &&
-                "${{ needs.slow-e2e-tests.result }}" == "success" &&
-                "${{ needs.graph-db-tests.result }}" == "success" &&
-                "${{ needs.vector-db-tests.result }}" == "success" &&
-                "${{ needs.example-tests.result }}" == "success" &&
-                "${{ needs.notebook-tests.result }}" == "success" &&
-                "${{ needs.different-os-tests-basic.result }}" == "success" &&
-                "${{ needs.different-os-tests-extended.result }}" == "success" &&
-                "${{ needs.llm-tests.result }}" == "success" &&
-                "${{ needs.s3-file-storage-test.result }}" == "success" &&
-                "${{ needs.integration-tests.result }}" == "success" &&
-                "${{ needs.mcp-test.result }}" == "success" &&
-                "${{ needs.docker-compose-test.result }}" == "success" &&
-                "${{ needs.docker-ci-test.result }}" == "success" &&
-                "${{ needs.temporal-graph-tests.result }}" == "success" &&
-                "${{ needs.search-db-tests.result }}" == "success" &&
-                "${{ needs.relational-db-migration-tests.result }}" == "success" &&
-                "${{ needs.db-examples-tests.result }}" == "success" ]]; then
+          declare -a failed=()
+
+          [[ "${{ needs.pre-test.result }}" == "success" ]] || failed+=("pre-test")
+          [[ "${{ needs.basic-tests.result }}" == "success" ]] || failed+=("basic-tests")
+          [[ "${{ needs.e2e-tests.result }}" == "success" ]] || failed+=("e2e-tests")
+          [[ "${{ needs.cli-tests.result }}" == "success" ]] || failed+=("cli-tests")
+          [[ "${{ needs.slow-e2e-tests.result }}" == "success" ]] || failed+=("slow-e2e-tests")
+          [[ "${{ needs.graph-db-tests.result }}" == "success" ]] || failed+=("graph-db-tests")
+          [[ "${{ needs.vector-db-tests.result }}" == "success" ]] || failed+=("vector-db-tests")
+          [[ "${{ needs.example-tests.result }}" == "success" ]] || failed+=("example-tests")
+          [[ "${{ needs.notebook-tests.result }}" == "success" ]] || failed+=("notebook-tests")
+          [[ "${{ needs.different-os-tests-basic.result }}" == "success" ]] || failed+=("different-os-tests-basic")
+          [[ "${{ needs.different-os-tests-extended.result }}" == "success" ]] || failed+=("different-os-tests-extended")
+          [[ "${{ needs.llm-tests.result }}" == "success" ]] || failed+=("llm-tests")
+          [[ "${{ needs.s3-file-storage-test.result }}" == "success" ]] || failed+=("s3-file-storage-test")
+          [[ "${{ needs.integration-tests.result }}" == "success" ]] || failed+=("integration-tests")
+          [[ "${{ needs.mcp-test.result }}" == "success" ]] || failed+=("mcp-test")
+          [[ "${{ needs.docker-compose-test.result }}" == "success" ]] || failed+=("docker-compose-test")
+          [[ "${{ needs.docker-ci-test.result }}" == "success" ]] || failed+=("docker-ci-test")
+          [[ "${{ needs.temporal-graph-tests.result }}" == "success" ]] || failed+=("temporal-graph-tests")
+          [[ "${{ needs.search-db-tests.result }}" == "success" ]] || failed+=("search-db-tests")
+          [[ "${{ needs.relational-db-migration-tests.result }}" == "success" ]] || failed+=("relational-db-migration-tests")
+          [[ "${{ needs.db-examples-tests.result }}" == "success" ]] || failed+=("db-examples-tests")
+
+          if ((${#failed[@]} == 0)); then
             echo "All test suites completed successfully!"
           else
-            echo "One or more test suites failed."
+            echo "One or more test suites failed: ${failed[*]}"
             exit 1
           fi
 
