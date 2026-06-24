@@ -174,3 +174,124 @@ async def test_recall_session_with_dataset_ids_does_not_short_circuit_graph(
     assert out == []
     assert captured["dataset_ids"] == [explicit_id]
     assert "resolved_from_datasets" not in captured
+
+
+# ----------------------------------------------------------------- session_context scope
+
+
+def test_normalize_scope_accepts_session_context():
+    from cognee.memory.entries import normalize_scope
+
+    assert normalize_scope("session_context") == ["session_context"]
+    assert "session_context" in normalize_scope("all")
+
+
+@pytest.mark.asyncio
+async def test_recall_session_context_scope_threads_profile(monkeypatch, api_recall_mod):
+    from cognee.modules.recall.types.RecallResponse import ResponseSessionContextEntry
+
+    user = _make_user()
+    captured = {}
+
+    async def dummy_fetch_session_context(query_text, session_id, context_profile, user=None):
+        captured["context_profile"] = context_profile
+        captured["session_id"] = session_id
+        return [
+            ResponseSessionContextEntry(
+                content="block", context_profile=context_profile, source="session_context"
+            )
+        ]
+
+    monkeypatch.setattr(api_recall_mod, "_fetch_session_context", dummy_fetch_session_context)
+    serve_state = importlib.import_module("cognee.api.v1.serve.state")
+    monkeypatch.setattr(serve_state, "get_remote_client", lambda: None)
+
+    out = await api_recall_mod.recall(
+        query_text="q",
+        scope=["session_context"],
+        context_profile="agent",
+        session_id="s",
+        user=user,
+    )
+
+    assert captured == {"context_profile": "agent", "session_id": "s"}
+    assert len(out) == 1
+    assert out[0].source == "session_context"
+    assert out[0].context_profile == "agent"
+
+
+@pytest.mark.asyncio
+async def test_recall_remote_client_forwards_context_profile(monkeypatch, api_recall_mod):
+    user = _make_user()
+    captured = {}
+
+    async def dummy_remote_recall(query_text, query_type, **kwargs):
+        captured["context_profile"] = kwargs.get("context_profile")
+        return []
+
+    serve_state = importlib.import_module("cognee.api.v1.serve.state")
+    monkeypatch.setattr(
+        serve_state, "get_remote_client", lambda: types.SimpleNamespace(recall=dummy_remote_recall)
+    )
+
+    out = await api_recall_mod.recall(
+        query_text="q",
+        scope=["session_context"],
+        context_profile="agent",
+        session_id="s",
+        user=user,
+    )
+
+    assert out == []
+    assert captured["context_profile"] == "agent"
+
+
+class _FakeRecallResponse:
+    status = 200
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    async def json(self):
+        return []
+
+    async def text(self):
+        return ""
+
+
+class _FakeRecallSession:
+    """Captures the JSON body of the recall POST."""
+
+    def __init__(self):
+        self.last_json = None
+
+    def post(self, _url, json=None, **kwargs):
+        self.last_json = json
+        return _FakeRecallResponse()
+
+    async def close(self):
+        pass
+
+
+@pytest.mark.asyncio
+async def test_cloud_client_recall_payload_includes_context_profile(monkeypatch):
+    # cloud_client.recall takes **kwargs and only forwards keys it picks, so a missed forward
+    # is a silent drop — assert context_profile actually lands in the POST body.
+    from cognee.api.v1.serve.cloud_client import CloudClient
+
+    client = CloudClient("http://example", "key")
+    fake = _FakeRecallSession()
+
+    async def fake_get_session():
+        return fake
+
+    monkeypatch.setattr(client, "_get_session", fake_get_session)
+
+    await client.recall(
+        "q", None, scope=["session_context"], context_profile="agent", session_id="s"
+    )
+
+    assert fake.last_json.get("context_profile") == "agent"
