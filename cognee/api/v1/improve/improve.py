@@ -155,12 +155,10 @@ async def improve(
                 )
                 return {}
             acquired_lock_for = sole_session
-        else:
-            release_improve_lock = None  # type: ignore[assignment]
 
-        # Stage 1 & 2: bridge sessions into the permanent graph
-        if session_ids:
-            try:
+        try:
+            # Stage 1 & 2: bridge sessions into the permanent graph
+            if session_ids:
                 await _bridge_sessions(
                     dataset=dataset,
                     session_ids=session_ids,
@@ -182,6 +180,12 @@ async def improve(
                 )
                 stages_run.append("persist_trace_steps")
 
+                # Stage 2b2: distill each session's agent traces into agent-profile
+                # session-context lessons (the LLM batch pass) before distillation, so
+                # those lessons are available as gated guidance for stage 2c.
+                if await _extract_agent_context(session_ids=session_ids, user=user):
+                    stages_run.append("extract_agent_context")
+
                 # Stage 2c: distill each session's gated guidance into curated,
                 # entity-anchored lessons and add+cognify them into the graph.
                 # This is what lets remember(session, self_improvement=True)
@@ -194,62 +198,56 @@ async def improve(
                 )
                 if distilled:
                     stages_run.append("distill_sessions")
-            except Exception:
-                if acquired_lock_for:
-                    from cognee.infrastructure.locks import release_improve_lock
 
-                    await release_improve_lock(acquired_lock_for)
-                raise
+            # Stage 3: default enrichment (triplet embeddings)
+            from cognee.modules.memify import memify
 
-        # Stage 3: default enrichment (triplet embeddings)
-        from cognee.modules.memify import memify
+            if "node_type" not in kwargs or kwargs.get("node_type") is None:
+                from cognee.modules.engine.models.node_set import NodeSet
 
-        if "node_type" not in kwargs or kwargs.get("node_type") is None:
-            from cognee.modules.engine.models.node_set import NodeSet
+                kwargs["node_type"] = NodeSet
 
-            kwargs["node_type"] = NodeSet
+            result = await memify(
+                dataset=dataset,
+                node_name=node_name,
+                user=user,
+                run_in_background=run_in_background,
+                **kwargs,
+            )
+            stages_run.append("memify_enrichment")
 
-        result = await memify(
-            dataset=dataset,
-            node_name=node_name,
-            user=user,
-            run_in_background=run_in_background,
-            **kwargs,
-        )
-        stages_run.append("memify_enrichment")
+            if build_global_context_index:
+                if run_in_background:
+                    logger.warning(
+                        "improve: global context index skipped in background mode "
+                        "because ordered background pipeline chaining is not supported"
+                    )
+                else:
+                    global_context_index_updated = await _build_global_context_index(
+                        dataset=dataset,
+                        user=user,
+                    )
+                    if global_context_index_updated:
+                        stages_run.append("global_context_index")
 
-        if build_global_context_index:
-            if run_in_background:
-                logger.warning(
-                    "improve: global context index skipped in background mode "
-                    "because ordered background pipeline chaining is not supported"
-                )
-            else:
-                global_context_index_updated = await _build_global_context_index(
+            # Stage 5: sync enriched graph back to session cache (incremental)
+            # Skip when running in background — stage 3 hasn't completed yet
+            if session_ids and not run_in_background:
+                await _sync_graph_to_sessions(
                     dataset=dataset,
+                    session_ids=session_ids,
                     user=user,
                 )
-                if global_context_index_updated:
-                    stages_run.append("global_context_index")
+                stages_run.append("sync_graph_to_sessions")
 
-        # Stage 5: sync enriched graph back to session cache (incremental)
-        # Skip when running in background — stage 3 hasn't completed yet
-        if session_ids and not run_in_background:
-            await _sync_graph_to_sessions(
-                dataset=dataset,
-                session_ids=session_ids,
-                user=user,
-            )
-            stages_run.append("sync_graph_to_sessions")
+            span.set_attribute(COGNEE_IMPROVE_STAGES, ",".join(stages_run))
 
-        span.set_attribute(COGNEE_IMPROVE_STAGES, ",".join(stages_run))
+            return result
+        finally:
+            if acquired_lock_for:
+                from cognee.infrastructure.locks import release_improve_lock
 
-        if acquired_lock_for:
-            from cognee.infrastructure.locks import release_improve_lock
-
-            await release_improve_lock(acquired_lock_for)
-
-        return result
+                await release_improve_lock(acquired_lock_for)
 
 
 async def _build_global_context_index(
@@ -335,6 +333,47 @@ async def _bridge_sessions(
         logger.info("improve: session Q&A persisted from %d session(s)", len(session_ids))
     except Exception as e:
         logger.warning("improve: session persistence failed (non-fatal): %s", e)
+
+
+async def _extract_agent_context(
+    session_ids: List[str],
+    user,
+) -> int:
+    """Flush pending trace windows into agent-profile lessons before distillation.
+
+    Delegates to ``agent_context_extraction.extract_pending_agent_context`` per session, which
+    shares the same watermark used by mid-session trace extraction. ``min_new_traces=1`` makes
+    improve/session-end flush any remaining unprocessed traces before distillation. Gated on
+    automatic session context and best-effort/fail-open: an error on one session never blocks the
+    others or the rest of ``improve()``. Returns the number of lessons created/linked.
+    """
+    from cognee.infrastructure.session.agent_context_extraction import (
+        extract_pending_agent_context,
+    )
+    from cognee.infrastructure.session.get_session_manager import get_session_manager
+
+    session_manager = get_session_manager()
+    if not session_manager.is_available or not session_manager.is_auto_feedback_enabled():
+        return 0
+
+    user_id = str(user.id)
+    touched = 0
+    for session_id in session_ids:
+        try:
+            ids = await extract_pending_agent_context(
+                session_manager=session_manager,
+                user_id=user_id,
+                session_id=session_id,
+                min_new_traces=1,
+            )
+            touched += len(ids)
+        except Exception as e:
+            logger.warning(
+                "improve: agent-context extraction failed for '%s' (non-fatal): %s",
+                session_id,
+                e,
+            )
+    return touched
 
 
 async def _distill_sessions(
