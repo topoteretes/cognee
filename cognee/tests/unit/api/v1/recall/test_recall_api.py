@@ -277,6 +277,75 @@ class _FakeRecallSession:
 
 
 @pytest.mark.asyncio
+async def test_fetch_session_context_renders_profile_read_only(monkeypatch, api_recall_mod):
+    from cognee.infrastructure.session.session_context_models import SessionContextEntry
+
+    agent_row = SessionContextEntry(
+        id="a1",
+        section="tool_rules",
+        context_profile="agent",
+        content="Use uv run",
+        created_at="2026-06-11T10:00:00",
+    ).model_dump()
+
+    class _FakeSM:
+        is_available = True
+
+        def __init__(self):
+            self.updates = 0
+
+        async def get_session_context_entries(self, user_id, session_id):
+            return [agent_row]
+
+        async def update_session_context_entry(self, **kwargs):
+            self.updates += 1
+            return True
+
+    fake = _FakeSM()
+
+    async def fake_resolve_cache_user(session_id, caller_user_id):
+        return caller_user_id
+
+    gsm_mod = importlib.import_module("cognee.infrastructure.session.get_session_manager")
+    monkeypatch.setattr(gsm_mod, "get_session_manager", lambda: fake)
+    monkeypatch.setattr(api_recall_mod, "_resolve_session_cache_user_id", fake_resolve_cache_user)
+
+    out = await api_recall_mod._fetch_session_context(
+        query_text="q",
+        session_id="s",
+        context_profile="agent",
+        user=_make_user(),
+    )
+
+    assert len(out) == 1
+    assert out[0].source == "session_context"
+    assert out[0].context_profile == "agent"
+    assert "Use uv run" in out[0].content
+    assert fake.updates == 0  # read-only: stamp_served=False
+
+
+@pytest.mark.asyncio
+async def test_fetch_session_context_empty_when_no_lessons(monkeypatch, api_recall_mod):
+    class _EmptySM:
+        is_available = True
+
+        async def get_session_context_entries(self, user_id, session_id):
+            return []
+
+    async def fake_resolve_cache_user(session_id, caller_user_id):
+        return caller_user_id
+
+    gsm_mod = importlib.import_module("cognee.infrastructure.session.get_session_manager")
+    monkeypatch.setattr(gsm_mod, "get_session_manager", lambda: _EmptySM())
+    monkeypatch.setattr(api_recall_mod, "_resolve_session_cache_user_id", fake_resolve_cache_user)
+
+    out = await api_recall_mod._fetch_session_context(
+        query_text="q", session_id="s", context_profile="agent", user=_make_user()
+    )
+    assert out == []
+
+
+@pytest.mark.asyncio
 async def test_cloud_client_recall_payload_includes_context_profile(monkeypatch):
     # cloud_client.recall takes **kwargs and only forwards keys it picks, so a missed forward
     # is a silent drop — assert context_profile actually lands in the POST body.
