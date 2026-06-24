@@ -29,7 +29,7 @@ from cognee.modules.migration.loader import (
 from cognee.modules.migration.sources.base import MemorySource
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion.data_item import DataItem
-
+from .sources.langmem import LangMemSource
 if TYPE_CHECKING:
     from cognee.api.v1.remember.remember import RememberResult
 
