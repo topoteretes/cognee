@@ -20,6 +20,39 @@ class ContextSection(str, Enum):
 VALID_SECTIONS = {section.value for section in ContextSection}
 
 
+class ContextProfile(str, Enum):
+    """Which kind of consumer a session-context lesson is for."""
+
+    QA = "qa"
+    AGENT = "agent"
+
+
+VALID_PROFILES = {profile.value for profile in ContextProfile}
+
+
+class AgentContextSection(str, Enum):
+    """Sections for agent/tool-loop session-context guidance."""
+
+    TOOL_RULES = "tool_rules"
+    WORKFLOW_STATE = "workflow_state"
+    SUCCESS_PATTERNS = "success_patterns"
+    FAILURE_LESSONS = "failure_lessons"
+    ENVIRONMENT_FACTS = "environment_facts"
+
+
+AGENT_VALID_SECTIONS = {section.value for section in AgentContextSection}
+
+SECTIONS_BY_PROFILE = {
+    ContextProfile.QA.value: VALID_SECTIONS,
+    ContextProfile.AGENT.value: AGENT_VALID_SECTIONS,
+}
+
+
+def valid_sections_for(profile: str) -> set:
+    """Allowed section names for a context profile; empty set for an unknown profile."""
+    return SECTIONS_BY_PROFILE.get(profile, set())
+
+
 def normalize_content(text: str) -> str:
     """Deterministic exact-match key: lowercased, whitespace-collapsed, stripped."""
     if not isinstance(text, str):
@@ -177,16 +210,121 @@ CandidateContextUpdateVariant = Annotated[
 ]
 
 
+class AgentCandidateContextUpdate(CandidateContextUpdate):
+    """A proposed new agent-profile session-context lesson (tool/workflow guidance)."""
+
+    context_profile: Literal["agent"] = ContextProfile.AGENT.value
+    section: str = Field(
+        description=(
+            "One of tool_rules, workflow_state, success_patterns, failure_lessons, or "
+            "environment_facts. Choose by what kind of tool/workflow lesson the content is."
+        ),
+    )
+
+    @field_validator("section")
+    @classmethod
+    def section_valid(cls, v: str) -> str:
+        if not isinstance(v, str):
+            raise ValueError("section must be a string")
+        normalized = v.strip().lower()
+        if normalized not in AGENT_VALID_SECTIONS:
+            raise ValueError(f"section must be one of {sorted(AGENT_VALID_SECTIONS)}")
+        return normalized
+
+
+class CandidateToolRuleUpdate(AgentCandidateContextUpdate):
+    """Candidate update for a reusable tool constraint or safe-invocation pattern."""
+
+    section: Literal["tool_rules"] = Field(
+        default=AgentContextSection.TOOL_RULES.value,
+        description="Fixed section value for tool-rule updates.",
+    )
+    content: str = Field(
+        description=(
+            "A reusable constraint or safe/required way to invoke a tool — what to do or avoid "
+            "when using it next time."
+        ),
+    )
+
+
+class CandidateWorkflowStateUpdate(AgentCandidateContextUpdate):
+    """Candidate update for where the current task stands."""
+
+    section: Literal["workflow_state"] = Field(
+        default=AgentContextSection.WORKFLOW_STATE.value,
+        description="Fixed section value for workflow-state updates.",
+    )
+    content: str = Field(
+        description=(
+            "Where the current task stands and what must survive context compaction to continue "
+            "it — progress, the next step, or a pending decision."
+        ),
+    )
+
+
+class CandidateSuccessPatternUpdate(AgentCandidateContextUpdate):
+    """Candidate update for an approach worth repeating."""
+
+    section: Literal["success_patterns"] = Field(
+        default=AgentContextSection.SUCCESS_PATTERNS.value,
+        description="Fixed section value for success-pattern updates.",
+    )
+    content: str = Field(
+        description="An approach or sequence that solved the user's request and is worth repeating.",
+    )
+
+
+class CandidateFailureLessonUpdate(AgentCandidateContextUpdate):
+    """Candidate update for something to avoid next time."""
+
+    section: Literal["failure_lessons"] = Field(
+        default=AgentContextSection.FAILURE_LESSONS.value,
+        description="Fixed section value for failure-lesson updates.",
+    )
+    content: str = Field(
+        description=(
+            "An error, retry, or rejected path and what to avoid or do differently next time."
+        ),
+    )
+
+
+class CandidateEnvironmentFactUpdate(AgentCandidateContextUpdate):
+    """Candidate update for a discovered environment fact."""
+
+    section: Literal["environment_facts"] = Field(
+        default=AgentContextSection.ENVIRONMENT_FACTS.value,
+        description="Fixed section value for environment-fact updates.",
+    )
+    content: str = Field(
+        description=(
+            "A discovered fact about the repository, runtime, configuration, or environment that "
+            "future steps need."
+        ),
+    )
+
+
+AgentCandidateContextUpdateVariant = Annotated[
+    CandidateToolRuleUpdate
+    | CandidateWorkflowStateUpdate
+    | CandidateSuccessPatternUpdate
+    | CandidateFailureLessonUpdate
+    | CandidateEnvironmentFactUpdate,
+    Field(discriminator="section"),
+]
+
+
 class SessionContextEntry(BaseModel):
-    """A stored active session-context guidance entry (goal/rule/preference/lesson)."""
+    """A stored active session-context lesson, tagged by profile (qa or agent)."""
 
     id: str
     section: str
+    context_profile: str = ContextProfile.QA.value
     content: str
     normalized_content: str = ""
     confidence: float = 0.0
     created_at: str
     source_feedback_ids: List[str] = Field(default_factory=list)
+    source_trace_ids: List[str] = Field(default_factory=list)
     helpful_count: int = 0
     harmful_count: int = 0
     priority: int = 0
@@ -206,12 +344,21 @@ class SessionContextEntry(BaseModel):
 
     @field_validator("section")
     @classmethod
-    def section_valid(cls, v: str) -> str:
+    def section_normalize(cls, v: str) -> str:
+        # Membership is profile-dependent, so only normalize here; the (profile, section)
+        # pair is validated in validate_section_for_profile once both fields are set.
         if not isinstance(v, str):
             raise ValueError("section must be a string")
+        return v.strip().lower()
+
+    @field_validator("context_profile")
+    @classmethod
+    def context_profile_valid(cls, v: str) -> str:
+        if not isinstance(v, str):
+            raise ValueError("context_profile must be a string")
         normalized = v.strip().lower()
-        if normalized not in VALID_SECTIONS:
-            raise ValueError(f"section must be one of {sorted(VALID_SECTIONS)}")
+        if normalized not in VALID_PROFILES:
+            raise ValueError(f"context_profile must be one of {sorted(VALID_PROFILES)}")
         return normalized
 
     @field_validator("content")
@@ -253,15 +400,15 @@ class SessionContextEntry(BaseModel):
             raise ValueError("count must be >= 0")
         return v
 
-    @field_validator("source_feedback_ids")
+    @field_validator("source_feedback_ids", "source_trace_ids")
     @classmethod
-    def source_feedback_ids_list_of_strings(cls, v: List[str]) -> List[str]:
+    def source_id_lists_only_strings(cls, v: List[str]) -> List[str]:
         if not isinstance(v, list):
-            raise ValueError("source_feedback_ids must be a list")
+            raise ValueError("source id list must be a list")
         normalized = []
         for item in v:
             if not isinstance(item, str):
-                raise ValueError("source_feedback_ids must contain only strings")
+                raise ValueError("source id list must contain only strings")
             stripped = item.strip()
             if stripped:
                 normalized.append(stripped)
@@ -271,6 +418,16 @@ class SessionContextEntry(BaseModel):
     def derive_normalized_content(self):
         if not self.normalized_content:
             self.normalized_content = normalize_content(self.content)
+        return self
+
+    @model_validator(mode="after")
+    def validate_section_for_profile(self):
+        allowed = valid_sections_for(self.context_profile)
+        if self.section not in allowed:
+            raise ValueError(
+                f"section '{self.section}' is not valid for profile "
+                f"'{self.context_profile}'; allowed: {sorted(allowed)}"
+            )
         return self
 
 

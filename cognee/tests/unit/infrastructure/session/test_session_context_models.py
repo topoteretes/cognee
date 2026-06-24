@@ -1,15 +1,20 @@
 import pytest
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 
 from cognee.infrastructure.session.session_context_models import (
+    AGENT_VALID_SECTIONS,
     MAX_CONTEXT_CONTENT_CHARS,
     MIN_CANDIDATE_CONFIDENCE,
+    VALID_PROFILES,
+    AgentCandidateContextUpdate,
+    AgentCandidateContextUpdateVariant,
     CandidateContextUpdate,
     ContextSection,
     ServedContextRating,
     SessionContextEntry,
     SessionFeedbackEntry,
     normalize_content,
+    valid_sections_for,
 )
 
 
@@ -157,3 +162,79 @@ def test_session_feedback_entry_kind_default():
     assert entry.candidate_context_entries == []
     assert "feedback_text" not in dump
     assert "feedback_score" not in dump
+
+
+# -- Profiles & agent sections ----------------------------------------------
+
+
+def test_context_profile_and_agent_sections():
+    assert VALID_PROFILES == {"qa", "agent"}
+    assert AGENT_VALID_SECTIONS == {
+        "tool_rules",
+        "workflow_state",
+        "success_patterns",
+        "failure_lessons",
+        "environment_facts",
+    }
+    assert valid_sections_for("qa") == {section.value for section in ContextSection}
+    assert valid_sections_for("agent") == AGENT_VALID_SECTIONS
+    assert valid_sections_for("nope") == set()
+
+
+def test_session_context_entry_defaults_to_qa_profile():
+    # Old rows carry no context_profile field — they must read as qa.
+    entry = SessionContextEntry(id="1", section="rules", content="be concise", created_at="t")
+    assert entry.context_profile == "qa"
+    assert entry.source_trace_ids == []
+
+
+def test_session_context_entry_agent_profile_valid():
+    entry = SessionContextEntry(
+        id="2",
+        section="failure_lessons",
+        context_profile="agent",
+        content="sync before tests",
+        created_at="t",
+        source_trace_ids=[" trace-1 ", "", "trace-2"],
+    )
+    assert entry.context_profile == "agent"
+    assert entry.section == "failure_lessons"
+    assert entry.source_trace_ids == ["trace-1", "trace-2"]
+
+
+@pytest.mark.parametrize(
+    "profile,section",
+    [("agent", "rules"), ("qa", "tool_rules"), ("agent", "goals"), ("qa", "failure_lessons")],
+)
+def test_session_context_entry_rejects_profile_section_mismatch(profile, section):
+    with pytest.raises(ValidationError):
+        SessionContextEntry(
+            id="3", section=section, context_profile=profile, content="x", created_at="t"
+        )
+
+
+def test_session_context_entry_rejects_unknown_profile():
+    with pytest.raises(ValidationError):
+        SessionContextEntry(
+            id="4", section="rules", context_profile="bogus", content="x", created_at="t"
+        )
+
+
+def test_agent_candidate_variants_round_trip():
+    adapter = TypeAdapter(AgentCandidateContextUpdateVariant)
+    for section in AGENT_VALID_SECTIONS:
+        candidate = adapter.validate_python(
+            {"section": section, "content": "lesson", "confidence": 0.9}
+        )
+        assert candidate.section == section
+        assert candidate.context_profile == "agent"
+
+
+def test_agent_candidate_rejects_qa_section():
+    with pytest.raises(ValidationError):
+        AgentCandidateContextUpdate(section="rules", content="x", confidence=0.9)
+
+
+def test_qa_candidate_rejects_agent_section():
+    with pytest.raises(ValidationError):
+        CandidateContextUpdate(section="tool_rules", content="x", confidence=0.9)
