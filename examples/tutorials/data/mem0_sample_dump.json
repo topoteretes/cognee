@@ -1,0 +1,37 @@
+{
+  "results": [
+    {
+      "id": "mem0-memory-001",
+      "memory": "Ava prefers espresso from Blue Bottle before architecture reviews.",
+      "user_id": "ava",
+      "agent_id": "travel-assistant",
+      "run_id": "demo-run-001",
+      "categories": ["preference", "coffee"],
+      "created_at": "2025-05-03T09:30:00Z",
+      "updated_at": "2025-05-03T09:30:00Z",
+      "metadata": {
+        "source": "mem0-platform-export"
+      }
+    },
+    {
+      "id": "mem0-memory-002",
+      "memory": "Ava is planning a Kyoto trip and wants quiet ryokans near gardens.",
+      "user_id": "ava",
+      "agent_id": "travel-assistant",
+      "run_id": "demo-run-001",
+      "categories": ["travel", "lodging"],
+      "created_at": "2025-05-04T14:15:00Z",
+      "updated_at": "2025-05-04T14:15:00Z"
+    },
+    {
+      "id": "mem0-memory-003",
+      "memory": "Ava dislikes red-eye flights unless the arrival day has no meetings.",
+      "user_id": "ava",
+      "agent_id": "travel-assistant",
+      "run_id": "demo-run-001",
+      "categories": ["travel", "flight-preference"],
+      "created_at": "2025-05-05T18:45:00Z",
+      "updated_at": "2025-05-05T18:45:00Z"
+    }
+  ]
+}
