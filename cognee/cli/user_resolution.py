@@ -19,7 +19,7 @@ async def resolve_cli_user(user_id: Optional[str] = None, strict: bool = False):
     from cognee.modules.users.methods import get_default_user
 
     if not user_id:
-        return await get_default_user()
+        return await _get_default_user_with_recovery()
 
     try:
         uid = UUID(user_id)
@@ -44,6 +44,22 @@ async def resolve_cli_user(user_id: Optional[str] = None, strict: bool = False):
             f"User {uid} not found — falling back to the default user.  "
             f"The --user-id will not provide isolation."
         )
+        return await _get_default_user_with_recovery()
+
+
+async def _get_default_user_with_recovery():
+    """Try get_default_user(); on DatabaseNotCreatedError run migrations and retry."""
+    from cognee.modules.users.methods import get_default_user
+    from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
+
+    try:
+        return await get_default_user()
+    except DatabaseNotCreatedError:
+        from cognee.infrastructure.databases.relational import get_relational_engine
+        from cognee.modules.migrations.startup import run_migrations
+
+        await run_migrations()
+
         return await get_default_user()
 
 
