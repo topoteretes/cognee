@@ -1,4 +1,5 @@
 import os
+import pytest
 from dotenv import load_dotenv
 import asyncio
 from cognee.infrastructure.databases.graph.neptune_driver import NeptuneGraphDB
@@ -10,7 +11,9 @@ from cognee.modules.data.processing.document_types import TextDocument
 load_dotenv()
 graph_id = os.getenv("GRAPH_ID", "")
 
-na_adapter = NeptuneGraphDB(graph_id)
+na_adapter = None
+if graph_id:
+    na_adapter = NeptuneGraphDB(graph_id)
 
 
 def setup():
@@ -104,12 +107,15 @@ def setup():
     return nodes_data, edges_data
 
 
-async def pipeline_method():
+@pytest.mark.asyncio
+async def test_pipeline_method():
     """
     Example script using the neptune analytics with small sample data
 
     This example demonstrates how to add nodes to Neptune Analytics
     """
+    if not na_adapter:
+        pytest.skip("GRAPH_ID is not set in environment variables.")
 
     print("------TRUNCATE GRAPH-------")
     await na_adapter.delete_graph()
@@ -228,7 +234,10 @@ async def pipeline_method():
         print("Delete failed")
 
 
-async def misc_methods():
+@pytest.mark.asyncio
+async def test_misc_methods():
+    if not na_adapter:
+        pytest.skip("GRAPH_ID is not set in environment variables.")
     print("------TRUNCATE GRAPH-------")
     await na_adapter.delete_graph()
 
@@ -305,5 +314,8 @@ async def misc_methods():
 
 
 if __name__ == "__main__":
-    asyncio.run(pipeline_method())
-    asyncio.run(misc_methods())
+    if na_adapter:
+        asyncio.run(test_pipeline_method())
+        asyncio.run(test_misc_methods())
+    else:
+        print("GRAPH_ID is not set in environment variables. Skipping execution.")
