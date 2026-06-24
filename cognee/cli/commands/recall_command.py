@@ -27,8 +27,8 @@ Otherwise, this is a memory-oriented alias for `cognee search`.
             "--query-type",
             "-t",
             choices=SEARCH_TYPE_CHOICES,
-            default="GRAPH_COMPLETION",
-            help="Search mode (default: GRAPH_COMPLETION)",
+            default="HYBRID_COMPLETION",
+            help="Search mode (default: HYBRID_COMPLETION)",
         )
         parser.add_argument(
             "--datasets",

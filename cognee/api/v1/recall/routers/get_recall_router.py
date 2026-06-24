@@ -23,11 +23,11 @@ from cognee.shared.utils import send_telemetry
 
 
 class RecallPayloadDTO(InDTO):
-    # Default preserved as GRAPH_COMPLETION for backward compatibility
-    # with existing HTTP clients. Pass ``search_type: null`` explicitly
-    # to opt into auto-routing (the new ``cognee.recall`` default).
+    # Default is HYBRID_COMPLETION (chunk + entity + optional global context).
+    # Pass ``search_type: null`` explicitly to opt into auto-routing
+    # (the ``cognee.recall`` default, which also falls back to HYBRID_COMPLETION).
     search_type: Optional[SearchType] = Field(
-        default=SearchType.GRAPH_COMPLETION,
+        default=SearchType.HYBRID_COMPLETION,
         description=(
             "Search strategy, e.g. GRAPH_COMPLETION, RAG_COMPLETION, CHUNKS, SUMMARIES. "
             "Pass null to let cognee auto-route the query to the best strategy."
@@ -138,7 +138,7 @@ def get_recall_router() -> APIRouter:
         topK); both camelCase and snake_case are accepted.
 
         - **search_type** (Optional[SearchType]): Type of search to perform
-          (default: GRAPH_COMPLETION). Pass null to enable automatic query routing.
+          (default: HYBRID_COMPLETION). Pass null to enable automatic query routing.
         - **datasets** (Optional[List[str]]): Dataset names to search within
         - **dataset_ids** (Optional[List[UUID]]): Dataset UUIDs to search within;
           take precedence over dataset names when both are provided
@@ -178,6 +178,9 @@ def get_recall_router() -> APIRouter:
             results = await cognee_recall(
                 query_text=payload.query,
                 query_type=payload.search_type,
+                # Preserve the HTTP contract: an explicit ``search_type: null``
+                # opts into auto-routing; otherwise the resolved search_type is used.
+                auto_route=payload.search_type is None,
                 user=user,
                 datasets=payload.datasets,
                 dataset_ids=payload.dataset_ids,

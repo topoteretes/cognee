@@ -177,7 +177,8 @@ Key files:
 `search(query_text, query_type)` → route to retriever type → filter by permissions → return results
 
 Available search types (from `cognee/modules/search/types/SearchType.py`):
-- **GRAPH_COMPLETION** (default) - Graph traversal + LLM completion
+- **HYBRID_COMPLETION** (default) - Blends chunk, entity, and optional global graph context + LLM completion (runs chunk and entity retrieval concurrently)
+- **GRAPH_COMPLETION** - Graph traversal + LLM completion
 - **GRAPH_SUMMARY_COMPLETION** - Uses pre-computed summaries with graph context
 - **GRAPH_COMPLETION_COT** - Chain-of-thought reasoning over graph
 - **GRAPH_COMPLETION_CONTEXT_EXTENSION** - Extended context graph retrieval
