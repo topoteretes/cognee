@@ -33,6 +33,7 @@ class BaseConfig(BaseSettings):
         self.data_root_directory = ensure_absolute_path(self.data_root_directory)
         self.system_root_directory = ensure_absolute_path(self.system_root_directory)
         self.logs_root_directory = ensure_absolute_path(self.logs_root_directory)
+        self.cache_root_directory = ensure_absolute_path(self.cache_root_directory)
 
         # Set monitoring tool based on available keys
         if self.langfuse_public_key and self.langfuse_secret_key:
