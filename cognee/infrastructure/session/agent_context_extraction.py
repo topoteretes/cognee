@@ -4,9 +4,12 @@ Flow:
 
 1. LIVE   (cheap, no LLM) — runs after each trace is stored; turns an errored step into a
    failure_lessons candidate built straight from its error text.
-2. BATCH  (LLM, off the hot path) — runs periodically and at improve/session end over bounded
-   pending trace windows; proposes reasoning-heavy sections (tool_rules, success_patterns,
-   workflow_state, environment_facts, and richer failure_lessons).
+2. BATCH  (LLM) — proposes reasoning-heavy sections (tool_rules, success_patterns,
+   workflow_state, environment_facts, and richer failure_lessons) over bounded pending trace
+   windows. It runs in two places: periodically from the trace-write path (every
+   TRACE_EXTRACTION_INTERVAL traces, awaited inline in SessionManager.add_agent_trace_step), and
+   again at improve/session end to flush any pending tail. Because the periodic pass is awaited
+   inline, a trace write that crosses the interval pays the latency of one LLM call.
 
 Both feed the shared deterministic applier (apply_candidate_updates), so lessons are
 confidence-gated and de-duplicated the same way QA lessons are. Fail-open: extraction never
