@@ -48,20 +48,38 @@ def install_sample_mocks() -> None:
 
     @staticmethod
     async def sample_structured_output(text_input, system_prompt, response_model, **kwargs):
-        if response_model is KnowledgeGraph or (isinstance(response_model, type) and issubclass(response_model, KnowledgeGraph)):
+        if response_model is KnowledgeGraph or (
+            isinstance(response_model, type) and issubclass(response_model, KnowledgeGraph)
+        ):
             if "Blue Bottle" not in text_input:
                 return KnowledgeGraph(nodes=[], edges=[])
             return KnowledgeGraph(
                 nodes=[
-                    Node(id="Ava", name="Ava", type="Person", description="Ava is a person with imported memories."),
-                    Node(id="Blue Bottle", name="Blue Bottle", type="CoffeeShop", description="Preferred coffee shop."),
+                    Node(
+                        id="Ava",
+                        name="Ava",
+                        type="Person",
+                        description="Ava is a person with imported memories.",
+                    ),
+                    Node(
+                        id="Blue Bottle",
+                        name="Blue Bottle",
+                        type="CoffeeShop",
+                        description="Preferred coffee shop.",
+                    ),
                 ],
                 edges=[
-                    Edge(source_node_id="Ava", target_node_id="Blue Bottle", relationship_name="prefers_coffee_from")
+                    Edge(
+                        source_node_id="Ava",
+                        target_node_id="Blue Bottle",
+                        relationship_name="prefers_coffee_from",
+                    )
                 ],
             )
 
-        if response_model is SummarizedContent or (isinstance(response_model, type) and issubclass(response_model, SummarizedContent)):
+        if response_model is SummarizedContent or (
+            isinstance(response_model, type) and issubclass(response_model, SummarizedContent)
+        ):
             return SummarizedContent(summary=text_input, description="")
 
         return response_model()
@@ -69,8 +87,12 @@ def install_sample_mocks() -> None:
     LLMGateway.acreate_structured_output = sample_structured_output
 
     # Clear explicit cache pools to apply configurations safely
-    embedding_module = importlib.import_module("cognee.infrastructure.databases.vector.embeddings.get_embedding_engine")
-    vector_module = importlib.import_module("cognee.infrastructure.databases.vector.create_vector_engine")
+    embedding_module = importlib.import_module(
+        "cognee.infrastructure.databases.vector.embeddings.get_embedding_engine"
+    )
+    vector_module = importlib.import_module(
+        "cognee.infrastructure.databases.vector.create_vector_engine"
+    )
 
     embedding_module.create_embedding_engine.cache_clear()
     vector_module._create_vector_engine.cache_clear()
@@ -144,19 +166,21 @@ async def main() -> None:
         top_k=3,
         auto_route=False,
     )
-    
+
     print(f"Query: {query}")
     for index, item in enumerate(results, start=1):
         print(f"Result {index}: {item}")
-        
+
     results_str = "\n".join(str(item) for item in results)
     if "Blue Bottle" not in results_str:
         raise RuntimeError("Recall did not return the migrated mem0 content.")
 
     print_step(6, "COGX note")
     print("Mem0Source translates each mem0 memory into a COGXMemory record in the COGX standard.")
-    print("Reference: https://github.com/topoteretes/cognee/blob/dev/cognee/modules/migration/cogx.py")
-    
+    print(
+        "Reference: https://github.com/topoteretes/cognee/blob/dev/cognee/modules/migration/cogx.py"
+    )
+
     print("\nDone.")
     await close_cached_engines()
 
