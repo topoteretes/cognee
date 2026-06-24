@@ -16,13 +16,6 @@ async def resolve_cli_user(user_id: Optional[str] = None, strict: bool = False):
     error instead — used by ownership-sensitive commands (e.g. ``agents``) where a
     silent fallback to the default user would break the isolation the flag promises.
     """
-    from cognee.infrastructure.databases.relational import get_relational_engine
-    from cognee.run_migrations import run_migrations
-
-    db_engine = get_relational_engine()
-    await db_engine.create_database()
-    await run_migrations()
-
     from cognee.modules.users.methods import get_default_user
 
     if not user_id:
