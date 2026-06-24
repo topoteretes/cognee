@@ -14,6 +14,7 @@ raises into the trace write path — a failure just means no lesson this time.
 """
 
 import json
+import re
 
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import read_query_prompt
@@ -44,12 +45,38 @@ BATCH_PROMPT_FILE = "agent_context_extraction_system.txt"
 # extractor the lessons that already exist so it does not re-propose or reword them.
 MAX_BATCH_LESSONS = 5
 EXISTING_LESSONS_SHOWN = 40
+MAX_ERROR_TEXT_CHARS = 600
+
+_JWT_RE = re.compile(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b")
+_BEARER_RE = re.compile(r"(?i)\b(Bearer)\s+[A-Za-z0-9._~+/=-]+")
+_SECRET_ASSIGNMENT_RE = re.compile(
+    r"(?i)\b(api[_-]?key|access[_-]?token|refresh[_-]?token|token|password|secret)"
+    r"\s*([=:])\s*([^\s,;]+)"
+)
+_LONG_HEX_RE = re.compile(r"\b[0-9a-fA-F]{32,}\b")
+_UUID_RE = re.compile(
+    r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+    r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b"
+)
+_LONG_NUMBER_RE = re.compile(r"\b\d{8,}\b")
+
+
+def _sanitize_error_text(error_message: str, max_chars: int = MAX_ERROR_TEXT_CHARS) -> str:
+    """Redact sensitive and volatile values before errors become reusable context."""
+    error = " ".join(str(error_message or "").split())
+    error = _BEARER_RE.sub(r"\1 [redacted]", error)
+    error = _SECRET_ASSIGNMENT_RE.sub(r"\1\2[redacted]", error)
+    error = _JWT_RE.sub("[redacted]", error)
+    error = _LONG_HEX_RE.sub("[redacted]", error)
+    error = _UUID_RE.sub("[uuid]", error)
+    error = _LONG_NUMBER_RE.sub("[number]", error)
+    return error[:max_chars]
 
 
 def _failure_lesson_content(origin_function: str, error_message: str) -> str:
     """Build a compact failure lesson from an errored trace step."""
     origin = origin_function.strip() or "a tool"
-    error = " ".join(error_message.split())
+    error = _sanitize_error_text(error_message, max_chars=MAX_CONTEXT_CONTENT_CHARS)
     return f"{origin} failed: {error}"[:MAX_CONTEXT_CONTENT_CHARS]
 
 
@@ -102,7 +129,7 @@ def _trace_line(entry) -> str:
     if entry.session_feedback:
         parts.append(f"feedback: {entry.session_feedback}")
     if entry.error_message:
-        parts.append(f"error: {entry.error_message}")
+        parts.append(f"error: {_sanitize_error_text(entry.error_message)}")
     sanitized_return = sanitize_value(entry.method_return_value)
     if sanitized_return not in (None, "", {}, []):
         serialized = json.dumps(sanitized_return, ensure_ascii=False)[:BATCH_RETURN_CHARS]

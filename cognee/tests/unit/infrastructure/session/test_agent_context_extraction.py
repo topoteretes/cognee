@@ -84,6 +84,28 @@ def test_errored_step_builds_failure_candidate():
     assert "dotenv" in candidate.content
 
 
+def test_errored_step_redacts_sensitive_error_text():
+    candidates = build_live_agent_candidates(
+        origin_function="call_api",
+        status="error",
+        error_message=(
+            "Request failed: Bearer sk-live-secret token=abc123 "
+            "request_id=123456789 path /tmp/550e8400-e29b-41d4-a716-446655440000"
+        ),
+    )
+
+    assert len(candidates) == 1
+    content = candidates[0].content
+    assert "sk-live-secret" not in content
+    assert "abc123" not in content
+    assert "123456789" not in content
+    assert "550e8400-e29b-41d4-a716-446655440000" not in content
+    assert "Bearer [redacted]" in content
+    assert "token=[redacted]" in content
+    assert "request_id=[number]" in content
+    assert "[uuid]" in content
+
+
 def test_successful_step_builds_no_candidate():
     assert (
         build_live_agent_candidates(origin_function="run_tests", status="success", error_message="")
@@ -179,6 +201,27 @@ def test_build_trace_batch_renders_compact_lines():
     assert "error: exit 1" in batch
     assert "read_file [success]" in batch
     assert "output:" in batch
+
+
+def test_build_trace_batch_redacts_sensitive_error_text():
+    batch = build_trace_batch(
+        [
+            _trace(
+                "fetch_remote",
+                status="error",
+                error_message=(
+                    "HTTP 401 api_key=super-secret jwt=eyJabc.def.ghi request 987654321"
+                ),
+            )
+        ]
+    )
+
+    assert "super-secret" not in batch
+    assert "eyJabc.def.ghi" not in batch
+    assert "987654321" not in batch
+    assert "api_key=[redacted]" in batch
+    assert "jwt=[redacted]" in batch
+    assert "request [number]" in batch
 
 
 @pytest.mark.asyncio
