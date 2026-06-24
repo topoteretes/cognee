@@ -14,6 +14,7 @@ from cognee.infrastructure.session.session_context_builder import (
     DeterministicRanker,
     apply_candidate_updates,
     build_active_context_block,
+    coerce_active_context_entries,
 )
 from cognee.infrastructure.session.session_context_models import (
     SessionContextEntry,
@@ -256,7 +257,7 @@ async def test_apply_creates_new_for_novel_content():
         session_manager=sm,
         user_id="u",
         session_id="s",
-        feedback_entry_id="fb1",
+        source_id="fb1",
         candidates=candidates,
     )
     assert len(touched) == 1
@@ -275,7 +276,7 @@ async def test_apply_rejects_low_confidence():
         session_manager=sm,
         user_id="u",
         session_id="s",
-        feedback_entry_id="fb1",
+        source_id="fb1",
         candidates=candidates,
     )
     assert touched == []
@@ -291,7 +292,7 @@ async def test_apply_rejects_empty_content():
         session_manager=sm,
         user_id="u",
         session_id="s",
-        feedback_entry_id="fb1",
+        source_id="fb1",
         candidates=candidates,
     )
     assert touched == []
@@ -307,7 +308,7 @@ async def test_apply_links_exact_duplicate_no_new_entry():
         session_manager=sm,
         user_id="u",
         session_id="s",
-        feedback_entry_id="fb2",
+        source_id="fb2",
         candidates=candidates,
     )
     assert touched == ["r1"]
@@ -324,7 +325,7 @@ async def test_apply_fail_open_on_raising_manager():
         session_manager=sm,
         user_id="u",
         session_id="s",
-        feedback_entry_id="fb1",
+        source_id="fb1",
         candidates=candidates,
     )
     assert touched == []
@@ -339,8 +340,117 @@ async def test_apply_handles_invalid_candidate_dict():
         session_manager=sm,
         user_id="u",
         session_id="s",
-        feedback_entry_id="fb1",
+        source_id="fb1",
         candidates=candidates,
     )
     assert touched == []
     assert sm.store == []
+
+
+# ----------------------------------------------------------------- profiles (agent)
+
+
+def _agent_entry(section, content, **kwargs):
+    return _entry(section, content, context_profile="agent", **kwargs)
+
+
+def test_ranker_agent_section_priority():
+    ranker = DeterministicRanker()
+    failure = _agent_entry("failure_lessons", "sync before tests")
+    success = _agent_entry("success_patterns", "this worked")
+    assert ranker.score(failure, "x") > ranker.score(success, "x")
+
+
+@pytest.mark.asyncio
+async def test_qa_render_ignores_agent_entries_by_default():
+    sm = FakeSessionManager(
+        [_entry("rules", "be concise", id="q1"), _agent_entry("tool_rules", "use uv run", id="a1")]
+    )
+    block, served = await build_active_context_block(
+        session_manager=sm, user_id="u", session_id="s", query="q"
+    )
+    assert served == ["q1"]
+    assert "use uv run" not in block
+
+
+@pytest.mark.asyncio
+async def test_agent_render_ignores_qa_entries_and_uses_agent_headings():
+    sm = FakeSessionManager(
+        [_entry("rules", "be concise", id="q1"), _agent_entry("tool_rules", "use uv run", id="a1")]
+    )
+    block, served = await build_active_context_block(
+        session_manager=sm, user_id="u", session_id="s", query="q", context_profile="agent"
+    )
+    assert served == ["a1"]
+    assert "### Tool rules" in block
+    assert "be concise" not in block
+
+
+@pytest.mark.asyncio
+async def test_stamp_served_false_issues_no_writes():
+    # FakeSessionManager.update would succeed, so an unstamped last_served_at proves it
+    # was never called (i.e. the read-only path issues no writes).
+    sm = FakeSessionManager([_agent_entry("tool_rules", "use uv run", id="a1")])
+    block, served = await build_active_context_block(
+        session_manager=sm,
+        user_id="u",
+        session_id="s",
+        query="q",
+        context_profile="agent",
+        stamp_served=False,
+    )
+    assert served == ["a1"]
+    assert "use uv run" in block
+    assert sm.store[0]["last_served_at"] is None
+
+
+def test_coerce_returns_both_profiles():
+    # The distillation gate relies on coerce being profile-agnostic; if it filtered to qa,
+    # agent lessons would silently vanish from distillation.
+    rows = [_entry("rules", "qa lesson"), _agent_entry("tool_rules", "agent lesson")]
+    coerced = coerce_active_context_entries([r.model_dump() for r in rows])
+    profiles = {entry.context_profile for entry in coerced}
+    assert profiles == {"qa", "agent"}
+
+
+@pytest.mark.asyncio
+async def test_apply_agent_candidate_creates_entry_with_trace_source():
+    sm = FakeSessionManager([])
+    candidates = [
+        {
+            "section": "failure_lessons",
+            "context_profile": "agent",
+            "content": "Run uv sync before tests",
+            "confidence": 0.85,
+        }
+    ]
+    touched = await apply_candidate_updates(
+        session_manager=sm, user_id="u", session_id="s", source_id="trace-1", candidates=candidates
+    )
+    assert len(touched) == 1
+    created = sm.store[0]
+    assert created["context_profile"] == "agent"
+    assert created["section"] == "failure_lessons"
+    assert created["source_trace_ids"] == ["trace-1"]
+    assert created["source_feedback_ids"] == []
+
+
+@pytest.mark.asyncio
+async def test_apply_agent_candidate_dedupes_within_profile_section_only():
+    # Same normalized content under qa/rules must NOT block an agent/tool_rules entry.
+    existing = _entry("rules", "use uv run", id="q1")
+    sm = FakeSessionManager([existing])
+    candidates = [
+        {
+            "section": "tool_rules",
+            "context_profile": "agent",
+            "content": "use uv run",
+            "confidence": 0.85,
+        }
+    ]
+    touched = await apply_candidate_updates(
+        session_manager=sm, user_id="u", session_id="s", source_id="trace-1", candidates=candidates
+    )
+    assert len(touched) == 1
+    assert touched[0] != "q1"
+    assert len(sm.store) == 2

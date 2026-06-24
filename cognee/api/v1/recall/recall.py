@@ -30,6 +30,7 @@ from cognee.modules.recall.types.RecallResponse import (
     ResponseGraphContextEntry,
     ResponseGraphEntry,
     ResponseQAEntry,
+    ResponseSessionContextEntry,
 )
 from cognee.modules.recall.types.SearchResultItem import SearchResultItem
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
@@ -313,6 +314,49 @@ async def _fetch_graph_context(
     return [ResponseGraphContextEntry(content=snapshot, source="graph_context")]
 
 
+async def _fetch_session_context(
+    query_text: str,
+    session_id: str,
+    context_profile: str,
+    user: str | None = None,
+) -> list[ResponseSessionContextEntry]:
+    """Render active session-context lessons for one profile as a one-item list.
+
+    Read-only: uses the deterministic builder with ``stamp_served=False`` so it never updates
+    served metadata. Returns an empty list when no lessons match the profile.
+    """
+    from cognee.infrastructure.session.get_session_manager import get_session_manager
+    from cognee.infrastructure.session.session_context_builder import build_active_context_block
+
+    caller_user_id = await _resolve_user_id(user)
+    if not caller_user_id:
+        return []
+    cache_user_id = await _resolve_session_cache_user_id(session_id, caller_user_id)
+    if not cache_user_id:
+        return []
+
+    sm = get_session_manager()
+    if not sm.is_available:
+        return []
+
+    block, _served = await build_active_context_block(
+        session_manager=sm,
+        user_id=cache_user_id,
+        session_id=session_id,
+        query=query_text,
+        context_profile=context_profile,
+        stamp_served=False,
+    )
+    if not block:
+        return []
+
+    return [
+        ResponseSessionContextEntry(
+            content=block, context_profile=context_profile, source="session_context"
+        )
+    ]
+
+
 async def recall(
     query_text: str,
     query_type: SearchType | None = None,
@@ -328,6 +372,7 @@ async def recall(
     node_name_filter_operator: str = "OR",
     only_context: bool = False,
     session_id: str | None = None,
+    context_profile: str = "qa",
     wide_search_top_k: int | None = 100,
     triplet_distance_penalty: float | None = 6.5,
     feedback_influence: float = 0.0,
@@ -442,6 +487,7 @@ async def recall(
                 node_name=node_name,
                 only_context=only_context,
                 session_id=session_id,
+                context_profile=context_profile,
                 verbose=verbose,
                 include_references=include_references,
             )
@@ -479,6 +525,18 @@ async def recall(
             if not session_id:
                 return []
             return list(await _fetch_graph_context(session_id=session_id, user=user))
+
+        async def _run_session_context() -> list[RecallResponse]:
+            if not session_id:
+                return []
+            return list(
+                await _fetch_session_context(
+                    query_text=query_text,
+                    session_id=session_id,
+                    context_profile=context_profile,
+                    user=user,
+                )
+            )
 
         async def _run_graph() -> list[RecallResponse]:
             nonlocal user, dataset_ids
@@ -570,6 +628,7 @@ async def recall(
             "session": _run_session,
             "trace": _run_trace,
             "graph_context": _run_graph_context,
+            "session_context": _run_session_context,
             "graph": _run_graph,
         }
 
