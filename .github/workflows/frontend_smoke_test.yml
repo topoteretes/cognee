@@ -1,0 +1,33 @@
+name: test | Frontend container smoke
+
+on:
+  workflow_call:
+
+env:
+  COGNEE_SKIP_CONNECTION_TEST: "true"
+
+jobs:
+  frontend-smoke:
+    name: Frontend Container Smoke
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install test dependencies
+        run: pip install pytest httpx
+
+      - name: Run frontend smoke tests
+        run: |
+          python -m pytest cognee/tests/deployment/test_frontend_smoke.py \
+            -v -m deployment --tb=short 2>&1
