@@ -12,16 +12,23 @@ Run a reduced, no-LLM version (only the immediate deterministic failure capture 
 
     uv run python examples/demos/agentic_session_context_demo.py --offline
 
-What it shows, using only the public remember()/recall()/improve() paths:
+What it shows:
 
-  Act 1  remember(TraceEntry ...) stores raw tool traces. An errored step also produces an
-         immediate, deterministic (no-LLM) failure_lessons capture — useful but shallow.
-  Act 2  improve() runs the LLM batch pass: it reads the traces and extracts the real, reusable
-         lessons (tool_rules, environment_facts, success_patterns, ...) and distills them. This
-         is the heart of the feature.
-  Act 3  recall(scope=["session_context"], context_profile="agent") returns those lessons
-         read-only (zero writes); context_profile="qa" returns nothing (profile isolation);
-         scope=["trace"] still returns the raw evidence.
+  Act 1  remember(TraceEntry ...) stores raw tool traces in the session cache. The errored trace
+         also creates one immediate, deterministic failure lesson. The demo prints every active
+         context entry extracted so far.
+  Act 2  The batch extractor reads all traces and adds richer active guidance. Then
+         distill_session() rewrites accepted guidance into markdown documents and add+cognifies
+         those documents into the graph. The demo prints the exact cognified documents.
+  Act 3  recall(scope=["session_context"], context_profile="agent") returns the active guidance
+         read-only; context_profile="qa" returns nothing because this demo wrote no QA-profile
+         entries; scope=["trace"] still returns the raw evidence.
+
+Mental model:
+
+  raw traces -> active agent guidance -> recall prompt context
+                     |
+                     +-> distillation -> session_learnings graph documents
 
 Exact lesson wording varies by model.
 """
@@ -108,6 +115,7 @@ async def main():
 
     # Act 1: store agent traces. The errored step yields an immediate, no-LLM failure capture.
     progress("Act 1: storing agent traces via remember(TraceEntry).")
+    print_phase_overview()
     for trace in TRACES:
         await cognee.remember(
             TraceEntry(**trace),
@@ -117,32 +125,25 @@ async def main():
             user=user,
         )
     output["act1_traces_and_live_capture"] = await snapshot(user)
-    print_snapshot(
-        "Act 1 — raw traces + immediate deterministic failure capture (no LLM)",
+    print_extracted_entries(
+        "Act 1 — extracted context entries after raw trace storage",
         output["act1_traces_and_live_capture"],
+        note=(
+            "Expected: exactly one live failure lesson, because only errored traces with "
+            "an error_message are extracted without an LLM."
+        ),
     )
 
     if args.offline:
-        progress("Offline mode: skipping the LLM extraction acts (Act 2 / Act 4).")
+        progress("Offline mode: skipping batch extraction and distillation.")
         output["act3_recall"] = await run_recall_act(user)
         print(json.dumps(output, indent=2))
         return
 
-    # Act 2: the LLM batch pass extracts the real reusable lessons. This is the centerpiece.
-    progress("Act 2: improve() — the LLM extracts reusable lessons from the traces.")
-    if not await try_improve(user):
-        progress(
-            "Act 2 could not run — configure an LLM provider (LLM_API_KEY/LLM_MODEL) or "
-            "use --offline. Showing recall of the deterministic capture instead."
-        )
-        output["llm_extraction_failed"] = True
-        output["act3_recall"] = await run_recall_act(user)
-        print(json.dumps(output, indent=2))
-        return
-
-    extracted = await snapshot(user)
-    output["act2_llm_extracted_lessons"] = extracted["agent_lessons"]
-    print_snapshot("Act 2 — lessons the LLM extracted from the traces", extracted)
+    # Act 2: run the extraction/distillation steps explicitly so the demo can print documents.
+    progress("Act 2: batch extraction, then distill_session() add+cognify.")
+    output["act2_distillation"] = await run_distillation_act(user)
+    print_distillation(output["act2_distillation"])
 
     # Act 3: read-only recall — profile rendering, isolation, evidence preservation, no writes.
     output["act3_recall"] = await run_recall_act(user)
@@ -150,14 +151,35 @@ async def main():
     print(json.dumps(output, indent=2))
 
 
-async def try_improve(user) -> bool:
-    """Run improve() for the demo session. Returns False if it fails (e.g. no LLM configured)."""
+async def run_distillation_act(user) -> dict:
+    """Run the same agent-context extraction/distillation pieces that improve() orchestrates."""
+    from cognee.infrastructure.session.agent_context_extraction import extract_pending_agent_context
+    from cognee.modules.session_distillation import distill_session
+
     try:
-        await cognee.improve(dataset=DATASET_NAME, session_ids=[SESSION_ID], user=user)
-        return True
+        touched_ids = await extract_pending_agent_context(
+            session_manager=get_session_manager(),
+            user_id=str(user.id),
+            session_id=SESSION_ID,
+            min_new_traces=1,
+        )
+        extracted = await snapshot(user)
+        result = await distill_session(SESSION_ID, dataset=DATASET_NAME, user=user)
+        return {
+            "batch_touched_entry_ids": touched_ids,
+            "active_context_entries_after_batch": extracted["agent_lessons"],
+            "distillation_status": result.status,
+            "cognified_documents": result.documents,
+        }
     except Exception as exc:
-        progress(f"improve() failed: {exc}")
-        return False
+        progress(f"Act 2 failed: {exc}")
+        return {
+            "batch_touched_entry_ids": [],
+            "active_context_entries_after_batch": await agent_lessons_for(user),
+            "distillation_status": "failed",
+            "cognified_documents": [],
+            "error": str(exc),
+        }
 
 
 async def run_recall_act(user) -> dict:
@@ -232,6 +254,8 @@ async def agent_lessons_for(user) -> list[dict]:
                 "content": row.get("content"),
                 "confidence": row.get("confidence"),
                 "source_trace_ids": row.get("source_trace_ids", []),
+                "id": row.get("id"),
+                "harmful_count": row.get("harmful_count", 0),
             }
         )
     return lessons
@@ -262,19 +286,81 @@ def block_text(recall_result: Any) -> str:
 # --------------------------------------------------------------------------- printing
 
 
-def print_snapshot(title: str, snap: dict):
+def print_phase_overview():
+    print("", file=sys.stderr)
+    print("--- Demo map ---", file=sys.stderr)
+    print("1. Store traces. Print every extracted active context entry.", file=sys.stderr)
+    print(
+        "   Expect one entry: the deterministic failure lesson from the errored trace.",
+        file=sys.stderr,
+    )
+    print(
+        "2. Run batch extraction and distillation. Print the exact documents add+cognify wrote.",
+        file=sys.stderr,
+    )
+    print(
+        "3. Recall. Print what should be present, what should be absent, and why.",
+        file=sys.stderr,
+    )
+
+
+def print_extracted_entries(title: str, snap: dict, *, note: str):
     print("", file=sys.stderr)
     print(f"--- {title} ---", file=sys.stderr)
+    print(note, file=sys.stderr)
     print(f"raw traces stored: {snap['trace_count']}", file=sys.stderr)
     if not snap["agent_lessons"]:
-        print("agent lessons: none", file=sys.stderr)
+        print("extracted active context entries: none", file=sys.stderr)
         return
-    print(f"agent lessons ({len(snap['agent_lessons'])}):", file=sys.stderr)
-    for lesson in snap["agent_lessons"]:
-        provenance = "from trace" if lesson["source_trace_ids"] else "from batch"
+    print(f"extracted active context entries ({len(snap['agent_lessons'])}):", file=sys.stderr)
+    print_agent_lessons(snap["agent_lessons"])
+
+
+def print_distillation(result: dict):
+    print("", file=sys.stderr)
+    print("--- Act 2 — distilled and cognified graph documents ---", file=sys.stderr)
+    print(
+        "Before distillation, the batch extractor may add richer active context entries from all traces.",
+        file=sys.stderr,
+    )
+    print(
+        f"batch touched entries: {len(result['batch_touched_entry_ids'])}",
+        file=sys.stderr,
+    )
+    print(
+        f"active context entries available to distillation: "
+        f"{len(result['active_context_entries_after_batch'])}",
+        file=sys.stderr,
+    )
+    print_agent_lessons(result["active_context_entries_after_batch"])
+    print("", file=sys.stderr)
+    print(
+        "Distillation rewrites accepted entries into standalone markdown documents and "
+        "add+cognifies them into node_set='session_learnings'.",
+        file=sys.stderr,
+    )
+    print(f"distillation status: {result['distillation_status']}", file=sys.stderr)
+    documents = result["cognified_documents"]
+    if not documents:
+        print("cognified documents: none", file=sys.stderr)
+        if result.get("error"):
+            print(f"error: {result['error']}", file=sys.stderr)
+        return
+    print(f"cognified documents ({len(documents)}):", file=sys.stderr)
+    for index, document in enumerate(documents, start=1):
+        print(f"  document {index}:", file=sys.stderr)
+        print(indent_block(document.strip(), prefix="    "), file=sys.stderr)
+
+
+def print_agent_lessons(agent_lessons: list[dict]):
+    if not agent_lessons:
+        print("  (none)", file=sys.stderr)
+        return
+    for lesson in agent_lessons:
+        provenance = "live trace" if lesson["source_trace_ids"] else "batch LLM"
         print(
             f"  - [{lesson['section']}] {lesson['content']} "
-            f"(confidence={lesson['confidence']}, {provenance})",
+            f"(confidence={lesson['confidence']}, source={provenance})",
             file=sys.stderr,
         )
 
@@ -282,11 +368,28 @@ def print_snapshot(title: str, snap: dict):
 def print_recall(result: dict):
     print("", file=sys.stderr)
     print("--- Act 3: read-only recall ---", file=sys.stderr)
+    print(
+        "Expected: agent profile has guidance, because prior acts wrote agent-profile entries.",
+        file=sys.stderr,
+    )
     print("agent profile block:", file=sys.stderr)
     print((result["agent_profile_block"] or "  (empty)"), file=sys.stderr)
-    print(f"qa profile results: {result['qa_profile_result_count']} (expected 0)", file=sys.stderr)
-    print(f"raw trace evidence still recallable: {result['trace_evidence_count']}", file=sys.stderr)
+    print("", file=sys.stderr)
+    print(
+        "Expected: QA profile has 0 results, because this demo never wrote QA-profile context.",
+        file=sys.stderr,
+    )
+    print(f"qa profile results: {result['qa_profile_result_count']}", file=sys.stderr)
+    print("", file=sys.stderr)
+    print("Expected: raw trace evidence is still recallable separately.", file=sys.stderr)
+    print(f"raw trace evidence results: {result['trace_evidence_count']}", file=sys.stderr)
+    print("", file=sys.stderr)
+    print("Expected: recall is read-only and does not update last_served_at.", file=sys.stderr)
     print(f"recall made no writes: {result['recall_made_no_writes']}", file=sys.stderr)
+
+
+def indent_block(text: str, *, prefix: str) -> str:
+    return "\n".join(f"{prefix}{line}" for line in text.splitlines())
 
 
 # --------------------------------------------------------------------------- storage setup

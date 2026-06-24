@@ -247,6 +247,7 @@ class SessionManager:
         try:
             from cognee.infrastructure.session.agent_context_extraction import (
                 extract_live_agent_context,
+                extract_pending_agent_context,
             )
 
             await extract_live_agent_context(
@@ -258,8 +259,13 @@ class SessionManager:
                 status=status,
                 error_message=error_message,
             )
+            await extract_pending_agent_context(
+                session_manager=self,
+                user_id=user_id,
+                session_id=session_id,
+            )
         except Exception as error:
-            logger.warning("Live agent-context extraction skipped: %s", error)
+            logger.warning("Agent-context extraction skipped: %s", error)
 
     def is_session_available_for_completion(self, user_id: str | None) -> bool:
         """Return True if session (history + save) is available for completion."""

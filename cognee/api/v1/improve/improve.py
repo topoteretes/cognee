@@ -339,15 +339,16 @@ async def _extract_agent_context(
     session_ids: List[str],
     user,
 ) -> int:
-    """Run the LLM batch pass that turns each session's traces into agent-profile lessons.
+    """Flush pending trace windows into agent-profile lessons before distillation.
 
-    Delegates to ``agent_context_extraction.extract_batch_agent_context`` per session, which
-    stores lessons through the shared session-context applier. Gated on automatic session
-    context and best-effort/fail-open: an error on one session never blocks the others or the
-    rest of ``improve()``. Returns the number of lessons created/linked across all sessions.
+    Delegates to ``agent_context_extraction.extract_pending_agent_context`` per session, which
+    shares the same watermark used by mid-session trace extraction. ``min_new_traces=1`` makes
+    improve/session-end flush any remaining unprocessed traces before distillation. Gated on
+    automatic session context and best-effort/fail-open: an error on one session never blocks the
+    others or the rest of ``improve()``. Returns the number of lessons created/linked.
     """
     from cognee.infrastructure.session.agent_context_extraction import (
-        extract_batch_agent_context,
+        extract_pending_agent_context,
     )
     from cognee.infrastructure.session.get_session_manager import get_session_manager
 
@@ -359,8 +360,11 @@ async def _extract_agent_context(
     touched = 0
     for session_id in session_ids:
         try:
-            ids = await extract_batch_agent_context(
-                session_manager=session_manager, user_id=user_id, session_id=session_id
+            ids = await extract_pending_agent_context(
+                session_manager=session_manager,
+                user_id=user_id,
+                session_id=session_id,
+                min_new_traces=1,
             )
             touched += len(ids)
         except Exception as e:

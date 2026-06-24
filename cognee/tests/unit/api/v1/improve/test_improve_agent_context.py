@@ -1,7 +1,7 @@
 """Unit tests for the improve() agent-context extraction stage (_extract_agent_context).
 
 The stage iterates sessions, is gated on automatic session context, and is fail-open per
-session. These tests stub the session manager and the batch extractor so no LLM/cache is needed.
+session. These tests stub the session manager and pending extractor so no LLM/cache is needed.
 """
 
 import importlib
@@ -34,11 +34,11 @@ def _patch_extractor(monkeypatch, behavior):
     ace_mod = importlib.import_module("cognee.infrastructure.session.agent_context_extraction")
     calls = []
 
-    async def fake_extract(*, session_manager, user_id, session_id):
-        calls.append(session_id)
+    async def fake_extract(*, session_manager, user_id, session_id, min_new_traces):
+        calls.append((session_id, min_new_traces))
         return behavior(session_id)
 
-    monkeypatch.setattr(ace_mod, "extract_batch_agent_context", fake_extract)
+    monkeypatch.setattr(ace_mod, "extract_pending_agent_context", fake_extract)
     return calls
 
 
@@ -49,7 +49,7 @@ async def test_runs_extraction_per_session_and_counts_lessons(monkeypatch, impro
 
     total = await improve_mod._extract_agent_context(session_ids=["s1", "s2"], user=_make_user())
 
-    assert calls == ["s1", "s2"]
+    assert calls == [("s1", 1), ("s2", 1)]
     assert total == 2
 
 
@@ -77,5 +77,5 @@ async def test_one_failing_session_does_not_block_others(monkeypatch, improve_mo
 
     total = await improve_mod._extract_agent_context(session_ids=["s1", "s2"], user=_make_user())
 
-    assert calls == ["s1", "s2"]  # s2 still processed after s1 raised
+    assert calls == [("s1", 1), ("s2", 1)]  # s2 still processed after s1 raised
     assert total == 1

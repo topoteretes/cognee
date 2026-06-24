@@ -4,9 +4,9 @@ Flow:
 
 1. LIVE   (cheap, no LLM) — runs after each trace is stored; turns an errored step into a
    failure_lessons candidate built straight from its error text.
-2. BATCH  (LLM, off the hot path) — runs at the improve stage over a session's recent traces and
-   proposes the reasoning-heavier sections (tool_rules, success_patterns, workflow_state,
-   environment_facts, and richer failure_lessons).
+2. BATCH  (LLM, off the hot path) — runs periodically and at improve/session end over bounded
+   pending trace windows; proposes reasoning-heavy sections (tool_rules, success_patterns,
+   workflow_state, environment_facts, and richer failure_lessons).
 
 Both feed the shared deterministic applier (apply_candidate_updates), so lessons are
 confidence-gated and de-duplicated the same way QA lessons are. Fail-open: extraction never
@@ -15,6 +15,8 @@ raises into the trace write path — a failure just means no lesson this time.
 
 import json
 import re
+from dataclasses import dataclass
+from datetime import datetime
 
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import read_query_prompt
@@ -47,6 +49,13 @@ MAX_BATCH_LESSONS = 5
 EXISTING_LESSONS_SHOWN = 40
 MAX_ERROR_TEXT_CHARS = 600
 
+# Mid-session extraction: every N new traces, re-read a small overlap so the LLM sees enough
+# sequence context to infer patterns without running on every tool call.
+TRACE_EXTRACTION_INTERVAL = 10
+TRACE_EXTRACTION_OVERLAP = 3
+TRACE_EXTRACTION_STATE_ID = "__agent_context_extraction_state__"
+TRACE_EXTRACTION_STATE_KIND = "agent_context_extraction_state"
+
 _JWT_RE = re.compile(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b")
 _BEARER_RE = re.compile(r"(?i)\b(Bearer)\s+[A-Za-z0-9._~+/=-]+")
 _SECRET_ASSIGNMENT_RE = re.compile(
@@ -59,6 +68,14 @@ _UUID_RE = re.compile(
     r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b"
 )
 _LONG_NUMBER_RE = re.compile(r"\b\d{8,}\b")
+
+
+@dataclass(frozen=True, slots=True)
+class TraceExtractionPlan:
+    """A bounded trace window to extract and the watermark to save afterward."""
+
+    total_trace_count: int
+    window_size: int
 
 
 def _sanitize_error_text(error_message: str, max_chars: int = MAX_ERROR_TEXT_CHARS) -> str:
@@ -123,6 +140,85 @@ async def extract_live_agent_context(
         return []
 
 
+def _trace_window_size(pending_trace_count: int, overlap: int, max_window: int) -> int:
+    """Return the bounded trace window size for pending-trace extraction."""
+    return max(1, min(max_window, pending_trace_count + overlap))
+
+
+def _extract_state_row(raw_entries: list) -> dict | None:
+    """Find this session's internal agent-extraction watermark row, if present."""
+    for raw in raw_entries or []:
+        if not isinstance(raw, dict):
+            continue
+        if raw.get("id") == TRACE_EXTRACTION_STATE_ID:
+            return raw
+        if raw.get("kind") == TRACE_EXTRACTION_STATE_KIND:
+            return raw
+    return None
+
+
+async def _get_processed_trace_count(session_manager, user_id: str, session_id: str) -> int:
+    """Read the count watermark. Missing or malformed state means no traces processed yet."""
+    raw_entries = await session_manager.get_session_context_entries(
+        user_id=user_id, session_id=session_id
+    )
+    row = _extract_state_row(raw_entries)
+    if row is None:
+        return 0
+    try:
+        return max(0, int(row.get("processed_trace_count") or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+async def _save_processed_trace_count(
+    session_manager, user_id: str, session_id: str, processed_trace_count: int
+) -> None:
+    """Persist the count watermark as an internal non-rendered session-context row."""
+    payload = {
+        "id": TRACE_EXTRACTION_STATE_ID,
+        "kind": TRACE_EXTRACTION_STATE_KIND,
+        "processed_trace_count": max(0, int(processed_trace_count)),
+        "updated_at": datetime.utcnow().isoformat(),
+    }
+    updated = await session_manager.update_session_context_entry(
+        user_id=user_id,
+        session_id=session_id,
+        entry_id=TRACE_EXTRACTION_STATE_ID,
+        merge=payload,
+    )
+    if not updated:
+        await session_manager.create_session_context_entry(
+            user_id=user_id,
+            session_id=session_id,
+            entry_dump=payload,
+        )
+
+
+async def _plan_pending_extraction(
+    *,
+    session_manager,
+    user_id: str,
+    session_id: str,
+    min_new_traces: int,
+    overlap: int,
+    max_window: int,
+) -> TraceExtractionPlan | None:
+    """Load trace-count state and decide whether a new extraction window is due."""
+    total_trace_count = await session_manager.get_agent_trace_count(
+        user_id=user_id, session_id=session_id
+    )
+    processed_count = await _get_processed_trace_count(session_manager, user_id, session_id)
+    pending_count = max(0, total_trace_count - processed_count)
+    if pending_count < min_new_traces:
+        return None
+
+    return TraceExtractionPlan(
+        total_trace_count=total_trace_count,
+        window_size=_trace_window_size(pending_count, overlap, max_window),
+    )
+
+
 def _trace_line(entry) -> str:
     """Render one trace step as a compact line for the batch prompt."""
     parts = [f"- {entry.origin_function} [{entry.status}]"]
@@ -172,6 +268,45 @@ def build_extraction_input(trace_batch: str, existing_lessons: list) -> str:
     return "\n\n".join(sections)
 
 
+async def _extract_batch_from_traces(
+    *,
+    session_manager,
+    user_id: str,
+    session_id: str,
+    traces: list,
+) -> list[str]:
+    """LLM batch pass over an already-selected trace window. Raises on infrastructure errors."""
+    if not traces:
+        return []
+
+    batch = build_trace_batch(traces)
+    if not batch.strip():
+        return []
+
+    system_prompt = read_query_prompt(BATCH_PROMPT_FILE)
+    if not system_prompt:
+        raise RuntimeError("Batch agent-context extraction: system prompt not found")
+
+    existing = await _existing_agent_lessons(session_manager, user_id, session_id)
+    result = await LLMGateway.acreate_structured_output(
+        text_input=build_extraction_input(batch, existing),
+        system_prompt=system_prompt,
+        response_model=AgentContextExtraction,
+    )
+    candidates = list(result.lessons)[:MAX_BATCH_LESSONS]
+    if not candidates:
+        return []
+
+    # No single source trace for a batch lesson; link none and rely on content dedup.
+    return await apply_candidate_updates(
+        session_manager=session_manager,
+        user_id=user_id,
+        session_id=session_id,
+        source_id="",
+        candidates=candidates,
+    )
+
+
 async def extract_batch_agent_context(
     *,
     session_manager,
@@ -190,36 +325,68 @@ async def extract_batch_agent_context(
         traces = await session_manager.get_agent_trace_session(
             user_id=user_id, session_id=session_id, last_n=last_n
         )
-        if not traces:
-            return []
-
-        batch = build_trace_batch(traces)
-        if not batch.strip():
-            return []
-
-        system_prompt = read_query_prompt(BATCH_PROMPT_FILE)
-        if not system_prompt:
-            logger.warning("Batch agent-context extraction: system prompt not found")
-            return []
-
-        existing = await _existing_agent_lessons(session_manager, user_id, session_id)
-        result = await LLMGateway.acreate_structured_output(
-            text_input=build_extraction_input(batch, existing),
-            system_prompt=system_prompt,
-            response_model=AgentContextExtraction,
-        )
-        candidates = list(result.lessons)[:MAX_BATCH_LESSONS]
-        if not candidates:
-            return []
-
-        # No single source trace for a batch lesson; link none and rely on content dedup.
-        return await apply_candidate_updates(
+        return await _extract_batch_from_traces(
             session_manager=session_manager,
             user_id=user_id,
             session_id=session_id,
-            source_id="",
-            candidates=candidates,
+            traces=traces,
         )
     except Exception as error:
         logger.warning("Batch agent-context extraction failed open: %s", error)
+        return []
+
+
+async def extract_pending_agent_context(
+    *,
+    session_manager,
+    user_id: str,
+    session_id: str,
+    min_new_traces: int = TRACE_EXTRACTION_INTERVAL,
+    overlap: int = TRACE_EXTRACTION_OVERLAP,
+    max_window: int = BATCH_TRACE_LIMIT,
+) -> list[str]:
+    """Extract agent lessons from unprocessed traces using one shared watermark policy.
+
+    ``min_new_traces`` controls the trigger:
+    - trace-write path uses the interval default, so extraction happens periodically;
+    - improve/session-end callers can pass ``1`` to flush any pending traces before distillation.
+
+    The LLM receives only the latest ``pending + overlap`` trace steps, capped by ``max_window``.
+    The watermark advances only after the extraction attempt completes without raising.
+    Fail-open -> [].
+    """
+    if min_new_traces <= 0:
+        return []
+    try:
+        plan = await _plan_pending_extraction(
+            session_manager=session_manager,
+            user_id=user_id,
+            session_id=session_id,
+            min_new_traces=min_new_traces,
+            overlap=overlap,
+            max_window=max_window,
+        )
+        if plan is None:
+            return []
+
+        traces = await session_manager.get_agent_trace_session(
+            user_id=user_id,
+            session_id=session_id,
+            last_n=plan.window_size,
+        )
+        touched = await _extract_batch_from_traces(
+            session_manager=session_manager,
+            user_id=user_id,
+            session_id=session_id,
+            traces=traces,
+        )
+        await _save_processed_trace_count(
+            session_manager,
+            user_id,
+            session_id,
+            processed_trace_count=plan.total_trace_count,
+        )
+        return touched
+    except Exception as error:
+        logger.warning("Pending agent-context extraction failed open: %s", error)
         return []

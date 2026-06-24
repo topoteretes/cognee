@@ -240,8 +240,10 @@ class TestSessionManager:
         """The live agent-context extraction hook fires after the trace row is stored."""
         import cognee.infrastructure.session.agent_context_extraction as ace
 
-        spy = AsyncMock(return_value=[])
-        monkeypatch.setattr(ace, "extract_live_agent_context", spy)
+        live_spy = AsyncMock(return_value=[])
+        pending_spy = AsyncMock(return_value=[])
+        monkeypatch.setattr(ace, "extract_live_agent_context", live_spy)
+        monkeypatch.setattr(ace, "extract_pending_agent_context", pending_spy)
         monkeypatch.setattr(sm, "is_auto_feedback_enabled", lambda: True)
 
         trace_id = await sm.add_agent_trace_step(
@@ -253,12 +255,17 @@ class TestSessionManager:
             generate_feedback_with_llm=False,
         )
 
-        spy.assert_awaited_once()
-        call_kw = spy.await_args.kwargs
+        live_spy.assert_awaited_once()
+        call_kw = live_spy.await_args.kwargs
         assert call_kw["trace_id"] == trace_id
         assert call_kw["status"] == "error"
         assert call_kw["error_message"] == "exit 1"
         assert call_kw["session_id"] == "s1"
+        pending_spy.assert_awaited_once_with(
+            session_manager=sm,
+            user_id="u1",
+            session_id="s1",
+        )
 
     @pytest.mark.asyncio
     async def test_add_agent_trace_step_skips_extraction_when_disabled(
@@ -267,8 +274,10 @@ class TestSessionManager:
         """With automatic session context off, no extraction runs."""
         import cognee.infrastructure.session.agent_context_extraction as ace
 
-        spy = AsyncMock(return_value=[])
-        monkeypatch.setattr(ace, "extract_live_agent_context", spy)
+        live_spy = AsyncMock(return_value=[])
+        pending_spy = AsyncMock(return_value=[])
+        monkeypatch.setattr(ace, "extract_live_agent_context", live_spy)
+        monkeypatch.setattr(ace, "extract_pending_agent_context", pending_spy)
         monkeypatch.setattr(sm, "is_auto_feedback_enabled", lambda: False)
 
         await sm.add_agent_trace_step(
@@ -280,7 +289,8 @@ class TestSessionManager:
             generate_feedback_with_llm=False,
         )
 
-        spy.assert_not_awaited()
+        live_spy.assert_not_awaited()
+        pending_spy.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_add_agent_trace_step_returns_trace_id_and_feedback(self, sm, mock_cache):

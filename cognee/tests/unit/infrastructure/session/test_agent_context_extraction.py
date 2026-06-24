@@ -13,10 +13,13 @@ from cognee.infrastructure.session import agent_context_extraction
 from cognee.infrastructure.session.agent_context_extraction import (
     LIVE_FAILURE_CONFIDENCE,
     MAX_BATCH_LESSONS,
+    TRACE_EXTRACTION_STATE_ID,
+    TRACE_EXTRACTION_STATE_KIND,
     build_live_agent_candidates,
     build_trace_batch,
     extract_batch_agent_context,
     extract_live_agent_context,
+    extract_pending_agent_context,
 )
 from cognee.infrastructure.session.session_context_models import (
     AgentContextExtraction,
@@ -42,6 +45,7 @@ class FakeSessionManager:
     def __init__(self, traces=None):
         self.store = []
         self.traces = list(traces or [])
+        self.trace_session_last_n_calls = []
 
     async def get_session_context_entries(self, user_id, session_id):
         return list(self.store)
@@ -57,7 +61,13 @@ class FakeSessionManager:
         return False
 
     async def get_agent_trace_session(self, user_id, session_id, last_n=None):
+        self.trace_session_last_n_calls.append(last_n)
+        if last_n is not None:
+            return list(self.traces[-last_n:])
         return list(self.traces)
+
+    async def get_agent_trace_count(self, user_id, session_id):
+        return len(self.traces)
 
 
 class RaisingSessionManager:
@@ -305,3 +315,119 @@ async def test_batch_caps_new_lessons_per_run(monkeypatch):
 
     assert len(touched) == MAX_BATCH_LESSONS
     assert len(sm.store) == MAX_BATCH_LESSONS
+
+
+# --------------------------------------------------------------- pending pass
+
+
+def _state_row(processed_trace_count):
+    return {
+        "id": TRACE_EXTRACTION_STATE_ID,
+        "kind": TRACE_EXTRACTION_STATE_KIND,
+        "processed_trace_count": processed_trace_count,
+    }
+
+
+@pytest.mark.asyncio
+async def test_pending_extraction_noop_below_interval(monkeypatch):
+    sm = FakeSessionManager(traces=[_trace("step-1"), _trace("step-2")])
+
+    async def unexpected_llm(text_input, system_prompt, response_model):
+        raise AssertionError("LLM should not run below interval")
+
+    monkeypatch.setattr(
+        agent_context_extraction.LLMGateway,
+        "acreate_structured_output",
+        unexpected_llm,
+    )
+
+    touched = await extract_pending_agent_context(
+        session_manager=sm, user_id="u", session_id="s", min_new_traces=3, overlap=1
+    )
+
+    assert touched == []
+    assert sm.store == []
+
+
+@pytest.mark.asyncio
+async def test_pending_extraction_runs_at_interval_and_sets_watermark(monkeypatch):
+    sm = FakeSessionManager(traces=[_trace("step-1"), _trace("step-2"), _trace("step-3")])
+    _patch_llm(
+        monkeypatch,
+        lessons=[
+            {
+                "section": "success_patterns",
+                "content": "Batch trace windows can produce reusable lessons.",
+                "confidence": 0.9,
+            }
+        ],
+    )
+
+    touched = await extract_pending_agent_context(
+        session_manager=sm, user_id="u", session_id="s", min_new_traces=3, overlap=1
+    )
+
+    assert len(touched) == 1
+    assert sm.trace_session_last_n_calls == [4]
+    state = next(row for row in sm.store if row.get("kind") == TRACE_EXTRACTION_STATE_KIND)
+    assert state["processed_trace_count"] == 3
+
+
+@pytest.mark.asyncio
+async def test_pending_extraction_can_flush_below_interval(monkeypatch):
+    sm = FakeSessionManager(traces=[_trace("step-1"), _trace("step-2")])
+    _patch_llm(
+        monkeypatch,
+        lessons=[
+            {
+                "section": "tool_rules",
+                "content": "Flush pending traces before distillation.",
+                "confidence": 0.9,
+            }
+        ],
+    )
+
+    touched = await extract_pending_agent_context(
+        session_manager=sm, user_id="u", session_id="s", min_new_traces=1, overlap=1
+    )
+
+    assert len(touched) == 1
+    assert sm.trace_session_last_n_calls == [3]
+    state = next(row for row in sm.store if row.get("kind") == TRACE_EXTRACTION_STATE_KIND)
+    assert state["processed_trace_count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_pending_extraction_uses_overlap_after_watermark(monkeypatch):
+    sm = FakeSessionManager(traces=[_trace(f"step-{index}") for index in range(13)])
+    sm.store.append(_state_row(10))
+    captured = {}
+    _patch_llm(monkeypatch, lessons=[], captured=captured)
+
+    touched = await extract_pending_agent_context(
+        session_manager=sm, user_id="u", session_id="s", min_new_traces=3, overlap=2
+    )
+
+    assert touched == []
+    assert sm.trace_session_last_n_calls == [5]
+    assert "step-8" in captured["text_input"]
+    assert "step-12" in captured["text_input"]
+    state = next(row for row in sm.store if row.get("kind") == TRACE_EXTRACTION_STATE_KIND)
+    assert state["processed_trace_count"] == 13
+
+
+@pytest.mark.asyncio
+async def test_pending_extraction_does_not_advance_watermark_on_llm_error(monkeypatch):
+    sm = FakeSessionManager(traces=[_trace("step-1"), _trace("step-2"), _trace("step-3")])
+
+    async def boom(text_input, system_prompt, response_model):
+        raise RuntimeError("llm down")
+
+    monkeypatch.setattr(agent_context_extraction.LLMGateway, "acreate_structured_output", boom)
+
+    touched = await extract_pending_agent_context(
+        session_manager=sm, user_id="u", session_id="s", min_new_traces=3, overlap=1
+    )
+
+    assert touched == []
+    assert not any(row.get("kind") == TRACE_EXTRACTION_STATE_KIND for row in sm.store)
