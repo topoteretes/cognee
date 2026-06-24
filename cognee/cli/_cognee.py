@@ -19,7 +19,10 @@ from cognee.cli.config import CLI_DESCRIPTION
 from cognee.cli import debug
 import cognee.cli.echo as fmt
 from cognee.cli.exceptions import CliCommandException
+from cognee.shared.logging_utils import get_logger
 
+
+logger = get_logger(__name__)
 
 ACTION_EXECUTED = False
 
@@ -358,6 +361,11 @@ def main() -> int:
         try:
             api_dispatch(args)
         except Exception as ex:
+            # Keep the friendly console message, but always log the full
+            # exception (type + traceback) so delegated-command failures stay
+            # diagnosable in CI/production even when --debug is off.
+            # See issue #3335.
+            logger.error("Delegated command failed: %s", ex, exc_info=True)
             fmt.error(str(ex))
             if debug.is_debug_enabled():
                 raise ex
