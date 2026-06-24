@@ -1878,3 +1878,33 @@ jobs:
           GRAPH_DATABASE_USERNAME: ${{ steps.neo4j.outputs.neo4j-username }}
           GRAPH_DATABASE_PASSWORD: ${{ steps.neo4j.outputs.neo4j-password }}
         run: uv run pytest cognee/tests/test_performance_analysis.py -v
+
+  test-concurrent-cognify:
+    name: Concurrent cognify on one dataset end-to-end (SQLite + LanceDB)
+    runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+
+      - name: Dependencies already installed
+        run: echo "Dependencies already installed in setup"
+
+      - name: Run concurrent cognify e2e test
+        env:
+          ENV: 'dev'
+          ENABLE_BACKEND_ACCESS_CONTROL: "True"
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_ARGS: ${{ secrets.LLM_ARGS }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_DIMENSIONS: 300
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+        run: uv run pytest cognee/tests/test_concurrent_cognify_e2e.py -v --log-level=INFO
