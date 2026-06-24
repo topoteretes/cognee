@@ -132,6 +132,7 @@ _telemetry_session: aiohttp.ClientSession | None = None
 _telemetry_session_loop: asyncio.AbstractEventLoop | None = None
 _telemetry_session_lock: asyncio.Lock | None = None
 _telemetry_session_lock_loop: asyncio.AbstractEventLoop | None = None
+_active_telemetry_tasks: set[asyncio.Task] = set()
 
 
 async def _get_telemetry_session() -> aiohttp.ClientSession:
@@ -179,6 +180,18 @@ async def _send_telemetry_request(payload: dict) -> None:
         # creation and session use (fire-and-forget telemetry tasks can outlive
         # the loop that scheduled them).
         logger.debug("Telemetry request failed: %s", e)
+
+
+async def close_telemetry() -> None:
+    """Wait for all pending telemetry tasks and close the shared aiohttp session."""
+    global _telemetry_session
+    # Safely await all running telemetry tasks
+    if _active_telemetry_tasks:
+        await asyncio.gather(*_active_telemetry_tasks, return_exceptions=True)
+    # Close the HTTP client session if it exists and is open
+    if _telemetry_session and not _telemetry_session.closed:
+        await _telemetry_session.close()
+        _telemetry_session = None
 
 
 def _get_api_key_tracking_id() -> str:
@@ -270,7 +283,10 @@ def send_telemetry(event_name: str, user_id: str | UUID, additional_properties: 
     }
 
     loop = asyncio.get_running_loop()
-    loop.create_task(_send_telemetry_request(payload))
+    task = loop.create_task(_send_telemetry_request(payload))
+    if task is not None and hasattr(task, "add_done_callback"):
+        _active_telemetry_tasks.add(task)
+        task.add_done_callback(_active_telemetry_tasks.discard)
 
 
 def embed_logo(p: Any, layout_scale: float, logo_alpha: float, position: str):

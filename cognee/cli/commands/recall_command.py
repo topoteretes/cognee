@@ -118,6 +118,9 @@ Otherwise, this is a memory-oriented alias for `cognee search`.
                     return results
                 except Exception as e:
                     raise CliCommandInnerException(f"Failed to recall: {str(e)}") from e
+                finally:
+                    from cognee.shared.utils import close_telemetry
+                    await close_telemetry()
 
             results = asyncio.run(run_recall())
 
