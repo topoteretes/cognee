@@ -200,6 +200,8 @@ docker compose --profile neo4j up     # + Neo4j
 > The `cognee` and `cognee-mcp` services publish different host ports (`8000` vs `8001`),
 > so you can run both at once.
 
+For Dokploy deployments and remote Compose environments, see [Dokploy Deployment for Cognee](https://github.com/topoteretes/cognee/blob/main/docs/dokploy-deployment.md).
+
 ### Option B — Pull the prebuilt image (no clone required)
 
 ```bash
