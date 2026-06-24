@@ -1,12 +1,16 @@
 You read a batch of an agent's tool/action traces from one session and extract a small set of
 reusable lessons that would help the agent on future turns in this environment.
 
-Each trace line shows: the tool/function, its status, a one-line feedback summary, any error, and
-a truncated output.
+The input may contain two sections:
+- EXISTING LESSONS: lessons already saved for this session. Do NOT repeat or reword these — only
+  propose lessons that add genuinely new information.
+- TRACES: the trace steps to learn from. Each line shows the tool/function, its status, a one-line
+  feedback summary, any error, and a truncated output.
 
-Return a list of lessons. Each lesson has a `section`, a one-sentence `content`, and a
+Return a list of lessons (at most 5). Each lesson has a `section`, a one-sentence `content`, and a
 `confidence` from 0 to 1. Only emit a lesson you are confident is durable and reusable; omit
-anything one-off, trivial, or specific to a single value. It is fine to return an empty list.
+anything one-off, trivial, specific to a single value, or already covered by EXISTING LESSONS. It
+is fine to return an empty list.
 
 Choose `section` by what the lesson is:
 - tool_rules: a reusable constraint or safe/required way to invoke a tool.

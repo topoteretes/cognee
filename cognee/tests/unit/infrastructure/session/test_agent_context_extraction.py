@@ -12,12 +12,16 @@ import pytest
 from cognee.infrastructure.session import agent_context_extraction
 from cognee.infrastructure.session.agent_context_extraction import (
     LIVE_FAILURE_CONFIDENCE,
+    MAX_BATCH_LESSONS,
     build_live_agent_candidates,
     build_trace_batch,
     extract_batch_agent_context,
     extract_live_agent_context,
 )
-from cognee.infrastructure.session.session_context_models import AgentContextExtraction
+from cognee.infrastructure.session.session_context_models import (
+    AgentContextExtraction,
+    SessionContextEntry,
+)
 
 
 def _trace(
@@ -150,8 +154,10 @@ async def test_extract_live_fail_open_on_raising_manager():
 # ------------------------------------------------------------------- batch (LLM) pass
 
 
-def _patch_llm(monkeypatch, lessons):
+def _patch_llm(monkeypatch, lessons, captured=None):
     async def fake_acreate_structured_output(text_input, system_prompt, response_model):
+        if captured is not None:
+            captured["text_input"] = text_input
         return AgentContextExtraction(lessons=lessons)
 
     monkeypatch.setattr(
@@ -218,3 +224,41 @@ async def test_batch_fail_open_on_llm_error(monkeypatch):
     touched = await extract_batch_agent_context(session_manager=sm, user_id="u", session_id="s")
     assert touched == []
     assert sm.store == []
+
+
+@pytest.mark.asyncio
+async def test_batch_shows_existing_lessons_to_the_model(monkeypatch):
+    sm = FakeSessionManager(traces=[_trace("run_tests", status="error", error_message="exit 1")])
+    sm.store.append(
+        SessionContextEntry(
+            id="e1",
+            section="failure_lessons",
+            context_profile="agent",
+            content="Old lesson about uv.",
+            created_at="2026-06-11T10:00:00",
+        ).model_dump()
+    )
+    captured = {}
+    _patch_llm(monkeypatch, lessons=[], captured=captured)
+
+    await extract_batch_agent_context(session_manager=sm, user_id="u", session_id="s")
+
+    assert "EXISTING LESSONS" in captured["text_input"]
+    assert "Old lesson about uv." in captured["text_input"]
+    assert "TRACES:" in captured["text_input"]
+
+
+@pytest.mark.asyncio
+async def test_batch_caps_new_lessons_per_run(monkeypatch):
+    sm = FakeSessionManager(traces=[_trace("run_tests", status="error", error_message="exit 1")])
+    # Seven distinct, novel lessons; only MAX_BATCH_LESSONS should be applied.
+    lessons = [
+        {"section": "tool_rules", "content": f"Lesson number {i}.", "confidence": 0.9}
+        for i in range(7)
+    ]
+    _patch_llm(monkeypatch, lessons=lessons)
+
+    touched = await extract_batch_agent_context(session_manager=sm, user_id="u", session_id="s")
+
+    assert len(touched) == MAX_BATCH_LESSONS
+    assert len(sm.store) == MAX_BATCH_LESSONS

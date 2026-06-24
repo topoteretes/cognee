@@ -17,11 +17,15 @@ import json
 
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import read_query_prompt
-from cognee.infrastructure.session.session_context_builder import apply_candidate_updates
+from cognee.infrastructure.session.session_context_builder import (
+    apply_candidate_updates,
+    coerce_active_context_entries,
+)
 from cognee.infrastructure.session.session_context_models import (
     MAX_CONTEXT_CONTENT_CHARS,
     AgentContextExtraction,
     CandidateFailureLessonUpdate,
+    ContextProfile,
 )
 from cognee.modules.agent_memory.sanitization import sanitize_value
 from cognee.shared.logging_utils import get_logger
@@ -36,6 +40,10 @@ LIVE_FAILURE_CONFIDENCE = 0.85
 BATCH_TRACE_LIMIT = 40
 BATCH_RETURN_CHARS = 600
 BATCH_PROMPT_FILE = "agent_context_extraction_system.txt"
+# Bound store growth across repeated improve() runs: cap new lessons per run, and show the
+# extractor the lessons that already exist so it does not re-propose or reword them.
+MAX_BATCH_LESSONS = 5
+EXISTING_LESSONS_SHOWN = 40
 
 
 def _failure_lesson_content(origin_function: str, error_message: str) -> str:
@@ -108,6 +116,35 @@ def build_trace_batch(traces) -> str:
     return "\n".join(line for line in lines if line.strip())
 
 
+async def _existing_agent_lessons(session_manager, user_id: str, session_id: str) -> list:
+    """Load this session's current agent-profile lessons (capped for the prompt)."""
+    raw_entries = await session_manager.get_session_context_entries(
+        user_id=user_id, session_id=session_id
+    )
+    agent_entries = [
+        entry
+        for entry in coerce_active_context_entries(raw_entries)
+        if entry.context_profile == ContextProfile.AGENT.value
+    ]
+    return agent_entries[:EXISTING_LESSONS_SHOWN]
+
+
+def build_extraction_input(trace_batch: str, existing_lessons: list) -> str:
+    """Combine already-stored lessons and new traces into one prompt input.
+
+    Showing existing lessons lets the model avoid re-proposing or rewording them, which is what
+    keeps the store from growing across repeated improve() runs.
+    """
+    sections = []
+    if existing_lessons:
+        rendered = "\n".join(f"- [{entry.section}] {entry.content}" for entry in existing_lessons)
+        sections.append(
+            "EXISTING LESSONS (already saved — do not repeat or reword these):\n" + rendered
+        )
+    sections.append("TRACES:\n" + trace_batch)
+    return "\n\n".join(sections)
+
+
 async def extract_batch_agent_context(
     *,
     session_manager,
@@ -115,11 +152,12 @@ async def extract_batch_agent_context(
     session_id: str,
     last_n: int = BATCH_TRACE_LIMIT,
 ) -> list[str]:
-    """LLM batch pass: read recent traces, propose agent lessons, and store them. Fail-open -> [].
+    """LLM batch pass: read recent traces, propose new agent lessons, and store them.
 
-    The applier de-duplicates against existing entries by exact content within (profile, section),
-    so a batch lesson identical to a live one links instead of duplicating; reworded lessons
-    coexist and are reconciled later by distillation.
+    The prompt is shown the session's existing agent lessons so the model only proposes
+    genuinely new ones, and the output is capped at ``MAX_BATCH_LESSONS`` — together these bound
+    store growth across repeated improve() runs. Exact-content dedup in the applier is the final
+    backstop. Fail-open -> [].
     """
     try:
         traces = await session_manager.get_agent_trace_session(
@@ -137,12 +175,13 @@ async def extract_batch_agent_context(
             logger.warning("Batch agent-context extraction: system prompt not found")
             return []
 
+        existing = await _existing_agent_lessons(session_manager, user_id, session_id)
         result = await LLMGateway.acreate_structured_output(
-            text_input=batch,
+            text_input=build_extraction_input(batch, existing),
             system_prompt=system_prompt,
             response_model=AgentContextExtraction,
         )
-        candidates = list(result.lessons)
+        candidates = list(result.lessons)[:MAX_BATCH_LESSONS]
         if not candidates:
             return []
 

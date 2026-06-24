@@ -8,6 +8,7 @@ from cognee.infrastructure.session.session_context_models import (
     VALID_PROFILES,
     AgentCandidateContextUpdate,
     AgentCandidateContextUpdateVariant,
+    AgentContextExtraction,
     CandidateContextUpdate,
     ContextSection,
     ServedContextRating,
@@ -238,3 +239,19 @@ def test_agent_candidate_rejects_qa_section():
 def test_qa_candidate_rejects_agent_section():
     with pytest.raises(ValidationError):
         CandidateContextUpdate(section="tool_rules", content="x", confidence=0.9)
+
+
+def test_agent_context_extraction_normalizes_lessons():
+    extraction = AgentContextExtraction(
+        lessons=[
+            {"section": " Tool_Rules ", "content": "Use uv run", "confidence": 0.9},
+            {"section": "failure_lessons", "content": "Sync first", "confidence": 0.8},
+        ]
+    )
+    assert [lesson.section for lesson in extraction.lessons] == ["tool_rules", "failure_lessons"]
+    assert all(lesson.context_profile == "agent" for lesson in extraction.lessons)
+
+
+def test_agent_context_extraction_defaults_to_empty():
+    assert AgentContextExtraction().lessons == []
+    assert AgentContextExtraction(lessons="not-a-list").lessons == []
