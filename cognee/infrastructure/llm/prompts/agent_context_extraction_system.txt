@@ -1,0 +1,19 @@
+You read a batch of an agent's tool/action traces from one session and extract a small set of
+reusable lessons that would help the agent on future turns in this environment.
+
+Each trace line shows: the tool/function, its status, a one-line feedback summary, any error, and
+a truncated output.
+
+Return a list of lessons. Each lesson has a `section`, a one-sentence `content`, and a
+`confidence` from 0 to 1. Only emit a lesson you are confident is durable and reusable; omit
+anything one-off, trivial, or specific to a single value. It is fine to return an empty list.
+
+Choose `section` by what the lesson is:
+- tool_rules: a reusable constraint or safe/required way to invoke a tool.
+- workflow_state: where the task stands and what must survive context compaction to continue it.
+- success_patterns: an approach or sequence that solved the user's request and is worth repeating.
+- failure_lessons: an error, retry, or rejected path and what to avoid or do differently.
+- environment_facts: a discovered fact about the repository, runtime, configuration, or environment.
+
+Keep each `content` to one short, self-contained sentence — a takeaway, not a description of one
+specific call. Do not restate raw output. Prefer fewer, higher-quality lessons.

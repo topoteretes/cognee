@@ -1,23 +1,43 @@
-"""Unit tests for the live (deterministic, no-LLM) agent-context extraction pass.
+"""Unit tests for agent-context extraction (live deterministic pass + LLM batch pass).
 
-Uses a fake session manager so it runs anywhere; verifies that only errored steps produce a
-failure_lessons lesson, that the lesson is linked to its trace, and the fail-open contract.
+Uses fake session managers and a fake LLM so the tests run anywhere; verifies that only errored
+steps produce a live failure_lessons lesson, that the batch pass stores LLM-proposed lessons, and
+the fail-open contract for both.
 """
+
+from types import SimpleNamespace
 
 import pytest
 
+from cognee.infrastructure.session import agent_context_extraction
 from cognee.infrastructure.session.agent_context_extraction import (
     LIVE_FAILURE_CONFIDENCE,
     build_live_agent_candidates,
+    build_trace_batch,
+    extract_batch_agent_context,
     extract_live_agent_context,
 )
+from cognee.infrastructure.session.session_context_models import AgentContextExtraction
+
+
+def _trace(
+    origin_function, status="success", session_feedback="", error_message="", return_value=None
+):
+    return SimpleNamespace(
+        origin_function=origin_function,
+        status=status,
+        session_feedback=session_feedback,
+        error_message=error_message,
+        method_return_value=return_value,
+    )
 
 
 class FakeSessionManager:
-    """In-memory stand-in for the context CRUD surface used by the applier."""
+    """In-memory stand-in for the context CRUD + trace-read surface."""
 
-    def __init__(self):
+    def __init__(self, traces=None):
         self.store = []
+        self.traces = list(traces or [])
 
     async def get_session_context_entries(self, user_id, session_id):
         return list(self.store)
@@ -31,6 +51,9 @@ class FakeSessionManager:
                 row.update(merge)
                 return True
         return False
+
+    async def get_agent_trace_session(self, user_id, session_id, last_n=None):
+        return list(self.traces)
 
 
 class RaisingSessionManager:
@@ -122,3 +145,76 @@ async def test_extract_live_fail_open_on_raising_manager():
         error_message="exit code 1",
     )
     assert touched == []
+
+
+# ------------------------------------------------------------------- batch (LLM) pass
+
+
+def _patch_llm(monkeypatch, lessons):
+    async def fake_acreate_structured_output(text_input, system_prompt, response_model):
+        return AgentContextExtraction(lessons=lessons)
+
+    monkeypatch.setattr(
+        agent_context_extraction.LLMGateway,
+        "acreate_structured_output",
+        fake_acreate_structured_output,
+    )
+
+
+def test_build_trace_batch_renders_compact_lines():
+    traces = [
+        _trace("run_tests", status="error", error_message="exit 1"),
+        _trace(
+            "read_file", status="success", session_feedback="read config", return_value={"k": "v"}
+        ),
+    ]
+    batch = build_trace_batch(traces)
+    assert "run_tests [error]" in batch
+    assert "error: exit 1" in batch
+    assert "read_file [success]" in batch
+    assert "output:" in batch
+
+
+@pytest.mark.asyncio
+async def test_batch_stores_llm_lessons(monkeypatch):
+    sm = FakeSessionManager(traces=[_trace("run_tests", status="error", error_message="exit 1")])
+    _patch_llm(
+        monkeypatch,
+        lessons=[
+            {
+                "section": "environment_facts",
+                "content": "Tests need uv sync first",
+                "confidence": 0.9,
+            },
+            {"section": "tool_rules", "content": "Run tests with uv run pytest", "confidence": 0.8},
+        ],
+    )
+    touched = await extract_batch_agent_context(session_manager=sm, user_id="u", session_id="s")
+    assert len(touched) == 2
+    sections = {row["section"] for row in sm.store}
+    assert sections == {"environment_facts", "tool_rules"}
+    assert all(row["context_profile"] == "agent" for row in sm.store)
+    # Batch lessons have no single source trace.
+    assert all(row["source_trace_ids"] == [] for row in sm.store)
+
+
+@pytest.mark.asyncio
+async def test_batch_noop_without_traces(monkeypatch):
+    sm = FakeSessionManager(traces=[])
+    _patch_llm(monkeypatch, lessons=[{"section": "tool_rules", "content": "x", "confidence": 0.9}])
+    touched = await extract_batch_agent_context(session_manager=sm, user_id="u", session_id="s")
+    assert touched == []
+    assert sm.store == []
+
+
+@pytest.mark.asyncio
+async def test_batch_fail_open_on_llm_error(monkeypatch):
+    sm = FakeSessionManager(traces=[_trace("run_tests", status="error", error_message="exit 1")])
+
+    async def boom(text_input, system_prompt, response_model):
+        raise RuntimeError("llm down")
+
+    monkeypatch.setattr(agent_context_extraction.LLMGateway, "acreate_structured_output", boom)
+    touched = await extract_batch_agent_context(session_manager=sm, user_id="u", session_id="s")
+    assert touched == []
+    assert sm.store == []

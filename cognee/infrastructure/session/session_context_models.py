@@ -313,6 +313,36 @@ AgentCandidateContextUpdateVariant = Annotated[
 ]
 
 
+class AgentContextExtraction(BaseModel):
+    """LLM output for the batch pass: agent-profile lessons drawn from trace evidence."""
+
+    lessons: List[AgentCandidateContextUpdateVariant] = Field(
+        default_factory=list,
+        description=(
+            "Reusable agent/tool lessons drawn from the traces. Each item must be one of the "
+            "section-specific agent candidate types."
+        ),
+    )
+
+    @field_validator("lessons", mode="before")
+    @classmethod
+    def normalize_lessons(cls, value):
+        if not isinstance(value, list):
+            return []
+        normalized = []
+        for item in value:
+            if isinstance(item, AgentCandidateContextUpdate):
+                item = item.model_dump()
+            if isinstance(item, dict):
+                item = dict(item)
+                section = item.get("section")
+                if isinstance(section, str):
+                    item["section"] = section.strip().lower()
+                item.setdefault("context_profile", ContextProfile.AGENT.value)
+            normalized.append(item)
+        return normalized
+
+
 class SessionContextEntry(BaseModel):
     """A stored active session-context lesson, tagged by profile (qa or agent)."""
 

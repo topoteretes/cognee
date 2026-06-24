@@ -180,6 +180,12 @@ async def improve(
                 )
                 stages_run.append("persist_trace_steps")
 
+                # Stage 2b2: distill each session's agent traces into agent-profile
+                # session-context lessons (the LLM batch pass) before distillation, so
+                # those lessons are available as gated guidance for stage 2c.
+                if await _extract_agent_context(session_ids=session_ids, user=user):
+                    stages_run.append("extract_agent_context")
+
                 # Stage 2c: distill each session's gated guidance into curated,
                 # entity-anchored lessons and add+cognify them into the graph.
                 # This is what lets remember(session, self_improvement=True)
@@ -327,6 +333,43 @@ async def _bridge_sessions(
         logger.info("improve: session Q&A persisted from %d session(s)", len(session_ids))
     except Exception as e:
         logger.warning("improve: session persistence failed (non-fatal): %s", e)
+
+
+async def _extract_agent_context(
+    session_ids: List[str],
+    user,
+) -> int:
+    """Run the LLM batch pass that turns each session's traces into agent-profile lessons.
+
+    Delegates to ``agent_context_extraction.extract_batch_agent_context`` per session, which
+    stores lessons through the shared session-context applier. Gated on automatic session
+    context and best-effort/fail-open: an error on one session never blocks the others or the
+    rest of ``improve()``. Returns the number of lessons created/linked across all sessions.
+    """
+    from cognee.infrastructure.session.agent_context_extraction import (
+        extract_batch_agent_context,
+    )
+    from cognee.infrastructure.session.get_session_manager import get_session_manager
+
+    session_manager = get_session_manager()
+    if not session_manager.is_available or not session_manager.is_auto_feedback_enabled():
+        return 0
+
+    user_id = str(user.id)
+    touched = 0
+    for session_id in session_ids:
+        try:
+            ids = await extract_batch_agent_context(
+                session_manager=session_manager, user_id=user_id, session_id=session_id
+            )
+            touched += len(ids)
+        except Exception as e:
+            logger.warning(
+                "improve: agent-context extraction failed for '%s' (non-fatal): %s",
+                session_id,
+                e,
+            )
+    return touched
 
 
 async def _distill_sessions(
