@@ -25,10 +25,10 @@ class TestCogneeServerStart(unittest.TestCase):
                 "--port",
                 "8000",
             ],
-            preexec_fn=os.setsid,
+            preexec_fn=os.setsid if hasattr(os, "setsid") else None,
         )
         # Give the server some time to start
-        time.sleep(120)
+        time.sleep(10)
 
         # Check if server started with errors
         if cls.server_process.poll() is not None:
