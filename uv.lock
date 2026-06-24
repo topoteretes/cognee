@@ -1348,11 +1348,17 @@ langchain = [
     { name = "langchain-text-splitters" },
     { name = "langsmith" },
 ]
+letta = [
+    { name = "letta-client" },
+]
 llama-cpp = [
     { name = "llama-cpp-python", extra = ["server"] },
 ]
 llama-index = [
     { name = "llama-index-core" },
+]
+mem0 = [
+    { name = "mem0ai" },
 ]
 mistral = [
     { name = "mistral-common", version = "1.9.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11' and python_full_version < '3.13'" },
@@ -1411,6 +1417,9 @@ tracing = [
     { name = "opentelemetry-exporter-otlp-proto-http" },
     { name = "opentelemetry-sdk" },
 ]
+zep = [
+    { name = "zep-cloud" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -1467,6 +1476,7 @@ requires-dist = [
     { name = "langdetect", specifier = ">=1.0.9" },
     { name = "langfuse", marker = "extra == 'monitoring'", specifier = ">=2.32.0,<3" },
     { name = "langsmith", marker = "extra == 'langchain'", specifier = ">=0.2.3,<1.0.0" },
+    { name = "letta-client", marker = "extra == 'letta'", specifier = ">=1.12.0" },
     { name = "limits", specifier = ">=4.4.1,<5" },
     { name = "litellm", specifier = ">=1.83.7" },
     { name = "llama-cpp-python", extras = ["server"], marker = "extra == 'llama-cpp'", specifier = ">=0.3.0,<1.0.0" },
@@ -1479,6 +1489,7 @@ requires-dist = [
     { name = "lxml", marker = "python_full_version >= '3.14' and extra == 'docs'", specifier = ">=6.0.1,<7" },
     { name = "lxml", marker = "python_full_version >= '3.14' and extra == 'scraping'", specifier = ">=6.0.1,<7" },
     { name = "matplotlib", marker = "extra == 'evals'", specifier = ">=3.8.3,<4" },
+    { name = "mem0ai", marker = "extra == 'mem0'", specifier = ">=0.1.114" },
     { name = "mistral-common", marker = "extra == 'mistral'", specifier = ">=1.5.2,<2" },
     { name = "mistralai", marker = "extra == 'mistral'", specifier = ">=1.9.10,<2" },
     { name = "mkdocs-material", marker = "extra == 'dev'", specifier = ">=9.5.42,<10" },
@@ -1551,8 +1562,9 @@ requires-dist = [
     { name = "urllib3", specifier = ">=2.6.0" },
     { name = "uvicorn", specifier = ">=0.34.0,<1.0.0" },
     { name = "websockets", specifier = ">=15.0.1,<16.0.0" },
+    { name = "zep-cloud", marker = "extra == 'zep'", specifier = ">=3.22.0" },
 ]
-provides-extras = ["api", "distributed", "scraping", "fastembed", "neo4j", "neptune", "postgres", "postgres-binary", "notebook", "langchain", "llama-index", "huggingface", "ollama", "mistral", "anthropic", "azure", "deepeval", "posthog", "groq", "llama-cpp", "docs", "codegraph", "evals", "graphiti", "aws", "dlt", "baml", "dev", "debug", "redis", "tracing", "monitoring", "docling"]
+provides-extras = ["api", "distributed", "scraping", "fastembed", "neo4j", "neptune", "postgres", "postgres-binary", "notebook", "langchain", "llama-index", "huggingface", "ollama", "mistral", "anthropic", "azure", "deepeval", "posthog", "groq", "llama-cpp", "docs", "codegraph", "evals", "graphiti", "mem0", "zep", "letta", "aws", "dlt", "baml", "dev", "debug", "redis", "tracing", "monitoring", "docling"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -3716,6 +3728,11 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/2a/39/e50c7c3a983047577ee07d2a9e53faf5a69493943ec3f6a384bdc792deb2/httpx-0.28.1-py3-none-any.whl", hash = "sha256:d909fcccc110f8c7faf814ca82a9a4d816bc5a6dbfea25d6591d6985b8ba59ad", size = 73517, upload-time = "2024-12-06T15:37:21.509Z" },
 ]
 
+[package.optional-dependencies]
+http2 = [
+    { name = "h2" },
+]
+
 [[package]]
 name = "huggingface-hub"
 version = "0.36.2"
@@ -4751,6 +4768,23 @@ wheels = [
 ]
 
 [[package]]
+name = "letta-client"
+version = "1.12.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "anyio" },
+    { name = "distro" },
+    { name = "httpx" },
+    { name = "pydantic" },
+    { name = "sniffio" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/8e/55/34a347fb443f5797045cde591c34ee2926650e99f1f0d5f565dcefa99120/letta_client-1.12.1.tar.gz", hash = "sha256:3073adb6cc1ce3b906a40d8ce3b2b77a77ac1887ca2135770590cfe3cef6eba9", size = 396805, upload-time = "2026-06-02T00:31:12.848Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/73/af/b140a7117b4385b3e1b060df97d9d39703f0c54e156a4d889de8bb8dd48f/letta_client-1.12.1-py3-none-any.whl", hash = "sha256:6f554569a684d57e7f4e4513f8ce6792129b305df37393c650e50776f61baf99", size = 418856, upload-time = "2026-06-02T00:31:14.475Z" },
+]
+
+[[package]]
 name = "limits"
 version = "4.8.0"
 source = { registry = "https://pypi.org/simple" }
@@ -5609,6 +5643,24 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/d6/54/cfe61301667036ec958cb99bd3efefba235e65cdeb9c84d24a8293ba1d90/mdurl-0.1.2.tar.gz", hash = "sha256:bb413d29f5eea38f31dd4754dd7377d4465116fb207585f97bf925588687c1ba", size = 8729, upload-time = "2022-08-14T12:40:10.846Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b3/38/89ba8ad64ae25be8de66a6d463314cf1eb366222074cfda9ee839c56a4b4/mdurl-0.1.2-py3-none-any.whl", hash = "sha256:84008a41e51615a49fc9966191ff91509e3c40b939176e643fd50a5c2196b8f8", size = 9979, upload-time = "2022-08-14T12:40:09.779Z" },
+]
+
+[[package]]
+name = "mem0ai"
+version = "1.0.11"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "openai" },
+    { name = "posthog" },
+    { name = "protobuf" },
+    { name = "pydantic" },
+    { name = "pytz" },
+    { name = "qdrant-client" },
+    { name = "sqlalchemy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/91/1e/2f8a8cc4b8e7f6126f3367d27dc65eac5cd4ceb854888faa3a8f62a2c0a0/mem0ai-1.0.11.tar.gz", hash = "sha256:ddb803bedc22bd514606d262407782e88df929f6991b59f6972fb8a25cc06001", size = 201758, upload-time = "2026-04-06T11:31:43.695Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b8/b5/f822c94e1b901f8a700af134c2473646de9a7db26364566f6a72d527d235/mem0ai-1.0.11-py3-none-any.whl", hash = "sha256:bcf4d678dc0a4d4e8eccaebe05562eae022fcdc825a0e3095d02f28cf61a5b6d", size = 297138, upload-time = "2026-04-06T11:31:41.716Z" },
 ]
 
 [[package]]
@@ -9652,6 +9704,25 @@ wheels = [
 ]
 
 [[package]]
+name = "qdrant-client"
+version = "1.18.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "grpcio" },
+    { name = "httpx", extra = ["http2"] },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "portalocker" },
+    { name = "protobuf" },
+    { name = "pydantic" },
+    { name = "urllib3" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/65/45/5b1bdd15a3c7730eefb9c113600829e20d689b82b5a23f9e07d107094004/qdrant_client-1.18.0.tar.gz", hash = "sha256:52e8ece1a7d40519801bf0b70713bfa0f6b7ae28c7275bbe0b0286fbed7f6db4", size = 352580, upload-time = "2026-05-11T14:12:38.702Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d6/10/c437bd2ac41ef30d3019063e6ce537dc111e9214473b337ee88f7fa6359a/qdrant_client-1.18.0-py3-none-any.whl", hash = "sha256:093aa8cf8a420ee3ad2a68b007e1378d7992b2600e0b53c193fc172674f659cd", size = 398126, upload-time = "2026-05-11T14:12:36.998Z" },
+]
+
+[[package]]
 name = "rapidfuzz"
 version = "3.14.5"
 source = { registry = "https://pypi.org/simple" }
@@ -13311,6 +13382,22 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/8f/be/f9f7594e23b5b93affff0318e4593c1920331bcaefda326cabcad94296a1/yarl-1.24.2-cp314-cp314t-win_amd64.whl", hash = "sha256:a7624b1ca46ca5d7b864ef0d2f8efe3091454085ee1855b4e992314529972215", size = 102980, upload-time = "2026-05-19T21:30:59.735Z" },
     { url = "https://files.pythonhosted.org/packages/65/a4/ba80dccd3593ff1f01051a818694d07b58cb8232677ee9a22a5a1f93a9fc/yarl-1.24.2-cp314-cp314t-win_arm64.whl", hash = "sha256:e434a45ce2e7a947f951fc5a8944c8cc080b7e59f9c50ae80fd39107cf88126d", size = 91219, upload-time = "2026-05-19T21:31:01.934Z" },
     { url = "https://files.pythonhosted.org/packages/fd/4d/4b880086bd0d3e034d25647be1d830afc3e3f610e98c4ab3490af6b1b6d5/yarl-1.24.2-py3-none-any.whl", hash = "sha256:2783d9226db8797636cd6896e4de81feed252d1db72265686c9558d97a4d94b9", size = 53576, upload-time = "2026-05-19T21:31:03.909Z" },
+]
+
+[[package]]
+name = "zep-cloud"
+version = "3.23.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "httpx" },
+    { name = "pydantic" },
+    { name = "pydantic-core" },
+    { name = "python-dateutil" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/da/45/18b0eebca6d4ff0250fa0b25d6074247e5bcaddbf5e46ee5815359111082/zep_cloud-3.23.0.tar.gz", hash = "sha256:fb96946dca1c417d9e537873038d323ba9fa6d3470395fb3c75a309bfba63a0b", size = 88446, upload-time = "2026-06-04T19:57:06.985Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/4e/f5/6eb3038444cb860123dccf9ecc04746aacdbcf2b7ff3461a2221ae20f018/zep_cloud-3.23.0-py3-none-any.whl", hash = "sha256:77a8eb0ab3f7ae6a0464d34773a9b7799090d9031e8a2f772bd7fdbb221b4405", size = 155733, upload-time = "2026-06-04T19:57:05.555Z" },
 ]
 
 [[package]]
