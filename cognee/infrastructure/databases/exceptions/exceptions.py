@@ -104,6 +104,28 @@ class EmbeddingException(CogneeConfigurationError):
         super().__init__(message, name, status_code)
 
 
+class TerminalEmbeddingException(EmbeddingException):
+    """
+    Non-retryable embedding failure for deterministic error conditions.
+
+    Raised when the context-window recovery logic has exhausted all split
+    attempts (e.g. a single token that still exceeds the model's context
+    window).  Unlike transient ``EmbeddingException`` errors, retrying this
+    exception is futile because the input is inherently too large to embed.
+
+    Retry decorators on ``embed_text`` methods should exclude this subclass
+    via ``retry_if_not_exception_type`` so the failure propagates immediately.
+    """
+
+    def __init__(
+        self,
+        message: str = "Text is too short to split further but exceeds context window.",
+        name: str = "TerminalEmbeddingException",
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+    ):
+        super().__init__(message, name, status_code)
+
+
 class MissingQueryParameterError(CogneeValidationError):
     """
     Raised when neither 'query_text' nor 'query_vector' is provided,
