@@ -16,6 +16,7 @@ from tenacity import (
     stop_after_attempt,
     wait_exponential_jitter,
 )
+from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError, is_budget_exhausted_error
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.types import (
     TranscriptionReturnType,
 )
@@ -153,7 +154,11 @@ class LlamaCppAPIAdapter(LLMInterface):
         stop=stop_after_attempt(3),
         wait=wait_exponential_jitter(8, 128),
         retry=retry_if_not_exception_type(
-            (litellm.exceptions.NotFoundError, litellm.exceptions.AuthenticationError)
+            (
+                litellm.exceptions.NotFoundError,
+                litellm.exceptions.AuthenticationError,
+                LLMPaymentRequiredError,
+            )
         ),
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
@@ -176,41 +181,46 @@ class LlamaCppAPIAdapter(LLMInterface):
         --------
             - BaseModel: A structured output that conforms to the specified response model.
         """
-        async with llm_rate_limiter_context_manager():
-            # Prepare messages (system first, then user is more standard)
-            messages = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": text_input},
-            ]
+        try:
+            async with llm_rate_limiter_context_manager():
+                # Prepare messages (system first, then user is more standard)
+                messages = [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": text_input},
+                ]
 
-            merged_kwargs = {**self.llm_args, **kwargs}
-            if self.mode_type == "server":
-                response = await cast(
-                    instructor.AsyncInstructor, self.aclient
-                ).chat.completions.create(
-                    model=self.model,
-                    messages=messages,  # ty:ignore[invalid-argument-type]
-                    response_model=response_model,
-                    max_retries=2,
-                    **merged_kwargs,
-                )
+                merged_kwargs = {**self.llm_args, **kwargs}
+                if self.mode_type == "server":
+                    response = await cast(
+                        instructor.AsyncInstructor, self.aclient
+                    ).chat.completions.create(
+                        model=self.model,
+                        messages=messages,  # ty:ignore[invalid-argument-type]
+                        response_model=response_model,
+                        max_retries=2,
+                        **merged_kwargs,
+                    )
 
-            else:
-                import asyncio
+                else:
+                    import asyncio
 
-                def _call_sync():
-                    # Serialize decodes on the shared, non-thread-safe Llama instance.
-                    with self._local_lock:
-                        return cast(InstructorChatCompletionCreate, self.aclient)(
-                            messages=messages,
-                            response_model=response_model,
-                            **merged_kwargs,
-                        )
+                    def _call_sync():
+                        # Serialize decodes on the shared, non-thread-safe Llama instance.
+                        with self._local_lock:
+                            return cast(InstructorChatCompletionCreate, self.aclient)(
+                                messages=messages,
+                                response_model=response_model,
+                                **merged_kwargs,
+                            )
 
-                # Run sync function in thread pool to avoid blocking
-                response = await asyncio.to_thread(_call_sync)
+                    # Run sync function in thread pool to avoid blocking
+                    response = await asyncio.to_thread(_call_sync)
 
-        return response
+            return response
+        except Exception as e:
+            if is_budget_exhausted_error(e):
+                raise LLMPaymentRequiredError() from e
+            raise
 
     async def create_transcript(self, input: str, **kwargs: Any) -> TranscriptionReturnType:
         raise NotImplementedError

@@ -24,7 +24,11 @@ from tenacity import (
     wait_exponential_jitter,
 )
 
-from cognee.infrastructure.llm.exceptions import ContentPolicyFilterError
+from cognee.infrastructure.llm.exceptions import (
+    ContentPolicyFilterError,
+    LLMPaymentRequiredError,
+    is_budget_exhausted_error,
+)
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.openai.adapter import (
     OpenAIAdapter,
 )
@@ -187,6 +191,7 @@ class AzureOpenAIAdapter(OpenAIAdapter):
                 litellm.exceptions.NotFoundError,
                 litellm.exceptions.AuthenticationError,
                 asyncio.CancelledError,
+                LLMPaymentRequiredError,
             )
         ),
         before_sleep=before_sleep_log(logger, logging.WARNING),
@@ -267,3 +272,7 @@ class AzureOpenAIAdapter(OpenAIAdapter):
                     raise ContentPolicyFilterError(
                         f"The provided input contains content that is not aligned with our content policy: {text_input}"
                     ) from error
+        except Exception as e:
+            if is_budget_exhausted_error(e):
+                raise LLMPaymentRequiredError() from e
+            raise

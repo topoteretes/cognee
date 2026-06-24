@@ -16,6 +16,7 @@ from tenacity import (
 )
 
 from cognee.infrastructure.llm.config import get_llm_config
+from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError, is_budget_exhausted_error
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.generic_llm_api.adapter import (
     GenericAPIAdapter,
 )
@@ -76,6 +77,7 @@ class AnthropicAdapter(GenericAPIAdapter):
                 litellm.exceptions.NotFoundError,
                 litellm.exceptions.AuthenticationError,
                 asyncio.CancelledError,
+                LLMPaymentRequiredError,
             )
         ),
         before_sleep=before_sleep_log(logger, logging.WARNING),
@@ -101,17 +103,22 @@ class AnthropicAdapter(GenericAPIAdapter):
             - BaseModel: An instance of BaseModel containing the structured response.
         """
         merged_kwargs = {**self.llm_args, **kwargs}
-        async with llm_rate_limiter_context_manager():
-            return await self.aclient(
-                model=self.model,
-                max_retries=2,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": f"""Use the given format to extract information
+        try:
+            async with llm_rate_limiter_context_manager():
+                return await self.aclient(
+                    model=self.model,
+                    max_retries=2,
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": f"""Use the given format to extract information
                     from the following input: {text_input}. {system_prompt}""",
-                    }
-                ],
-                response_model=response_model,
-                **merged_kwargs,
-            )
+                        }
+                    ],
+                    response_model=response_model,
+                    **merged_kwargs,
+                )
+        except Exception as e:
+            if is_budget_exhausted_error(e):
+                raise LLMPaymentRequiredError() from e
+            raise
