@@ -129,6 +129,17 @@ class TestBuildCuratorBatches:
         assert f"Candidate {context_entries[0].id}" in batches[0]
         assert "Flashing wipes calibration." in batches[0]
 
+    def test_candidate_label_includes_profile_and_section(self):
+        qa_entry = _context_entry(section="rules", content="Be concise.")
+        agent_entry = _context_entry(
+            section="failure_lessons", context_profile="agent", content="Sync before tests."
+        )
+
+        batch = distill_module.build_curator_batches([], [qa_entry, agent_entry])[0]
+
+        assert f"Candidate {qa_entry.id} [qa/rules]:" in batch
+        assert f"Candidate {agent_entry.id} [agent/failure_lessons]:" in batch
+
     def test_interleaves_turns_and_candidates_chronologically(self):
         context_entries = [
             _context_entry(content="Earlier candidate.", created_at="2026-06-11T10:00:00")
@@ -167,6 +178,73 @@ class TestBuildCuratorBatches:
         assert len(batch) <= BATCH_CHAR_BUDGET
         assert huge_content not in batch
         assert "z" * MAX_CANDIDATE_CHARS in batch
+
+
+class _SymmetryFakeSessionManager:
+    """One session holding both qa and agent context rows; counts context writes."""
+
+    def __init__(self, rows):
+        self.store = [dict(row, last_served_at=None) for row in rows]
+        self.updates = 0
+
+    async def get_session_context_entries(self, user_id, session_id):
+        return list(self.store)
+
+    async def update_session_context_entry(self, **kwargs):
+        self.updates += 1
+        return True
+
+    async def get_session(self, **kwargs):
+        return []
+
+
+class TestProfileSymmetry:
+    """End-to-end guard for the profile boundary across render, recall, and distillation."""
+
+    @pytest.mark.asyncio
+    async def test_one_session_renders_recalls_and_distills_per_profile(self, monkeypatch):
+        from cognee.infrastructure.session.session_context_builder import (
+            build_active_context_block,
+        )
+
+        sm = _SymmetryFakeSessionManager(
+            [
+                _context_row(section="rules", content="Be concise."),
+                _context_row(
+                    section="failure_lessons",
+                    context_profile="agent",
+                    content="Sync before tests.",
+                ),
+            ]
+        )
+
+        # (1) QA render shows only QA lessons.
+        qa_block, _ = await build_active_context_block(
+            session_manager=sm, user_id="u", session_id="s", query="q"
+        )
+        assert "Be concise." in qa_block
+        assert "Sync before tests." not in qa_block
+
+        # (2) Agent recall render is read-only and shows only agent lessons.
+        writes_before = sm.updates
+        agent_block, _ = await build_active_context_block(
+            session_manager=sm,
+            user_id="u",
+            session_id="s",
+            query="q",
+            context_profile="agent",
+            stamp_served=False,
+        )
+        assert "Sync before tests." in agent_block
+        assert "Be concise." not in agent_block
+        assert sm.updates == writes_before  # no writes from the read-only render
+
+        # (3) Distillation sees both profiles.
+        monkeypatch.setattr(distill_module, "get_session_manager", lambda: sm)
+        _qa_rows, entries = await distill_module.load_distillable_session_inputs(
+            SimpleNamespace(user_id="u", session_id="s")
+        )
+        assert {entry.context_profile for entry in entries} == {"qa", "agent"}
 
 
 class TestRenderLessonDocument:

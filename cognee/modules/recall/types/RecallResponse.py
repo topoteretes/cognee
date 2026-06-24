@@ -21,11 +21,21 @@ class ResponseGraphContextEntry(BaseModel):
     content: str
 
 
+class ResponseSessionContextEntry(BaseModel):
+    source: Literal["session_context"]
+    content: str
+    context_profile: str
+
+
 class ResponseGraphEntry(SearchResultItem):
     source: Literal["graph"]
 
 
 RecallResponse = Annotated[
-    ResponseQAEntry | ResponseAgentTraceEntry | ResponseGraphContextEntry | ResponseGraphEntry,
+    ResponseQAEntry
+    | ResponseAgentTraceEntry
+    | ResponseGraphContextEntry
+    | ResponseSessionContextEntry
+    | ResponseGraphEntry,
     Field(discriminator="source"),
 ]

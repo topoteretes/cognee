@@ -82,8 +82,15 @@ class RecallPayloadDTO(InDTO):
         examples=[None],
         description=(
             "Which memory sources to include: 'graph', 'session', 'trace', "
-            "'graph_context', 'all', 'auto', or a list of these. Defaults to "
-            "'auto' (session first when session_id is set, else graph)."
+            "'graph_context', 'session_context', 'all', 'auto', or a list of these. Defaults "
+            "to 'auto' (session first when session_id is set, else graph)."
+        ),
+    )
+    context_profile: str = Field(
+        default="qa",
+        description=(
+            "Profile to render for the 'session_context' scope: 'qa' (conversational) or "
+            "'agent' (tool/workflow). Ignored by other scopes."
         ),
     )
 
@@ -191,6 +198,7 @@ def get_recall_router() -> APIRouter:
                 only_context=payload.only_context,
                 session_id=payload.session_id,
                 scope=payload.scope,
+                context_profile=payload.context_profile,
                 include_references=payload.include_references,
                 score_weights=payload.score_weights,
             )
