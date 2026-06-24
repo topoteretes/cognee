@@ -43,11 +43,7 @@ class BaseConfig(BaseSettings):
     default_user_password: Optional[str] = os.getenv("DEFAULT_USER_PASSWORD")
 
     # OpenTelemetry / tracing
-    cognee_tracing_enabled: bool = os.getenv("COGNEE_TRACING_ENABLED", "false").lower() in (
-        "true",
-        "1",
-        "yes",
-    )
+    cognee_tracing_enabled: bool = os.getenv("COGNEE_TRACING_ENABLED", "false")
     otel_service_name: str = os.getenv("OTEL_SERVICE_NAME", "cognee")
     otel_exporter_otlp_endpoint: Optional[str] = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
     otel_exporter_otlp_headers: Optional[str] = os.getenv("OTEL_EXPORTER_OTLP_HEADERS")
