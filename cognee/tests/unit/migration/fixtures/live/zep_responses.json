@@ -1,0 +1,30 @@
+{
+  "episodes": [
+    {
+      "uuid": "ep-zep-1",
+      "name": "session",
+      "content": "User asked about Berlin",
+      "created_at": "2024-03-01T00:00:00Z",
+      "group_id": "sess-1"
+    }
+  ],
+  "nodes": [
+    {
+      "uuid": "node-1",
+      "name": "Berlin",
+      "labels": ["Entity"],
+      "summary": "A city"
+    }
+  ],
+  "edges": [
+    {
+      "uuid": "edge-1",
+      "source_node_uuid": "node-1",
+      "target_node_uuid": "node-2",
+      "name": "LOCATED_IN",
+      "fact": "Berlin is in Germany",
+      "valid_at": "2024-03-01T00:00:00Z",
+      "episodes": ["ep-zep-1", "ep-missing"]
+    }
+  ]
+}

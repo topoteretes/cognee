@@ -51,6 +51,88 @@ def _message_text(message: Dict[str, Any]) -> str:
     return ""
 
 
+def normalize_letta_data(data: Union[str, Path, Dict[str, Any]]) -> Dict[str, Any]:
+    """Parse Letta agent file export into a dict."""
+    if isinstance(data, (str, Path)):
+        data = json.loads(Path(data).read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError("Unrecognized Letta agent file: expected a JSON object.")
+    return data
+
+
+async def iter_letta_records(
+    data: Dict[str, Any], source_system: str = "letta"
+) -> AsyncIterator[COGXRecord]:
+    """Yield COGX records from a normalized Letta agent export dict."""
+    agents = _first_list(data, "agents")
+    if not agents:
+        agents = [data]
+
+    shared_blocks = {
+        str(block.get("id")): block for block in _first_list(data, "blocks") if block.get("id")
+    }
+
+    for agent_index, agent in enumerate(agents):
+        agent_name = str(agent.get("name") or f"agent-{agent_index}")
+        scope = COGXScope(agent_id=agent_name)
+
+        blocks = _first_list(agent, "core_memory", "blocks", "memory_blocks")
+        if not blocks and shared_blocks:
+            block_ids = agent.get("block_ids") or agent.get("core_memory_block_ids") or []
+            blocks = [shared_blocks[str(bid)] for bid in block_ids if str(bid) in shared_blocks]
+        for block_index, block in enumerate(blocks):
+            value = block.get("value") or block.get("content") or ""
+            if not isinstance(value, str) or not value.strip():
+                continue
+            label = str(block.get("label") or block.get("name") or f"block-{block_index}")
+            yield COGXMemoryBlock(
+                external_system=source_system,
+                external_id=str(block.get("id") or f"{agent_name}:block:{label}"),
+                label=label,
+                value=value,
+                limit=block.get("limit"),
+                scope=scope,
+            )
+
+        messages = _first_list(agent, "messages", "in_context_messages", "message_history")
+        turns = []
+        for message in messages:
+            text = _message_text(message)
+            role = str(message.get("role") or "unknown")
+            if not text.strip() or role in ("system", "tool"):
+                continue
+            turns.append(
+                COGXTurn(
+                    role=role,
+                    content=text,
+                    occurred_at=parse_timestamp(
+                        message.get("created_at") or message.get("timestamp")
+                    ),
+                )
+            )
+        if turns:
+            yield COGXEpisode(
+                external_system=source_system,
+                external_id=f"{agent_name}:messages",
+                title=f"Conversation history of agent {agent_name}",
+                turns=turns,
+                scope=scope,
+            )
+
+        passages = _first_list(agent, "archival_memory", "passages", "archival_passages")
+        for passage_index, passage in enumerate(passages):
+            text = passage.get("text") or passage.get("content")
+            if not isinstance(text, str) or not text.strip():
+                continue
+            yield COGXDocument(
+                external_system=source_system,
+                external_id=str(passage.get("id") or f"{agent_name}:passage:{passage_index}"),
+                content=text,
+                created_at=parse_timestamp(passage.get("created_at")),
+                scope=scope,
+            )
+
+
 class LettaSource(MemorySource):
     source_system = "letta"
 
@@ -59,80 +141,8 @@ class LettaSource(MemorySource):
         self._data = data
 
     def _load_raw(self) -> Dict[str, Any]:
-        data = self._data
-        if isinstance(data, (str, Path)):
-            data = json.loads(Path(data).read_text(encoding="utf-8"))
-        if not isinstance(data, dict):
-            raise ValueError("Unrecognized Letta agent file: expected a JSON object.")
-        return data
+        return normalize_letta_data(self._data)
 
     async def records(self) -> AsyncIterator[COGXRecord]:
-        data = self._load_raw()
-        agents = _first_list(data, "agents")
-        if not agents:
-            # A file may serialize a single agent at the top level.
-            agents = [data]
-
-        shared_blocks = {
-            str(block.get("id")): block for block in _first_list(data, "blocks") if block.get("id")
-        }
-
-        for agent_index, agent in enumerate(agents):
-            agent_name = str(agent.get("name") or f"agent-{agent_index}")
-            scope = COGXScope(agent_id=agent_name)
-
-            blocks = _first_list(agent, "core_memory", "blocks", "memory_blocks")
-            if not blocks and shared_blocks:
-                block_ids = agent.get("block_ids") or agent.get("core_memory_block_ids") or []
-                blocks = [shared_blocks[str(bid)] for bid in block_ids if str(bid) in shared_blocks]
-            for block_index, block in enumerate(blocks):
-                value = block.get("value") or block.get("content") or ""
-                if not isinstance(value, str) or not value.strip():
-                    continue
-                label = str(block.get("label") or block.get("name") or f"block-{block_index}")
-                yield COGXMemoryBlock(
-                    external_system=self.source_system,
-                    external_id=str(block.get("id") or f"{agent_name}:block:{label}"),
-                    label=label,
-                    value=value,
-                    limit=block.get("limit"),
-                    scope=scope,
-                )
-
-            messages = _first_list(agent, "messages", "in_context_messages", "message_history")
-            turns = []
-            for message in messages:
-                text = _message_text(message)
-                role = str(message.get("role") or "unknown")
-                if not text.strip() or role in ("system", "tool"):
-                    continue
-                turns.append(
-                    COGXTurn(
-                        role=role,
-                        content=text,
-                        occurred_at=parse_timestamp(
-                            message.get("created_at") or message.get("timestamp")
-                        ),
-                    )
-                )
-            if turns:
-                yield COGXEpisode(
-                    external_system=self.source_system,
-                    external_id=f"{agent_name}:messages",
-                    title=f"Conversation history of agent {agent_name}",
-                    turns=turns,
-                    scope=scope,
-                )
-
-            passages = _first_list(agent, "archival_memory", "passages", "archival_passages")
-            for passage_index, passage in enumerate(passages):
-                text = passage.get("text") or passage.get("content")
-                if not isinstance(text, str) or not text.strip():
-                    continue
-                yield COGXDocument(
-                    external_system=self.source_system,
-                    external_id=str(passage.get("id") or f"{agent_name}:passage:{passage_index}"),
-                    content=text,
-                    created_at=parse_timestamp(passage.get("created_at")),
-                    scope=scope,
-                )
+        async for record in iter_letta_records(self._load_raw(), source_system=self.source_system):
+            yield record

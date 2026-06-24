@@ -3,9 +3,12 @@
 Importing from other memory systems (pass any source to ``cognee.remember``)::
 
     from cognee.migration import Mem0Source, ZepSource, LettaSource
+    from cognee.migration import Mem0LiveSource, GraphitiLiveSource
 
     await cognee.remember(Mem0Source("mem0_export.json"))
     await cognee.remember(ZepSource("graphiti_dump.json", mode="hybrid"))
+    await cognee.remember(Mem0LiveSource(client=mem0_client, filters={"user_id": "alice"}))
+    await cognee.remember(GraphitiLiveSource(graphiti=graphiti))
 
 Exporting (``cognee.export``)::
 
@@ -37,11 +40,15 @@ from cognee.modules.migration import (
     ExportResult,
     GraphEdge,
     GraphSnapshot,
+    GraphitiLiveSource,
     GraphitiSource,
     IMPORT_MODES,
+    LettaLiveSource,
     LettaSource,
+    Mem0LiveSource,
     Mem0Source,
     MemorySource,
+    ZepLiveSource,
     ZepSource,
     build_snapshot,
     datapoint_registry,
@@ -69,11 +76,15 @@ __all__ = [
     "ExportResult",
     "GraphEdge",
     "GraphSnapshot",
+    "GraphitiLiveSource",
     "GraphitiSource",
     "IMPORT_MODES",
+    "LettaLiveSource",
     "LettaSource",
+    "Mem0LiveSource",
     "Mem0Source",
     "MemorySource",
+    "ZepLiveSource",
     "ZepSource",
     "build_snapshot",
     "datapoint_registry",

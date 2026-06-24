@@ -1,0 +1,36 @@
+{
+  "agents": [
+    {
+      "name": "assistant",
+      "core_memory": [
+        {
+          "id": "blk1",
+          "label": "persona",
+          "value": "I am helpful",
+          "limit": 2000
+        }
+      ],
+      "messages": [
+        {
+          "role": "user",
+          "content": "hello",
+          "created_at": "2024-01-01T00:00:00Z"
+        },
+        {
+          "role": "assistant",
+          "content": [{"type": "text", "text": "hi there"}]
+        },
+        {
+          "role": "system",
+          "content": "ignored"
+        }
+      ],
+      "archival_memory": [
+        {
+          "id": "p1",
+          "text": "archived note"
+        }
+      ]
+    }
+  ]
+}

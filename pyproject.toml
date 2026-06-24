@@ -150,6 +150,9 @@ evals = [
 ]
 
 graphiti = ["graphiti-core>=0.28.0"]
+mem0 = ["mem0ai>=0.1.114"]
+zep = ["zep-cloud>=3.22.0"]
+letta = ["letta-client>=1.12.0"]
 # Note: New s3fs and boto3 versions don't work well together
 # Always use comaptible fixed versions of these two dependencies
 aws = ["s3fs[boto3]==2025.3.2"]
