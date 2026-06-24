@@ -29,6 +29,7 @@ from cognee.api.v1.remember.routers import get_remember_router
 from cognee.api.v1.recall.routers import get_recall_router
 from cognee.api.v1.improve.routers import get_improve_router
 from cognee.api.v1.forget.routers import get_forget_router
+from cognee.api.v1.validate.routers import get_validate_router
 from cognee.api.v1.responses.routers import get_responses_router
 from cognee.api.v1.llm.routers import get_llm_router
 from cognee.api.v1.sync.routers import get_sync_router
@@ -309,6 +310,7 @@ app.include_router(get_remember_router(), prefix="/api/v1/remember", tags=["reme
 app.include_router(get_recall_router(), prefix="/api/v1/recall", tags=["recall"])
 app.include_router(get_improve_router(), prefix="/api/v1/improve", tags=["improve"])
 app.include_router(get_forget_router(), prefix="/api/v1/forget", tags=["forget"])
+app.include_router(get_validate_router(), prefix="/api/v1/validate", tags=["validate"])
 
 
 @app.get("/")

@@ -58,6 +58,8 @@ from .api.v1 import (
     recall,
     improve,
     forget,
+    validate,
+    ValidationReport,
     serve,
     disconnect,
     visualize,
