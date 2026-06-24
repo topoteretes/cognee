@@ -20,19 +20,19 @@ class ForgetPayloadDTO(InDTO):
 
     data_id: Optional[UUID] = Field(
         default=None,
-        examples=["7c9e6679-7425-40de-944b-e07fc1f90ae7"],
+        examples=[""],
         description="UUID of a single data item to remove. "
         "Requires `dataset` or `datasetId` to also be set.",
     )
     dataset: Optional[str] = Field(
         default=None,
-        examples=["main_dataset"],
+        examples=["default_dataset"],
         description="Dataset name to delete (or clear with memoryOnly). "
         "Provide either `dataset` or `datasetId`, not both.",
     )
     dataset_id: Optional[UUID] = Field(
         default=None,
-        examples=["a1b2c3d4-e5f6-7890-abcd-ef1234567890"],
+        examples=[""],
         description="Dataset UUID, alternative to `dataset`. "
         "Provide either `dataset` or `datasetId`, not both.",
     )

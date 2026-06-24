@@ -5,6 +5,7 @@ from typing import Optional, Union
 from uuid import UUID
 
 from cognee.base_config import get_base_config
+from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.llm.config import LLMConfig
 from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
 from cognee.infrastructure.databases.vector.config import (
@@ -138,6 +139,14 @@ class DatabaseContextManager:
 
         if not backend_access_control_enabled():
             return
+
+        # In multi-user mode a dataset is required to resolve the per-dataset
+        # database; fail fast with a clear message instead of a downstream
+        # "user None" lookup error.
+        if dataset is None:
+            raise CogneeValidationError(
+                "A dataset must be provided when backend access control is enabled."
+            )
 
         # Imported lazily to avoid circular imports at module load.
         from cognee.infrastructure.databases.dataset_queue import dataset_queue

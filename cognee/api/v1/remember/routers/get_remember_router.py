@@ -129,7 +129,8 @@ def get_remember_router() -> APIRouter:
             ),
         ),
         node_set: Optional[List[EmptyExampleStr]] = Form(
-            default=[""],
+            default=None,
+            examples=[None],
             description=(
                 "Tags the ingested data with named node sets (e.g. per-agent or per-project "
                 "groups). Extracted graph nodes are linked to these sets, and recall/search "
@@ -204,6 +205,24 @@ def get_remember_router() -> APIRouter:
             examples=[""],
             description=(
                 "COGX archive imports only: 'preserve' (default), 'hybrid', or 're-derive'."
+            ),
+        ),
+        skills_text: Optional[str] = Form(
+            default=None,
+            examples=[""],
+            description=(
+                "content_type='skills' only: inline SKILL.md markdown to ingest without a file "
+                "upload (no-code path). When set and no files are uploaded, it is written to a "
+                "temporary SKILL.md and ingested via the normal skills pipeline. Pair with "
+                "skill_name to control the resulting skill name."
+            ),
+        ),
+        skill_name: Optional[str] = Form(
+            default=None,
+            examples=[""],
+            description=(
+                "content_type='skills' + skills_text only: name/slug for the inline skill "
+                "(defaults to 'skill')."
             ),
         ),
         user: User = Depends(get_authenticated_user),
@@ -341,6 +360,8 @@ def get_remember_router() -> APIRouter:
                 # Swagger UI submits every rendered form field, so an untouched
                 # content_type arrives as "" — treat it as omitted.
                 content_type=content_type or None,
+                skills_text=skills_text or None,
+                skill_name=skill_name or None,
                 **({"config": config_to_use} if config_to_use else {}),
                 **({"graph_model": graph_model_parsed} if graph_model_parsed else {}),
             )

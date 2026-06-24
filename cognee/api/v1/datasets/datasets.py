@@ -71,7 +71,7 @@ class datasets:
         if not user:
             user = await get_default_user()
 
-        dataset = await get_authorized_dataset(user.id, dataset_id)
+        dataset = await get_authorized_dataset(user, dataset_id)
 
         return await has_dataset_data(dataset.id)
 

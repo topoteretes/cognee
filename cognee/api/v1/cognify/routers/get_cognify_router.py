@@ -106,7 +106,7 @@ class CognifyPayloadDTO(InDTO):
         examples=[None],
         description=(
             "Number of chunks to process per task batch (e.g. 36). Controls processing "
-            "parallelism/throughput; leave null for the pipeline default."
+            "parallelism/throughput; leave null for the pipeline default. Higher the value higher the parallelism/throughput"
         ),
     )
     data_per_batch: Optional[int] = Field(

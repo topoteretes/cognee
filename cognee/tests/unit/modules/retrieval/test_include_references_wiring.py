@@ -107,7 +107,7 @@ async def test_completion_references_enabled_appends_evidence():
 
     assert len(completion) == 1
     assert completion[0].startswith(f"{MOCK_ANSWER}\n\nEvidence:\n")
-    assert "- chunk 1 of document report.pdf:" in completion[0]
+    assert "- chunk 1 of document report.pdf (chunk_id: chunk-1):" in completion[0]
 
 
 @pytest.mark.asyncio
@@ -230,7 +230,7 @@ async def test_graph_references_enabled_appends_answer_grounded_evidence():
 
     assert len(completion) == 1
     assert completion[0].startswith(f"{MOCK_ANSWER}\n\nEvidence:\n")
-    assert "- chunk 3 of document report.pdf:" in completion[0]
+    assert "- chunk 3 of document report.pdf (chunk_id: chunk-1):" in completion[0]
     # The answer text itself is the vector query.
     assert engine.search.await_args.args[1] == MOCK_ANSWER
 

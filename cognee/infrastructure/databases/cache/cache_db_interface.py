@@ -117,6 +117,19 @@ class CacheDBInterface(ABC):
         pass
 
     @abstractmethod
+    async def get_qa_entries_by_ids(
+        self,
+        user_id: str,
+        session_id: str,
+        qa_ids: list[str],
+    ) -> list[SessionQAEntry]:
+        """
+        Retrieve Q/A/context triplets matching qa_ids for the given session.
+        Results are returned in chronological order.
+        """
+        pass
+
+    @abstractmethod
     async def update_qa_entry(
         self,
         user_id: str,

@@ -6,7 +6,7 @@ the four branches:
 
   1. first-turn       -> no served context, empty block, served_ids recorded as None
   2. ordinary question-> active block built + prepended above graph snapshot, served_ids on new QA
-  3. feedback-only    -> response_to_user returned, NO new QA, counters bumped, candidate applied
+  3. feedback-only    -> response_to_user returned, QA recorded, counters bumped, candidate applied
   4. feedback+request -> answer request, new QA with served_ids, candidate applied
 
 The whole session-guidance layer is gated on caching and auto_feedback.
@@ -24,6 +24,7 @@ from cognee.infrastructure.session.session_context_models import (
     normalize_content,
 )
 from cognee.infrastructure.session.session_manager import SessionManager
+from cognee.infrastructure.session.session_turn import apply_served_context_ratings
 
 
 @pytest.fixture
@@ -48,6 +49,21 @@ def session_manager(fs_adapter) -> SessionManager:
     return SessionManager(cache_engine=fs_adapter)
 
 
+@pytest.fixture(autouse=True)
+def session_vector_mocks():
+    with (
+        patch(
+            "cognee.infrastructure.session.session_manager.index_session_qa", new_callable=AsyncMock
+        ),
+        patch(
+            "cognee.infrastructure.session.session_turn.search_session_qa_ids",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
+    ):
+        yield
+
+
 def _config(*, auto_feedback: bool = True):
     cfg = MagicMock()
     cfg.caching = True
@@ -64,12 +80,12 @@ def _patches(completion_return, analysis_return=None):
     mock_user = patch("cognee.infrastructure.session.session_manager.session_user")
     mock_cfg = patch("cognee.infrastructure.session.session_manager.CacheConfig")
     mock_analyze = patch(
-        "cognee.infrastructure.session.session_manager.analyze_turn_for_session_context",
+        "cognee.infrastructure.session.session_turn.analyze_turn_for_session_context",
         new_callable=AsyncMock,
         return_value=analysis_return or FeedbackDetectionResult(),
     )
     mock_gen = patch(
-        "cognee.infrastructure.session.session_manager.generate_session_completion_with_optional_summary",
+        "cognee.infrastructure.session.session_turn.generate_session_completion_with_optional_summary",
         new_callable=AsyncMock,
         return_value=completion_return,
     )
@@ -167,8 +183,8 @@ async def test_non_feedback_block_prepended_and_served_ids_recorded(session_mana
 
 
 @pytest.mark.asyncio
-async def test_feedback_only_returns_thanks_no_new_qa_applies_candidate(session_manager):
-    """Feedback-only turn: response_to_user returned, NO new QA, counter bumped, candidate stored."""
+async def test_feedback_only_returns_thanks_records_qa_and_applies_candidate(session_manager):
+    """Feedback-only turn: response_to_user returned, QA recorded, counter bumped, candidate stored."""
     await _seed_context_entry(session_manager, "c-served", "rules", "Be concise.")
     # A previous QA that served c-served, so it can be rated this turn.
     await session_manager.add_qa(
@@ -215,10 +231,11 @@ async def test_feedback_only_returns_thanks_no_new_qa_applies_candidate(session_
     assert result == "Glad it helped!"
     mock_add_feedback.assert_not_called()
 
-    # No new QA was added (still just the one previous QA).
     entries = await session_manager.get_session(user_id="owner-1", session_id="s1")
-    assert len(entries) == 1
-    assert entries[0].question == "prev?"
+    assert len(entries) == 2
+    assert entries[-1].question == "that was great"
+    assert entries[-1].answer == "Glad it helped!"
+    assert entries[-1].used_session_context_ids is None
 
     ctx_entries = await session_manager.get_session_context_entries(
         user_id="owner-1", session_id="s1"
@@ -245,7 +262,8 @@ async def test_duplicate_served_context_ratings_accumulate(session_manager):
     """Duplicate ratings for the same context entry increment from the latest local count."""
     await _seed_context_entry(session_manager, "c-served", "rules", "Be concise.")
 
-    await session_manager._apply_served_context_ratings(
+    await apply_served_context_ratings(
+        session_manager,
         user_id="owner-1",
         session_id="s1",
         ratings=[
@@ -265,7 +283,7 @@ async def test_duplicate_served_context_ratings_accumulate(session_manager):
 
 @pytest.mark.asyncio
 async def test_preference_only_turn_applies_candidate_without_answering(session_manager):
-    """Instruction-only turn: preference is stored, but no QA answer is generated."""
+    """Instruction-only turn: preference is stored, acknowledgement is recorded."""
     await session_manager.add_qa(
         user_id="owner-1",
         question="prev?",
@@ -305,8 +323,10 @@ async def test_preference_only_turn_applies_candidate_without_answering(session_
     mg.assert_not_called()
 
     entries = await session_manager.get_session(user_id="owner-1", session_id="s1")
-    assert len(entries) == 1
-    assert entries[-1].question == "prev?"
+    assert len(entries) == 2
+    assert entries[-1].question == "For now, answer with 2 informative bullet points."
+    assert entries[-1].answer == "Got it."
+    assert entries[-1].used_session_context_ids is None
 
     ctx_entries = await session_manager.get_session_context_entries(
         user_id="owner-1", session_id="s1"

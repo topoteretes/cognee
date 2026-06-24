@@ -19,14 +19,12 @@ jobs:
 
     - name: Build Docker images
       env:
-        ENVIRONMENT: dev
         ENV: dev
       run: |
         docker compose -f docker-compose.yml build
 
     - name: Run Docker Compose
       env:
-        ENVIRONMENT: dev
         ENV: dev
       run: |
         docker compose -f docker-compose.yml up -d

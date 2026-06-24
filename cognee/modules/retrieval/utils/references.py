@@ -133,6 +133,21 @@ def _get_payload(obj: Any) -> Optional[dict]:
     return None
 
 
+def _provenance_suffix(data_id: Optional[str], chunk_id: Optional[str]) -> str:
+    """Render a '(data_id: …, chunk_id: …)' annotation for whichever ids exist.
+
+    Lets a reader map the citation back to the ingested data item and the exact
+    cited chunk, instead of only a (possibly auto-generated) document name and a
+    positional chunk number.
+    """
+    parts = []
+    if data_id:
+        parts.append(f"data_id: {data_id}")
+    if chunk_id:
+        parts.append(f"chunk_id: {chunk_id}")
+    return f" ({', '.join(parts)})" if parts else ""
+
+
 def _chunk_id(obj: Any, payload: dict) -> Optional[str]:
     """Resolve a stable chunk id for dedup, preferring the object id."""
     obj_id = getattr(obj, "id", None)
@@ -201,8 +216,8 @@ def format_chunk_references(
             # rather than presenting unverifiable retrieval order as provenance.
             return ""
 
-    # (overlap_score, document_name, number, text) per usable candidate.
-    candidates: List[Tuple[int, str, int, str]] = []
+    # (overlap_score, document_name, number, text, data_id, chunk_id) per candidate.
+    candidates: List[Tuple[int, str, int, str, Optional[str], Optional[str]]] = []
     seen: set = set()
 
     for obj in iterator:
@@ -219,7 +234,13 @@ def format_chunk_references(
         if document_name is None or number is None or text is None:
             continue
 
-        dedup_key = _chunk_id(obj, payload) or f"{document_name}#{number}"
+        chunk_id = _chunk_id(obj, payload)
+        # document_id == the ingested Data item's id (cognify sets
+        # Document.id = data.id), i.e. the dataId a caller needs to map a
+        # citation back to the document they ingested.
+        data_id = _clean_str(payload.get("document_id"))
+
+        dedup_key = chunk_id or f"{document_name}#{number}"
         if dedup_key in seen:
             continue
         seen.add(dedup_key)
@@ -233,7 +254,7 @@ def format_chunk_references(
                 # certainly not a source of the answer.
                 continue
 
-        candidates.append((score, document_name, number, text))
+        candidates.append((score, document_name, number, text, data_id, chunk_id))
 
     if not candidates:
         return ""
@@ -244,8 +265,9 @@ def format_chunk_references(
 
     max_bullets = _clamp_limit(limit)
     bullets = [
-        f'- chunk {number} of document {document_name}: "{_snippet(text)}"'
-        for _, document_name, number, text in candidates[:max_bullets]
+        f"- chunk {number} of document {document_name}"
+        f'{_provenance_suffix(data_id, chunk_id)}: "{_snippet(text)}"'
+        for _, document_name, number, text, data_id, chunk_id in candidates[:max_bullets]
     ]
 
     return EVIDENCE_HEADER + "\n" + "\n".join(bullets)

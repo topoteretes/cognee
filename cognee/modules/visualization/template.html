@@ -54,16 +54,23 @@ canvas:active{cursor:grabbing}
 }
 .ctrl-btn:hover{color:var(--text);background:var(--surface)}
 .ctrl-btn.active{color:#F4F4F4;background:rgba(101,16,244,0.2)}
+.ctrl-btn:disabled{opacity:0.35;cursor:not-allowed}
+.ctrl-btn:disabled:hover{color:var(--text2);background:transparent}
 .ctrl-sep{width:1px;background:var(--border);margin:2px 4px}
 
 #search-box{
   position:fixed;top:56px;left:20px;z-index:100;width:280px;
 }
 #search-input{
-  width:100%;padding:8px 12px 8px 32px;
+  width:100%;padding:8px 64px 8px 32px;
   font-size:12px;font-family:inherit;color:var(--text);
   background:var(--bg2);border:1px solid var(--border);border-radius:8px;
   outline:none;transition:border-color 0.15s;
+}
+#search-count{
+  position:absolute;right:10px;top:50%;transform:translateY(-50%);
+  font-size:10.5px;color:var(--text2);pointer-events:none;
+  font-variant-numeric:tabular-nums;white-space:nowrap;
 }
 #search-input:focus{border-color:var(--accent)}
 #search-input::placeholder{color:var(--text2)}
@@ -112,6 +119,7 @@ canvas:active{cursor:grabbing}
   display:inline-block;width:11px;height:11px;border-radius:50%;
   background:var(--bg);border:2px solid #0DFF00;flex-shrink:0;
 }
+.legend-ring.memory{border:2px dashed #FFC53D;}
 .legend-sizes{display:inline-flex;align-items:center;gap:4px;}
 .legend-sizes .legend-dot{background:var(--text);}
 .legend-sep{width:1px;height:18px;background:var(--border);}
@@ -152,6 +160,7 @@ canvas:active{cursor:grabbing}
 <div id="view-tabs" style="position:fixed;top:0;left:50%;transform:translateX(-50%);z-index:1100;display:flex;gap:2px;align-items:center;background:var(--bg);border:1px solid var(--border);border-top:none;border-radius:0 0 8px 8px;padding:2px 6px;">
   <button class="tab-btn active" data-view="graph" style="background:#1F9E6E;color:#fff;border:none;padding:6px 18px;border-radius:6px 6px 0 0;cursor:pointer;font-size:12px;font-weight:600;">Graph</button>
   <button class="tab-btn" data-view="schema" style="background:transparent;color:var(--text2);border:none;padding:6px 18px;border-radius:6px 6px 0 0;cursor:pointer;font-size:12px;font-weight:600;">Schema</button>
+  <button class="tab-btn" data-view="memory" style="background:transparent;color:var(--text2);border:none;padding:6px 18px;border-radius:6px 6px 0 0;cursor:pointer;font-size:12px;font-weight:600;">Memory</button>
 </div>
 
 <button id="theme-toggle" style="position:fixed;top:12px;right:20px;z-index:1200;background:var(--bg2);border:1px solid var(--border);cursor:pointer;font-size:12px;padding:6px 14px;border-radius:8px;color:var(--text);font-family:inherit;font-weight:500;transition:all 0.15s;">Dark mode</button>
@@ -166,7 +175,8 @@ canvas:active{cursor:grabbing}
 
 <div id="search-box">
   <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-  <input type="text" id="search-input" placeholder="Search nodes..." autocomplete="off" spellcheck="false">
+  <input type="text" id="search-input" placeholder="Search nodes... (Enter jumps to match)" autocomplete="off" spellcheck="false">
+  <span id="search-count"></span>
 </div>
 
 <div id="controls">
@@ -234,6 +244,24 @@ canvas:active{cursor:grabbing}
   <div id="schema-side-panel" style="display:none;position:absolute;top:104px;right:0;bottom:0;width:344px;background:#FFFFFF;border-left:1px solid #E6E8EB;box-shadow:-12px 0 32px rgba(16,24,40,0.08);padding:26px 24px;overflow-y:auto;z-index:5;">
     <!-- PR3: schema type details (count, sample chips, relationships) render here -->
   </div>
+</div>
+
+<!-- Memory tab: deterministic column map of the memory (documents → entities
+     → summaries → global context) with a run/search timeline rail. Rendered
+     lazily by views/memory_map.js into #memory-svg. -->
+<div id="memory-view" style="display:none;position:fixed;inset:0;padding:56px 0 0;overflow:hidden;z-index:900;">
+  <div id="memory-header"><div id="memory-status"></div></div>
+  <div id="memory-diagram-section">
+    <svg id="memory-svg"></svg>
+  </div>
+  <div id="memory-zoom">
+    <button id="memory-zoom-out" title="Zoom out">&minus;</button>
+    <button id="memory-zoom-in" title="Zoom in">+</button>
+    <button id="memory-zoom-fit" title="Fit to view">Fit</button>
+  </div>
+  <div id="memory-empty"><div>No memory content to map yet. Run <b>cognify</b> first.</div></div>
+  <div id="memory-side-panel"></div>
+  <div id="memory-timeline"></div>
 </div>
 <style>
 /* ── Schema diagram ─────────────────────────────────────────────── */
@@ -325,6 +353,95 @@ html:not(.light) .si-rel{border-bottom-color:#2E333C;}
 .si-highlight{margin-top:24px;width:100%;background:#1F9E6E;color:#fff;border:none;border-radius:8px;padding:11px 0;cursor:pointer;font-size:13px;font-weight:600;font-family:inherit;box-shadow:0 1px 2px rgba(16,24,40,0.12);transition:background .12s;}
 .si-highlight:hover{background:#18815B;}
 .si-empty{color:#8792A2;font-size:12px;}
+
+/* ── Memory map ──────────────────────────────────────────────────
+   All colors flow through --mm-* vars so both themes work without a
+   re-render: light defaults here, dark overrides under html:not(.light). */
+#memory-view{
+  --mm-bg:#F7F8FA;--mm-card:#FFFFFF;--mm-card2:#F2F5F8;--mm-border:#E6E8EB;
+  --mm-text:#1A1F36;--mm-muted:#8792A2;--mm-accent:#1F9E6E;--mm-spot:#6510F4;
+  --mm-edge:#A9B4C0;--mm-sem:#C2C9D1;--mm-chunk:#EDF4FB;--mm-chunk-stroke:#C8DCEF;
+  background:var(--mm-bg);color:var(--mm-text);
+  font-family:'Inter',system-ui,-apple-system,'Segoe UI',sans-serif;
+}
+html:not(.light) #memory-view{
+  --mm-bg:#15181D;--mm-card:#23272F;--mm-card2:#1C2026;--mm-border:#3A4049;
+  --mm-text:#E4E8EE;--mm-muted:#7E8894;--mm-accent:#3DD68C;--mm-spot:#A550FF;
+  --mm-edge:#4A515B;--mm-sem:#3A4049;--mm-chunk:#1E2A38;--mm-chunk-stroke:#2C3E52;
+}
+#memory-header{position:absolute;top:56px;left:0;right:0;padding:14px 28px 10px;display:flex;align-items:center;gap:16px;}
+#memory-status{font-size:13px;color:var(--mm-muted);min-height:16px;}
+#memory-diagram-section{position:absolute;top:96px;left:0;right:0;bottom:64px;overflow:hidden;}
+#memory-svg{display:block;width:100%;height:100%;cursor:grab;font-family:'Inter',system-ui,sans-serif;}
+#memory-svg.is-panning{cursor:grabbing;}
+#memory-zoom{position:absolute;left:20px;bottom:84px;z-index:6;display:flex;gap:4px;background:var(--mm-card);border:1px solid var(--mm-border);border-radius:10px;padding:4px;box-shadow:0 2px 8px rgba(16,24,40,0.10);}
+#memory-zoom button{height:30px;min-width:30px;padding:0 10px;border:none;background:transparent;border-radius:7px;cursor:pointer;font-size:15px;font-weight:600;color:var(--mm-muted);font-family:inherit;}
+#memory-zoom button:hover{background:var(--mm-card2);color:var(--mm-text);}
+#memory-empty{display:none;position:absolute;inset:96px 0 64px;align-items:center;justify-content:center;}
+#memory-empty div{color:var(--mm-muted);text-align:center;font-size:15px;}
+#memory-side-panel{display:none;position:absolute;top:96px;right:0;bottom:64px;width:344px;background:var(--mm-card);border-left:1px solid var(--mm-border);box-shadow:-12px 0 32px rgba(16,24,40,0.08);padding:26px 24px;overflow-y:auto;z-index:5;font-size:13px;}
+#memory-timeline{position:absolute;left:0;right:0;bottom:0;height:64px;background:var(--mm-card);border-top:1px solid var(--mm-border);display:flex;align-items:center;gap:8px;padding:0 16px;overflow-x:auto;overflow-y:hidden;z-index:6;}
+.mm-rail-label{flex:0 0 auto;font-size:10px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:var(--mm-muted);margin-right:6px;}
+.mm-rail-item{flex:0 0 auto;display:flex;flex-direction:column;align-items:flex-start;gap:1px;padding:5px 12px;border:1px solid var(--mm-border);border-radius:8px;background:var(--mm-card2);cursor:pointer;font-size:11px;font-weight:600;color:var(--mm-text);font-family:inherit;line-height:1.3;text-align:left;}
+.mm-rail-item .t{color:var(--mm-muted);font-size:10px;font-weight:500;font-variant-numeric:tabular-nums;}
+.mm-rail-item:hover{border-color:var(--mm-accent);}
+.mm-rail-item.active{border-color:var(--mm-accent);box-shadow:0 0 0 1px var(--mm-accent);}
+.mm-rail-search{border-radius:16px;background:rgba(101,16,244,0.08);}
+.mm-rail-search:hover{border-color:var(--mm-spot);}
+.mm-rail-search.active{border-color:var(--mm-spot);box-shadow:0 0 0 1px var(--mm-spot);}
+/* SVG element styling */
+.mm-band-header{font-size:12px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;fill:var(--mm-muted);}
+.mm-band-sub{font-size:10px;fill:var(--mm-muted);opacity:0.8;}
+.mm-node{cursor:pointer;}
+.mm-unit{transition:opacity 0.18s ease;}
+.mm-frame{fill:var(--mm-card);stroke:var(--mm-border);}
+.mm-title{font-size:12px;font-weight:600;fill:var(--mm-text);}
+.mm-sub{font-size:10px;fill:var(--mm-muted);}
+.mm-cell .mm-box{fill:var(--mm-chunk);stroke:var(--mm-chunk-stroke);}
+.mm-cell:hover .mm-box{stroke:var(--mm-accent);}
+.mm-cell text{font-size:10.5px;fill:var(--mm-text);}
+.mm-row .mm-box{fill:transparent;stroke:transparent;}
+.mm-row:hover .mm-box{fill:var(--mm-card2);}
+.mm-row text{font-size:11px;fill:var(--mm-text);}
+.mm-row .mm-dot{fill:var(--mm-accent);}
+.mm-pill .mm-box{fill:var(--mm-card2);stroke:var(--mm-border);}
+.mm-pill:hover .mm-box{stroke:var(--mm-accent);}
+.mm-pill text{font-size:10px;fill:var(--mm-muted);}
+.mm-count{font-size:10px;fill:var(--mm-muted);font-variant-numeric:tabular-nums;}
+.mm-sum .mm-box{fill:var(--mm-card);stroke:var(--mm-border);}
+.mm-sum:hover .mm-box{stroke:var(--mm-accent);}
+.mm-sum text{font-size:10.5px;fill:var(--mm-text);}
+.mm-ctx-empty rect{fill:none;stroke:var(--mm-muted);stroke-dasharray:5 4;opacity:0.55;}
+.mm-ctx-empty text{font-size:11px;fill:var(--mm-muted);}
+.mm-edge{fill:none;stroke:var(--mm-edge);stroke-width:1.1;opacity:0.20;transition:opacity 0.18s ease;}
+.mm-edge-semantic{stroke:var(--mm-sem);opacity:0.10;}
+.mm-edge-made_from{opacity:0.38;}
+.mm-node.is-selected .mm-box,.mm-node.is-selected .mm-frame{stroke:var(--mm-accent);stroke-width:2;}
+.mm-future{opacity:0.06 !important;pointer-events:none;}
+/* Search overlay: dim base, spotlight retrieved set — classes/opacity only,
+   never positions. */
+#memory-svg.mm-searching .mm-unit{opacity:0.14;}
+#memory-svg.mm-searching .mm-edge{opacity:0.03;}
+#memory-svg.mm-searching .mm-unit.is-spotlit{opacity:1;}
+.mm-unit.is-spotlit .mm-box,.mm-unit.is-spotlit .mm-frame{stroke:var(--mm-spot);stroke-width:2;}
+#memory-svg.mm-searching .mm-edge.is-trail{stroke:var(--mm-spot);opacity:0.45;stroke-width:1.4;}
+#memory-svg.mm-searching .mm-edge.is-spotlit-edge{stroke:var(--mm-spot);opacity:0.95;stroke-width:2;}
+/* Reinforcement (improve) overlay: feedback valence on the same layout —
+   green = weights up from a positive rating, amber = weights down. */
+#memory-svg.mm-reinforcing .mm-unit.is-reinforced,
+#memory-svg.mm-reinforcing .mm-unit.is-weakened{opacity:1;}
+.mm-unit.is-reinforced .mm-box,.mm-unit.is-reinforced .mm-frame{stroke:#1F9E6E;stroke-width:2.2;}
+.mm-unit.is-weakened .mm-box,.mm-unit.is-weakened .mm-frame{stroke:#E2A33B;stroke-width:2.2;}
+.mm-rail-improve{border-radius:16px;background:rgba(31,158,110,0.10);}
+html:not(.light) .mm-rail-improve{background:rgba(31,158,110,0.18);}
+/* Memory side panel: dark-theme parity with the schema drawer. */
+html:not(.light) #memory-side-panel{box-shadow:-12px 0 32px rgba(0,0,0,0.45);}
+#memory-side-panel .si-title{color:var(--mm-text);}
+#memory-side-panel .si-chip{background:var(--mm-card2);border-color:var(--mm-border);color:var(--mm-text);}
+#memory-side-panel .si-rel-name{color:var(--mm-text);}
+#memory-side-panel .mm-panel-text{font-size:12.5px;line-height:1.55;color:var(--mm-text);white-space:pre-wrap;word-break:break-word;background:var(--mm-card2);border:1px solid var(--mm-border);border-radius:8px;padding:10px 12px;}
+#memory-side-panel .panel-row .k{color:var(--mm-muted);}
+#memory-side-panel .panel-row .v{color:var(--mm-text);}
 </style>
 
 
@@ -338,6 +455,7 @@ __SCHEMA_VIEW_JS__
 __STORY_VIEW_JS__
 __PIPELINE_LAYOUT_JS__
 __INSPECTOR_JS__
+__MEMORY_VIEW_JS__
 </script>
 </body>
 </html>
