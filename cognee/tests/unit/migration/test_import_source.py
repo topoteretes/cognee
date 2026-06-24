@@ -385,3 +385,37 @@ class TestRememberDispatch:
         assert len(sinks.pipeline_calls) == 1
         assert len(sinks.add_calls) == 1
         assert sinks.remember_calls == []
+
+
+class TestLangMemImport:
+    def test_preserve_imports_semantic_memories(self, monkeypatch):
+        from cognee.modules.migration.sources.langmem import LangMemSource
+
+        sinks = install_sinks(monkeypatch)
+        source = LangMemSource(
+            [
+                {
+                    "namespace": ["user-42", "memories"],
+                    "key": "mem-001",
+                    "value": {
+                        "kind": "Memory",
+                        "content": {"content": "User prefers dark mode"},
+                    },
+                }
+            ],
+            mode="preserve",
+        )
+
+        result = asyncio.run(import_memory_source(source, dataset_name="ds"))
+
+        assert len(sinks.add_calls) == 1
+        assert sinks.pipeline_calls == []
+        assert sinks.remember_calls == []
+        assert len(sinks.add_calls[0]["data"]) == 1
+        assert sinks.add_calls[0]["node_set"] == ["import:langmem"]
+
+        (summary,) = _summary_items(result)
+        assert summary["source_system"] == "langmem"
+        assert summary["mode"] == "preserve"
+        assert summary["record_counts"] == {"memory": 1}
+        assert result.status == "completed"
