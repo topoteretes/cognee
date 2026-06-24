@@ -3,8 +3,11 @@
 import { Flex, Text, Button } from "@mantine/core";
 import { useRouter } from "next/navigation";
 import { tokens } from "@/ui/theme/tokens";
+import isCloudEnvironment from "@/utils/isCloudEnvironment";
 
 export default function UpgradeBanner() {
+  if (!isCloudEnvironment()) return null;
+
   const router = useRouter();
 
   return (
