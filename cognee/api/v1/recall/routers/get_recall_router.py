@@ -88,6 +88,15 @@ class RecallPayloadDTO(InDTO):
     )
 
 
+    score_weights: Optional[dict[str, float]] = Field(
+        default=None,
+        examples=[None],
+        description=(
+            "Weights for different recall sources, e.g. {'session': 1.0, 'graph': 1.0}."
+        ),
+    )
+
+
 def get_recall_router() -> APIRouter:
     router = APIRouter()
 
@@ -148,6 +157,7 @@ def get_recall_router() -> APIRouter:
         - **scope** (Optional[str | List[str]]): Memory sources to include: "graph",
           "session", "trace", "graph_context", "all", "auto", or a list of these
           (default: "auto" — session first when session_id is set, else graph)
+        - **score_weights** (Optional[dict[str, float]]): Weights for different recall sources
 
         ## Error Codes
         - **409 Conflict**: Error during recall
@@ -182,6 +192,7 @@ def get_recall_router() -> APIRouter:
                 session_id=payload.session_id,
                 scope=payload.scope,
                 include_references=payload.include_references,
+                score_weights=payload.score_weights,
             )
             return jsonable_encoder(results)
         except (DatabaseNotCreatedError, UserNotFoundError, CogneeValidationError) as e:
