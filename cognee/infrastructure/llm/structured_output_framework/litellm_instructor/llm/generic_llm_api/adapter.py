@@ -48,7 +48,7 @@ def _report_token_usage_to_langsmith(usage, model: str) -> None:
             "output_tokens": getattr(usage, "completion_tokens", 0),
             "total_tokens": getattr(usage, "total_tokens", 0),
         },
-        metadata={"model": model},
+        metadata={"ls_model_name": model, "model": model},
     )
 
 
