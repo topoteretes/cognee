@@ -118,11 +118,7 @@ def _wrap_with_otel(inner_decorator):
 def get_observe():
     monitoring = get_base_config().monitoring_tool
 
-    if monitoring == Observer.LANGFUSE:
-        from langfuse.decorators import observe
-
-        return _wrap_with_otel(observe)
-    elif monitoring == Observer.LANGSMITH:
+    if monitoring == Observer.LANGSMITH:
         from langsmith import traceable
 
         _TYPE_MAP = {
