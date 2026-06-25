@@ -29,6 +29,9 @@ interface FileEntry {
   createdAt?: string;
 }
 
+type SortKey = "name" | "type" | "added";
+type SortDir = "asc" | "desc";
+
 // ── File type colors and labels ──
 
 const EXT_META: Record<string, { fill: string; stroke: string; text: string; label: string }> = {
@@ -130,6 +133,18 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
   const [isConnectedSource, setIsConnectedSource] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [search, setSearch] = useState("");
+  const [sortKey, setSortKey] = useState<SortKey>("added");
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
+
+  function handleSort(key: SortKey) {
+    if (key === sortKey) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDir(key === "added" ? "desc" : "asc");
+    }
+  }
+
   const [showShareModal, setShowShareModal] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [sharedWith, setSharedWith] = useState<Set<string>>(new Set());
@@ -571,6 +586,21 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
   }
 
   const filtered = search ? files.filter((f) => f.name.toLowerCase().includes(search.toLowerCase())) : files;
+
+  const sorted = [...filtered].sort((a, b) => {
+    let cmp = 0;
+    if (sortKey === "name") {
+      cmp = decodeURIComponent(a.name).localeCompare(decodeURIComponent(b.name));
+    } else if (sortKey === "type") {
+      cmp = getTypeName(a.name, a.extension).localeCompare(getTypeName(b.name, b.extension));
+    } else {
+      if (!a.createdAt && !b.createdAt) cmp = 0;
+      else if (!a.createdAt) return 1;
+      else if (!b.createdAt) return -1;
+      else cmp = a.createdAt.localeCompare(b.createdAt);
+    }
+    return sortDir === "asc" ? cmp : -cmp;
+  });
 
   if (loading || isInitializing) {
     return <><TrackPageView page="Dataset Detail" additionalProperties={{ dataset_id: datasetId }} /><div style={{ padding: 32, display: "flex", alignItems: "center", justifyContent: "center", height: "100%" }}><span style={{ fontSize: 14, color: "#71717A" }}>Loading files...</span></div></>;
@@ -1198,23 +1228,50 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
       )}
 
       {/* Files table */}
-      {filtered.length > 0 ? (
+      {sorted.length > 0 ? (
         <div style={{ background: "#fff", border: "1px solid #E5E7EB", borderRadius: 12, overflow: "hidden" }}>
           <div style={{ display: "flex", alignItems: "center", background: "#FAFAF9", borderBottom: "1px solid #E5E7EB", padding: "12px 20px" }}>
-            <span style={{ flex: 1, fontSize: 12, fontWeight: 600, color: "#71717A" }}>Name</span>
-            <span style={{ width: 100, fontSize: 12, fontWeight: 600, color: "#71717A", flexShrink: 0 }}>Type</span>
+            <button
+              onClick={() => handleSort("name")}
+              className="cursor-pointer"
+              style={{ flex: 1, fontSize: 12, fontWeight: 600, color: "#71717A", background: "none", border: "none", padding: 0, textAlign: "left", fontFamily: "inherit", display: "flex", alignItems: "center", gap: 4 }}
+            >
+              Name
+              <span style={{ fontSize: 10, opacity: sortKey === "name" ? 1 : 0.3 }}>
+                {sortKey === "name" ? (sortDir === "asc" ? "▲" : "▼") : "⇅"}
+              </span>
+            </button>
+            <button
+              onClick={() => handleSort("type")}
+              className="cursor-pointer"
+              style={{ width: 100, fontSize: 12, fontWeight: 600, color: "#71717A", background: "none", border: "none", padding: 0, textAlign: "left", fontFamily: "inherit", flexShrink: 0, display: "flex", alignItems: "center", gap: 4 }}
+            >
+              Type
+              <span style={{ fontSize: 10, opacity: sortKey === "type" ? 1 : 0.3 }}>
+                {sortKey === "type" ? (sortDir === "asc" ? "▲" : "▼") : "⇅"}
+              </span>
+            </button>
             <span style={{ width: 80, fontSize: 12, fontWeight: 600, color: "#71717A", flexShrink: 0 }}>Size</span>
-            <span style={{ width: 140, fontSize: 12, fontWeight: 600, color: "#71717A", flexShrink: 0 }}>Added</span>
+            <button
+              onClick={() => handleSort("added")}
+              className="cursor-pointer"
+              style={{ width: 140, fontSize: 12, fontWeight: 600, color: "#71717A", background: "none", border: "none", padding: 0, textAlign: "left", fontFamily: "inherit", flexShrink: 0, display: "flex", alignItems: "center", gap: 4 }}
+            >
+              Added
+              <span style={{ fontSize: 10, opacity: sortKey === "added" ? 1 : 0.3 }}>
+                {sortKey === "added" ? (sortDir === "asc" ? "▲" : "▼") : "⇅"}
+              </span>
+            </button>
             <span style={{ width: 40, flexShrink: 0 }} />
           </div>
-          {filtered.map((file, i) => {
+          {sorted.map((file, i) => {
             const meta = getExtMeta(file.name, file.extension);
             const typeName = getTypeName(file.name, file.extension);
             return (
               <div
                 key={file.id}
                 className="hover:bg-cognee-hover"
-                style={{ display: "flex", alignItems: "center", padding: "14px 20px", borderBottom: i < filtered.length - 1 ? "1px solid #F4F4F5" : "none", transition: "background 150ms" }}
+                style={{ display: "flex", alignItems: "center", padding: "14px 20px", borderBottom: i < sorted.length - 1 ? "1px solid #F4F4F5" : "none", transition: "background 150ms" }}
               >
                 <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 10 }}>
                   <FileIcon fill={meta.fill} stroke={meta.stroke} text={meta.text} label={meta.label} />
