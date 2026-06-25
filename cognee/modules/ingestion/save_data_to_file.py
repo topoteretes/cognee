@@ -21,7 +21,11 @@ async def save_data_to_file(
             hash_contents = hashlib.md5(data_contents).hexdigest()
             file_metadata["name"] = "text_" + hash_contents + ".txt"
 
-        file_name = file_metadata["name"]
+        from pathlib import Path
+
+        file_name = Path(file_metadata["name"]).name
+        if not file_name or file_name in (".", ".."):
+            raise ValueError(f"Invalid filename: {file_metadata['name']}")
 
         if file_extension is not None:
             extension = file_extension.lstrip(".")
