@@ -111,6 +111,7 @@ postgres-binary = [
     "asyncpg>=0.30.0,<1.0.0",
 ]
 notebook = ["notebook>=7.1.0,<8"]
+langsmith = ["langsmith>=0.2.3,<1.0.0"]
 langchain = [
     "langsmith>=0.2.3,<1.0.0",
     "langchain_text_splitters>=0.3.2,<1.0.0",
@@ -177,6 +178,16 @@ debug = ["debugpy>=1.8.9,<2.0.0"]
 redis = ["redis>=5.0.3,<6.0.0"]
 
 tracing = [
+    "opentelemetry-api>=1.20.0,<2",
+    "opentelemetry-sdk>=1.20.0,<2",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.20.0,<2",
+    "opentelemetry-exporter-otlp-proto-http>=1.20.0,<2",
+]
+
+monitoring = [
+    "sentry-sdk[fastapi]>=2.9.0,<3",
+    "langfuse>=2.32.0,<3",
+    "langsmith>=0.2.3,<1.0.0",
     "opentelemetry-api>=1.20.0,<2",
     "opentelemetry-sdk>=1.20.0,<2",
     "opentelemetry-exporter-otlp-proto-grpc>=1.20.0,<2",

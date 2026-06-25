@@ -118,7 +118,43 @@ def _wrap_with_otel(inner_decorator):
 def get_observe():
     monitoring = get_base_config().monitoring_tool
 
-    if monitoring == Observer.NONE:
+    if monitoring == Observer.LANGFUSE:
+        from langfuse.decorators import observe
+
+        return _wrap_with_otel(observe)
+    elif monitoring == Observer.LANGSMITH:
+        from langsmith import traceable
+
+        _TYPE_MAP = {
+            "generation": "llm",
+            "retrieval": "retrieval",
+            "default": "chain",
+        }
+
+        def langsmith_observe(*dec_args, **dec_kwargs):
+            # Pop cognee-specific kwargs only; discard unknown ones
+            as_type = dec_kwargs.pop("as_type", "default")
+            run_type = _TYPE_MAP.get(as_type, "chain")
+            name = dec_kwargs.pop("name", None)
+            dec_kwargs.clear()
+
+            # Build traceable with keyword args only — no *args forwarding
+            ts_decorator = traceable(
+                run_type=run_type,
+                **({"name": name} if name else {}),
+            )
+
+            # Handle direct decoration: @observe (function as positional arg)
+            if len(dec_args) == 1 and callable(dec_args[0]):
+                return ts_decorator(dec_args[0])
+
+            return ts_decorator
+
+        # LangSmith's traceable already integrates with OTEL natively,
+        # so skip _wrap_with_otel to avoid double spans
+        return langsmith_observe
+
+    elif monitoring == Observer.NONE:
         # Return a no-op decorator that handles keyword arguments
         def no_op_decorator(*args, **kwargs):
             if len(args) == 1 and callable(args[0]) and not kwargs:
