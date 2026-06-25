@@ -7,6 +7,7 @@ import asyncio
 import json
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
+from pathlib import Path
 
 from cognee.modules.migration.cogx import (
     COGX_VERSION,
@@ -28,10 +29,13 @@ from cognee.modules.migration import loader
 from cognee.modules.migration.loader import record_data_id, translate_records
 from cognee.modules.migration.sources import (
     COGXArchiveSource,
+    GoogleMemorySource,
     GraphitiSource,
     LettaSource,
     Mem0Source,
 )
+
+GOOGLE_ADK_FIXTURE = Path(__file__).resolve().parent / "fixtures" / "google_adk_export.json"
 
 
 def collect(source):
@@ -192,6 +196,193 @@ class TestMem0Source:
 
     def test_skips_items_without_content(self):
         assert collect(Mem0Source([{"id": "1"}, {"id": "2", "memory": "kept"}])) != []
+
+
+class TestGoogleMemorySource:
+    def test_plain_list(self):
+        memories = collect(
+            GoogleMemorySource(
+                [
+                    {
+                        "id": "memory-001",
+                        "content": {
+                            "role": "user",
+                            "parts": [{"text": "Alice works at Acme"}],
+                        },
+                        "timestamp": "2024-01-01T00:00:00Z",
+                        "custom_metadata": {
+                            "user_id": "u1",
+                            "app_name": "career_assistant",
+                            "session_id": "session_abc",
+                        },
+                    }
+                ]
+            )
+        )
+        assert len(memories) == 1
+        assert memories[0].kind == "memory"
+        assert memories[0].external_system == "google_adk"
+        assert memories[0].external_id == "memory-001"
+        assert memories[0].content == "Alice works at Acme"
+        assert memories[0].scope.user_id == "u1"
+        assert memories[0].scope.agent_id == "career_assistant"
+        assert memories[0].scope.session_id == "session_abc"
+        assert memories[0].created_at == datetime(2024, 1, 1, tzinfo=timezone.utc)
+        assert memories[0].metadata == {
+            "user_id": "u1",
+            "app_name": "career_assistant",
+            "session_id": "session_abc",
+        }
+
+    def test_memories_wrapper(self):
+        memories = collect(
+            GoogleMemorySource(
+                {
+                    "memories": [
+                        {
+                            "content": {
+                                "parts": [{"text": "remembers things"}],
+                            }
+                        }
+                    ]
+                }
+            )
+        )
+        assert len(memories) == 1
+        assert memories[0].content == "remembers things"
+        assert memories[0].external_id == "google-adk-0"
+
+    def test_multi_part_text_joined(self):
+        memories = collect(
+            GoogleMemorySource(
+                [
+                    {
+                        "content": {
+                            "parts": [
+                                {"text": "line one"},
+                                {"text": "line two"},
+                            ]
+                        }
+                    }
+                ]
+            )
+        )
+        assert memories[0].content == "line one\nline two"
+
+    def test_generic_author_not_mapped_to_user_id(self):
+        memories = collect(
+            GoogleMemorySource(
+                [
+                    {
+                        "author": "user",
+                        "content": {"parts": [{"text": "from memory bank"}]},
+                    },
+                    {
+                        "author": "model",
+                        "content": {"parts": [{"text": "model authored"}]},
+                    },
+                ]
+            )
+        )
+        assert len(memories) == 2
+        assert memories[0].scope.user_id is None
+        assert memories[1].scope.user_id is None
+
+    def test_real_author_used_when_metadata_user_id_missing(self):
+        memories = collect(
+            GoogleMemorySource(
+                [
+                    {
+                        "author": "user-42",
+                        "content": {"parts": [{"text": "scoped by author"}]},
+                    }
+                ]
+            )
+        )
+        assert memories[0].scope.user_id == "user-42"
+
+    def test_metadata_user_id_preferred_over_author(self):
+        memories = collect(
+            GoogleMemorySource(
+                [
+                    {
+                        "author": "user-42",
+                        "content": {"parts": [{"text": "x"}]},
+                        "custom_metadata": {"user_id": "from-metadata"},
+                    }
+                ]
+            )
+        )
+        assert memories[0].scope.user_id == "from-metadata"
+
+    def test_skips_entries_without_text(self):
+        memories = collect(
+            GoogleMemorySource(
+                [
+                    {"id": "empty"},
+                    {"content": {}},
+                    {"content": {"parts": []}},
+                    {"content": {"parts": [{"text": "   "}]}},
+                    {"content": {"parts": [{"inline_data": {"data": "abc"}}]}},
+                    {"content": {"parts": [{"text": "kept"}]}},
+                ]
+            )
+        )
+        assert len(memories) == 1
+        assert memories[0].content == "kept"
+        assert memories[0].external_id == "google-adk-5"
+
+    def test_fixture_file(self):
+        memories = collect(GoogleMemorySource(GOOGLE_ADK_FIXTURE))
+        assert len(memories) == 2
+        assert memories[0].external_id == "memory-001"
+        assert memories[0].content == "Alice works at Acme"
+        assert memories[0].scope.user_id == "u1"
+        assert memories[1].external_id == "memory-002"
+        assert memories[1].content == "from file"
+
+    def test_export_file(self, tmp_path):
+        export_file = tmp_path / "google_adk.json"
+        export_file.write_text(
+            json.dumps(
+                [
+                    {
+                        "id": "file-1",
+                        "content": {"parts": [{"text": "loaded from path"}]},
+                    }
+                ]
+            )
+        )
+        memories = collect(GoogleMemorySource(export_file))
+        assert memories[0].external_id == "file-1"
+        assert memories[0].content == "loaded from path"
+
+    def test_invalid_dict_shape_raises(self):
+        try:
+            GoogleMemorySource({"results": [{"content": {"parts": [{"text": "x"}]}}]})._load_raw()
+            raise AssertionError("expected ValueError")
+        except ValueError as error:
+            assert "memories" in str(error)
+
+    def test_invalid_top_level_shape_raises(self):
+        try:
+            GoogleMemorySource(42)._load_raw()
+            raise AssertionError("expected ValueError")
+        except ValueError as error:
+            assert "list" in str(error)
+
+    def test_skips_non_dict_items_in_list(self):
+        memories = collect(
+            GoogleMemorySource(
+                [
+                    "skip-me",
+                    None,
+                    {"content": {"parts": [{"text": "kept"}]}},
+                ]
+            )
+        )
+        assert len(memories) == 1
+        assert memories[0].content == "kept"
 
 
 class TestLettaSource:
@@ -494,6 +685,13 @@ class TestImportModeValidation:
     def test_unknown_mode_rejected(self):
         try:
             Mem0Source([], mode="yolo")
+            raise AssertionError("expected ValueError")
+        except ValueError as error:
+            assert "yolo" in str(error)
+
+    def test_unknown_mode_rejected_google(self):
+        try:
+            GoogleMemorySource([], mode="yolo")
             raise AssertionError("expected ValueError")
         except ValueError as error:
             assert "yolo" in str(error)

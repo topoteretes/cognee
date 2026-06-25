@@ -7,6 +7,7 @@ are monkeypatched so each test asserts exactly which of them fire per mode.
 
 import asyncio
 import importlib
+from pathlib import Path
 from types import SimpleNamespace
 from typing import AsyncIterator
 
@@ -15,7 +16,10 @@ import pytest
 from cognee.api.v1.remember.remember import RememberResult, remember
 from cognee.modules.migration.cogx import COGXDocument, COGXEntity, COGXFact, COGXRecord
 from cognee.modules.migration.import_source import import_memory_source
+from cognee.modules.migration.sources import GoogleMemorySource
 from cognee.modules.migration.sources.base import MemorySource
+
+GOOGLE_ADK_FIXTURE = Path(__file__).resolve().parent / "fixtures" / "google_adk_export.json"
 
 # Module handles for monkeypatching the seams import_memory_source resolves
 # lazily at call time. importlib is required: plain ``import a.b.c as x``
@@ -115,6 +119,203 @@ def _flushed_edges(sinks):
 
 def _summary_items(result):
     return [item for item in result.items if item.get("kind") == "migration_import"]
+
+
+def _google_sample_entries():
+    return [
+        {
+            "id": "memory-001",
+            "content": {"parts": [{"text": "Alice works at Acme"}]},
+            "timestamp": "2024-01-01T00:00:00Z",
+            "custom_metadata": {
+                "user_id": "u1",
+                "app_name": "career_assistant",
+                "session_id": "session_abc",
+            },
+        },
+        {
+            "id": "memory-002",
+            "content": {"parts": [{"text": "User prefers tea"}]},
+        },
+    ]
+
+
+def _google_empty_entries():
+    return [
+        {"id": "empty"},
+        {"content": {"parts": [{"text": "   "}]}},
+        {"content": {"parts": [{"inline_data": {"data": "abc"}}]}},
+    ]
+
+
+class TestGoogleMemoryImport:
+    """Integration tests for GoogleMemorySource through import_memory_source."""
+
+    def test_preserve_imports_fixture(self, monkeypatch):
+        sinks = install_sinks(monkeypatch)
+        source = GoogleMemorySource(GOOGLE_ADK_FIXTURE, mode="preserve")
+
+        result = asyncio.run(import_memory_source(source, dataset_name="ds"))
+
+        assert len(sinks.add_calls) == 1
+        assert sinks.pipeline_calls == []
+        assert sinks.remember_calls == []
+        assert sinks.graph_flushes == []
+
+        add_call = sinks.add_calls[0]
+        assert add_call["dataset_name"] == "ds"
+        assert add_call["node_set"] == ["import:google_adk"]
+        assert len(add_call["data"]) == 2
+        assert add_call["data"][0].data == "Alice works at Acme"
+        assert add_call["data"][1].data == "from file"
+
+        (summary,) = _summary_items(result)
+        assert summary["source_system"] == "google_adk"
+        assert summary["mode"] == "preserve"
+        assert summary["record_counts"] == {"memory": 2}
+        assert summary["graph_nodes"] == 0
+        assert summary["graph_edges"] == 0
+        assert summary["skipped_facts"] == 0
+        assert summary["pipeline_run_id"] is None
+        assert result.status == "completed"
+        assert result.items_processed == 2
+        assert result.dataset_name == "ds"
+        assert result.elapsed_seconds is not None
+
+    def test_preserve_data_items_carry_google_metadata(self, monkeypatch):
+        sinks = install_sinks(monkeypatch)
+        source = GoogleMemorySource(_google_sample_entries(), mode="preserve")
+
+        asyncio.run(import_memory_source(source, dataset_name="ds"))
+
+        items = sinks.add_calls[0]["data"]
+        assert items[0].external_metadata["external_system"] == "google_adk"
+        assert items[0].external_metadata["external_id"] == "memory-001"
+        assert items[0].external_metadata["scope"] == {
+            "user_id": "u1",
+            "agent_id": "career_assistant",
+            "session_id": "session_abc",
+        }
+        assert items[0].external_metadata["user_id"] == "u1"
+        assert items[0].external_metadata["app_name"] == "career_assistant"
+
+    def test_preserve_custom_node_set(self, monkeypatch):
+        sinks = install_sinks(monkeypatch)
+        source = GoogleMemorySource(_google_sample_entries(), mode="preserve")
+
+        asyncio.run(import_memory_source(source, dataset_name="ds", node_set=["custom-google"]))
+
+        assert sinks.add_calls[0]["node_set"] == ["custom-google"]
+
+    def test_preserve_memories_wrapper_shape(self, monkeypatch):
+        sinks = install_sinks(monkeypatch)
+        source = GoogleMemorySource(
+            {"memories": [{"content": {"parts": [{"text": "wrapped memory"}]}}]},
+            mode="preserve",
+        )
+
+        result = asyncio.run(import_memory_source(source, dataset_name="ds"))
+
+        (summary,) = _summary_items(result)
+        assert summary["record_counts"] == {"memory": 1}
+        assert sinks.add_calls[0]["data"][0].data == "wrapped memory"
+
+    def test_preserve_skipped_entries_produce_no_data_items(self, monkeypatch):
+        sinks = install_sinks(monkeypatch)
+        source = GoogleMemorySource(_google_empty_entries(), mode="preserve")
+
+        result = asyncio.run(import_memory_source(source, dataset_name="ds"))
+
+        assert sinks.add_calls == []
+        (summary,) = _summary_items(result)
+        assert summary["record_counts"] == {}
+        assert result.items_processed == 0
+
+    def test_re_derive_fires_nested_remember_only(self, monkeypatch):
+        sinks = install_sinks(monkeypatch)
+        source = GoogleMemorySource(_google_sample_entries(), mode="re-derive")
+
+        result = asyncio.run(import_memory_source(source, dataset_name="ds"))
+
+        assert len(sinks.remember_calls) == 1
+        assert sinks.pipeline_calls == []
+        assert sinks.add_calls == []
+        assert sinks.graph_flushes == []
+
+        call = sinks.remember_calls[0]
+        assert call["dataset_name"] == "ds"
+        assert call["node_set"] == ["import:google_adk"]
+        assert len(call["data"]) == 2
+        assert call["data"][0].data == "Alice works at Acme"
+        assert call["data"][1].data == "User prefers tea"
+
+        (summary,) = _summary_items(result)
+        assert summary["source_system"] == "google_adk"
+        assert summary["mode"] == "re-derive"
+        assert summary["record_counts"] == {"memory": 2}
+        assert summary["graph_nodes"] == 0
+        assert summary["graph_edges"] == 0
+        assert result.items_processed == 2
+
+    def test_hybrid_memory_only_fires_nested_remember(self, monkeypatch):
+        sinks = install_sinks(monkeypatch)
+        source = GoogleMemorySource(_google_sample_entries(), mode="hybrid")
+
+        result = asyncio.run(import_memory_source(source, dataset_name="ds"))
+
+        assert len(sinks.remember_calls) == 1
+        assert sinks.pipeline_calls == []
+        assert sinks.add_calls == []
+
+        (summary,) = _summary_items(result)
+        assert summary["mode"] == "hybrid"
+        assert summary["graph_nodes"] == 0
+        assert summary["graph_edges"] == 0
+        assert result.items_processed == 2
+
+    def test_preserve_non_replayable_uses_buffered_add(self, monkeypatch):
+        sinks = install_sinks(monkeypatch)
+        source = GoogleMemorySource(_google_sample_entries(), mode="preserve")
+        source.replayable = False
+
+        result = asyncio.run(import_memory_source(source, dataset_name="ds"))
+
+        assert len(sinks.add_calls) == 1
+        assert sinks.pipeline_calls == []
+        assert sinks.remember_calls == []
+        assert len(sinks.add_calls[0]["data"]) == 2
+        (summary,) = _summary_items(result)
+        assert summary["mode"] == "preserve"
+        assert summary["record_counts"] == {"memory": 2}
+
+    def test_remember_dispatch_preserve(self, monkeypatch):
+        monkeypatch.setattr(serve_state, "get_remote_client", lambda: None)
+        monkeypatch.setattr(shared_utils, "send_telemetry", lambda *args, **kwargs: None)
+        sinks = install_sinks(monkeypatch)
+        source = GoogleMemorySource(GOOGLE_ADK_FIXTURE, mode="preserve")
+
+        result = asyncio.run(remember(source, "ds"))
+
+        (summary,) = _summary_items(result)
+        assert summary["source_system"] == "google_adk"
+        assert summary["mode"] == "preserve"
+        assert summary["record_counts"] == {"memory": 2}
+        assert len(sinks.add_calls) == 1
+        assert sinks.remember_calls == []
+
+    def test_remember_dispatch_re_derive(self, monkeypatch):
+        monkeypatch.setattr(serve_state, "get_remote_client", lambda: None)
+        monkeypatch.setattr(shared_utils, "send_telemetry", lambda *args, **kwargs: None)
+        sinks = install_sinks(monkeypatch)
+        source = GoogleMemorySource(_google_sample_entries(), mode="re-derive")
+
+        result = asyncio.run(remember(source, "ds"))
+
+        (summary,) = _summary_items(result)
+        assert summary["source_system"] == "google_adk"
+        assert summary["mode"] == "re-derive"
+        assert len(sinks.remember_calls) == 1
+        assert sinks.add_calls == []
 
 
 class TestImportMemorySourceModes:
