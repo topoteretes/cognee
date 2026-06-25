@@ -5,6 +5,9 @@ import os
 from numbers import Number
 
 from cognee.infrastructure.databases.utils.closing_lru_cache import closing_lru_cache
+from cognee.infrastructure.databases.utils.resolve_postgres_connection import (
+    resolve_postgres_url,
+)
 from cognee.shared.lru_cache import DATABASE_MAX_LRU_CACHE_SIZE
 from cognee.shared.logging_utils import get_logger
 
@@ -314,57 +317,28 @@ def _create_graph_engine(
         )
 
     elif graph_database_provider == "postgres":
-        from cognee.context_global_variables import backend_access_control_enabled
+        from cognee.infrastructure.databases.relational import get_relational_config
 
-        if backend_access_control_enabled():
-            if not (
-                graph_database_host
-                and graph_database_port
-                and graph_database_username
-                and graph_database_password
-            ):
-                raise EnvironmentError("Missing required Postgres graph credentials.")
+        # ``graph_database_url`` is also used by the neo4j / kuzu-remote / neptune
+        # branches, so only treat it as a Postgres connection URL when it carries
+        # a Postgres scheme.
+        store_url = graph_database_url if graph_database_url.startswith("postgres") else ""
 
-            connection_string: str = (
-                f"postgresql+asyncpg://{graph_database_username}:{graph_database_password}"
-                f"@{graph_database_host}:{graph_database_port}/{graph_database_name}"
-            )
-        else:
-            if (
-                graph_database_port
-                and graph_database_username
-                and graph_database_password
-                and graph_database_host
-                and graph_database_name
-            ):
-                connection_string: str = (
-                    f"postgresql+asyncpg://{graph_database_username}:{graph_database_password}"
-                    f"@{graph_database_host}:{graph_database_port}/{graph_database_name}"
-                )
-            else:
-                from cognee.infrastructure.databases.relational import get_relational_config
-
-                logger.warning(
-                    "Postgres graph credentials are not fully configured; "
-                    "falling back to the relational database configuration. "
-                    "Set GRAPH_DATABASE_HOST/PORT/USERNAME/PASSWORD/NAME explicitly "
-                    "to avoid this fallback."
-                )
-
-                relational_config = get_relational_config()
-                db_username = relational_config.db_username
-                db_password = relational_config.db_password
-                db_host = relational_config.db_host
-                db_port = relational_config.db_port
-                db_name = relational_config.db_name
-
-                if not (db_host and db_port and db_name and db_username and db_password):
-                    raise EnvironmentError("Missing required Postgres graph credentials!")
-
-                connection_string: str = (
-                    f"postgresql+asyncpg://{db_username}:{db_password}"
-                    f"@{db_host}:{db_port}/{db_name}"
-                )
+        relational_config = get_relational_config()
+        connection_string = resolve_postgres_url(
+            store_url=store_url,
+            store_host=graph_database_host,
+            store_port=graph_database_port,
+            store_username=graph_database_username,
+            store_password=graph_database_password,
+            store_name=graph_database_name,
+            shared_host=relational_config.db_host,
+            shared_port=relational_config.db_port,
+            shared_username=relational_config.db_username,
+            shared_password=relational_config.db_password,
+            shared_name=relational_config.db_name,
+            missing_error="Missing required Postgres graph credentials.",
+        )
 
         from .postgres.adapter import PostgresAdapter
 
