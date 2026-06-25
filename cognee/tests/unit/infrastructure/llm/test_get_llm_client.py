@@ -45,6 +45,7 @@ def _llm_config(**overrides):
         "llama_cpp_n_ctx": 2048,
         "llama_cpp_n_gpu_layers": 1,
         "llama_cpp_chat_format": "chatml",
+        "ollama_num_ctx": 4096,
     }
     config.update(overrides)
     return LLMConfig(**config)
@@ -66,6 +67,7 @@ def test_llm_client_cache_key_covers_adapter_configuration_fields():
         _build_llm_client_cache_key(_llm_config(fallback_model="other-model"), 1024),
         _build_llm_client_cache_key(_llm_config(llm_args={"temperature": 1}), 1024),
         _build_llm_client_cache_key(_llm_config(llm_azure_use_managed_identity=True), 1024),
+        _build_llm_client_cache_key(_llm_config(ollama_num_ctx=8192), 1024),
         _build_llm_client_cache_key(_llm_config(), max_completion_tokens=4096),
     ]
 

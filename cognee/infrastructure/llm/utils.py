@@ -14,6 +14,29 @@ logger = get_logger()
 CONNECTION_TEST_TIMEOUT_SECONDS = 30
 
 
+def resolve_llm_token_limit(model_name: str, llm_config) -> int:
+    """
+    Resolve the token budget used for chunk sizing and LLM context.
+
+    Uses LiteLLM's model lookup when available. For providers whose models are
+    not in LiteLLM (e.g. Ollama, llama.cpp), falls back to the configured
+    context window so chunks fit the context the model actually loads.
+    """
+    model_max = get_model_max_completion_tokens(model_name)
+    user_max = llm_config.llm_max_completion_tokens
+
+    if model_max is not None:
+        return min(model_max, user_max)
+
+    provider = llm_config.llm_provider
+    if provider == "ollama":
+        return min(llm_config.ollama_num_ctx, user_max)
+    if provider == "llama_cpp":
+        return min(llm_config.llama_cpp_n_ctx, user_max)
+
+    return user_max
+
+
 def get_max_chunk_tokens() -> int:
     """
     Calculate the maximum number of tokens allowed in a chunk.

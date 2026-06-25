@@ -64,6 +64,7 @@ class _LLMClientCacheKey:
     llama_cpp_n_ctx: int
     llama_cpp_n_gpu_layers: int
     llama_cpp_chat_format: str
+    ollama_num_ctx: int
 
 
 # Define an Enum for LLM Providers
@@ -178,6 +179,7 @@ def _build_llm_client_cache_key(llm_config, max_completion_tokens: int) -> _LLMC
         llama_cpp_n_ctx=llm_config.llama_cpp_n_ctx,
         llama_cpp_n_gpu_layers=llm_config.llama_cpp_n_gpu_layers,
         llama_cpp_chat_format=llm_config.llama_cpp_chat_format,
+        ollama_num_ctx=llm_config.ollama_num_ctx,
     )
 
 
@@ -258,6 +260,7 @@ def _get_llm_client_cached(cache_key: _LLMClientCacheKey) -> LLMInterface:
             max_completion_tokens,
             instructor_mode=cache_key.instructor_mode,
             llm_args=llm_args,
+            num_ctx=cache_key.ollama_num_ctx,
         )
 
     elif provider == LLMProvider.ANTHROPIC:
@@ -383,19 +386,11 @@ def get_llm_client(raise_api_key_error: bool = True) -> LLMInterface:
         llm_config.llm_azure_use_managed_identity,
     )
 
-    # Check if max_token value is defined in liteLLM for given model
-    # if not use value from cognee configuration
     from cognee.infrastructure.llm.utils import (
-        get_model_max_completion_tokens,
+        resolve_llm_token_limit,
     )  # imported here to avoid circular imports
 
-    model_max_completion_tokens = get_model_max_completion_tokens(llm_config.llm_model)
-    user_max = llm_config.llm_max_completion_tokens
-    if model_max_completion_tokens is not None:
-        # Use the lower of the model's hard limit and the user's configured ceiling
-        max_completion_tokens = min(model_max_completion_tokens, user_max)
-    else:
-        max_completion_tokens = user_max
+    max_completion_tokens = resolve_llm_token_limit(llm_config.llm_model, llm_config)
 
     cache_key = _build_llm_client_cache_key(llm_config, max_completion_tokens)
     return _get_llm_client_cached(cache_key)

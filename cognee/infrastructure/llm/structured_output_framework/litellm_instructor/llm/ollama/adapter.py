@@ -62,13 +62,18 @@ class OllamaAPIAdapter(LLMInterface):
         max_completion_tokens: int,
         instructor_mode: str | None = None,
         llm_args: dict[str, Any] | None = None,
+        num_ctx: int = 4096,
     ) -> None:
         self.name = name
         self.model = model
         self.api_key = api_key
         self.endpoint = endpoint
         self.max_completion_tokens = max_completion_tokens
-        self.llm_args: dict[str, Any] = llm_args or {}
+        self.num_ctx = num_ctx
+        self.llm_args: dict[str, Any] = dict(llm_args or {})
+        extra_body = self.llm_args.setdefault("extra_body", {})
+        options = extra_body.setdefault("options", {})
+        options.setdefault("num_ctx", num_ctx)
 
         self.instructor_mode = instructor_mode if instructor_mode else self.default_instructor_mode
 

@@ -75,6 +75,8 @@ class LLMConfig(BaseSettings):
     llama_cpp_n_gpu_layers: int = 0
     llama_cpp_chat_format: str = "chatml"
 
+    ollama_num_ctx: int = 4096
+
     fallback_api_key: str = ""
     fallback_endpoint: str = ""
     fallback_model: str = ""
@@ -256,6 +258,7 @@ class LLMConfig(BaseSettings):
             "llama_cpp_n_ctx": self.llama_cpp_n_ctx,
             "llama_cpp_n_gpu_layers": self.llama_cpp_n_gpu_layers,
             "llama_cpp_chat_format": self.llama_cpp_chat_format,
+            "ollama_num_ctx": self.ollama_num_ctx,
             "llm_args": self.llm_args,
         }
 
