@@ -3,6 +3,7 @@ from pydantic import BaseModel, Field, field_validator
 from cognee.infrastructure.session.session_context_models import (
     CandidateContextUpdate,
     ServedContextRating,
+    VALID_SECTIONS,
 )
 
 
@@ -27,7 +28,7 @@ class SessionTurnAnalysis(BaseModel):
         default_factory=list,
         description=(
             "Up to 3 proposed session-context updates. Each item has a section "
-            "(goals, rules, preferences, or lessons_learned), content, and confidence."
+            f"({', '.join(sorted(VALID_SECTIONS))}), content, and confidence."
         ),
     )
 
