@@ -14,6 +14,7 @@ from cognee.modules.retrieval.hybrid.context import (
 )
 from cognee.modules.retrieval.hybrid.entities import build_entities
 from cognee.modules.retrieval.hybrid.facts import edge_rank_by_id, select_facts
+from cognee.modules.retrieval.hybrid.results import payload, result_id
 from cognee.modules.retrieval.utils.completion import generate_completion
 from cognee.modules.retrieval.utils.global_context import (
     format_global_context_prelude,
@@ -21,6 +22,11 @@ from cognee.modules.retrieval.utils.global_context import (
     search_top_global_context_summaries,
 )
 from cognee.modules.retrieval.utils.validate_queries import validate_retriever_input
+from cognee.modules.truth_subspace import align
+from cognee.modules.truth_subspace.constants import DEFAULT_K, TRUTH_ANCHOR_COLLECTION
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger("HybridRetriever")
 
 
 class HybridRetriever(BaseRetriever):
@@ -42,6 +48,7 @@ class HybridRetriever(BaseRetriever):
         system_prompt: Optional[str] = None,
         text_summaries_top_k: Optional[int] = None,
         use_importance_weight: bool = True,
+        use_truth_weight: bool = False,
         facts_top_k: Optional[int] = 5,
     ):
         self.chunks_top_k = chunks_top_k if chunks_top_k is not None else 5
@@ -58,6 +65,7 @@ class HybridRetriever(BaseRetriever):
         self.system_prompt = system_prompt
         self.text_summaries_top_k = text_summaries_top_k
         self.use_importance_weight = use_importance_weight
+        self.use_truth_weight = use_truth_weight
         self.facts_top_k = facts_top_k if facts_top_k is not None else 5
 
     def _use_session_cache(self) -> bool:
@@ -75,6 +83,8 @@ class HybridRetriever(BaseRetriever):
         query_embeddings = await self._unified_engine.vector.embedding_engine.embed_text([query])
         query_vector = query_embeddings[0]
 
+        q_coords, coords_by_id = await self._build_truth_context(query_vector)
+
         chunk_objects, (entities, facts) = await asyncio.gather(
             retrieve_hybrid_chunks(
                 vector_engine=self._unified_engine.vector,
@@ -85,10 +95,91 @@ class HybridRetriever(BaseRetriever):
                 node_name_filter_operator=self.node_name_filter_operator,
                 use_importance_weight=self.use_importance_weight,
                 query_vector=query_vector,
+                use_truth_weight=self.use_truth_weight,
+                q_coords=q_coords,
+                coords_by_id=coords_by_id,
             ),
             self._retrieve_entities_and_facts(query, query_vector),
         )
         return {**chunk_objects, "entities": entities, "facts": facts}
+
+    async def _build_truth_context(self, query_vector: list[float]) -> tuple:
+        """Truth-subspace alignment context for the chunk lane.
+
+        Returns ``(q_coords, coords_by_id)``. Both are ``None`` when the truth
+        weight is off or the TruthAnchor collection is absent/empty, so ranking
+        stays at exact baseline. Fails open to baseline on any error.
+
+        ``q_coords`` is the query projected onto the active anchor directions.
+        Stored anchor vectors are not returned by the vector search, so each
+        anchor coordinate is derived from the cosine-distance score the backend
+        returns: ``cosine = 1 - score`` for the cosine LanceDB backend.
+        """
+        if not self.use_truth_weight:
+            return None, None
+
+        try:
+            anchor_hits = await search_collection(
+                self._unified_engine.vector,
+                TRUTH_ANCHOR_COLLECTION,
+                "",
+                DEFAULT_K * 4,
+                None,
+                "OR",
+                apply_node_filter=False,
+                query_vector=query_vector,
+            )
+            if not anchor_hits:
+                return None, None
+
+            # cosine = 1 - score for the cosine-distance LanceDB backend
+            score_by_id = {str(hit.id): 1.0 - float(hit.score) for hit in anchor_hits}
+            active_anchors = align.active_anchor_order(
+                [
+                    {"id": hit.id, "created_at": payload(hit).get("created_at")}
+                    for hit in anchor_hits
+                ],
+                DEFAULT_K,
+            )
+            # Order q_coords by the active anchor order so it lines up with the
+            # node truth_alignment vectors, which are built in the same order.
+            q_coords = [score_by_id[str(anchor["id"])] for anchor in active_anchors]
+            if not q_coords:
+                return None, None
+
+            candidate_chunk_ids = await self._candidate_chunk_ids(query_vector)
+            if not candidate_chunk_ids:
+                return q_coords, {}
+
+            coords_by_id = await self._unified_engine.graph.get_node_truth_alignments(
+                candidate_chunk_ids
+            )
+            return q_coords, coords_by_id
+        except Exception as error:
+            logger.debug("Truth-subspace lookup failed; using baseline ranking: %s", error)
+            return None, None
+
+    async def _candidate_chunk_ids(self, query_vector: list[float]) -> list[str]:
+        """Candidate DocumentChunk ids whose truth alignments we batch-fetch.
+
+        Mirrors the chunk lane's vector candidate window so the truth coords map
+        covers the chunks that ranking can surface."""
+        candidate_limit = max(0, self.chunks_top_k * 2)
+        chunk_hits = await search_collection(
+            self._unified_engine.vector,
+            "DocumentChunk_text",
+            "",
+            candidate_limit,
+            self.node_name,
+            self.node_name_filter_operator,
+            query_vector=query_vector,
+        )
+        ids = []
+        for hit in chunk_hits:
+            chunk_id = result_id(hit)
+            if chunk_id:
+                ids.append(str(chunk_id))
+        return ids
 
     async def _retrieve_entities_and_facts(self, query: str, query_vector: list[float]) -> tuple:
         """Entity lane, run concurrently with the chunk lane so the graph round trip for

@@ -14,6 +14,11 @@ class BaseConfig(BaseSettings):
     cache_root_directory: str = get_absolute_path(".cognee_cache")
     logs_root_directory: str = os.getenv("COGNEE_LOGS_DIR", str(Path.home() / ".cognee" / "logs"))
     monitoring_tool: object = Observer.NONE
+    # Default blend weight for the learned feedback signal during graph search.
+    # Conservative non-zero default so the existing feedback blend is read unless
+    # a caller overrides it. Set DEFAULT_FEEDBACK_INFLUENCE=0.0 to fully restore
+    # the previous baseline behavior. Must stay in range [0, 1].
+    default_feedback_influence: float = float(os.getenv("DEFAULT_FEEDBACK_INFLUENCE", "0.1"))
 
     @pydantic.model_validator(mode="after")
     def validate_paths(self):
