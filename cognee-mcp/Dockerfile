@@ -80,7 +80,6 @@ ENV PATH="/app/.venv/bin:$PATH"
 
 # Set environment variables for MCP server
 ENV PYTHONUNBUFFERED=1
-ENV MCP_LOG_LEVEL=DEBUG
 ENV PYTHONPATH=/app
 # Give the non-root user a stable, writable HOME so Kuzu/Ladybug caches its
 # downloaded extensions in a consistent location across build and runtime.

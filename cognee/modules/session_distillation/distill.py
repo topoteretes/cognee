@@ -160,7 +160,7 @@ def build_curator_batches(
 
     for entry in context_entries:
         content = " ".join(entry.content.split())[:MAX_CANDIDATE_CHARS]
-        block = f"Candidate {entry.id} ({entry.section}): {content}"
+        block = f"Candidate {entry.id} [{entry.context_profile}/{entry.section}]: {content}"
         timeline.append((entry.created_at or "", block))
 
     timeline.sort(key=lambda item: item[0])

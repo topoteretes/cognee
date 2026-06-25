@@ -14,8 +14,7 @@ services:
       # - /path/to/your/data:/data
     environment:
       - DEBUG=false # Change to true if debugging
-      - HOST=0.0.0.0
-      - ENVIRONMENT=local
+      - ENV=local
       - LOG_LEVEL=INFO
       # CAUTION: Default '*' allows all origins. Override with specific domains in production.
       - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-*}
@@ -55,7 +54,7 @@ services:
       # - /path/to/your/data:/data
     environment:
       - DEBUG=false # Change to true if debugging
-      - ENVIRONMENT=local
+      - ENV=local
       - LOG_LEVEL=INFO
       - TRANSPORT_MODE=sse
       # Database configuration - should match the main cognee service
@@ -66,7 +65,6 @@ services:
       - DB_USERNAME=${DB_USERNAME:-cognee}
       - DB_PASSWORD=${DB_PASSWORD:-cognee}
       # MCP specific configuration
-      - MCP_LOG_LEVEL=INFO
       - PYTHONUNBUFFERED=1
     extra_hosts:
       - "host.docker.internal:host-gateway"
