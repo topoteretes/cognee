@@ -69,3 +69,32 @@ class TestRelationalConfig:
                 ("sslmode", "require"),
                 ("timeout", 60),
             )
+
+
+_RESOLVER_LOGGER = "cognee.infrastructure.databases.utils.resolve_postgres_connection.logger"
+
+
+def test_unknown_db_env_var_warns(tmp_path):
+    """A typo'd DB_* var in the .env file is reported (not silently ignored),
+    and the config still constructs (extra="allow", not forbid)."""
+    envf = tmp_path / ".env"
+    envf.write_text("DB_HSOT=x\n")
+
+    with patch(_RESOLVER_LOGGER) as mock_logger:
+        config = RelationalConfig(_env_file=str(envf))
+
+    assert config.db_provider == "sqlite"  # still constructs with defaults
+    warned = [call.args[1] for call in mock_logger.warning.call_args_list]
+    assert warned == ["db_hsot"]
+
+
+def test_relational_does_not_false_warn_on_other_namespaces(tmp_path):
+    """The DB_ scan must not warn on VECTOR_DB_*/GRAPH_DATABASE_*/unrelated keys
+    that land in relational's model_extra (locks the prefix-collision fix)."""
+    envf = tmp_path / ".env"
+    envf.write_text("VECTOR_DB_HOST=v\nGRAPH_DATABASE_FOO=g\nLLM_API_KEY=k\n")
+
+    with patch(_RESOLVER_LOGGER) as mock_logger:
+        RelationalConfig(_env_file=str(envf))
+
+    mock_logger.warning.assert_not_called()

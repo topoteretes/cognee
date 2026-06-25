@@ -106,6 +106,17 @@ class GraphConfig(BaseSettings):
 
         return self
 
+    @pydantic.model_validator(mode="after")
+    def warn_on_unknown_db_env_vars(self):
+        # Surface typo'd ``GRAPH_DATABASE_*`` env vars (extra="allow" otherwise swallows them).
+        # Imported lazily to avoid a circular import via the utils package __init__.
+        from cognee.infrastructure.databases.utils.resolve_postgres_connection import (
+            warn_unknown_db_env_vars,
+        )
+
+        warn_unknown_db_env_vars(self.model_extra, prefixes=["GRAPH_DATABASE_"])
+        return self
+
     def to_dict(self) -> dict:
         """
         Return the configuration as a dictionary.

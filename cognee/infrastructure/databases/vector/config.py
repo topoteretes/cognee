@@ -95,6 +95,17 @@ class VectorConfig(BaseSettings):
 
         return self
 
+    @pydantic.model_validator(mode="after")
+    def warn_on_unknown_db_env_vars(self):
+        # Surface typo'd ``VECTOR_DB_*`` env vars (extra="allow" otherwise swallows them).
+        # Imported lazily to avoid a circular import via the utils package __init__.
+        from cognee.infrastructure.databases.utils.resolve_postgres_connection import (
+            warn_unknown_db_env_vars,
+        )
+
+        warn_unknown_db_env_vars(self.model_extra, prefixes=["VECTOR_DB_"])
+        return self
+
     def to_dict(self) -> dict:
         """
         Convert the configuration settings to a dictionary.
