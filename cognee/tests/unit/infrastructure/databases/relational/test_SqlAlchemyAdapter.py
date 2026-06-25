@@ -1,7 +1,7 @@
 import asyncio
 from unittest.mock import patch, MagicMock
 
-from sqlalchemy import text
+from sqlalchemy import text, NullPool
 
 from cognee.infrastructure.databases.relational.sqlalchemy.SqlAlchemyAdapter import (
     SQLAlchemyAdapter,
@@ -59,7 +59,7 @@ class TestSQLAlchemyAdapterConnectArgs:
 
         _, kwargs = mock_create_engine.call_args
         assert "timeout" in kwargs["connect_args"]
-        assert kwargs["connect_args"]["timeout"] == 30
+        assert kwargs["connect_args"]["timeout"] == 120
 
 
 class TestSQLAlchemyAdapterSqlitePragmas:
@@ -79,7 +79,7 @@ class TestSQLAlchemyAdapterSqlitePragmas:
         journal_mode, busy_timeout, foreign_keys = asyncio.run(read_pragmas())
 
         assert journal_mode.lower() == "wal"
-        assert busy_timeout == 30000
+        assert busy_timeout == 120000
         assert foreign_keys == 1
 
     def test_concurrent_writers_do_not_deadlock(self, tmp_path):
@@ -120,3 +120,79 @@ class TestSQLAlchemyAdapterSqlitePragmas:
         # The assertion that matters is that run() completed without a lock error;
         # a committed value confirms the writers actually wrote.
         assert final_val >= 1
+
+
+class TestSQLAlchemyAdapterSqliteConcurrencyModel:
+    """Guards the SQLite concurrency model the #2717 fix depends on.
+
+    The lock fix is NullPool (connection-per-greenlet) + WAL + busy_timeout. Two
+    tempting "optimizations" both look like they fix the lock but break cognee:
+
+      * StaticPool collapses every coroutine onto one shared connection, so their
+        transactions merge -> dirty reads and one greenlet's rollback discards
+        another's committed writes (silent corruption).
+      * A size-1 QueuePool (max_overflow=0) serializes checkouts, so the adapter's
+        own nested checkout (get_table() opens a second connection inside
+        insert_data()/delete_*()) deadlocks waiting on the connection it holds.
+
+    These tests fail loudly if either change is ever introduced.
+    """
+
+    def test_sqlite_uses_nullpool(self, tmp_path):
+        """SQLite must use NullPool: a fresh connection (and transaction) per checkout."""
+        adapter = _make_sqlite_adapter(tmp_path)
+        assert isinstance(adapter.engine.pool, NullPool)
+
+    def test_concurrent_sessions_are_transaction_isolated(self, tmp_path):
+        """A concurrent session must NOT see another session's uncommitted row.
+
+        This is the StaticPool detector: under a shared connection the reader sees
+        the writer's uncommitted insert (a dirty read). With NullPool each session
+        owns its connection/transaction, so the read returns nothing.
+        """
+        adapter = _make_sqlite_adapter(tmp_path)
+
+        async def run():
+            async with adapter.engine.begin() as conn:
+                await conn.execute(text("CREATE TABLE iso (name TEXT)"))
+
+            writer_inserted = asyncio.Event()
+            reader_done = asyncio.Event()
+            seen = {}
+
+            async def writer():
+                async with adapter.get_async_session() as session:
+                    await session.execute(text("INSERT INTO iso (name) VALUES ('A')"))
+                    await session.flush()  # written to the connection, NOT committed
+                    writer_inserted.set()
+                    await reader_done.wait()
+                    await session.rollback()
+
+            async def reader():
+                await writer_inserted.wait()
+                async with adapter.get_async_session() as session:
+                    rows = (await session.execute(text("SELECT name FROM iso"))).all()
+                    seen["rows"] = [r[0] for r in rows]
+                reader_done.set()
+
+            await asyncio.gather(writer(), reader())
+            return seen["rows"]
+
+        assert asyncio.run(run()) == []  # no dirty read -> transactions are isolated
+
+    def test_nested_checkout_does_not_deadlock(self, tmp_path):
+        """Opening a second connection while the first is held must not deadlock.
+
+        This mirrors insert_data()/delete_*() calling get_table() (which opens its
+        own engine.begin()) inside an already-open connection. NullPool just opens
+        another connection; a serialized size-1 pool would hang here.
+        """
+        adapter = _make_sqlite_adapter(tmp_path)
+
+        async def run():
+            async with adapter.engine.begin() as outer:
+                await outer.execute(text("SELECT 1"))
+                async with adapter.engine.begin() as inner:
+                    return (await inner.execute(text("SELECT 2"))).scalar()
+
+        assert asyncio.run(asyncio.wait_for(run(), timeout=15)) == 2

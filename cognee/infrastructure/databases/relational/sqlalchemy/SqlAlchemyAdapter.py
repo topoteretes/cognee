@@ -76,7 +76,7 @@ class SQLAlchemyAdapter:
             self.engine = create_async_engine(
                 connection_string,
                 poolclass=NullPool,
-                connect_args={**{"timeout": 30}, **final_connect_args},
+                connect_args={**{"timeout": 120}, **final_connect_args},
             )
 
             # SQLite defaults to rollback-journal mode, where a connection that
@@ -96,7 +96,7 @@ class SQLAlchemyAdapter:
                 try:
                     cursor.execute("PRAGMA journal_mode=WAL")
                     cursor.execute("PRAGMA synchronous=NORMAL")
-                    cursor.execute("PRAGMA busy_timeout=30000")
+                    cursor.execute("PRAGMA busy_timeout=120000")
                     # Foreign key enforcement is off by default in SQLite and is
                     # also connection scoped; set it here so it is consistently
                     # enabled rather than only around individual operations.
