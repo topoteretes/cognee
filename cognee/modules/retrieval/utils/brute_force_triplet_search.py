@@ -71,6 +71,10 @@ async def get_memory_fragment(
             node_properties_to_project.append("feedback_weight")
         if "feedback_weight" not in edge_properties_to_project:
             edge_properties_to_project.append("feedback_weight")
+        if "frequency_weight" not in node_properties_to_project:
+            node_properties_to_project.append("frequency_weight")
+        if "frequency_weight" not in edge_properties_to_project:
+            edge_properties_to_project.append("frequency_weight")
 
     memory_fragment = CogneeGraph()
 

@@ -883,6 +883,53 @@ class Neo4jAdapter(GraphDBInterface):
         results = await self.query(query, {"node_ids": node_ids})
         return [result["node"] for result in results]
 
+    def _build_node_frequency_items(
+        self, node_frequency_weights: Dict[str, float]
+    ) -> List[Dict[str, Any]]:
+        """Build UNWIND items for node frequency weight updates."""
+        return [
+            {"node_id": node_id, "frequency_weight": float(weight)}
+            for node_id, weight in node_frequency_weights.items()
+            if isinstance(node_id, str) and node_id
+        ]
+
+    async def _execute_node_frequency_updates(self, items: List[Dict[str, Any]]) -> Set[str]:
+        """Run node frequency weight UNWIND/SET; return set of updated node_ids."""
+        if not items:
+            return set()
+        query = """
+        UNWIND $items AS item
+        MATCH (n:`__Node__` {id: item.node_id})
+        SET n.frequency_weight = item.frequency_weight, n.updated_at = timestamp()
+        RETURN n.id AS node_id
+        """
+        results = await self.query(query, {"items": items})
+        return {str(r["node_id"]) for r in results if r.get("node_id") is not None}
+
+    def _build_edge_frequency_items(
+        self, edge_frequency_weights: Dict[str, float]
+    ) -> List[Dict[str, Any]]:
+        """Build UNWIND items for edge frequency weight updates."""
+        return [
+            {"edge_object_id": edge_object_id, "frequency_weight": float(weight)}
+            for edge_object_id, weight in edge_frequency_weights.items()
+            if isinstance(edge_object_id, str) and edge_object_id
+        ]
+
+    async def _execute_edge_frequency_updates(self, items: List[Dict[str, Any]]) -> Set[str]:
+        """Run edge frequency weight UNWIND/SET; return set of updated edge_object_ids."""
+        if not items:
+            return set()
+        query = """
+        UNWIND $items AS item
+        MATCH ()-[r]->()
+        WHERE r.edge_object_id = item.edge_object_id
+        SET r.frequency_weight = item.frequency_weight, r.updated_at = timestamp()
+        RETURN r.edge_object_id AS edge_object_id
+        """
+        results = await self.query(query, {"items": items})
+        return {str(r["edge_object_id"]) for r in results if r.get("edge_object_id") is not None}
+
     def _build_node_feedback_items(
         self, node_feedback_weights: Dict[str, float]
     ) -> List[Dict[str, Any]]:
@@ -929,6 +976,74 @@ class Neo4jAdapter(GraphDBInterface):
         """
         results = await self.query(query, {"items": items})
         return {str(r["edge_object_id"]) for r in results if r.get("edge_object_id") is not None}
+
+    async def get_node_frequency_weights(self, node_ids: List[str]) -> Dict[str, float]:
+        """Return each node's `frequency_weight` property, defaulting to 0.0 when unset."""
+        if not node_ids:
+            return {}
+        valid_node_ids = [nid for nid in node_ids if isinstance(nid, str) and nid]
+        if not valid_node_ids:
+            return {}
+        query = """
+        UNWIND $node_ids AS node_id
+        MATCH (n:`__Node__` {id: node_id})
+        RETURN n.id AS node_id, coalesce(n.frequency_weight, $default_weight) AS frequency_weight
+        """
+        results = await self.query(query, {"node_ids": valid_node_ids, "default_weight": 0.0})
+        return {
+            str(row["node_id"]): float(row["frequency_weight"])
+            for row in results
+            if row.get("node_id") is not None
+        }
+
+    async def set_node_frequency_weights(
+        self, node_frequency_weights: Dict[str, float]
+    ) -> Dict[str, bool]:
+        """Persist `frequency_weight` per node; returns a map of node_id → updated bool."""
+        if not node_frequency_weights:
+            return {}
+        node_ids = list(node_frequency_weights.keys())
+        items = self._build_node_frequency_items(node_frequency_weights)
+        if not items:
+            return {nid: False for nid in node_ids}
+        updated_ids = await self._execute_node_frequency_updates(items)
+        return {nid: (nid in updated_ids) for nid in node_ids}
+
+    async def get_edge_frequency_weights(self, edge_object_ids: List[str]) -> Dict[str, float]:
+        """Return each edge's `frequency_weight` property, defaulting to 0.0 when unset."""
+        if not edge_object_ids:
+            return {}
+        valid_edge_ids = [eid for eid in edge_object_ids if isinstance(eid, str) and eid]
+        if not valid_edge_ids:
+            return {}
+        query = """
+        UNWIND $edge_object_ids AS edge_object_id
+        MATCH ()-[r]->()
+        WHERE r.edge_object_id = edge_object_id
+        RETURN r.edge_object_id AS edge_object_id, coalesce(r.frequency_weight, $default_weight) AS frequency_weight
+        """
+        results = await self.query(
+            query,
+            {"edge_object_ids": valid_edge_ids, "default_weight": 0.0},
+        )
+        return {
+            str(row["edge_object_id"]): float(row["frequency_weight"])
+            for row in results
+            if row.get("edge_object_id") is not None
+        }
+
+    async def set_edge_frequency_weights(
+        self, edge_frequency_weights: Dict[str, float]
+    ) -> Dict[str, bool]:
+        """Persist `frequency_weight` per edge; returns a map of edge_object_id → updated bool."""
+        if not edge_frequency_weights:
+            return {}
+        edge_ids = list(edge_frequency_weights.keys())
+        items = self._build_edge_frequency_items(edge_frequency_weights)
+        if not items:
+            return {eid: False for eid in edge_ids}
+        updated_ids = await self._execute_edge_frequency_updates(items)
+        return {eid: (eid in updated_ids) for eid in edge_ids}
 
     async def get_node_feedback_weights(self, node_ids: List[str]) -> Dict[str, float]:
         """Return each node's `feedback_weight` property, defaulting to 0.5 when unset."""
@@ -1806,8 +1921,8 @@ class Neo4jAdapter(GraphDBInterface):
         ids: List[str] = []
 
         if time_from and time_to:
-            time_from = date_to_int(time_from)
-            time_to = date_to_int(time_to)
+            time_from_int = date_to_int(time_from)
+            time_to_int = date_to_int(time_to)
 
             cypher = """
             MATCH (n)
@@ -1816,10 +1931,10 @@ class Neo4jAdapter(GraphDBInterface):
               AND n.time_at <= $time_to
             RETURN n.id AS id
             """
-            params = {"time_from": time_from, "time_to": time_to}
+            params = {"time_from": time_from_int, "time_to": time_to_int}
 
         elif time_from:
-            time_from = date_to_int(time_from)
+            time_from_int = date_to_int(time_from)
 
             cypher = """
             MATCH (n)
@@ -1827,10 +1942,10 @@ class Neo4jAdapter(GraphDBInterface):
               AND n.time_at >= $time_from
             RETURN n.id AS id
             """
-            params = {"time_from": time_from}
+            params = {"time_from": time_from_int}
 
         elif time_to:
-            time_to = date_to_int(time_to)
+            time_to_int = date_to_int(time_to)
 
             cypher = """
             MATCH (n)
@@ -1838,10 +1953,10 @@ class Neo4jAdapter(GraphDBInterface):
               AND n.time_at <= $time_to
             RETURN n.id AS id
             """
-            params = {"time_to": time_to}
+            params = {"time_to": time_to_int}
 
         else:
-            return ids
+            return ""
 
         time_nodes = await self.query(cypher, params)
         time_ids_list = [item["id"] for item in time_nodes if "id" in item]

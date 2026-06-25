@@ -1,5 +1,5 @@
 from uuid import UUID
-from typing import Union, Optional, List, Type, Any
+from typing import Union, Optional, List, Type, Any, cast
 
 try:
     from typing import Unpack
@@ -23,14 +23,14 @@ logger = get_logger("improve")
 class ImproveKwargs(TypedDict, total=False):
     """Power-user overrides for improve(). Most users never need these."""
 
-    extraction_tasks: list
-    enrichment_tasks: list
+    extraction_tasks: Any
+    enrichment_tasks: Any
     data: Any
-    node_type: Type
-    user: object
-    vector_db_config: dict
-    graph_db_config: dict
-    feedback_alpha: float
+    node_type: Any
+    user: Any
+    vector_db_config: Any
+    graph_db_config: Any
+    feedback_alpha: Any
 
 
 async def improve(
@@ -214,9 +214,64 @@ async def improve(
             node_name=node_name,
             user=user,
             run_in_background=run_in_background,
-            **kwargs,
+            **cast(dict[str, Any], kwargs),
         )
         stages_run.append("memify_enrichment")
+
+        try:
+            from cognee.memify_pipelines.decay_weights import decay_weights_pipeline
+
+            # Resolve the dataset name/reference for decay_weights_pipeline
+            dataset_name = await _resolve_dataset_name(dataset, user)
+            await decay_weights_pipeline(
+                user=user,
+                dataset=dataset_name,
+                run_in_background=run_in_background,
+            )
+            stages_run.append("decay_weights")
+        except Exception as e:
+            logger.warning("improve: memory weight decay failed (non-fatal): %s", e)
+
+        try:
+            from cognee.memify_pipelines.cross_connect import cross_connect_pipeline
+
+            dataset_name = await _resolve_dataset_name(dataset, user)
+            await cross_connect_pipeline(
+                user=user,
+                dataset=dataset_name,
+                run_in_background=run_in_background,
+            )
+            stages_run.append("cross_connect")
+        except Exception as e:
+            logger.warning("improve: cross-connect link prediction failed (non-fatal): %s", e)
+
+        try:
+            from cognee.memify_pipelines.consolidate_merge import consolidate_merge_pipeline
+
+            dataset_name = await _resolve_dataset_name(dataset, user)
+            await consolidate_merge_pipeline(
+                user=user,
+                dataset=dataset_name,
+                run_in_background=run_in_background,
+            )
+            stages_run.append("consolidate_merge")
+        except Exception as e:
+            logger.warning("improve: consolidate duplicate entities failed (non-fatal): %s", e)
+
+        try:
+            from cognee.memify_pipelines.reconcile_contradictions import (
+                reconcile_contradictions_pipeline,
+            )
+
+            dataset_name = await _resolve_dataset_name(dataset, user)
+            await reconcile_contradictions_pipeline(
+                user=user,
+                dataset=dataset_name,
+                run_in_background=run_in_background,
+            )
+            stages_run.append("reconcile_contradictions")
+        except Exception as e:
+            logger.warning("improve: reconcile contradictions failed (non-fatal): %s", e)
 
         if build_global_context_index:
             if run_in_background:
@@ -280,7 +335,7 @@ async def _resolve_dataset_name(dataset: Union[str, UUID], user) -> str:
     from cognee.modules.data.methods.get_authorized_dataset import get_authorized_dataset
 
     ds = await get_authorized_dataset(user, dataset, "write")
-    return ds.name if ds else "main_dataset"
+    return str(ds.name) if ds else "main_dataset"
 
 
 async def _bridge_sessions(
@@ -458,7 +513,7 @@ async def _sync_graph_to_sessions(
             result = await sync_graph_to_session(
                 user_id=user_id,
                 session_id=session_id,
-                dataset_id=dataset_obj.id,
+                dataset_id=cast(UUID, dataset_obj.id),
                 dataset_name=dataset_name,
             )
             logger.info(

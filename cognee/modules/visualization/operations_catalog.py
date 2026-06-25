@@ -192,6 +192,55 @@ _OPERATIONS: List[Dict[str, Any]] = [
             {"effect": "removes", "target_type": "TextSummary"},
         ],
     },
+    {
+        "name": "decay_weights",
+        "label": "weight decay",
+        "kind": "self_improve",
+        "scope": "whole",
+        "pipeline_name": "memify_pipeline",
+        "summary": "Decays feedback/frequency weights based on time and prunes stale nodes.",
+        "effects": [
+            {"effect": "modifies", "target_type": "Entity", "property": "feedback_weight"},
+            {"effect": "modifies", "target_type": "Entity", "property": "frequency_weight"},
+            {"effect": "removes", "target_type": "Entity"},
+        ],
+    },
+    {
+        "name": "cross_connect",
+        "label": "cross-connect link prediction",
+        "kind": "self_improve",
+        "scope": "whole",
+        "pipeline_name": "memify_pipeline",
+        "summary": "Predicts and creates new edges between related-but-unlinked entities.",
+        "effects": [
+            {"effect": "enriches", "target_type": "Entity"},
+        ],
+    },
+    {
+        "name": "consolidate_merge",
+        "label": "consolidate / merge duplicate entities",
+        "kind": "self_improve",
+        "scope": "whole",
+        "pipeline_name": "memify_pipeline",
+        "summary": "Merges near-duplicate entities, redirects edges, and deletes duplicate nodes.",
+        "effects": [
+            {"effect": "modifies", "target_type": "Entity", "property": "name"},
+            {"effect": "modifies", "target_type": "Entity", "property": "description"},
+            {"effect": "removes", "target_type": "Entity"},
+        ],
+    },
+    {
+        "name": "reconcile_contradictions",
+        "label": "reconcile contradictions",
+        "kind": "self_improve",
+        "scope": "whole",
+        "pipeline_name": "memify_pipeline",
+        "summary": "Detects contradictions, adds supersedes edges, and demotes stale claims.",
+        "effects": [
+            {"effect": "enriches", "target_type": "Entity"},
+            {"effect": "modifies", "target_type": "Entity", "property": "feedback_weight"},
+        ],
+    },
 ]
 
 
