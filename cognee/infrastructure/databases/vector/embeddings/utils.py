@@ -8,7 +8,7 @@ def is_embeddable(s: str) -> bool:
     """
     Check if input string is embeddable, if not it will be replaced with a dummy value to prevent API errors.
     Empty strings and a string with only a space character are not embeddable.
-    If input string contains at least one alphanumeric character, it is considered embeddable.
+    If the input string contains at least one non-whitespace character, it is considered embeddable.
     """
     if not isinstance(s, str):
         return False

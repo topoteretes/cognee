@@ -67,6 +67,7 @@ class DataPoint(BaseModel):
     source_content_hash: str | None = None
     feedback_weight: float = 0.5
     importance_weight: float | None = 0.5
+    frequency_weight: float = 0.0
 
     def __init__(self, **data: Any) -> None:
         explicit_id = "id" in data

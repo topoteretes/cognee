@@ -1,3 +1,4 @@
+from typing import Any
 from datetime import datetime, timezone
 from cognee.modules.engine.models import Interval, Timestamp, Event
 from cognee.modules.engine.utils import generate_node_id
@@ -36,7 +37,7 @@ def generate_timestamp_datapoint(ts: Timestamp) -> Timestamp:
     )
 
 
-def date_to_int(ts: Timestamp) -> int:
+def date_to_int(ts: Any) -> int:
     """
     Converts a Timestamp model into an integer representation in milliseconds since the Unix epoch (UTC).
 

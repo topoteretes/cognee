@@ -1517,6 +1517,96 @@ class LadybugAdapter(GraphDBInterface):
         rows = await self.query(query, {"edge_object_ids_json": requested_ids_json})
         return self._rows_to_dicts(rows, self._EDGE_BY_OBJECT_ID_COLUMNS)
 
+    def _build_node_frequency_updates(
+        self,
+        nodes: List[Dict[str, Any]],
+        node_frequency_weights: Dict[str, float],
+    ) -> List[Dict[str, Any]]:
+        """Build UNWIND items for node frequency weight updates."""
+        updates = []
+        for node in nodes:
+            node_id = node.get("id")
+            if not isinstance(node_id, str) or node_id not in node_frequency_weights:
+                continue
+            properties = {
+                k: v
+                for k, v in node.items()
+                if k not in {"id", "name", "type", "created_at", "updated_at"}
+            }
+            properties["frequency_weight"] = float(node_frequency_weights[node_id])
+            updates.append(
+                {"node_id": node_id, "properties": json.dumps(properties, cls=JSONEncoder)}
+            )
+        return updates
+
+    async def _execute_node_frequency_updates(self, updates: List[Dict[str, Any]]) -> Set[str]:
+        """Run node frequency weight UNWIND/SET; return set of updated node_ids."""
+        if not updates:
+            return set()
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
+        query = """
+        UNWIND $items AS item
+        MATCH (n:Node)
+        WHERE n.id = item.node_id
+        SET n.properties = item.properties,
+            n.updated_at = timestamp($updated_at)
+        RETURN n.id AS node_id
+        """
+        result = await self.query(query, {"items": updates, "updated_at": now})
+        rows_dicts = self._rows_to_dicts(result, ["node_id"])
+        return {str(r["node_id"]) for r in rows_dicts if r.get("node_id") is not None}
+
+    def _build_edge_frequency_updates(
+        self,
+        edge_rows: List[Dict[str, Any]],
+        edge_frequency_weights: Dict[str, float],
+    ) -> List[Dict[str, Any]]:
+        """Build UNWIND items for edge frequency weight updates."""
+        edge_updates = []
+        for row in edge_rows:
+            properties_raw = row.get("properties")
+            if not properties_raw:
+                continue
+            try:
+                properties = json.loads(properties_raw)
+            except (TypeError, json.JSONDecodeError):
+                continue
+            edge_object_id = self._resolve_edge_object_id(
+                properties, row.get("edge_object_id_json")
+            )
+            if not edge_object_id or edge_object_id not in edge_frequency_weights:
+                continue
+            properties["frequency_weight"] = float(edge_frequency_weights[edge_object_id])
+            edge_updates.append(
+                {
+                    "edge_object_id": edge_object_id,
+                    "from_id": str(row.get("from_id")),
+                    "to_id": str(row.get("to_id")),
+                    "relationship_name": str(row.get("relationship_name")),
+                    "properties": json.dumps(properties, cls=JSONEncoder),
+                }
+            )
+        return edge_updates
+
+    async def _execute_edge_frequency_updates(self, edge_updates: List[Dict[str, Any]]) -> Set[str]:
+        """Run edge frequency weight UNWIND/SET; return set of updated edge_object_ids."""
+        if not edge_updates:
+            return set()
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
+        query = """
+        UNWIND $items AS item
+        MATCH (from:Node)-[r:EDGE]->(to:Node)
+        WHERE from.id = item.from_id
+          AND to.id = item.to_id
+          AND r.relationship_name = item.relationship_name
+        SET r.properties = item.properties,
+            r.updated_at = timestamp($updated_at)
+        RETURN item.edge_object_id AS edge_object_id
+        """
+        result = await self.query(query, {"items": edge_updates, "updated_at": now})
+        rows_dicts = self._rows_to_dicts(result, ["edge_object_id"])
+        return {str(r["edge_object_id"]) for r in rows_dicts if r.get("edge_object_id") is not None}
+
     def _build_node_feedback_updates(
         self,
         nodes: List[Dict[str, Any]],
@@ -1606,6 +1696,84 @@ class LadybugAdapter(GraphDBInterface):
         result = await self.query(query, {"items": edge_updates, "updated_at": now})
         rows_dicts = self._rows_to_dicts(result, ["edge_object_id"])
         return {str(r["edge_object_id"]) for r in rows_dicts if r.get("edge_object_id") is not None}
+
+    async def get_node_frequency_weights(self, node_ids: List[str]) -> Dict[str, float]:
+        if not node_ids:
+            return {}
+        valid_node_ids = [node_id for node_id in node_ids if isinstance(node_id, str) and node_id]
+        if not valid_node_ids:
+            return {}
+        nodes = await self.get_nodes(valid_node_ids)
+        result: Dict[str, float] = {}
+        for node in nodes:
+            node_id = node.get("id")
+            if not isinstance(node_id, str):
+                continue
+            value = node.get("frequency_weight", 0.0)
+            try:
+                result[node_id] = float(value)
+            except (TypeError, ValueError):
+                result[node_id] = 0.0
+        return result
+
+    async def set_node_frequency_weights(
+        self, node_frequency_weights: Dict[str, float]
+    ) -> Dict[str, bool]:
+        if not node_frequency_weights:
+            return {}
+        node_ids = list(node_frequency_weights.keys())
+        valid_node_ids = [nid for nid in node_ids if isinstance(nid, str) and nid]
+        if not valid_node_ids:
+            return {nid: False for nid in node_ids}
+        nodes = await self.get_nodes(valid_node_ids)
+        updates = self._build_node_frequency_updates(nodes, node_frequency_weights)
+        if not updates:
+            return {nid: False for nid in node_ids}
+        updated_ids = await self._execute_node_frequency_updates(updates)
+        return {nid: (nid in updated_ids) for nid in node_ids}
+
+    async def get_edge_frequency_weights(self, edge_object_ids: List[str]) -> Dict[str, float]:
+        if not edge_object_ids:
+            return {}
+        requested_ids = {eid for eid in edge_object_ids if isinstance(eid, str) and eid}
+        if not requested_ids:
+            return {}
+        edge_rows = await self._fetch_edge_rows_by_object_ids(requested_ids)
+        result: Dict[str, float] = {}
+        for row in edge_rows:
+            properties_raw = row.get("properties")
+            if not properties_raw:
+                continue
+            try:
+                properties = json.loads(properties_raw)
+            except (TypeError, json.JSONDecodeError):
+                continue
+            edge_object_id = self._resolve_edge_object_id(
+                properties, row.get("edge_object_id_json")
+            )
+            if not edge_object_id or edge_object_id not in requested_ids:
+                continue
+            value = properties.get("frequency_weight", 0.0)
+            try:
+                result[edge_object_id] = float(value)
+            except (TypeError, ValueError):
+                result[edge_object_id] = 0.0
+        return result
+
+    async def set_edge_frequency_weights(
+        self, edge_frequency_weights: Dict[str, float]
+    ) -> Dict[str, bool]:
+        if not edge_frequency_weights:
+            return {}
+        requested_ids = {eid for eid in edge_frequency_weights if isinstance(eid, str) and eid}
+        if not requested_ids:
+            return {eid: False for eid in edge_frequency_weights}
+        edge_rows = await self._fetch_edge_rows_by_object_ids(requested_ids)
+        edge_updates = self._build_edge_frequency_updates(edge_rows, edge_frequency_weights)
+        if not edge_updates:
+            return {eid: False for eid in edge_frequency_weights}
+        updated_ids = await self._execute_edge_frequency_updates(edge_updates)
+        return {eid: (eid in updated_ids) for eid in edge_frequency_weights}
 
     async def get_node_feedback_weights(self, node_ids: List[str]) -> Dict[str, float]:
         if not node_ids:
@@ -2594,7 +2762,7 @@ class LadybugAdapter(GraphDBInterface):
             logger.error(f"Failed to delete graph data: {e}")
             raise
         finally:
-            if held_redis_lock is not None:
+            if self.redis_lock and held_redis_lock is not None:
                 # Offloaded for symmetry with the acquire path; release
                 # does Redis I/O too.
                 await asyncio.to_thread(self.redis_lock.release_lock, held_redis_lock)
@@ -2771,8 +2939,8 @@ class LadybugAdapter(GraphDBInterface):
         ids: List[str] = []
 
         if time_from and time_to:
-            time_from = date_to_int(time_from)
-            time_to = date_to_int(time_to)
+            time_from_int = date_to_int(time_from)
+            time_to_int = date_to_int(time_to)
 
             cypher = f"""
             MATCH (n:Node)
@@ -2784,13 +2952,13 @@ class LadybugAdapter(GraphDBInterface):
                    WHEN t_str IS NULL OR t_str = '' THEN NULL
                    ELSE CAST(t_str AS INT64)
                  END AS t
-            WHERE t >= {time_from}
-            AND t <= {time_to}
+            WHERE t >= {time_from_int}
+            AND t <= {time_to_int}
             RETURN n.id as id
             """
 
         elif time_from:
-            time_from = date_to_int(time_from)
+            time_from_int = date_to_int(time_from)
 
             cypher = f"""
             MATCH (n:Node)
@@ -2802,12 +2970,12 @@ class LadybugAdapter(GraphDBInterface):
                    WHEN t_str IS NULL OR t_str = '' THEN NULL
                    ELSE CAST(t_str AS INT64)
                  END AS t
-            WHERE t >= {time_from}
+            WHERE t >= {time_from_int}
             RETURN n.id as id
             """
 
         elif time_to:
-            time_to = date_to_int(time_to)
+            time_to_int = date_to_int(time_to)
 
             cypher = f"""
             MATCH (n:Node)
@@ -2819,7 +2987,7 @@ class LadybugAdapter(GraphDBInterface):
                    WHEN t_str IS NULL OR t_str = '' THEN NULL
                    ELSE CAST(t_str AS INT64)
                  END AS t
-            WHERE t <= {time_to}
+            WHERE t <= {time_to_int}
             RETURN n.id as id
             """
 
