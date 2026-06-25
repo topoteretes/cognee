@@ -79,20 +79,15 @@ async def execute_source_ref_removal(
         await vector_engine.delete_data_points(collection, ids)
 
     if unowned_edges:
-        edge_type_ids: list[str] = []
-        triplet_ids: list[str] = []
-        for edge in unowned_edges:
-            data = edge_data[edge]
-            edge_text = get_edge_retrieval_text(data.edge_text, edge.relationship_name)
-            if edge_text:
-                edge_type_ids.append(str(EdgeType.id_for(edge_text)))
-            triplet_ids.append(
-                str(generate_node_id(edge.source_id + edge.relationship_name + edge.target_id))
-            )
-
-        if edge_type_ids:
-            await vector_engine.delete_data_points("EdgeType_relationship_name", edge_type_ids)
-
+        # Per-edge triplet vectors are tied to a single deleted edge instance, so
+        # they are safe to delete here. EdgeType vectors are keyed by *shared*
+        # relationship text and may still be used by a surviving edge, so they
+        # are handled in _cleanup_orphaned_edge_types (after the graph delete,
+        # against the truly-orphaned text set) — never blindly here.
+        triplet_ids: list[str] = [
+            str(generate_node_id(edge.source_id + edge.relationship_name + edge.target_id))
+            for edge in unowned_edges
+        ]
         if triplet_ids:
             try:
                 await vector_engine.delete_data_points("Triplet_text", triplet_ids)
@@ -101,12 +96,16 @@ async def execute_source_ref_removal(
                 pass
 
     # ------------------------------------------------------------------
-    # 3. Remove the targeted refs from ALL matched artifacts (idempotent).
-    #    Surviving artifacts keep their remaining refs; unowned ones are then
-    #    hard-deleted below.
+    # 3. Remove the targeted refs from SURVIVING artifacts only (idempotent).
+    #    Unowned artifacts keep their refs until they are hard-deleted below, so
+    #    a failed hard delete leaves them rediscoverable by source ref on retry
+    #    (Part 0 retry-safe order: delete unowned without first stripping refs).
     # ------------------------------------------------------------------
+    unowned_node_set = set(unowned_node_ids)
     nodes_by_removed_refs: dict[tuple[str, ...], list[str]] = {}
     for node_id in node_data:
+        if node_id in unowned_node_set:
+            continue
         removed = refs_by_node.get(node_id, [])
         if not removed:
             continue
@@ -115,8 +114,11 @@ async def execute_source_ref_removal(
     for removed_refs, node_ids in nodes_by_removed_refs.items():
         await graph_engine.remove_node_source_refs(node_ids, list(removed_refs))
 
+    unowned_edge_set = set(unowned_edges)
     edges_by_removed_refs: dict[tuple[str, ...], list[EdgeIdentity]] = {}
     for edge in edge_data:
+        if edge in unowned_edge_set:
+            continue
         removed = refs_by_edge.get(edge, [])
         if not removed:
             continue
@@ -138,16 +140,23 @@ async def execute_source_ref_removal(
     # 5. Post-delete cleanup parity with delete_from_graph_and_vector
     #    (best-effort, non-fatal).
     # ------------------------------------------------------------------
-    await _cleanup_orphaned_edge_types(graph_engine, unowned_edges, edge_data)
+    await _cleanup_orphaned_edge_types(graph_engine, vector_engine, unowned_edges, edge_data)
     await _cleanup_orphaned_nodeset_tags(graph_engine, vector_engine, unowned_node_ids, node_data)
 
 
 async def _cleanup_orphaned_edge_types(
     graph_engine,
+    vector_engine,
     unowned_edges: list[EdgeIdentity],
     edge_data: dict[EdgeIdentity, EdgeDeleteData],
 ) -> None:
-    """Prune EdgeType nodes whose retrieval text no longer appears in the graph."""
+    """Prune EdgeType nodes (and their vectors) whose text no longer appears.
+
+    EdgeType artifacts are keyed by *shared* relationship text, so an EdgeType is
+    only orphaned when no surviving edge in the graph still uses that text. We
+    delete the graph node and the vector point together, off the same orphaned-
+    text set, so a relationship that another edge still uses keeps both.
+    """
     if not unowned_edges:
         return
 
@@ -170,11 +179,10 @@ async def _cleanup_orphaned_edge_types(
             if edge_text:
                 remaining_edge_texts.add(edge_text)
 
-        orphaned_edge_type_ids = [
-            str(EdgeType.id_for(edge_text))
-            for edge_text in deleted_edge_texts
-            if edge_text not in remaining_edge_texts
+        orphaned_edge_texts = [
+            edge_text for edge_text in deleted_edge_texts if edge_text not in remaining_edge_texts
         ]
+        orphaned_edge_type_ids = [str(EdgeType.id_for(text)) for text in orphaned_edge_texts]
 
         if orphaned_edge_type_ids:
             await graph_engine.delete_nodes(orphaned_edge_type_ids)
@@ -182,6 +190,12 @@ async def _cleanup_orphaned_edge_types(
                 "Deleted %d orphaned EdgeType node(s)",
                 len(orphaned_edge_type_ids),
             )
+            try:
+                await vector_engine.delete_data_points(
+                    "EdgeType_relationship_name", orphaned_edge_type_ids
+                )
+            except Exception as error:
+                logger.warning("EdgeType vector cleanup failed (non-fatal): %s", error)
     except Exception as error:
         logger.warning("EdgeType cleanup failed (non-fatal): %s", error)
 

@@ -102,9 +102,17 @@ async def add_data_points(
     if user and dataset and data_item:
         # Graph-native graphs (empty graphs marked via graph metadata) carry
         # their provenance in the graph itself, so they skip the relational
-        # rollback ledger entirely. On the default/pre-Part-1 stack marking is
-        # impossible (set_graph_metadata raises), so this stays False and the
-        # ledger path below runs unchanged.
+        # rollback ledger entirely. On backends that implement provenance
+        # (e.g. Ladybug + LanceDB) a fresh empty graph IS marked here and takes
+        # the graph-native path; backends without provenance support raise on
+        # set_graph_metadata, so this stays False and the ledger path runs.
+        #
+        # NOTE: the graph/vector writes below happen before the source refs are
+        # attached (see end of this function). If a write succeeds but the attach
+        # fails, the artifacts have neither ledger rows nor graph provenance and
+        # cannot be found by delete/rollback. True atomicity needs adapter-level
+        # transactional attach (a Part 1 follow-up); until then the attach raising
+        # marks the run failed.
         is_graph_native = await ensure_graph_native_for_new_graph(graph_engine)
 
         if not is_graph_native:

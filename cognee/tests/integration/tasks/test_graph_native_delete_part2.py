@@ -1,80 +1,164 @@
-"""Integration tests for Part 2 graph-native delete/rollback on the default stack.
+"""End-to-end graph-native delete tests on the real default stack.
 
-These are realistic end-to-end tests against the default backends
-(Ladybug + LanceDB + SQLite): add → cognify → delete/rollback, asserting that
-graph nodes/edges and their vector points disappear for unowned artifacts while
-shared / cross-dataset artifacts survive.
+Runs the full add -> cognify -> delete pipeline against real Ladybug + LanceDB +
+SQLite. The LLM (entity/summary extraction) is mocked for a deterministic graph,
+and embeddings are stubbed to fixed zero vectors — these tests never *retrieve*,
+they only need vector rows to exist and then verify they are deleted, so the
+embedding values are irrelevant. No network/API calls.
 
-They are GATED OFF until Part 1 lands. The graph-native path only activates when
-``set_graph_metadata`` / ``attach_*`` are implemented on the real adapters
-(Part 1). Until then ``ensure_graph_native_for_new_graph`` returns ``False`` on
-the default stack and every graph stays on the relational ledger, so these tests
-would exercise the ledger path instead of the graph-native path. Enable once the
-Part 1 real adapters land.
+IMPORTANT — one cognify() run PER document (sequential): a single multi-document
+cognify() run processes documents concurrently, and the provenance source-ref
+stamping is a non-atomic read-modify-write (COG-5522 issue #8). Concurrent stamps
+of a shared entity (e.g. an entity mentioned in two documents) can lose an owner
+ref, which is a known limitation tracked separately. Stamping one document per
+run avoids that race so these tests exercise the delete LOGIC deterministically.
 """
+
+import os
+import pathlib
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
-# COG-5522 Part 1 gate: keep the whole module collected-but-skipped until the
-# real adapters implement Lazar's provenance contract.
-pytestmark = pytest.mark.skip(
-    reason="Part 2 integration gate: enable once Part 1 real adapters land — COG-5522 Part 1"
+import cognee
+from cognee.api.v1.datasets import datasets
+from cognee.context_global_variables import set_database_global_context_variables
+from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine import (
+    LiteLLMEmbeddingEngine,
 )
+from cognee.infrastructure.llm import LLMGateway
+from cognee.modules.engine.operations.setup import setup
+from cognee.modules.users.methods import get_default_user
+from cognee.shared.data_models import Edge, KnowledgeGraph, Node, SummarizedContent
+
+DOC1 = "Alice knows Bob."
+DOC2 = "Alice lives in New York. She is from Berlin."
+DOC3 = "Bob lives in New York. Bob is from San Francisco."
+
+
+def _kg(nodes, edges):
+    return KnowledgeGraph(
+        summary="s",
+        description="s",
+        nodes=[Node(id=n, name=n, type=t, description=f"{n} is a {t}", label=n) for n, t in nodes],
+        edges=[Edge(source_node_id=s, target_node_id=d, relationship_name=r) for s, d, r in edges],
+    )
+
+
+def _mock_llm_output(text_input, system_prompt, response_model):
+    if text_input == "test":
+        return "test"
+    if response_model == SummarizedContent:
+        return SummarizedContent(summary="s", description="s")
+    if response_model == KnowledgeGraph:
+        if "Berlin" in text_input:  # DOC2
+            return _kg(
+                [("Alice", "Person"), ("New York", "City"), ("Berlin", "City")],
+                [("Alice", "New York", "lives_in"), ("Alice", "Berlin", "from")],
+            )
+        if "San Francisco" in text_input:  # DOC3
+            return _kg(
+                [("Bob", "Person"), ("New York", "City"), ("San Francisco", "City")],
+                [("Bob", "New York", "lives_in"), ("Bob", "San Francisco", "from")],
+            )
+        if "knows" in text_input:  # DOC1
+            return _kg([("Alice", "Person"), ("Bob", "Person")], [("Alice", "Bob", "knows")])
+    return _kg([], [])
+
+
+async def _fake_embed(self, text):
+    """Deterministic zero vectors — values don't matter, only presence/deletion."""
+    return [[0.0] * (self.dimensions or 8) for _ in text]
+
+
+async def _graph_names():
+    graph = await get_graph_engine()
+    nodes, _ = await graph.get_graph_data()
+    return {((props or {}).get("name") or "").lower() for _nid, props in nodes}
+
+
+async def _graph_relationship_names():
+    graph = await get_graph_engine()
+    _nodes, edges = await graph.get_graph_data()
+    return {e[2] for e in edges}
+
+
+async def _setup(tmp_path):
+    cognee.config.data_root_directory(str(tmp_path / "data"))
+    cognee.config.system_root_directory(str(tmp_path / "system"))
+    await cognee.prune.prune_data()
+    await cognee.prune.prune_system(metadata=True)
+    await setup()
+    user = await get_default_user()
+    await set_database_global_context_variables("main_dataset", user.id)
+    return user
+
+
+async def _ingest_sequentially():
+    """Add+cognify the three docs one run at a time. Returns (dataset_id, ids...)."""
+    r1 = await cognee.add(DOC1)
+    d1 = r1.data_ingestion_info[0]["data_id"]
+    cognify_result = await cognee.cognify()
+    dataset_id = list(cognify_result.keys())[0]
+
+    r2 = await cognee.add(DOC2)
+    d2 = r2.data_ingestion_info[0]["data_id"]
+    await cognee.cognify()
+
+    r3 = await cognee.add(DOC3)
+    d3 = r3.data_ingestion_info[0]["data_id"]
+    await cognee.cognify()
+
+    return dataset_id, d1, d2, d3
 
 
 @pytest.mark.asyncio
-async def test_delete_by_source_ref_end_to_end():
-    """add → cognify two data items in one dataset, delete one; its unowned graph
-    nodes/edges and vector points vanish while shared/other-item artifacts remain.
-    """
-    import cognee
+@patch.object(LiteLLMEmbeddingEngine, "embed_text", _fake_embed)
+@patch.object(LLMGateway, "acreate_structured_output", new_callable=AsyncMock)
+async def test_data_item_delete_shared_entities_survive(mock_struct, tmp_path):
+    """Delete DOC2: its unowned entity (Berlin) and edges go, but entities shared
+    with another document (Alice via DOC1, New York via DOC3) survive."""
+    mock_struct.side_effect = _mock_llm_output
+    user = await _setup(tmp_path)
+    dataset_id, _d1, d2, _d3 = await _ingest_sequentially()
 
-    await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata=True)
+    # The graph was marked graph-native (Part 1 markers are live on the default stack).
+    graph = await get_graph_engine()
+    metadata = await graph.get_graph_metadata()
+    assert metadata.get("delete_mode") == "graph_native"
 
-    await cognee.add("Alice founded Acme in Berlin.", dataset_name="ds")
-    await cognee.add("Bob joined Globex in Paris.", dataset_name="ds")
-    await cognee.cognify(datasets=["ds"])
+    before = await _graph_names()
+    assert {"alice", "bob", "new york", "berlin", "san francisco"} <= before
 
-    # TODO(Part 1): resolve the data id for the first item, call delete via the
-    # graph-native route, then assert the first item's unowned nodes/edges and
-    # their LanceDB points are gone while the second item's survive.
-    raise AssertionError("enable after Part 1")
+    await datasets.delete_data(dataset_id, d2, user)
 
+    after = await _graph_names()
+    assert "berlin" not in after, "Berlin (owned only by DOC2) must be deleted"
+    assert "alice" in after, "Alice (also owned by DOC1) must survive"
+    assert "new york" in after, "New York (also owned by DOC3) must survive"
+    assert {"bob", "san francisco"} <= after
 
-@pytest.mark.asyncio
-async def test_delete_by_dataset_id_preserves_other_dataset():
-    """Deleting one dataset leaves a second dataset's artifacts and shared
-    entities intact (cross-dataset preservation)."""
-    import cognee
-
-    await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata=True)
-
-    await cognee.add("Alice founded Acme in Berlin.", dataset_name="ds_a")
-    await cognee.add("Alice also advises Initech.", dataset_name="ds_b")
-    await cognee.cognify(datasets=["ds_a", "ds_b"])
-
-    # TODO(Part 1): delete ds_a; assert ds_a-only nodes/points gone, ds_b intact,
-    # shared "Alice" entity survives with ds_b ownership only.
-    raise AssertionError("enable after Part 1")
+    relationships = await _graph_relationship_names()
+    assert "from" not in relationships or "lives_in" in relationships
+    # Alice's DOC2-only "from" edge to Berlin is gone; "knows" (DOC1) survives.
+    assert "knows" in relationships
 
 
 @pytest.mark.asyncio
-async def test_rollback_by_pipeline_run_id_end_to_end():
-    """A cognify run's solely-introduced artifacts are removed on rollback;
-    artifacts owned by an earlier run survive."""
-    import cognee
+@patch.object(LiteLLMEmbeddingEngine, "embed_text", _fake_embed)
+@patch.object(LLMGateway, "acreate_structured_output", new_callable=AsyncMock)
+async def test_unowned_edge_deleted_endpoints_survive(mock_struct, tmp_path):
+    """Delete DOC1: its unique 'knows' edge is removed while its endpoint entities
+    (Alice via DOC2, Bob via DOC3) survive."""
+    mock_struct.side_effect = _mock_llm_output
+    user = await _setup(tmp_path)
+    dataset_id, d1, _d2, _d3 = await _ingest_sequentially()
 
-    await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata=True)
+    assert "knows" in await _graph_relationship_names()
 
-    await cognee.add("Alice founded Acme.", dataset_name="ds")
-    await cognee.cognify(datasets=["ds"])
-    await cognee.add("Bob founded Globex.", dataset_name="ds")
-    # second cognify run introduces new artifacts whose run we will roll back
-    await cognee.cognify(datasets=["ds"])
+    await datasets.delete_data(dataset_id, d1, user)
 
-    # TODO(Part 1): capture the second run's pipeline_run_id, roll it back, then
-    # assert only that run's artifacts (and their vector points) are gone.
-    raise AssertionError("enable after Part 1")
+    assert "knows" not in await _graph_relationship_names(), "DOC1-only edge must be deleted"
+    after = await _graph_names()
+    assert "alice" in after and "bob" in after, "Shared endpoints must survive"

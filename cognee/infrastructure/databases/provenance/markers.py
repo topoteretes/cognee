@@ -2,10 +2,11 @@
 
 A graph is "graph-native" when its graph-level metadata advertises the
 graph-native delete mode. Marking happens lazily for empty graphs only, via
-``set_graph_metadata``. On pre-Part-1 backends ``set_graph_metadata`` and
+``set_graph_metadata``. On backends that implement provenance (e.g. Ladybug +
+LanceDB) a fresh empty graph gets marked and the graph-native path becomes live;
+on backends without provenance support ``set_graph_metadata`` /
 ``get_graph_metadata`` raise ``UnsupportedProvenanceCapability``, so nothing is
-ever marked and the whole graph-native path stays inert — old/unmarked graphs
-keep using the relational ledger.
+marked and old/unmarked graphs keep using the relational ledger.
 """
 
 from cognee.infrastructure.databases.exceptions import UnsupportedProvenanceCapability
@@ -20,16 +21,24 @@ from cognee.infrastructure.databases.provenance import (
 async def is_graph_native_graph(graph_engine) -> bool:
     """Return True when the graph metadata marks it as graph-native.
 
-    Fail-safe: any exception (including ``UnsupportedProvenanceCapability`` from
-    a backend that does not implement provenance) is treated as "not
-    graph-native" so callers fall back to the relational-ledger delete path.
+    A backend without provenance support (``UnsupportedProvenanceCapability``) is
+    simply "not graph-native" -> fall back to the relational-ledger path. Any
+    *other* error reading metadata is allowed to propagate: a destructive op must
+    fail closed rather than silently route a real graph-native graph (which has
+    no ledger rows) to the legacy path and skip graph cleanup.
+
+    Both marker fields must match: ``delete_mode`` and ``provenance_version``.
+    A partial or older marker is not treated as graph-native.
     """
     try:
         metadata = await graph_engine.get_graph_metadata()
-    except Exception:
+    except UnsupportedProvenanceCapability:
         return False
 
-    return metadata.get(GRAPH_DELETE_MODE_KEY) == GRAPH_DELETE_MODE_GRAPH_NATIVE
+    return (
+        metadata.get(GRAPH_DELETE_MODE_KEY) == GRAPH_DELETE_MODE_GRAPH_NATIVE
+        and metadata.get(GRAPH_PROVENANCE_VERSION_KEY) == GRAPH_PROVENANCE_VERSION
+    )
 
 
 async def ensure_graph_native_for_new_graph(graph_engine) -> bool:

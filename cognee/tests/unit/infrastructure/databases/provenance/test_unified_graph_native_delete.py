@@ -143,25 +143,28 @@ class FakeProvenanceGraphEngine:
         self._guard()
         for node_id in node_ids:
             node = self.nodes[node_id]
-            for key in source_ref_keys:
-                if key not in node.source_ref_keys:
-                    node.source_ref_keys.append(key)
-                if pipeline_run_id is not None:
-                    run_ref = make_source_run_ref(_as_uuid(pipeline_run_id), key)
-                    if run_ref not in node.source_run_refs:
-                        node.source_run_refs.append(run_ref)
+            self._attach(node, source_ref_keys, pipeline_run_id)
 
     async def attach_edge_source_refs(self, edges, source_ref_keys, pipeline_run_id=None):
         self._guard()
         for edge in edges:
             row = self.edges[edge]
-            for key in source_ref_keys:
-                if key not in row.source_ref_keys:
-                    row.source_ref_keys.append(key)
-                if pipeline_run_id is not None:
-                    run_ref = make_source_run_ref(_as_uuid(pipeline_run_id), key)
-                    if run_ref not in row.source_run_refs:
-                        row.source_run_refs.append(run_ref)
+            self._attach(row, source_ref_keys, pipeline_run_id)
+
+    @staticmethod
+    def _attach(artifact, source_ref_keys, pipeline_run_id):
+        # Part 0 invariant: a run ref is recorded only for keys NEWLY attached to
+        # this artifact (mirrors provenance_after_attach). Re-attaching an
+        # already-present key adds no run mapping, so rolling that run back
+        # cannot strip ownership a prior run established.
+        for key in source_ref_keys:
+            newly_added = key not in artifact.source_ref_keys
+            if newly_added:
+                artifact.source_ref_keys.append(key)
+            if newly_added and pipeline_run_id is not None:
+                run_ref = make_source_run_ref(_as_uuid(pipeline_run_id), key)
+                if run_ref not in artifact.source_run_refs:
+                    artifact.source_run_refs.append(run_ref)
 
     async def remove_node_source_refs(self, node_ids, source_ref_keys):
         self._guard()
@@ -477,6 +480,73 @@ async def test_vectors_deleted_before_graph_mutation_and_retry_converges():
     await engine.delete_by_source_ref(ref)
     assert "n1" not in graph.nodes
     assert ("Entity_name", ["n1"]) in vector.deleted
+
+
+async def test_rollback_keeps_artifact_a_prior_run_still_owns():
+    """A re-cognify run re-touching an already-owned ref must not delete it.
+
+    Guards the Part 0 invariant end-to-end: run_1 establishes ownership of a node
+    via ref S; run_2 re-cognifies the SAME data (re-touches S, records no new run
+    ref) and then fails. Rolling back run_2 must leave the node intact, because
+    run_2 introduced nothing new. Rolling back run_1 (the real owner) deletes it.
+    """
+    dataset = uuid4()
+    ref = make_source_ref_key(dataset, uuid4())  # SAME data item across both runs
+    run_1, run_2 = uuid4(), uuid4()
+
+    graph = FakeProvenanceGraphEngine()
+    graph.add_node("shared", "Entity", ["name"], {"name": "x"})
+    await graph.attach_node_source_refs(["shared"], [ref], run_1)
+    await graph.attach_node_source_refs(["shared"], [ref], run_2)
+
+    vector = FakeVectorEngine()
+    engine = _build_engine(graph, vector)
+
+    await engine.rollback_by_pipeline_run_id(str(run_2))
+    assert "shared" in graph.nodes
+    assert graph.nodes["shared"].source_ref_keys == [ref]
+    assert vector.deleted == []
+
+    await engine.rollback_by_pipeline_run_id(str(run_1))
+    assert "shared" not in graph.nodes
+
+
+async def test_hard_delete_failure_leaves_refs_for_retry():
+    """If the graph hard delete fails, the unowned node keeps its refs so a retry
+    can rediscover it (Part 0 retry-safe order: never strip refs before delete)."""
+    dataset = uuid4()
+    ref = make_source_ref_key(dataset, uuid4())
+    run = uuid4()
+
+    class FailOnceDeleteNodes(FakeProvenanceGraphEngine):
+        def __init__(self):
+            super().__init__()
+            self._fail_delete_nodes = True
+
+        async def delete_nodes(self, node_ids):
+            if self._fail_delete_nodes:
+                self._fail_delete_nodes = False
+                raise RuntimeError("injected delete_nodes failure")
+            await super().delete_nodes(node_ids)
+
+    graph = FailOnceDeleteNodes()
+    graph.add_node("n1", "Entity", ["name"], {"name": "x"})
+    await graph.attach_node_source_refs(["n1"], [ref], run)
+
+    vector = FakeVectorEngine()
+    engine = _build_engine(graph, vector)
+
+    with pytest.raises(RuntimeError, match="injected delete_nodes failure"):
+        await engine.delete_by_source_ref(ref)
+
+    # The node is still present AND still carries its ref, so find_nodes_by_source_ref
+    # rediscovers it on retry (it was not stranded with empty refs).
+    assert "n1" in graph.nodes
+    assert graph.nodes["n1"].source_ref_keys == [ref]
+    assert await graph.find_nodes_by_source_ref(ref) == ["n1"]
+
+    await engine.delete_by_source_ref(ref)
+    assert "n1" not in graph.nodes
 
 
 async def test_unsupported_capability_propagates():

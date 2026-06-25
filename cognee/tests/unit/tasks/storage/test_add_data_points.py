@@ -184,6 +184,139 @@ async def test_add_data_points_with_single_datapoint(
     mock_index_nodes.assert_awaited_once()
 
 
+class _AsyncCM:
+    """Minimal async context manager yielding a fixed session."""
+
+    def __init__(self, session):
+        self._session = session
+
+    async def __aenter__(self):
+        return self._session
+
+    async def __aexit__(self, *_args):
+        return False
+
+
+def _provenance_ctx():
+    user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
+    dataset = SimpleNamespace(id=uuid4())
+    data_item = SimpleNamespace(id=uuid4())
+    return PipelineContext(
+        user=user,
+        dataset=dataset,
+        data_item=data_item,
+        pipeline_run_id=uuid4(),
+    )
+
+
+@pytest.mark.asyncio
+@patch.object(adp_module, "upsert_edges")
+@patch.object(adp_module, "upsert_nodes")
+@patch.object(adp_module, "index_graph_edges")
+@patch.object(adp_module, "index_data_points")
+@patch.object(adp_module, "get_unified_engine")
+@patch.object(adp_module, "deduplicate_nodes_and_edges")
+@patch.object(adp_module, "get_graph_from_model")
+async def test_add_data_points_graph_native_stamps_and_skips_ledger(
+    mock_get_graph,
+    mock_dedup,
+    mock_get_unified,
+    mock_index_nodes,
+    mock_index_edges,
+    mock_upsert_nodes,
+    mock_upsert_edges,
+):
+    from cognee.infrastructure.databases.provenance import (
+        EdgeIdentity,
+        make_source_ref_key,
+        GRAPH_DELETE_MODE_GRAPH_NATIVE,
+        GRAPH_DELETE_MODE_KEY,
+        GRAPH_PROVENANCE_VERSION,
+        GRAPH_PROVENANCE_VERSION_KEY,
+    )
+
+    dp1 = SimplePoint(text="first")
+    dp2 = SimplePoint(text="second")
+    edge1 = (str(dp1.id), str(dp2.id), "related_to", {"edge_text": "connects"})
+    custom_edges = [(str(dp2.id), str(dp1.id), "custom_edge", {})]
+
+    mock_get_graph.side_effect = [([dp1], [edge1]), ([dp2], [])]
+    mock_dedup.side_effect = lambda n, e: (n, e)
+
+    unified, graph_engine, vector_engine = _make_unified_mock()
+    # Marked graph-native: is_graph_native_graph -> True (both marker fields).
+    graph_engine.get_graph_metadata = AsyncMock(
+        return_value={
+            GRAPH_DELETE_MODE_KEY: GRAPH_DELETE_MODE_GRAPH_NATIVE,
+            GRAPH_PROVENANCE_VERSION_KEY: GRAPH_PROVENANCE_VERSION,
+        }
+    )
+    mock_get_unified.return_value = unified
+
+    ctx = _provenance_ctx()
+    await add_data_points([dp1, dp2], custom_edges=custom_edges, ctx=ctx)
+
+    # Ledger is skipped entirely on a graph-native graph.
+    mock_upsert_nodes.assert_not_called()
+    mock_upsert_edges.assert_not_called()
+
+    # Source refs are stamped on the written nodes and edges (incl. custom edge).
+    expected_key = make_source_ref_key(ctx.dataset.id, ctx.data_item.id)
+
+    graph_engine.attach_node_source_refs.assert_awaited_once()
+    node_args = graph_engine.attach_node_source_refs.await_args.args
+    assert set(node_args[0]) == {str(dp1.id), str(dp2.id)}
+    assert node_args[1] == [expected_key]
+    assert node_args[2] == str(ctx.pipeline_run_id)
+
+    graph_engine.attach_edge_source_refs.assert_awaited_once()
+    edge_args = graph_engine.attach_edge_source_refs.await_args.args
+    edge_ids = edge_args[0]
+    assert EdgeIdentity(str(dp1.id), str(dp2.id), "related_to") in edge_ids
+    assert EdgeIdentity(str(dp2.id), str(dp1.id), "custom_edge") in edge_ids
+    assert edge_args[1] == [expected_key]
+
+
+@pytest.mark.asyncio
+@patch.object(adp_module, "get_async_session")
+@patch.object(adp_module, "upsert_edges")
+@patch.object(adp_module, "upsert_nodes")
+@patch.object(adp_module, "index_graph_edges")
+@patch.object(adp_module, "index_data_points")
+@patch.object(adp_module, "get_unified_engine")
+@patch.object(adp_module, "deduplicate_nodes_and_edges")
+@patch.object(adp_module, "get_graph_from_model")
+async def test_add_data_points_old_graph_uses_ledger_and_skips_attach(
+    mock_get_graph,
+    mock_dedup,
+    mock_get_unified,
+    mock_index_nodes,
+    mock_index_edges,
+    mock_upsert_nodes,
+    mock_upsert_edges,
+    mock_get_session,
+):
+    dp1 = SimplePoint(text="first")
+    dp2 = SimplePoint(text="second")
+    edge1 = (str(dp1.id), str(dp2.id), "related_to", {"edge_text": "connects"})
+
+    mock_get_graph.side_effect = [([dp1], [edge1]), ([dp2], [])]
+    mock_dedup.side_effect = lambda n, e: (n, e)
+
+    # Default mock is NOT graph-native (empty metadata + non-empty graph).
+    unified, graph_engine, vector_engine = _make_unified_mock()
+    mock_get_unified.return_value = unified
+    mock_get_session.return_value = _AsyncCM(AsyncMock())
+
+    await add_data_points([dp1, dp2], ctx=_provenance_ctx())
+
+    # Old graph keeps the relational ledger and never stamps graph provenance.
+    mock_upsert_nodes.assert_awaited_once()
+    mock_upsert_edges.assert_awaited()
+    graph_engine.attach_node_source_refs.assert_not_called()
+    graph_engine.attach_edge_source_refs.assert_not_called()
+
+
 def test_entity_description_not_in_index_fields():
     from cognee.modules.engine.models import Entity, EntityType
 

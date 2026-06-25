@@ -129,17 +129,16 @@ async def test_attach_node_source_refs_materializes_all_fields(tmp_path):
             {make_source_run_ref(r1, key_a), make_source_run_ref(r2, key_b)}
         )
 
-        # A NEW run re-touching an existing key DOES record a new run ref
-        # (keeps that run rollbackable for the key it re-attached).
+        # Part 0 invariant: a NEW run re-touching an already-present key records
+        # NO new run ref. Only the run that first attached the key owns it for
+        # rollback, so rolling back the re-touching run cannot strip that
+        # ownership (and delete an artifact a prior run still owns).
         await adapter.attach_node_source_refs([germany_id], [key_a], str(r2))
         snap = (await adapter.get_node_delete_data([germany_id]))[germany_id]
         assert sorted(snap.source_run_refs) == sorted(
-            {
-                make_source_run_ref(r1, key_a),
-                make_source_run_ref(r2, key_b),
-                make_source_run_ref(r2, key_a),
-            }
+            {make_source_run_ref(r1, key_a), make_source_run_ref(r2, key_b)}
         )
+        assert snap.source_run_ids == sorted({str(r1), str(r2)})
     finally:
         await adapter.close()
 

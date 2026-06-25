@@ -54,21 +54,25 @@ def provenance_after_attach(
 ) -> ProvenanceColumns:
     """Return the four provenance columns after attaching ``add_keys``.
 
-    Part 0 contract: source_ref_keys are set-merged (deduped, order preserved); a
-    source_run_ref is recorded for every ``(run, key)`` pair when a
-    pipeline_run_id is given — independent of whether the key was already present,
-    so a later run re-touching an existing key stays rollbackable. A write without
-    a pipeline_run_id records no run ref (non-rollbackable by run id).
+    Part 0 contract: source_ref_keys are set-merged (deduped, order preserved). A
+    source_run_ref is recorded **only when a key is newly attached** — re-attaching
+    an already-present key adds no new run mapping, so rolling back a run that
+    merely re-touched pre-existing ownership cannot strip that ownership (it only
+    undoes the ownership the run first established). A write without a
+    pipeline_run_id records no run ref (non-rollbackable by run id).
     """
-    keys = list(current_keys)
+    newly_added_keys: List[str] = []
     for key in add_keys:
-        if key not in keys:
-            keys.append(key)
+        if key not in current_keys and key not in newly_added_keys:
+            newly_added_keys.append(key)
+
+    keys = list(current_keys)
+    keys.extend(newly_added_keys)
 
     run_refs = list(current_run_refs)
     if pipeline_run_id is not None:
         run_uuid = coerce_run_uuid(pipeline_run_id)
-        for key in add_keys:
+        for key in newly_added_keys:
             run_ref = make_source_run_ref(run_uuid, key)
             if run_ref not in run_refs:
                 run_refs.append(run_ref)

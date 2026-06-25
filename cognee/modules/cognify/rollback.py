@@ -7,6 +7,7 @@ from sqlalchemy.orm import aliased, attributes as orm_attributes
 from cognee.context_global_variables import multi_user_support_possible
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.databases.unified import get_unified_engine
+from cognee.infrastructure.databases.provenance import get_data_id_from_source_ref_key
 from cognee.infrastructure.databases.provenance.markers import is_graph_native_graph
 from cognee.modules.data.models import Data
 from cognee.modules.graph.legacy.has_edges_in_legacy_ledger import has_edges_in_legacy_ledger
@@ -38,6 +39,25 @@ def _extract_data_ids(data_ingestion_info: Any) -> set[UUID]:
         maybe_data_id = _to_uuid(entry.get("data_id"))
         if maybe_data_id:
             data_ids.add(maybe_data_id)
+    return data_ids
+
+
+async def _graph_native_affected_data_ids(graph_engine, pipeline_run_id: str) -> set[UUID]:
+    """Data ids whose ownership the run introduced, read from graph provenance.
+
+    Must be called *before* the rollback removes the run's source refs. The run's
+    source refs (per Part 0, the refs it newly attached) carry the dataset/data
+    pair, so the data ids fall straight out of the source-ref helper — this is the
+    set whose per-data cognify status the rollback must clear, and it works even
+    when ``data_ingestion_info`` is absent (e.g. startup recovery).
+    """
+    refs_by_node = await graph_engine.find_node_source_refs_by_pipeline_run(pipeline_run_id)
+    refs_by_edge = await graph_engine.find_edge_source_refs_by_pipeline_run(pipeline_run_id)
+
+    data_ids: set[UUID] = set()
+    for refs in list(refs_by_node.values()) + list(refs_by_edge.values()):
+        for source_ref_key in refs:
+            data_ids.add(get_data_id_from_source_ref_key(source_ref_key))
     return data_ids
 
 
@@ -92,9 +112,17 @@ async def cognify_rollback_handler(
     if unified.supports_graph_native_delete():
         graph_engine = unified.graph
         if await is_graph_native_graph(graph_engine):
+            # Read the run's affected data ids from graph provenance BEFORE the
+            # rollback removes the run's source refs. Supplement with any
+            # data_ingestion_info the caller passed (startup recovery passes
+            # none, so the graph read is what keeps status reset correct there).
+            target_data_ids = await _graph_native_affected_data_ids(
+                graph_engine, str(pipeline_run_id)
+            )
+            target_data_ids |= _extract_data_ids(data_ingestion_info)
+
             await unified.rollback_by_pipeline_run_id(str(pipeline_run_id))
 
-            target_data_ids = _extract_data_ids(data_ingestion_info)
             async with db_engine.get_async_session() as session:
                 await _reset_pipeline_status(session, target_data_ids, dataset_id)
                 await session.commit()

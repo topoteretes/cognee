@@ -42,16 +42,21 @@ def test_reattach_same_run_and_key_adds_nothing():
     assert cols.source_run_refs == [make_source_run_ref(r1, key)]
 
 
-def test_new_run_on_existing_key_records_a_run_ref():
+def test_new_run_reattaching_existing_key_records_no_run_ref():
+    """Part 0 invariant: a run ref is recorded only when a key is *newly* attached.
+
+    A later run re-touching an already-present key must NOT claim rollback
+    ownership of it — otherwise rolling that run back would strip ownership a
+    prior run established and delete an artifact that should survive.
+    """
     d1, r1, r2 = uuid4(), uuid4(), uuid4()
     key = make_source_ref_key(d1, uuid4())
     cols = provenance_after_attach([], [], [key], str(r1))
     cols = provenance_after_attach(cols.source_ref_keys, cols.source_run_refs, [key], str(r2))
     assert cols.source_ref_keys == [key]
-    assert sorted(cols.source_run_refs) == sorted(
-        [make_source_run_ref(r1, key), make_source_run_ref(r2, key)]
-    )
-    assert cols.source_run_ids == sorted([str(r1), str(r2)])
+    # Only r1 (the run that first attached the key) owns it for rollback.
+    assert cols.source_run_refs == [make_source_run_ref(r1, key)]
+    assert cols.source_run_ids == [str(r1)]
 
 
 def test_attach_without_run_is_not_rollbackable():
