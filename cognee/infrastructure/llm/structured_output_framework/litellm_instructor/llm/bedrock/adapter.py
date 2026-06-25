@@ -29,6 +29,37 @@ from cognee.modules.observability.get_observe import get_observe
 observe = get_observe()
 
 
+def _report_token_usage_to_langsmith(usage, model: str) -> None:
+    from langsmith import get_current_run_tree
+
+    run = get_current_run_tree()
+    if run is None:
+        return
+
+    run.set(
+        usage_metadata={
+            "input_tokens": getattr(usage, "prompt_tokens", 0),
+            "output_tokens": getattr(usage, "completion_tokens", 0),
+            "total_tokens": getattr(usage, "total_tokens", 0),
+        },
+        metadata={"model": model},
+    )
+
+
+def _report_token_usage(result, model: str) -> None:
+    """Dispatch token usage from the instructor response to the active observer."""
+    from cognee.base_config import get_base_config
+    from cognee.modules.observability.observers import Observer
+
+    usage = getattr(getattr(result, "_raw_response", None), "usage", None)
+    if usage is None:
+        return
+
+    monitoring = get_base_config().monitoring_tool
+    if monitoring == Observer.LANGSMITH:
+        _report_token_usage_to_langsmith(usage, model)
+
+
 class BedrockAdapter(LLMInterface):
     """
     Adapter for AWS Bedrock API with support for three authentication methods:
@@ -117,7 +148,9 @@ class BedrockAdapter(LLMInterface):
             request_params = self._create_bedrock_request(
                 text_input, system_prompt, response_model, **kwargs
             )
-            return await self.aclient.chat.completions.create(**request_params)
+            result = await self.aclient.chat.completions.create(**request_params)
+            _report_token_usage(result, self.model)
+            return result
 
         except (
             ContentPolicyViolationError,

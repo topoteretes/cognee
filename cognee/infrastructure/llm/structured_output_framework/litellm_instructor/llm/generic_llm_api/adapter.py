@@ -35,6 +35,37 @@ logger = get_logger()
 observe = get_observe()
 
 
+def _report_token_usage_to_langsmith(usage, model: str) -> None:
+    from langsmith import get_current_run_tree
+
+    run = get_current_run_tree()
+    if run is None:
+        return
+
+    run.set(
+        usage_metadata={
+            "input_tokens": getattr(usage, "prompt_tokens", 0),
+            "output_tokens": getattr(usage, "completion_tokens", 0),
+            "total_tokens": getattr(usage, "total_tokens", 0),
+        },
+        metadata={"model": model},
+    )
+
+
+def _report_token_usage(result, model: str) -> None:
+    """Dispatch token usage from the instructor response to the active observer."""
+    from cognee.base_config import get_base_config
+    from cognee.modules.observability.observers import Observer
+
+    usage = getattr(getattr(result, "_raw_response", None), "usage", None)
+    if usage is None:
+        return
+
+    monitoring = get_base_config().monitoring_tool
+    if monitoring == Observer.LANGSMITH:
+        _report_token_usage_to_langsmith(usage, model)
+
+
 def _enrich_llm_span(model: str, name: str) -> None:
     """Set LLM attributes on the current OTEL span, if tracing is enabled."""
     from cognee.modules.observability.trace_context import is_tracing_enabled
@@ -191,13 +222,14 @@ class GenericAPIAdapter(LLMInterface):
                             "content": f"""{text_input}""",
                         },
                     ],
-                    max_retries=self.MAX_RETRIES,
+                    max_retries=1,
                     api_key=self.api_key,
                     api_base=self.endpoint,
                     response_model=response_model,
                     **merged_kwargs,
                 )
                 _enrich_llm_span(self.model, self.name)
+                _report_token_usage(result, self.model)
                 return result
         except (
             ContentFilterFinishReasonError,
@@ -232,7 +264,7 @@ class GenericAPIAdapter(LLMInterface):
                                 "content": f"""{text_input}""",
                             },
                         ],
-                        max_retries=self.MAX_RETRIES,
+                        max_retries=1,
                         api_key=self.fallback_api_key,
                         api_base=self.fallback_endpoint,
                         response_model=response_model,
