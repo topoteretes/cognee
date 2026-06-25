@@ -97,10 +97,6 @@ class SQLAlchemyAdapter:
                     cursor.execute("PRAGMA journal_mode=WAL")
                     cursor.execute("PRAGMA synchronous=NORMAL")
                     cursor.execute("PRAGMA busy_timeout=120000")
-                    # Foreign key enforcement is off by default in SQLite and is
-                    # also connection scoped; set it here so it is consistently
-                    # enabled rather than only around individual operations.
-                    cursor.execute("PRAGMA foreign_keys=ON")
                 finally:
                     cursor.close()
         else:

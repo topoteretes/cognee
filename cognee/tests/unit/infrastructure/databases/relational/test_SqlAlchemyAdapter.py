@@ -73,14 +73,12 @@ class TestSQLAlchemyAdapterSqlitePragmas:
             async with adapter.engine.connect() as conn:
                 journal_mode = (await conn.execute(text("PRAGMA journal_mode"))).scalar()
                 busy_timeout = (await conn.execute(text("PRAGMA busy_timeout"))).scalar()
-                foreign_keys = (await conn.execute(text("PRAGMA foreign_keys"))).scalar()
-            return journal_mode, busy_timeout, foreign_keys
+            return journal_mode, busy_timeout
 
-        journal_mode, busy_timeout, foreign_keys = asyncio.run(read_pragmas())
+        journal_mode, busy_timeout = asyncio.run(read_pragmas())
 
         assert journal_mode.lower() == "wal"
         assert busy_timeout == 120000
-        assert foreign_keys == 1
 
     def test_concurrent_writers_do_not_deadlock(self, tmp_path):
         """Parallel read-then-write transactions must not raise 'database is locked'.
