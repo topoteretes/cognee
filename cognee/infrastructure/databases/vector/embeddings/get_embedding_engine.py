@@ -101,6 +101,18 @@ def create_embedding_engine(
             batch_size=embedding_batch_size,
         )
 
+    if embedding_provider == "twelvelabs":
+        from .TwelveLabsEmbeddingEngine import TwelveLabsEmbeddingEngine
+
+        return TwelveLabsEmbeddingEngine(
+            model=embedding_model,
+            dimensions=embedding_dimensions,
+            max_completion_tokens=embedding_max_completion_tokens,
+            endpoint=embedding_endpoint,
+            api_key=embedding_api_key or llm_api_key,
+            batch_size=embedding_batch_size,
+        )
+
     if embedding_provider == "openai_compatible":
         from .OpenAICompatibleEmbeddingEngine import OpenAICompatibleEmbeddingEngine
 
