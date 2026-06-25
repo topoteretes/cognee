@@ -29,7 +29,10 @@ from cognee.infrastructure.databases.provenance.source_refs import (
     get_dataset_id_from_source_ref_key,
     get_pipeline_run_id_from_source_run_ref,
     get_source_ref_key_from_source_run_ref,
-    make_source_run_ref,
+)
+from cognee.infrastructure.databases.provenance.source_ref_state import (
+    provenance_after_attach,
+    provenance_after_remove,
 )
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.storage.utils import JSONEncoder
@@ -74,69 +77,14 @@ def _as_str_list(value: Any) -> List[str]:
     return [str(item) for item in value]
 
 
-def _coerce_run_uuid(pipeline_run_id: Any) -> UUID:
-    return pipeline_run_id if isinstance(pipeline_run_id, UUID) else UUID(str(pipeline_run_id))
-
-
-def _derive_dataset_ids(source_ref_keys: List[str]) -> List[str]:
-    """Materialized dataset filter derived from source_ref_keys (sorted, unique)."""
-    return sorted({str(get_dataset_id_from_source_ref_key(key)) for key in source_ref_keys})
-
-
-def _derive_run_ids(source_run_refs: List[str]) -> List[str]:
-    """Materialized rollback filter derived from source_run_refs (sorted, unique)."""
-    return sorted({str(get_pipeline_run_id_from_source_run_ref(ref)) for ref in source_run_refs})
-
-
-def _provenance_after_attach(
-    current_keys: List[str],
-    current_run_refs: List[str],
-    add_keys: List[str],
-    pipeline_run_id: Optional[str],
-) -> Tuple[List[str], List[str], List[str], List[str]]:
-    """Return the four provenance column values after attaching ``add_keys``.
-
-    Mirrors the Part 0 contract: source_ref_keys are set-merged (deduped, order
-    preserved); a source_run_ref is recorded for every ``(run, key)`` pair when
-    a pipeline_run_id is given — independent of whether the key was already
-    present, so a later run re-touching an existing key stays rollbackable.
-    A write without pipeline_run_id records no run ref (non-rollbackable by run).
-    """
-    keys = list(current_keys)
-    for key in add_keys:
-        if key not in keys:
-            keys.append(key)
-
-    run_refs = list(current_run_refs)
-    if pipeline_run_id is not None:
-        run_uuid = _coerce_run_uuid(pipeline_run_id)
-        for key in add_keys:
-            run_ref = make_source_run_ref(run_uuid, key)
-            if run_ref not in run_refs:
-                run_refs.append(run_ref)
-
-    return keys, _derive_dataset_ids(keys), _derive_run_ids(run_refs), run_refs
-
-
-def _provenance_after_remove(
-    current_keys: List[str],
-    current_run_refs: List[str],
-    remove_keys: List[str],
-) -> Tuple[List[str], List[str], List[str], List[str]]:
-    """Return the four provenance column values after removing ``remove_keys``.
-
-    Removing a key strips every source_run_ref that embeds it; source_dataset_ids
-    and source_run_ids are re-derived from what remains, so the last ref/run for
-    a dataset/run disappearing automatically drops that id.
-    """
-    removed = set(remove_keys)
-    keys = [key for key in current_keys if key not in removed]
-    run_refs = [
-        ref
-        for ref in current_run_refs
-        if get_source_ref_key_from_source_run_ref(ref) not in removed
-    ]
-    return keys, _derive_dataset_ids(keys), _derive_run_ids(run_refs), run_refs
+def _parse_properties_blob(raw: Any) -> Dict[str, Any]:
+    """Decode a node/edge JSON ``properties`` blob, tolerating empty/invalid input."""
+    if not raw:
+        return {}
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
 
 
 cache_config = get_cache_config()
@@ -1278,31 +1226,67 @@ class LadybugAdapter(GraphDBInterface):
         )
         await self.checkpoint()
 
+    @staticmethod
+    def _node_row(node_id: str) -> dict:
+        return {"id": node_id}
+
+    @staticmethod
+    def _edge_row(edge: EdgeIdentity) -> dict:
+        return {"s": edge.source_id, "t": edge.target_id, "rel": edge.relationship_name}
+
+    async def _apply_source_ref_change(
+        self,
+        artifacts,
+        read_provenance,
+        write_provenance,
+        identity_row,
+        transition,
+    ) -> None:
+        """Read each artifact's provenance, apply a pure transition, write it back.
+
+        Shared by attach/remove for both nodes and edges: ``read_provenance`` /
+        ``write_provenance`` are the Cypher node|edge helpers, ``identity_row``
+        maps an artifact identity to the batch row's match fields, and
+        ``transition`` is the pure ``provenance_after_*`` function.
+
+        The read->write is not atomic: concurrent stamps of the same artifact can
+        lose an update in this window (see phase1_storage_capabilities.md).
+        """
+        if not artifacts:
+            return
+        current = await read_provenance(artifacts)
+        batch = []
+        for identity, (keys, run_refs) in current.items():
+            cols = transition(keys, run_refs)
+            batch.append(
+                {
+                    **identity_row(identity),
+                    "refs": cols.source_ref_keys,
+                    "datasets": cols.source_dataset_ids,
+                    "runs": cols.source_run_ids,
+                    "run_refs": cols.source_run_refs,
+                }
+            )
+        await write_provenance(batch)
+
     async def attach_node_source_refs(
         self,
         node_ids: list[str],
         source_ref_keys: list[str],
         pipeline_run_id: str | None = None,
     ) -> None:
-        if not node_ids or not source_ref_keys:
+        if not source_ref_keys:
             return
         add_keys = list(source_ref_keys)
-        current = await self._read_node_provenance(node_ids)
-        batch = []
-        for node_id, (keys, run_refs) in current.items():
-            new_keys, datasets, runs, new_run_refs = _provenance_after_attach(
+        await self._apply_source_ref_change(
+            node_ids,
+            self._read_node_provenance,
+            self._write_node_provenance,
+            self._node_row,
+            lambda keys, run_refs: provenance_after_attach(
                 keys, run_refs, add_keys, pipeline_run_id
-            )
-            batch.append(
-                {
-                    "id": node_id,
-                    "refs": new_keys,
-                    "datasets": datasets,
-                    "runs": runs,
-                    "run_refs": new_run_refs,
-                }
-            )
-        await self._write_node_provenance(batch)
+            ),
+        )
 
     async def attach_edge_source_refs(
         self,
@@ -1310,79 +1294,50 @@ class LadybugAdapter(GraphDBInterface):
         source_ref_keys: list[str],
         pipeline_run_id: str | None = None,
     ) -> None:
-        if not edges or not source_ref_keys:
+        if not source_ref_keys:
             return
         add_keys = list(source_ref_keys)
-        current = await self._read_edge_provenance(edges)
-        batch = []
-        for edge, (keys, run_refs) in current.items():
-            new_keys, datasets, runs, new_run_refs = _provenance_after_attach(
+        await self._apply_source_ref_change(
+            edges,
+            self._read_edge_provenance,
+            self._write_edge_provenance,
+            self._edge_row,
+            lambda keys, run_refs: provenance_after_attach(
                 keys, run_refs, add_keys, pipeline_run_id
-            )
-            batch.append(
-                {
-                    "s": edge.source_id,
-                    "t": edge.target_id,
-                    "rel": edge.relationship_name,
-                    "refs": new_keys,
-                    "datasets": datasets,
-                    "runs": runs,
-                    "run_refs": new_run_refs,
-                }
-            )
-        await self._write_edge_provenance(batch)
+            ),
+        )
 
     async def remove_node_source_refs(
         self,
         node_ids: list[str],
         source_ref_keys: list[str],
     ) -> None:
-        if not node_ids or not source_ref_keys:
+        if not source_ref_keys:
             return
         remove_keys = list(source_ref_keys)
-        current = await self._read_node_provenance(node_ids)
-        batch = []
-        for node_id, (keys, run_refs) in current.items():
-            new_keys, datasets, runs, new_run_refs = _provenance_after_remove(
-                keys, run_refs, remove_keys
-            )
-            batch.append(
-                {
-                    "id": node_id,
-                    "refs": new_keys,
-                    "datasets": datasets,
-                    "runs": runs,
-                    "run_refs": new_run_refs,
-                }
-            )
-        await self._write_node_provenance(batch)
+        await self._apply_source_ref_change(
+            node_ids,
+            self._read_node_provenance,
+            self._write_node_provenance,
+            self._node_row,
+            lambda keys, run_refs: provenance_after_remove(keys, run_refs, remove_keys),
+        )
 
     async def remove_edge_source_refs(
         self,
         edges: list[EdgeIdentity],
         source_ref_keys: list[str],
     ) -> None:
-        if not edges or not source_ref_keys:
+        if not source_ref_keys:
             return
         remove_keys = list(source_ref_keys)
-        current = await self._read_edge_provenance(edges)
-        batch = []
-        for edge, (keys, run_refs) in current.items():
-            new_keys, datasets, runs, new_run_refs = _provenance_after_remove(
-                keys, run_refs, remove_keys
-            )
-            batch.append(
-                {
-                    "s": edge.source_id,
-                    "t": edge.target_id,
-                    "rel": edge.relationship_name,
-                    "refs": new_keys,
-                    "datasets": datasets,
-                    "runs": runs,
-                    "run_refs": new_run_refs,
-                }
-            )
-        await self._write_edge_provenance(batch)
+        await self._apply_source_ref_change(
+            edges,
+            self._read_edge_provenance,
+            self._write_edge_provenance,
+            self._edge_row,
+            lambda keys, run_refs: provenance_after_remove(keys, run_refs, remove_keys),
+        )
 
     async def delete_edge_triples(self, edges: list[EdgeIdentity]) -> None:
         if not edges:
@@ -1418,12 +1373,7 @@ class LadybugAdapter(GraphDBInterface):
         result: dict[str, NodeDeleteData] = {}
         for row in rows:
             node_id, name, node_type, raw_props = row[0], row[1], row[2], row[3]
-            properties: Dict[str, Any] = {}
-            if raw_props:
-                try:
-                    properties = json.loads(raw_props)
-                except json.JSONDecodeError:
-                    properties = {}
+            properties = _parse_properties_blob(raw_props)
             # Reconstruct the flat payload the way get_node does: core columns
             # merged over the JSON blob.
             properties["id"] = node_id
@@ -1472,12 +1422,7 @@ class LadybugAdapter(GraphDBInterface):
         result: dict[EdgeIdentity, EdgeDeleteData] = {}
         for row in rows:
             edge = EdgeIdentity(source_id=row[0], target_id=row[1], relationship_name=row[2])
-            properties: Dict[str, Any] = {}
-            if row[3]:
-                try:
-                    properties = json.loads(row[3])
-                except json.JSONDecodeError:
-                    properties = {}
+            properties = _parse_properties_blob(row[3])
             # Stored edge_text wins; fall back to relationship_name when absent.
             edge_text = get_edge_retrieval_text(properties.get("edge_text"), edge.relationship_name)
             result[edge] = EdgeDeleteData(
