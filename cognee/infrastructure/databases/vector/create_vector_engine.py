@@ -5,6 +5,9 @@ from numbers import Number
 from .supported_databases import supported_databases
 from .embeddings import get_embedding_engine
 from cognee.infrastructure.databases.utils.closing_lru_cache import closing_lru_cache
+from cognee.infrastructure.databases.utils.resolve_postgres_connection import (
+    resolve_postgres_url,
+)
 from cognee.shared.lru_cache import DATABASE_MAX_LRU_CACHE_SIZE
 from cognee.shared.logging_utils import get_logger
 
@@ -205,55 +208,28 @@ def _create_vector_engine(
         )
 
     if vector_db_provider.lower() == "pgvector":
-        from cognee.context_global_variables import backend_access_control_enabled
+        from cognee.infrastructure.databases.relational import get_relational_config
 
-        if backend_access_control_enabled():
-            if not (
-                vector_db_host and vector_db_port and vector_db_username and vector_db_password
-            ):
-                raise EnvironmentError("Missing required pgvector credentials.")
+        # ``vector_db_url`` doubles as the LanceDB filesystem path (VectorConfig
+        # defaults it to a local ``.lancedb`` path), so only treat it as a
+        # connection URL when it carries a Postgres scheme.
+        store_url = vector_db_url if vector_db_url.startswith("postgres") else ""
 
-            connection_string: str = (
-                f"postgresql+asyncpg://{vector_db_username}:{vector_db_password}"
-                f"@{vector_db_host}:{vector_db_port}/{vector_db_name}"
-            )
-        else:
-            if (
-                vector_db_port
-                and vector_db_username
-                and vector_db_password
-                and vector_db_host
-                and vector_db_name
-            ):
-                connection_string: str = (
-                    f"postgresql+asyncpg://{vector_db_username}:{vector_db_password}"
-                    f"@{vector_db_host}:{vector_db_port}/{vector_db_name}"
-                )
-            else:
-                from cognee.infrastructure.databases.relational import get_relational_config
-
-                logger.warning(
-                    "PGVector credentials are not fully configured; "
-                    "falling back to the relational database configuration. "
-                    "Set VECTOR_DB_HOST/PORT/USERNAME/PASSWORD/NAME explicitly "
-                    "to avoid this fallback."
-                )
-
-                # Get configuration for postgres database
-                relational_config = get_relational_config()
-                db_username = relational_config.db_username
-                db_password = relational_config.db_password
-                db_host = relational_config.db_host
-                db_port = relational_config.db_port
-                db_name = relational_config.db_name
-
-                if not (db_host and db_port and db_name and db_username and db_password):
-                    raise EnvironmentError("Missing required pgvector credentials!")
-
-                connection_string: str = (
-                    f"postgresql+asyncpg://{db_username}:{db_password}"
-                    f"@{db_host}:{db_port}/{db_name}"
-                )
+        relational_config = get_relational_config()
+        connection_string = resolve_postgres_url(
+            store_url=store_url,
+            store_host=vector_db_host,
+            store_port=vector_db_port,
+            store_username=vector_db_username,
+            store_password=vector_db_password,
+            store_name=vector_db_name,
+            shared_host=relational_config.db_host,
+            shared_port=relational_config.db_port,
+            shared_username=relational_config.db_username,
+            shared_password=relational_config.db_password,
+            shared_name=relational_config.db_name,
+            missing_error="Missing required pgvector credentials.",
+        )
 
         try:
             from .pgvector.PGVectorAdapter import PGVectorAdapter
