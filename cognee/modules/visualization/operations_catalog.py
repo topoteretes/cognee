@@ -192,6 +192,18 @@ _OPERATIONS: List[Dict[str, Any]] = [
             {"effect": "removes", "target_type": "TextSummary"},
         ],
     },
+    {
+        "name": "decay_memory",
+        "label": "decay / forget",
+        "kind": "self_improve",
+        "scope": "whole",
+        "summary": "Ages node feedback_weight by half-life, then prunes stale orphans below a threshold.",
+        "effects": [
+            {"effect": "modifies", "target_type": "Entity", "property": "feedback_weight"},
+            {"effect": "modifies", "target_type": "EntityType", "property": "feedback_weight"},
+            {"effect": "removes", "target_type": "Entity"},
+        ],
+    },
 ]
 
 
