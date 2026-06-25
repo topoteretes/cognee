@@ -34,17 +34,11 @@ class BaseConfig(BaseSettings):
         self.system_root_directory = ensure_absolute_path(self.system_root_directory)
         self.logs_root_directory = ensure_absolute_path(self.logs_root_directory)
 
-        # Set monitoring tool based on available keys
-        if self.langfuse_public_key and self.langfuse_secret_key:
-            self.monitoring_tool = Observer.LANGFUSE
-        elif self.langsmith_api_key:
+        if self.langsmith_api_key:
             self.monitoring_tool = Observer.LANGSMITH
 
         return self
 
-    langfuse_public_key: Optional[str] = os.getenv("LANGFUSE_PUBLIC_KEY")
-    langfuse_secret_key: Optional[str] = os.getenv("LANGFUSE_SECRET_KEY")
-    langfuse_host: Optional[str] = os.getenv("LANGFUSE_HOST")
     langsmith_api_key: Optional[str] = os.getenv("LANGSMITH_API_KEY")
     default_user_email: Optional[str] = os.getenv("DEFAULT_USER_EMAIL")
     default_user_password: Optional[str] = os.getenv("DEFAULT_USER_PASSWORD")
