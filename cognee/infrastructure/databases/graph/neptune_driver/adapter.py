@@ -635,6 +635,18 @@ class NeptuneGraphDB(GraphDBInterface):
             logger.error(f"Failed to delete graph: {error_msg}")
             raise Exception(f"Failed to delete graph: {error_msg}") from e
 
+    async def is_empty(self) -> bool:
+        """
+        Check if the graph is empty.
+        """
+        query = """
+        MATCH (n)
+        RETURN true
+        LIMIT 1;
+        """
+        query_result = await self.query(query)
+        return len(query_result) == 0
+
     async def get_graph_data(self) -> Tuple[List[Node], List[EdgeData]]:
         """
         Retrieve all nodes and edges within the graph.
