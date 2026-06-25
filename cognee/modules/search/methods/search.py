@@ -369,15 +369,13 @@ async def search_in_datasets_context(
             # still forward any per-call LLM/embedding overrides onto the async
             # context (set_database_global_context_variables applies these even
             # in single-tenant mode and ignores the dataset argument).
-            if llm_config is not None or embedding_config is not None:
-                async with set_database_global_context_variables(
-                    dataset.id if dataset else None,
-                    user.id,
-                    llm_config=llm_config,
-                    embedding_config=embedding_config,
-                ):
-                    return await get_retriever_output(**retriever_kwargs)
-            return await get_retriever_output(**retriever_kwargs)
+            async with set_database_global_context_variables(
+                dataset.id if dataset else None,
+                user.id,
+                llm_config=llm_config,
+                embedding_config=embedding_config,
+            ):
+                return await get_retriever_output(**retriever_kwargs)
 
         tasks.append(_search_without_context())
 

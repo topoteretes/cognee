@@ -1,26 +1,11 @@
-"""Build the truth subspace for a dataset's distilled session learnings.
+"""Build centroid-slot truth coordinates for a dataset's session learnings.
 
-The truth subspace is a small set of accepted lesson statements (the
-``session_learnings`` node set) used as semantic *anchors*. Each graph node is
-projected onto those anchors and the resulting coordinate vector is persisted on
-the node, so retrieval can later nudge scores toward statements the system has
-already accepted as true.
-
-The whole build is fail-open and OFF BY DEFAULT: callers opt in explicitly. When
-there are no anchors, nothing is written and an empty-ish result is returned, so
-baseline behaviour is untouched.
-
-Flow:
-
-1. ANCHORS   traverse the ``session_learnings`` node set -> anchor statements.
-2. UPSERT    build :class:`TruthAnchor` data points and upsert them.
-3. EMBED     embed the active anchor statements in memory.
-4. ACTIVE K  deterministically pick the most-recent ``k`` anchors + signature.
-5. LOAD      load the DocumentChunk subgraph and extract each node's index text.
-6. COORDS    embed node texts (batched) and project onto the active anchors.
-7. PERSIST   write per-node coordinate vectors via the graph engine.
+The ``session_learnings`` node set is replayed on every build into up to
+``DEFAULT_K`` deterministic centroid slots. DocumentChunk nodes are projected
+onto those slots and persisted with the centroid epoch used to compute them.
 """
 
+from datetime import datetime, timezone
 from typing import List, Optional, Union
 from uuid import UUID
 
@@ -37,8 +22,15 @@ from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
 
 from . import align
-from .constants import DEFAULT_K, TRUTH_ANCHOR_COLLECTION, TRUTH_NODE_SET
-from .models import TruthAnchor
+from .centroids import (
+    build_centroids_from_learning_vectors,
+    centroids_changed,
+    learning_id,
+    load_centroids,
+    pad_coords,
+    upsert_centroids,
+)
+from .constants import DEFAULT_K, TRUTH_NODE_SET
 
 logger = get_logger("truth_subspace")
 
@@ -54,7 +46,7 @@ def _node_index_text(node_data: dict) -> str:
     return str(text).strip()
 
 
-async def _fetch_anchor_statements(graph_engine) -> List[str]:
+async def _fetch_learning_statements(graph_engine) -> List[str]:
     """Read accepted lesson statements from the session_learnings node set.
 
     Traverses the ``session_learnings`` NodeSet to its member DocumentChunk
@@ -68,7 +60,7 @@ async def _fetch_anchor_statements(graph_engine) -> List[str]:
             node_name=TRUTH_NODE_SET,
         )
     except Exception as error:
-        logger.warning("truth_subspace: anchor lookup failed open: %s", error)
+        logger.warning("truth_subspace: learning lookup failed open: %s", error)
         return []
 
     statements: List[str] = []
@@ -112,22 +104,12 @@ async def build_truth_subspace(
     user=None,
     k: int = DEFAULT_K,
 ) -> dict:
-    """Build/refresh the truth subspace for ``dataset``.
-
-    Reads accepted session-learning statements as anchors, upserts them as
-    :class:`TruthAnchor` data points, embeds the active anchors, then projects
-    every DocumentChunk node onto those anchors and persists the per-node
-    coordinate vectors on the graph.
-
-    Fail-open and logged throughout, mirroring the ``improve()`` distillation
-    stage. Returns ``{"anchors": n, "nodes_scored": m, "signature": str}``.
-    When there are no anchors, returns early writing nothing.
-    """
+    """Build/refresh centroid slots and chunk coordinates for ``dataset``."""
     resolved_user = user if user is not None else session_user.get()
     if resolved_user is None or getattr(resolved_user, "id", None) is None:
         resolved_user = await get_default_user()
 
-    empty_result = {"anchors": 0, "nodes_scored": 0, "signature": ""}
+    empty_result = {"anchors": 0, "nodes_scored": 0, "signature": "", "truth_epoch": 0}
 
     dataset_obj = await _resolve_dataset(dataset, resolved_user)
     if dataset_obj is None:
@@ -138,43 +120,78 @@ async def build_truth_subspace(
         vector_engine = get_vector_engine()
         graph_engine = await get_graph_engine()
 
-        # Step 1: ANCHORS — accepted lesson statements from session_learnings.
-        statements = await _fetch_anchor_statements(graph_engine)
+        # Step 1: accepted learning statements from session_learnings.
+        statements = await _fetch_learning_statements(graph_engine)
         if not statements:
-            logger.info("truth_subspace: no anchors found, nothing to build")
+            logger.info("truth_subspace: no learnings found, nothing to build")
             return empty_result
 
-        # Step 2: UPSERT TruthAnchor data points. No belongs_to_set tag: the
-        # query-time anchor search is unscoped (apply_node_filter=False), and a
-        # NodeSet object does not serialize into the LanceDB anchor collection.
-        anchors = [
-            TruthAnchor(id=TruthAnchor.id_for(statement), statement=statement)
-            for statement in statements
-        ]
         try:
-            # Pre-create the collection. create_data_points auto-creates a missing
-            # collection while already holding VECTOR_DB_LOCK, then calls
-            # create_collection which re-acquires the same non-reentrant lock —
-            # a deadlock on first run. Creating it up front (lock acquired once)
-            # makes create_data_points take its collection-exists fast path.
-            await vector_engine.create_collection(
-                TRUTH_ANCHOR_COLLECTION, payload_schema=TruthAnchor
-            )
-            await vector_engine.create_data_points(TRUTH_ANCHOR_COLLECTION, anchors)
+            existing_centroids = await load_centroids(vector_engine, str(dataset_obj.id), k)
         except Exception as error:
-            logger.warning("truth_subspace: anchor upsert failed open: %s", error)
+            logger.debug("truth_subspace: centroid load failed open: %s", error)
+            existing_centroids = []
 
-        # Step 3 & 4: ACTIVE K + signature, then embed the active anchors.
-        active_anchors = align.active_anchor_order(anchors, k)
-        active_statements = [anchor.statement for anchor in active_anchors]
-        signature = align.anchor_signature([anchor.id for anchor in active_anchors])
+        previous_epoch = max((centroid.truth_epoch for centroid in existing_centroids), default=0)
+        learning_items = sorted(
+            {
+                learning_id(statement): statement
+                for statement in statements
+                if str(statement).strip()
+            }.items(),
+            key=lambda item: item[0],
+        )
+        learning_ids = [item[0] for item in learning_items]
+        learning_texts = [item[1] for item in learning_items]
+        signature = align.stable_signature(learning_ids)
 
         embedding_engine = get_embedding_engine()
         try:
-            anchor_vecs = await embedding_engine.embed_text(active_statements)
+            learning_vecs = await embedding_engine.embed_text(learning_texts)
         except Exception as error:
-            logger.warning("truth_subspace: anchor embedding failed open: %s", error)
-            return {"anchors": len(active_anchors), "nodes_scored": 0, "signature": signature}
+            logger.warning("truth_subspace: learning embedding failed open: %s", error)
+            return {
+                "anchors": len(existing_centroids),
+                "nodes_scored": 0,
+                "signature": signature,
+                "truth_epoch": previous_epoch,
+            }
+
+        updated_at = int(datetime.now(timezone.utc).timestamp() * 1000)
+        rebuilt_centroids = build_centroids_from_learning_vectors(
+            str(dataset_obj.id),
+            list(zip(learning_ids, learning_vecs)),
+            truth_epoch=previous_epoch,
+            updated_at=updated_at,
+            k=k,
+        )
+        if not rebuilt_centroids:
+            return empty_result
+
+        if centroids_changed(existing_centroids, rebuilt_centroids):
+            current_epoch = previous_epoch + 1
+            centroids = build_centroids_from_learning_vectors(
+                str(dataset_obj.id),
+                list(zip(learning_ids, learning_vecs)),
+                truth_epoch=current_epoch,
+                updated_at=updated_at,
+                k=k,
+            )
+            try:
+                await upsert_centroids(vector_engine, centroids)
+            except Exception as error:
+                logger.warning("truth_subspace: centroid upsert failed open: %s", error)
+                return {
+                    "anchors": len(centroids),
+                    "nodes_scored": 0,
+                    "signature": signature,
+                    "truth_epoch": current_epoch,
+                }
+        else:
+            current_epoch = previous_epoch
+            centroids = existing_centroids
+
+        centroid_vecs = [centroid.centroid for centroid in centroids]
 
         # Step 5: LOAD nodes — ALL DocumentChunk nodes in the dataset (the chunk
         # lane the hybrid retriever reranks). Scoping to the session_learnings
@@ -188,7 +205,12 @@ async def build_truth_subspace(
             nodes, _edges = await graph_engine.get_graph_data()
         except Exception as error:
             logger.warning("truth_subspace: node load failed open: %s", error)
-            return {"anchors": len(active_anchors), "nodes_scored": 0, "signature": signature}
+            return {
+                "anchors": len(centroids),
+                "nodes_scored": 0,
+                "signature": signature,
+                "truth_epoch": current_epoch,
+            }
 
         chunk_label = DocumentChunk.__name__
         scored: dict = {}
@@ -204,37 +226,59 @@ async def build_truth_subspace(
             node_texts.append(text)
 
         if not node_texts:
-            logger.info("truth_subspace: %d anchors, no scoreable nodes", len(active_anchors))
-            return {"anchors": len(active_anchors), "nodes_scored": 0, "signature": signature}
+            logger.info("truth_subspace: %d centroids, no scoreable nodes", len(centroids))
+            return {
+                "anchors": len(centroids),
+                "nodes_scored": 0,
+                "signature": signature,
+                "truth_epoch": current_epoch,
+            }
 
         # Step 6: EMBED node texts (batched) and compute coords per node.
         node_vecs = await _embed_in_batches(embedding_engine, node_texts)
         for node_id, node_vec in zip(node_ids, node_vecs):
             try:
-                coords = align.node_coords(node_vec, anchor_vecs)
-                scored[node_id] = coords
+                coords = pad_coords(align.node_coords(node_vec, centroid_vecs), k)
+                scored[node_id] = {
+                    "truth_alignment": coords,
+                    "truth_epoch": current_epoch,
+                }
             except Exception as error:
                 # Per-node fail-open: one bad node never sinks the batch.
                 logger.debug("truth_subspace: coords failed for node %s: %s", node_id, error)
 
         if not scored:
-            return {"anchors": len(active_anchors), "nodes_scored": 0, "signature": signature}
+            return {
+                "anchors": len(centroids),
+                "nodes_scored": 0,
+                "signature": signature,
+                "truth_epoch": current_epoch,
+            }
 
         # Step 7: PERSIST per-node coordinate vectors.
         try:
-            await graph_engine.set_node_truth_alignments(scored)
+            write_result = await graph_engine.set_node_truth_state(scored)
         except Exception as error:
             logger.warning("truth_subspace: persisting alignments failed open: %s", error)
-            return {"anchors": len(active_anchors), "nodes_scored": 0, "signature": signature}
+            return {
+                "anchors": len(centroids),
+                "nodes_scored": 0,
+                "signature": signature,
+                "truth_epoch": current_epoch,
+            }
+
+        nodes_scored = sum(1 for ok in write_result.values() if ok)
 
     logger.info(
-        "truth_subspace: built subspace -> anchors=%d nodes_scored=%d signature=%s",
-        len(active_anchors),
-        len(scored),
+        "truth_subspace: built subspace -> centroids=%d nodes_scored=%d epoch=%d signature=%s",
+        len(centroids),
+        nodes_scored,
+        current_epoch,
         signature,
     )
     return {
-        "anchors": len(active_anchors),
-        "nodes_scored": len(scored),
+        "anchors": len(centroids),
+        "nodes_scored": nodes_scored,
         "signature": signature,
+        "truth_epoch": current_epoch,
     }

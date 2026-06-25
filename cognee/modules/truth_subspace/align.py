@@ -8,7 +8,7 @@ that pass nothing leave baseline scoring untouched.
 
 import hashlib
 import math
-from typing import Any, Sequence
+from typing import Sequence
 
 
 def cosine(a: Sequence[float], b: Sequence[float]) -> float:
@@ -30,37 +30,37 @@ def cosine(a: Sequence[float], b: Sequence[float]) -> float:
     return dot / (math.sqrt(norm_a) * math.sqrt(norm_b))
 
 
-def node_coords(node_vec: Sequence[float], anchor_vecs: Sequence[Sequence[float]]) -> list[float]:
-    """Project ``node_vec`` onto each anchor (per-anchor cosine).
+def node_coords(node_vec: Sequence[float], basis_vecs: Sequence[Sequence[float]]) -> list[float]:
+    """Project ``node_vec`` onto each basis vector using cosine similarity.
 
-    The result is zero-padded to ``len(anchor_vecs)`` so the coordinate vector
-    always has one entry per anchor.
+    The result is zero-padded to ``len(basis_vecs)`` so the coordinate vector
+    always has one entry per basis vector.
     """
-    coords = [cosine(node_vec, anchor_vec) for anchor_vec in anchor_vecs]
-    # cosine already yields 0.0 per anchor, so length == len(anchor_vecs) holds;
+    coords = [cosine(node_vec, basis_vec) for basis_vec in basis_vecs]
+    # cosine already yields 0.0 per vector, so length == len(basis_vecs) holds;
     # pad defensively to keep the contract explicit.
-    while len(coords) < len(anchor_vecs):
+    while len(coords) < len(basis_vecs):
         coords.append(0.0)
     return coords
 
 
-def query_coords(q_vec: Sequence[float], anchor_vecs: Sequence[Sequence[float]]) -> list[float]:
-    """Project a query vector onto each anchor (per-anchor cosine), zero-padded."""
-    return node_coords(q_vec, anchor_vecs)
+def query_coords(q_vec: Sequence[float], basis_vecs: Sequence[Sequence[float]]) -> list[float]:
+    """Project a query vector onto each basis vector, zero-padded."""
+    return node_coords(q_vec, basis_vecs)
 
 
 def truth_score(node_coords: Sequence[float], q_coords: Sequence[float]) -> float:
-    """Truth score in [0, 1]: the node's alignment with the anchors the query cares about.
+    """Truth score in [0, 1]: the node's alignment with directions the query cares about.
 
-    A query-relevance-weighted average of the node's per-anchor alignments, using
+    A query-relevance-weighted average of the node's per-direction alignments, using
     the (clamped) query coordinates as weights. This is magnitude-sensitive on
-    purpose: a node strongly aligned with the anchors scores higher. Cosine of the
-    two coord vectors does NOT work here — every anchor cosine is positive, so all
+    purpose: a node strongly aligned with those directions scores higher. Cosine of the
+    two coord vectors does NOT work here — every basis cosine is positive, so all
     coord vectors share one octant and their cosine collapses to ~1 regardless of
     magnitude, erasing the very signal we rank on.
 
     Returns ``0.5`` (NEUTRAL) when either coord vector is empty, or when the query
-    aligns with no anchor (no weight to spread).
+    aligns with no direction (no weight to spread).
     """
     if not node_coords or not q_coords:
         return 0.5
@@ -83,27 +83,7 @@ def truth_factor(node_coords: Sequence[float], q_coords: Sequence[float]) -> flo
     return 0.75 + 0.5 * truth_score(node_coords, q_coords)
 
 
-def active_anchor_order(anchors: Sequence[Any], k: int) -> list:
-    """Deterministically order anchors and take the most recent ``k``.
-
-    Sorts by ``created_at`` descending, then by ``id`` (as a tiebreak), then
-    returns the first ``k``. Works with objects exposing ``created_at``/``id``
-    attributes or mappings with those keys.
-    """
-
-    def _get(anchor: Any, key: str) -> Any:
-        if isinstance(anchor, dict):
-            return anchor.get(key)
-        return getattr(anchor, key, None)
-
-    ordered = sorted(
-        anchors,
-        key=lambda anchor: (-(_get(anchor, "created_at") or 0), str(_get(anchor, "id"))),
-    )
-    return list(ordered[:k])
-
-
-def anchor_signature(ordered_ids: Sequence[Any]) -> str:
+def stable_signature(ordered_ids: Sequence[object]) -> str:
     """Stable sha1 signature of an ordered id sequence."""
-    joined = "|".join(str(anchor_id) for anchor_id in ordered_ids)
+    joined = "|".join(str(item_id) for item_id in ordered_ids)
     return hashlib.sha1(joined.encode("utf-8")).hexdigest()

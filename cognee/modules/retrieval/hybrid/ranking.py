@@ -10,7 +10,8 @@ def rank_chunk_summary_pairs(
     use_importance_weight: bool,
     use_truth_weight: bool = False,
     q_coords: Optional[list[float]] = None,
-    coords_by_id: Optional[dict] = None,
+    truth_state_by_id: Optional[dict] = None,
+    current_truth_epoch: Optional[int] = None,
 ) -> list[dict]:
     if limit <= 0:
         return []
@@ -36,8 +37,10 @@ def rank_chunk_summary_pairs(
             final_score *= _importance_factor(chunk)
 
         chunk_id = pair["chunk_id"] or result_id(chunk) or ""
-        if use_truth_weight and q_coords:
-            final_score *= truth_factor((coords_by_id or {}).get(chunk_id, []), q_coords)
+        if use_truth_weight and q_coords and current_truth_epoch is not None:
+            truth_state = (truth_state_by_id or {}).get(chunk_id, {})
+            if truth_state.get("truth_epoch") == current_truth_epoch:
+                final_score *= truth_factor(truth_state.get("truth_alignment", []), q_coords)
 
         ranked.append((final_score, rrf_score, min(ranks), chunk_id, pair))
 

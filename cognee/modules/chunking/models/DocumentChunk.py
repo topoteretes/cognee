@@ -42,4 +42,5 @@ class DocumentChunk(DataPoint):
     # and not part of id/dedup.
     truth_alignment: Optional[list[float]] = None
     truth_subspace_signature: Optional[str] = None
+    truth_epoch: Optional[int] = None
     metadata: dict = {"index_fields": ["text"]}

@@ -3,10 +3,10 @@
 What it shows
 -------------
 A finished "session" teaches the system a preference (here: the user cares about
-*coffee*, not tea). We distill that into a **truth subspace** (anchor vectors built
-from the lessons), project every corpus chunk onto it, and store the per-chunk
-coordinates on the graph node. At query time the HYBRID retriever reads those
-coordinates and nudges ranking toward the learned preference.
+*coffee*, not tea). We distill that into deterministic centroid slots, project
+every corpus chunk onto those slots, and store the per-chunk coordinates on the
+graph node. At query time the HYBRID retriever reads current-epoch coordinates
+and nudges ranking toward the learned preference.
 
 The demo retrieves the SAME ambiguous query twice — once with truth weighting OFF
 (exact baseline) and once ON — and prints a side-by-side rank diff so you can see
@@ -44,7 +44,7 @@ from cognee.modules.users.methods import get_default_user
 
 DATASET = "truth_subspace_demo"
 CORPUS_NODE_SET = ["beverages"]
-LESSONS_NODE_SET = ["session_learnings"]  # the node set build_truth_subspace reads anchors from
+LESSONS_NODE_SET = ["session_learnings"]  # the node set build_truth_subspace reads learnings from
 
 # A small two-theme corpus. Each short doc becomes its own chunk.
 CORPUS = [
@@ -58,8 +58,8 @@ CORPUS = [
     "Matcha is a powdered green tea whisked into hot water with a bamboo whisk until frothy.",
 ]
 
-# What a finished session "learned" about the user. These become the truth anchors.
-# They are about coffee, so coffee chunks align more strongly with the subspace.
+# What a finished session "learned" about the user. These fill the truth centroid
+# slots. They are about coffee, so coffee chunks align more strongly.
 LESSONS = [
     "The user is a dedicated coffee drinker who cares about espresso extraction and pour-over technique.",
     "We learned the user wants coffee brewing recommendations specifically, and is not interested in tea.",
@@ -151,12 +151,12 @@ async def main():
     await cognee.add(LESSONS, dataset_name=DATASET, node_set=LESSONS_NODE_SET)
     await cognee.cognify(datasets=[DATASET])
 
-    # 4) Build the truth subspace: anchors from lessons → coords on every corpus chunk.
+    # 4) Build the truth subspace: lesson centroids -> coords on every corpus chunk.
     print("\n[4/5] Building the truth subspace (build_truth_subspace)…")
     result = await build_truth_subspace(dataset=DATASET, session_ids=None, user=user)
-    print(f"      anchors={result['anchors']}  nodes_scored={result['nodes_scored']}")
+    print(f"      centroid_slots={result['anchors']}  nodes_scored={result['nodes_scored']}")
     if result["anchors"] == 0 or result["nodes_scored"] == 0:
-        print("      ⚠ No anchors or no scored nodes — truth weighting will be a no-op.")
+        print("      ⚠ No centroid slots or no scored nodes — truth weighting will be a no-op.")
 
     # 5) Truth-weighted ranking — same query, truth weighting ON.
     print("\n[5/5] Retrieval with truth weighting ON for the same query…")
