@@ -9,7 +9,8 @@ from typing import AsyncGenerator, List
 from contextlib import asynccontextmanager
 from sqlalchemy.orm import joinedload
 from sqlalchemy.exc import NoResultFound
-from sqlalchemy import NullPool, text, select, MetaData, Table, delete, inspect, func
+# from sqlalchemy import NullPool, text, select, MetaData, Table, delete, inspect, func
+from sqlalchemy import NullPool, text, select, MetaData, Table, delete, inspect, func, event as sa_event
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 
 from cognee.modules.data.models.Data import Data
@@ -71,13 +72,22 @@ class SQLAlchemyAdapter:
                     connection_string = prefix + "///" + self.temp_db_file
 
                 run_sync(self.pull_from_s3())
-
         if "sqlite" in connection_string:
+            # from sqlalchemy import event as sa_event
+
             self.engine = create_async_engine(
                 connection_string,
                 poolclass=NullPool,
                 connect_args={**{"timeout": 30}, **final_connect_args},
             )
+
+            @sa_event.listens_for(self.engine.sync_engine, "connect")
+            def _set_sqlite_pragmas(dbapi_connection, connection_record):
+                cursor = dbapi_connection.cursor()
+                cursor.execute("PRAGMA journal_mode=WAL")
+                cursor.execute("PRAGMA busy_timeout=30000")
+                cursor.execute("PRAGMA synchronous=NORMAL")
+                cursor.close()
         else:
             # Transform pool_args from tuple into dict if provided
             # Note: For caching purposes, pool_args is stored as a sorted tuple of key-value pairs in the config
