@@ -108,12 +108,12 @@ class NeptuneGraphDB(GraphDBInterface):
         )
 
         # Initialize Neptune Analytics client using langchain_aws
-        self._client: NeptuneAnalyticsGraph = self._initialize_client()
+        self._client: Any = self._initialize_client()
         logger.info(
             f'Initialized Neptune Analytics adapter for graph: "{graph_id}" in region: "{self.region}"'
         )
 
-    def _initialize_client(self) -> Optional[NeptuneAnalyticsGraph]:
+    def _initialize_client(self) -> Optional[Any]:
         """
         Initialize the Neptune Analytics client using langchain_aws.
 
