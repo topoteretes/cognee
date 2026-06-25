@@ -37,7 +37,29 @@ class VectorConfig(BaseSettings):
     vector_db_subprocess_enabled: bool = True
     vector_pool_args: Union[str, None] = None
 
-    model_config = SettingsConfigDict(env_file=".env", extra="allow")
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    @pydantic.model_validator(mode="before")
+    @classmethod
+    def unify_db_config(cls, data: dict) -> dict:
+        """Fallback to DB_* environment variables if specific VECTOR_DB_* ones are missing."""
+        mapping = {
+            "vector_db_host": "DB_HOST",
+            "vector_db_port": "DB_PORT",
+            "vector_db_username": "DB_USERNAME",
+            "vector_db_password": "DB_PASSWORD",
+            "vector_db_name": "DB_NAME",
+            "vector_db_provider": "DB_PROVIDER",
+        }
+        for vector_field, db_env in mapping.items():
+            if not data.get(vector_field) and os.getenv(db_env):
+                data[vector_field] = os.getenv(db_env)
+                
+            # If still missing, check if it's in the data dict under the generic name (parsed from .env by Pydantic if it overlaps)
+            if not data.get(vector_field) and db_env.lower() in data:
+                data[vector_field] = data[db_env.lower()]
+                
+        return data
 
     @pydantic.model_validator(mode="after")
     def fill_derived(self):

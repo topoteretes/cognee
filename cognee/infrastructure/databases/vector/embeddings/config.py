@@ -8,13 +8,6 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger("embedding_config")
 
 
-# Hard fallback when neither litellm nor fastembed knows the model. This used
-# to be the unconditional default and was the source of the silent
-# "Vector(3072)" mismatch on every non-OpenAI-text-embedding-3-large embedder.
-# Keep it for back-compat (the OpenAI default model still resolves to this via
-# litellm), but log a warning when we hit it without a real lookup.
-_FALLBACK_DIMENSIONS = 3072
-
 
 def _resolve_embedding_dimensions(provider: Optional[str], model: Optional[str]) -> Optional[int]:
     """Best-effort lookup of the embedding dimensionality for a provider+model.
@@ -68,8 +61,8 @@ class EmbeddingConfig(BaseSettings):
     - to_dict: Serialize the configuration settings to a dictionary.
     """
 
-    embedding_provider: Optional[str] = "openai"
-    embedding_model: Optional[str] = "openai/text-embedding-3-large"
+    embedding_provider: Optional[str] = None
+    embedding_model: Optional[str] = None
     # Resolved in model_post_init when not set explicitly. Was hard-defaulted
     # to 3072, which silently broke every non-OpenAI-text-embedding-3-large
     # embedder by causing a Vector(3072) / 384-dim (etc.) mismatch on first
@@ -81,30 +74,27 @@ class EmbeddingConfig(BaseSettings):
     embedding_max_completion_tokens: Optional[int] = 8191
     embedding_batch_size: Optional[int] = None
     huggingface_tokenizer: Optional[str] = None
-    model_config = SettingsConfigDict(env_file=".env", extra="allow")
+
+    embedding_rate_limit_enabled: bool = False
+    embedding_rate_limit_requests: int = 60
+    embedding_rate_limit_interval: int = 60  # in seconds (default is 60 requests per minute)
+    embedding_rate_limit_tokens: int = 0  # max tokens per interval (0 = disabled)
+
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     def model_post_init(self, __context) -> None:
-        if self.embedding_dimensions is None:
+        if self.embedding_dimensions is None and self.embedding_provider and self.embedding_model:
             derived = _resolve_embedding_dimensions(self.embedding_provider, self.embedding_model)
             if derived is not None:
                 self.embedding_dimensions = derived
             else:
-                logger.warning(
-                    "Could not auto-derive embedding_dimensions for "
-                    "provider=%r model=%r. Falling back to %d. If your embedder "
-                    "produces vectors of a different size, set EMBEDDING_DIMENSIONS "
-                    "explicitly — otherwise the first write into the vector store "
-                    "will fail with a shape mismatch.",
-                    self.embedding_provider,
-                    self.embedding_model,
-                    _FALLBACK_DIMENSIONS,
+                raise ValueError(
+                    f"Could not auto-derive embedding_dimensions for provider='{self.embedding_provider}' "
+                    f"model='{self.embedding_model}'. You must set EMBEDDING_DIMENSIONS explicitly."
                 )
-                self.embedding_dimensions = _FALLBACK_DIMENSIONS
 
-        if not self.embedding_batch_size and self.embedding_provider.lower() == "openai":
-            self.embedding_batch_size = 36
-        elif not self.embedding_batch_size:
-            self.embedding_batch_size = 36
+        if self.embedding_provider and not self.embedding_batch_size:
+            self.embedding_batch_size = 36 if self.embedding_provider.lower() == "openai" else 36
 
     def to_dict(self) -> dict:
         """
@@ -124,6 +114,9 @@ class EmbeddingConfig(BaseSettings):
             "embedding_api_version": self.embedding_api_version,
             "embedding_max_completion_tokens": self.embedding_max_completion_tokens,
             "huggingface_tokenizer": self.huggingface_tokenizer,
+            "embedding_rate_limit_enabled": self.embedding_rate_limit_enabled,
+            "embedding_rate_limit_requests": self.embedding_rate_limit_requests,
+            "embedding_rate_limit_interval": self.embedding_rate_limit_interval,
         }
 
 

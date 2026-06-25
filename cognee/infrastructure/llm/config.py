@@ -50,13 +50,6 @@ class LLMConfig(BaseSettings):
     llm_streaming: bool = False
     llm_max_completion_tokens: int = 16384
 
-    baml_llm_provider: str = "openai"
-    baml_llm_model: str = "gpt-5-mini"
-    baml_llm_endpoint: str = ""
-    baml_llm_api_key: str | None = None
-    baml_llm_temperature: float = 0.0
-    baml_llm_api_version: str = ""
-
     transcription_model: str = "whisper-1"
     graph_prompt_path: str = "generate_graph_prompt.txt"
     temporal_graph_prompt_path: str = "generate_event_graph_prompt.txt"
@@ -65,10 +58,6 @@ class LLMConfig(BaseSettings):
     llm_rate_limit_requests: int = 60
     llm_rate_limit_interval: int = 60  # in seconds (default is 60 requests per minute)
     llm_rate_limit_tokens: int = 0  # max tokens per interval (0 = disabled)
-    embedding_rate_limit_enabled: bool = False
-    embedding_rate_limit_requests: int = 60
-    embedding_rate_limit_interval: int = 60  # in seconds (default is 60 requests per minute)
-    embedding_rate_limit_tokens: int = 0  # max tokens per interval (0 = disabled)
 
     llama_cpp_model_path: str | None = None
     llama_cpp_n_ctx: int = 2048
@@ -85,7 +74,7 @@ class LLMConfig(BaseSettings):
 
     baml_registry: Any | None = None
 
-    model_config = SettingsConfigDict(env_file=".env", extra="allow")
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     @model_validator(mode="after")
     def strip_quotes_from_strings(self) -> "LLMConfig":
@@ -99,16 +88,11 @@ class LLMConfig(BaseSettings):
             "llm_api_key",
             "llm_endpoint",
             "llm_api_version",
-            "baml_llm_api_key",
-            "baml_llm_endpoint",
-            "baml_llm_api_version",
             "fallback_api_key",
             "fallback_endpoint",
             "fallback_model",
             "llm_provider",
             "llm_model",
-            "baml_llm_provider",
-            "baml_llm_model",
             "llama_cpp_model_path",
             "llama_cpp_chat_format",
         ]
@@ -124,6 +108,18 @@ class LLMConfig(BaseSettings):
 
         return self
 
+    @model_validator(mode="after")
+    def set_instructor_mode(self) -> "LLMConfig":
+        if not self.llm_instructor_mode and self.llm_provider:
+            provider = self.llm_provider.lower()
+            if provider == "anthropic":
+                self.llm_instructor_mode = "MODE_JSON_SCHEMA"
+            elif provider in ("openai", "litellm"):
+                self.llm_instructor_mode = "MODE_TOOLS"
+            else:
+                self.llm_instructor_mode = "MODE_JSON"
+        return self
+
     def model_post_init(self, __context) -> None:
         """Initialize the BAML registry after the model is created."""
         # Check if BAML is selected as structured output framework but not available
@@ -136,20 +132,20 @@ class LLMConfig(BaseSettings):
             self.baml_registry = ClientRegistry()
 
             raw_options = {
-                "model": self.baml_llm_model,
-                "temperature": self.baml_llm_temperature,
-                "api_key": self.baml_llm_api_key,
-                "base_url": self.baml_llm_endpoint,
-                "api_version": self.baml_llm_api_version,
+                "model": self.llm_model,
+                "temperature": self.llm_temperature,
+                "api_key": self.llm_api_key,
+                "base_url": self.llm_endpoint,
+                "api_version": self.llm_api_version,
             }
 
             # Note: keep the item only when the value is not None or an empty string (they would override baml default values)
             options = {k: v for k, v in raw_options.items() if v not in (None, "")}
             self.baml_registry.add_llm_client(
-                name=self.baml_llm_provider, provider=self.baml_llm_provider, options=options
+                name=self.llm_provider, provider=self.llm_provider, options=options
             )
             # Sets the primary client
-            self.baml_registry.set_primary(self.baml_llm_provider)
+            self.baml_registry.set_primary(self.llm_provider)
 
     @model_validator(mode="after")
     def ensure_env_vars_for_ollama(self) -> "LLMConfig":
@@ -246,9 +242,6 @@ class LLMConfig(BaseSettings):
             "rate_limit_enabled": self.llm_rate_limit_enabled,
             "rate_limit_requests": self.llm_rate_limit_requests,
             "rate_limit_interval": self.llm_rate_limit_interval,
-            "embedding_rate_limit_enabled": self.embedding_rate_limit_enabled,
-            "embedding_rate_limit_requests": self.embedding_rate_limit_requests,
-            "embedding_rate_limit_interval": self.embedding_rate_limit_interval,
             "fallback_api_key": self.fallback_api_key,
             "fallback_endpoint": self.fallback_endpoint,
             "fallback_model": self.fallback_model,

@@ -64,7 +64,29 @@ class GraphConfig(BaseSettings):
     kuzu_buffer_pool_size: int = Field(DEFAULT_KUZU_BUFFER_POOL_SIZE, env="KUZU_BUFFER_POOL_SIZE")
     kuzu_max_db_size: int = Field(DEFAULT_KUZU_MAX_DB_SIZE, env="KUZU_MAX_DB_SIZE")
 
-    model_config = SettingsConfigDict(env_file=".env", extra="allow", populate_by_name=True)
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore", populate_by_name=True)
+
+    @pydantic.model_validator(mode="before")
+    @classmethod
+    def unify_db_config(cls, data: dict) -> dict:
+        """Fallback to DB_* environment variables if specific GRAPH_DATABASE_* ones are missing."""
+        mapping = {
+            "graph_database_host": "DB_HOST",
+            "graph_database_port": "DB_PORT",
+            "graph_database_username": "DB_USERNAME",
+            "graph_database_password": "DB_PASSWORD",
+            "graph_database_name": "DB_NAME",
+            "graph_database_provider": "DB_PROVIDER",
+        }
+        for graph_field, db_env in mapping.items():
+            if not data.get(graph_field) and os.getenv(db_env):
+                data[graph_field] = os.getenv(db_env)
+                
+            # If still missing, check if it's in the data dict under the generic name (parsed from .env by Pydantic if it overlaps)
+            if not data.get(graph_field) and db_env.lower() in data:
+                data[graph_field] = data[db_env.lower()]
+                
+        return data
 
     # Model validator updates graph_filename and path dynamically after class creation based on current database provider
     # If no specific graph_filename or path are provided
