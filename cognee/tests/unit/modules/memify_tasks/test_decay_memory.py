@@ -56,10 +56,10 @@ def _patch_engine(mock):
 # ----------------------- pure core -----------------------
 def test_decay_is_deterministic_half_life():
     one_hl = HALF_LIFE_DAYS * _MS_PER_DAY
-    assert decay_weight(0.8, 0, one_hl) == 0.8                  # no age -> unchanged
+    assert decay_weight(0.8, 0, one_hl) == 0.8  # no age -> unchanged
     assert abs(decay_weight(0.8, one_hl, one_hl) - 0.4) < 1e-9  # one half-life -> halves
     assert abs(decay_weight(0.8, 2 * one_hl, one_hl) - 0.2) < 1e-9
-    assert decay_weight(0.5, 5, 0) == 0.5                       # guard: half_life 0 -> no decay
+    assert decay_weight(0.5, 5, 0) == 0.5  # guard: half_life 0 -> no decay
 
 
 def test_degrees_and_prune_selection():
@@ -69,37 +69,52 @@ def test_degrees_and_prune_selection():
     # a self-loop (Cognee writes a SELF edge per node) does not count as a connection -> orphan
     assert node_degrees(["a"], [("a", "a", "SELF", {})]) == {"a": 0}
     pruned = select_prune({"orphan": 0.01, "leaf": 0.01, "mid": 0.9}, degrees, min_weight=0.05)
-    assert "mid" not in pruned          # above threshold -> kept
-    assert pruned[0] == "orphan"        # orphan-first (lowest degree)
+    # both the degree-0 orphan AND the degree-1 leaf are pruned (degree <= 1), 'mid' (degree 2) is kept.
+    # Pinning the exact list guards the <=1 leaf boundary itself: a regression to "< 1" would silently
+    # stop pruning leaves (gutting the feature) yet still satisfy a looser "orphan first / mid absent" check.
+    assert pruned == [
+        "orphan",
+        "leaf",
+    ]  # orphan-first ordering, leaf included, connector 'mid' kept
     # a below-threshold but well-connected node is NEVER pruned (can't orphan a live subgraph)
-    pruned_hub = select_prune({"orphan": 0.01, "hub": 0.01}, {"orphan": 0, "hub": 3}, min_weight=0.05)
+    pruned_hub = select_prune(
+        {"orphan": 0.01, "hub": 0.01}, {"orphan": 0, "hub": 3}, min_weight=0.05
+    )
     assert pruned_hub == ["orphan"]
 
 
 # ----------------------- task (mocked graph) -----------------------
 @pytest.mark.asyncio
 async def test_dry_run_reports_without_mutating():
-    nodes = [_node("fresh", 0.8, 0), _node("old", 0.8, HALF_LIFE_DAYS)]  # 'old' aged exactly one half-life
+    nodes = [
+        _node("fresh", 0.8, 0),
+        _node("old", 0.8, HALF_LIFE_DAYS),
+    ]  # 'old' aged exactly one half-life
     graph = InMemoryGraph(nodes, [])
     with _patch_engine(graph):
         result = await decay_memory(
             half_life_days=HALF_LIFE_DAYS, min_weight=0.05, dry_run=True, now_ms=NOW_MS
         )
     assert result["scanned"] == 2
-    assert result["decayed"] == 1          # only 'old' changed
+    assert result["decayed"] == 1  # only 'old' changed
     assert result["dry_run"] is True
-    assert graph.weight_writes == {}       # dry_run -> graph untouched
+    assert graph.weight_writes == {}  # dry_run -> graph untouched
     assert graph.deleted == []
 
 
 @pytest.mark.asyncio
 async def test_prune_orphans_below_threshold_and_protect_types():
     nodes = [
-        _node("stale_orphan", 0.1, 300),                       # very old + small -> below min, orphan
-        _node("protected", 0.1, 300, node_type="EntityType"),  # would qualify, but type is protected
-        _node("fresh", 0.9, 0),                                # stays
+        _node("stale_orphan", 0.1, 300),  # below min, degree-0 orphan
+        _node("stale_leaf", 0.1, 300),  # below min, degree-1 leaf (only edge -> 'fresh')
+        _node(
+            "protected", 0.1, 300, node_type="EntityType"
+        ),  # would qualify, but type is protected
+        _node("fresh", 0.9, 0),  # stays (high weight); keeps its single edge
     ]
-    graph = InMemoryGraph(nodes, edges=[])  # stale_orphan has degree 0
+    # 'stale_leaf' -> 'fresh' makes stale_leaf a degree-1 leaf, so the prune runs the <=1 path
+    # all the way through delete_nodes (not just the degree-0 orphan case).
+    graph = InMemoryGraph(nodes, edges=[("stale_leaf", "fresh", "REL", {})])
     with _patch_engine(graph):
         result = await decay_memory(
             half_life_days=HALF_LIFE_DAYS,
@@ -108,7 +123,8 @@ async def test_prune_orphans_below_threshold_and_protect_types():
             dry_run=False,
             now_ms=NOW_MS,
         )
-    assert "protected" not in result["pruned_ids"]   # protected type never scanned/pruned
-    assert "stale_orphan" in result["pruned_ids"]
-    assert "fresh" not in result["pruned_ids"]
-    assert graph.deleted == result["pruned_ids"]     # real delete happened (dry_run=False)
+    assert "protected" not in result["pruned_ids"]  # protected type never scanned/pruned
+    assert "stale_orphan" in result["pruned_ids"]  # degree-0 orphan pruned
+    assert "stale_leaf" in result["pruned_ids"]  # degree-1 leaf pruned via the <=1 path
+    assert "fresh" not in result["pruned_ids"]  # high weight -> kept (its only edge is dropped)
+    assert graph.deleted == result["pruned_ids"]  # real delete happened (dry_run=False)
