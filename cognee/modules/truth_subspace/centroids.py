@@ -71,14 +71,46 @@ def build_centroids_from_learning_vectors(
     updated_at: int | None = None,
     k: int = DEFAULT_K,
 ) -> list[TruthCentroidPayload]:
+    return extend_centroids_with_learning_vectors(
+        dataset_id,
+        [],
+        learning_vectors,
+        truth_epoch=truth_epoch,
+        updated_at=updated_at,
+        k=k,
+    )
+
+
+def extend_centroids_with_learning_vectors(
+    dataset_id: str,
+    existing_centroids: Sequence[TruthCentroidPayload],
+    learning_vectors: Sequence[tuple[str, Sequence[float]]],
+    truth_epoch: int,
+    updated_at: int | None = None,
+    k: int = DEFAULT_K,
+) -> list[TruthCentroidPayload]:
     if updated_at is None:
         updated_at = int(datetime.now(timezone.utc).timestamp() * 1000)
 
-    slots: list[dict] = []
-    for _learning_id, vector in learning_vectors:
+    slots = [
+        {
+            "centroid": list(centroid.centroid),
+            "count": int(centroid.count),
+            "learning_ids": list(centroid.learning_ids),
+        }
+        for centroid in sorted(existing_centroids, key=lambda centroid: centroid.slot)[:k]
+    ]
+    seen_learning_ids = {learning_id for slot in slots for learning_id in slot["learning_ids"]}
+
+    for new_learning_id, vector in learning_vectors:
+        if new_learning_id in seen_learning_ids:
+            continue
         normalized_vector = normalize(vector)
         if len(slots) < k:
-            slots.append({"centroid": normalized_vector, "count": 1})
+            slots.append(
+                {"centroid": normalized_vector, "count": 1, "learning_ids": [new_learning_id]}
+            )
+            seen_learning_ids.add(new_learning_id)
             continue
 
         nearest_slot = max(
@@ -86,12 +118,10 @@ def build_centroids_from_learning_vectors(
             key=lambda index: cosine(normalized_vector, slots[index]["centroid"]),
         )
         slot = slots[nearest_slot]
-        slot["centroid"] = weighted_centroid(
-            slot["centroid"],
-            slot["count"],
-            normalized_vector,
-        )
+        slot["centroid"] = weighted_centroid(slot["centroid"], slot["count"], normalized_vector)
         slot["count"] += 1
+        slot["learning_ids"].append(new_learning_id)
+        seen_learning_ids.add(new_learning_id)
 
     return [
         TruthCentroidPayload(
@@ -101,8 +131,9 @@ def build_centroids_from_learning_vectors(
             truth_epoch=int(truth_epoch),
             updated_at=updated_at,
             centroid=list(slot["centroid"]),
+            learning_ids=list(slot["learning_ids"]),
         )
-        for slot_index, slot in enumerate(slots[:k])
+        for slot_index, slot in enumerate(slots)
     ]
 
 
@@ -122,6 +153,8 @@ def centroids_changed(
         if old_centroid.count != new_centroid.count:
             return True
         if len(old_centroid.centroid) != len(new_centroid.centroid):
+            return True
+        if old_centroid.learning_ids != new_centroid.learning_ids:
             return True
         for old_value, new_value in zip(old_centroid.centroid, new_centroid.centroid):
             if abs(float(old_value) - float(new_value)) > tolerance:

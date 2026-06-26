@@ -37,18 +37,3 @@ async def test_get_node_truth_state_returns_alignment_and_epoch():
 
     assert state["n1"] == {"truth_alignment": [0.1, 0.2], "truth_epoch": 3}
     assert state["n2"] == {"truth_alignment": [], "truth_epoch": None}
-
-
-@pytest.mark.asyncio
-async def test_set_node_truth_alignments_keeps_compatibility_wrapper():
-    adapter = LadybugAdapter.__new__(LadybugAdapter)
-    adapter.get_nodes = AsyncMock(return_value=[{"id": "n1", "text": "hello"}])
-    adapter._execute_node_truth_state_updates = AsyncMock(return_value={"n1"})
-
-    result = await adapter.set_node_truth_alignments({"n1": [0.5]})
-
-    assert result == {"n1": True}
-    updates = adapter._execute_node_truth_state_updates.await_args.args[0]
-    properties = json.loads(updates[0]["properties"])
-    assert properties["truth_alignment"] == [0.5]
-    assert "truth_epoch" not in properties

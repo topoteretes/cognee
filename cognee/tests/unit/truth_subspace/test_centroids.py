@@ -7,6 +7,7 @@ from cognee.modules.truth_subspace.centroids import (
     build_centroids_from_learning_vectors,
     centroid_id,
     centroids_changed,
+    extend_centroids_with_learning_vectors,
     learning_id,
     normalize,
     pad_coords,
@@ -71,6 +72,37 @@ def test_build_centroids_is_deterministic_for_same_inputs():
 
     assert [centroid.centroid for centroid in first] == [centroid.centroid for centroid in second]
     assert [centroid.count for centroid in first] == [centroid.count for centroid in second]
+
+
+def test_extend_centroids_adds_new_learning_ids_without_double_counting():
+    existing = build_centroids_from_learning_vectors(
+        "dataset-1",
+        [("a", [1.0, 0.0])],
+        truth_epoch=1,
+        updated_at=123,
+        k=2,
+    )
+
+    first = extend_centroids_with_learning_vectors(
+        "dataset-1",
+        existing,
+        [("a", [1.0, 0.0]), ("b", [0.0, 1.0])],
+        truth_epoch=2,
+        updated_at=456,
+        k=2,
+    )
+    second = extend_centroids_with_learning_vectors(
+        "dataset-1",
+        first,
+        [("b", [0.0, 1.0])],
+        truth_epoch=3,
+        updated_at=789,
+        k=2,
+    )
+
+    assert sum(centroid.count for centroid in first) == 2
+    assert [centroid.learning_ids for centroid in first] == [["a"], ["b"]]
+    assert [centroid.count for centroid in second] == [centroid.count for centroid in first]
 
 
 def test_centroids_changed_ignores_epoch_only_changes():

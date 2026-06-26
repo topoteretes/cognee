@@ -1725,20 +1725,6 @@ class LadybugAdapter(GraphDBInterface):
         updated_ids = await self._execute_node_truth_state_updates(updates)
         return {nid: (nid in updated_ids) for nid in node_ids}
 
-    async def get_node_truth_alignments(self, node_ids: List[str]) -> Dict[str, List[float]]:
-        states = await self.get_node_truth_state(node_ids)
-        return {node_id: state.get("truth_alignment", []) for node_id, state in states.items()}
-
-    async def set_node_truth_alignments(
-        self, node_truth_alignments: Dict[str, List[float]]
-    ) -> Dict[str, bool]:
-        return await self.set_node_truth_state(
-            {
-                node_id: {"truth_alignment": alignment}
-                for node_id, alignment in node_truth_alignments.items()
-            }
-        )
-
     async def get_edge_feedback_weights(self, edge_object_ids: List[str]) -> Dict[str, float]:
         if not edge_object_ids:
             return {}

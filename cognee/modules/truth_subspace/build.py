@@ -25,12 +25,13 @@ from . import align
 from .centroids import (
     build_centroids_from_learning_vectors,
     centroids_changed,
+    extend_centroids_with_learning_vectors,
     learning_id,
     load_centroids,
     pad_coords,
     upsert_centroids,
 )
-from .constants import DEFAULT_K, TRUTH_NODE_SET
+from .constants import DEFAULT_K, TRUTH_NODE_SET, truth_session_node_set
 
 logger = get_logger("truth_subspace")
 
@@ -46,7 +47,13 @@ def _node_index_text(node_data: dict) -> str:
     return str(text).strip()
 
 
-async def _fetch_learning_statements(graph_engine) -> List[str]:
+def _truth_node_sets(session_ids: Optional[List[str]]) -> List[str]:
+    if not session_ids:
+        return TRUTH_NODE_SET
+    return [truth_session_node_set(session_id) for session_id in session_ids if session_id]
+
+
+async def _fetch_learning_statements(graph_engine, session_ids: Optional[List[str]]) -> List[str]:
     """Read accepted lesson statements from the session_learnings node set.
 
     Traverses the ``session_learnings`` NodeSet to its member DocumentChunk
@@ -57,7 +64,7 @@ async def _fetch_learning_statements(graph_engine) -> List[str]:
     try:
         nodes, _edges = await graph_engine.get_nodeset_subgraph(
             node_type=NodeSet,
-            node_name=TRUTH_NODE_SET,
+            node_name=_truth_node_sets(session_ids),
         )
     except Exception as error:
         logger.warning("truth_subspace: learning lookup failed open: %s", error)
@@ -121,7 +128,7 @@ async def build_truth_subspace(
         graph_engine = await get_graph_engine()
 
         # Step 1: accepted learning statements from session_learnings.
-        statements = await _fetch_learning_statements(graph_engine)
+        statements = await _fetch_learning_statements(graph_engine, session_ids)
         if not statements:
             logger.info("truth_subspace: no learnings found, nothing to build")
             return empty_result
@@ -158,25 +165,33 @@ async def build_truth_subspace(
             }
 
         updated_at = int(datetime.now(timezone.utc).timestamp() * 1000)
-        rebuilt_centroids = build_centroids_from_learning_vectors(
-            str(dataset_obj.id),
-            list(zip(learning_ids, learning_vecs)),
-            truth_epoch=previous_epoch,
-            updated_at=updated_at,
-            k=k,
-        )
+        learning_vectors = list(zip(learning_ids, learning_vecs))
+
+        def build_for_epoch(truth_epoch: int):
+            if session_ids:
+                return extend_centroids_with_learning_vectors(
+                    str(dataset_obj.id),
+                    existing_centroids,
+                    learning_vectors,
+                    truth_epoch=truth_epoch,
+                    updated_at=updated_at,
+                    k=k,
+                )
+            return build_centroids_from_learning_vectors(
+                str(dataset_obj.id),
+                learning_vectors,
+                truth_epoch=truth_epoch,
+                updated_at=updated_at,
+                k=k,
+            )
+
+        rebuilt_centroids = build_for_epoch(previous_epoch)
         if not rebuilt_centroids:
             return empty_result
 
         if centroids_changed(existing_centroids, rebuilt_centroids):
             current_epoch = previous_epoch + 1
-            centroids = build_centroids_from_learning_vectors(
-                str(dataset_obj.id),
-                list(zip(learning_ids, learning_vecs)),
-                truth_epoch=current_epoch,
-                updated_at=updated_at,
-                k=k,
-            )
+            centroids = build_for_epoch(current_epoch)
             try:
                 await upsert_centroids(vector_engine, centroids)
             except Exception as error:

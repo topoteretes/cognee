@@ -1,4 +1,5 @@
 from pydantic import BaseModel
+from pydantic import Field
 
 
 class TruthCentroidPayload(BaseModel):
@@ -8,3 +9,4 @@ class TruthCentroidPayload(BaseModel):
     truth_epoch: int
     updated_at: int
     centroid: list[float]
+    learning_ids: list[str] = Field(default_factory=list)

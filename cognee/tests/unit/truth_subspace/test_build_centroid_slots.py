@@ -17,8 +17,7 @@ class _EmbeddingEngine:
         return [vectors_by_text[text] for text in texts]
 
 
-@pytest.mark.asyncio
-async def test_build_truth_subspace_writes_centroids_and_epoch_state(monkeypatch):
+async def _run_build(monkeypatch, session_ids=None):
     dataset = SimpleNamespace(id=uuid4(), owner_id=uuid4())
     user = SimpleNamespace(id=uuid4())
     vector_engine = MagicMock()
@@ -61,7 +60,14 @@ async def test_build_truth_subspace_writes_centroids_and_epoch_state(monkeypatch
             return_value=_EmbeddingEngine(),
         ),
     ):
-        result = await build_truth_subspace(dataset.id, session_ids=None, user=user)
+        result = await build_truth_subspace(dataset.id, session_ids=session_ids, user=user)
+
+    return result, vector_engine, graph_engine
+
+
+@pytest.mark.asyncio
+async def test_build_truth_subspace_writes_centroids_and_epoch_state(monkeypatch):
+    result, vector_engine, graph_engine = await _run_build(monkeypatch)
 
     assert result["anchors"] == 2
     assert result["nodes_scored"] == 1
@@ -74,3 +80,16 @@ async def test_build_truth_subspace_writes_centroids_and_epoch_state(monkeypatch
     assert len(node_state["chunk-1"]["truth_alignment"]) == 8
     assert sorted(node_state["chunk-1"]["truth_alignment"][:2]) == [0.0, 1.0]
     assert node_state["chunk-1"]["truth_alignment"][2:] == [0.0] * 6
+
+
+@pytest.mark.asyncio
+async def test_build_truth_subspace_filters_learning_sets_by_session_ids(monkeypatch):
+    _result, _vector_engine, graph_engine = await _run_build(
+        monkeypatch, session_ids=["s-1", "s-2"]
+    )
+
+    graph_engine.get_nodeset_subgraph.assert_awaited_once()
+    assert graph_engine.get_nodeset_subgraph.await_args.kwargs["node_name"] == [
+        "session_learnings:s-1",
+        "session_learnings:s-2",
+    ]
