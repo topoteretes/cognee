@@ -20,6 +20,7 @@ from cognee.modules.search.types import SearchType
 
 _KIND_BY_SEARCH_TYPE: dict[SearchType, SearchResultKind] = {
     SearchType.GRAPH_COMPLETION: SearchResultKind.GRAPH_COMPLETION,
+    SearchType.NEIGHBORHOOD: SearchResultKind.GRAPH_COMPLETION,
     SearchType.GRAPH_COMPLETION_COT: SearchResultKind.GRAPH_COMPLETION,
     SearchType.GRAPH_COMPLETION_DECOMPOSITION: SearchResultKind.GRAPH_COMPLETION,
     SearchType.GRAPH_COMPLETION_CONTEXT_EXTENSION: SearchResultKind.GRAPH_COMPLETION,
