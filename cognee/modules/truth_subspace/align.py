@@ -84,6 +84,6 @@ def truth_factor(node_coords: Sequence[float], q_coords: Sequence[float]) -> flo
 
 
 def stable_signature(ordered_ids: Sequence[object]) -> str:
-    """Stable sha1 signature of an ordered id sequence."""
+    """Stable sha256 signature of an ordered id sequence."""
     joined = "|".join(str(item_id) for item_id in ordered_ids)
-    return hashlib.sha1(joined.encode("utf-8")).hexdigest()
+    return hashlib.sha256(joined.encode("utf-8")).hexdigest()

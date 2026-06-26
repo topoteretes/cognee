@@ -105,7 +105,7 @@ def test_stable_signature_stability():
     sig1 = align.stable_signature(ids)
     sig2 = align.stable_signature(ids)
     assert sig1 == sig2
-    assert len(sig1) == 40  # sha1 hex digest
+    assert len(sig1) == 64  # sha256 hex digest
 
 
 def test_stable_signature_order_sensitive():
