@@ -335,6 +335,30 @@ Use [Cognee Cloud](https://www.cognee.ai) for a fully managed experience, or sel
 
 See the [`distributed/`](distributed/) folder for deploy scripts, worker configurations, and additional details.
 
+## Use Cognee in Other Languages
+
+Prefer something other than Python? Cognee also ships official clients for Rust and TypeScript.
+
+### Getting Started with Rust
+
+Use the [cognee-rs](https://github.com/topoteretes/cognee-rs) crate to add, cognify, and search from Rust.
+
+```bash
+cargo add cognee
+```
+
+See the [cognee-rs repository](https://github.com/topoteretes/cognee-rs) for full setup and examples.
+
+### Getting Started with TypeScript
+
+Use the [@cognee/cognee-ts](https://www.npmjs.com/package/@cognee/cognee-ts) package to add, cognify, and search from Node.js or the browser.
+
+```bash
+npm install @cognee/cognee-ts
+```
+
+See the [@cognee/cognee-ts package](https://www.npmjs.com/package/@cognee/cognee-ts) for full setup and examples.
+
 ## Latest News
 
 [![Watch Demo](https://img.youtube.com/vi/8hmqS2Y5RVQ/maxresdefault.jpg)](https://www.youtube.com/watch?v=8hmqS2Y5RVQ&t=13s)
