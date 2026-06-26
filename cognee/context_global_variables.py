@@ -27,6 +27,7 @@ from cognee.infrastructure.databases.utils.resolve_dataset_database_connection_i
 #       for different async tasks, threads and processes
 vector_db_config = ContextVar("vector_db_config", default=None)
 graph_db_config = ContextVar("graph_db_config", default=None)
+current_dataset_id = ContextVar("current_dataset_id", default=None)
 # Note: same mechanism for LLM and embedding configs so that the LiteLLM client
 #       and the embedding engine can use per-context (e.g. per-request) configs.
 llm_config = ContextVar("llm_config", default=None)
@@ -111,7 +112,14 @@ class DatabaseContextManager:
     Note: Single-use object, should not be reused across multiple calls.
     """
 
-    __slots__ = ("_dataset", "_user_id", "_llm_config", "_embedding_config", "_applied")
+    __slots__ = (
+        "_dataset",
+        "_user_id",
+        "_llm_config",
+        "_embedding_config",
+        "_applied",
+        "_dataset_token",
+    )
 
     def __init__(
         self,
@@ -125,10 +133,13 @@ class DatabaseContextManager:
         self._llm_config = llm_config
         self._embedding_config = embedding_config
         self._applied = False
+        self._dataset_token = None
 
     async def apply_database_context_variables(
         self, dataset: Union[str, UUID], user_id: UUID
     ) -> None:
+        self._dataset_token = current_dataset_id.set(str(dataset) if dataset is not None else None)
+
         # LLM and embedding configs are an explicit, caller-provided override and
         # are intentionally applied regardless of backend access control: callers
         # may want per-context LLM/embedding configs even in single-tenant mode.
@@ -255,6 +266,10 @@ class DatabaseContextManager:
         return self
 
     async def __aexit__(self, exc_type, exc, tb) -> None:
+        if self._dataset_token is not None:
+            current_dataset_id.reset(self._dataset_token)
+            self._dataset_token = None
+
         if not backend_access_control_enabled():
             return None
 
