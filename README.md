@@ -89,7 +89,7 @@ Cognee is an open-source AI memory platform for AI Agents. Ingest data in any fo
 ### Product Features
 
 <p align="center">
-  <img src="assets/cognee_products.png" alt="Cognee Products" width="80%" />
+  <img src="assets/remember.svg" alt="Cognee Products" width="80%" />
 </p>
 
 ## Basic Usage & Feature Guide
