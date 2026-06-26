@@ -221,32 +221,38 @@ extras, and MCP client configuration.
 
 ### Claude Code
 
-Install the [Cognee memory plugin](https://github.com/topoteretes/cognee-integrations/tree/main/integrations/claude-code) to give Claude Code persistent memory across sessions. The plugin automatically captures tool calls into session memory via hooks and syncs to the permanent knowledge graph at session end.
+Install the [Cognee memory plugin](https://github.com/topoteretes/cognee-integrations/tree/main/integrations/claude-code) to give Claude Code persistent memory across sessions. The plugin captures prompts, tool traces, and assistant responses into session memory, injects relevant context on every prompt, and syncs session memory into the permanent knowledge graph at session end.
 
-**Setup:**
+**Install** from the Claude Code marketplace. The recommended way is from your shell, *before* launching Claude Code, so the first `claude` launch is a clean session that bootstraps memory automatically:
 
 ```bash
-# Install cognee
-pip install cognee
+# Add the marketplace and install the plugin (one-time, user-scoped)
+claude plugin marketplace add topoteretes/cognee-integrations
+claude plugin install cognee-memory@cognee
 
-# Configure
-export LLM_API_KEY="your-openai-key"
-
-# Clone the plugin
-git clone https://github.com/topoteretes/cognee-integrations.git
-
-# Enable it (add to ~/.zshrc for permanent use)
-claude --plugin-dir ./cognee-integrations/integrations/claude-code
+# Set env vars for your mode (see below), then launch
+export LLM_API_KEY="sk-..."   # local mode; or COGNEE_BASE_URL + COGNEE_API_KEY for cloud
+claude
 ```
 
-Or connect to Cognee Cloud instead of running locally:
+**Local mode** (default) — the plugin bootstraps a local Cognee API at `http://localhost:8011`. Only `LLM_API_KEY` is required; the Cognee API key is auto-minted if absent:
 
 ```bash
-export COGNEE_SERVICE_URL="https://your-instance.cognee.ai"
+export LLM_API_KEY="sk-..."
+```
+
+**Cognee Cloud or a remote server** — set both:
+
+```bash
+export COGNEE_BASE_URL="https://your-instance.cognee.ai"
 export COGNEE_API_KEY="ck_..."
 ```
 
-The plugin hooks into Claude Code's lifecycle — `SessionStart` initializes memory, `PostToolUse` captures actions, `UserPromptSubmit` injects relevant context, `PreCompact` preserves memory across context resets, and `SessionEnd` bridges session data into the permanent graph.
+On startup you should see a "Cognee Memory Connected" system message.
+
+The plugin hooks into Claude Code's lifecycle — `SessionStart` selects mode and sets up identity, `UserPromptSubmit` injects dataset-scoped context, `PostToolUse` captures tool traces, `Stop` writes the assistant's answer, `PreCompact` preserves memory across context resets, and `SessionEnd` triggers the final sync into the permanent graph.
+
+See the [plugin README](https://github.com/topoteretes/cognee-integrations/tree/main/integrations/claude-code) for sessions, datasets, and full configuration.
 
 ### Connect to Cognee Cloud
 
