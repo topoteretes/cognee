@@ -22,6 +22,9 @@ env:
   RUNTIME__LOG_LEVEL: ERROR
   ENV: 'dev'
 
+permissions:
+  contents: read
+
 jobs:
   test-weighted-edges-functionality:
     name: Test Weighted Edges Core Functionality

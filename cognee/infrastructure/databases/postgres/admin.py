@@ -9,13 +9,43 @@ credentials came from.
 
 import json
 import os
+import re
 from typing import Union
 
 from sqlalchemy import URL, text
+from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.schema import DDLElement
 
 
 _MAINTENANCE_DB_NAME = "postgres"
+_POSTGRES_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_$]{0,62}$")
+
+
+def _validate_database_identifier(db_name: str) -> str:
+    if not _POSTGRES_IDENTIFIER_RE.fullmatch(db_name):
+        raise ValueError("Invalid Postgres database name")
+    return db_name
+
+
+class CreateDatabase(DDLElement):
+    def __init__(self, db_name: str) -> None:
+        self.db_name = _validate_database_identifier(db_name)
+
+
+class DropDatabaseIfExists(DDLElement):
+    def __init__(self, db_name: str) -> None:
+        self.db_name = _validate_database_identifier(db_name)
+
+
+@compiles(CreateDatabase)
+def _compile_create_database(element: CreateDatabase, compiler, **kwargs) -> str:
+    return "CREATE DATABASE " + compiler.preparer.quote(element.db_name)
+
+
+@compiles(DropDatabaseIfExists)
+def _compile_drop_database_if_exists(element: DropDatabaseIfExists, compiler, **kwargs) -> str:
+    return "DROP DATABASE IF EXISTS " + compiler.preparer.quote(element.db_name)
 
 
 def _admin_connect_args() -> dict:
@@ -86,7 +116,7 @@ async def create_pg_database_if_not_exists(
             )
             if result.scalar():
                 return False
-            await connection.execute(text(f'CREATE DATABASE "{db_name}";'))
+            await connection.execute(CreateDatabase(db_name))
             return True
         finally:
             await connection.close()
@@ -123,7 +153,7 @@ async def drop_pg_database_if_exists(
                 ),
                 {"db": db_name},
             )
-            await connection.execute(text(f'DROP DATABASE IF EXISTS "{db_name}";'))
+            await connection.execute(DropDatabaseIfExists(db_name))
         finally:
             await connection.close()
     finally:

@@ -70,7 +70,7 @@ class TestOntologyServiceDelete:
 
         user_dir = tmp_path / "user-1"
         user_dir.mkdir()
-        owl_file = user_dir / "my_ontology.owl"
+        owl_file = ontology_service._get_ontology_path(user_dir, "my_ontology")
         owl_file.write_text("<rdf>test</rdf>")
 
         metadata = {
@@ -132,15 +132,17 @@ class TestOntologyServiceDelete:
             "delete_this": {"filename": "del.owl", "size_bytes": 10, "uploaded_at": "2024-01-01"},
         }
         (user_dir / "metadata.json").write_text(json.dumps(metadata))
-        (user_dir / "delete_this.owl").write_text("<rdf/>")
-        (user_dir / "keep_this.owl").write_text("<rdf/>")
+        delete_file = ontology_service._get_ontology_path(user_dir, "delete_this")
+        keep_file = ontology_service._get_ontology_path(user_dir, "keep_this")
+        delete_file.write_text("<rdf/>")
+        keep_file.write_text("<rdf/>")
 
         ontology_service.delete_ontology("delete_this", user)
 
         updated_metadata = json.loads((user_dir / "metadata.json").read_text())
         assert "keep_this" in updated_metadata
         assert "delete_this" not in updated_metadata
-        assert (user_dir / "keep_this.owl").exists()
+        assert keep_file.exists()
 
     def test_delete_ontology_rejects_path_traversal_key(self, ontology_service, tmp_path):
         """delete_ontology rejects keys that resolve outside the user directory."""

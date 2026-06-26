@@ -2,6 +2,9 @@ name: release.yml
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   release-github:
     name: Create GitHub Release from ${{ github.ref_name }}
