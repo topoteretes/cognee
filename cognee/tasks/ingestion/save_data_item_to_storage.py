@@ -85,6 +85,8 @@ async def save_data_item_to_storage(data_item: Union[BinaryIO, str, Any]) -> str
                 # Normalize path separators before creating file URL
                 normalized_path = os.path.normpath(abs_path)
                 return Path(normalized_path).as_uri()
+            else:
+                raise IngestionError(message="Local files are not accepted.")
 
         # data is text, save it to data storage and return the file path
         return await save_data_to_file(data_item)
