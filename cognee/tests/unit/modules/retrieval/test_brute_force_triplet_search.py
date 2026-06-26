@@ -188,6 +188,99 @@ async def test_brute_force_triplet_search_always_includes_edge_collection():
 
 
 @pytest.mark.asyncio
+async def test_brute_force_triplet_search_does_not_mutate_caller_collections():
+    """Regression: the caller's collections list must not be mutated.
+
+    The edge collection is appended to a local copy, not to the list the caller
+    passed in (e.g. a context provider's persistent, shared ``self.collections``).
+    The same list is reused across two calls to mimic a caller that runs many
+    searches with one configured list — it must never grow or accumulate
+    duplicates.
+    """
+    mock_vector_engine = AsyncMock()
+    mock_vector_engine.embedding_engine = AsyncMock()
+    mock_vector_engine.embedding_engine.embed_text = AsyncMock(return_value=[[0.1, 0.2, 0.3]])
+    mock_vector_engine.search = AsyncMock(return_value=[])
+
+    caller_collections = ["Entity_name", "TextSummary_text"]
+    snapshot = list(caller_collections)
+
+    with patch(
+        "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine",
+        return_value=mock_vector_engine,
+    ):
+        await brute_force_triplet_search(query="test", collections=caller_collections)
+        await brute_force_triplet_search(query="test", collections=caller_collections)
+
+    # The edge collection is still searched (added to the internal copy)...
+    searched = {call[1]["collection_name"] for call in mock_vector_engine.search.call_args_list}
+    assert "EdgeType_relationship_name" in searched
+    # ...but the caller's own list is left untouched across repeated calls.
+    assert caller_collections == snapshot
+
+
+@pytest.mark.asyncio
+async def test_brute_force_triplet_search_caller_collections_with_edge_not_duplicated():
+    """If the caller already includes the edge collection, the list is neither
+    mutated nor given a duplicate entry."""
+    mock_vector_engine = AsyncMock()
+    mock_vector_engine.embedding_engine = AsyncMock()
+    mock_vector_engine.embedding_engine.embed_text = AsyncMock(return_value=[[0.1, 0.2, 0.3]])
+    mock_vector_engine.search = AsyncMock(return_value=[])
+
+    caller_collections = ["Entity_name", "EdgeType_relationship_name"]
+    snapshot = list(caller_collections)
+
+    with patch(
+        "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine",
+        return_value=mock_vector_engine,
+    ):
+        await brute_force_triplet_search(query="test", collections=caller_collections)
+
+    assert caller_collections == snapshot
+
+
+@pytest.mark.asyncio
+async def test_triplet_context_provider_does_not_mutate_configured_collections():
+    """End-to-end regression for issue #3481.
+
+    TripletSearchContextProvider keeps a single ``self.collections`` and passes the
+    same list into one brute_force_triplet_search() per entity. Running a context
+    search across multiple entities must not mutate that configured list.
+    """
+    from cognee.modules.retrieval.context_providers.TripletSearchContextProvider import (
+        TripletSearchContextProvider,
+    )
+
+    mock_vector_engine = AsyncMock()
+    mock_vector_engine.embedding_engine = AsyncMock()
+    mock_vector_engine.embedding_engine.embed_text = AsyncMock(return_value=[[0.1, 0.2, 0.3]])
+    mock_vector_engine.search = AsyncMock(return_value=[])
+
+    class _Entity:
+        def __init__(self, name):
+            self.name = name
+
+    provider = TripletSearchContextProvider(collections=["Entity_name"])
+
+    with (
+        patch(
+            "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine",
+            return_value=mock_vector_engine,
+        ),
+        patch(
+            "cognee.modules.retrieval.context_providers."
+            "TripletSearchContextProvider.get_memory_fragment",
+            new=AsyncMock(return_value=CogneeGraph()),
+        ),
+    ):
+        await provider.get_context([_Entity("Alice"), _Entity("Bob")], query="how are they related")
+
+    # The provider's configured collections list is unchanged after the search.
+    assert provider.collections == ["Entity_name"]
+
+
+@pytest.mark.asyncio
 async def test_brute_force_triplet_search_all_collections_empty():
     """Test that empty list is returned when all collections return no results."""
     mock_vector_engine = AsyncMock()

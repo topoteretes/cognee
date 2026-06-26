@@ -285,6 +285,12 @@ async def brute_force_triplet_search(
                 "EntityType_name",
                 "DocumentChunk_text",
             ]
+        else:
+            # Copy so the caller's list is never mutated. Callers such as
+            # TripletSearchContextProvider pass a persistent ``self.collections``
+            # that is shared across concurrent per-entity searches; appending the
+            # edge collection in place would leak into that shared list.
+            collections = list(collections)
 
         if "EdgeType_relationship_name" not in collections:
             collections.append("EdgeType_relationship_name")
