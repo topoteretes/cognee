@@ -278,6 +278,109 @@ async def test_add_data_points_graph_provenance_folds_provenance_and_skips_ledge
     graph_engine.attach_edge_source_refs.assert_not_called()
 
 
+def _graph_provenance_unified(mock_get_unified):
+    """A graph-provenance-marked unified engine; returns (unified, graph)."""
+    from cognee.infrastructure.databases.provenance import (
+        GRAPH_DELETE_MODE_GRAPH_PROVENANCE,
+        GRAPH_DELETE_MODE_KEY,
+        GRAPH_PROVENANCE_VERSION,
+        GRAPH_PROVENANCE_VERSION_KEY,
+    )
+
+    unified, graph_engine, _vector = _make_unified_mock()
+    graph_engine.get_graph_metadata = AsyncMock(
+        return_value={
+            GRAPH_DELETE_MODE_KEY: GRAPH_DELETE_MODE_GRAPH_PROVENANCE,
+            GRAPH_PROVENANCE_VERSION_KEY: GRAPH_PROVENANCE_VERSION,
+        }
+    )
+    mock_get_unified.return_value = unified
+    return unified, graph_engine
+
+
+@pytest.mark.asyncio
+@patch.object(adp_module, "upsert_edges")
+@patch.object(adp_module, "upsert_nodes")
+@patch.object(adp_module, "index_graph_edges")
+@patch.object(adp_module, "index_data_points")
+@patch.object(adp_module, "get_unified_engine")
+@patch.object(adp_module, "deduplicate_nodes_and_edges")
+@patch.object(adp_module, "get_graph_from_model")
+async def test_add_data_points_stamps_from_dataitem_data_id(
+    mock_get_graph,
+    mock_dedup,
+    mock_get_unified,
+    mock_index_nodes,
+    mock_index_edges,
+    mock_upsert_nodes,
+    mock_upsert_edges,
+):
+    """A pipeline DataItem exposes `.data_id` (no `.id`); provenance must still be
+    stamped from it (DLT-style ingestion)."""
+    from cognee.infrastructure.databases.provenance import make_source_ref_key
+
+    dp = SimplePoint(text="only")
+    mock_get_graph.side_effect = [([dp], [])]
+    mock_dedup.side_effect = lambda n, e: (n, e)
+    _unified, graph_engine = _graph_provenance_unified(mock_get_unified)
+
+    item_data_id = uuid4()
+    ctx = PipelineContext(
+        user=SimpleNamespace(id=uuid4(), tenant_id=uuid4()),
+        dataset=SimpleNamespace(id=uuid4()),
+        data_item=SimpleNamespace(data=object(), data_id=item_data_id),  # DataItem shape
+        pipeline_run_id=uuid4(),
+    )
+
+    await add_data_points([dp], ctx=ctx)
+
+    expected_key = make_source_ref_key(ctx.dataset.id, item_data_id)
+    graph_engine.add_nodes.assert_awaited_once()
+    assert graph_engine.add_nodes.await_args.kwargs["source_ref_key"] == expected_key
+
+
+@pytest.mark.asyncio
+@patch.object(adp_module, "upsert_edges")
+@patch.object(adp_module, "upsert_nodes")
+@patch.object(adp_module, "index_graph_edges")
+@patch.object(adp_module, "index_data_points")
+@patch.object(adp_module, "get_unified_engine")
+@patch.object(adp_module, "deduplicate_nodes_and_edges")
+@patch.object(adp_module, "get_graph_from_model")
+async def test_add_data_points_skips_provenance_when_data_item_has_no_id(
+    mock_get_graph,
+    mock_dedup,
+    mock_get_unified,
+    mock_index_nodes,
+    mock_index_edges,
+    mock_upsert_nodes,
+    mock_upsert_edges,
+):
+    """memify hands the CogneeGraph itself as data_item (no `.id`/`.data_id`):
+    add_data_points must not crash, must skip the ledger, and must not stamp."""
+    dp = SimplePoint(text="only")
+    mock_get_graph.side_effect = [([dp], [])]
+    mock_dedup.side_effect = lambda n, e: (n, e)
+    _unified, graph_engine = _graph_provenance_unified(mock_get_unified)
+
+    class _GraphLike:  # stand-in for CogneeGraph: no id, no data_id
+        pass
+
+    ctx = PipelineContext(
+        user=SimpleNamespace(id=uuid4(), tenant_id=uuid4()),
+        dataset=SimpleNamespace(id=uuid4()),
+        data_item=_GraphLike(),
+        pipeline_run_id=uuid4(),
+    )
+
+    await add_data_points([dp], ctx=ctx)  # must not raise
+
+    mock_upsert_nodes.assert_not_called()
+    graph_engine.add_nodes.assert_awaited_once()
+    assert graph_engine.add_nodes.await_args.kwargs["source_ref_key"] is None
+    assert graph_engine.add_nodes.await_args.kwargs["pipeline_run_id"] is None
+
+
 @pytest.mark.asyncio
 @patch.object(adp_module, "upsert_edges")
 @patch.object(adp_module, "upsert_nodes")

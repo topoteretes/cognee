@@ -5,6 +5,10 @@ import pytest
 
 from cognee.infrastructure.databases.provenance import (
     EdgeIdentity,
+    GRAPH_DELETE_MODE_GRAPH_PROVENANCE,
+    GRAPH_DELETE_MODE_KEY,
+    GRAPH_PROVENANCE_VERSION,
+    GRAPH_PROVENANCE_VERSION_KEY,
     make_source_ref_key,
     make_source_run_ref,
 )
@@ -20,6 +24,13 @@ class _Graph:
         self.added_nodes = []
         self.added_edges = []
         self.deleted_nodes = []
+
+    async def get_graph_metadata(self):
+        # Marked graph-provenance, so the migration snapshots/preserves provenance.
+        return {
+            GRAPH_DELETE_MODE_KEY: GRAPH_DELETE_MODE_GRAPH_PROVENANCE,
+            GRAPH_PROVENANCE_VERSION_KEY: GRAPH_PROVENANCE_VERSION,
+        }
 
     async def get_node_delete_data(self, node_ids):
         return {node_id: self.node_snapshot for node_id in node_ids}
@@ -66,3 +77,35 @@ async def test_migrate_graph_preserves_existing_graph_provenance():
     assert graph.edge_attaches == [
         ([EdgeIdentity("new-node", "chunk", "contains")], [source_ref], str(run_id))
     ]
+
+
+class _LedgerGraph(_Graph):
+    """A pre-provenance (ledger) graph: not marked, and its Node/EDGE tables have
+    no provenance columns, so reading them raises (as Kuzu does)."""
+
+    async def get_graph_metadata(self):
+        return {}
+
+    async def get_node_delete_data(self, node_ids):
+        raise RuntimeError("Binder exception: Cannot find property source_ref_keys for n.")
+
+    async def get_edge_delete_data(self, edges):
+        raise RuntimeError("Binder exception: Cannot find property source_ref_keys for r.")
+
+
+@pytest.mark.asyncio
+async def test_migrate_graph_skips_provenance_on_ledger_graph():
+    """On an old/ledger graph the migration must NOT read provenance columns
+    (they don't exist) nor attempt to restore — it just re-keys."""
+    graph = _LedgerGraph(node_snapshot=None, edge_snapshot=None)
+
+    remapped = await _migrate_graph(
+        graph,
+        {"old-node": "new-node"},
+        {"old-node": {"id": "old-node", "name": "Alice", "type": "Entity"}},
+        [("old-node", "chunk", "contains", {"source_node_id": "old-node"})],
+    )
+
+    assert remapped == 1
+    assert graph.node_attaches == []
+    assert graph.edge_attaches == []

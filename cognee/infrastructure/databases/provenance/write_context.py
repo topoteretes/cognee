@@ -7,6 +7,20 @@ from cognee.infrastructure.databases.provenance.markers import stores_provenance
 from cognee.infrastructure.databases.provenance.source_refs import make_source_ref_key
 
 
+def data_item_id(data_item: Any) -> Any:
+    """Resolve the data id from a pipeline ``data_item``.
+
+    A pipeline data_item is not always the same kind of object (see
+    ``run_tasks_data_item``): it can be a relational ``Data`` (exposes ``.id``),
+    an ingestion ``DataItem`` (exposes ``.data_id``, no ``.id``), a raw
+    file/text item, or — in memify — the ``CogneeGraph`` itself. Only the first
+    two carry a usable data id; everything else has none.
+    """
+    if data_item is None:
+        return None
+    return getattr(data_item, "id", None) or getattr(data_item, "data_id", None)
+
+
 def _value_id(value: Any) -> Any:
     if value is None:
         return None
@@ -20,10 +34,7 @@ def _context_value(ctx: Any, name: str) -> Any:
 
 
 def _context_data_id(ctx: Any) -> Any:
-    data_item = _context_value(ctx, "data_item")
-    if data_item is None:
-        return None
-    return getattr(data_item, "id", None) or getattr(data_item, "data_id", None)
+    return data_item_id(_context_value(ctx, "data_item"))
 
 
 def _coerce_uuid(value: Any) -> UUID:

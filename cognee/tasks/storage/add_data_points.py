@@ -7,6 +7,7 @@ from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.infrastructure.databases.unified.capabilities import EngineCapability
 from cognee.infrastructure.databases.provenance import (
     EdgeIdentity,
+    data_item_id,
     make_source_ref_key,
 )
 from cognee.infrastructure.databases.provenance.markers import (
@@ -98,8 +99,14 @@ async def add_data_points(
     vector_engine = unified.vector
     use_hybrid = unified.has_capability(EngineCapability.HYBRID_WRITE)
 
+    # Provenance needs a concrete (dataset, data) pair. data_item_id resolves
+    # the id whether data_item is a relational Data (.id) or an ingestion
+    # DataItem (.data_id); it is None for items that carry neither (a raw
+    # file/text item, or the CogneeGraph memify passes in), in which case there
+    # is nothing to attribute and both the ledger and graph-fold paths are skipped.
+    data_id = data_item_id(data_item)
     stores_provenance = False
-    if user and dataset and data_item:
+    if user and dataset and data_id is not None:
         # Graph-provenance graphs (empty graphs marked via graph metadata) carry
         # their provenance in the graph itself, so they skip the relational
         # rollback ledger entirely. On backends that implement provenance
@@ -123,7 +130,7 @@ async def add_data_points(
                     tenant_id=user.tenant_id,
                     user_id=user.id,
                     dataset_id=dataset.id,
-                    data_id=data_item.id,
+                    data_id=data_id,
                     session=session,
                     pipeline_run_id=pipeline_run_id,
                 )
@@ -132,7 +139,7 @@ async def add_data_points(
                     tenant_id=user.tenant_id,
                     user_id=user.id,
                     dataset_id=dataset.id,
-                    data_id=data_item.id,
+                    data_id=data_id,
                     session=session,
                     pipeline_run_id=pipeline_run_id,
                 )
@@ -142,7 +149,7 @@ async def add_data_points(
                         tenant_id=user.tenant_id,
                         user_id=user.id,
                         dataset_id=dataset.id,
-                        data_id=data_item.id,
+                        data_id=data_id,
                         session=session,
                         pipeline_run_id=pipeline_run_id,
                     )
@@ -156,7 +163,7 @@ async def add_data_points(
     fold_source_ref_key = None
     fold_run_arg = None
     if stores_provenance and not use_hybrid:
-        fold_source_ref_key = make_source_ref_key(dataset.id, data_item.id)
+        fold_source_ref_key = make_source_ref_key(dataset.id, data_id)
         fold_run_arg = str(pipeline_run_id) if pipeline_run_id else None
 
     if use_hybrid:
@@ -205,7 +212,7 @@ async def add_data_points(
         # cannot yet fold provenance, so stamp the source refs in a separate
         # attach pass. This keeps a write-then-attach window for hybrid graphs
         # only; the non-hybrid path above is already atomic.
-        source_ref_key = make_source_ref_key(dataset.id, data_item.id)
+        source_ref_key = make_source_ref_key(dataset.id, data_id)
         run_arg = str(pipeline_run_id) if pipeline_run_id else None
 
         node_ids = [str(node.id) for node in nodes]

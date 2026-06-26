@@ -129,6 +129,7 @@ from cognee.infrastructure.databases.provenance import (
     get_pipeline_run_id_from_source_run_ref,
     get_source_ref_key_from_source_run_ref,
 )
+from cognee.infrastructure.databases.provenance.markers import stores_provenance_in_graph
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.migrations.migration import MigrationContext
 from cognee.modules.migrations.versions._vector_rekey import (
@@ -676,6 +677,12 @@ def _edge_identity(source_id: str, target_id: str, relationship_name: str) -> Ed
 
 
 async def _snapshot_graph_provenance(graph_engine, node_ids: list[str], edges: list) -> tuple:
+    # Only graphs that carry provenance in-graph have anything to preserve. An
+    # old/ledger graph being migrated has no provenance columns, so reading them
+    # would raise a backend "no such property" error — skip it entirely.
+    if not await stores_provenance_in_graph(graph_engine):
+        return {}, {}
+
     try:
         node_snapshots = await graph_engine.get_node_delete_data(node_ids)
         edge_snapshots = await graph_engine.get_edge_delete_data(
