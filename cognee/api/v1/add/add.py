@@ -1,6 +1,8 @@
 from uuid import UUID
 from typing import Union, BinaryIO, List, Optional, Any
+import math
 
+from cognee.exceptions import CogneeValidationError
 from cognee.modules.users.models import User
 from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
 from cognee.infrastructure.llm.config import LLMConfig
@@ -186,6 +188,22 @@ async def add(
         - TAVILY_API_KEY: YOUR_TAVILY_API_KEY
 
     """
+    # Validate importance_weight early. The triplet scoring formula uses
+    # (2 - importance_weight) as a multiplier, which is only well-behaved for
+    # weights in [0.0, 2.0]: outside that range the ranking sign flips and the
+    # least-relevant triplets win retrieval. Non-finite values (NaN/inf) corrupt
+    # ranking entirely. Reject at the boundary so bad data is never persisted.
+    if importance_weight is not None and (
+        not isinstance(importance_weight, (int, float))
+        or not math.isfinite(float(importance_weight))
+        or not (0.0 <= float(importance_weight) <= 2.0)
+    ):
+        raise CogneeValidationError(
+            message="importance_weight must be a finite number in range [0.0, 2.0].",
+            name="InvalidImportanceWeightError",
+            log=False,
+        )
+
     # Route to remote instance if connected via serve()
     from cognee.api.v1.serve.state import get_remote_client
 
