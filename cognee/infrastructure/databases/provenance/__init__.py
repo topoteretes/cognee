@@ -15,6 +15,7 @@ from .source_refs import (
     make_source_ref_key,
     make_source_run_ref,
 )
+from .write_context import graph_provenance_write_kwargs, source_ref_from_context
 
 __all__ = [
     "GRAPH_DELETE_MODE_GRAPH_PROVENANCE",
@@ -32,4 +33,6 @@ __all__ = [
     "get_source_ref_key_from_source_run_ref",
     "make_source_ref_key",
     "make_source_run_ref",
+    "graph_provenance_write_kwargs",
+    "source_ref_from_context",
 ]

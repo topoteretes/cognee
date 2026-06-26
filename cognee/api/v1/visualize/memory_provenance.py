@@ -377,6 +377,85 @@ async def _read_memory_relational(
     return {"nodes": nodes, "edges": edges, "links": links}
 
 
+async def _read_memory_graph_provenance(
+    limit: int = 5000, dataset_ids: Optional[List[str]] = None
+) -> Optional[MemoryPayload]:
+    """Read extracted memory from graph provenance on ledger-free graphs."""
+    if not dataset_ids:
+        return None
+
+    try:
+        from cognee.infrastructure.databases.provenance import (
+            EdgeIdentity,
+            get_data_id_from_source_ref_key,
+            get_dataset_id_from_source_ref_key,
+        )
+        from cognee.infrastructure.databases.provenance.markers import (
+            stores_provenance_in_graph,
+        )
+        from cognee.infrastructure.databases.unified import get_unified_engine
+    except Exception as error:  # pragma: no cover - imports unavailable
+        logger.debug(f"graph provenance memory models unavailable: {error}")
+        return None
+
+    try:
+        unified = await get_unified_engine()
+        graph = unified.graph
+        if not await stores_provenance_in_graph(graph):
+            return None
+
+        refs_by_node: Dict[str, List[str]] = {}
+        refs_by_edge: Dict[Any, List[str]] = {}
+        for dataset_id in dataset_ids:
+            for node_id, refs in (await graph.find_node_source_refs_by_dataset(dataset_id)).items():
+                refs_by_node.setdefault(str(node_id), []).extend(refs)
+            for edge, refs in (await graph.find_edge_source_refs_by_dataset(dataset_id)).items():
+                refs_by_edge.setdefault(edge, []).extend(refs)
+
+        graph_nodes, graph_edges = await graph.get_graph_data()
+    except Exception as error:  # pragma: no cover - defensive
+        logger.debug(f"graph provenance memory read skipped: {error}")
+        return None
+
+    node_ids = set(refs_by_node)
+    node_ids.update(edge.source_id for edge in refs_by_edge)
+    node_ids.update(edge.target_id for edge in refs_by_edge)
+    nodes_by_id = {str(node_id): props for node_id, props in graph_nodes}
+
+    nodes: List[Tuple[str, Dict[str, Any]]] = []
+    for node_id in sorted(node_ids)[:limit]:
+        props = nodes_by_id.get(node_id)
+        if props is not None:
+            nodes.append(Node(node_id, dict(props)))
+
+    edges: List[Tuple[str, str, str, Dict[str, Any]]] = []
+    edge_ref_keys = set(refs_by_edge)
+    for source, target, relation, props in graph_edges:
+        edge = EdgeIdentity(str(source), str(target), str(relation))
+        if edge not in edge_ref_keys:
+            continue
+        if str(source) not in node_ids or str(target) not in node_ids:
+            continue
+        edges.append(EdgeData(str(source), str(target), relation or "related", dict(props or {})))
+        if len(edges) >= limit * 4:
+            break
+
+    links: List[Dict[str, Any]] = []
+    for node_id, refs in refs_by_node.items():
+        for source_ref_key in refs:
+            links.append(
+                {
+                    "node_id": node_id,
+                    "data_id": str(get_data_id_from_source_ref_key(source_ref_key)),
+                    "dataset_id": str(get_dataset_id_from_source_ref_key(source_ref_key)),
+                }
+            )
+
+    if not nodes:
+        return None
+    return {"nodes": nodes, "edges": edges, "links": links}
+
+
 async def get_memory_provenance_graph(
     include_memory: bool = False,
     scope_tenant_ids: Optional[List[Any]] = None,
@@ -475,11 +554,11 @@ async def get_memory_provenance_graph(
         agents = [a for a in agents if a.get("user_id") in allowed_user_ids]
     sessions = await _read_sessions(user_ids, agents)
     # Scope memory to the in-scope datasets so it never leaks across tenants.
-    memory = (
-        await _read_memory_relational(dataset_ids=dataset_ids if scoped else None)
-        if include_memory
-        else None
-    )
+    memory = None
+    if include_memory:
+        memory = await _read_memory_graph_provenance(dataset_ids=dataset_ids)
+        if memory is None:
+            memory = await _read_memory_relational(dataset_ids=dataset_ids if scoped else None)
 
     return build_provenance_graph(
         tenants=cast(List[TenantRecord], tenants),

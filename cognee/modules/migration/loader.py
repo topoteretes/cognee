@@ -438,7 +438,11 @@ def _provenance_ctx(ctx):
         user=getattr(ctx, "user", None),
         dataset=getattr(ctx, "dataset", None),
         data_item=SimpleNamespace(id=data_id) if data_id else None,
+        pipeline_run_id=getattr(ctx, "pipeline_run_id", None),
+        pipeline_name=getattr(ctx, "pipeline_name", None),
         extras=getattr(ctx, "extras", None),
+        _provenance_visited=getattr(ctx, "_provenance_visited", set()),
+        task_sequence=getattr(ctx, "task_sequence", []),
     )
 
 

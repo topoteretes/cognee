@@ -7,9 +7,12 @@ linked with weighted "associated_with" edges in the knowledge graph.
 """
 
 from typing import AsyncGenerator, List, Optional, Union
+from uuid import NAMESPACE_URL, uuid5
+
 from pydantic import BaseModel, Field
 
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.databases.provenance import graph_provenance_write_kwargs
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.infrastructure.llm import LLMGateway
 from cognee.infrastructure.llm.prompts import render_prompt, read_query_prompt
@@ -102,6 +105,7 @@ async def create_chunk_associations(
     top_k_candidates: Optional[int] = None,
     user_prompt_location: str = "chunk_association_user.txt",
     system_prompt_location: str = "chunk_association_system.txt",
+    ctx=None,
 ) -> AsyncGenerator[str, None]:
     """Create semantic association edges between document chunks in the knowledge graph.
 
@@ -210,7 +214,12 @@ async def create_chunk_associations(
     if edges:
         try:
             graph_engine = await get_graph_engine()
-            await graph_engine.add_edges(edges)
+            provenance_kwargs = await graph_provenance_write_kwargs(
+                graph_engine,
+                ctx,
+                fallback_data_id=uuid5(NAMESPACE_URL, "cognee:chunk-associations"),
+            )
+            await graph_engine.add_edges(edges, **provenance_kwargs)
             await index_graph_edges(edges)
             logger.info(f"Successfully persisted {len(edges)} edges to graph database")
         except Exception as e:
