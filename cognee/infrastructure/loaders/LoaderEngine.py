@@ -1,6 +1,5 @@
-from typing import Any
-
-import filetype
+from pathlib import Path
+from typing import Any, BinaryIO
 
 from cognee.infrastructure.files.utils.guess_file_type import guess_file_type
 from cognee.shared.logging_utils import get_logger
@@ -84,11 +83,32 @@ class LoaderEngine:
         Returns:
             LoaderInterface that can handle the file, or None if not found
         """
-        from pathlib import Path
-
         file_info = guess_file_type(file_path)  # ty:ignore[invalid-argument-type]
 
         path_extension = Path(file_path).suffix.lstrip(".")
+
+        return self._get_loader(path_extension, file_info.extension, file_info.mime, preferred_loaders)
+
+    def get_loader_for_stream(
+        self,
+        file: BinaryIO,
+        file_name: str,
+        preferred_loaders: dict[str, dict[str, Any]] | None,
+    ) -> LoaderInterface | None:
+        file_info = guess_file_type(file, file_name)
+        file.seek(0)
+
+        path_extension = Path(file_name).suffix.lstrip(".")
+
+        return self._get_loader(path_extension, file_info.extension, file_info.mime, preferred_loaders)
+
+    def _get_loader(
+        self,
+        path_extension: str,
+        detected_extension: str,
+        mime_type: str,
+        preferred_loaders: dict[str, dict[str, Any]] | None,
+    ) -> LoaderInterface | None:
 
         # Try preferred loaders first
         if preferred_loaders:
@@ -96,10 +116,10 @@ class LoaderEngine:
                 if loader_name in self._loaders:
                     loader = self._loaders[loader_name]
                     # Try with path extension first (for text formats like html)
-                    if loader.can_handle(extension=path_extension, mime_type=file_info.mime):
+                    if loader.can_handle(extension=path_extension, mime_type=mime_type):
                         return loader
                     # Fall back to content-detected extension
-                    if loader.can_handle(extension=file_info.extension, mime_type=file_info.mime):
+                    if loader.can_handle(extension=detected_extension, mime_type=mime_type):
                         return loader
                 else:
                     logger.info(f"Skipping {loader_name}: Preferred Loader not registered")
@@ -109,10 +129,10 @@ class LoaderEngine:
             if loader_name in self._loaders:
                 loader = self._loaders[loader_name]
                 # Try with path extension first (for text formats like html)
-                if loader.can_handle(extension=path_extension, mime_type=file_info.mime):
+                if loader.can_handle(extension=path_extension, mime_type=mime_type):
                     return loader
                 # Fall back to content-detected extension
-                if loader.can_handle(extension=file_info.extension, mime_type=file_info.mime):
+                if loader.can_handle(extension=detected_extension, mime_type=mime_type):
                     return loader
             else:
                 logger.info(
@@ -120,6 +140,27 @@ class LoaderEngine:
                 )
 
         return None
+
+    async def load_file_stream(
+        self,
+        file: BinaryIO,
+        file_name: str,
+        preferred_loaders: dict[str, dict[str, Any]] | None = None,
+        **kwargs: Any,
+    ) -> tuple[str, LoaderInterface]:
+        loader = self.get_loader_for_stream(file, file_name, preferred_loaders)
+        if not loader:
+            raise ValueError(self._no_loader_message(file_name))
+
+        logger.debug(f"Loading {file_name} with {loader.loader_name}")
+
+        loader_config = {}
+        if preferred_loaders and loader.loader_name in preferred_loaders:
+            loader_config = preferred_loaders[loader.loader_name]
+
+        merged_kwargs = {**loader_config, **kwargs, "file_stream": file}
+
+        return await loader.load(file_name, **merged_kwargs), loader
 
     async def load_file(
         self,
