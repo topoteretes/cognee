@@ -92,6 +92,10 @@ Cognee is an open-source AI memory platform for AI Agents. Ingest data in any fo
   <img src="assets/remember.svg" alt="Cognee Products" width="80%" />
 </p>
 
+<p align="center">
+  <img src="assets/recall.svg" alt="Cognee Recall" width="80%" />
+</p>
+
 ## Basic Usage & Feature Guide
 
 To learn more, [check out this short, end-to-end Colab walkthrough](https://colab.research.google.com/drive/12Vi9zID-M3fpKpKiaqDBvkk98ElkRPWy?usp=sharing) of Cognee's core features.
