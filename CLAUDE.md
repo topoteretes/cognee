@@ -15,7 +15,7 @@ Cognee is an open-source AI memory platform that transforms raw data into persis
 # Create virtual environment (recommended: uv)
 uv venv && source .venv/bin/activate
 
-# Install with pip, poetry, or uv
+# Install with pip or uv
 uv pip install -e .
 
 # Install with dev dependencies
