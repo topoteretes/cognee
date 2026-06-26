@@ -73,6 +73,10 @@ Cognee is an open-source AI memory platform for AI Agents. Ingest data in any fo
 
 ✴️ _Available as a plugin for your Claude Code — [claude-code-plugin](https://github.com/topoteretes/cognee-integrations/tree/main/integrations/claude-code)_
 
+🦀 _Available as a Rust client — [cognee-rs](https://github.com/topoteretes/cognee-rs)_
+
+🟦 _Available as a TypeScript client — [@cognee/cognee-ts](https://www.npmjs.com/package/@cognee/cognee-ts)_
+
 
 
 ### Why use Cognee:
