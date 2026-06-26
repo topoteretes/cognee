@@ -54,7 +54,7 @@ pre-commit install
 - **evals** - Evaluation tools
 - **deepeval** - DeepEval testing framework
 - **posthog** - PostHog analytics
-- **monitoring** - Sentry + Langfuse observability
+- **tracing** - OpenTelemetry tracing
 - **distributed** - Modal distributed execution
 - **dev** - All development tools (pytest, ty, ruff, etc.)
 - **debug** - Debugpy for debugging
@@ -101,7 +101,7 @@ ty check .
 ### Running Cognee
 ```bash
 # Using Python SDK
-python examples/python/simple_example.py
+uv run python examples/demos/simple_cognee_example.py
 
 # Using CLI
 cognee-cli add "Your text here"
