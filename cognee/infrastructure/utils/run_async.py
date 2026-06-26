@@ -16,10 +16,7 @@ async def run_async(
     **kwargs: Any,
 ) -> T:
     if loop is None:
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
     if "loop" in inspect.signature(func).parameters:
         pfunc = partial(func, *args, loop=loop, **kwargs)
