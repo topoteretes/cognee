@@ -30,6 +30,14 @@ class _Claim(DataPoint):
     metadata: dict = {"index_fields": ["name"]}
 
 
+class _ClaimTs(DataPoint):
+    name: str = ""
+    updated_at: int = (
+        0  # epoch ms; lets the default recency path be tested with distinct timestamps
+    )
+    metadata: dict = {"index_fields": ["name"]}
+
+
 async def _stub_judge(text_a, text_b):
     """Two 'reports to <manager>' claims contradict; anything else does not. Deterministic, no LLM call."""
     both = "reports to" in text_a.lower() and "reports to" in text_b.lower()
@@ -83,6 +91,40 @@ async def test_reconcile_supersedes_on_real_graph(tmp_path, monkeypatch):
     weights = await adapter.get_node_feedback_weights([str(old.id), str(new.id)])
     assert abs(weights[str(old.id)] - 0.25) < 1e-6
     assert abs(weights[str(new.id)] - 0.9) < 1e-6
+
+
+@pytest.mark.asyncio
+async def test_reconcile_prefers_recency_on_real_graph(tmp_path, monkeypatch):
+    # DEFAULT prefer="recency" path, end-to-end on a real graph. The two claims keep their DEFAULT
+    # (equal) feedback_weight: we deliberately do NOT call set_node_feedback_weights here — both because
+    # equal weights make recency the only deciding signal, AND because that write would strip updated_at
+    # from the persisted properties blob on the ladybug adapter (a pre-existing adapter limitation:
+    # _build_node_feedback_updates drops created_at/updated_at and get_graph_data never reads the typed
+    # column). With timestamps intact, the newer claim (updated_at=2000) must supersede the older one.
+    adapter = LadybugAdapter(str(tmp_path / "kuzu_reconcile_recency"))
+    subject = _ClaimTs(name="Bob", updated_at=1)
+    older = _ClaimTs(name="Bob reports to Dave", updated_at=1_000)
+    newer = _ClaimTs(name="Bob reports to Erin", updated_at=2_000)
+    await adapter.add_nodes([subject, older, newer])
+    await adapter.add_edge(str(older.id), str(subject.id), "about", {})
+    await adapter.add_edge(str(newer.id), str(subject.id), "about", {})
+
+    async def _engine():
+        return adapter
+
+    monkeypatch.setattr(_reconcile_mod, "get_graph_engine", _engine)
+
+    result = await reconcile_memory(
+        dry_run=False, judge=_stub_judge
+    )  # prefer defaults to "recency"
+    assert result["superseded"] == 1
+
+    _, edges = await adapter.get_graph_data()
+    supersedes_edges = [(s, t) for (s, t, rel, _p) in edges if rel == SUPERSEDES]
+    assert (
+        str(newer.id),
+        str(older.id),
+    ) in supersedes_edges  # newer (updated_at=2000) supersedes older
 
 
 @pytest.mark.asyncio
