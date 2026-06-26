@@ -249,13 +249,24 @@ async def reconcile_memory(
 
     pairs = candidate_pairs(list(props_by_id.keys()), edges, max_pairs)
 
+    # Already-reconciled state from prior runs: a node that is the TARGET of an existing
+    # ``supersedes`` edge has already been retired. Skipping these keeps repeated mutating runs
+    # IDEMPOTENT — without it, each run would re-read the (already-demoted) live weight and demote
+    # again (0.5 -> 0.25 -> 0.125 -> ...). The supersedes edge is the durable record; one demotion suffices.
+    superseded_pairs = {(e[0], e[1]) for e in edges if len(e) >= 3 and e[2] == SUPERSEDES}
+    already_superseded = {tgt for _src, tgt in superseded_pairs}
+
     supersedes_out: list = []
     edge_writes: list = []
     weight_updates: dict = {}
-    resolved_stale: set = set()  # supersede each stale node once (first/strongest wins)
+    resolved_stale: set = set(
+        already_superseded
+    )  # supersede each stale node once (within and across runs)
     contradictions = 0
 
     for a, b in pairs:
+        if (a, b) in superseded_pairs or (b, a) in superseded_pairs:
+            continue  # this pair was reconciled by a prior run — no LLM call, no re-demotion
         try:
             verdict = await judge(_node_text(props_by_id[a]), _node_text(props_by_id[b]))
         except Exception as exc:  # a single bad judgment must not abort the whole run

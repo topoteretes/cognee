@@ -25,6 +25,14 @@ from cognee.tasks.memify.reconcile_memory import (
 )
 
 
+class _ClaimTs(DataPoint):
+    name: str = ""
+    updated_at: int = (
+        0  # epoch ms; lets the recency path be tested with distinct, controlled timestamps
+    )
+    metadata: dict = {"index_fields": ["name"]}
+
+
 class _Claim(DataPoint):
     name: str = ""
     metadata: dict = {"index_fields": ["name"]}
@@ -83,6 +91,39 @@ async def test_reconcile_supersedes_on_real_graph(tmp_path, monkeypatch):
     weights = await adapter.get_node_feedback_weights([str(old.id), str(new.id)])
     assert abs(weights[str(old.id)] - 0.25) < 1e-6
     assert abs(weights[str(new.id)] - 0.9) < 1e-6
+
+
+@pytest.mark.asyncio
+async def test_reconcile_prefers_recency_on_real_graph(tmp_path, monkeypatch):
+    # the DEFAULT prefer="recency" path, end-to-end on a real graph: with EQUAL feedback weights, the
+    # newer claim (higher updated_at) must supersede the older one — so recency reads persisted int-ms
+    # timestamps off the real graph, not just the in-memory mocks.
+    adapter = LadybugAdapter(str(tmp_path / "kuzu_reconcile_recency"))
+    subject = _ClaimTs(name="Bob", updated_at=1)
+    older = _ClaimTs(name="Bob reports to Dave", updated_at=1_000)
+    newer = _ClaimTs(name="Bob reports to Erin", updated_at=2_000)
+    await adapter.add_nodes([subject, older, newer])
+    await adapter.add_edge(str(older.id), str(subject.id), "about", {})
+    await adapter.add_edge(str(newer.id), str(subject.id), "about", {})
+    # EQUAL feedback weights -> only recency can pick the winner
+    await adapter.set_node_feedback_weights({str(older.id): 0.5, str(newer.id): 0.5})
+
+    async def _engine():
+        return adapter
+
+    monkeypatch.setattr(_reconcile_mod, "get_graph_engine", _engine)
+
+    result = await reconcile_memory(
+        dry_run=False, judge=_stub_judge
+    )  # prefer defaults to "recency"
+    assert result["superseded"] == 1
+
+    _, edges = await adapter.get_graph_data()
+    supersedes_edges = [(s, t) for (s, t, rel, _p) in edges if rel == SUPERSEDES]
+    assert (
+        str(newer.id),
+        str(older.id),
+    ) in supersedes_edges  # newer (updated_at=2000) supersedes older
 
 
 @pytest.mark.asyncio

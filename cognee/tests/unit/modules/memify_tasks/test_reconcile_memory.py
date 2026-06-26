@@ -290,3 +290,50 @@ async def test_truncated_flag_signals_capped_scan():
         full = await reconcile_memory(max_pairs=10, dry_run=True, judge=no_conflict)
     assert full["pairs_checked"] == 3
     assert full["truncated"] is False  # whole candidate set examined
+
+
+# ---------------- task: repeated mutating runs are IDEMPOTENT (no cross-run weight bleed) ----------------
+class _PersistGraph(InMemoryGraph):
+    """InMemoryGraph that PERSISTS writes across calls — ``set_node_feedback_weights`` updates the
+    weights read back, and ``add_edge`` appends to the edge list ``get_graph_data`` returns. This lets
+    a second reconcile run see the first run's writes (the real-graph behaviour idempotency rides on)."""
+
+    async def set_node_feedback_weights(self, updates):
+        self._weights.update(updates)  # persist, not just record
+        self.weight_writes = dict(updates)
+        return {nid: True for nid in updates}
+
+    async def add_edge(self, source, target, relationship_name, edge_properties=None):
+        # MERGE semantics (like ladybug/neo4j): don't duplicate an existing (source,target,rel) edge
+        if not any(
+            e[0] == source and e[1] == target and e[2] == relationship_name for e in self._edges
+        ):
+            self._edges.append((source, target, relationship_name, edge_properties or {}))
+        self.edge_writes.append((source, target, relationship_name, edge_properties or {}))
+
+
+@pytest.mark.asyncio
+async def test_reconcile_is_idempotent_across_runs():
+    # Without the already-superseded guard, a repeated mutating run re-reads the live (already-demoted)
+    # weight and demotes again: 0.5 -> 0.25 -> 0.125. The supersedes edge is the durable record;
+    # one demotion suffices, and a second run over an already-reconciled pair must be a no-op.
+    nodes = [
+        _node("old", "Alice reports to Bob", weight=0.5),
+        _node("new", "Alice reports to Carol", weight=0.9),
+        _node("subject", "Alice"),
+    ]
+    edges = [("old", "subject", "about", {}), ("new", "subject", "about", {})]
+    graph = _PersistGraph(nodes, edges)
+
+    with _patch_engine(graph):
+        first = await reconcile_memory(prefer=PREFER_FEEDBACK, dry_run=False, judge=_stub_judge())
+    assert first["superseded"] == 1
+    assert graph._weights["old"] == 0.25  # demoted once
+
+    with _patch_engine(graph):
+        second = await reconcile_memory(prefer=PREFER_FEEDBACK, dry_run=False, judge=_stub_judge())
+    assert (
+        second["contradictions"] == 0
+    )  # the only contradictory pair is already reconciled -> skipped
+    assert second["superseded"] == 0
+    assert graph._weights["old"] == 0.25  # NOT re-demoted (would be 0.125 without the guard)
