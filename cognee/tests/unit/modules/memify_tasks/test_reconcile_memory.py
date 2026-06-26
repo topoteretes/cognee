@@ -228,3 +228,33 @@ async def test_protect_node_types_skips_protected_claim():
     assert result["superseded"] == 0
     assert graph.edge_writes == []
     assert graph.weight_writes == {}
+
+
+# ---------------- task: a stale node is superseded ONCE even if it loses multiple pairs ----------------
+@pytest.mark.asyncio
+async def test_stale_node_is_superseded_only_once():
+    # 'old' contradicts BOTH 'new1' and 'new2' (all three share 'subject'); both newer claims outrank it.
+    # Without the resolved_stale guard, 'old' would get two supersedes edges and be demoted twice (0.125).
+    nodes = [
+        _node("old", "Alice reports to Bob", weight=0.5),
+        _node("new1", "Alice reports to Carol", weight=0.9),
+        _node("new2", "Alice reports to Dave", weight=0.8),
+        _node("subject", "Alice"),
+    ]
+    edges = [
+        ("old", "subject", "about", {}),
+        ("new1", "subject", "about", {}),
+        ("new2", "subject", "about", {}),
+    ]
+    graph = InMemoryGraph(nodes, edges)
+    with _patch_engine(graph):
+        result = await reconcile_memory(prefer=PREFER_FEEDBACK, dry_run=False, judge=_stub_judge())
+
+    # all three pairs are judged contradictory, but 'old' is superseded only once
+    assert result["contradictions"] == 3
+    assert (
+        result["superseded"] == 2
+    )  # (new1 -> old) once, plus (new1 -> new2); NOT (new2 -> old) again
+    stale_targets = [tgt for _src, tgt, _rel, _props in graph.edge_writes]
+    assert stale_targets.count("old") == 1  # exactly one supersedes edge into 'old'
+    assert graph.weight_writes["old"] == 0.25  # demoted once (0.5*0.5), not twice (0.125)
