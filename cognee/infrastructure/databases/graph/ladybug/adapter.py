@@ -31,6 +31,8 @@ from cognee.infrastructure.databases.provenance.source_refs import (
     get_source_ref_key_from_source_run_ref,
 )
 from cognee.infrastructure.databases.provenance.source_ref_state import (
+    derive_dataset_ids,
+    derive_run_ids,
     provenance_after_attach,
     provenance_after_remove,
     provenance_attach_inputs,
@@ -1233,6 +1235,27 @@ class LadybugAdapter(GraphDBInterface):
         )
         return {row[0]: (_as_str_list(row[1]), _as_str_list(row[2])) for row in rows}
 
+    async def _read_node_provenance_for_source_ref_datasets(
+        self, source_ref_keys: list[str]
+    ) -> Dict[str, Tuple[List[str], List[str]]]:
+        """Return node provenance for all nodes in the affected source-ref datasets."""
+        dataset_ids = {str(get_dataset_id_from_source_ref_key(key)) for key in source_ref_keys}
+        if not dataset_ids:
+            return {}
+
+        rows = await self.query(
+            """
+            MATCH (n:Node)
+            RETURN n.id, n.source_ref_keys, n.source_run_refs
+            """
+        )
+        result: Dict[str, Tuple[List[str], List[str]]] = {}
+        for row in rows:
+            refs = _as_str_list(row[1])
+            if any(str(get_dataset_id_from_source_ref_key(ref)) in dataset_ids for ref in refs):
+                result[row[0]] = (refs, _as_str_list(row[2]))
+        return result
+
     async def _write_node_provenance(self, batch: List[dict]) -> None:
         if not batch:
             return
@@ -1378,13 +1401,43 @@ class LadybugAdapter(GraphDBInterface):
         if not source_ref_keys:
             return
         remove_keys = list(source_ref_keys)
-        await self._apply_source_ref_change(
-            node_ids,
-            self._read_node_provenance,
-            self._write_node_provenance,
-            self._node_row,
-            lambda keys, run_refs: provenance_after_remove(keys, run_refs, remove_keys),
-        )
+        target_node_ids = set(node_ids)
+
+        # Ladybug/Kuzu has shown a durability bug with the simpler targeted form:
+        # ``MATCH (n) WHERE n.id = $id SET n.source_ref_keys = $refs; CHECKPOINT``.
+        # In the reduced repro, that command reaches Kuzu with the correct target
+        # and params and reads back correctly before checkpoint, but checkpoint (or
+        # close/reopen) can persist a different untouched node's ``STRING[]``
+        # provenance value. Rewriting the complete expected provenance columns for
+        # all nodes in the affected source-ref dataset keeps the existing node
+        # provenance shape while avoiding the flaky narrow list-column flush.
+        current = await self._read_node_provenance_for_source_ref_datasets(remove_keys)
+        batch = []
+        for node_id, (keys, run_refs) in current.items():
+            if node_id in target_node_ids:
+                cols = provenance_after_remove(keys, run_refs, remove_keys)
+                refs = cols.source_ref_keys
+                datasets = cols.source_dataset_ids
+                runs = cols.source_run_ids
+                next_run_refs = cols.source_run_refs
+            else:
+                refs = list(keys)
+                next_run_refs = list(run_refs)
+                datasets = derive_dataset_ids(refs)
+                runs = derive_run_ids(next_run_refs)
+
+            batch.append(
+                {
+                    "id": node_id,
+                    "refs": refs,
+                    "datasets": datasets,
+                    "runs": runs,
+                    "run_refs": next_run_refs,
+                }
+            )
+
+        if batch:
+            await self._write_node_provenance(batch)
 
     async def remove_edge_source_refs(
         self,
