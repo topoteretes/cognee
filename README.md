@@ -39,6 +39,10 @@
 
 Cognee is the open-source AI memory platform that gives AI agents persistent long-term memory across sessions. Ingest data in any format, build a self-hosted knowledge graph, and let every agent recall, connect, and act with full context
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/topoteretes/cognee/refs/heads/dev/assets/cognee-demo.gif" alt="Cognee Demo" width="80%" />
+</p>
+
   <p align="center">
   🌐 This README is also available in:
   :
