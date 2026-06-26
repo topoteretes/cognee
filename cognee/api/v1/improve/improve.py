@@ -40,6 +40,7 @@ async def improve(
     node_name: Optional[List[str]] = None,
     session_ids: Optional[List[str]] = None,
     build_global_context_index: bool = False,
+    build_truth_subspace: bool = False,
     **kwargs: Unpack[ImproveKwargs],
 ):
     """Enrich an existing knowledge graph with additional context and rules.
@@ -86,6 +87,10 @@ async def improve(
             context index after default enrichment. Skipped in background
             mode because ordered background pipeline chaining is not
             supported yet.
+        build_truth_subspace: Opt-in flag (default ``False``) for building the
+            truth subspace from distilled session learnings after distillation
+            and before enrichment. Only runs when ``session_ids`` is provided.
+            Off by default = no behaviour change.
         **kwargs: Additional options -- see ``ImproveKwargs``.
 
     Returns:
@@ -113,6 +118,7 @@ async def improve(
             "session_ids": ",".join(session_ids) if session_ids else "",
             "run_in_background": run_in_background,
             "build_global_context_index": build_global_context_index,
+            "build_truth_subspace": build_truth_subspace,
             "cognee_version": cognee_version,
         },
     )
@@ -198,6 +204,26 @@ async def improve(
                 )
                 if distilled:
                     stages_run.append("distill_sessions")
+
+                # Stage 2d: build the truth subspace from distilled session
+                # learnings (opt-in, default OFF). Runs after distillation so
+                # freshly accepted lessons are available as anchors, and before
+                # enrichment. Non-fatal — never blocks the rest of improve().
+                if build_truth_subspace:
+                    try:
+                        from cognee.modules.truth_subspace.build import (
+                            build_truth_subspace as _build_truth_subspace,
+                        )
+
+                        result_ts = await _build_truth_subspace(
+                            dataset=dataset,
+                            session_ids=session_ids,
+                            user=user,
+                        )
+                        logger.info("improve: truth subspace built -> %s", result_ts)
+                        stages_run.append("build_truth_subspace")
+                    except Exception as e:
+                        logger.warning("improve: truth subspace build failed (non-fatal): %s", e)
 
             # Stage 3: default enrichment (triplet embeddings)
             from cognee.modules.memify import memify

@@ -5,7 +5,7 @@ are tested directly with fixtures — no LLM, cache, or vector engine involved.
 """
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import pytest
@@ -281,6 +281,28 @@ class TestRenderLessonDocument:
         )
         assert "Plain statement.\n" in document
         assert "()" not in document
+
+    @pytest.mark.asyncio
+    async def test_publish_tags_lessons_with_global_and_session_node_sets(self):
+        scope = SimpleNamespace(
+            session_id="s-1",
+            dataset=SimpleNamespace(id=uuid4()),
+            user=SimpleNamespace(id=uuid4()),
+        )
+        add = AsyncMock()
+        cognify = AsyncMock()
+
+        with (
+            patch("cognee.api.v1.add.add", add),
+            patch("cognee.api.v1.cognify.cognify", cognify),
+        ):
+            await distill_module.publish_distilled_lessons(
+                scope,
+                [WrittenLesson(accept=True, statement="Keep reports concise.")],
+            )
+
+        assert add.await_args.kwargs["node_set"] == ["session_learnings", "session_learnings:s-1"]
+        cognify.assert_awaited_once_with(datasets=[scope.dataset.id], user=scope.user)
 
 
 class TestBuildWriterInput:

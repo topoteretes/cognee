@@ -27,6 +27,7 @@ from cognee.infrastructure.session.session_context_builder import coerce_active_
 from cognee.infrastructure.session.session_context_models import SessionContextEntry
 from cognee.modules.data.models import Dataset
 from cognee.modules.data.methods import get_authorized_existing_datasets
+from cognee.modules.truth_subspace.constants import truth_session_node_set
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
 from cognee.shared.async_utils import gather_with_concurrency_limit
@@ -374,7 +375,8 @@ async def publish_distilled_lessons(
     from cognee.api.v1.add import add
     from cognee.api.v1.cognify import cognify
 
-    await add(documents, dataset_id=scope.dataset.id, user=scope.user, node_set=DISTILLATE_NODE_SET)
+    node_set = [*DISTILLATE_NODE_SET, truth_session_node_set(scope.session_id)]
+    await add(documents, dataset_id=scope.dataset.id, user=scope.user, node_set=node_set)
     await cognify(datasets=[scope.dataset.id], user=scope.user)
     return documents
 
