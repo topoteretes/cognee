@@ -19,6 +19,10 @@ from tenacity import (
     wait_exponential_jitter,
 )
 
+from cognee.infrastructure.llm.retry_config import (
+    llm_retry_stop_condition,
+)
+
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.llm.exceptions import ContentPolicyFilterError
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.llm_interface import (
@@ -133,7 +137,7 @@ class GenericAPIAdapter(LLMInterface):
 
     @observe(as_type="generation")
     @retry(
-        stop=stop_after_attempt(4),
+        stop=llm_retry_stop_condition,
         wait=wait_exponential_jitter(8, 128),
         retry=retry_if_not_exception_type(
             (litellm.exceptions.NotFoundError, litellm.exceptions.AuthenticationError)
@@ -191,7 +195,7 @@ class GenericAPIAdapter(LLMInterface):
                             "content": f"""{text_input}""",
                         },
                     ],
-                    max_retries=1,
+                    max_retries=self.MAX_RETRIES,
                     api_key=self.api_key,
                     api_base=self.endpoint,
                     response_model=response_model,
@@ -232,7 +236,7 @@ class GenericAPIAdapter(LLMInterface):
                                 "content": f"""{text_input}""",
                             },
                         ],
-                        max_retries=1,
+                        max_retries=self.MAX_RETRIES,
                         api_key=self.fallback_api_key,
                         api_base=self.fallback_endpoint,
                         response_model=response_model,

@@ -340,7 +340,7 @@ async def apply_session_turn_analysis(
             session_manager=session_manager,
             user_id=user_id,
             session_id=session_id,
-            feedback_entry_id=feedback_entry.id,
+            source_id=feedback_entry.id,
             candidates=candidates,
         )
 
