@@ -1606,6 +1606,56 @@ class LadybugAdapter(GraphDBInterface):
                 result[edge] = contributed
         return result
 
+    async def get_edges_created_since(
+        self,
+        since: Optional[datetime],
+        limit: int,
+    ) -> Tuple[List[Tuple[str, str, str, datetime]], Dict[str, Dict[str, Any]]]:
+        """Return edges created after ``since`` (oldest first) plus endpoint nodes.
+
+        Reads the edge ``created_at`` column directly (``get_graph_data`` drops it),
+        so the session-sync incremental checkpoint keeps the same timestamp model
+        as the relational path. Endpoint node properties are returned so callers
+        can render triplets without a second lookup.
+        """
+        where_clause = ""
+        params: Dict[str, Any] = {"limit": limit}
+        if since is not None:
+            where_clause = "WHERE r.created_at > timestamp($since)"
+            params["since"] = since.strftime("%Y-%m-%d %H:%M:%S.%f")
+
+        rows = await self.query(
+            f"""
+            MATCH (a:Node)-[r:EDGE]->(b:Node)
+            {where_clause}
+            RETURN a.id, a.name, a.type, a.properties,
+                   b.id, b.name, b.type, b.properties,
+                   r.relationship_name, r.created_at
+            ORDER BY r.created_at ASC
+            LIMIT $limit
+            """,
+            params,
+        )
+
+        edges: List[Tuple[str, str, str, datetime]] = []
+        node_map: Dict[str, Dict[str, Any]] = {}
+        for row in rows:
+            source_id, target_id = str(row[0]), str(row[4])
+            for node_id, name, node_type, props_blob in (
+                (source_id, row[1], row[2], row[3]),
+                (target_id, row[5], row[6], row[7]),
+            ):
+                if node_id not in node_map:
+                    node_map[node_id] = {
+                        "id": node_id,
+                        "name": name,
+                        "type": node_type,
+                        **_parse_properties_blob(props_blob),
+                    }
+            edges.append((source_id, target_id, str(row[8]), row[9]))
+
+        return edges, node_map
+
     async def set_graph_metadata(self, metadata: dict[str, str]) -> None:
         if not metadata:
             return
