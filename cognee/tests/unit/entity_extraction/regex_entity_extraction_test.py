@@ -287,3 +287,32 @@ async def test_custom_config_path(tmp_path):
     assert all(e.is_a.name == "TEST_ENTITY" for e in entities)
     assert "TEST123" in [e.name for e in entities]
     assert "TEST456" in [e.name for e in entities]
+
+
+@pytest.mark.asyncio
+async def test_concurrent_extraction_correctness(regex_extractor):
+    """Test that concurrent entity extraction returns identical results to sequential extraction."""
+    text = """
+    Contact John Doe at john.doe@example.com or +1-555-123-4567.
+    Visit our website at https://www.example.com.
+    The meeting is scheduled for 2023-05-15 at 09:30 AM.
+    The project budget is $10,000.00.
+    Follow us on social media with #Python and mention @pythonorg.
+    Our server IP is 192.168.1.1.
+    """
+
+    # Get sequential results (the baseline)
+    sequential_entities = regex_extractor._text_to_entities(text)
+
+    # Get concurrent results
+    concurrent_entities = await regex_extractor.extract_entities(text)
+
+    # Sort them by name and class to verify exact matches
+    sequential_sorted = sorted(sequential_entities, key=lambda e: (e.name, e.is_a.name))
+    concurrent_sorted = sorted(concurrent_entities, key=lambda e: (e.name, e.is_a.name))
+
+    assert len(sequential_sorted) == len(concurrent_sorted)
+    for s_ent, c_ent in zip(sequential_sorted, concurrent_sorted):
+        assert s_ent.name == c_ent.name
+        assert s_ent.is_a.name == c_ent.is_a.name
+        assert s_ent.description == c_ent.description
