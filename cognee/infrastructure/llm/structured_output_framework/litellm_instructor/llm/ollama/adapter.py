@@ -66,6 +66,7 @@ class OllamaAPIAdapter(LLMInterface):
         max_completion_tokens: int,
         instructor_mode: str | None = None,
         llm_args: dict[str, Any] | None = None,
+        ollama_num_ctx: int | None = None,
     ) -> None:
         self.name = name
         self.model = model
@@ -73,6 +74,7 @@ class OllamaAPIAdapter(LLMInterface):
         self.endpoint = endpoint
         self.max_completion_tokens = max_completion_tokens
         self.llm_args: dict[str, Any] = llm_args or {}
+        self.ollama_num_ctx = ollama_num_ctx
 
         self.instructor_mode = instructor_mode if instructor_mode else self.default_instructor_mode
 
@@ -122,6 +124,11 @@ class OllamaAPIAdapter(LLMInterface):
             - BaseModel: A structured output that conforms to the specified response model.
         """
         merged_kwargs = {**self.llm_args, **kwargs}
+
+        if self.ollama_num_ctx is not None:
+            extra_body = merged_kwargs.get("extra_body", {}) or {}
+            if "num_ctx" not in extra_body:
+                merged_kwargs["extra_body"] = {**extra_body, "num_ctx": self.ollama_num_ctx}
 
         # A plain string needs no schema — skip instructor and hit the OpenAI-
         # compatible endpoint directly. Instructor's JSON/tool-call schemas cause
