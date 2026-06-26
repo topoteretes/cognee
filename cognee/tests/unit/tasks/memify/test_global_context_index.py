@@ -30,6 +30,15 @@ update_global_context_index_module = import_module(
 )
 load_module = import_module("cognee.tasks.memify.global_context_index.load")
 summary_generation_module = import_module("cognee.tasks.memify.global_context_index.summarize")
+persist_module = import_module("cognee.tasks.memify.global_context_index.persist")
+
+
+@pytest.fixture(autouse=True)
+def _default_ledger_graph(monkeypatch):
+    """Default to a ledger graph so edge writes take the unstamped path. The
+    dedicated stamping test overrides this. (Avoids the real is_graph_native_graph
+    probing the lightweight SimpleNamespace graph mocks used across the suite.)"""
+    monkeypatch.setattr(persist_module, "is_graph_native_graph", AsyncMock(return_value=False))
 
 
 def _summary_node(text: str = "summary", bucket_id: str | None = None) -> SummaryNode:
@@ -600,7 +609,9 @@ async def test_update_global_context_index_persists_summaries_before_edges(monke
         graph=SimpleNamespace(
             delete_nodes=AsyncMock(),
             add_nodes=AsyncMock(),
-            add_edges=AsyncMock(side_effect=lambda edges: events.append(("edges", len(edges)))),
+            add_edges=AsyncMock(
+                side_effect=lambda edges, **kwargs: events.append(("edges", len(edges)))
+            ),
         ),
         vector=SimpleNamespace(search=AsyncMock(return_value=[]), delete_data_points=AsyncMock()),
     )
@@ -1372,3 +1383,56 @@ async def test_update_global_context_index_graph_rebuild_rejects_missing_made_fr
     unified_engine.graph.delete_nodes.assert_not_awaited()
     unified_engine.vector.delete_data_points.assert_not_awaited()
     unified_engine.graph.add_edges.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# persist_context_index_edges — dataset-level provenance on graph-native graphs
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_persist_context_index_edges_stamps_dataset_ref_on_graph_native(monkeypatch):
+    from cognee.infrastructure.databases.provenance import make_source_ref_key
+    from cognee.tasks.memify.global_context_index.models import BucketAssignment
+    from cognee.tasks.memify.global_context_index.persist import persist_context_index_edges
+
+    dataset_id = uuid4()
+    run_id = uuid4()
+    unified_engine = SimpleNamespace(graph=SimpleNamespace(add_edges=AsyncMock()))
+
+    monkeypatch.setattr(persist_module, "is_graph_native_graph", AsyncMock(return_value=True))
+
+    assignments = [BucketAssignment(child_id=str(uuid4()), parent_id=str(uuid4()))]
+    ctx = PipelineContext(
+        dataset=SimpleNamespace(id=dataset_id),
+        pipeline_run_id=run_id,
+    )
+
+    await persist_context_index_edges(assignments, unified_engine, ctx=ctx)
+
+    # Dataset-level ref reuses the same sentinel data id as the context summaries.
+    sentinel_data_id = uuid5(NAMESPACE_URL, f"cognee:global-context-index:{dataset_id}")
+    expected_key = make_source_ref_key(dataset_id, sentinel_data_id)
+
+    unified_engine.graph.add_edges.assert_awaited_once()
+    kwargs = unified_engine.graph.add_edges.await_args.kwargs
+    assert kwargs["source_ref_key"] == expected_key
+    assert kwargs["pipeline_run_id"] == str(run_id)
+
+
+@pytest.mark.asyncio
+async def test_persist_context_index_edges_unstamped_on_ledger_graph(monkeypatch):
+    from cognee.tasks.memify.global_context_index.models import BucketAssignment
+    from cognee.tasks.memify.global_context_index.persist import persist_context_index_edges
+
+    unified_engine = SimpleNamespace(graph=SimpleNamespace(add_edges=AsyncMock()))
+    monkeypatch.setattr(persist_module, "is_graph_native_graph", AsyncMock(return_value=False))
+
+    assignments = [BucketAssignment(child_id=str(uuid4()), parent_id=str(uuid4()))]
+    ctx = PipelineContext(dataset=SimpleNamespace(id=uuid4()), pipeline_run_id=uuid4())
+
+    await persist_context_index_edges(assignments, unified_engine, ctx=ctx)
+
+    kwargs = unified_engine.graph.add_edges.await_args.kwargs
+    assert kwargs["source_ref_key"] is None
+    assert kwargs["pipeline_run_id"] is None
