@@ -188,6 +188,38 @@ async def test_brute_force_triplet_search_always_includes_edge_collection():
 
 
 @pytest.mark.asyncio
+async def test_brute_force_triplet_search_does_not_mutate_caller_collections():
+    """Test that the caller's `collections` list is not mutated in place.
+
+    Regression test: the edge collection used to be appended directly to the
+    caller-owned list, so a caller reusing the same list across searches (e.g.
+    TripletSearchContextProvider) would see it grow on every call.
+    """
+    mock_vector_engine = AsyncMock()
+    mock_vector_engine.embedding_engine = AsyncMock()
+    mock_vector_engine.embedding_engine.embed_text = AsyncMock(return_value=[[0.1, 0.2, 0.3]])
+    mock_vector_engine.search = AsyncMock(return_value=[])
+
+    caller_collections = ["Entity_name"]
+
+    with patch(
+        "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine",
+        return_value=mock_vector_engine,
+    ):
+        await brute_force_triplet_search(query="test", collections=caller_collections)
+        # Run twice with the same list to mimic a caller reusing it across searches.
+        await brute_force_triplet_search(query="test", collections=caller_collections)
+
+        # The edge collection must still be searched (handled via a local copy)...
+        call_collections = [
+            call[1]["collection_name"] for call in mock_vector_engine.search.call_args_list
+        ]
+        assert "EdgeType_relationship_name" in call_collections
+        # ...but the caller's list must be left untouched.
+        assert caller_collections == ["Entity_name"]
+
+
+@pytest.mark.asyncio
 async def test_brute_force_triplet_search_all_collections_empty():
     """Test that empty list is returned when all collections return no results."""
     mock_vector_engine = AsyncMock()

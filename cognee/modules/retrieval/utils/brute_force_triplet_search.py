@@ -287,7 +287,10 @@ async def brute_force_triplet_search(
             ]
 
         if "EdgeType_relationship_name" not in collections:
-            collections.append("EdgeType_relationship_name")
+            # Rebind to a new list instead of mutating in place: callers (e.g.
+            # TripletSearchContextProvider) reuse the same `collections` list across
+            # many searches, and an in-place append would leak this entry back to them.
+            collections = [*collections, "EdgeType_relationship_name"]
 
         otel_span.set_attribute("cognee.retrieval.collection_count", len(collections))
         otel_span.set_attribute(COGNEE_VECTOR_COLLECTION, ", ".join(collections))
