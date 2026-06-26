@@ -258,3 +258,35 @@ async def test_stale_node_is_superseded_only_once():
     stale_targets = [tgt for _src, tgt, _rel, _props in graph.edge_writes]
     assert stale_targets.count("old") == 1  # exactly one supersedes edge into 'old'
     assert graph.weight_writes["old"] == 0.25  # demoted once (0.5*0.5), not twice (0.125)
+
+
+# ---------------- task: a capped scan is reported as truncated (not silently "clean") ----------------
+@pytest.mark.asyncio
+async def test_truncated_flag_signals_capped_scan():
+    # three claims about the same subject -> three candidate pairs; the names hold no contradiction.
+    nodes = [
+        _node("a", "claim alpha"),
+        _node("b", "claim beta"),
+        _node("c", "claim gamma"),
+        _node("subject", "Topic"),
+    ]
+    edges = [
+        ("a", "subject", "about", {}),
+        ("b", "subject", "about", {}),
+        ("c", "subject", "about", {}),
+    ]
+    no_conflict = _stub_judge(
+        contradict_when_both_contain="reports to"
+    )  # never fires on these names
+
+    with _patch_engine(InMemoryGraph(nodes, edges)):
+        capped = await reconcile_memory(max_pairs=2, dry_run=True, judge=no_conflict)
+    # the scan stopped at the cap: contradictions=0 must NOT be read as "graph is clean"
+    assert capped["pairs_checked"] == 2
+    assert capped["truncated"] is True
+    assert capped["contradictions"] == 0
+
+    with _patch_engine(InMemoryGraph(nodes, edges)):
+        full = await reconcile_memory(max_pairs=10, dry_run=True, judge=no_conflict)
+    assert full["pairs_checked"] == 3
+    assert full["truncated"] is False  # whole candidate set examined

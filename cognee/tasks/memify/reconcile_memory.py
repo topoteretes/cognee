@@ -158,6 +158,7 @@ class ReconcileResult(TypedDict):
     superseded: int
     dry_run: bool
     supersedes: list
+    truncated: bool  # True if the candidate scan hit max_pairs (more pairs may be unexamined)
 
 
 # --------------------------------------------------------------------------------------
@@ -300,13 +301,17 @@ async def reconcile_memory(
         if weight_updates:
             await graph_engine.set_node_feedback_weights(weight_updates)
 
+    # the candidate scan stops at max_pairs; signal it so a caller never reads contradictions=0
+    # as "graph is clean" when it was really "we stopped early" on a large graph.
+    truncated = len(pairs) >= max_pairs
     logger.info(
-        "reconcile_memory: scanned=%d pairs=%d contradictions=%d superseded=%d dry_run=%s",
+        "reconcile_memory: scanned=%d pairs=%d contradictions=%d superseded=%d dry_run=%s truncated=%s",
         len(props_by_id),
         len(pairs),
         contradictions,
         len(edge_writes),
         dry_run,
+        truncated,
     )
     return {
         "scanned": len(props_by_id),
@@ -315,4 +320,5 @@ async def reconcile_memory(
         "superseded": len(edge_writes),
         "dry_run": dry_run,
         "supersedes": supersedes_out,
+        "truncated": truncated,
     }
