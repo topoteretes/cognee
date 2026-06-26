@@ -17,8 +17,8 @@ Design (matches the ticket):
   node's ``feedback_weight``. The demotion biases feedback-weighted retrieval toward the current claim **when
   ``feedback_influence`` > 0** (off by default); the ``supersedes`` edge is durable provenance either way.
 - **Safety:** ``dry_run=True`` is the default — it reports the detected contradictions + intended
-  supersessions without mutating the graph (mirrors ``cleanup_unused_data`` / ``apply_feedback_weights``). A
-  hard ``max_pairs`` cap bounds the number of LLM calls per run.
+  supersessions without mutating the graph (mirrors ``cleanup_unused_data``'s dry-run safety). A hard
+  ``max_pairs`` cap bounds the number of LLM calls per run; the result flags ``truncated`` when it is hit.
 
 Scope: contradictions are judged over claim-bearing **nodes** (a node's name / description / summary text)
 that share a subject — not over raw relationship edges. Bitemporal ``valid_from``/``valid_to`` is intentionally
