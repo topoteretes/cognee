@@ -24,7 +24,7 @@ class RelationalConfig(BaseSettings):
     database_connect_args: Union[str, None] = None
     pool_args: Union[str, None] = None
 
-    model_config = SettingsConfigDict(env_file=".env", extra="allow")
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     @pydantic.model_validator(mode="after")
     def fill_derived(self):
@@ -125,7 +125,29 @@ class MigrationConfig(BaseSettings):
     migration_db_password: Union[str, None] = None
     migration_db_provider: Union[str, None] = None
 
-    model_config = SettingsConfigDict(env_file=".env", extra="allow")
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    @pydantic.model_validator(mode="before")
+    @classmethod
+    def unify_db_config(cls, data: dict) -> dict:
+        """Fallback to DB_* environment variables if specific MIGRATION_DB_* ones are missing."""
+        mapping = {
+            "migration_db_host": "DB_HOST",
+            "migration_db_port": "DB_PORT",
+            "migration_db_username": "DB_USERNAME",
+            "migration_db_password": "DB_PASSWORD",
+            "migration_db_name": "DB_NAME",
+            "migration_db_provider": "DB_PROVIDER",
+        }
+        for mig_field, db_env in mapping.items():
+            if not data.get(mig_field) and os.getenv(db_env):
+                data[mig_field] = os.getenv(db_env)
+                
+            # If still missing, check if it's in the data dict under the generic name (parsed from .env by Pydantic if it overlaps)
+            if not data.get(mig_field) and db_env.lower() in data:
+                data[mig_field] = data[db_env.lower()]
+                
+        return data
 
     def to_dict(self) -> dict:
         """
