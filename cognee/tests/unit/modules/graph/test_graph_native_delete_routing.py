@@ -1,6 +1,6 @@
-"""Routing seam tests for graph-native delete (COG-5522).
+"""Routing seam tests for graph-provenance delete (COG-5522).
 
-Prove that the public delete entry points send graph-native graphs through the
+Prove that the public delete entry points send graph-provenance graphs through the
 unified boundary (and old/unmarked graphs stay on the relational-ledger path).
 These mock the unified engine + marker so they stay fast and backend-free; the
 real end-to-end behavior is covered by the integration suite.
@@ -26,16 +26,16 @@ ddsne_module = sys.modules["cognee.modules.graph.methods.delete_dataset_nodes_an
 pytestmark = pytest.mark.asyncio
 
 
-def _unified(graph_native_supported=True):
+def _unified(graph_provenance_supported=True):
     return SimpleNamespace(
-        supports_graph_native_delete=lambda: graph_native_supported,
+        supports_graph_provenance_delete=lambda: graph_provenance_supported,
         graph=object(),
         delete_by_source_ref=AsyncMock(),
         delete_by_dataset_id=AsyncMock(),
     )
 
 
-async def test_delete_data_routes_graph_native():
+async def test_delete_data_routes_graph_provenance():
     dataset_id, data_id, user_id = uuid4(), uuid4(), uuid4()
     unified = _unified()
 
@@ -47,7 +47,7 @@ async def test_delete_data_routes_graph_native():
             AsyncMock(return_value=SimpleNamespace(id=dataset_id)),
         ),
         patch.object(ddne_module, "get_unified_engine", AsyncMock(return_value=unified)),
-        patch.object(ddne_module, "is_graph_native_graph", AsyncMock(return_value=True)),
+        patch.object(ddne_module, "stores_provenance_in_graph", AsyncMock(return_value=True)),
         patch.object(ddne_module, "delete_from_graph_and_vector", AsyncMock()) as legacy_delete,
     ):
         await ddne_module.delete_data_nodes_and_edges(dataset_id, data_id, user_id)
@@ -56,7 +56,7 @@ async def test_delete_data_routes_graph_native():
     legacy_delete.assert_not_called()  # returned before the ledger path
 
 
-async def test_delete_dataset_routes_graph_native():
+async def test_delete_dataset_routes_graph_provenance():
     dataset_id, user_id = uuid4(), uuid4()
     unified = _unified()
 
@@ -68,7 +68,7 @@ async def test_delete_dataset_routes_graph_native():
             AsyncMock(return_value=SimpleNamespace(id=dataset_id)),
         ),
         patch.object(ddsne_module, "get_unified_engine", AsyncMock(return_value=unified)),
-        patch.object(ddsne_module, "is_graph_native_graph", AsyncMock(return_value=True)),
+        patch.object(ddsne_module, "stores_provenance_in_graph", AsyncMock(return_value=True)),
         patch.object(ddsne_module, "delete_from_graph_and_vector", AsyncMock()) as legacy_delete,
     ):
         await ddsne_module.delete_dataset_nodes_and_edges(dataset_id, user_id)
@@ -78,10 +78,10 @@ async def test_delete_dataset_routes_graph_native():
 
 
 async def test_delete_data_old_graph_uses_legacy():
-    """Marker absent -> the unified graph-native delete is NOT called and the
+    """Marker absent -> the unified graph-provenance delete is NOT called and the
     relational-ledger cleanup runs instead."""
     dataset_id, data_id, user_id = uuid4(), uuid4(), uuid4()
-    unified = _unified(graph_native_supported=True)
+    unified = _unified(graph_provenance_supported=True)
 
     with (
         patch.object(ddne_module, "get_user", AsyncMock(return_value=SimpleNamespace(id=user_id))),
@@ -92,7 +92,7 @@ async def test_delete_data_old_graph_uses_legacy():
         ),
         patch.object(ddne_module, "get_unified_engine", AsyncMock(return_value=unified)),
         # Old graph: marker absent.
-        patch.object(ddne_module, "is_graph_native_graph", AsyncMock(return_value=False)),
+        patch.object(ddne_module, "stores_provenance_in_graph", AsyncMock(return_value=False)),
         patch.object(ddne_module, "backend_access_control_enabled", lambda: False),
         patch.object(ddne_module, "get_global_data_related_nodes", AsyncMock(return_value=[])),
         patch.object(

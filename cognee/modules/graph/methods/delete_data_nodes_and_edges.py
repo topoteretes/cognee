@@ -4,7 +4,7 @@ from cognee.context_global_variables import backend_access_control_enabled
 from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
 from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.infrastructure.databases.provenance import make_source_ref_key
-from cognee.infrastructure.databases.provenance.markers import is_graph_native_graph
+from cognee.infrastructure.databases.provenance.markers import stores_provenance_in_graph
 from cognee.infrastructure.databases.vector.get_vector_engine import get_vector_engine
 from cognee.modules.graph.legacy.has_edges_in_legacy_ledger import has_edges_in_legacy_ledger
 from cognee.modules.graph.legacy.has_nodes_in_legacy_ledger import has_nodes_in_legacy_ledger
@@ -36,13 +36,13 @@ async def delete_data_nodes_and_edges(dataset_id: UUID, data_id: UUID, user_id: 
     dataset = await get_authorized_dataset(user, dataset_id, "delete")
     dataset_id = dataset.id
 
-    # Graph-native graphs carry provenance in the graph (no relational ledger
+    # Graph-provenance graphs carry provenance in the graph (no relational ledger
     # rows). Route them through the unified boundary, which removes the
     # dataset/data source ref and hard-deletes any artifact left unowned.
     unified = await get_unified_engine()
-    if unified.supports_graph_native_delete():
+    if unified.supports_graph_provenance_delete():
         graph_engine = unified.graph
-        if await is_graph_native_graph(graph_engine):
+        if await stores_provenance_in_graph(graph_engine):
             await unified.delete_by_source_ref(make_source_ref_key(dataset_id, data_id))
             return
 

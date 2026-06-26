@@ -97,7 +97,7 @@ class PostgresAdapter(GraphDBInterface):
         return data
 
     async def query(self, query_str: str, params: Optional[dict] = None) -> List[Any]:
-        """Not supported. Use typed adapter methods or a graph-native backend.
+        """Not supported. Use typed adapter methods or a Cypher-capable graph backend.
 
         Raises:
         -------
@@ -105,7 +105,7 @@ class PostgresAdapter(GraphDBInterface):
         """
         raise NotImplementedError(
             "The Postgres graph backend does not support raw Cypher queries. "
-            "Use a graph-native backend (Neo4j, Ladybug) for raw query support, "
+            "Use a Cypher-capable graph backend (Neo4j, Ladybug) for raw query support, "
             "or use the typed adapter methods (add_nodes, get_neighbors, etc.)."
         )
 

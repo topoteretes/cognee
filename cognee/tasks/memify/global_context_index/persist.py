@@ -6,7 +6,7 @@ from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from cognee.infrastructure.databases.provenance import make_source_ref_key
-from cognee.infrastructure.databases.provenance.markers import is_graph_native_graph
+from cognee.infrastructure.databases.provenance.markers import stores_provenance_in_graph
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 from cognee.modules.pipelines.models import PipelineContext
 from cognee.tasks.storage import add_data_points
@@ -116,12 +116,12 @@ async def persist_context_index_edges(
         return
 
     # Structural global context index edges are written directly by this task.
-    # On a graph-native graph, fold a dataset-level source ref into the write so
+    # On a graph-provenance graph, fold a dataset-level source ref into the write so
     # the edges are deletable/rollbackable; on ledger graphs they are unstamped
     # as before (the source ref is ignored).
     source_ref_key = None
     pipeline_run_id = None
-    if await is_graph_native_graph(unified_engine.graph):
+    if await stores_provenance_in_graph(unified_engine.graph):
         source_ref_key, pipeline_run_id = _context_index_source_ref(ctx)
 
     await unified_engine.graph.add_edges(

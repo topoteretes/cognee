@@ -8,7 +8,7 @@ from cognee.context_global_variables import multi_user_support_possible
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.infrastructure.databases.provenance import get_data_id_from_source_ref_key
-from cognee.infrastructure.databases.provenance.markers import is_graph_native_graph
+from cognee.infrastructure.databases.provenance.markers import stores_provenance_in_graph
 from cognee.modules.data.models import Data
 from cognee.modules.graph.legacy.has_edges_in_legacy_ledger import has_edges_in_legacy_ledger
 from cognee.modules.graph.legacy.has_nodes_in_legacy_ledger import has_nodes_in_legacy_ledger
@@ -42,7 +42,7 @@ def _extract_data_ids(data_ingestion_info: Any) -> set[UUID]:
     return data_ids
 
 
-async def _graph_native_affected_data_ids(graph_engine, pipeline_run_id: str) -> set[UUID]:
+async def _graph_provenance_affected_data_ids(graph_engine, pipeline_run_id: str) -> set[UUID]:
     """Data ids whose ownership the run introduced, read from graph provenance.
 
     Must be called *before* the rollback removes the run's source refs. The run's
@@ -104,19 +104,19 @@ async def cognify_rollback_handler(
     user_id = getattr(user, "id", None)
     db_engine = get_relational_engine()
 
-    # Graph-native graphs carry provenance in the graph (no relational ledger
+    # Graph-provenance graphs carry provenance in the graph (no relational ledger
     # rows). Roll back through the unified boundary, which removes the refs the
     # run attached and hard-deletes any artifact left unowned. We still reset
     # the cognify pipeline status for the run's data ids so re-cognify works.
     unified = await get_unified_engine()
-    if unified.supports_graph_native_delete():
+    if unified.supports_graph_provenance_delete():
         graph_engine = unified.graph
-        if await is_graph_native_graph(graph_engine):
+        if await stores_provenance_in_graph(graph_engine):
             # Read the run's affected data ids from graph provenance BEFORE the
             # rollback removes the run's source refs. Supplement with any
             # data_ingestion_info the caller passed (startup recovery passes
             # none, so the graph read is what keeps status reset correct there).
-            target_data_ids = await _graph_native_affected_data_ids(
+            target_data_ids = await _graph_provenance_affected_data_ids(
                 graph_engine, str(pipeline_run_id)
             )
             target_data_ids |= _extract_data_ids(data_ingestion_info)
@@ -128,7 +128,7 @@ async def cognify_rollback_handler(
                 await session.commit()
 
             logger.info(
-                "Graph-native cognify rollback completed for run %s (dataset=%s, user=%s).",
+                "Graph-provenance cognify rollback completed for run %s (dataset=%s, user=%s).",
                 pipeline_run_id,
                 dataset_id,
                 user_id,

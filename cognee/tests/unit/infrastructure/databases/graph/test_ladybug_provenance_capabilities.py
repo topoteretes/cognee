@@ -1,10 +1,10 @@
-"""Backend capability tests for graph-native provenance on the default graph
+"""Backend capability tests for graph provenance on the default graph
 backend (Ladybug/Kuzu) — COG-5522 Part 1.
 
 These exercise the real adapter (declared STRING[] provenance columns + the
 GraphMetadata marker table) against the Part 0 contract: source-ref
 attach/remove invariants, the six lookups, delete-planning snapshots,
-delete_edge_triples, the graph-native metadata marker, and belongs_to_set
+delete_edge_triples, the graph-provenance metadata marker, and belongs_to_set
 detag. They mirror the in-memory FakeProvenanceGraphEngine semantics that
 Part 2 is built against.
 """
@@ -19,7 +19,7 @@ import pytest
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.databases.provenance import (
     EdgeIdentity,
-    GRAPH_DELETE_MODE_GRAPH_NATIVE,
+    GRAPH_DELETE_MODE_GRAPH_PROVENANCE,
     GRAPH_DELETE_MODE_KEY,
     GRAPH_PROVENANCE_VERSION,
     GRAPH_PROVENANCE_VERSION_KEY,
@@ -73,11 +73,11 @@ async def test_graph_metadata_round_trip(tmp_path):
         await adapter.set_graph_metadata(
             {
                 GRAPH_PROVENANCE_VERSION_KEY: GRAPH_PROVENANCE_VERSION,
-                GRAPH_DELETE_MODE_KEY: GRAPH_DELETE_MODE_GRAPH_NATIVE,
+                GRAPH_DELETE_MODE_KEY: GRAPH_DELETE_MODE_GRAPH_PROVENANCE,
             }
         )
         meta = await adapter.get_graph_metadata()
-        assert meta[GRAPH_DELETE_MODE_KEY] == GRAPH_DELETE_MODE_GRAPH_NATIVE
+        assert meta[GRAPH_DELETE_MODE_KEY] == GRAPH_DELETE_MODE_GRAPH_PROVENANCE
         assert meta[GRAPH_PROVENANCE_VERSION_KEY] == GRAPH_PROVENANCE_VERSION
 
         # A marked-but-data-empty graph still reads as empty (marker lives in a
@@ -87,7 +87,7 @@ async def test_graph_metadata_round_trip(tmp_path):
         # set_graph_metadata is a merge/update, not a replace.
         await adapter.set_graph_metadata({"extra": "value"})
         meta = await adapter.get_graph_metadata()
-        assert meta[GRAPH_DELETE_MODE_KEY] == GRAPH_DELETE_MODE_GRAPH_NATIVE
+        assert meta[GRAPH_DELETE_MODE_KEY] == GRAPH_DELETE_MODE_GRAPH_PROVENANCE
         assert meta["extra"] == "value"
     finally:
         await adapter.close()
@@ -475,7 +475,7 @@ async def test_add_edges_folds_provenance_in_one_write(tmp_path):
 
 
 async def test_folded_attach_omitted_when_no_source_ref(tmp_path):
-    """Without a source_ref_key the write stamps nothing — non-graph-native and
+    """Without a source_ref_key the write stamps nothing — non-graph-provenance and
     other write sites are unaffected (back-compat)."""
     adapter = _new_adapter(tmp_path)
     try:

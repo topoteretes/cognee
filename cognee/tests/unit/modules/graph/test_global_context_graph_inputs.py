@@ -22,9 +22,9 @@ from cognee.tasks.memify.global_context_index.bucketing.graph.inputs import (
 
 @pytest.fixture(autouse=True)
 def _force_relational_path(monkeypatch):
-    """Default every test to the relational (ledger) read path. Graph-native
+    """Default every test to the relational (ledger) read path. Graph-provenance
     tests override this with their own fake engine."""
-    monkeypatch.setattr(gci, "_resolve_graph_native_engine", AsyncMock(return_value=None))
+    monkeypatch.setattr(gci, "_resolve_graph_provenance_engine", AsyncMock(return_value=None))
 
 
 class FakeResult:
@@ -42,7 +42,7 @@ def _session_with_results(*results):
 
 
 class _FakeGraphNativeEngine:
-    """Minimal graph engine for the graph-native read branch: a dataset's node
+    """Minimal graph engine for the graph-provenance read branch: a dataset's node
     set (via source-ref provenance) plus full nodes/edges from get_graph_data."""
 
     def __init__(self, dataset_node_ids, nodes, edges):
@@ -314,12 +314,12 @@ def test_chunk_entity_query_filters_contains_label_and_entity_type():
 
 
 # ---------------------------------------------------------------------------
-# Graph-native read path (provenance in the graph, empty relational ledger)
+# Graph-provenance read path (provenance in the graph, empty relational ledger)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_graph_native_text_summary_ids_read_from_graph(monkeypatch):
+async def test_graph_provenance_text_summary_ids_read_from_graph(monkeypatch):
     s1, s2, c1, e1 = (str(uuid4()) for _ in range(4))
     nodes = [
         (s1, {"type": "TextSummary"}),
@@ -329,14 +329,14 @@ async def test_graph_native_text_summary_ids_read_from_graph(monkeypatch):
     ]
     edges = [(s1, c1, "made_from", {}), (c1, e1, "contains", {})]
     engine = _FakeGraphNativeEngine({s1, s2, c1, e1}, nodes, edges)
-    monkeypatch.setattr(gci, "_resolve_graph_native_engine", AsyncMock(return_value=engine))
+    monkeypatch.setattr(gci, "_resolve_graph_provenance_engine", AsyncMock(return_value=engine))
 
     ids = await get_dataset_text_summary_ids(uuid4())
     assert ids == {s1, s2}
 
 
 @pytest.mark.asyncio
-async def test_graph_native_entity_input_builds_summary_chunk_entity(monkeypatch):
+async def test_graph_provenance_entity_input_builds_summary_chunk_entity(monkeypatch):
     s1, s2, s3, c1, c2, e1, e2, x1 = (str(uuid4()) for _ in range(8))
     nodes = [
         (s1, {"type": "TextSummary"}),
@@ -357,9 +357,9 @@ async def test_graph_native_entity_input_builds_summary_chunk_entity(monkeypatch
         (x1, c1, "made_from", {}),  # x1 outside the dataset -> edge dropped by scoping
     ]
     engine = _FakeGraphNativeEngine({s1, s2, s3, c1, c2, e1, e2}, nodes, edges)
-    monkeypatch.setattr(gci, "_resolve_graph_native_engine", AsyncMock(return_value=engine))
+    monkeypatch.setattr(gci, "_resolve_graph_provenance_engine", AsyncMock(return_value=engine))
 
-    # session is required by the decorator but unused on the graph-native branch.
+    # session is required by the decorator but unused on the graph-provenance branch.
     result = await load_dataset_graph_entity_input(uuid4(), [s1, s2], session=AsyncMock())
 
     assert result.summary_entities.entities_by_summary_id == {s1: {e1, e2}, s2: {e2}}

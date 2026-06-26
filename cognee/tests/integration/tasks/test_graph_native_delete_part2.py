@@ -1,4 +1,4 @@
-"""End-to-end graph-native delete tests on the real default stack.
+"""End-to-end graph-provenance delete tests on the real default stack.
 
 Runs the full add -> cognify -> delete pipeline against real Ladybug + LanceDB +
 SQLite. The LLM (entity/summary extraction) is mocked for a deterministic graph,
@@ -28,7 +28,7 @@ from cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine im
     LiteLLMEmbeddingEngine,
 )
 from cognee.infrastructure.llm import LLMGateway
-from cognee.modules.engine.operations.setup import setup
+from cognee.modules.engine.operations.setup import setup as setup_cognee
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.data_models import Edge, KnowledgeGraph, Node, SummarizedContent
 
@@ -105,7 +105,7 @@ async def _setup(tmp_path):
     cognee.config.system_root_directory(str(tmp_path / "system"))
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
-    await setup()
+    await setup_cognee()
     user = await get_default_user()
     await set_database_global_context_variables("main_dataset", user.id)
     return user
@@ -137,7 +137,7 @@ async def test_data_item_delete_shared_entities_survive(mock_struct, tmp_path):
     user = await _setup(tmp_path)
     dataset_id, _d1, d2, _d3 = await _ingest_single_run()
 
-    # The graph was marked graph-native (Part 1 markers are live on the default stack).
+    # The graph was marked graph-provenance (Part 1 markers are live on the default stack).
     graph = await get_graph_engine()
     metadata = await graph.get_graph_metadata()
     assert metadata.get("delete_mode") == "graph_native"

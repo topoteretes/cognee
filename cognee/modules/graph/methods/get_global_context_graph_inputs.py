@@ -8,13 +8,13 @@ from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
-from cognee.infrastructure.databases.provenance.markers import is_graph_native_graph
+from cognee.infrastructure.databases.provenance.markers import stores_provenance_in_graph
 from cognee.infrastructure.databases.relational import with_async_session
 from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.modules.graph.models import Edge, Node
 
 # Graph node types and edge relationship names traversed to build the graph
-# bucketing input. On graph-native graphs both edges live in relationship_name
+# bucketing input. On graph-provenance graphs both edges live in relationship_name
 # (the relational ledger splits "contains" into label, but the graph does not).
 _SUMMARY_TYPE = "TextSummary"
 _CHUNK_TYPE = "DocumentChunk"
@@ -55,19 +55,19 @@ def coerce_graph_uuid_set(values: Iterable[str | UUID], field_name: str) -> set[
     return {coerce_graph_uuid(value, field_name) for value in values}
 
 
-async def _resolve_graph_native_engine():
+async def _resolve_graph_provenance_engine():
     """Return the graph engine if this graph stores provenance in the graph
     itself (so its relational Node/Edge ledger is empty), else None."""
     unified = await get_unified_engine()
-    if not unified.supports_graph_native_delete():
+    if not unified.supports_graph_provenance_delete():
         return None
     graph_engine = unified.graph
-    if await is_graph_native_graph(graph_engine):
+    if await stores_provenance_in_graph(graph_engine):
         return graph_engine
     return None
 
 
-async def _graph_native_dataset_subgraph(
+async def _graph_provenance_dataset_subgraph(
     graph_engine,
     dataset_uuid: UUID,
 ) -> tuple[dict[str, dict], list[tuple[str, str, str]]]:
@@ -90,7 +90,7 @@ async def _graph_native_dataset_subgraph(
     return nodes_by_id, edges
 
 
-def _graph_native_entity_input(
+def _graph_provenance_entity_input(
     nodes_by_id: dict[str, dict],
     edges: list[tuple[str, str, str]],
     expected_summary_uuids: set[UUID],
@@ -143,10 +143,10 @@ def _graph_native_entity_input(
 
 
 async def get_dataset_text_summary_ids(dataset_id: str | UUID) -> set[str]:
-    graph_engine = await _resolve_graph_native_engine()
+    graph_engine = await _resolve_graph_provenance_engine()
     if graph_engine is not None:
         dataset_uuid = coerce_graph_uuid(dataset_id, "dataset_id")
-        nodes_by_id, _edges = await _graph_native_dataset_subgraph(graph_engine, dataset_uuid)
+        nodes_by_id, _edges = await _graph_provenance_dataset_subgraph(graph_engine, dataset_uuid)
         return {
             node_id for node_id, props in nodes_by_id.items() if props.get("type") == _SUMMARY_TYPE
         }
@@ -220,10 +220,10 @@ async def _load_dataset_graph_entity_input(
             entity_counts=DatasetEntityCounts(chunk_count=0, entity_chunk_counts={}),
         )
 
-    graph_engine = await _resolve_graph_native_engine()
+    graph_engine = await _resolve_graph_provenance_engine()
     if graph_engine is not None:
-        nodes_by_id, edges = await _graph_native_dataset_subgraph(graph_engine, dataset_uuid)
-        return _graph_native_entity_input(nodes_by_id, edges, expected_summary_uuids)
+        nodes_by_id, edges = await _graph_provenance_dataset_subgraph(graph_engine, dataset_uuid)
+        return _graph_provenance_entity_input(nodes_by_id, edges, expected_summary_uuids)
 
     summary_chunk_rows = await _load_summary_chunk_rows(
         dataset_uuid, expected_summary_uuids, session

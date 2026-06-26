@@ -67,11 +67,11 @@ class UnifiedStoreEngine(GraphVectorStoreInterface):
     def is_same_backend(self) -> bool:
         return self._graph is not None and self._graph is self._vector
 
-    def supports_graph_native_delete(self) -> bool:
-        """Return True when this engine can perform graph-native delete/rollback.
+    def supports_graph_provenance_delete(self) -> bool:
+        """Return True when this engine can perform graph-provenance delete/rollback.
 
         Requires both GRAPH and VECTOR capabilities and present engines. Routing
-        additionally checks ``is_graph_native_graph`` on the graph; unsupported
+        additionally checks ``stores_provenance_in_graph`` on the graph; unsupported
         provenance reads raise ``UnsupportedProvenanceCapability`` from the
         adapter (there is no separate provenance-capability flag).
         """
@@ -84,7 +84,7 @@ class UnifiedStoreEngine(GraphVectorStoreInterface):
 
     async def delete_by_source_ref(self, source_ref_key: str) -> None:
         """Delete artifacts owned only by the given source ref; detach the rest."""
-        if not self.supports_graph_native_delete():
+        if not self.supports_graph_provenance_delete():
             raise UnsupportedProvenanceCapability()
         graph = self.graph
         vector = self.vector
@@ -109,7 +109,7 @@ class UnifiedStoreEngine(GraphVectorStoreInterface):
 
     async def delete_by_dataset_id(self, dataset_id: str) -> None:
         """Remove the dataset's source refs; delete artifacts left unowned."""
-        if not self.supports_graph_native_delete():
+        if not self.supports_graph_provenance_delete():
             raise UnsupportedProvenanceCapability()
         graph = self.graph
         vector = self.vector
@@ -131,7 +131,7 @@ class UnifiedStoreEngine(GraphVectorStoreInterface):
 
     async def rollback_by_pipeline_run_id(self, pipeline_run_id: str) -> None:
         """Remove the refs a run attached; delete artifacts left unowned."""
-        if not self.supports_graph_native_delete():
+        if not self.supports_graph_provenance_delete():
             raise UnsupportedProvenanceCapability()
         graph = self.graph
         vector = self.vector

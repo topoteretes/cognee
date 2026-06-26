@@ -1,7 +1,7 @@
-"""Backend capability tests for graph-native vector cleanup on the default
+"""Backend capability tests for graph-provenance vector cleanup on the default
 vector backend (LanceDB) — COG-5522 Part 1.
 
-Graph-native delete computes vector ids from graph snapshots and hands them to
+Graph-provenance delete computes vector ids from graph snapshots and hands them to
 ``delete_data_points``. Those ids may be UUIDs or graph-computed deterministic
 strings, and the delete must be idempotent (missing collection / missing id /
 empty input are all no-ops). ``remove_belongs_to_set_tags`` branch coverage

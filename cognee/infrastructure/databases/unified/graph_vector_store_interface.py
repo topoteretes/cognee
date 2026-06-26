@@ -3,7 +3,7 @@ from cognee.infrastructure.databases.exceptions import UnsupportedProvenanceCapa
 
 class GraphVectorStoreInterface:
     """
-    Defines graph-native delete and rollback operations across graph and vector storage.
+    Defines graph-provenance delete and rollback operations across graph and vector storage.
 
     Default implementations raise UnsupportedProvenanceCapability so existing
     adapters keep their current behavior until they explicitly implement this

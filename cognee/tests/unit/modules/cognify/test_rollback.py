@@ -100,10 +100,10 @@ async def test_cognify_rollback_deletes_graph_before_relational(monkeypatch):
     async def _has_edges_in_legacy_ledger(_edges):
         return []
 
-    # Pin the engine as non-graph-native so rollback takes the relational-ledger
-    # path (the unified branch is gated on supports_graph_native_delete()).
+    # Pin the engine as non-graph-provenance so rollback takes the relational-ledger
+    # path (the unified branch is gated on supports_graph_provenance_delete()).
     async def _get_unified_engine():
-        return SimpleNamespace(supports_graph_native_delete=lambda: False)
+        return SimpleNamespace(supports_graph_provenance_delete=lambda: False)
 
     monkeypatch.setattr(rollback_module, "get_unified_engine", _get_unified_engine)
     monkeypatch.setattr(rollback_module, "get_relational_engine", lambda: engine)
@@ -126,8 +126,8 @@ async def test_cognify_rollback_deletes_graph_before_relational(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_graph_native_rollback_resets_status_without_ingestion_info(monkeypatch):
-    """Startup recovery passes no data_ingestion_info, so the graph-native branch
+async def test_graph_provenance_rollback_resets_status_without_ingestion_info(monkeypatch):
+    """Startup recovery passes no data_ingestion_info, so the graph-provenance branch
     must derive the affected data ids from graph provenance and still reset the
     per-data cognify status (otherwise re-cognify would skip the data)."""
     from cognee.infrastructure.databases.provenance import make_source_ref_key
@@ -150,7 +150,7 @@ async def test_graph_native_rollback_resets_status_without_ingestion_info(monkey
         rolled_back.append(run)
 
     fake_unified = SimpleNamespace(
-        supports_graph_native_delete=lambda: True,
+        supports_graph_provenance_delete=lambda: True,
         graph=_FakeGraph(),
         rollback_by_pipeline_run_id=_rollback,
     )
@@ -165,11 +165,11 @@ async def test_graph_native_rollback_resets_status_without_ingestion_info(monkey
     async def _get_unified_engine():
         return fake_unified
 
-    async def _is_graph_native_graph(_graph):
+    async def _stores_provenance_in_graph(_graph):
         return True
 
     monkeypatch.setattr(rollback_module, "get_unified_engine", _get_unified_engine)
-    monkeypatch.setattr(rollback_module, "is_graph_native_graph", _is_graph_native_graph)
+    monkeypatch.setattr(rollback_module, "stores_provenance_in_graph", _stores_provenance_in_graph)
     monkeypatch.setattr(rollback_module, "get_relational_engine", lambda: engine)
     monkeypatch.setattr(rollback_module.orm_attributes, "flag_modified", lambda *_args: None)
 
@@ -215,10 +215,10 @@ async def test_cognify_rollback_keeps_relational_rows_if_graph_delete_fails(monk
     async def _has_edges_in_legacy_ledger(_edges):
         return []
 
-    # Pin the engine as non-graph-native so rollback takes the relational-ledger
-    # path (the unified branch is gated on supports_graph_native_delete()).
+    # Pin the engine as non-graph-provenance so rollback takes the relational-ledger
+    # path (the unified branch is gated on supports_graph_provenance_delete()).
     async def _get_unified_engine():
-        return SimpleNamespace(supports_graph_native_delete=lambda: False)
+        return SimpleNamespace(supports_graph_provenance_delete=lambda: False)
 
     monkeypatch.setattr(rollback_module, "get_unified_engine", _get_unified_engine)
     monkeypatch.setattr(rollback_module, "get_relational_engine", lambda: engine)

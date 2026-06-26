@@ -53,7 +53,7 @@ logger = get_logger()
 DEFAULT_KUZU_BUFFER_POOL_SIZE = 1 << 35  # 32 GB (must be a power of 2 for Kuzu)
 DEFAULT_KUZU_MAX_DB_SIZE = 1 << 35  # 32 GB (must be a power of 2 for Kuzu)
 
-# Graph-native provenance (COG-5522 Part 1). These four fields live in declared
+# Graph provenance (COG-5522 Part 1). These four fields live in declared
 # STRING[] columns on both Node and EDGE — never inside the JSON `properties`
 # blob — so delete/rollback can filter by source ref, dataset id, or pipeline
 # run id with a column scan. Unset columns read back as NULL on Kuzu, so every
@@ -360,7 +360,7 @@ class LadybugAdapter(GraphDBInterface):
         logger.debug("Ladybug database schema ensured")
 
     def _ensure_graph_metadata_table(self) -> None:
-        """Create the GraphMetadata key/value table used by graph-native markers.
+        """Create the GraphMetadata key/value table used by graph-provenance markers.
 
         A dedicated node table — rather than a sentinel Node row — keeps marker
         rows out of every ``:Node``-scoped data query and out of ``is_empty()``,
@@ -1106,9 +1106,9 @@ class LadybugAdapter(GraphDBInterface):
 
             - nodes (List[DataPoint]): A list of nodes to be added to the graph, each
               represented as a DataPoint.
-            - source_ref_key (Optional[str]): When set, graph-native provenance for this
+            - source_ref_key (Optional[str]): When set, graph provenance for this
               source ref is stamped atomically in the same statement that writes the nodes
-              (no separate attach pass). Omit for non-graph-native writes.
+              (no separate attach pass). Omit for non-graph-provenance writes.
             - pipeline_run_id (Optional[str]): Run id recorded alongside the provenance
               stamp, so the write is rollbackable by run. Ignored when source_ref_key is None.
         """
@@ -1212,7 +1212,7 @@ class LadybugAdapter(GraphDBInterface):
         await self.query(query_str, {"ids": node_ids})
 
     # ------------------------------------------------------------------
-    # Graph-native provenance (COG-5522 Part 1)
+    # Graph provenance (COG-5522 Part 1)
     #
     # The four provenance fields live in declared STRING[] columns on Node and
     # EDGE. attach/remove do a per-artifact read-modify-write (delete/rollback
@@ -1931,9 +1931,9 @@ class LadybugAdapter(GraphDBInterface):
 
             - edges (List[Tuple[str, str, str, Dict[str, Any]]]): A list of edges represented as
               tuples of (from_node, to_node, relationship_name, edge_properties).
-            - source_ref_key (Optional[str]): When set, graph-native provenance for this
+            - source_ref_key (Optional[str]): When set, graph provenance for this
               source ref is stamped atomically in the same statement that writes the edges
-              (no separate attach pass). Omit for non-graph-native writes.
+              (no separate attach pass). Omit for non-graph-provenance writes.
             - pipeline_run_id (Optional[str]): Run id recorded alongside the provenance
               stamp, so the write is rollbackable by run. Ignored when source_ref_key is None.
         """

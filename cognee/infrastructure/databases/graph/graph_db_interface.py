@@ -95,8 +95,8 @@ class GraphDBInterface(ABC):
         -----------
 
             - nodes (Union[List[Node], List[DataPoint]]): A list of Node objects or DataPoint objects to be added to the graph.
-            - source_ref_key (Optional[str]): Graph-native provenance source ref to stamp
-              atomically as part of this write. Backends that support graph-native
+            - source_ref_key (Optional[str]): Graph provenance source ref to stamp
+              atomically as part of this write. Backends that support graph-provenance
               provenance fold it into the same statement; others may ignore it. (default None)
             - pipeline_run_id (Optional[str]): Run id recorded with the provenance stamp so
               the write is rollbackable by run. Ignored when source_ref_key is None. (default None)
@@ -259,7 +259,7 @@ class GraphDBInterface(ABC):
         node_ids: list[str],
     ) -> dict[str, NodeDeleteData]:
         """
-        Return node properties needed by graph-native delete and vector cleanup.
+        Return node properties needed by graph-provenance delete and vector cleanup.
 
         Returned data includes node identity, indexed fields, node properties,
         and all four provenance fields.
@@ -281,7 +281,7 @@ class GraphDBInterface(ABC):
         edges: list[EdgeIdentity],
     ) -> dict[EdgeIdentity, EdgeDeleteData]:
         """
-        Return edge properties needed by graph-native delete and rollback.
+        Return edge properties needed by graph-provenance delete and rollback.
 
         Returned data includes edge identity, edge text, edge properties, and
         all four provenance fields.
@@ -427,7 +427,7 @@ class GraphDBInterface(ABC):
     ) -> Tuple[List[Tuple[str, str, str, datetime]], Dict[str, Dict[str, Any]]]:
         """Return edges created after ``since`` (oldest first), with endpoint nodes.
 
-        Graph-native equivalent of the relational incremental edge fetch used to
+        Graph-provenance equivalent of the relational incremental edge fetch used to
         sync recent graph knowledge into the session cache. On graphs that store
         provenance in the graph itself the relational Edge/Node tables are empty,
         so callers read new edges here instead.
@@ -510,8 +510,8 @@ class GraphDBInterface(ABC):
         -----------
 
             - edges (Union[List[EdgeData], List[Tuple[str, str, str, Optional[Dict[str, Any]]]]]): A list of EdgeData objects or tuples representing edges to be added.
-            - source_ref_key (Optional[str]): Graph-native provenance source ref to stamp
-              atomically as part of this write. Backends that support graph-native
+            - source_ref_key (Optional[str]): Graph provenance source ref to stamp
+              atomically as part of this write. Backends that support graph-provenance
               provenance fold it into the same statement; others may ignore it. (default None)
             - pipeline_run_id (Optional[str]): Run id recorded with the provenance stamp so
               the write is rollbackable by run. Ignored when source_ref_key is None. (default None)

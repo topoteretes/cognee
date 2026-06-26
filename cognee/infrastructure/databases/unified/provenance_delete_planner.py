@@ -1,4 +1,4 @@
-"""Retry-safe planner for graph-native source-ref removal.
+"""Retry-safe planner for graph-provenance source-ref removal.
 
 Given snapshots of the matched nodes/edges and the set of source refs to remove
 from each, the planner decides which artifacts become *unowned* (no owning

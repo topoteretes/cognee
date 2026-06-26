@@ -5,7 +5,7 @@ import pytest
 from cognee.infrastructure.databases.exceptions import UnsupportedProvenanceCapability
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
 from cognee.infrastructure.databases.provenance import (
-    GRAPH_DELETE_MODE_GRAPH_NATIVE,
+    GRAPH_DELETE_MODE_GRAPH_PROVENANCE,
     GRAPH_DELETE_MODE_KEY,
     GRAPH_PROVENANCE_VERSION,
     GRAPH_PROVENANCE_VERSION_KEY,
@@ -86,11 +86,11 @@ def test_delete_data_dataclasses_are_stable_values():
     assert edge_delete_data.edge == edge
 
 
-def test_graph_native_marker_constants_import_cleanly():
+def test_graph_provenance_marker_constants_import_cleanly():
     assert GRAPH_PROVENANCE_VERSION_KEY == "provenance_version"
     assert GRAPH_PROVENANCE_VERSION == "1"
     assert GRAPH_DELETE_MODE_KEY == "delete_mode"
-    assert GRAPH_DELETE_MODE_GRAPH_NATIVE == "graph_native"
+    assert GRAPH_DELETE_MODE_GRAPH_PROVENANCE == "graph_native"
 
 
 @pytest.mark.asyncio

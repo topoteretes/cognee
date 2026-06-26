@@ -63,7 +63,7 @@ def _make_unified_mock():
     unified.graph = graph_engine
     unified.vector = vector_engine
     unified.has_capability = MagicMock(return_value=False)
-    # Default-stack backend is not graph-native (until Part 1): a non-empty/
+    # Default-stack backend is not graph-provenance (until Part 1): a non-empty/
     # unmarked graph keeps add_data_points on the relational-ledger path.
     graph_engine.is_empty = AsyncMock(return_value=False)
     graph_engine.get_graph_metadata = AsyncMock(return_value={})
@@ -217,7 +217,7 @@ def _provenance_ctx():
 @patch.object(adp_module, "get_unified_engine")
 @patch.object(adp_module, "deduplicate_nodes_and_edges")
 @patch.object(adp_module, "get_graph_from_model")
-async def test_add_data_points_graph_native_folds_provenance_and_skips_ledger(
+async def test_add_data_points_graph_provenance_folds_provenance_and_skips_ledger(
     mock_get_graph,
     mock_dedup,
     mock_get_unified,
@@ -228,7 +228,7 @@ async def test_add_data_points_graph_native_folds_provenance_and_skips_ledger(
 ):
     from cognee.infrastructure.databases.provenance import (
         make_source_ref_key,
-        GRAPH_DELETE_MODE_GRAPH_NATIVE,
+        GRAPH_DELETE_MODE_GRAPH_PROVENANCE,
         GRAPH_DELETE_MODE_KEY,
         GRAPH_PROVENANCE_VERSION,
         GRAPH_PROVENANCE_VERSION_KEY,
@@ -243,10 +243,10 @@ async def test_add_data_points_graph_native_folds_provenance_and_skips_ledger(
     mock_dedup.side_effect = lambda n, e: (n, e)
 
     unified, graph_engine, vector_engine = _make_unified_mock()
-    # Marked graph-native: is_graph_native_graph -> True (both marker fields).
+    # Marked graph-provenance: stores_provenance_in_graph -> True (both marker fields).
     graph_engine.get_graph_metadata = AsyncMock(
         return_value={
-            GRAPH_DELETE_MODE_KEY: GRAPH_DELETE_MODE_GRAPH_NATIVE,
+            GRAPH_DELETE_MODE_KEY: GRAPH_DELETE_MODE_GRAPH_PROVENANCE,
             GRAPH_PROVENANCE_VERSION_KEY: GRAPH_PROVENANCE_VERSION,
         }
     )
@@ -255,7 +255,7 @@ async def test_add_data_points_graph_native_folds_provenance_and_skips_ledger(
     ctx = _provenance_ctx()
     await add_data_points([dp1, dp2], custom_edges=custom_edges, ctx=ctx)
 
-    # Ledger is skipped entirely on a graph-native graph.
+    # Ledger is skipped entirely on a graph-provenance graph.
     mock_upsert_nodes.assert_not_called()
     mock_upsert_edges.assert_not_called()
 
@@ -286,7 +286,7 @@ async def test_add_data_points_graph_native_folds_provenance_and_skips_ledger(
 @patch.object(adp_module, "get_unified_engine")
 @patch.object(adp_module, "deduplicate_nodes_and_edges")
 @patch.object(adp_module, "get_graph_from_model")
-async def test_add_data_points_graph_native_hybrid_attaches_after_write(
+async def test_add_data_points_graph_provenance_hybrid_attaches_after_write(
     mock_get_graph,
     mock_dedup,
     mock_get_unified,
@@ -300,7 +300,7 @@ async def test_add_data_points_graph_native_hybrid_attaches_after_write(
     from cognee.infrastructure.databases.provenance import (
         EdgeIdentity,
         make_source_ref_key,
-        GRAPH_DELETE_MODE_GRAPH_NATIVE,
+        GRAPH_DELETE_MODE_GRAPH_PROVENANCE,
         GRAPH_DELETE_MODE_KEY,
         GRAPH_PROVENANCE_VERSION,
         GRAPH_PROVENANCE_VERSION_KEY,
@@ -319,7 +319,7 @@ async def test_add_data_points_graph_native_hybrid_attaches_after_write(
     unified.has_capability = MagicMock(side_effect=lambda cap: cap == EngineCapability.HYBRID_WRITE)
     graph_engine.get_graph_metadata = AsyncMock(
         return_value={
-            GRAPH_DELETE_MODE_KEY: GRAPH_DELETE_MODE_GRAPH_NATIVE,
+            GRAPH_DELETE_MODE_KEY: GRAPH_DELETE_MODE_GRAPH_PROVENANCE,
             GRAPH_PROVENANCE_VERSION_KEY: GRAPH_PROVENANCE_VERSION,
         }
     )
@@ -370,7 +370,7 @@ async def test_add_data_points_old_graph_uses_ledger_and_skips_attach(
     mock_get_graph.side_effect = [([dp1], [edge1]), ([dp2], [])]
     mock_dedup.side_effect = lambda n, e: (n, e)
 
-    # Default mock is NOT graph-native (empty metadata + non-empty graph).
+    # Default mock is NOT graph-provenance (empty metadata + non-empty graph).
     unified, graph_engine, vector_engine = _make_unified_mock()
     mock_get_unified.return_value = unified
     mock_get_session.return_value = _AsyncCM(AsyncMock())

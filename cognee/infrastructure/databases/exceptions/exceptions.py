@@ -26,11 +26,11 @@ class DatabaseNotCreatedError(CogneeSystemError):
 
 
 class UnsupportedProvenanceCapability(CogneeApiError):
-    """Raised when an adapter does not implement graph-native provenance operations."""
+    """Raised when an adapter does not implement graph provenance operations."""
 
     def __init__(
         self,
-        message: str = "This backend does not support graph-native provenance yet.",
+        message: str = "This backend does not support graph provenance yet.",
         name: str = "UnsupportedProvenanceCapability",
         status_code: int = status.HTTP_501_NOT_IMPLEMENTED,
     ):

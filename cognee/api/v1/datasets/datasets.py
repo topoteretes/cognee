@@ -179,20 +179,20 @@ class datasets:
             raise UnauthorizedDataAccessError(f"Data {data_id} not accessible.")
 
         async with set_database_global_context_variables(dataset_id, dataset.owner_id):
-            # Graph-native graphs have no relational ledger rows, so the
+            # Graph-provenance graphs have no relational ledger rows, so the
             # has_data_related_nodes gate would wrongly route to legacy_delete.
             # Route them straight to delete_data_nodes_and_edges, which detects
-            # the graph-native marker and removes the source ref via the
+            # the graph-provenance marker and removes the source ref via the
             # unified boundary. Old/unmarked graphs keep the existing gate.
             from cognee.infrastructure.databases.graph.get_graph_engine import (
                 get_graph_engine,
             )
             from cognee.infrastructure.databases.provenance.markers import (
-                is_graph_native_graph,
+                stores_provenance_in_graph,
             )
 
             graph_engine = await get_graph_engine()
-            if await is_graph_native_graph(graph_engine):
+            if await stores_provenance_in_graph(graph_engine):
                 await delete_data_nodes_and_edges(dataset_id, data_id, user.id)
             elif not await has_data_related_nodes(dataset_id, data_id):
                 await legacy_delete(data, "soft")

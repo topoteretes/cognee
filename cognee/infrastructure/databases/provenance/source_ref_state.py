@@ -1,4 +1,4 @@
-"""Pure source-ref state transitions for graph-native provenance (COG-5522).
+"""Pure source-ref state transitions for graph provenance (COG-5522).
 
 Backend-agnostic logic shared by every graph adapter that implements the Part 0
 provenance contract. It operates only on lists of contract strings — no storage,

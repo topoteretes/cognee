@@ -36,9 +36,9 @@ persist_module = import_module("cognee.tasks.memify.global_context_index.persist
 @pytest.fixture(autouse=True)
 def _default_ledger_graph(monkeypatch):
     """Default to a ledger graph so edge writes take the unstamped path. The
-    dedicated stamping test overrides this. (Avoids the real is_graph_native_graph
+    dedicated stamping test overrides this. (Avoids the real stores_provenance_in_graph
     probing the lightweight SimpleNamespace graph mocks used across the suite.)"""
-    monkeypatch.setattr(persist_module, "is_graph_native_graph", AsyncMock(return_value=False))
+    monkeypatch.setattr(persist_module, "stores_provenance_in_graph", AsyncMock(return_value=False))
 
 
 def _summary_node(text: str = "summary", bucket_id: str | None = None) -> SummaryNode:
@@ -1386,12 +1386,12 @@ async def test_update_global_context_index_graph_rebuild_rejects_missing_made_fr
 
 
 # ---------------------------------------------------------------------------
-# persist_context_index_edges — dataset-level provenance on graph-native graphs
+# persist_context_index_edges — dataset-level provenance on graph-provenance graphs
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_persist_context_index_edges_stamps_dataset_ref_on_graph_native(monkeypatch):
+async def test_persist_context_index_edges_stamps_dataset_ref_on_graph_provenance(monkeypatch):
     from cognee.infrastructure.databases.provenance import make_source_ref_key
     from cognee.tasks.memify.global_context_index.models import BucketAssignment
     from cognee.tasks.memify.global_context_index.persist import persist_context_index_edges
@@ -1400,7 +1400,7 @@ async def test_persist_context_index_edges_stamps_dataset_ref_on_graph_native(mo
     run_id = uuid4()
     unified_engine = SimpleNamespace(graph=SimpleNamespace(add_edges=AsyncMock()))
 
-    monkeypatch.setattr(persist_module, "is_graph_native_graph", AsyncMock(return_value=True))
+    monkeypatch.setattr(persist_module, "stores_provenance_in_graph", AsyncMock(return_value=True))
 
     assignments = [BucketAssignment(child_id=str(uuid4()), parent_id=str(uuid4()))]
     ctx = PipelineContext(
@@ -1426,7 +1426,7 @@ async def test_persist_context_index_edges_unstamped_on_ledger_graph(monkeypatch
     from cognee.tasks.memify.global_context_index.persist import persist_context_index_edges
 
     unified_engine = SimpleNamespace(graph=SimpleNamespace(add_edges=AsyncMock()))
-    monkeypatch.setattr(persist_module, "is_graph_native_graph", AsyncMock(return_value=False))
+    monkeypatch.setattr(persist_module, "stores_provenance_in_graph", AsyncMock(return_value=False))
 
     assignments = [BucketAssignment(child_id=str(uuid4()), parent_id=str(uuid4()))]
     ctx = PipelineContext(dataset=SimpleNamespace(id=uuid4()), pipeline_run_id=uuid4())

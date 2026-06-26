@@ -14,7 +14,7 @@ class EdgeIdentity:
 @dataclass(frozen=True)
 class NodeDeleteData:
     """
-    Node payload needed to decide and perform graph-native delete or vector cleanup.
+    Node payload needed to decide and perform graph-provenance delete or vector cleanup.
 
     Provenance fields have separate jobs:
     - source_ref_keys stores exact dataset/data ownership refs.
@@ -36,7 +36,7 @@ class NodeDeleteData:
 @dataclass(frozen=True)
 class EdgeDeleteData:
     """
-    Edge payload needed to decide and perform graph-native delete or rollback.
+    Edge payload needed to decide and perform graph-provenance delete or rollback.
 
     Provenance fields have separate jobs:
     - source_ref_keys stores exact dataset/data ownership refs.

@@ -10,7 +10,7 @@ from cognee.infrastructure.databases.provenance import (
     make_source_ref_key,
 )
 from cognee.infrastructure.databases.provenance.markers import (
-    ensure_graph_native_for_new_graph,
+    mark_graph_provenance_if_empty,
 )
 from cognee.infrastructure.databases.relational import get_async_session
 from cognee.modules.graph.methods import upsert_edges, upsert_nodes
@@ -98,22 +98,22 @@ async def add_data_points(
     vector_engine = unified.vector
     use_hybrid = unified.has_capability(EngineCapability.HYBRID_WRITE)
 
-    is_graph_native = False
+    stores_provenance = False
     if user and dataset and data_item:
-        # Graph-native graphs (empty graphs marked via graph metadata) carry
+        # Graph-provenance graphs (empty graphs marked via graph metadata) carry
         # their provenance in the graph itself, so they skip the relational
         # rollback ledger entirely. On backends that implement provenance
         # (e.g. Ladybug + LanceDB) a fresh empty graph IS marked here and takes
-        # the graph-native path; backends without provenance support raise on
+        # the graph-provenance path; backends without provenance support raise on
         # set_graph_metadata, so this stays False and the ledger path runs.
         #
         # On the non-hybrid path the provenance source refs are folded into the
         # graph write below (atomic — no window where an artifact exists without
         # its provenance). Hybrid backends still attach in a second pass and keep
         # that window; if the attach raises, the run is marked failed.
-        is_graph_native = await ensure_graph_native_for_new_graph(graph_engine)
+        stores_provenance = await mark_graph_provenance_if_empty(graph_engine)
 
-        if not is_graph_native:
+        if not stores_provenance:
             # Single session for all upserts: one transaction, one commit. The
             # rollback ledger is written BEFORE the graph/vector writes so a
             # failed write can always be swept by the rollback handler.
@@ -148,14 +148,14 @@ async def add_data_points(
                     )
                 await session.commit()
 
-    # Graph-native provenance is folded INTO the graph write so a node/edge is
+    # Graph provenance is folded INTO the graph write so a node/edge is
     # created and stamped in one atomic statement (no write-then-attach window,
     # no concurrent lost update — COG-5522 #4/#8). Only the non-hybrid path can
     # fold today; hybrid backends still stamp via a separate attach pass below.
-    # source_ref_key stays None for non-graph-native writes (no provenance).
+    # source_ref_key stays None for non-graph-provenance writes (no provenance).
     fold_source_ref_key = None
     fold_run_arg = None
-    if is_graph_native and not use_hybrid:
+    if stores_provenance and not use_hybrid:
         fold_source_ref_key = make_source_ref_key(dataset.id, data_item.id)
         fold_run_arg = str(pipeline_run_id) if pipeline_run_id else None
 
@@ -200,7 +200,7 @@ async def add_data_points(
 
         edges.extend(custom_edges)
 
-    if is_graph_native and use_hybrid:
+    if stores_provenance and use_hybrid:
         # Hybrid backends write nodes/edges and their vectors in one call that
         # cannot yet fold provenance, so stamp the source refs in a separate
         # attach pass. This keeps a write-then-attach window for hybrid graphs

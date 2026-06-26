@@ -1,4 +1,4 @@
-"""Unit tests for the Part 2 graph-native delete/rollback spine.
+"""Unit tests for the Part 2 graph-provenance delete/rollback spine.
 
 These exercise ``UnifiedStoreEngine.delete_by_source_ref`` /
 ``delete_by_dataset_id`` / ``rollback_by_pipeline_run_id`` and the planner
@@ -577,14 +577,14 @@ async def test_no_candidate_is_a_noop():
     assert vector.deleted == []
 
 
-async def test_supports_graph_native_delete_requires_both_capabilities():
+async def test_supports_graph_provenance_delete_requires_both_capabilities():
     graph = FakeProvenanceGraphEngine()
     vector = FakeVectorEngine()
 
-    assert _build_engine(graph, vector).supports_graph_native_delete() is True
+    assert _build_engine(graph, vector).supports_graph_provenance_delete() is True
 
     graph_only = UnifiedStoreEngine(graph_engine=graph, capabilities=EngineCapability.GRAPH)
-    assert graph_only.supports_graph_native_delete() is False
+    assert graph_only.supports_graph_provenance_delete() is False
 
 
 async def test_orphaned_nodeset_tags_stripped_on_delete():

@@ -1,4 +1,4 @@
-"""Part 1 + Part 2 integration gate: graph-native delete/rollback on the REAL
+"""Part 1 + Part 2 integration gate: graph-provenance delete/rollback on the REAL
 default graph adapter (Ladybug/Kuzu) driven through the UnifiedStoreEngine.
 
 These don't use the LLM or an embedding backend — they seed the graph directly

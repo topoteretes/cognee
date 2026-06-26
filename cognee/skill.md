@@ -204,7 +204,7 @@ await cognee.run_custom_pipeline(
 
 A `DataPoint` is the **atomic unit of knowledge** in Cognee.
 
-Use this concept whenever the user asks how Cognee represents structured data internally or how to insert graph-native objects directly.
+Use this concept whenever the user asks how Cognee represents structured data internally or how to insert graph objects directly.
 
 Key ideas:
 

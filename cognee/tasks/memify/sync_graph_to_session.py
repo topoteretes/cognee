@@ -2,7 +2,7 @@
 
 Reads new edges incrementally (by created_at timestamp) so only edges added
 since the last sync are processed. On ledger-backed graphs this walks the
-relational Edge/Node tables; on graph-native graphs (provenance stored in the
+relational Edge/Node tables; on graph-provenance graphs (provenance stored in the
 graph, empty ledger) it reads the edges straight from the graph adapter via
 ``get_edges_created_since``. Either way the result is stored as a dedicated
 graph knowledge key — separate from the QA conversation history — so it is
@@ -20,7 +20,7 @@ from sqlalchemy import select, and_
 
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.databases.unified import get_unified_engine
-from cognee.infrastructure.databases.provenance.markers import is_graph_native_graph
+from cognee.infrastructure.databases.provenance.markers import stores_provenance_in_graph
 from cognee.modules.graph.models.Edge import Edge
 from cognee.modules.graph.models.Node import Node
 from cognee.shared.logging_utils import get_logger
@@ -201,8 +201,8 @@ async def _collect_relational_lines(db_engine, dataset_id: UUID, since: Optional
     return lines, latest
 
 
-async def _collect_graph_native_lines(graph_engine, since: Optional[datetime]):
-    """Walk new graph edges (by created_at) on a graph-native graph, returning
+async def _collect_graph_provenance_lines(graph_engine, since: Optional[datetime]):
+    """Walk new graph edges (by created_at) on a graph-provenance graph, returning
     (triplet_lines, latest_timestamp). Mirrors the relational collector but reads
     provenance-carrying edges straight from the graph instead of the ledger."""
     lines: list[str] = []
@@ -257,15 +257,16 @@ async def sync_graph_to_session(
         since.isoformat() if since else "beginning",
     )
 
-    # Collect new triplet lines (ordered by created_at ascending). Graph-native
+    # Collect new triplet lines (ordered by created_at ascending). Graph-provenance
     # graphs carry their edges in the graph (the relational Edge ledger is empty),
     # so read new edges straight from the graph adapter; otherwise walk the ledger.
     unified = await get_unified_engine()
-    graph_native = unified.supports_graph_native_delete() and await is_graph_native_graph(
-        unified.graph
+    stores_provenance = (
+        unified.supports_graph_provenance_delete()
+        and await stores_provenance_in_graph(unified.graph)
     )
-    if graph_native:
-        new_lines, latest_ts = await _collect_graph_native_lines(unified.graph, since)
+    if stores_provenance:
+        new_lines, latest_ts = await _collect_graph_provenance_lines(unified.graph, since)
     else:
         db_engine = get_relational_engine()
         new_lines, latest_ts = await _collect_relational_lines(db_engine, dataset_id, since)

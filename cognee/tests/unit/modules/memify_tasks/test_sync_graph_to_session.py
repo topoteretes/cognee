@@ -32,13 +32,13 @@ _mod_search_methods = importlib.import_module("cognee.modules.search.methods.sea
 
 _PATCH_GET_REL = "cognee.tasks.memify.sync_graph_to_session.get_relational_engine"
 _PATCH_GET_UNIFIED = "cognee.tasks.memify.sync_graph_to_session.get_unified_engine"
-_PATCH_IS_GRAPH_NATIVE = "cognee.tasks.memify.sync_graph_to_session.is_graph_native_graph"
+_PATCH_STORES_PROVENANCE = "cognee.tasks.memify.sync_graph_to_session.stores_provenance_in_graph"
 
 
-def _patch_unified(graph_native: bool, graph=None):
+def _patch_unified(graph_provenance: bool, graph=None):
     """Patch the unified engine lookup. Defaults to the relational (ledger) path."""
     unified = MagicMock()
-    unified.supports_graph_native_delete = MagicMock(return_value=graph_native)
+    unified.supports_graph_provenance_delete = MagicMock(return_value=graph_provenance)
     unified.graph = graph if graph is not None else MagicMock()
     return patch(_PATCH_GET_UNIFIED, new=AsyncMock(return_value=unified))
 
@@ -200,7 +200,7 @@ async def test_sync_no_new_edges():
         patch.object(_mod_sm, "get_session_manager", return_value=sm),
         patch.object(_mod_cache, "get_cache_engine", return_value=cache_engine),
         patch(_PATCH_GET_REL, return_value=db_engine),
-        _patch_unified(graph_native=False),
+        _patch_unified(graph_provenance=False),
     ):
         result = await sync_graph_to_session(
             user_id="u1",
@@ -259,7 +259,7 @@ async def test_sync_merges_with_existing():
         patch.object(_mod_sm, "get_session_manager", return_value=sm),
         patch.object(_mod_cache, "get_cache_engine", return_value=cache_engine),
         patch(_PATCH_GET_REL, return_value=db_engine),
-        _patch_unified(graph_native=False),
+        _patch_unified(graph_provenance=False),
     ):
         result = await sync_graph_to_session(
             user_id="u1",
@@ -302,7 +302,7 @@ async def test_sync_caps_at_max_lines():
         patch.object(_mod_sm, "get_session_manager", return_value=sm),
         patch.object(_mod_cache, "get_cache_engine", return_value=cache_engine),
         patch(_PATCH_GET_REL, return_value=db_engine),
-        _patch_unified(graph_native=False),
+        _patch_unified(graph_provenance=False),
     ):
         result = await sync_graph_to_session(
             user_id="u1",
@@ -322,13 +322,13 @@ async def test_sync_caps_at_max_lines():
 
 
 # ---------------------------------------------------------------------------
-# sync_graph_to_session — graph-native path reads edges from the graph
+# sync_graph_to_session — graph-provenance path reads edges from the graph
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_sync_graph_native_reads_from_graph_adapter():
-    """On a graph-native graph the relational ledger is empty, so sync reads new
+async def test_sync_graph_provenance_reads_from_graph_adapter():
+    """On a graph-provenance graph the relational ledger is empty, so sync reads new
     edges via the graph adapter's get_edges_created_since, renders triplets, and
     advances the checkpoint to the latest edge created_at."""
     dataset_id = uuid4()
@@ -346,15 +346,15 @@ async def test_sync_graph_native_reads_from_graph_adapter():
 
     sm = _make_session_manager()
     cache_engine = _make_cache_engine()
-    # Relational engine must NOT be used on the graph-native path.
+    # Relational engine must NOT be used on the graph-provenance path.
     db_engine = _mock_db_engine_empty()
 
     with (
         patch.object(_mod_sm, "get_session_manager", return_value=sm),
         patch.object(_mod_cache, "get_cache_engine", return_value=cache_engine),
         patch(_PATCH_GET_REL, return_value=db_engine),
-        _patch_unified(graph_native=True, graph=graph),
-        patch(_PATCH_IS_GRAPH_NATIVE, new=AsyncMock(return_value=True)),
+        _patch_unified(graph_provenance=True, graph=graph),
+        patch(_PATCH_STORES_PROVENANCE, new=AsyncMock(return_value=True)),
     ):
         result = await sync_graph_to_session(
             user_id="u1",
