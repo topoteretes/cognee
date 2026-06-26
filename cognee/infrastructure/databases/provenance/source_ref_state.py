@@ -31,6 +31,53 @@ class ProvenanceColumns(NamedTuple):
     source_run_refs: List[str]
 
 
+class ProvenanceAttachInputs(NamedTuple):
+    """Pre-computed values for an atomic, in-write provenance attach.
+
+    A folded graph write (``add_nodes`` / ``add_edges`` stamping provenance in
+    the same statement that creates the artifact) cannot run the full
+    ``provenance_after_attach`` transition, because it does not read the
+    artifact's current columns first — that read is exactly the race it removes.
+    Instead it carries these fixed "to add" lists for the single key being
+    attached and lets the storage layer set-merge them against committed state
+    atomically. The run ref/id are populated only when there is a run id; the
+    storage layer is responsible for the Model A guard (append the run mapping
+    only when the key was not already present).
+    """
+
+    source_ref_key: str
+    add_keys: List[str]
+    add_dataset_ids: List[str]
+    add_run_refs: List[str]
+    add_run_ids: List[str]
+
+
+def provenance_attach_inputs(
+    source_ref_key: str,
+    pipeline_run_id: Optional[str],
+) -> ProvenanceAttachInputs:
+    """Build the fixed add-lists for folding one source ref into a graph write.
+
+    Used by the atomic write path (Model A preserved in-statement). A single key
+    is attached per data item, so the storage-side guard on ``source_ref_key``
+    can decide per-artifact whether the run mapping is new.
+    """
+    add_dataset_ids = [str(get_dataset_id_from_source_ref_key(source_ref_key))]
+    add_run_refs: List[str] = []
+    add_run_ids: List[str] = []
+    if pipeline_run_id is not None:
+        run_uuid = coerce_run_uuid(pipeline_run_id)
+        add_run_refs = [make_source_run_ref(run_uuid, source_ref_key)]
+        add_run_ids = [str(run_uuid)]
+    return ProvenanceAttachInputs(
+        source_ref_key=source_ref_key,
+        add_keys=[source_ref_key],
+        add_dataset_ids=add_dataset_ids,
+        add_run_refs=add_run_refs,
+        add_run_ids=add_run_ids,
+    )
+
+
 def coerce_run_uuid(pipeline_run_id: Any) -> UUID:
     """Accept a UUID or its string form (the contract passes ``str``)."""
     return pipeline_run_id if isinstance(pipeline_run_id, UUID) else UUID(str(pipeline_run_id))

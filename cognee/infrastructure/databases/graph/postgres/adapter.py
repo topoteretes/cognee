@@ -138,7 +138,12 @@ class PostgresAdapter(GraphDBInterface):
         else:
             await self.add_nodes([node])
 
-    async def add_nodes(self, nodes: Union[List[Tuple[str, Dict]], List[DataPoint]]) -> None:
+    async def add_nodes(
+        self,
+        nodes: Union[List[Tuple[str, Dict]], List[DataPoint]],
+        source_ref_key: Optional[str] = None,
+        pipeline_run_id: Optional[str] = None,
+    ) -> None:
         """Add multiple nodes via batch upsert.
 
         Parameters:
@@ -272,7 +277,10 @@ class PostgresAdapter(GraphDBInterface):
         )
 
     async def add_edges(
-        self, edges: Union[List[Tuple[str, str, str, Optional[Dict[str, Any]]]], List]
+        self,
+        edges: Union[List[Tuple[str, str, str, Optional[Dict[str, Any]]]], List],
+        source_ref_key: Optional[str] = None,
+        pipeline_run_id: Optional[str] = None,
     ) -> None:
         """Add multiple edges via batch upsert.
 

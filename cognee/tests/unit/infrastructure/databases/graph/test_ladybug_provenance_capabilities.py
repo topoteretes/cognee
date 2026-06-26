@@ -11,7 +11,8 @@ Part 2 is built against.
 
 from __future__ import annotations
 
-from uuid import uuid4
+import asyncio
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -414,5 +415,127 @@ async def test_rewrite_preserves_provenance(tmp_path):
         edge_snap = (await adapter.get_edge_delete_data([edge]))[edge]
         assert edge_snap.source_ref_keys == [key]
         assert edge_snap.edge_text == "t2"
+    finally:
+        await adapter.close()
+
+
+# ----------------------------------------------------------------------------
+# Folded provenance: stamping inside the add_nodes / add_edges write itself
+# (COG-5522 #4/#8). The artifact is created and stamped in one atomic statement
+# — no separate attach pass, so no write-then-attach window and no concurrent
+# read-modify-write lost update.
+# ----------------------------------------------------------------------------
+
+
+async def test_add_nodes_folds_provenance_in_one_write(tmp_path):
+    """A single folded add_nodes materializes all four provenance fields, so the
+    node is findable by ref with nothing left to attach afterwards (closes #4)."""
+    adapter = _new_adapter(tmp_path)
+    try:
+        d1, r1 = uuid4(), uuid4()
+        key = make_source_ref_key(d1, uuid4())
+        node = _Ent(id=uuid4(), name="Germany")
+
+        await adapter.add_nodes([node], source_ref_key=key, pipeline_run_id=str(r1))
+
+        node_id = str(node.id)
+        snap = (await adapter.get_node_delete_data([node_id]))[node_id]
+        assert snap.source_ref_keys == [key]
+        assert snap.source_dataset_ids == [str(d1)]
+        assert snap.source_run_ids == [str(r1)]
+        assert snap.source_run_refs == [make_source_run_ref(r1, key)]
+        assert await adapter.find_nodes_by_source_ref(key) == [node_id]
+    finally:
+        await adapter.close()
+
+
+async def test_add_edges_folds_provenance_in_one_write(tmp_path):
+    """The edge variant stamps provenance in the same MERGE that writes the edge."""
+    adapter = _new_adapter(tmp_path)
+    try:
+        d1, r1 = uuid4(), uuid4()
+        key = make_source_ref_key(d1, uuid4())
+        germany_id, alice_id = await _seed_two_entities(adapter)
+
+        await adapter.add_edges(
+            [(germany_id, alice_id, "knows", {"edge_text": "t"})],
+            source_ref_key=key,
+            pipeline_run_id=str(r1),
+        )
+
+        edge = EdgeIdentity(germany_id, alice_id, "knows")
+        snap = (await adapter.get_edge_delete_data([edge]))[edge]
+        assert snap.source_ref_keys == [key]
+        assert snap.source_dataset_ids == [str(d1)]
+        assert snap.source_run_ids == [str(r1)]
+        assert snap.source_run_refs == [make_source_run_ref(r1, key)]
+        assert await adapter.find_edges_by_source_ref(key) == [edge]
+    finally:
+        await adapter.close()
+
+
+async def test_folded_attach_omitted_when_no_source_ref(tmp_path):
+    """Without a source_ref_key the write stamps nothing — non-graph-native and
+    other write sites are unaffected (back-compat)."""
+    adapter = _new_adapter(tmp_path)
+    try:
+        node = _Ent(id=uuid4(), name="Germany")
+        await adapter.add_nodes([node])  # no provenance args
+        node_id = str(node.id)
+        snap = (await adapter.get_node_delete_data([node_id]))[node_id]
+        assert snap.source_ref_keys == []
+        assert snap.source_run_refs == []
+    finally:
+        await adapter.close()
+
+
+async def test_folded_attach_preserves_model_a_on_reattach(tmp_path):
+    """Re-attaching an already-present key via a NEW run records no new run ref,
+    even on the folded path — the in-statement guard reads pre-write ownership
+    (Part 0 invariant preserved atomically)."""
+    adapter = _new_adapter(tmp_path)
+    try:
+        key = make_source_ref_key(uuid4(), uuid4())
+        r1, r2 = uuid4(), uuid4()
+        node = _Ent(id=uuid4(), name="Shared")
+        node_id = str(node.id)
+
+        await adapter.add_nodes([node], source_ref_key=key, pipeline_run_id=str(r1))
+        # Re-cognify the same data item in a new run: key already present.
+        await adapter.add_nodes([node], source_ref_key=key, pipeline_run_id=str(r2))
+
+        snap = (await adapter.get_node_delete_data([node_id]))[node_id]
+        assert snap.source_ref_keys == [key]
+        assert snap.source_run_refs == [make_source_run_ref(r1, key)]
+        assert snap.source_run_ids == [str(r1)]
+    finally:
+        await adapter.close()
+
+
+async def test_concurrent_folded_attach_keeps_all_keys(tmp_path):
+    """The #8 regression: two concurrent folded writes attach DIFFERENT keys to
+    the SAME node. With the old read-modify-write attach one key was lost; the
+    folded single-statement set-merge keeps both."""
+    adapter = _new_adapter(tmp_path)
+    try:
+        ds = uuid4()
+        run = str(uuid4())
+        key1 = make_source_ref_key(ds, uuid4())  # data item 1
+        key2 = make_source_ref_key(ds, uuid4())  # data item 2
+        node = _Ent(id=uuid4(), name="Alice")  # shared across both data items
+        node_id = str(node.id)
+
+        await asyncio.gather(
+            adapter.add_nodes([node], source_ref_key=key1, pipeline_run_id=run),
+            adapter.add_nodes([node], source_ref_key=key2, pipeline_run_id=run),
+        )
+
+        snap = (await adapter.get_node_delete_data([node_id]))[node_id]
+        assert sorted(snap.source_ref_keys) == sorted([key1, key2]), (
+            "concurrent folded stamps must not lose a source ref"
+        )
+        assert sorted(snap.source_run_refs) == sorted(
+            [make_source_run_ref(UUID(run), key1), make_source_run_ref(UUID(run), key2)]
+        )
     finally:
         await adapter.close()

@@ -33,6 +33,7 @@ from cognee.infrastructure.databases.provenance.source_refs import (
 from cognee.infrastructure.databases.provenance.source_ref_state import (
     provenance_after_attach,
     provenance_after_remove,
+    provenance_attach_inputs,
 )
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.storage.utils import JSONEncoder
@@ -63,6 +64,53 @@ PROVENANCE_LIST_COLUMNS = (
     "source_run_ids",
     "source_run_refs",
 )
+
+
+def _provenance_fold_clause(alias: str) -> str:
+    """Cypher ``SET`` fragment that stamps provenance inside the artifact write.
+
+    Appended to the ``MERGE`` in ``add_nodes`` / ``add_edges`` so a node/edge is
+    created and stamped in one atomic statement — there is no read-then-write
+    window (closes the write-then-attach gap and the concurrent lost update,
+    COG-5522 #4/#8). Set-merge is done with ``list_distinct`` against the
+    committed column. The run ref/id are appended only when the key is *not*
+    already present (Model A): the ``CASE`` guard reads ``source_ref_keys`` from
+    the pre-SET row, so it sees ownership as it was before this write.
+
+    ``alias`` is the bound variable for the artifact (``n`` for nodes, ``r`` for
+    edges). All four ``$``-params are scalars shared across the UNWIND batch
+    because a single source ref key is attached per call.
+    """
+    return f"""
+            SET {alias}.source_run_refs = CASE
+                    WHEN list_contains(coalesce({alias}.source_ref_keys, []), $sr_key)
+                    THEN coalesce({alias}.source_run_refs, [])
+                    ELSE list_distinct(coalesce({alias}.source_run_refs, []) + $add_run_refs)
+                END,
+                {alias}.source_run_ids = CASE
+                    WHEN list_contains(coalesce({alias}.source_ref_keys, []), $sr_key)
+                    THEN coalesce({alias}.source_run_ids, [])
+                    ELSE list_distinct(coalesce({alias}.source_run_ids, []) + $add_run_ids)
+                END,
+                {alias}.source_ref_keys = list_distinct(
+                    coalesce({alias}.source_ref_keys, []) + $add_keys
+                ),
+                {alias}.source_dataset_ids = list_distinct(
+                    coalesce({alias}.source_dataset_ids, []) + $add_dataset_ids
+                )
+            """
+
+
+def _provenance_fold_params(source_ref_key: str, pipeline_run_id: Optional[str]) -> dict:
+    """Scalar query params consumed by :func:`_provenance_fold_clause`."""
+    inputs = provenance_attach_inputs(source_ref_key, pipeline_run_id)
+    return {
+        "sr_key": inputs.source_ref_key,
+        "add_keys": inputs.add_keys,
+        "add_dataset_ids": inputs.add_dataset_ids,
+        "add_run_refs": inputs.add_run_refs,
+        "add_run_ids": inputs.add_run_ids,
+    }
 
 
 def _as_str_list(value: Any) -> List[str]:
@@ -1040,7 +1088,12 @@ class LadybugAdapter(GraphDBInterface):
             logger.error(f"Failed to add node: {e}")
             raise
 
-    async def add_nodes(self, nodes: List[DataPoint]) -> None:
+    async def add_nodes(
+        self,
+        nodes: List[DataPoint],
+        source_ref_key: Optional[str] = None,
+        pipeline_run_id: Optional[str] = None,
+    ) -> None:
         """
         Add multiple nodes to the graph in a batch operation.
 
@@ -1053,6 +1106,11 @@ class LadybugAdapter(GraphDBInterface):
 
             - nodes (List[DataPoint]): A list of nodes to be added to the graph, each
               represented as a DataPoint.
+            - source_ref_key (Optional[str]): When set, graph-native provenance for this
+              source ref is stamped atomically in the same statement that writes the nodes
+              (no separate attach pass). Omit for non-graph-native writes.
+            - pipeline_run_id (Optional[str]): Run id recorded alongside the provenance
+              stamp, so the write is rollbackable by run. Ignored when source_ref_key is None.
         """
         if not nodes:
             return
@@ -1105,7 +1163,12 @@ class LadybugAdapter(GraphDBInterface):
                     n.properties = node.properties,
                     n.updated_at = timestamp(node.updated_at)
                 """
-                await self.query(merge_query, {"nodes": node_params})
+                query_params = {"nodes": node_params}
+                if source_ref_key is not None:
+                    merge_query += _provenance_fold_clause("n")
+                    query_params.update(_provenance_fold_params(source_ref_key, pipeline_run_id))
+
+                await self.query(merge_query, query_params)
                 await self.checkpoint()
                 logger.debug(f"Processed {len(node_params)} nodes in batch")
 
@@ -1800,7 +1863,12 @@ class LadybugAdapter(GraphDBInterface):
             logger.error(f"Failed to add edge: {e}")
             raise
 
-    async def add_edges(self, edges: List[Tuple[str, str, str, Dict[str, Any]]]) -> None:
+    async def add_edges(
+        self,
+        edges: List[Tuple[str, str, str, Dict[str, Any]]],
+        source_ref_key: Optional[str] = None,
+        pipeline_run_id: Optional[str] = None,
+    ) -> None:
         """
         Add multiple edges in a batch operation.
 
@@ -1813,6 +1881,11 @@ class LadybugAdapter(GraphDBInterface):
 
             - edges (List[Tuple[str, str, str, Dict[str, Any]]]): A list of edges represented as
               tuples of (from_node, to_node, relationship_name, edge_properties).
+            - source_ref_key (Optional[str]): When set, graph-native provenance for this
+              source ref is stamped atomically in the same statement that writes the edges
+              (no separate attach pass). Omit for non-graph-native writes.
+            - pipeline_run_id (Optional[str]): Run id recorded alongside the provenance
+              stamp, so the write is rollbackable by run. Ignored when source_ref_key is None.
         """
         if not edges:
             return
@@ -1847,8 +1920,12 @@ class LadybugAdapter(GraphDBInterface):
                 r.updated_at = timestamp(edge.updated_at),
                 r.properties = edge.properties
             """
+            query_params = {"edges": edge_params}
+            if source_ref_key is not None:
+                query += _provenance_fold_clause("r")
+                query_params.update(_provenance_fold_params(source_ref_key, pipeline_run_id))
 
-            await self.query(query, {"edges": edge_params})
+            await self.query(query, query_params)
             await self.checkpoint()
 
         except Exception as e:

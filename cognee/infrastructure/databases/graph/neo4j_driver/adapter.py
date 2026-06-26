@@ -228,7 +228,12 @@ class Neo4jAdapter(GraphDBInterface):
         return await self.query(query, params)
 
     @override_distributed(queued_add_nodes)
-    async def add_nodes(self, nodes: list[DataPoint]) -> None:
+    async def add_nodes(
+        self,
+        nodes: list[DataPoint],
+        source_ref_key: Optional[str] = None,
+        pipeline_run_id: Optional[str] = None,
+    ) -> None:
         """
         Add multiple nodes to the database in a single query.
 
@@ -591,7 +596,12 @@ class Neo4jAdapter(GraphDBInterface):
         return flattened
 
     @override_distributed(queued_add_edges)
-    async def add_edges(self, edges: list[tuple[str, str, str, dict[str, Any]]]) -> None:
+    async def add_edges(
+        self,
+        edges: list[tuple[str, str, str, dict[str, Any]]],
+        source_ref_key: Optional[str] = None,
+        pipeline_run_id: Optional[str] = None,
+    ) -> None:
         """
         Add multiple edges between nodes in a single query.
 

@@ -159,7 +159,7 @@ async def test_add_data_points_with_empty_list(
 
     assert result == []
     mock_get_graph.assert_not_called()
-    graph_engine.add_nodes.assert_awaited_once_with([])
+    graph_engine.add_nodes.assert_awaited_once_with([], source_ref_key=None, pipeline_run_id=None)
 
 
 @pytest.mark.asyncio
@@ -217,7 +217,7 @@ def _provenance_ctx():
 @patch.object(adp_module, "get_unified_engine")
 @patch.object(adp_module, "deduplicate_nodes_and_edges")
 @patch.object(adp_module, "get_graph_from_model")
-async def test_add_data_points_graph_native_stamps_and_skips_ledger(
+async def test_add_data_points_graph_native_folds_provenance_and_skips_ledger(
     mock_get_graph,
     mock_dedup,
     mock_get_unified,
@@ -227,7 +227,6 @@ async def test_add_data_points_graph_native_stamps_and_skips_ledger(
     mock_upsert_edges,
 ):
     from cognee.infrastructure.databases.provenance import (
-        EdgeIdentity,
         make_source_ref_key,
         GRAPH_DELETE_MODE_GRAPH_NATIVE,
         GRAPH_DELETE_MODE_KEY,
@@ -260,7 +259,75 @@ async def test_add_data_points_graph_native_stamps_and_skips_ledger(
     mock_upsert_nodes.assert_not_called()
     mock_upsert_edges.assert_not_called()
 
-    # Source refs are stamped on the written nodes and edges (incl. custom edge).
+    expected_key = make_source_ref_key(ctx.dataset.id, ctx.data_item.id)
+    expected_run = str(ctx.pipeline_run_id)
+
+    # On the non-hybrid path provenance is folded INTO the graph write: the
+    # source ref + run id are passed to add_nodes / add_edges, and there is no
+    # separate attach pass.
+    graph_engine.add_nodes.assert_awaited_once()
+    assert graph_engine.add_nodes.await_args.kwargs["source_ref_key"] == expected_key
+    assert graph_engine.add_nodes.await_args.kwargs["pipeline_run_id"] == expected_run
+
+    assert graph_engine.add_edges.await_count == 2  # main edges + custom edges
+    for call in graph_engine.add_edges.await_args_list:
+        assert call.kwargs["source_ref_key"] == expected_key
+        assert call.kwargs["pipeline_run_id"] == expected_run
+
+    graph_engine.attach_node_source_refs.assert_not_called()
+    graph_engine.attach_edge_source_refs.assert_not_called()
+
+
+@pytest.mark.asyncio
+@patch.object(adp_module, "upsert_edges")
+@patch.object(adp_module, "upsert_nodes")
+@patch.object(adp_module, "index_graph_edges")
+@patch.object(adp_module, "index_data_points")
+@patch.object(adp_module, "get_unified_engine")
+@patch.object(adp_module, "deduplicate_nodes_and_edges")
+@patch.object(adp_module, "get_graph_from_model")
+async def test_add_data_points_graph_native_hybrid_attaches_after_write(
+    mock_get_graph,
+    mock_dedup,
+    mock_get_unified,
+    mock_index_nodes,
+    mock_index_edges,
+    mock_upsert_nodes,
+    mock_upsert_edges,
+):
+    """A hybrid backend cannot fold provenance into its combined node+vector
+    write, so it stamps via the separate attach pass (the retained fallback)."""
+    from cognee.infrastructure.databases.provenance import (
+        EdgeIdentity,
+        make_source_ref_key,
+        GRAPH_DELETE_MODE_GRAPH_NATIVE,
+        GRAPH_DELETE_MODE_KEY,
+        GRAPH_PROVENANCE_VERSION,
+        GRAPH_PROVENANCE_VERSION_KEY,
+    )
+    from cognee.infrastructure.databases.unified.capabilities import EngineCapability
+
+    dp1 = SimplePoint(text="first")
+    dp2 = SimplePoint(text="second")
+    edge1 = (str(dp1.id), str(dp2.id), "related_to", {"edge_text": "connects"})
+    custom_edges = [(str(dp2.id), str(dp1.id), "custom_edge", {})]
+
+    mock_get_graph.side_effect = [([dp1], [edge1]), ([dp2], [])]
+    mock_dedup.side_effect = lambda n, e: (n, e)
+
+    unified, graph_engine, vector_engine = _make_unified_mock()
+    unified.has_capability = MagicMock(side_effect=lambda cap: cap == EngineCapability.HYBRID_WRITE)
+    graph_engine.get_graph_metadata = AsyncMock(
+        return_value={
+            GRAPH_DELETE_MODE_KEY: GRAPH_DELETE_MODE_GRAPH_NATIVE,
+            GRAPH_PROVENANCE_VERSION_KEY: GRAPH_PROVENANCE_VERSION,
+        }
+    )
+    mock_get_unified.return_value = unified
+
+    ctx = _provenance_ctx()
+    await add_data_points([dp1, dp2], custom_edges=custom_edges, ctx=ctx)
+
     expected_key = make_source_ref_key(ctx.dataset.id, ctx.data_item.id)
 
     graph_engine.attach_node_source_refs.assert_awaited_once()

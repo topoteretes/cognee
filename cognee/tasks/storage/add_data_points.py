@@ -107,12 +107,10 @@ async def add_data_points(
         # the graph-native path; backends without provenance support raise on
         # set_graph_metadata, so this stays False and the ledger path runs.
         #
-        # NOTE: the graph/vector writes below happen before the source refs are
-        # attached (see end of this function). If a write succeeds but the attach
-        # fails, the artifacts have neither ledger rows nor graph provenance and
-        # cannot be found by delete/rollback. True atomicity needs adapter-level
-        # transactional attach (a Part 1 follow-up); until then the attach raising
-        # marks the run failed.
+        # On the non-hybrid path the provenance source refs are folded into the
+        # graph write below (atomic — no window where an artifact exists without
+        # its provenance). Hybrid backends still attach in a second pass and keep
+        # that window; if the attach raises, the run is marked failed.
         is_graph_native = await ensure_graph_native_for_new_graph(graph_engine)
 
         if not is_graph_native:
@@ -150,11 +148,24 @@ async def add_data_points(
                     )
                 await session.commit()
 
+    # Graph-native provenance is folded INTO the graph write so a node/edge is
+    # created and stamped in one atomic statement (no write-then-attach window,
+    # no concurrent lost update — COG-5522 #4/#8). Only the non-hybrid path can
+    # fold today; hybrid backends still stamp via a separate attach pass below.
+    # source_ref_key stays None for non-graph-native writes (no provenance).
+    fold_source_ref_key = None
+    fold_run_arg = None
+    if is_graph_native and not use_hybrid:
+        fold_source_ref_key = make_source_ref_key(dataset.id, data_item.id)
+        fold_run_arg = str(pipeline_run_id) if pipeline_run_id else None
+
     if use_hybrid:
         await graph_engine.add_nodes_with_vectors(nodes)
     else:
         await asyncio.gather(
-            graph_engine.add_nodes(nodes),
+            graph_engine.add_nodes(
+                nodes, source_ref_key=fold_source_ref_key, pipeline_run_id=fold_run_arg
+            ),
             index_data_points(
                 [node.model_copy(deep=True) for node in nodes],
                 vector_engine=vector_engine,
@@ -165,7 +176,10 @@ async def add_data_points(
         await graph_engine.add_edges_with_vectors(edges)
     else:
         await asyncio.gather(
-            graph_engine.add_edges(edges), index_graph_edges(edges, vector_engine=vector_engine)
+            graph_engine.add_edges(
+                edges, source_ref_key=fold_source_ref_key, pipeline_run_id=fold_run_arg
+            ),
+            index_graph_edges(edges, vector_engine=vector_engine),
         )
 
     if custom_edges:
@@ -176,17 +190,21 @@ async def add_data_points(
             await graph_engine.add_edges_with_vectors(custom_edges)
         else:
             await asyncio.gather(
-                graph_engine.add_edges(custom_edges),
+                graph_engine.add_edges(
+                    custom_edges,
+                    source_ref_key=fold_source_ref_key,
+                    pipeline_run_id=fold_run_arg,
+                ),
                 index_graph_edges(custom_edges, vector_engine=vector_engine),
             )
 
         edges.extend(custom_edges)
 
-    if is_graph_native and user and dataset and data_item:
-        # Graph-native provenance: now that the graph (and vector) writes have
-        # succeeded, stamp the source refs onto the written nodes/edges. A
-        # single attach call per artifact kind — the adapter derives the
-        # dataset_ids / run_ids / run_refs from the source ref key + run id.
+    if is_graph_native and use_hybrid:
+        # Hybrid backends write nodes/edges and their vectors in one call that
+        # cannot yet fold provenance, so stamp the source refs in a separate
+        # attach pass. This keeps a write-then-attach window for hybrid graphs
+        # only; the non-hybrid path above is already atomic.
         source_ref_key = make_source_ref_key(dataset.id, data_item.id)
         run_arg = str(pipeline_run_id) if pipeline_run_id else None
 

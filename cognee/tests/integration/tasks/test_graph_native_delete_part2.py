@@ -6,12 +6,12 @@ and embeddings are stubbed to fixed zero vectors — these tests never *retrieve
 they only need vector rows to exist and then verify they are deleted, so the
 embedding values are irrelevant. No network/API calls.
 
-IMPORTANT — one cognify() run PER document (sequential): a single multi-document
-cognify() run processes documents concurrently, and the provenance source-ref
-stamping is a non-atomic read-modify-write (COG-5522 issue #8). Concurrent stamps
-of a shared entity (e.g. an entity mentioned in two documents) can lose an owner
-ref, which is a known limitation tracked separately. Stamping one document per
-run avoids that race so these tests exercise the delete LOGIC deterministically.
+All three documents are ingested in a SINGLE multi-document cognify() run, which
+processes documents concurrently. Provenance is now folded into the graph write
+(COG-5522 #4/#8): a node/edge is created and stamped in one atomic statement, so
+concurrent stamps of a shared entity (e.g. one mentioned in two documents)
+set-merge instead of racing — every owner ref survives. This is the realistic
+ingestion path; before the fold it non-deterministically dropped owner refs.
 """
 
 import os
@@ -84,6 +84,22 @@ async def _graph_relationship_names():
     return {e[2] for e in edges}
 
 
+async def _source_ref_keys_by_name(name):
+    """Distinct source ref keys stamped on the graph node(s) with this name."""
+    graph = await get_graph_engine()
+    nodes, _edges = await graph.get_graph_data()
+    ids = [
+        str(nid)
+        for nid, props in nodes
+        if ((props or {}).get("name") or "").lower() == name.lower()
+    ]
+    snapshots = await graph.get_node_delete_data(ids)
+    keys = set()
+    for snapshot in snapshots.values():
+        keys.update(snapshot.source_ref_keys)
+    return keys
+
+
 async def _setup(tmp_path):
     cognee.config.data_root_directory(str(tmp_path / "data"))
     cognee.config.system_root_directory(str(tmp_path / "system"))
@@ -95,20 +111,18 @@ async def _setup(tmp_path):
     return user
 
 
-async def _ingest_sequentially():
-    """Add+cognify the three docs one run at a time. Returns (dataset_id, ids...)."""
+async def _ingest_single_run():
+    """Add all three docs, then cognify ONCE over the whole dataset (the docs are
+    processed concurrently in a single run). Returns (dataset_id, ids...)."""
     r1 = await cognee.add(DOC1)
+    r2 = await cognee.add(DOC2)
+    r3 = await cognee.add(DOC3)
     d1 = r1.data_ingestion_info[0]["data_id"]
+    d2 = r2.data_ingestion_info[0]["data_id"]
+    d3 = r3.data_ingestion_info[0]["data_id"]
+
     cognify_result = await cognee.cognify()
     dataset_id = list(cognify_result.keys())[0]
-
-    r2 = await cognee.add(DOC2)
-    d2 = r2.data_ingestion_info[0]["data_id"]
-    await cognee.cognify()
-
-    r3 = await cognee.add(DOC3)
-    d3 = r3.data_ingestion_info[0]["data_id"]
-    await cognee.cognify()
 
     return dataset_id, d1, d2, d3
 
@@ -121,7 +135,7 @@ async def test_data_item_delete_shared_entities_survive(mock_struct, tmp_path):
     with another document (Alice via DOC1, New York via DOC3) survive."""
     mock_struct.side_effect = _mock_llm_output
     user = await _setup(tmp_path)
-    dataset_id, _d1, d2, _d3 = await _ingest_sequentially()
+    dataset_id, _d1, d2, _d3 = await _ingest_single_run()
 
     # The graph was marked graph-native (Part 1 markers are live on the default stack).
     graph = await get_graph_engine()
@@ -130,6 +144,13 @@ async def test_data_item_delete_shared_entities_survive(mock_struct, tmp_path):
 
     before = await _graph_names()
     assert {"alice", "bob", "new york", "berlin", "san francisco"} <= before
+
+    # #8 fix: in one multi-doc run the shared entities keep BOTH owners' refs
+    # (Alice is in DOC1+DOC2, New York in DOC2+DOC3). Folded stamping set-merges
+    # the concurrent writes instead of losing one.
+    assert len(await _source_ref_keys_by_name("Alice")) == 2
+    assert len(await _source_ref_keys_by_name("New York")) == 2
+    assert len(await _source_ref_keys_by_name("Berlin")) == 1
 
     await datasets.delete_data(dataset_id, d2, user)
 
@@ -153,7 +174,7 @@ async def test_unowned_edge_deleted_endpoints_survive(mock_struct, tmp_path):
     (Alice via DOC2, Bob via DOC3) survive."""
     mock_struct.side_effect = _mock_llm_output
     user = await _setup(tmp_path)
-    dataset_id, d1, _d2, _d3 = await _ingest_sequentially()
+    dataset_id, d1, _d2, _d3 = await _ingest_single_run()
 
     assert "knows" in await _graph_relationship_names()
 

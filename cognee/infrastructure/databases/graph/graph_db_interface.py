@@ -81,7 +81,12 @@ class GraphDBInterface(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    async def add_nodes(self, nodes: Union[List[Node], List[DataPoint]]) -> None:
+    async def add_nodes(
+        self,
+        nodes: Union[List[Node], List[DataPoint]],
+        source_ref_key: Optional[str] = None,
+        pipeline_run_id: Optional[str] = None,
+    ) -> None:
         """
         Add multiple nodes to the graph in a single operation.
 
@@ -89,6 +94,11 @@ class GraphDBInterface(ABC):
         -----------
 
             - nodes (Union[List[Node], List[DataPoint]]): A list of Node objects or DataPoint objects to be added to the graph.
+            - source_ref_key (Optional[str]): Graph-native provenance source ref to stamp
+              atomically as part of this write. Backends that support graph-native
+              provenance fold it into the same statement; others may ignore it. (default None)
+            - pipeline_run_id (Optional[str]): Run id recorded with the provenance stamp so
+              the write is rollbackable by run. Ignored when source_ref_key is None. (default None)
         """
         raise NotImplementedError
 
@@ -458,7 +468,10 @@ class GraphDBInterface(ABC):
 
     @abstractmethod
     async def add_edges(
-        self, edges: Union[List[EdgeData], List[Tuple[str, str, str, Optional[Dict[str, Any]]]]]
+        self,
+        edges: Union[List[EdgeData], List[Tuple[str, str, str, Optional[Dict[str, Any]]]]],
+        source_ref_key: Optional[str] = None,
+        pipeline_run_id: Optional[str] = None,
     ) -> None:
         """
         Add multiple edges to the graph in a single operation.
@@ -467,6 +480,11 @@ class GraphDBInterface(ABC):
         -----------
 
             - edges (Union[List[EdgeData], List[Tuple[str, str, str, Optional[Dict[str, Any]]]]]): A list of EdgeData objects or tuples representing edges to be added.
+            - source_ref_key (Optional[str]): Graph-native provenance source ref to stamp
+              atomically as part of this write. Backends that support graph-native
+              provenance fold it into the same statement; others may ignore it. (default None)
+            - pipeline_run_id (Optional[str]): Run id recorded with the provenance stamp so
+              the write is rollbackable by run. Ignored when source_ref_key is None. (default None)
         """
         raise NotImplementedError
 
