@@ -1,32 +1,34 @@
 import asyncio
 from typing import Any, Dict, List, Optional, Type, Union
 
+from cognee.context_global_variables import session_user
+from cognee.infrastructure.databases.cache.config import CacheConfig
+from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.infrastructure.engine import DataPoint
+from cognee.infrastructure.session.get_session_manager import get_session_manager
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
-from cognee.modules.retrieval.utils.validate_queries import validate_retriever_input
 from cognee.modules.graph.utils import resolve_edges_to_text
 from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses
 from cognee.modules.retrieval.base_retriever import BaseRetriever
-from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_force_triplet_search
+from cognee.modules.retrieval.utils.brute_force_triplet_search import (
+    brute_force_triplet_search,
+)
+from cognee.modules.retrieval.utils.completion import (
+    generate_completion,
+    generate_completion_batch,
+)
 from cognee.modules.retrieval.utils.global_context import (
     format_global_context_prelude,
     load_root_text,
     search_top_global_context_summaries,
 )
-from cognee.modules.retrieval.utils.used_graph_elements import (
-    is_edge_list,
-    extract_from_edges,
-)
 from cognee.modules.retrieval.utils.references import append_answer_grounded_evidence
-from cognee.modules.retrieval.utils.completion import (
-    generate_completion,
-    generate_completion_batch,
+from cognee.modules.retrieval.utils.used_graph_elements import (
+    extract_from_edges,
+    is_edge_list,
 )
-from cognee.infrastructure.session.get_session_manager import get_session_manager
+from cognee.modules.retrieval.utils.validate_queries import validate_retriever_input
 from cognee.shared.logging_utils import get_logger
-from cognee.infrastructure.databases.unified import get_unified_engine
-from cognee.context_global_variables import session_user
-from cognee.infrastructure.databases.cache.config import CacheConfig
 
 logger = get_logger("GraphCompletionRetriever")
 
@@ -113,7 +115,7 @@ class GraphCompletionRetriever(BaseRetriever):
 
         Returns:
             List[Edge]: A list of retrieved Edge objects (triplets).
-                       Returns an empty list if the graph is empty or no results are found.
+                        Returns an empty list if the graph is empty or no results are found.
         """
 
         validate_retriever_input(query, query_batch, self._use_session_cache())
@@ -128,7 +130,9 @@ class GraphCompletionRetriever(BaseRetriever):
         triplets = await self.get_triplets(query, query_batch)
 
         # Check if all triplets are empty, in case of batch queries
-        if query_batch and all(len(batched_triplets) == 0 for batched_triplets in triplets):
+        if query_batch and all(
+            len(batched_triplets) == 0 for batched_triplets in triplets
+        ):
             logger.warning("Empty context was provided to the completion")
             return []
 
@@ -237,12 +241,17 @@ class GraphCompletionRetriever(BaseRetriever):
 
         if query_batch:
             # Check if all triplets are empty, in case of batch queries
-            if not triplets or all(len(batched_triplets) == 0 for batched_triplets in triplets):
+            if not triplets or all(
+                len(batched_triplets) == 0 for batched_triplets in triplets
+            ):
                 logger.warning("Empty context was provided to the completion")
                 return ["" for _ in query_batch]
 
             return await asyncio.gather(
-                *[self.resolve_edges_to_text(batched_triplets) for batched_triplets in triplets]
+                *[
+                    self.resolve_edges_to_text(batched_triplets)
+                    for batched_triplets in triplets
+                ]
             )
 
         graph_context = await self.resolve_edges_to_text(triplets) if triplets else ""
@@ -274,7 +283,9 @@ class GraphCompletionRetriever(BaseRetriever):
         )
         return format_global_context_prelude(root_text, top_summaries)
 
-    def _extract_context_object_ids(self, retrieved_objects: Any) -> Optional[Dict[str, List[str]]]:
+    def _extract_context_object_ids(
+        self, retrieved_objects: Any
+    ) -> Optional[Dict[str, List[str]]]:
         """Extract node_ids and edge_ids from list of Edge. Only used for single-query session path."""
         if not isinstance(retrieved_objects, list) or not retrieved_objects:
             return None
@@ -311,7 +322,7 @@ class GraphCompletionRetriever(BaseRetriever):
         Each answer is run as a vector query against the chunk index, so the
         Evidence bullets reflect where the answer text is grounded in the corpus
         rather than which graph elements happened to be retrieved. Evidence is
-        appended only when references are enabled and the completion is a plain
+        underlined only when references are enabled and the completion is a plain
         string (never corrupt a structured response_model); search failures
         degrade to no Evidence.
         """
@@ -328,6 +339,7 @@ class GraphCompletionRetriever(BaseRetriever):
         context: str = None,
         effective_query: Optional[str] = None,
         turn_preparation=None,
+        persist_trace: bool = False,  # Added opt-in parameter for context-only tracking
     ) -> List[Any]:
         """
         Generates an LLM response based on the query, context, and conversation history.
@@ -337,9 +349,10 @@ class GraphCompletionRetriever(BaseRetriever):
             query (str): The user's question or prompt.
             query_batch (List[str]): The batch of user queries.
             retrieved_objects (Optional[List[Edge]]): Raw triplets used for interaction mapping.
-                                                     Output of get_retrieved_objects method.
+                                                      Output of get_retrieved_objects method.
             context (str): The text-resolved graph context.
                            Output of the get_context_from_objects method.
+            persist_trace (bool): If True, logs context retrieval traces when bypassing completions.
 
         Returns:
             List[Any]: A list containing the generated response (completion).
@@ -351,6 +364,18 @@ class GraphCompletionRetriever(BaseRetriever):
         if use_session:
             sm = get_session_manager()
             used_graph_element_ids = self._extract_context_object_ids(retrieved_objects)
+
+            # Feature #2910 implementation: handle explicit trace persistence for context-only retrieval
+            if persist_trace and self.session_id:
+                await sm.add_qa(
+                    session_id=self.session_id,
+                    question=query or effective_query or "Context-only Retrieval",
+                    answer="[Context-only Retrieval Trace]",
+                    used_graph_element_ids=used_graph_element_ids,
+                )
+                # If we're strictly doing context tracing without an LLM completion loop, return the graph trace context text directly
+                return [context]
+
             completion = await sm.generate_completion_with_session(
                 session_id=self.session_id,
                 query=query,
