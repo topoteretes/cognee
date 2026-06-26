@@ -1556,6 +1556,48 @@ class LadybugAdapter(GraphDBInterface):
         rows_dicts = self._rows_to_dicts(result, ["node_id"])
         return {str(r["node_id"]) for r in rows_dicts if r.get("node_id") is not None}
 
+    def _build_node_truth_state_updates(
+        self,
+        nodes: List[Dict[str, Any]],
+        node_truth_state: Dict[str, Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """Build UNWIND items for node truth state updates."""
+        updates = []
+        for node in nodes:
+            node_id = node.get("id")
+            if not isinstance(node_id, str) or node_id not in node_truth_state:
+                continue
+            state = node_truth_state[node_id]
+            properties = {
+                k: v
+                for k, v in node.items()
+                if k not in {"id", "name", "type", "created_at", "updated_at"}
+            }
+            properties["truth_alignment"] = list(state.get("truth_alignment") or [])
+            if state.get("truth_epoch") is not None:
+                properties["truth_epoch"] = int(state["truth_epoch"])
+            updates.append(
+                {"node_id": node_id, "properties": json.dumps(properties, cls=JSONEncoder)}
+            )
+        return updates
+
+    async def _execute_node_truth_state_updates(self, updates: List[Dict[str, Any]]) -> Set[str]:
+        """Run node truth state UNWIND/SET; return set of updated node_ids."""
+        if not updates:
+            return set()
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
+        query = """
+        UNWIND $items AS item
+        MATCH (n:Node)
+        WHERE n.id = item.node_id
+        SET n.properties = item.properties,
+            n.updated_at = timestamp($updated_at)
+        RETURN n.id AS node_id
+        """
+        result = await self.query(query, {"items": updates, "updated_at": now})
+        rows_dicts = self._rows_to_dicts(result, ["node_id"])
+        return {str(r["node_id"]) for r in rows_dicts if r.get("node_id") is not None}
+
     def _build_edge_feedback_updates(
         self,
         edge_rows: List[Dict[str, Any]],
@@ -1640,6 +1682,47 @@ class LadybugAdapter(GraphDBInterface):
         if not updates:
             return {nid: False for nid in node_ids}
         updated_ids = await self._execute_node_feedback_updates(updates)
+        return {nid: (nid in updated_ids) for nid in node_ids}
+
+    async def get_node_truth_state(self, node_ids: List[str]) -> Dict[str, Dict[str, Any]]:
+        if not node_ids:
+            return {}
+        valid_node_ids = [node_id for node_id in node_ids if isinstance(node_id, str) and node_id]
+        if not valid_node_ids:
+            return {}
+        nodes = await self.get_nodes(valid_node_ids)
+        result: Dict[str, Dict[str, Any]] = {}
+        for node in nodes:
+            node_id = node.get("id")
+            if not isinstance(node_id, str):
+                continue
+            value = node.get("truth_alignment", [])
+            epoch = node.get("truth_epoch")
+            if isinstance(value, (list, tuple)):
+                alignment = list(value)
+            else:
+                alignment = []
+            try:
+                truth_epoch = int(epoch) if epoch is not None else None
+            except (TypeError, ValueError):
+                truth_epoch = None
+            result[node_id] = {"truth_alignment": alignment, "truth_epoch": truth_epoch}
+        return result
+
+    async def set_node_truth_state(
+        self, node_truth_state: Dict[str, Dict[str, Any]]
+    ) -> Dict[str, bool]:
+        if not node_truth_state:
+            return {}
+        node_ids = list(node_truth_state.keys())
+        valid_node_ids = [nid for nid in node_ids if isinstance(nid, str) and nid]
+        if not valid_node_ids:
+            return {nid: False for nid in node_ids}
+        nodes = await self.get_nodes(valid_node_ids)
+        updates = self._build_node_truth_state_updates(nodes, node_truth_state)
+        if not updates:
+            return {nid: False for nid in node_ids}
+        updated_ids = await self._execute_node_truth_state_updates(updates)
         return {nid: (nid in updated_ids) for nid in node_ids}
 
     async def get_edge_feedback_weights(self, edge_object_ids: List[str]) -> Dict[str, float]:
