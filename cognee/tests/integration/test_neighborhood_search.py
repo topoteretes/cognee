@@ -145,9 +145,10 @@ async def test_max_nodes_truncation_on_real_data(ladybug_graph):
     raises=RuntimeError,
     strict=True,
     reason=(
-        "Ladybug/Kuzu get_neighborhood edge_types filter is broken: ALL(rel IN r ...) "
-        "rejects a variable-length recursive-rel binding and a parameter inside the "
-        "predicate crashes the parser. Works on Neo4j/Postgres (extras-gated)."
+        "Ladybug/Kuzu get_neighborhood raises on edge_types filtering: passing "
+        "edge_types triggers a Kuzu internal assertion (UNREACHABLE_CODE) on the "
+        "variable-length path predicate, not a parser rejection. Works on "
+        "Neo4j/Postgres (extras-gated). Tracked in #3585."
     ),
 )
 @pytest.mark.asyncio
