@@ -8,6 +8,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { tokens } from "@/ui/theme/tokens";
 import trackEvent from "@/modules/analytics/trackEvent";
+import isCloudEnvironment from "@/utils/isCloudEnvironment";
 
 function SettingsIcon() {
   return (
@@ -68,13 +69,18 @@ function HelpIcon() {
   );
 }
 
-const menuItems = [
+const baseMenuItems = [
   { label: "Settings", href: "/settings", external: false, icon: <SettingsIcon />, track: null },
   { label: "Access Management", href: "/access-management", external: false, icon: <AccessManagementIcon />, track: null },
   { label: "Billing", href: "/setup", external: false, icon: <BillingIcon />, track: null },
   { label: "Discord Community", href: "https://discord.gg/m63hxKsp4p", external: true, icon: <DiscordIcon />, track: "https://discord.gg/m63hxKsp4p" },
   { label: "Help", href: "mailto:social@cognee.ai", external: true, icon: <HelpIcon />, track: "mailto:social@cognee.ai" },
 ];
+
+const cloudOnlyLabels = new Set(["Billing"]);
+const menuItems = baseMenuItems.filter(
+  (item) => isCloudEnvironment() || !cloudOnlyLabels.has(item.label)
+);
 
 export default function UserProfile() {
   const [user, setUser] = useState<CogneeUser>();
