@@ -221,6 +221,27 @@ jobs:
     uses: ./.github/workflows/backend_docker_build_test.yml
     secrets: inherit
 
+  deployment-test:
+    name: Deployment Test
+    needs: [ pre-test ]
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Build local Docker image
+        run: docker build -t cognee:local .
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+
+      - name: Run Deployment Tests
+        env:
+          COGNEE_DOCKER_IMAGE: cognee:local
+        run: uv run pytest cognee/tests/deployment/ -v -m deployment --timeout=300
+
   temporal-graph-tests:
     name: Temporal Graph Test
     needs: [ build-ci-env ]
@@ -289,6 +310,7 @@ jobs:
       mcp-test,
       docker-compose-test,
       docker-ci-test,
+      deployment-test,
       temporal-graph-tests,
       search-db-tests,
       relational-db-migration-tests,
@@ -316,6 +338,7 @@ jobs:
                 "${{ needs.mcp-test.result }}" == "success" &&
                 "${{ needs.docker-compose-test.result }}" == "success" &&
                 "${{ needs.docker-ci-test.result }}" == "success" &&
+                "${{ needs.deployment-test.result }}" == "success" &&
                 "${{ needs.temporal-graph-tests.result }}" == "success" &&
                 "${{ needs.search-db-tests.result }}" == "success" &&
                 "${{ needs.relational-db-migration-tests.result }}" == "success" &&
