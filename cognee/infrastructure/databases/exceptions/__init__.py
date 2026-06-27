@@ -8,6 +8,7 @@ from .exceptions import (
     EntityNotFoundError,
     EntityAlreadyExistsError,
     DatabaseNotCreatedError,
+    EmbeddingContextWindowTooSmallError,
     EmbeddingException,
     MissingQueryParameterError,
     MutuallyExclusiveQueryParametersError,
