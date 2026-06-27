@@ -546,6 +546,62 @@ class LanceDBAdapter(VectorDBInterface):
                 collection_name, collection, payload_schema, lance_data_points
             )
 
+    async def upsert_raw_vectors(
+        self,
+        collection_name: str,
+        points: list[dict],
+        payload_schema: Optional[type[BaseModel]] = None,
+    ) -> None:
+        """Upsert caller-provided vectors without invoking the embedding engine."""
+        if not points:
+            return
+        if payload_schema is None:
+            raise ValueError("payload_schema is required for LanceDB raw vector upserts")
+
+        vector_size = self.embedding_engine.get_vector_size()
+        LanceDataPoint = self._make_lance_datapoint_cls(payload_schema, vector_size)
+
+        if not await self.has_collection(collection_name):
+            async with self.VECTOR_DB_LOCK:
+                if not await self.has_collection(collection_name):
+                    connection = await self.get_connection()
+                    await connection.create_table(
+                        name=collection_name,
+                        schema=self._schema_for_create_table(LanceDataPoint),
+                        exist_ok=True,
+                    )
+
+        collection = await self.get_collection(collection_name)
+
+        raw_points = []
+        for point in points:
+            point_id = point.get("id")
+            vector = point.get("vector")
+            payload_value = point.get("payload")
+            if point_id is None:
+                raise ValueError("Raw vector point is missing id")
+            if not isinstance(vector, list):
+                raise ValueError("Raw vector point vector must be a list")
+            if len(vector) != vector_size:
+                raise ValueError(
+                    f"Raw vector size {len(vector)} does not match expected size {vector_size}"
+                )
+            raw_points.append(
+                LanceDataPoint(
+                    id=str(point_id),
+                    vector=vector,
+                    payload=payload_schema.model_validate(payload_value).model_dump(),
+                )
+            )
+
+        async with self.VECTOR_DB_LOCK:
+            await (
+                collection.merge_insert("id")
+                .when_matched_update_all()
+                .when_not_matched_insert_all()
+                .execute(self._records_for_write(raw_points))
+            )
+
     async def _migrate_collection_schema(
         self,
         collection_name: str,

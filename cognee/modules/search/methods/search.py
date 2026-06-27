@@ -4,6 +4,7 @@ from typing import Any, List, Optional, Tuple, Type, Union
 from uuid import UUID
 
 from cognee import __version__ as cognee_version
+from cognee.base_config import get_base_config
 from cognee.context_global_variables import (
     backend_access_control_enabled,
     set_database_global_context_variables,
@@ -48,7 +49,7 @@ async def search(
     session_id: Optional[str] = None,
     wide_search_top_k: Optional[int] = 100,
     triplet_distance_penalty: Optional[float] = 6.5,
-    feedback_influence: float = 0.0,
+    feedback_influence: float = get_base_config().default_feedback_influence,
     verbose=False,
     retriever_specific_config: Optional[dict] = None,
     neighborhood_depth: Optional[int] = None,
@@ -157,7 +158,7 @@ async def authorized_search(
     session_id: Optional[str] = None,
     wide_search_top_k: Optional[int] = 100,
     triplet_distance_penalty: Optional[float] = 6.5,
-    feedback_influence: float = 0.0,
+    feedback_influence: float = get_base_config().default_feedback_influence,
     retriever_specific_config: Optional[dict] = None,
     neighborhood_depth: Optional[int] = None,
     neighborhood_seed_top_k: Optional[int] = None,
@@ -215,7 +216,7 @@ async def search_in_datasets_context(
     session_id: Optional[str] = None,
     wide_search_top_k: Optional[int] = 100,
     triplet_distance_penalty: Optional[float] = 6.5,
-    feedback_influence: float = 0.0,
+    feedback_influence: float = get_base_config().default_feedback_influence,
     retriever_specific_config: Optional[dict] = None,
     neighborhood_depth: Optional[int] = None,
     neighborhood_seed_top_k: Optional[int] = None,
@@ -262,6 +263,117 @@ async def search_in_datasets_context(
             query=query_text,
             dataset_ids=dataset_ids,
             dataset_names=dataset_names,
+    async def _search_in_dataset_context(
+        dataset: Dataset,
+        query_type: SearchType,
+        query_text: str,
+        system_prompt_path: str = "answer_simple_question.txt",
+        system_prompt: Optional[str] = None,
+        top_k: int = 15,
+        node_type: Optional[Type] = NodeSet,
+        node_name: Optional[List[str]] = None,
+        node_name_filter_operator: str = "OR",
+        only_context: bool = False,
+        session_id: Optional[str] = None,
+        wide_search_top_k: Optional[int] = 100,
+        triplet_distance_penalty: Optional[float] = 6.5,
+        feedback_influence: float = get_base_config().default_feedback_influence,
+        retriever_specific_config: Optional[dict] = None,
+        neighborhood_depth: Optional[int] = None,
+        neighborhood_seed_top_k: Optional[int] = None,
+        include_references: bool = False,
+    ) -> SearchResultPayload:
+        with new_span("cognee.search.dataset") as span:
+            span.set_attribute("cognee.search.dataset_name", dataset.name or "")
+            span.set_attribute("cognee.search.dataset_id", str(dataset.id))
+
+            async with set_database_global_context_variables(
+                dataset.id,
+                dataset.owner_id,
+                llm_config=llm_config,
+                embedding_config=embedding_config,
+            ):
+                # Check if graph for dataset is empty and log warnings if necessary
+                graph_engine = await get_graph_engine()
+                is_empty = await graph_engine.is_empty()
+                if is_empty:
+                    # TODO: we can log here, but not all search types use graph. Still keeping this here for reviewer input
+                    from cognee.modules.data.methods import get_dataset_data
+
+                    dataset_data = await get_dataset_data(dataset.id)
+
+                    if len(dataset_data) > 0:
+                        logger.warning(
+                            f"Dataset '{dataset.name}' has {len(dataset_data)} data item(s) but the knowledge graph is empty. "
+                            "Please run cognify to process the data before searching."
+                        )
+                    else:
+                        logger.warning(
+                            f"Search attempt on an empty knowledge graph - no data has been added to this dataset: {dataset.name}"
+                        )
+
+                    span.set_attribute("cognee.search.graph_empty", True)
+
+                # Get retriever output in the context of the current dataset
+                return await get_retriever_output(
+                    query_type=query_type,
+                    query_text=query_text,
+                    user=user,
+                    dataset=dataset,
+                    system_prompt_path=system_prompt_path,
+                    system_prompt=system_prompt,
+                    top_k=top_k,
+                    node_type=node_type,
+                    node_name=node_name,
+                    node_name_filter_operator=node_name_filter_operator,
+                    only_context=only_context,
+                    session_id=session_id,
+                    wide_search_top_k=wide_search_top_k,
+                    triplet_distance_penalty=triplet_distance_penalty,
+                    feedback_influence=feedback_influence,
+                    retriever_specific_config=retriever_specific_config,
+                    neighborhood_depth=neighborhood_depth,
+                    neighborhood_seed_top_k=neighborhood_seed_top_k,
+                    include_references=include_references,
+                )
+
+    # Search every dataset async based on query and appropriate database configuration
+    tasks = []
+    if backend_access_control_enabled():
+        for dataset in search_datasets:
+            tasks.append(
+                _search_in_dataset_context(
+                    dataset=dataset,
+                    query_type=query_type,
+                    query_text=query_text,
+                    system_prompt_path=system_prompt_path,
+                    system_prompt=system_prompt,
+                    top_k=top_k,
+                    node_type=node_type,
+                    node_name=node_name,
+                    node_name_filter_operator=node_name_filter_operator,
+                    only_context=only_context,
+                    session_id=session_id,
+                    wide_search_top_k=wide_search_top_k,
+                    triplet_distance_penalty=triplet_distance_penalty,
+                    feedback_influence=feedback_influence,
+                    retriever_specific_config=retriever_specific_config,
+                    neighborhood_depth=neighborhood_depth,
+                    neighborhood_seed_top_k=neighborhood_seed_top_k,
+                    include_references=include_references,
+                )
+            )
+    else:
+        # Run search without setting database context in case access control is disabled
+        # Needed for low level pipelines that need to run search without dataset context.
+        dataset = search_datasets[0] if len(search_datasets) == 1 else None
+        retriever_kwargs = dict(
+            query_type=query_type,
+            query_text=query_text,
+            user=user,
+            dataset=dataset,
+            system_prompt_path=system_prompt_path,
+            system_prompt=system_prompt,
             top_k=top_k,
             session_id=session_id,
             wide_search_top_k=wide_search_top_k,
@@ -270,6 +382,18 @@ async def search_in_datasets_context(
 
     else:
         raise ValueError(f"Unsupported query type: {query_type}")
+        async def _search_without_context() -> SearchResultPayload:
+            # No dataset DB context to set when access control is disabled, but
+            # still forward any per-call LLM/embedding overrides onto the async
+            # context (set_database_global_context_variables applies these even
+            # in single-tenant mode and ignores the dataset argument).
+            async with set_database_global_context_variables(
+                dataset.id if dataset else None,
+                user.id,
+                llm_config=llm_config,
+                embedding_config=embedding_config,
+            ):
+                return await get_retriever_output(**retriever_kwargs)
 
 
 async def _search_in_dataset_context(

@@ -354,6 +354,22 @@ class GraphDBInterface(ABC):
         """
         raise NotImplementedError("set_node_feedback_weights is not implemented for this adapter")
 
+    async def get_node_truth_state(self, node_ids: List[str]) -> Dict[str, Dict[str, Any]]:
+        """
+        Retrieve node truth alignment state for multiple node ids.
+        Returns only found node ids.
+        """
+        raise NotImplementedError("get_node_truth_state is not implemented for this adapter")
+
+    async def set_node_truth_state(
+        self, node_truth_state: Dict[str, Dict[str, Any]]
+    ) -> Dict[str, bool]:
+        """
+        Persist node truth alignment state for multiple node ids.
+        Returns per-id update success.
+        """
+        raise NotImplementedError("set_node_truth_state is not implemented for this adapter")
+
     async def get_edge_feedback_weights(self, edge_object_ids: List[str]) -> Dict[str, float]:
         """
         Retrieve edge feedback weights for multiple edge_object_ids.
