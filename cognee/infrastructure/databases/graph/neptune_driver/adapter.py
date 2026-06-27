@@ -1,27 +1,27 @@
 """Neptune Analytics Adapter for Graph Database"""
 
 import json
-from typing import Optional, Any, List, Dict, Type, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Type
 from uuid import UUID
-from cognee.shared.logging_utils import get_logger
-from cognee.infrastructure.databases.graph.graph_db_interface import (
-    GraphDBInterface,
-    NodeData,
-    EdgeData,
-    Node,
-)
-from cognee.modules.storage.utils import JSONEncoder
-from cognee.infrastructure.engine import DataPoint
+
 from botocore.config import Config
 
-from .exceptions import (
-    NeptuneAnalyticsConfigurationError,
+from cognee.infrastructure.databases.graph.graph_db_interface import (
+    EdgeData,
+    GraphDBInterface,
+    Node,
+    NodeData,
 )
+from cognee.infrastructure.engine import DataPoint
+from cognee.modules.storage.utils import JSONEncoder
+from cognee.shared.logging_utils import get_logger
+
+from .exceptions import NeptuneAnalyticsConfigurationError
 from .neptune_utils import (
-    validate_graph_id,
-    validate_aws_region,
     build_neptune_config,
     format_neptune_error,
+    validate_aws_region,
+    validate_graph_id,
 )
 
 logger = get_logger("NeptuneGraphDB")
@@ -205,6 +205,16 @@ class NeptuneGraphDB(GraphDBInterface):
             error_msg = format_neptune_error(e)
             logger.error(f"Neptune Analytics query failed: {error_msg}")
             raise Exception(f"Query execution failed: {error_msg}") from e
+
+    async def is_empty(self) -> bool:
+        """Checks if the Neptune graph database contains any nodes."""
+        query = """
+            MATCH (n)
+            RETURN true
+            LIMIT 1;
+            """
+        query_result = await self.client.query(query)
+        return len(query_result) == 0
 
     async def add_node(self, node: DataPoint) -> None:
         """

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, List, Optional, Type, Union
+from uuid import UUID
 
+from cognee.exceptions import CogneeValidationError
 from cognee.modules.observability import OtelStatusCode as StatusCode
 
 from cognee.base_config import get_base_config
@@ -14,12 +16,12 @@ from cognee.modules.observability import (
     COGNEE_RESULT_SUMMARY,
     COGNEE_VECTOR_COLLECTION,
     COGNEE_VECTOR_RESULT_COUNT,
-    new_span,
 )
+from cognee.modules.observability import OtelStatusCode as StatusCode
+from cognee.modules.observability import new_span
 from cognee.modules.retrieval.utils.node_edge_vector_search import NodeEdgeVectorSearch
 from cognee.modules.retrieval.utils.validate_queries import validate_queries
 from cognee.shared.logging_utils import ERROR, get_logger
-from cognee.exceptions import CogneeValidationError
 
 if TYPE_CHECKING:
     from cognee.infrastructure.databases.unified import UnifiedStoreEngine
@@ -62,7 +64,14 @@ async def get_memory_fragment(
 ) -> CogneeGraph:
     """Creates and initializes a CogneeGraph memory fragment with optional property projections."""
     if properties_to_project is None:
-        properties_to_project = ["id", "description", "name", "type", "text", "importance_weight"]
+        properties_to_project = [
+            "id",
+            "description",
+            "name",
+            "type",
+            "text",
+            "importance_weight",
+        ]
 
     node_properties_to_project = list(properties_to_project)
     edge_properties_to_project = ["relationship_name", "edge_text", "edge_object_id"]
@@ -132,23 +141,9 @@ async def _get_top_triplet_importances(
     graph_engine=None,
     neighborhood_depth: Optional[int] = None,
     neighborhood_seed_top_k: Optional[int] = 10,
+    dataset_ids: Optional[List[UUID]] = None,  # Passed into internal neighborhood rescorer
 ) -> Union[List[Edge], List[List[Edge]]]:
-    """Creates memory fragment (if needed), maps distances, and calculates top triplet importances.
-
-    Args:
-        query_list_length: Number of queries in batch mode (None for single-query mode).
-            When None, node_distances/edge_distances are flat lists; when set, they are list-of-lists.
-        graph_engine: Optional pre-created graph engine to pass through to
-            ``get_memory_fragment()``.
-        neighborhood_depth: If set, extract a k-hop neighborhood around seed nodes
-            instead of projecting the full or ID-filtered graph.
-        neighborhood_seed_top_k: Maximum number of seed nodes to use for neighborhood
-            extraction. (default 10)
-
-    Returns:
-        List[Edge]: For single-query mode (query_list_length is None).
-        List[List[Edge]]: For batch mode (query_list_length is set), one list per query.
-    """
+    """Creates memory fragment (if needed), maps distances, and calculates top triplet importances."""
     if memory_fragment is None:
         if wide_search_limit is None:
             relevant_node_ids = None
@@ -169,9 +164,6 @@ async def _get_top_triplet_importances(
         )
 
         # Re-score expansion nodes discovered via neighborhood traversal.
-        # These nodes have no vector scores yet — run an ID-filtered vector
-        # search so they participate in triplet ranking instead of getting
-        # the default penalty score.
         if (
             neighborhood_depth is not None
             and relevant_node_ids
@@ -182,11 +174,15 @@ async def _get_top_triplet_importances(
             if expansion_ids:
                 for collection_name in list(vector_search.node_distances.keys()):
                     try:
+                        # SECURITY FIX: Ensure the neighborhood expansion rescoring also enforces dataset payload constraints
+                        db_filter = {"dataset_id": dataset_ids} if dataset_ids else None
+
                         extra_scores = await vector_search.vector_engine.search(
                             collection_name=collection_name,
                             query_vector=vector_search.query_vector,
                             limit=len(expansion_ids),
                             node_name=expansion_ids,
+                            query_filter=db_filter,  # METADATA ENFORCED HERE
                         )
                         if extra_scores:
                             if vector_search.query_list_length is None:
@@ -230,31 +226,11 @@ async def brute_force_triplet_search(
     unified_engine: Optional[UnifiedStoreEngine] = None,
     neighborhood_depth: Optional[int] = None,
     neighborhood_seed_top_k: Optional[int] = 10,
+    dataset_ids: Optional[List[UUID]] = None,  # <-- PLUMBED FOR SECURITY FIX
+    dataset_names: Optional[List[str]] = None,  # <-- PLUMBED FOR SECURITY FIX
 ) -> Union[List[Edge], List[List[Edge]]]:
     """
     Performs a brute force search to retrieve the top triplets from the graph.
-
-    Args:
-        query (Optional[str]): The search query (single query mode). Exactly one of query or query_batch must be provided.
-        query_batch (Optional[List[str]]): List of search queries (batch mode). Exactly one of query or query_batch must be provided.
-        top_k (int): The number of top results to retrieve.
-        collections (Optional[List[str]]): List of collections to query.
-        properties_to_project (Optional[List[str]]): List of properties to project.
-        memory_fragment (Optional[CogneeGraph]): Existing memory fragment to reuse.
-        node_type: node type to filter
-        node_name: node name to filter
-        wide_search_top_k (Optional[int]): Number of initial elements to retrieve from collections.
-            Ignored in batch mode (always None to project full graph).
-        triplet_distance_penalty (Optional[float]): Default distance penalty in graph projection
-        feedback_influence (float): Weight of feedback influence in range [0, 1]
-
-    Returns:
-        List[Edge]: The top triplet results for single query mode (flat list).
-        List[List[Edge]]: List of top triplet results (one per query) for batch mode (list-of-lists).
-
-    Note:
-        In single-query mode, node_distances and edge_distances are stored as flat lists.
-        In batch mode, they are stored as list-of-lists (one list per query).
     """
     is_query_valid, msg = validate_queries(query, query_batch)
     if not is_query_valid:
@@ -299,6 +275,10 @@ async def brute_force_triplet_search(
 
             vector_search = NodeEdgeVectorSearch(vector_engine=vector_engine)
 
+            # SECURITY FIX: Construct data-tenant restriction mapping wrapper
+            # and push it down directly into embed_and_retrieve_distances payload options.
+            db_filter = {"dataset_id": dataset_ids} if dataset_ids else None
+
             await vector_search.embed_and_retrieve_distances(
                 query=None if query_list_length else query,
                 query_batch=query_batch if query_list_length else None,
@@ -306,6 +286,7 @@ async def brute_force_triplet_search(
                 wide_search_limit=wide_search_limit,
                 node_name=node_name,
                 node_name_filter_operator=node_name_filter_operator,
+                query_filter=db_filter,  # <-- INJECTED INTO VECTOR STORAGE PIPELINE
             )
 
             if query_batch is not None:
@@ -331,6 +312,7 @@ async def brute_force_triplet_search(
                 graph_engine=graph_engine,
                 neighborhood_depth=neighborhood_depth,
                 neighborhood_seed_top_k=neighborhood_seed_top_k,
+                dataset_ids=dataset_ids,  # <-- FORWARDED
             )
 
             result_count = sum(len(r) for r in results) if query_list_length else len(results)

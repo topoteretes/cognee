@@ -2,7 +2,10 @@ import uuid
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
 
-from cognee.infrastructure.databases.cache.models import SessionAgentTraceEntry, SessionQAEntry
+from cognee.infrastructure.databases.cache.models import (
+    SessionAgentTraceEntry,
+    SessionQAEntry,
+)
 
 
 class CacheDBInterface(ABC):
@@ -12,7 +15,11 @@ class CacheDBInterface(ABC):
     """
 
     def __init__(
-        self, host: str, port: int, lock_key: str = "default_lock", log_key: str = "usage_logs"
+        self,
+        host: str,
+        port: int,
+        lock_key: str = "default_lock",
+        log_key: str = "usage_logs",
     ):
         """Store shared cache/lock configuration for concrete adapter implementations."""
         self.host = host
@@ -44,9 +51,10 @@ class CacheDBInterface(ABC):
         """
         lock = self.acquire_lock()
         try:
-            yield
+            yield lock
         finally:
-            self.release_lock(lock)
+            if lock is not None:
+                self.release_lock(lock)
 
     async def add_qa(
         self,
