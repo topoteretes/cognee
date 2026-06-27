@@ -53,8 +53,9 @@ class NeptuneGraphDB(GraphDBInterface):
     Adapter for interacting with Amazon Neptune Analytics graph store.
     This class provides methods for querying, adding, deleting nodes and edges using the aws_langchain library.
     """
-
     _GRAPH_NODE_LABEL = "COGNEE_NODE"
+    
+
 
     def __init__(
         self,
@@ -112,6 +113,15 @@ class NeptuneGraphDB(GraphDBInterface):
         logger.info(
             f'Initialized Neptune Analytics adapter for graph: "{graph_id}" in region: "{self.region}"'
         )
+
+    async def is_empty(self) -> bool:
+        query = """
+        MATCH (n)
+        RETURN true
+        LIMIT 1;
+        """
+        query_result = self._client.query(query)
+        return len(query_result) == 0
 
     def _initialize_client(self) -> Optional[NeptuneAnalyticsGraph]:
         """
