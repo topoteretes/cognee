@@ -97,11 +97,7 @@ async def _serve_direct(service_url: str, api_key: str = "") -> CloudClient:
     )
 
     set_remote_client(client)
-    mode = (
-        "local"
-        if "localhost" in service_url or "127.0.0.1" in service_url
-        else "remote"
-    )
+    mode = "local" if "localhost" in service_url or "127.0.0.1" in service_url else "remote"
     print(f"   Connected to Cognee ({mode}) at {service_url}")
     return client
 

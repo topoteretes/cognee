@@ -41,6 +41,6 @@ def test_hold_lock_releases_on_successful_acquisition():
     cache_db.acquire_lock = MagicMock(return_value=mock_lock_handle)
     cache_db.release_lock = MagicMock()
     with cache_db.hold_lock():
-        pass 
+        pass
     cache_db.acquire_lock.assert_called_once()
     cache_db.release_lock.assert_called_once_with(mock_lock_handle)

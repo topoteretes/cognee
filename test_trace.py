@@ -40,9 +40,7 @@ async def test_context_only_trace():
         for entry in history:
             print(f"Question: {getattr(entry, 'question', None)}")
             print(f"Answer Reference: {getattr(entry, 'answer', None)}")
-            print(
-                f"Persisted Graph Element IDs: {getattr(entry, 'used_graph_element_ids', None)}"
-            )
+            print(f"Persisted Graph Element IDs: {getattr(entry, 'used_graph_element_ids', None)}")
     else:
         print("Verification Failed: No session history written.")
 

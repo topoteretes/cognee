@@ -7,14 +7,22 @@ from uuid import UUID
 from botocore.config import Config
 
 from cognee.infrastructure.databases.graph.graph_db_interface import (
-    EdgeData, GraphDBInterface, Node, NodeData)
+    EdgeData,
+    GraphDBInterface,
+    Node,
+    NodeData,
+)
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.storage.utils import JSONEncoder
 from cognee.shared.logging_utils import get_logger
 
 from .exceptions import NeptuneAnalyticsConfigurationError
-from .neptune_utils import (build_neptune_config, format_neptune_error,
-                            validate_aws_region, validate_graph_id)
+from .neptune_utils import (
+    build_neptune_config,
+    format_neptune_error,
+    validate_aws_region,
+    validate_graph_id,
+)
 
 logger = get_logger("NeptuneGraphDB")
 
@@ -199,14 +207,14 @@ class NeptuneGraphDB(GraphDBInterface):
             raise Exception(f"Query execution failed: {error_msg}") from e
 
     async def is_empty(self) -> bool:
-            """Checks if the Neptune graph database contains any nodes."""
-            query = """
+        """Checks if the Neptune graph database contains any nodes."""
+        query = """
             MATCH (n)
             RETURN true
             LIMIT 1;
             """
-            query_result = await self.client.query(query)
-            return len(query_result) == 0
+        query_result = await self.client.query(query)
+        return len(query_result) == 0
 
     async def add_node(self, node: DataPoint) -> None:
         """

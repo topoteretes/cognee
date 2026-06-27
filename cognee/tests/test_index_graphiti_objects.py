@@ -1,5 +1,10 @@
 import sys
 from unittest.mock import MagicMock
+from uuid import uuid4
+
+import pytest
+
+from cognee.tasks.temporal_awareness.graphiti_model import GraphitiNode
 
 # 1. Expand the mocks to cover nested submodules required by temporal awareness imports
 mock_graphiti = MagicMock()
@@ -8,13 +13,6 @@ mock_nodes = MagicMock()
 sys.modules["graphiti_core"] = mock_graphiti
 sys.modules["graphiti_core.nodes"] = mock_nodes
 
-# 2. Standard imports
-import pytest
-from uuid import uuid4
-from cognee.tasks.temporal_awareness.graphiti_model import GraphitiNode
-
-# Assuming EdgeType is imported similarly from the same module, or customize if needed
-# from cognee.tasks.temporal_awareness.graphiti_model import EdgeType
 
 # Define a mock EdgeType locally in case it needs dynamic testing context
 class MockEdgeType:
@@ -23,14 +21,16 @@ class MockEdgeType:
         self.source_id = source_id
         self.target_id = target_id
         self.metadata = {"index_fields": ["source_id", "target_id"]}
+
     def model_copy(self):
         # Emulate Pydantic's shallow model_copy
         copied = MockEdgeType(self.id, self.source_id, self.target_id)
-        copied.metadata = self.metadata # Shallow reference sharing
+        copied.metadata = self.metadata  # Shallow reference sharing
         return copied
 
 
 # --- TEST SUITE ---
+
 
 def test_graphiti_node_metadata_isolation():
     """Test 1: Core bug fix — multi-field metadata dictionary isolation."""
@@ -95,7 +95,7 @@ def test_graphiti_node_empty_index_fields():
 def test_edge_type_metadata_isolation():
     """Test 5: Verify the fix on the EdgeType indexing branch too."""
     edge = MockEdgeType(id=uuid4(), source_id=uuid4(), target_id=uuid4())
-    
+
     indexed_copies = []
     for field_name in list(edge.metadata["index_fields"]):
         indexed_data_point = edge.model_copy()

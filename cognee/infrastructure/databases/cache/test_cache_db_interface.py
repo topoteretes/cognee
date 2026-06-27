@@ -2,30 +2,74 @@ import pytest
 from unittest.mock import MagicMock
 from cognee.infrastructure.databases.cache.cache_db_interface import CacheDBInterface
 
+
 # Define a minimal concrete implementation of CacheDBInterface for testing purposes
 class MockCacheDB(CacheDBInterface):
-    def acquire_lock(self): pass
-    def release_lock(self, lock=None): pass
-    async def create_qa_entry(self, *args, **kwargs): pass
-    async def get_latest_qa_entries(self, *args, **kwargs): pass
-    async def get_all_qa_entries(self, *args, **kwargs): pass
-    async def get_qa_entries_by_ids(self, *args, **kwargs): pass
-    async def update_qa_entry(self, *args, **kwargs): pass
-    async def delete_feedback(self, *args, **kwargs): pass
-    async def delete_qa_entry(self, *args, **kwargs): pass
-    async def delete_session(self, *args, **kwargs): pass
-    async def append_agent_trace_step(self, *args, **kwargs): pass
-    async def get_agent_trace_session(self, *args, **kwargs): pass
-    async def get_agent_trace_feedback(self, *args, **kwargs): pass
-    async def get_agent_trace_count(self, *args, **kwargs): pass
-    async def create_session_context_entry(self, *args, **kwargs): pass
-    async def get_session_context_entries(self, *args, **kwargs): pass
-    async def update_session_context_entry(self, *args, **kwargs): pass
-    async def delete_session_context(self, *args, **kwargs): pass
-    async def prune(self, *args, **kwargs): pass
-    async def close(self, *args, **kwargs): pass
-    async def log_usage(self, *args, **kwargs): pass
-    async def get_usage_logs(self, *args, **kwargs): pass
+    def acquire_lock(self):
+        pass
+
+    def release_lock(self, lock=None):
+        pass
+
+    async def create_qa_entry(self, *args, **kwargs):
+        pass
+
+    async def get_latest_qa_entries(self, *args, **kwargs):
+        pass
+
+    async def get_all_qa_entries(self, *args, **kwargs):
+        pass
+
+    async def get_qa_entries_by_ids(self, *args, **kwargs):
+        pass
+
+    async def update_qa_entry(self, *args, **kwargs):
+        pass
+
+    async def delete_feedback(self, *args, **kwargs):
+        pass
+
+    async def delete_qa_entry(self, *args, **kwargs):
+        pass
+
+    async def delete_session(self, *args, **kwargs):
+        pass
+
+    async def append_agent_trace_step(self, *args, **kwargs):
+        pass
+
+    async def get_agent_trace_session(self, *args, **kwargs):
+        pass
+
+    async def get_agent_trace_feedback(self, *args, **kwargs):
+        pass
+
+    async def get_agent_trace_count(self, *args, **kwargs):
+        pass
+
+    async def create_session_context_entry(self, *args, **kwargs):
+        pass
+
+    async def get_session_context_entries(self, *args, **kwargs):
+        pass
+
+    async def update_session_context_entry(self, *args, **kwargs):
+        pass
+
+    async def delete_session_context(self, *args, **kwargs):
+        pass
+
+    async def prune(self, *args, **kwargs):
+        pass
+
+    async def close(self, *args, **kwargs):
+        pass
+
+    async def log_usage(self, *args, **kwargs):
+        pass
+
+    async def get_usage_logs(self, *args, **kwargs):
+        pass
 
 
 def test_hold_lock_bypasses_release_on_failed_acquisition():
@@ -40,7 +84,7 @@ def test_hold_lock_bypasses_release_on_failed_acquisition():
 
     # Act
     with cache_db.hold_lock():
-        pass # Code inside block executes or returns safely
+        pass  # Code inside block executes or returns safely
 
     # Assert
     cache_db.acquire_lock.assert_called_once()
@@ -61,7 +105,7 @@ def test_hold_lock_releases_on_successful_acquisition():
 
     # Act
     with cache_db.hold_lock():
-        pass 
+        pass
 
     # Assert
     cache_db.acquire_lock.assert_called_once()

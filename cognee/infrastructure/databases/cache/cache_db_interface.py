@@ -118,9 +118,7 @@ class CacheDBInterface(ABC):
         return await self.get_all_qa_entries(user_id, session_id)
 
     @abstractmethod
-    async def get_all_qa_entries(
-        self, user_id: str, session_id: str
-    ) -> list[SessionQAEntry]:
+    async def get_all_qa_entries(self, user_id: str, session_id: str) -> list[SessionQAEntry]:
         """
         Retrieve all Q/A/context triplets for the given session.
         """
@@ -194,9 +192,7 @@ class CacheDBInterface(ABC):
         (``graph_sync_checkpoint:...``). Adapters that do not support generic
         key/value storage may leave this unimplemented.
         """
-        raise NotImplementedError(
-            "This cache adapter does not support key/value storage."
-        )
+        raise NotImplementedError("This cache adapter does not support key/value storage.")
 
     async def set_value(self, key: str, value: str, ttl: int | None = None) -> None:
         """
@@ -207,9 +203,7 @@ class CacheDBInterface(ABC):
         (``graph_sync_checkpoint:...``). Adapters that do not support generic
         key/value storage may leave this unimplemented.
         """
-        raise NotImplementedError(
-            "This cache adapter does not support key/value storage."
-        )
+        raise NotImplementedError("This cache adapter does not support key/value storage.")
 
     async def delete_value(self, key: str) -> None:
         """
@@ -220,9 +214,7 @@ class CacheDBInterface(ABC):
         (``graph_sync_checkpoint:...``). Adapters that do not support generic
         key/value storage may leave this unimplemented.
         """
-        raise NotImplementedError(
-            "This cache adapter does not support key/value storage."
-        )
+        raise NotImplementedError("This cache adapter does not support key/value storage.")
 
     @abstractmethod
     async def append_agent_trace_step(
@@ -281,9 +273,7 @@ class CacheDBInterface(ABC):
         pass
 
     @abstractmethod
-    async def get_session_context_entries(
-        self, user_id: str, session_id: str
-    ) -> list[dict]:
+    async def get_session_context_entries(self, user_id: str, session_id: str) -> list[dict]:
         """
         Retrieve all stored session-context entries (both "context" and "feedback" kinds).
         """

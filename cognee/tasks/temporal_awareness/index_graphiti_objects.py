@@ -45,11 +45,7 @@ async def index_and_transform_graphiti_nodes_and_edges():
 
     for node_id, node_data in nodes_data:
         graphiti_node = GraphitiNode(
-            **{
-                key: node_data[key]
-                for key in ("content", "name", "summary")
-                if key in node_data
-            },
+            **{key: node_data[key] for key in ("content", "name", "summary") if key in node_data},
             id=node_id,
         )
 
@@ -59,9 +55,7 @@ async def index_and_transform_graphiti_nodes_and_edges():
             index_name = f"{data_point_type.__name__}.{field_name}"
 
             if index_name not in created_indexes:
-                await vector_engine.create_vector_index(
-                    data_point_type.__name__, field_name
-                )
+                await vector_engine.create_vector_index(data_point_type.__name__, field_name)
                 created_indexes[index_name] = True
 
             if index_name not in index_points:
@@ -80,7 +74,8 @@ async def index_and_transform_graphiti_nodes_and_edges():
         await vector_engine.index_data_points(index_name, field_name, indexable_points)
 
     edge_types = Counter(
-        edge[2] for edge in edges_data  # The edge key (relationship name) is at index 2
+        edge[2]
+        for edge in edges_data  # The edge key (relationship name) is at index 2
     )
 
     for text, count in edge_types.items():
@@ -91,17 +86,16 @@ async def index_and_transform_graphiti_nodes_and_edges():
             index_name = f"{data_point_type.__name__}.{field_name}"
 
             if index_name not in created_indexes:
-                await vector_engine.create_vector_index(
-                    data_point_type.__name__, field_name
-                )
+                await vector_engine.create_vector_index(data_point_type.__name__, field_name)
                 created_indexes[index_name] = True
 
             if index_name not in index_points:
                 index_points[index_name] = []
 
-            indexed_data_point = edge_type.model_copy()
+            # --- FIXED HERE: Changed edge_type to edge ---
+            indexed_data_point = edge.model_copy()
             indexed_data_point.metadata = {
-                **edge_type.metadata,
+                **edge.metadata,
                 "index_fields": [field_name],
             }
             index_points[index_name].append(indexed_data_point)
