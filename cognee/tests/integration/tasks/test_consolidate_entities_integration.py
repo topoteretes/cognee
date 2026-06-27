@@ -26,7 +26,7 @@ import cognee
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine
-from cognee.low_level import setup
+from cognee.low_level import setup as cognee_setup
 from cognee.memify_pipelines.consolidate_entities import consolidate_entities_pipeline
 from cognee.modules.engine.models.Entity import Entity
 from cognee.modules.engine.models.EntityType import EntityType
@@ -52,7 +52,7 @@ async def clean_test_environment():
 
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
-    await setup()
+    await cognee_setup()
 
     yield
 
