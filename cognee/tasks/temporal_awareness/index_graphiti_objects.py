@@ -1,10 +1,10 @@
-from cognee.shared.logging_utils import get_logger, ERROR
 from collections import Counter
 
-from cognee.tasks.temporal_awareness.graphiti_model import GraphitiNode
-from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.modules.graph.models.EdgeType import EdgeType
+from cognee.shared.logging_utils import ERROR, get_logger
+from cognee.tasks.temporal_awareness.graphiti_model import GraphitiNode
 
 logger = get_logger(level=ERROR)
 
@@ -45,7 +45,11 @@ async def index_and_transform_graphiti_nodes_and_edges():
 
     for node_id, node_data in nodes_data:
         graphiti_node = GraphitiNode(
-            **{key: node_data[key] for key in ("content", "name", "summary") if key in node_data},
+            **{
+                key: node_data[key]
+                for key in ("content", "name", "summary")
+                if key in node_data
+            },
             id=node_id,
         )
 
@@ -55,7 +59,9 @@ async def index_and_transform_graphiti_nodes_and_edges():
             index_name = f"{data_point_type.__name__}.{field_name}"
 
             if index_name not in created_indexes:
-                await vector_engine.create_vector_index(data_point_type.__name__, field_name)
+                await vector_engine.create_vector_index(
+                    data_point_type.__name__, field_name
+                )
                 created_indexes[index_name] = True
 
             if index_name not in index_points:
@@ -63,7 +69,10 @@ async def index_and_transform_graphiti_nodes_and_edges():
 
             if getattr(graphiti_node, field_name, None) is not None:
                 indexed_data_point = graphiti_node.model_copy()
-                indexed_data_point.metadata["index_fields"] = [field_name]
+                indexed_data_point.metadata = {
+                    **graphiti_node.metadata,
+                    "index_fields": [field_name],
+                }
                 index_points[index_name].append(indexed_data_point)
 
     for index_name, indexable_points in index_points.items():
@@ -71,8 +80,7 @@ async def index_and_transform_graphiti_nodes_and_edges():
         await vector_engine.index_data_points(index_name, field_name, indexable_points)
 
     edge_types = Counter(
-        edge[2]  # The edge key (relationship name) is at index 2
-        for edge in edges_data
+        edge[2] for edge in edges_data  # The edge key (relationship name) is at index 2
     )
 
     for text, count in edge_types.items():
@@ -83,14 +91,19 @@ async def index_and_transform_graphiti_nodes_and_edges():
             index_name = f"{data_point_type.__name__}.{field_name}"
 
             if index_name not in created_indexes:
-                await vector_engine.create_vector_index(data_point_type.__name__, field_name)
+                await vector_engine.create_vector_index(
+                    data_point_type.__name__, field_name
+                )
                 created_indexes[index_name] = True
 
             if index_name not in index_points:
                 index_points[index_name] = []
 
-            indexed_data_point = edge.model_copy()
-            indexed_data_point.metadata["index_fields"] = [field_name]
+            indexed_data_point = edge_type.model_copy()
+            indexed_data_point.metadata = {
+                **edge_type.metadata,
+                "index_fields": [field_name],
+            }
             index_points[index_name].append(indexed_data_point)
 
     for index_name, indexable_points in index_points.items():
