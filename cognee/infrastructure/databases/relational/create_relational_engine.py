@@ -15,6 +15,8 @@ def create_relational_engine(
     db_username: str,
     db_password: str,
     db_provider: str,
+    turso_url: str = None,
+    turso_auth_token: str = None,
     database_connect_args: tuple = None,
     pool_args: tuple = None,
 ) -> SQLAlchemyAdapter:
@@ -34,7 +36,13 @@ def create_relational_engine(
           PostgreSQL.
         - db_password (str): The password for database authentication, required for
           PostgreSQL.
-        - db_provider (str): The type of database provider (e.g., 'sqlite' or 'postgres').
+        - db_provider (str): The type of database provider (e.g., 'sqlite', 'postgres',
+          or 'turso').
+        - turso_url (str, optional): The Turso database URL
+          (e.g., 'libsql://mydb-org.turso.io'). Required when db_provider is 'turso'
+          for remote databases.
+        - turso_auth_token (str, optional): The authentication token for Turso.
+          Required when db_provider is 'turso' for remote databases.
         - database_connect_args (dict, optional): Database driver connection arguments.
 
     Returns:
@@ -67,6 +75,24 @@ def create_relational_engine(
         except ImportError:
             raise ImportError(
                 "PostgreSQL dependencies are not installed. Please install with 'pip install cognee\"[postgres]\"' or 'pip install cognee\"[postgres-binary]\"' to use PostgreSQL functionality."
+            )
+
+    elif db_provider == "turso":
+        try:
+            import sqlalchemy_libsql  # noqa: F401  — registers the libsql dialect
+
+            if turso_url:
+                # Remote Turso database: libsql://host?authToken=xxx&secure=true
+                connection_string = f"{turso_url}?authToken={turso_auth_token}&secure=true"
+            else:
+                # Local embedded libSQL file (same as SQLite but via libsql driver)
+                connection_string = f"sqlite+libsql:///{db_path}/{db_name}"
+
+        except ImportError:
+            raise ImportError(
+                "Turso/libSQL dependencies are not installed. "
+                "Please install with 'pip install cognee\"[turso]\"' "
+                "to use Turso functionality."
             )
 
     else:
