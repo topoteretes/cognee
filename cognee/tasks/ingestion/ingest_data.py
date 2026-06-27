@@ -188,6 +188,7 @@ async def ingest_data(
                 data_point.node_set = json.dumps(node_set) if node_set else None
                 data_point.tenant_id = user.tenant_id if user.tenant_id else None
                 data_point.label = current_label
+                data_point.importance_weight = importance_weight
 
                 if content_changed:
                     data_point.pipeline_status = {}
