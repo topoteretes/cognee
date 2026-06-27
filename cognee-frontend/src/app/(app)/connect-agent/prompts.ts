@@ -177,7 +177,12 @@ export const MCP_CLIENT_CONFIG = `{
   }
 }`;
 
-export const SKILLS_CONTENT = `# Cognee Cloud Memory Skill
+export const SKILLS_CONTENT = `---
+name: cognee-memory
+description: Connects your agent to Cognee Cloud for persistent knowledge graph memory.
+---
+
+# Cognee Cloud Memory Skill
 
 This skill connects Claude Code to Cognee Cloud for persistent knowledge graph memory.
 
