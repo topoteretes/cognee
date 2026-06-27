@@ -186,6 +186,16 @@ async def add(
         - TAVILY_API_KEY: YOUR_TAVILY_API_KEY
 
     """
+    import math
+
+    if importance_weight is not None:
+        if isinstance(importance_weight, bool) or not isinstance(importance_weight, (int, float)):
+            raise ValueError(f"importance_weight must be a numeric float between 0.0 and 2.0")
+        if math.isnan(importance_weight) or math.isinf(importance_weight):
+            raise ValueError(f"importance_weight must be a finite float between 0.0 and 2.0")
+        if not (0.0 <= importance_weight <= 2.0):
+            raise ValueError(f"importance_weight must be between 0.0 and 2.0")
+
     # Route to remote instance if connected via serve()
     from cognee.api.v1.serve.state import get_remote_client
 
