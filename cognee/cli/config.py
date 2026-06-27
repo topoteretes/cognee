@@ -39,6 +39,7 @@ SEARCH_TYPE_CHOICES = [
     "SUMMARIES",
     "CODE",
     "CYPHER",
+    "CONNECTION_PATH",
 ]
 
 # Chunker choices
