@@ -45,13 +45,29 @@ async def data_item_to_text_file(
             # TODO: Rework this to work with file streams and not saving data to temp storage
             # Note: proper suffix information is needed for OpenAI to handle mp3 files
             path_info = Path(parsed_url.path)
-            with tempfile.NamedTemporaryFile(mode="wb", suffix=path_info.suffix) as temp_file:
+            # NamedTemporaryFile defaults to delete=True, which on Windows keeps an
+            # exclusive lock on the file and forbids reopening it by name while the
+            # handle is still open. The loader below reopens the file by name, so we
+            # create it with delete=False, close our handle first, and clean it up
+            # ourselves. (Mirrors the delete=False pattern used by the SQLAlchemy and
+            # ladybug S3 temp-file paths.)
+            temp_file = tempfile.NamedTemporaryFile(
+                mode="wb", suffix=path_info.suffix, delete=False
+            )
+            try:
                 await pull_from_s3(data_item_path, temp_file)
                 temp_file.flush()  # Data needs to be saved to local storage
+                temp_file.close()  # release the handle so the loader can reopen by name
                 loader = get_loader_engine()
                 return await loader.load_file(temp_file.name, preferred_loaders), loader.get_loader(
                     temp_file.name, preferred_loaders
                 )
+            finally:
+                temp_file.close()  # idempotent; covers the early-exception path
+                try:
+                    os.unlink(temp_file.name)
+                except OSError:
+                    pass
 
         # data is local file path
         elif parsed_url.scheme == "file":
