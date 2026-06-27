@@ -69,9 +69,7 @@ async def _seed(graph):
     country = EntityType(name="Country", description="A sovereign nation.")
     park_type = EntityType(name="Park", description="A public green space.")
 
-    nycity = Entity(
-        name="New York City", is_a=city, description="The most populous US city."
-    )
+    nycity = Entity(name="New York City", is_a=city, description="The most populous US city.")
     nyc = Entity(name="NYC", is_a=city, description="Common abbreviation for New York City.")
     usa = Entity(name="United States", is_a=country, description="A country in North America.")
     central_park = Entity(
@@ -113,18 +111,17 @@ async def test_consolidate_entities_merges_real_graph(clean_test_environment):
         vector = get_vector_engine()
         nodes_after, edges_after = await graph.get_graph_data()
         entities_after = {
-            str(node_id): props
-            for node_id, props in nodes_after
-            if props.get("type") == "Entity"
+            str(node_id): props for node_id, props in nodes_after if props.get("type") == "Entity"
         }
 
         # Exactly one of the duplicate pair remains.
         survivors = [
-            node_id for node_id, props in entities_after.items() if props.get("name") in DUPLICATE_NAMES
+            node_id
+            for node_id, props in entities_after.items()
+            if props.get("name") in DUPLICATE_NAMES
         ]
         assert len(survivors) == 1, (
-            f"expected a single survivor, found "
-            f"{[entities_after[s]['name'] for s in survivors]}"
+            f"expected a single survivor, found {[entities_after[s]['name'] for s in survivors]}"
         )
         survivor_id = survivors[0]
 
