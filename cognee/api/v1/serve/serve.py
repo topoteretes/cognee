@@ -171,32 +171,39 @@ async def _serve_cloud(
             except Exception as e:
                 logger.warning("Token refresh failed, re-authenticating: %s", e)
 
-    # Step 2: Device Code Flow
-    print("  Authenticating with Cognee Cloud...")
-    token = await device_code_login(
-        domain=auth0_domain,
-        client_id=auth0_client_id,
-        audience=auth0_audience,
-    )
+    # Step 2: Device Code Flow with Local Fallback
+    try:
+        print("  Authenticating with Cognee Cloud...")
+        token = await device_code_login(
+            domain=auth0_domain,
+            client_id=auth0_client_id,
+            audience=auth0_audience,
+        )
 
-    access_token = token.access_token
-    email = extract_email_from_id_token(token.id_token) if token.id_token else None
+        access_token = token.access_token
+        email = extract_email_from_id_token(token.id_token) if token.id_token else None
 
-    # Step 3: Discover or create tenant
-    tenant = await get_current_tenant(mgmt_url, access_token)
-    if not tenant:
-        if not email:
-            raise RuntimeError(
-                "Could not extract email from token. "
-                "Ensure the Auth0 app includes 'email' in the scope."
-            )
-        tenant = await create_tenant(mgmt_url, access_token, email)
+        # Step 3: Discover or create tenant
+        tenant = await get_current_tenant(mgmt_url, access_token)
+        if not tenant:
+            if not email:
+                raise RuntimeError(
+                    "Could not extract email from token. "
+                    "Ensure the Auth0 app includes 'email' in the scope."
+                )
+            tenant = await create_tenant(mgmt_url, access_token, email)
 
-    # Step 4: Get service URL
-    service_url = await get_service_url(mgmt_url, access_token)
+        # Step 4: Get service URL
+        service_url = await get_service_url(mgmt_url, access_token)
 
-    # Step 5: Get or create API key
-    api_key = await get_or_create_api_key(mgmt_url, access_token)
+        # Step 5: Get or create API key
+        api_key = await get_or_create_api_key(mgmt_url, access_token)
+
+    except (Exception, RuntimeError) as e:
+        logger.warning("Cloud authentication/connection failed: %s", e)
+        fallback_local_url = os.getenv("COGNEE_SERVICE_URL", "http://localhost:8000")
+        print(f"⚠️  Cloud connection failed. Falling back to local instance at {fallback_local_url}...")
+        return await _serve_direct(service_url=fallback_local_url, api_key=os.getenv("COGNEE_API_KEY", ""))
 
     # Step 6: Save credentials
     creds = CloudCredentials(
