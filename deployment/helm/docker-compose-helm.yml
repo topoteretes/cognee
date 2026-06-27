@@ -11,8 +11,7 @@ services:
       - .:/app
       - /app/cognee-frontend/ # Ignore frontend code
     environment:
-      - HOST=0.0.0.0
-      - ENVIRONMENT=local
+      - ENV=local
       - PYTHONPATH=.
     ports:
       - 8000:8000
