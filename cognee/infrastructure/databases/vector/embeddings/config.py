@@ -31,6 +31,11 @@ def _resolve_embedding_dimensions(provider: Optional[str], model: Optional[str])
     bare_model = model.split("/")[-1] if "/" in model else model
     candidates = [model, bare_model, f"{provider_lower}/{bare_model}"]
 
+    # TwelveLabs' Marengo is multimodal and not known to litellm/fastembed;
+    # every current Marengo model produces 512-dim vectors.
+    if provider_lower == "twelvelabs":
+        return 512
+
     if provider_lower == "fastembed":
         try:
             from fastembed import TextEmbedding
