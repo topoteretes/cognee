@@ -329,7 +329,7 @@ class TestCandidateExactDuplicateMerge:
             session_manager=manager,
             user_id="u",
             session_id="s",
-            feedback_entry_id="fb-1",
+            source_id="fb-1",
             candidates=[
                 {
                     "section": "rules",
@@ -352,7 +352,7 @@ class TestCandidateExactDuplicateMerge:
             session_manager=manager,
             user_id="u",
             session_id="s",
-            feedback_entry_id="fb-2",
+            source_id="fb-2",
             candidates=[{"section": "rules", "content": "Cite sources.", "confidence": 0.9}],
         )
 
@@ -370,7 +370,7 @@ class TestCandidateExactDuplicateMerge:
             session_manager=manager,
             user_id="u",
             session_id="s",
-            feedback_entry_id="fb-3",
+            source_id="fb-3",
             candidates=[
                 {
                     "section": "rules",
