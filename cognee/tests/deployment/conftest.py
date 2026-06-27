@@ -4,6 +4,7 @@ import time
 import uuid
 import socket
 import pytest
+import pytest_asyncio
 import httpx
 import asyncio
 import threading
@@ -58,18 +59,34 @@ class MockLLMHandler(BaseHTTPRequestHandler):
             req = {}
 
         if self.path.endswith('/chat/completions'):
+            schema_name = ""
+            if "response_format" in req:
+                schema_name = req["response_format"].get("json_schema", {}).get("name", "")
+            if not schema_name and "tools" in req:
+                tools = req["tools"]
+                if tools and isinstance(tools, list) and len(tools) > 0:
+                    schema_name = tools[0].get("function", {}).get("name", "")
+            if not schema_name and "functions" in req:
+                funcs = req["functions"]
+                if funcs and isinstance(funcs, list) and len(funcs) > 0:
+                    schema_name = funcs[0].get("name", "")
+
             messages = req.get("messages", [])
             prompt = "".join([m.get("content", "") for m in messages])
             
             response_content = "{}"
-            if "DefaultContentPrediction" in prompt or "TEXTUAL_DOCUMENTS_USED_FOR_GENERAL_PURPOSES" in prompt:
+            if schema_name == "DefaultContentPrediction" or "DefaultContentPrediction" in prompt or "TEXTUAL_DOCUMENTS_USED_FOR_GENERAL_PURPOSES" in prompt:
                 response_content = json.dumps({
                     "label": {
                         "type": "TEXTUAL_DOCUMENTS_USED_FOR_GENERAL_PURPOSES",
                         "subclass": ["News stories and blog posts"]
                     }
                 })
-            elif "KnowledgeGraph" in prompt or "nodes" in prompt:
+            elif schema_name == "SummarizedContent" or "SummarizedContent" in prompt or "summary" in prompt:
+                response_content = json.dumps({
+                    "summary": "This document covers Albert Einstein and his development of the theory of relativity."
+                })
+            elif schema_name == "KnowledgeGraph" or "KnowledgeGraph" in prompt or "nodes" in prompt:
                 response_content = json.dumps({
                     "nodes": [
                         {
@@ -87,10 +104,6 @@ class MockLLMHandler(BaseHTTPRequestHandler):
                             "description": "Albert Einstein developed the theory of relativity."
                         }
                     ]
-                })
-            elif "SummarizedContent" in prompt or "summary" in prompt:
-                response_content = json.dumps({
-                    "summary": "This document covers Albert Einstein and his development of the theory of relativity."
                 })
             elif "Answer" in prompt:
                 response_content = json.dumps({
@@ -192,7 +205,7 @@ def image_name(request):
     if img == "build":
         local_image = "cognee:local"
         print("Building local Docker image 'cognee:local' from Dockerfile...")
-        proc = subprocess.run(["docker", "build", "-t", local_image, "."], capture_output=True, text=True)
+        proc = subprocess.run(["docker", "build", "-t", local_image, "."], capture_output=True, text=True, errors="replace")
         if proc.returncode == 0:
             print("Successfully built local image 'cognee:local'.")
             return local_image
@@ -217,7 +230,7 @@ def mcp_image_name(request):
     if img == "build":
         local_image = "cognee-mcp:local"
         print("Building local MCP Docker image 'cognee-mcp:local' from cognee-mcp/Dockerfile...")
-        proc = subprocess.run(["docker", "build", "-t", local_image, "-f", "cognee-mcp/Dockerfile", "."], capture_output=True, text=True)
+        proc = subprocess.run(["docker", "build", "-t", local_image, "-f", "cognee-mcp/Dockerfile", "."], capture_output=True, text=True, errors="replace")
         if proc.returncode == 0:
             print("Successfully built local MCP image 'cognee-mcp:local'.")
             return local_image
@@ -281,7 +294,7 @@ def running_container(mock_llm_server, image_name):
         ]
         
     print(f"Starting container {container_name} on host port {host_port} with image {image_name}...")
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    proc = subprocess.run(cmd, capture_output=True, text=True, errors="replace")
     if proc.returncode != 0:
         raise RuntimeError(f"docker run failed to start: {proc.stderr}")
         
@@ -294,18 +307,20 @@ def running_container(mock_llm_server, image_name):
             "port": host_port,
             "container_name": container_name
         }
-    except Exception as e:
-        print(f"\n--- CONTAINER FAILURE LOGS ---")
-        logs = subprocess.run(["docker", "logs", container_name], capture_output=True, text=True)
-        print(logs.stdout)
-        print(logs.stderr)
-        raise e
     finally:
+        print(f"\n--- CONTAINER LOGS FOR {container_name} ---")
+        logs = subprocess.run(["docker", "logs", container_name], capture_output=True, text=True, errors="replace")
+        sys.stdout.buffer.write(logs.stdout.encode("utf-8", errors="replace"))
+        sys.stdout.buffer.write(b"\n")
+        sys.stderr.buffer.write(logs.stderr.encode("utf-8", errors="replace"))
+        sys.stderr.buffer.write(b"\n")
+        sys.stdout.flush()
+        sys.stderr.flush()
         print(f"Stopping and removing container {container_name}...")
         subprocess.run(["docker", "stop", container_name], capture_output=True)
         subprocess.run(["docker", "rm", container_name], capture_output=True)
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def api_client(running_container):
     base_url = running_container["url"]
     
@@ -321,6 +336,8 @@ async def api_client(running_container):
             try:
                 await self.post("/api/v1/auth/register", json=reg_payload)
             except Exception:
+                # Swallow registration failures to ensure idempotency across multiple local runs
+                # on persistent storage, falling back to attempting login.
                 pass
             
             login_payload = {
@@ -336,7 +353,7 @@ async def api_client(running_container):
     async with AuthAsyncClient(base_url=base_url, timeout=30.0) as client:
         yield client
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def mcp_client(mcp_image_name):
     host_port = get_free_port()
     container_name = f"cognee-mcp-test-{uuid.uuid4().hex[:8]}"
@@ -362,7 +379,7 @@ async def mcp_client(mcp_image_name):
         ]
         
     print(f"Starting MCP container {container_name} on host port {host_port} with image {mcp_image_name}...")
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    proc = subprocess.run(cmd, capture_output=True, text=True, errors="replace")
     if proc.returncode != 0:
         raise RuntimeError(f"docker run for MCP failed to start: {proc.stderr}")
         
@@ -390,13 +407,15 @@ async def mcp_client(mcp_image_name):
         wait_for_health(f"{url}/health", timeout=60.0)
         async with MCPAsyncClient(base_url=url, timeout=30.0) as client:
             yield client
-    except Exception as e:
-        print(f"\n--- MCP CONTAINER FAILURE LOGS ---")
-        logs = subprocess.run(["docker", "logs", container_name], capture_output=True, text=True)
-        print(logs.stdout)
-        print(logs.stderr)
-        raise e
     finally:
+        print(f"\n--- MCP CONTAINER LOGS FOR {container_name} ---")
+        logs = subprocess.run(["docker", "logs", container_name], capture_output=True, text=True, errors="replace")
+        sys.stdout.buffer.write(logs.stdout.encode("utf-8", errors="replace"))
+        sys.stdout.buffer.write(b"\n")
+        sys.stderr.buffer.write(logs.stderr.encode("utf-8", errors="replace"))
+        sys.stderr.buffer.write(b"\n")
+        sys.stdout.flush()
+        sys.stderr.flush()
         print(f"Stopping and removing MCP container {container_name}...")
         subprocess.run(["docker", "stop", container_name], capture_output=True)
         subprocess.run(["docker", "rm", container_name], capture_output=True)
@@ -433,23 +452,26 @@ def run_golden_flow():
         # 3. Trigger Cognify
         cognify_payload = {
             "datasets": [dataset_name],
-            "run_in_background": False
+            "run_in_background": True
         }
         resp = await api_client.post("/api/v1/cognify", json=cognify_payload)
         resp.raise_for_status()
         
-        # 4. Poll status
+        # 4. Poll status (60s timeout under heavy CI virtual environments)
         status_completed = False
-        for _ in range(30):
+        for _ in range(60):
             resp = await api_client.get(f"/api/v1/datasets/status?dataset={dataset_id}")
             resp.raise_for_status()
             status_data = resp.json()
             status = status_data.get(str(dataset_id))
-            if status == "completed":
+            if status == "DATASET_PROCESSING_COMPLETED":
                 status_completed = True
                 break
-            elif status == "failed":
-                raise RuntimeError("Cognify pipeline failed")
+            elif status == "DATASET_PROCESSING_ERRORED":
+                raise RuntimeError(
+                    f"Cognify pipeline failed for dataset {dataset_id}. "
+                    f"Status check payload: {status_data}"
+                )
             await asyncio.sleep(1)
             
         assert status_completed, f"Cognify pipeline did not complete in time"
