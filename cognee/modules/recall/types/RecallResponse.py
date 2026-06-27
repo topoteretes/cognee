@@ -8,10 +8,12 @@ from cognee.modules.recall.types.SearchResultItem import SearchResultItem
 
 class ResponseQAEntry(SessionQAEntry):
     source: Literal["session"]
+    score: float | None = None
 
 
 class ResponseAgentTraceEntry(SessionAgentTraceEntry):
     source: Literal["trace"]
+    score: float | None = None
 
 
 class ResponseGraphContextEntry(BaseModel):
