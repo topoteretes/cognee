@@ -12,8 +12,8 @@ These two tasks back the ``consolidate_entities`` memify pipeline:
   embeddings. ``dry_run`` computes and logs the plan without mutating anything.
 
 The merge is backend-agnostic: it relies only on ``get_graph_data`` (directed
-edges), ``add_edge`` (an UPSERT/MERGE on every adapter), ``add_nodes`` (an
-upsert that updates existing node properties via ``ON MATCH SET``),
+edges), ``add_edges`` (a batched UPSERT/MERGE on every adapter), ``add_nodes``
+(an upsert that updates existing node properties via ``ON MATCH SET``),
 ``delete_nodes`` (a detach-delete that cascades the duplicates' old edges), and
 the vector engine's ``delete_data_points``. No per-edge delete primitive is
 required or used.
@@ -22,6 +22,7 @@ required or used.
 import json
 import re
 from typing import Any, Dict, List, Optional, Tuple
+from uuid import UUID
 
 import numpy as np
 
@@ -72,20 +73,62 @@ def _normalize_name(name: Any) -> str:
     return re.sub(r"[^a-z0-9]+", "", name.lower())
 
 
-def _cosine_similarity_matrix(vectors: List[List[float]]) -> np.ndarray:
-    """Return the full pairwise cosine-similarity matrix for ``vectors``.
+# Row-block size for the chunked similarity scan. Each block holds at most
+# ``_SIMILARITY_CHUNK_SIZE`` x N similarities at a time, so peak memory grows
+# with the chunk size rather than with N**2.
+_SIMILARITY_CHUNK_SIZE = 512
 
-    This materializes an N x N matrix, which is fine for the entity counts a
-    single dataset's graph typically holds. For very large graphs this should be
-    replaced with a chunked / ANN top-k search against the vector backend.
+
+def _normalize_rows(vectors: List[List[float]]) -> np.ndarray:
+    """L2-normalize each row so that a dot product equals cosine similarity.
+
+    Returns a 2-D float array, or an empty array when there is nothing to
+    normalize. Zero-length rows are left as zeros (cosine-similar to nothing).
     """
     matrix = np.asarray(vectors, dtype=float)
     if matrix.ndim != 2 or matrix.shape[0] == 0:
         return np.zeros((0, 0))
     norms = np.linalg.norm(matrix, axis=1, keepdims=True)
     norms = np.where(norms == 0, 1.0, norms)
-    normalized = matrix / norms
-    return normalized @ normalized.T
+    return matrix / norms
+
+
+def _iter_topk_similar_pairs(
+    normalized: np.ndarray,
+    threshold: float,
+    top_k: int,
+    chunk_size: int = _SIMILARITY_CHUNK_SIZE,
+):
+    """Yield ``(i, j)`` index pairs whose cosine similarity is ``>= threshold``.
+
+    Similarities are computed one row-block at a time (``chunk_size`` rows per
+    block), so the full N x N matrix is never materialized — peak memory is
+    ``chunk_size`` x N instead of N**2, which lets the pipeline scale past small
+    graphs. For each row only its ``top_k`` nearest neighbors are inspected,
+    selected with ``np.argpartition`` (O(n) per row) instead of a full sort.
+    When ``top_k`` is unset or not smaller than the candidate pool, every other
+    node is considered.
+    """
+    count = int(normalized.shape[0]) if normalized.size else 0
+    if count < 2:
+        return
+    bounded = bool(top_k) and 0 < top_k < count - 1
+    for start in range(0, count, chunk_size):
+        block = normalized[start : start + chunk_size] @ normalized.T
+        for offset, row in enumerate(block):
+            index = start + offset
+            if bounded:
+                # +1 because the row's own entry (similarity 1.0) is always picked.
+                k = min(top_k + 1, count)
+                candidate_indices = np.argpartition(row, -k)[-k:]
+            else:
+                candidate_indices = range(count)
+            for other in candidate_indices:
+                other = int(other)
+                if other == index:
+                    continue
+                if row[other] >= threshold:
+                    yield index, other
 
 
 def _cluster_entities(
@@ -107,7 +150,7 @@ def _cluster_entities(
     name_match = cfg["name_match"]
     allow_cross_type = cfg["allow_cross_type"]
 
-    similarity = _cosine_similarity_matrix(vectors)
+    normalized_vectors = _normalize_rows(vectors)
     normalized_names = [_normalize_name(member["name"]) for member in members]
 
     parent = list(range(count))
@@ -126,23 +169,13 @@ def _cluster_entities(
     def same_type(left: int, right: int) -> bool:
         return allow_cross_type or members[left]["type"] == members[right]["type"]
 
-    # Pass 1 — cosine similarity. For each node, take its top_k nearest
-    # neighbors with np.argpartition (O(n) per node instead of a full sort),
-    # then union the ones at or above the threshold.
-    if similarity.size:
-        for index in range(count):
-            row = similarity[index]
-            if top_k and top_k < count - 1:
-                # +1 because the node itself (similarity 1.0) is always selected.
-                k = min(top_k + 1, count)
-                candidate_indices = np.argpartition(row, -k)[-k:]
-            else:
-                candidate_indices = range(count)
-            for other in candidate_indices:
-                if other == index:
-                    continue
-                if row[other] >= threshold and same_type(index, other):
-                    union(index, other)
+    # Pass 1 — cosine similarity. Similarities are scanned in row-blocks (the
+    # full N x N matrix is never held) and only each node's top_k nearest
+    # neighbors are considered; union those at or above the threshold that also
+    # share an EntityType (unless allow_cross_type).
+    for index, other in _iter_topk_similar_pairs(normalized_vectors, threshold, top_k):
+        if same_type(index, other):
+            union(index, other)
 
     # Pass 2 — exact normalized-name match (not bounded by top_k).
     if name_match:
@@ -305,29 +338,91 @@ def _union_descriptions(members: List[Dict[str, Any]]) -> Optional[str]:
     return " ".join(descriptions) if descriptions else None
 
 
+def _belongs_to_set_tags(member: Dict[str, Any]) -> List[str]:
+    """Return a member's ``belongs_to_set`` tags as a list of strings.
+
+    Reads the member's top-level value (populated by the detect task) and falls
+    back to its raw stored ``props``. Each tag may be stored as a plain string,
+    a NodeSet-like mapping, or a DataPoint; all are reduced to a stable string
+    key (``name`` preferred, then ``id``).
+    """
+    value = member.get("belongs_to_set")
+    if value is None:
+        value = (member.get("props") or {}).get("belongs_to_set")
+    if value is None:
+        return []
+    if not isinstance(value, (list, tuple, set)):
+        value = [value]
+
+    tags: List[str] = []
+    for item in value:
+        if item is None:
+            continue
+        if isinstance(item, str):
+            tag: Any = item
+        elif isinstance(item, dict):
+            tag = item.get("name") or item.get("id")
+        else:
+            tag = getattr(item, "name", None) or getattr(item, "id", None)
+        if tag is not None:
+            tags.append(str(tag))
+    return tags
+
+
+def _union_belongs_to_set(members: List[Dict[str, Any]]) -> Optional[List[str]]:
+    """Union the ``belongs_to_set`` tags across members, preserving first-seen order.
+
+    ``belongs_to_set`` is a node property that scopes a node to one or more
+    datasets / node sets. The canonical must inherit the tags of every duplicate
+    it absorbs, otherwise a merge would silently narrow the node's dataset
+    scoping. Returns ``None`` when no member carries any tag, so the caller
+    leaves the property untouched.
+    """
+    unioned: List[str] = []
+    for member in members:
+        for tag in _belongs_to_set_tags(member):
+            if tag not in unioned:
+                unioned.append(tag)
+    return unioned or None
+
+
 def _build_canonical_entity(
     canonical: Dict[str, Any], duplicates: List[Dict[str, Any]]
 ) -> Optional[Entity]:
-    """Rebuild the canonical ``Entity`` with a unioned description.
+    """Rebuild the canonical ``Entity`` with unioned description and tags.
 
     The node is reconstructed faithfully from its stored properties so that
     ``add_nodes`` (which overwrites the property blob via ``ON MATCH SET``)
-    never drops existing data. The ``is_a`` relationship is preserved as a graph
-    edge and is not part of the node blob, so it is omitted here. Returns
-    ``None`` if reconstruction fails, in which case the caller leaves the
-    canonical node untouched (no data loss).
+    never drops existing data. Three things are enforced explicitly:
+
+    * the canonical's **actual graph id** is pinned onto the rebuilt node.
+      ``Entity`` ids are otherwise derived from the name, so a legacy- or
+      random-id canonical would be re-created under a different id by
+      ``add_nodes`` and orphaned from its edges;
+    * ``description`` is the union of the canonical's and the duplicates' text;
+    * ``belongs_to_set`` is the union of every member's dataset / node-set tags,
+      so a merge never narrows the canonical's scoping.
+
+    The ``is_a`` relationship is preserved as a graph edge (not part of the node
+    blob) and is omitted here. Returns ``None`` if reconstruction fails, in
+    which case the caller leaves the canonical node untouched (no data loss).
     """
     props = dict(canonical.get("props") or {})
     props.pop("is_a", None)
     props["name"] = canonical["name"]
+    props["id"] = canonical["id"]
 
     unioned = _union_descriptions([canonical] + duplicates)
     if unioned is not None:
         props["description"] = unioned
     props.setdefault("description", "")
 
+    unioned_tags = _union_belongs_to_set([canonical] + duplicates)
+    if unioned_tags is not None:
+        props["belongs_to_set"] = unioned_tags
+
     try:
-        return Entity.from_dict(props)
+        entity = Entity.from_dict(props)
     except Exception as error:  # noqa: BLE001 - reconstruction is best-effort
         logger.warning(
             "consolidate_entities: could not rebuild canonical %s (%s); "
@@ -336,6 +431,19 @@ def _build_canonical_entity(
             error,
         )
         return None
+
+    # Pin the canonical's real id regardless of name-based derivation, so
+    # add_nodes upserts the existing node in place instead of creating a new one.
+    canonical_id = canonical["id"]
+    try:
+        entity.id = canonical_id if isinstance(canonical_id, UUID) else UUID(str(canonical_id))
+    except (ValueError, AttributeError, TypeError):
+        logger.warning(
+            "consolidate_entities: canonical id %s is not a UUID; keeping derived id %s.",
+            canonical_id,
+            entity.id,
+        )
+    return entity
 
 
 async def merge_entity_duplicates(
@@ -400,15 +508,20 @@ async def merge_entity_duplicates(
     graph_engine = await get_graph_engine()
     vector_engine = get_vector_engine()
 
-    # 1. Re-point edges onto the canonicals. add_edge is called positionally
-    #    because adapters disagree on the 4th parameter's name
+    # 1. Re-point every duplicate edge onto its canonical in a single batched
+    #    call. add_edges is part of GraphDBInterface and implemented by every
+    #    adapter, so a large cluster costs one round-trip instead of one await
+    #    per edge. The 4-tuples (source, target, relationship, properties) are
+    #    passed positionally because adapters disagree on the 4th field's name
     #    (properties vs edge_properties); position is stable across all of them.
-    for source, target, relationship, properties in moved_edges:
-        await graph_engine.add_edge(source, target, relationship, properties or {})
+    if moved_edges:
+        await graph_engine.add_edges(moved_edges)
 
-    # 2. Persist unioned descriptions onto the canonicals (add_nodes upserts via
-    #    ON MATCH SET). Membership in node sets is already unioned at the edge
-    #    level by step 1, since belongs_to_set links are ordinary edges.
+    # 2. Persist the rebuilt canonicals (add_nodes upserts via ON MATCH SET).
+    #    Each rebuilt canonical carries the union of its cluster's descriptions
+    #    AND belongs_to_set tags (see _build_canonical_entity). belongs_to_set is
+    #    a node property, so it must be unioned here — edge re-pointing in step 1
+    #    cannot preserve it.
     updated_canonicals = [
         entity
         for canonical, duplicates in plans

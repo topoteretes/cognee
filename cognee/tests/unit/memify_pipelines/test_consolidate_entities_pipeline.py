@@ -8,15 +8,17 @@ dry_run no-op) and the pipeline *wiring* (tasks and config passed to memify).
 
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 
+from cognee.exceptions import CogneeValidationError
 from cognee.memify_pipelines.consolidate_entities import consolidate_entities_pipeline
 from cognee.modules.engine.models.Entity import Entity
 from cognee.tasks.memify.consolidate_entities import (
     _node_degrees,
     _pick_canonical,
+    _union_belongs_to_set,
     detect_entity_duplicates,
     merge_entity_duplicates,
     plan_edge_repointing,
@@ -34,6 +36,7 @@ ID_BANANA = str(Entity.id_for("Banana"))
 def _graph_mock():
     graph = AsyncMock()
     graph.add_edge = AsyncMock()
+    graph.add_edges = AsyncMock()
     graph.add_nodes = AsyncMock()
     graph.delete_nodes = AsyncMock()
     return graph
@@ -275,12 +278,14 @@ async def test_merge_repoints_edges_and_deletes_duplicates():
         result = await merge_entity_duplicates(payload, config={})
 
     # New York City and NYC tie on degree (3 each); New York City is older -> canonical.
-    repointed = {
-        (call.args[0], call.args[1], call.args[2]) for call in graph.add_edge.await_args_list
-    }
+    # Edges are re-pointed in a single batched add_edges call.
+    graph.add_edges.assert_awaited_once()
+    repointed_edges = graph.add_edges.await_args.args[0]
+    repointed = {(edge[0], edge[1], edge[2]) for edge in repointed_edges}
     assert (ID_NYCITY, "subway", "operates") in repointed  # source remapped, direction kept
     assert ("tourist", ID_NYCITY, "visited") in repointed  # target remapped, direction kept
-    assert graph.add_edge.await_count == 2  # untouched + self-loop edges are not re-added
+    assert len(repointed_edges) == 2  # untouched + self-loop edges are not re-added
+    graph.add_edge.assert_not_called()  # per-edge path is no longer used
 
     # Duplicate node and its embedding are removed.
     graph.delete_nodes.assert_awaited_once_with([ID_NYC])
@@ -313,7 +318,7 @@ async def test_merge_dry_run_performs_no_mutations():
     assert result == []
     # Not a single mutating call, and the engines are not even acquired.
     graph_getter.assert_not_called()
-    graph.add_edge.assert_not_called()
+    graph.add_edges.assert_not_called()
     graph.add_nodes.assert_not_called()
     graph.delete_nodes.assert_not_called()
     vector.delete_data_points.assert_not_called()
@@ -326,8 +331,111 @@ async def test_merge_without_clusters_is_noop():
     with patch(GRAPH, new=AsyncMock(return_value=graph)), patch(VECTOR, return_value=vector):
         result = await merge_entity_duplicates({"clusters": [], "edges": []}, config={})
     assert result == []
-    graph.add_edge.assert_not_called()
+    graph.add_edges.assert_not_called()
     graph.delete_nodes.assert_not_called()
+
+
+# --------------------------------------------------------------------------- #
+# belongs_to_set union + canonical id preservation
+# --------------------------------------------------------------------------- #
+def test_union_belongs_to_set_handles_mixed_shapes_and_dedups():
+    members = [
+        {"belongs_to_set": ["a", "b"]},
+        {"belongs_to_set": [{"name": "b"}, {"id": "c"}]},  # dict tags; "b" is a dup
+        {"props": {"belongs_to_set": "d"}},  # scalar, read via the props fallback
+        {"belongs_to_set": None},  # contributes nothing
+    ]
+    # First-seen order preserved, duplicates collapsed.
+    assert _union_belongs_to_set(members) == ["a", "b", "c", "d"]
+    # Nothing to union -> None, so the caller leaves the property untouched.
+    assert _union_belongs_to_set([{"belongs_to_set": None}]) is None
+
+
+@pytest.mark.asyncio
+async def test_merge_unions_belongs_to_set_and_pins_canonical_id():
+    """A merge must keep the canonical's id and union every duplicate's
+    belongs_to_set tags, or dataset / node-set scoping is silently narrowed."""
+    payload = _cluster_payload()
+    canonical, duplicate = payload["clusters"][0]
+    # Canonical and duplicate are scoped to DIFFERENT node sets.
+    canonical["props"]["belongs_to_set"] = ["dataset_a"]
+    duplicate["props"]["belongs_to_set"] = ["dataset_b"]
+
+    graph = _graph_mock()
+    vector = _vector_mock()
+    with patch(GRAPH, new=AsyncMock(return_value=graph)), patch(VECTOR, return_value=vector):
+        await merge_entity_duplicates(payload, config={})
+
+    graph.add_nodes.assert_awaited_once()
+    persisted = graph.add_nodes.await_args.args[0][0]
+    # New York City is canonical (older on the degree tie-break) and keeps its id.
+    assert persisted.id == UUID(ID_NYCITY)
+    # Both scoping tags survive the merge — neither dataset is dropped.
+    assert set(persisted.belongs_to_set or []) == {"dataset_a", "dataset_b"}
+
+
+@pytest.mark.asyncio
+async def test_merge_preserves_legacy_canonical_id():
+    """If the canonical has a legacy / random id (not ``Entity.id_for(name)``),
+    the rebuilt node must upsert under that real id, not a name-derived one,
+    otherwise add_nodes creates a brand-new node and orphans the survivor."""
+    legacy_id = str(uuid4())
+    assert legacy_id != ID_NYCITY  # sanity: not the name-derived id
+    canonical = {
+        "id": legacy_id,
+        "name": "New York City",
+        "created_at": 100,  # older -> wins the degree tie-break
+        "type": None,
+        "description": "Largest US city.",
+        "props": {
+            "id": legacy_id,
+            "name": "New York City",
+            "type": "Entity",
+            "description": "Largest US city.",
+        },
+    }
+    duplicate = {
+        "id": ID_NYC,
+        "name": "NYC",
+        "created_at": 200,
+        "type": None,
+        "description": "The Big Apple.",
+        "props": {"id": ID_NYC, "name": "NYC", "type": "Entity", "description": "The Big Apple."},
+    }
+    edges = [
+        (legacy_id, "country", "located_in", {}),
+        (ID_NYC, "subway", "operates", {}),
+    ]
+    payload = {"clusters": [[canonical, duplicate]], "edges": edges}
+
+    graph = _graph_mock()
+    vector = _vector_mock()
+    with patch(GRAPH, new=AsyncMock(return_value=graph)), patch(VECTOR, return_value=vector):
+        result = await merge_entity_duplicates(payload, config={})
+
+    persisted = graph.add_nodes.await_args.args[0][0]
+    assert persisted.id == UUID(legacy_id)  # real id pinned...
+    assert persisted.id != Entity.id_for("New York City")  # ...not the name-derived id
+    graph.delete_nodes.assert_awaited_once_with([ID_NYC])
+    assert [entity.id for entity in result] == [UUID(legacy_id)]
+
+
+# --------------------------------------------------------------------------- #
+# pipeline input validation
+# --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bad_top_k", [0, -1, 2.5, True])
+async def test_pipeline_rejects_invalid_top_k(bad_top_k):
+    # Invalid top_k is rejected before any user / dataset resolution.
+    with pytest.raises(CogneeValidationError):
+        await consolidate_entities_pipeline(top_k=bad_top_k)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bad_protect", [["ok", ""], ["ok", "   "], "City", [1, 2]])
+async def test_pipeline_rejects_invalid_protect_node_types(bad_protect):
+    with pytest.raises(CogneeValidationError):
+        await consolidate_entities_pipeline(protect_node_types=bad_protect)
 
 
 # --------------------------------------------------------------------------- #

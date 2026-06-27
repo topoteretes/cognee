@@ -59,6 +59,20 @@ async def consolidate_entities_pipeline(
             message="similarity_threshold must be in the range (0, 1]", log=False
         )
 
+    # top_k drives the top-k neighbor optimization in clustering; a non-positive
+    # or non-int value would silently fall back to an all-pairs scan, so reject
+    # it up front. (bool is an int subclass — exclude it explicitly.)
+    if isinstance(top_k, bool) or not isinstance(top_k, int) or top_k <= 0:
+        raise CogneeValidationError(message="top_k must be a positive integer", log=False)
+
+    if protect_node_types is not None and (
+        not isinstance(protect_node_types, list)
+        or not all(isinstance(item, str) and item.strip() for item in protect_node_types)
+    ):
+        raise CogneeValidationError(
+            message="protect_node_types must be a list of non-empty strings", log=False
+        )
+
     if user is None:
         user = await get_default_user()
 
