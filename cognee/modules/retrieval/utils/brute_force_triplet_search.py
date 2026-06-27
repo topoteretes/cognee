@@ -259,7 +259,8 @@ async def brute_force_triplet_search(
                 "EntityType_name",
                 "DocumentChunk_text",
             ]
-
+        else:
+            collections = list(collections)
         if "EdgeType_relationship_name" not in collections:
             collections.append("EdgeType_relationship_name")
 
