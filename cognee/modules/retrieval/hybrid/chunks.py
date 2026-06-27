@@ -33,6 +33,10 @@ async def retrieve_hybrid_chunks(
     node_name_filter_operator: str,
     use_importance_weight: bool,
     query_vector: Optional[list[float]] = None,
+    use_truth_weight: bool = False,
+    q_coords: Optional[list[float]] = None,
+    truth_state_by_id: Optional[dict] = None,
+    current_truth_epoch: Optional[int] = None,
 ) -> dict[str, Any]:
     candidate_limit = max(0, chunks_top_k * 2)
     summary_limit = summary_candidate_limit(chunks_top_k, text_summaries_top_k)
@@ -76,7 +80,15 @@ async def retrieve_hybrid_chunks(
         )
         attach_source_chunks(pairs, source_chunks)
 
-    ranked_pairs = rank_chunk_summary_pairs(pairs, chunks_top_k, use_importance_weight)
+    ranked_pairs = rank_chunk_summary_pairs(
+        pairs,
+        chunks_top_k,
+        use_importance_weight,
+        use_truth_weight=use_truth_weight,
+        q_coords=q_coords,
+        truth_state_by_id=truth_state_by_id,
+        current_truth_epoch=current_truth_epoch,
+    )
     if summary_limit > 0:
         await load_summary_text_for_ranked_pairs(
             vector_engine,

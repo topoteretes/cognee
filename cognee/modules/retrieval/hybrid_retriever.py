@@ -1,7 +1,7 @@
 import asyncio
 from typing import Any, Dict, List, Optional, Type
 
-from cognee.context_global_variables import session_user
+from cognee.context_global_variables import current_dataset_id, session_user
 from cognee.infrastructure.databases.cache.config import CacheConfig
 from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.infrastructure.session.get_session_manager import get_session_manager
@@ -14,6 +14,7 @@ from cognee.modules.retrieval.hybrid.context import (
 )
 from cognee.modules.retrieval.hybrid.entities import build_entities
 from cognee.modules.retrieval.hybrid.facts import edge_rank_by_id, select_facts
+from cognee.modules.retrieval.hybrid.results import result_id
 from cognee.modules.retrieval.utils.completion import generate_completion
 from cognee.modules.retrieval.utils.global_context import (
     format_global_context_prelude,
@@ -21,6 +22,12 @@ from cognee.modules.retrieval.utils.global_context import (
     search_top_global_context_summaries,
 )
 from cognee.modules.retrieval.utils.validate_queries import validate_retriever_input
+from cognee.modules.truth_subspace import align
+from cognee.modules.truth_subspace.centroids import load_centroids, pad_coords
+from cognee.modules.truth_subspace.constants import DEFAULT_K
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger("HybridRetriever")
 
 
 class HybridRetriever(BaseRetriever):
@@ -42,6 +49,7 @@ class HybridRetriever(BaseRetriever):
         system_prompt: Optional[str] = None,
         text_summaries_top_k: Optional[int] = None,
         use_importance_weight: bool = True,
+        use_truth_weight: bool = False,
         facts_top_k: Optional[int] = 5,
     ):
         self.chunks_top_k = chunks_top_k if chunks_top_k is not None else 5
@@ -58,6 +66,7 @@ class HybridRetriever(BaseRetriever):
         self.system_prompt = system_prompt
         self.text_summaries_top_k = text_summaries_top_k
         self.use_importance_weight = use_importance_weight
+        self.use_truth_weight = use_truth_weight
         self.facts_top_k = facts_top_k if facts_top_k is not None else 5
 
     def _use_session_cache(self) -> bool:
@@ -75,6 +84,10 @@ class HybridRetriever(BaseRetriever):
         query_embeddings = await self._unified_engine.vector.embedding_engine.embed_text([query])
         query_vector = query_embeddings[0]
 
+        q_coords, truth_state_by_id, current_truth_epoch = await self._build_truth_context(
+            query_vector
+        )
+
         chunk_objects, (entities, facts) = await asyncio.gather(
             retrieve_hybrid_chunks(
                 vector_engine=self._unified_engine.vector,
@@ -85,10 +98,71 @@ class HybridRetriever(BaseRetriever):
                 node_name_filter_operator=self.node_name_filter_operator,
                 use_importance_weight=self.use_importance_weight,
                 query_vector=query_vector,
+                use_truth_weight=self.use_truth_weight,
+                q_coords=q_coords,
+                truth_state_by_id=truth_state_by_id,
+                current_truth_epoch=current_truth_epoch,
             ),
             self._retrieve_entities_and_facts(query, query_vector),
         )
         return {**chunk_objects, "entities": entities, "facts": facts}
+
+    async def _build_truth_context(self, query_vector: list[float]) -> tuple:
+        """Truth-subspace alignment context for the chunk lane.
+
+        Returns ``(q_coords, truth_state_by_id, current_truth_epoch)``. Values
+        are ``None`` when the truth weight is off or centroid slots are absent,
+        so ranking stays at exact baseline. Fails open to baseline on any error.
+        """
+        if not self.use_truth_weight:
+            return None, None, None
+
+        try:
+            dataset_id = current_dataset_id.get()
+            if dataset_id is None:
+                return None, None, None
+
+            centroids = await load_centroids(self._unified_engine.vector, str(dataset_id))
+            if not centroids:
+                return None, None, None
+
+            centroid_vectors = [centroid.centroid for centroid in centroids]
+            q_coords = pad_coords(align.query_coords(query_vector, centroid_vectors), DEFAULT_K)
+            current_truth_epoch = max(centroid.truth_epoch for centroid in centroids)
+
+            candidate_chunk_ids = await self._candidate_chunk_ids(query_vector)
+            if not candidate_chunk_ids:
+                return q_coords, {}, current_truth_epoch
+
+            truth_state_by_id = await self._unified_engine.graph.get_node_truth_state(
+                candidate_chunk_ids
+            )
+            return q_coords, truth_state_by_id, current_truth_epoch
+        except Exception as error:
+            logger.debug("Truth-subspace lookup failed; using baseline ranking: %s", error)
+            return None, None, None
+
+    async def _candidate_chunk_ids(self, query_vector: list[float]) -> list[str]:
+        """Candidate DocumentChunk ids whose truth alignments we batch-fetch.
+
+        Mirrors the chunk lane's vector candidate window so the truth coords map
+        covers the chunks that ranking can surface."""
+        candidate_limit = max(0, self.chunks_top_k * 2)
+        chunk_hits = await search_collection(
+            self._unified_engine.vector,
+            "DocumentChunk_text",
+            "",
+            candidate_limit,
+            self.node_name,
+            self.node_name_filter_operator,
+            query_vector=query_vector,
+        )
+        ids = []
+        for hit in chunk_hits:
+            chunk_id = result_id(hit)
+            if chunk_id:
+                ids.append(str(chunk_id))
+        return ids
 
     async def _retrieve_entities_and_facts(self, query: str, query_vector: list[float]) -> tuple:
         """Entity lane, run concurrently with the chunk lane so the graph round trip for
