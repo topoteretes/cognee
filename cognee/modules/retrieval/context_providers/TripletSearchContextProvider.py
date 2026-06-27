@@ -82,11 +82,15 @@ class TripletSearchContextProvider(BaseContextProvider):
         if not entities:
             return "No entities provided for context search."
 
-        memory_fragment = await get_memory_fragment(self.properties_to_project)
-        search_tasks = self._get_search_tasks(entities, query, memory_fragment)
+        valid_entities = [
+            entity for entity in entities if self._get_entity_text(entity) is not None
+        ]
 
-        if not search_tasks:
+        if not valid_entities:
             return "No valid entities found for context search."
 
+        memory_fragment = await get_memory_fragment(self.properties_to_project)
+        search_tasks = self._get_search_tasks(valid_entities, query, memory_fragment)
+
         results = await asyncio.gather(*search_tasks)
-        return await self._results_to_context(entities, results)
+        return await self._results_to_context(valid_entities, results)
