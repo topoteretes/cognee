@@ -36,6 +36,9 @@ class BaseConfig(BaseSettings):
         self.data_root_directory = ensure_absolute_path(self.data_root_directory)
         self.system_root_directory = ensure_absolute_path(self.system_root_directory)
         self.logs_root_directory = ensure_absolute_path(self.logs_root_directory)
+        # cache_root_directory is a root directory too; validate it like the others
+        # (ensure_absolute_path passes s3:// URLs through unchanged).
+        self.cache_root_directory = ensure_absolute_path(self.cache_root_directory)
 
         return self
 
