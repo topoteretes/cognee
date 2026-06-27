@@ -22,7 +22,6 @@ required or used.
 import json
 import re
 from typing import Any, Dict, List, Optional, Tuple
-from uuid import UUID
 
 import numpy as np
 
@@ -74,7 +73,12 @@ def _normalize_name(name: Any) -> str:
 
 
 def _cosine_similarity_matrix(vectors: List[List[float]]) -> np.ndarray:
-    """Return the full pairwise cosine-similarity matrix for ``vectors``."""
+    """Return the full pairwise cosine-similarity matrix for ``vectors``.
+
+    This materializes an N x N matrix, which is fine for the entity counts a
+    single dataset's graph typically holds. For very large graphs this should be
+    replaced with a chunked / ANN top-k search against the vector backend.
+    """
     matrix = np.asarray(vectors, dtype=float)
     if matrix.ndim != 2 or matrix.shape[0] == 0:
         return np.zeros((0, 0))
@@ -122,18 +126,22 @@ def _cluster_entities(
     def same_type(left: int, right: int) -> bool:
         return allow_cross_type or members[left]["type"] == members[right]["type"]
 
-    # Pass 1 — cosine similarity, bounded to the top_k nearest neighbors per node.
+    # Pass 1 — cosine similarity. For each node, take its top_k nearest
+    # neighbors with np.argpartition (O(n) per node instead of a full sort),
+    # then union the ones at or above the threshold.
     if similarity.size:
         for index in range(count):
-            neighbors = sorted(
-                (other for other in range(count) if other != index),
-                key=lambda other: similarity[index][other],
-                reverse=True,
-            )
-            if top_k:
-                neighbors = neighbors[:top_k]
-            for other in neighbors:
-                if similarity[index][other] >= threshold and same_type(index, other):
+            row = similarity[index]
+            if top_k and top_k < count - 1:
+                # +1 because the node itself (similarity 1.0) is always selected.
+                k = min(top_k + 1, count)
+                candidate_indices = np.argpartition(row, -k)[-k:]
+            else:
+                candidate_indices = range(count)
+            for other in candidate_indices:
+                if other == index:
+                    continue
+                if row[other] >= threshold and same_type(index, other):
                     union(index, other)
 
     # Pass 2 — exact normalized-name match (not bounded by top_k).
@@ -415,9 +423,10 @@ async def merge_entity_duplicates(
     #    purge their name embeddings, or stale vectors resurface in later runs.
     if duplicate_ids:
         await graph_engine.delete_nodes(duplicate_ids)
-        await vector_engine.delete_data_points(
-            ENTITY_VECTOR_COLLECTION, [UUID(duplicate_id) for duplicate_id in duplicate_ids]
-        )
+        # Duplicate ids are already strings. Sibling deletion code (e.g.
+        # delete_from_graph_and_vector) likewise passes string ids, which keeps
+        # this adapter-agnostic and avoids a UUID() cast that could raise.
+        await vector_engine.delete_data_points(ENTITY_VECTOR_COLLECTION, duplicate_ids)
 
     logger.info(
         "consolidate_entities: merged %d duplicate(s) into %d canonical(s).",

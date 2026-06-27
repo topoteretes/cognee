@@ -150,17 +150,20 @@ async def main():
             if str(source) == survivor_id:
                 survivor_rels.add((rel, neighbor_name.get(str(tgt))))
 
-        # Was the deleted duplicate's embedding purged from Entity_name?
+        # Verify the deleted duplicate's embedding is actually gone from
+        # Entity_name: embed its name and confirm its id is not among the
+        # nearest matches (a real query_vector search, not a no-op probe).
         deleted_ids = dup_ids - {survivor_id}
         purged = True
-        try:
+        for deleted_id in deleted_ids:
+            deleted_name = (entities_before.get(deleted_id) or {}).get("name") or survivor_name
+            probe_vector = (await vector.embed_data([deleted_name]))[0]
             results = await vector.search(
-                "Entity_name", query_text=None, query_vector=None, limit=1000
+                "Entity_name", query_text=None, query_vector=probe_vector, limit=50
             )
             present_ids = {str(getattr(r, "id", None)) for r in results}
-            purged = all(deleted_id not in present_ids for deleted_id in deleted_ids)
-        except Exception as error:  # pragma: no cover - search shape varies by adapter
-            print(f"  (note: vector search probe skipped: {error})")
+            if deleted_id in present_ids:
+                purged = False
 
         print(f"Surviving duplicate-pair node: {survivor_name} ({survivor_id})")
         print(f"Survivor outgoing relationships: {sorted(survivor_rels)}")

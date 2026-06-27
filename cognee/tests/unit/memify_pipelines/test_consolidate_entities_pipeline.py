@@ -110,6 +110,71 @@ async def test_detect_respects_protect_node_types():
     vector.embed_data.assert_not_awaited()
 
 
+@pytest.mark.asyncio
+async def test_detect_name_match_groups_punctuation_variants():
+    # "USA" and "U.S.A." are not cosine-similar here, but their normalized names
+    # are identical, so name_match (on by default) must still group them.
+    id_usa = str(Entity.id_for("USA"))
+    id_usa_dotted = str(Entity.id_for("U.S.A."))
+    nodes = [
+        (id_usa, {"name": "USA", "type": "Entity"}),
+        (id_usa_dotted, {"name": "U.S.A.", "type": "Entity"}),
+    ]
+
+    graph = _graph_mock()
+    graph.get_graph_data = AsyncMock(return_value=(nodes, []))
+    vector = _vector_mock()
+    vector.embed_data = AsyncMock(return_value=[[1.0, 0.0], [0.0, 1.0]])  # cosine 0
+
+    with patch(GRAPH, new=AsyncMock(return_value=graph)), patch(VECTOR, return_value=vector):
+        grouped = await detect_entity_duplicates(None, config={"similarity_threshold": 0.85})
+        separate = await detect_entity_duplicates(
+            None, config={"similarity_threshold": 0.85, "name_match": False}
+        )
+
+    assert len(grouped["clusters"]) == 1
+    assert {m["name"] for m in grouped["clusters"][0]} == {"USA", "U.S.A."}
+    # With name_match off and dissimilar vectors, they are left separate.
+    assert separate["clusters"] == []
+
+
+@pytest.mark.asyncio
+async def test_detect_allow_cross_type_controls_cross_type_merge():
+    # Two cosine-similar names that belong to DIFFERENT EntityTypes.
+    nodes = [
+        (ID_NYC, {"name": "NYC", "type": "Entity"}),
+        (ID_NYCITY, {"name": "New York City", "type": "Entity"}),
+        ("type-city", {"name": "City", "type": "EntityType"}),
+        ("type-borough", {"name": "Borough", "type": "EntityType"}),
+    ]
+    edges = [
+        (ID_NYC, "type-borough", "is_a", {}),
+        (ID_NYCITY, "type-city", "is_a", {}),
+    ]
+    vectors = [[1.0, 0.0], [0.97, 0.24]]  # cosine ~0.97
+
+    # Default: differing EntityTypes are NOT merged.
+    graph = _graph_mock()
+    graph.get_graph_data = AsyncMock(return_value=(nodes, edges))
+    vector = _vector_mock()
+    vector.embed_data = AsyncMock(return_value=vectors)
+    with patch(GRAPH, new=AsyncMock(return_value=graph)), patch(VECTOR, return_value=vector):
+        default_result = await detect_entity_duplicates(None, config={"similarity_threshold": 0.85})
+    assert default_result["clusters"] == []
+
+    # allow_cross_type=True merges across types.
+    graph = _graph_mock()
+    graph.get_graph_data = AsyncMock(return_value=(nodes, edges))
+    vector = _vector_mock()
+    vector.embed_data = AsyncMock(return_value=vectors)
+    with patch(GRAPH, new=AsyncMock(return_value=graph)), patch(VECTOR, return_value=vector):
+        cross = await detect_entity_duplicates(
+            None, config={"similarity_threshold": 0.85, "allow_cross_type": True}
+        )
+    assert len(cross["clusters"]) == 1
+    assert {m["name"] for m in cross["clusters"][0]} == {"NYC", "New York City"}
+
+
 # --------------------------------------------------------------------------- #
 # canonical selection
 # --------------------------------------------------------------------------- #
@@ -222,7 +287,8 @@ async def test_merge_repoints_edges_and_deletes_duplicates():
     vector.delete_data_points.assert_awaited_once()
     collection, ids = vector.delete_data_points.await_args.args
     assert collection == "Entity_name"
-    assert ids == [UUID(ID_NYC)]
+    # ids are passed as strings (matches sibling deletion code, adapter-agnostic).
+    assert ids == [ID_NYC]
 
     # Canonical persisted once, with a unioned description and unchanged id.
     graph.add_nodes.assert_awaited_once()
