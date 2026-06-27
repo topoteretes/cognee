@@ -31,6 +31,11 @@ class CloudClient:
     # can legitimately exceed any fixed total; per-read inactivity stays
     # bounded instead. Applied per-request, only to archive uploads.
     UPLOAD_TIMEOUT = aiohttp.ClientTimeout(total=None, sock_connect=30, sock_read=300)
+    # Health checks should fail fast so that startup can fall through to
+    # token refresh or device-code login. 5s total is plenty for a healthy
+    # service; any slower means Auth0/management is degraded, which is
+    # exactly the case we want to detect quickly. See issue #3249.
+    HEALTH_CHECK_TIMEOUT = aiohttp.ClientTimeout(total=5, sock_connect=2)
 
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
@@ -45,10 +50,27 @@ class CloudClient:
             await self._session.close()
             self._session = None
 
-    async def _health_check(self) -> bool:
-        """Verify the remote instance is reachable."""
+    async def _health_check(
+        self,
+        timeout: Optional[aiohttp.ClientTimeout] = None,
+    ) -> bool:
+        """Verify the remote instance is reachable.
+
+        Args:
+            timeout: Optional aiohttp.ClientTimeout to apply. Defaults to
+                ``None`` (aiohttp's session default — inherits
+                ``DEFAULT_TIMEOUT`` of 5 min total / 30s connect) to
+                preserve prior behaviour for existing callers. Pass
+                ``self.HEALTH_CHECK_TIMEOUT`` (5s/2s) explicitly when
+                checking at startup, so a degraded Auth0/management
+                backend surfaces fast and the caller can fall through to
+                token refresh or device-code login. See issue #3249.
+        """
         try:
             session = await self._get_session()
+            if timeout is not None:
+                async with session.get(f"{self.service_url}/health", timeout=timeout) as resp:
+                    return resp.status == 200
             async with session.get(f"{self.service_url}/health") as resp:
                 return resp.status == 200
         except Exception:
