@@ -282,3 +282,9 @@ dev = [
     "pytest-split>=0.11.0,<0.12",
     "ruff>=0.13.1",
 ]
+
+[tool.pytest.ini_options]
+markers = [
+    "deployment: Deployment end-to-end integration tests (require Docker; opt-in via -m deployment)",
+    "nightly: Heavy or external-infra variants (e.g. Neo4j) intended for nightly runs",
+]

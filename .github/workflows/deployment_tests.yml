@@ -1,0 +1,43 @@
+name: test | deployment
+
+permissions:
+  contents: read
+  packages: write
+
+on:
+  workflow_call:
+    inputs:
+      markers:
+        description: "pytest -m marker expression selecting which deployment tests to run"
+        required: false
+        type: string
+        default: "deployment and not nightly"
+      timeout:
+        description: "Per-test timeout in seconds"
+        required: false
+        type: string
+        default: "600"
+
+jobs:
+  deployment-tests:
+    name: Deployment Tests
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Build local Docker image
+        run: docker build -t cognee:local .
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+
+      - name: Run deployment tests
+        env:
+          COGNEE_DOCKER_IMAGE: cognee:local
+        run: |
+          uv run pytest cognee/tests/deployment/ -v \
+            -m "${{ inputs.markers }}" \
+            --timeout=${{ inputs.timeout }}

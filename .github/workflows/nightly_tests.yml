@@ -33,6 +33,14 @@ jobs:
     uses: ./.github/workflows/test_llamacpp.yml
     secrets: inherit
 
+  deployment-neo4j-test:
+    name: Deployment Neo4j Matrix Test
+    uses: ./.github/workflows/deployment_tests.yml
+    with:
+      markers: "deployment and nightly"
+      timeout: "900"
+    secrets: inherit
+
   # ══ Performance: each caller runs BOTH file_based and postgres backends ════
   perf-small-llm:
     name: Performance — 50 Small Documents (real LLM)
@@ -83,6 +91,7 @@ jobs:
     needs: [
       ollama-tests,
       llamacpp-tests,
+      deployment-neo4j-test,
       perf-small-llm,
       perf-small-mock,
       perf-wap-llm,
@@ -96,6 +105,7 @@ jobs:
         run: |
           if [[ "${{ needs.ollama-tests.result }}" == "success" &&
                 "${{ needs.llamacpp-tests.result }}" == "success" &&
+                "${{ needs.deployment-neo4j-test.result }}" == "success" &&
                 "${{ needs.perf-small-llm.result }}" == "success" &&
                 "${{ needs.perf-small-mock.result }}" == "success" &&
                 "${{ needs.perf-wap-llm.result }}" == "success" &&

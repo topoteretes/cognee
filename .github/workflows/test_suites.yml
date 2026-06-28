@@ -221,6 +221,11 @@ jobs:
     uses: ./.github/workflows/backend_docker_build_test.yml
     secrets: inherit
 
+  deployment-test:
+    name: Deployment Matrix Test
+    uses: ./.github/workflows/deployment_tests.yml
+    secrets: inherit
+
   temporal-graph-tests:
     name: Temporal Graph Test
     needs: [ build-ci-env ]
@@ -289,6 +294,7 @@ jobs:
       mcp-test,
       docker-compose-test,
       docker-ci-test,
+      deployment-test,
       temporal-graph-tests,
       search-db-tests,
       relational-db-migration-tests,
@@ -316,6 +322,7 @@ jobs:
                 "${{ needs.mcp-test.result }}" == "success" &&
                 "${{ needs.docker-compose-test.result }}" == "success" &&
                 "${{ needs.docker-ci-test.result }}" == "success" &&
+                "${{ needs.deployment-test.result }}" == "success" &&
                 "${{ needs.temporal-graph-tests.result }}" == "success" &&
                 "${{ needs.search-db-tests.result }}" == "success" &&
                 "${{ needs.relational-db-migration-tests.result }}" == "success" &&
