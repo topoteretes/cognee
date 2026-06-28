@@ -1,31 +1,4 @@
-"""Vector-database adapter backed by Turso / libSQL.
-
-libSQL is SQLite-compatible and adds a native vector type plus built-in
-similarity functions. This adapter stores each collection as a libSQL table
-
-    CREATE TABLE "{collection}" (
-        id      TEXT PRIMARY KEY,
-        payload TEXT,                 -- JSON (SQLite JSON1)
-        vector  F32_BLOB({dim})       -- libSQL native vector
-    )
-
-and runs similarity search with ``vector_distance_cos`` (cosine distance,
-lower-is-better — the same score convention as PGVector / LanceDB, see
-``ScoredResult``). NodeSet (``belongs_to_set``) filtering uses the SQLite
-JSON1 functions ``json_each`` / ``json_group_array`` — the SQLite analog of
-PGVector's JSONB ``?|`` / ``?&`` operators.
-
-Async model
------------
-The libSQL engine that supports the native vector functions in *embedded*
-(local file) mode ships as the synchronous ``libsql_experimental`` client
-(the pure-async ``libsql-client`` falls back to plain SQLite locally and has
-no vector functions). cognee's ``VectorDBInterface`` is async, so every DB
-call here is run through ``asyncio.to_thread`` and serialized by a single
-lock. The sync client is touched in exactly one place (``_run``), so the
-async contract can be re-aligned to a native-async client later without
-changing any SQL.
-"""
+"""Vector-database adapter backed by Turso / libSQL."""
 
 import json
 import asyncio
@@ -103,7 +76,12 @@ class TursoVectorAdapter(VectorDBInterface):
         self._connection = None
 
     # ------------------------------------------------------------------ #
-    # Connection + low-level execution (the only sync-client touch point)
+    # Connection + low-level execution.
+    #
+    # libsql-experimental is sync but is the only client with native vector
+    # support in embedded mode, so DB calls run via asyncio.to_thread. The sync
+    # client is touched only here (and in _run / _run_many), keeping the async
+    # contract easy to re-align to a native-async client later.
     # ------------------------------------------------------------------ #
     def _get_connection(self):
         """Lazily open the libSQL connection (embedded file or remote server)."""
