@@ -7,6 +7,7 @@ import asyncio
 import json
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
+from pathlib import Path
 
 from cognee.modules.migration.cogx import (
     COGX_VERSION,
@@ -29,6 +30,7 @@ from cognee.modules.migration.loader import record_data_id, translate_records
 from cognee.modules.migration.sources import (
     COGXArchiveSource,
     GraphitiSource,
+    LangMemSource,
     LettaSource,
     Mem0Source,
 )
@@ -192,6 +194,125 @@ class TestMem0Source:
 
     def test_skips_items_without_content(self):
         assert collect(Mem0Source([{"id": "1"}, {"id": "2", "memory": "kept"}])) != []
+
+
+class TestLangMemSource:
+    def test_semantic_memory(self):
+        records = collect(
+            LangMemSource(
+                [
+                    {
+                        "namespace": ["user-42", "memories"],
+                        "key": "mem-001",
+                        "value": {
+                            "kind": "Memory",
+                            "content": {"content": "User prefers dark mode"},
+                        },
+                        "created_at": "2024-01-01T00:00:00Z",
+                    }
+                ]
+            )
+        )
+        assert len(records) == 1
+        assert records[0].kind == "memory"
+        assert records[0].external_id == "mem-001"
+        assert records[0].content == "User prefers dark mode"
+        assert records[0].scope.user_id == "user-42"
+        assert records[0].scope.session_id == "memories"
+
+    def test_items_wrapper(self):
+        records = collect(
+            LangMemSource(
+                {
+                    "items": [
+                        {
+                            "key": "1",
+                            "value": {"kind": "Memory", "content": "likes tea"},
+                        }
+                    ]
+                }
+            )
+        )
+        assert records[0].content == "likes tea"
+
+    def test_episodic_episode(self):
+        records = collect(
+            LangMemSource(
+                [
+                    {
+                        "key": "ep-1",
+                        "value": {
+                            "kind": "Episodic",
+                            "content": {
+                                "messages": [
+                                    {"role": "user", "content": "hello"},
+                                    {"role": "assistant", "content": "hi there"},
+                                    {"role": "system", "content": "ignored"},
+                                ]
+                            },
+                        },
+                    }
+                ]
+            )
+        )
+        assert len(records) == 1
+        assert records[0].kind == "episode"
+        assert len(records[0].turns) == 2
+
+    def test_procedural_memory_block(self):
+        records = collect(
+            LangMemSource(
+                [
+                    {
+                        "key": "proc-1",
+                        "value": {
+                            "kind": "Procedural",
+                            "content": "Confirm before delete.",
+                        },
+                    }
+                ]
+            )
+        )
+        assert records[0].kind == "memory_block"
+        assert records[0].label == "procedural"
+        assert records[0].value == "Confirm before delete."
+
+    def test_entities_and_facts(self):
+        records = collect(
+            LangMemSource(
+                [
+                    {
+                        "key": "bundle-1",
+                        "value": {
+                            "kind": "Memory",
+                            "content": {"content": "ignored when graph present"},
+                            "entities": [{"id": "n1", "name": "Alice", "labels": ["Person"]}],
+                            "facts": [
+                                {
+                                    "id": "f1",
+                                    "subject_ref": "n1",
+                                    "predicate": "knows",
+                                    "object_ref": "Bob",
+                                    "fact": "Alice knows Bob",
+                                }
+                            ],
+                        },
+                    }
+                ]
+            )
+        )
+        kinds = [record.kind for record in records]
+        assert kinds.count("entity") == 1
+        assert kinds.count("fact") == 1
+        assert kinds.count("memory") == 1
+
+    def test_export_file(self, tmp_path):
+        fixture = Path(__file__).parent / "fixtures" / "langmem_export.json"
+        records = collect(LangMemSource(fixture))
+        assert [record.kind for record in records] == ["memory", "episode", "memory_block"]
+
+    def test_skips_items_without_content(self):
+        assert collect(LangMemSource([{"key": "empty"}, {"key": "x", "value": {}}])) == []
 
 
 class TestLettaSource:

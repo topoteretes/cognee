@@ -69,7 +69,7 @@ from .api.v1 import (
 from .memory import MemoryEntry, QAEntry, TraceEntry, FeedbackEntry
 
 # Memory migration (cognee.migration has the provider sources:
-# Mem0Source, ZepSource/GraphitiSource, LettaSource, COGXArchiveSource)
+# Mem0Source, LangMemSource, ZepSource/GraphitiSource, LettaSource, COGXArchiveSource)
 from . import migration
 
 # Tracing / Observability
