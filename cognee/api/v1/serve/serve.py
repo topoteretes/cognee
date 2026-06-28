@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import time
 from typing import TYPE_CHECKING, Optional
@@ -96,8 +97,12 @@ async def _serve_direct(service_url: str, api_key: str = "") -> CloudClient:
     )
 
     set_remote_client(client)
-    mode = "local" if "localhost" in service_url or "127.0.0.1" in service_url else "remote"
-    print(f"  Connected to Cognee ({mode}) at {service_url}")
+    mode = (
+        "local"
+        if "localhost" in service_url or "127.0.0.1" in service_url
+        else "remote"
+    )
+    print(f"   Connected to Cognee ({mode}) at {service_url}")
     return client
 
 
@@ -137,12 +142,28 @@ async def _serve_cloud(
     creds = load_credentials()
 
     if creds and creds.service_url and creds.api_key:
+        # Speculatively attempt direct connection using the saved API key first
+        try:
+            client = CloudClient(creds.service_url, creds.api_key)
+            # Add a short timeout to prevent hanging if connection parameters are stale
+            if await asyncio.wait_for(client._health_check(), timeout=3.0):
+                set_remote_client(client)
+                print(f"   Connected to Cognee Cloud at {creds.service_url}")
+                return client
+            await client.close()
+        except (asyncio.TimeoutError, Exception) as error:
+            logger.debug(
+                "Speculative health check failed, falling back to token validation: %s",
+                error,
+            )
+
+        # Fallback to token evaluation pathway if direct connection did not succeed
         if not is_token_expired(creds):
             logger.info("Using saved credentials for %s", creds.email)
             client = CloudClient(creds.service_url, creds.api_key)
             if await client._health_check():
                 set_remote_client(client)
-                print(f"  Connected to Cognee Cloud at {creds.service_url}")
+                print(f"   Connected to Cognee Cloud at {creds.service_url}")
                 return client
             else:
                 logger.warning("Saved service URL unreachable, re-authenticating")
@@ -165,14 +186,14 @@ async def _serve_cloud(
                 client = CloudClient(creds.service_url, creds.api_key)
                 if await client._health_check():
                     set_remote_client(client)
-                    print(f"  Connected to Cognee Cloud at {creds.service_url}")
+                    print(f"   Connected to Cognee Cloud at {creds.service_url}")
                     return client
                 await client.close()
             except Exception as e:
                 logger.warning("Token refresh failed, re-authenticating: %s", e)
 
     # Step 2: Device Code Flow
-    print("  Authenticating with Cognee Cloud...")
+    print("   Authenticating with Cognee Cloud...")
     token = await device_code_login(
         domain=auth0_domain,
         client_id=auth0_client_id,
@@ -223,8 +244,8 @@ async def _serve_cloud(
         )
 
     set_remote_client(client)
-    print(f"  Connected to Cognee Cloud at {service_url}")
+    print(f"   Connected to Cognee Cloud at {service_url}")
     if email:
-        print(f"  Tenant: {tenant.name} ({email})")
+        print(f"   Tenant: {tenant.name} ({email})")
 
     return client
