@@ -91,3 +91,41 @@ def test_config_falls_back_when_unresolvable(monkeypatch):
         embedding_dimensions=None,
     )
     assert cfg.embedding_dimensions == 3072
+
+
+def test_ollama_without_huggingface_tokenizer_does_not_crash(monkeypatch):
+    # EMBEDDING_PROVIDER=ollama without HUGGINGFACE_TOKENIZER must not raise.
+    _clear_embedding_env(monkeypatch)
+    monkeypatch.delenv("HUGGINGFACE_TOKENIZER", raising=False)
+    cfg = EmbeddingConfig(
+        _env_file=None,
+        embedding_provider="ollama",
+        embedding_model="llama3:latest",
+    )
+    assert cfg.embedding_provider == "ollama"
+    assert cfg.huggingface_tokenizer is None
+
+
+def test_ollama_nomic_model_auto_sets_tokenizer(monkeypatch):
+    # When provider=ollama and model name contains "nomic", the tokenizer
+    # should be auto-derived even if HUGGINGFACE_TOKENIZER is not set.
+    _clear_embedding_env(monkeypatch)
+    monkeypatch.delenv("HUGGINGFACE_TOKENIZER", raising=False)
+    cfg = EmbeddingConfig(
+        _env_file=None,
+        embedding_provider="ollama",
+        embedding_model="nomic-embed-text:latest",
+    )
+    assert cfg.huggingface_tokenizer == "nomic-ai/nomic-embed-text-v1.5"
+
+
+def test_ollama_explicit_tokenizer_not_overridden(monkeypatch):
+    # An explicit HUGGINGFACE_TOKENIZER must be preserved even for nomic models.
+    _clear_embedding_env(monkeypatch)
+    cfg = EmbeddingConfig(
+        _env_file=None,
+        embedding_provider="ollama",
+        embedding_model="nomic-embed-text:latest",
+        huggingface_tokenizer="my-org/my-tokenizer",
+    )
+    assert cfg.huggingface_tokenizer == "my-org/my-tokenizer"

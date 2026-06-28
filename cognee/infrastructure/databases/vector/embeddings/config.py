@@ -101,6 +101,20 @@ class EmbeddingConfig(BaseSettings):
                 )
                 self.embedding_dimensions = _FALLBACK_DIMENSIONS
 
+        if (
+            self.embedding_provider
+            and self.embedding_provider.lower() == "ollama"
+            and self.huggingface_tokenizer is None
+            and self.embedding_model
+            and "nomic" in self.embedding_model.lower()
+        ):
+            self.huggingface_tokenizer = "nomic-ai/nomic-embed-text-v1.5"
+            logger.debug(
+                "Auto-set huggingface_tokenizer to %r based on embedding_model %r.",
+                self.huggingface_tokenizer,
+                self.embedding_model,
+            )
+
         if not self.embedding_batch_size and self.embedding_provider.lower() == "openai":
             self.embedding_batch_size = 36
         elif not self.embedding_batch_size:
