@@ -282,3 +282,8 @@ dev = [
     "pytest-split>=0.11.0,<0.12",
     "ruff>=0.13.1",
 ]
+
+[tool.pytest.ini_options]
+markers = [
+    "deployment: Deployment end-to-end tests (opt-in, not in default run)"
+]
