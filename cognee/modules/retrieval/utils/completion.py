@@ -16,6 +16,9 @@ async def generate_completion(
     response_model: Type = str,
 ) -> Any:
     """Generates a completion using LLM with given context and prompts."""
+    if not context or not context.strip():
+        if response_model is str:
+            return "I don't have enough context to answer this query."
     args = {"question": query, "context": context}
     user_prompt = render_prompt(user_prompt_path, args)
     system_prompt = system_prompt if system_prompt else read_query_prompt(system_prompt_path)

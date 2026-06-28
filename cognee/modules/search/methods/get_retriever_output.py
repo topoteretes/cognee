@@ -39,6 +39,23 @@ async def get_retriever_output(
         query_type=query_type, query_text=query_text, **kwargs
     )
 
+    dataset = kwargs.get("dataset")
+    allowed_node_ids = None
+    if "user" in kwargs:
+        from cognee.modules.data.methods import get_authorized_existing_datasets
+        from cognee.modules.graph.methods.get_dataset_node_ids import get_dataset_node_ids
+
+        if dataset is not None:
+            allowed_dataset_ids = [dataset.id]
+        else:
+            search_datasets = await get_authorized_existing_datasets(
+                datasets=None, permission_type="read", user=kwargs["user"]
+            )
+            allowed_dataset_ids = [ds.id for ds in search_datasets]
+
+        allowed_node_ids = await get_dataset_node_ids(allowed_dataset_ids)
+        retriever_instance.allowed_node_ids = allowed_node_ids
+
     retriever_class = type(retriever_instance).__name__
     only_context = kwargs.get("only_context", False)
     effective_query = query_text
@@ -66,6 +83,88 @@ async def get_retriever_output(
         span.set_attribute("cognee.retrieval.retriever", retriever_class)
         span.set_attribute(COGNEE_SEARCH_TYPE, query_type.value)
         retrieved_objects = await retriever_instance.get_retrieved_objects(query=effective_query)
+
+        # Enforce dataset isolation at the Python level
+        if allowed_node_ids is not None:
+            if isinstance(retrieved_objects, list):
+                if retrieved_objects and isinstance(retrieved_objects[0], list):
+                    # Batch mode (list-of-lists)
+                    filtered_outer = []
+                    for sublist in retrieved_objects:
+                        filtered_inner = []
+                        for item in sublist:
+                            if hasattr(item, "node1"):
+                                if (
+                                    str(item.node1.id) in allowed_node_ids
+                                    and str(item.node2.id) in allowed_node_ids
+                                ):
+                                    filtered_inner.append(item)
+                            else:
+                                item_id = str(
+                                    getattr(item, "id", None)
+                                    or (item.get("id") if isinstance(item, dict) else "")
+                                )
+                                if item_id in allowed_node_ids:
+                                    filtered_inner.append(item)
+                        filtered_outer.append(filtered_inner)
+                    retrieved_objects = filtered_outer
+                else:
+                    # Single query mode (flat list)
+                    filtered = []
+                    for item in retrieved_objects:
+                        if hasattr(item, "node1"):
+                            if (
+                                str(item.node1.id) in allowed_node_ids
+                                and str(item.node2.id) in allowed_node_ids
+                            ):
+                                filtered.append(item)
+                        else:
+                            item_id = str(
+                                getattr(item, "id", None)
+                                or (item.get("id") if isinstance(item, dict) else "")
+                            )
+                            if item_id in allowed_node_ids:
+                                filtered.append(item)
+                    retrieved_objects = filtered
+            elif isinstance(retrieved_objects, dict):
+                # HybridRetriever output structure
+                if "chunks" in retrieved_objects:
+                    retrieved_objects["chunks"] = [
+                        chunk
+                        for chunk in retrieved_objects["chunks"]
+                        if str(
+                            getattr(chunk, "id", None)
+                            or (chunk.get("id") if isinstance(chunk, dict) else "")
+                        )
+                        in allowed_node_ids
+                    ]
+                if "chunk_summaries" in retrieved_objects and isinstance(
+                    retrieved_objects["chunk_summaries"], dict
+                ):
+                    retrieved_objects["chunk_summaries"] = {
+                        chunk_id: summary
+                        for chunk_id, summary in retrieved_objects["chunk_summaries"].items()
+                        if str(chunk_id) in allowed_node_ids
+                    }
+                if "entities" in retrieved_objects:
+                    retrieved_objects["entities"] = [
+                        entity
+                        for entity in retrieved_objects["entities"]
+                        if str(
+                            entity.get("id")
+                            if isinstance(entity, dict)
+                            else getattr(entity, "id", "")
+                        )
+                        in allowed_node_ids
+                    ]
+                if "facts" in retrieved_objects:
+                    retrieved_objects["facts"] = [
+                        fact
+                        for fact in retrieved_objects["facts"]
+                        if str(fact.get("source_node_id")) in allowed_node_ids
+                        or str(fact.get("target_node_id")) in allowed_node_ids
+                    ]
+
         obj_count = _count_retrieved_objects(retrieved_objects)
         span.set_attribute(COGNEE_RESULT_COUNT, obj_count)
         span.set_attribute(
