@@ -258,6 +258,60 @@ async def cognify(
                 **kwargs,
             )
 
+        import os
+        from cognee.infrastructure.ingestion.execution import (
+            ingestion_queue,
+            worker_pool,
+            IngestionJob,
+        )
+        from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
+            resolve_authorized_user_datasets,
+        )
+
+        async_ingestion = os.getenv("COGNEE_ASYNC_INGESTION_ENABLED", "false").lower() in (
+            "true",
+            "1",
+            "yes",
+        )
+
+        if async_ingestion:
+            user, authorized_datasets = await resolve_authorized_user_datasets(datasets, user)
+
+            # Start worker pool if not already running
+            if not worker_pool._running:
+                worker_pool.start()
+
+            priority = kwargs.pop("priority", 1)
+            retries = kwargs.pop("retries", 3)
+            timeout = kwargs.pop("timeout", 600.0)
+
+            jobs_submitted = {}
+            for dataset in authorized_datasets:
+                job = IngestionJob(
+                    dataset_id=dataset.id,
+                    tasks=tasks,
+                    data=None,
+                    user=user,
+                    priority=priority,
+                    retries=retries,
+                    timeout=timeout,
+                    vector_db_config=vector_db_config,
+                    graph_db_config=graph_db_config,
+                    incremental_loading=incremental_loading,
+                    data_per_batch=data_per_batch,
+                    llm_config=llm_config,
+                    embedding_config=embedding_config,
+                    **kwargs,
+                )
+                ingestion_queue.submit_job(job)
+                jobs_submitted[str(dataset.id)] = {
+                    "job_id": str(job.job_id),
+                    "status": job.status,
+                    "priority": job.priority,
+                    "dataset_name": dataset.name,
+                }
+            return jobs_submitted
+
         # By calling get pipeline executor we get a function that will have the run_pipeline run in the background or a function that we will need to wait for
         pipeline_executor_func = get_pipeline_executor(run_in_background=run_in_background)
 
