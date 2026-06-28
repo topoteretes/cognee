@@ -446,32 +446,45 @@ class TursoVectorAdapter(VectorDBInterface):
 
         for table_name in candidate_tables:
             id_scope = ""
-            base_params: List[Any] = [tags_json]
+            scope_params: List[Any] = []
             if node_ids_list is not None:
                 placeholders = ",".join("?" for _ in node_ids_list)
                 id_scope = f" AND id IN ({placeholders})"
+                scope_params = list(node_ids_list)
 
-            # Remove the tags from the array.
-            update_sql = (
-                f"UPDATE \"{table_name}\" SET payload = json_set(payload, '$.belongs_to_set', ("
-                f"  SELECT json_group_array(value) FROM json_each(payload, '$.belongs_to_set')"
-                f"  WHERE value NOT IN (SELECT value FROM json_each(?))"
-                f")) WHERE json_type(payload, '$.belongs_to_set') = 'array'{id_scope}"
-            )
-            # Delete rows whose array is now empty.
-            delete_sql = (
-                f'DELETE FROM "{table_name}" '
+            # Capture the rows that actually contain one of the removed tags
+            # FIRST. The UPDATE + delete-when-empty must only touch these rows,
+            # otherwise a row that was already stored with an empty
+            # belongs_to_set (e.g. an untagged index row) would be deleted as
+            # collateral on any unrelated tag removal. Mirrors PGVector.
+            select_sql = (
+                f'SELECT id FROM "{table_name}" '
                 f"WHERE json_type(payload, '$.belongs_to_set') = 'array' "
-                f"AND json_array_length(payload, '$.belongs_to_set') = 0{id_scope}"
+                f"AND EXISTS (SELECT 1 FROM json_each(payload, '$.belongs_to_set') je "
+                f"WHERE je.value IN (SELECT value FROM json_each(?))){id_scope}"
             )
             try:
-                update_params = list(base_params)
-                if node_ids_list is not None:
-                    update_params.extend(node_ids_list)
-                await self._execute(update_sql, update_params, commit=True)
+                rows = await self._execute(select_sql, [tags_json] + scope_params, fetch=True)
+                target_ids = [row[0] for row in rows or []]
+                if not target_ids:
+                    continue
 
-                delete_params = node_ids_list if node_ids_list is not None else None
-                await self._execute(delete_sql, delete_params, commit=True)
+                id_placeholders = ",".join("?" for _ in target_ids)
+                # Strip the tags from exactly those rows.
+                update_sql = (
+                    f"UPDATE \"{table_name}\" SET payload = json_set(payload, '$.belongs_to_set', ("
+                    f"  SELECT json_group_array(value) FROM json_each(payload, '$.belongs_to_set')"
+                    f"  WHERE value NOT IN (SELECT value FROM json_each(?))"
+                    f")) WHERE id IN ({id_placeholders})"
+                )
+                await self._execute(update_sql, [tags_json] + target_ids, commit=True)
+
+                # Delete only the captured rows that are now empty.
+                delete_sql = (
+                    f'DELETE FROM "{table_name}" WHERE id IN ({id_placeholders}) '
+                    f"AND json_array_length(payload, '$.belongs_to_set') = 0"
+                )
+                await self._execute(delete_sql, target_ids, commit=True)
             except Exception as error:  # noqa: BLE001 - one bad table must not abort the rest
                 logger.debug("remove_belongs_to_set_tags skipped '%s': %s", table_name, error)
 
