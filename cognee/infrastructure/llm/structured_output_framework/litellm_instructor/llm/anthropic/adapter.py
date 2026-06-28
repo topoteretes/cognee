@@ -24,6 +24,19 @@ logger = get_logger()
 observe = get_observe()
 
 
+def _build_cached_system_prompt(system_prompt: str) -> list[dict]:
+    if not system_prompt:
+        return []
+
+    return [
+        {
+            "type": "text",
+            "text": system_prompt,
+            "cache_control": {"type": "ephemeral"},
+        }
+    ]
+
+
 class AnthropicAdapter(GenericAPIAdapter):
     """
     Adapter for interfacing with the Anthropic API, enabling structured output generation
@@ -82,11 +95,13 @@ class AnthropicAdapter(GenericAPIAdapter):
                 model=self.model,
                 max_tokens=4096,
                 max_retries=2,
+                system=_build_cached_system_prompt(system_prompt),
                 messages=[
                     {
                         "role": "user",
-                        "content": f"""Use the given format to extract information
-                    from the following input: {text_input}. {system_prompt}""",
+                        "content": """Use the given format to extract information
+                    from the following input: """
+                        + text_input,
                     }
                 ],
                 response_model=response_model,
