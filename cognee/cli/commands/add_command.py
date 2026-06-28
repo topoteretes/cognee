@@ -75,6 +75,9 @@ After adding data, use `cognee cognify` to process it into knowledge graphs.
                     fmt.success(f"Successfully added data to dataset '{args.dataset_name}'")
                 except Exception as e:
                     raise CliCommandInnerException(f"Failed to add data: {str(e)}") from e
+                finally:
+                    from cognee.shared.utils import close_telemetry
+                    await close_telemetry()
 
             asyncio.run(run_add())
 

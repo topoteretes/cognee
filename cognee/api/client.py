@@ -102,6 +102,9 @@ async def lifespan(app: FastAPI):
     _create_graph_engine.cache_clear()
     _create_vector_engine.cache_clear()
 
+    from cognee.shared.utils import close_telemetry
+    await close_telemetry()
+
 
 app = FastAPI(debug=app_environment != "prod", lifespan=lifespan)
 

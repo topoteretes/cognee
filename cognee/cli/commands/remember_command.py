@@ -95,6 +95,9 @@ After completion, use `cognee recall` (or `cognee search`) to query the graph.
                     return result
                 except Exception as e:
                     raise CliCommandInnerException(f"Failed to remember: {str(e)}") from e
+                finally:
+                    from cognee.shared.utils import close_telemetry
+                    await close_telemetry()
 
             result = asyncio.run(run_remember())
 
