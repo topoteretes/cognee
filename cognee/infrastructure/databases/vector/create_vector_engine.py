@@ -353,8 +353,24 @@ def _create_vector_engine(
             embedding_engine=embedding_engine,
         )
 
+    elif vector_db_provider.lower() == "turso":
+        try:
+            from .turso.TursoVectorAdapter import TursoVectorAdapter
+        except ImportError:
+            raise ImportError(
+                "Turso/libSQL dependencies are not installed. Please install with "
+                "'pip install cognee\"[turso]\"' to use Turso functionality."
+            )
+
+        return TursoVectorAdapter(
+            url=vector_db_url,
+            api_key=vector_db_key,
+            embedding_engine=embedding_engine,
+            database_name=vector_db_name,
+        )
+
     else:
         raise EnvironmentError(
             f"Unsupported vector database provider: {vector_db_provider}. "
-            f"Supported providers are: {', '.join(list(supported_databases.keys()) + ['LanceDB', 'PGVector', 'neptune_analytics'])}"
+            f"Supported providers are: {', '.join(list(supported_databases.keys()) + ['LanceDB', 'PGVector', 'neptune_analytics', 'Turso'])}"
         )
