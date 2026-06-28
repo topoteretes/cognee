@@ -173,6 +173,23 @@ async def test_remove_belongs_to_set_tags(adapter):
 
 
 @pytest.mark.asyncio
+async def test_remove_tags_preserves_untagged_rows(adapter):
+    # Regression: a row stored with an empty belongs_to_set (e.g. an untagged
+    # index row) must NOT be deleted when an unrelated tag is removed. The detag
+    # must only touch rows that actually contained one of the removed tags.
+    tagged = _Doc(text="quantum tagged", belongs_to_set=["Quantum"])
+    untagged = _Doc(text="untagged chunk", belongs_to_set=[])
+    await adapter.create_data_points("DocumentChunk_text", [tagged, untagged])
+
+    await adapter.remove_belongs_to_set_tags(["Quantum"])
+
+    # tagged row had only Quantum -> emptied -> deleted
+    assert await adapter.retrieve("DocumentChunk_text", [tagged.id]) == []
+    # untagged row never had Quantum -> must survive
+    assert len(await adapter.retrieve("DocumentChunk_text", [untagged.id])) == 1
+
+
+@pytest.mark.asyncio
 async def test_delete_data_points(adapter):
     docs = _docs()
     await adapter.create_data_points("DocumentChunk_text", docs)
