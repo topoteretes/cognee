@@ -21,6 +21,9 @@ from cognee.infrastructure.databases.exceptions import EmbeddingException
 from cognee.infrastructure.llm.tokenizer.HuggingFace import (
     HuggingFaceTokenizer,
 )
+from cognee.infrastructure.llm.tokenizer.TikToken import (
+    TikTokenTokenizer,
+)
 from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager
 from cognee.shared.utils import create_secure_ssl_context
 from cognee.infrastructure.databases.vector.embeddings.utils import (
@@ -55,7 +58,7 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
     max_completion_tokens: int
     endpoint: str
     mock: bool
-    huggingface_tokenizer_name: str
+    huggingface_tokenizer_name: Optional[str]
 
     MAX_RETRIES = 5
 
@@ -65,7 +68,7 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
         dimensions: Optional[int] = 1024,
         max_completion_tokens: int = 512,
         endpoint: Optional[str] = "http://localhost:11434/api/embed",
-        huggingface_tokenizer: str = "Salesforce/SFR-Embedding-Mistral",
+        huggingface_tokenizer: Optional[str] = None,
         batch_size: int = 100,
     ):
         self.model = model
@@ -225,16 +228,56 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
 
     def get_tokenizer(self):
         """
-        Load and return a HuggingFace tokenizer for the embedding engine.
+        Load and return a tokenizer for the embedding engine.
+
+        Three-tier fallback so HUGGINGFACE_TOKENIZER is never required:
+
+        1. Explicit name provided → try HuggingFace, fall back to TikToken on error.
+        2. No name, but model is recognizably nomic → auto-default to the canonical
+           nomic tokenizer, fall back to TikToken on error.
+        3. Unknown model, no name → TikToken (cl100k_base) with no network call.
 
         Returns:
         --------
 
-            The instantiated HuggingFace tokenizer used by the embedding engine.
+            A tokenizer compatible with the TokenizerInterface protocol.
         """
-        logger.debug("Loading HuggingfaceTokenizer for OllamaEmbeddingEngine...")
-        tokenizer = HuggingFaceTokenizer(
-            model=self.huggingface_tokenizer_name, max_completion_tokens=self.max_completion_tokens
-        )
-        logger.debug("Tokenizer loaded for OllamaEmbeddingEngine")
-        return tokenizer
+        if self.huggingface_tokenizer_name is not None:
+            logger.debug(
+                f"Loading HuggingFace tokenizer {self.huggingface_tokenizer_name!r} "
+                "for OllamaEmbeddingEngine..."
+            )
+            try:
+                return HuggingFaceTokenizer(
+                    model=self.huggingface_tokenizer_name,
+                    max_completion_tokens=self.max_completion_tokens,
+                )
+            except Exception as e:
+                logger.warning(
+                    f"Could not load HuggingFace tokenizer {self.huggingface_tokenizer_name!r}: "
+                    f"{e}. Falling back to TikToken."
+                )
+                return TikTokenTokenizer(model=None, max_completion_tokens=self.max_completion_tokens)
+
+        # Tier 2: engine instantiated directly (bypassing EmbeddingConfig),
+        # model is recognizably nomic — auto-default rather than crash.
+        if "nomic" in (self.model or "").lower():
+            _nomic_tokenizer = "nomic-ai/nomic-embed-text-v1.5"
+            logger.debug(
+                f"No HUGGINGFACE_TOKENIZER set; model {self.model!r} looks like nomic — "
+                f"auto-defaulting to {_nomic_tokenizer!r}."
+            )
+            try:
+                return HuggingFaceTokenizer(
+                    model=_nomic_tokenizer,
+                    max_completion_tokens=self.max_completion_tokens,
+                )
+            except Exception as e:
+                logger.warning(
+                    f"Could not load nomic tokenizer {_nomic_tokenizer!r}: {e}. "
+                    "Falling back to TikToken."
+                )
+                return TikTokenTokenizer(model=None, max_completion_tokens=self.max_completion_tokens)
+
+        logger.debug("No HuggingFace tokenizer configured for OllamaEmbeddingEngine. Using TikToken.")
+        return TikTokenTokenizer(model=None, max_completion_tokens=self.max_completion_tokens)
