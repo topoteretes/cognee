@@ -312,8 +312,46 @@ def _create_vector_engine(
             embedding_engine=embedding_engine,
         )
 
+    elif vector_db_provider.lower() == "turso":
+        try:
+            import sqlalchemy_libsql  # noqa: F401  — registers the libsql dialect
+        except ImportError:
+            raise ImportError(
+                "Turso/libSQL dependencies are not installed. "
+                "Please install with 'pip install cognee\"[turso]\"' "
+                "to use Turso functionality."
+            )
+
+        from .turso.TursoVectorAdapter import TursoVectorAdapter
+
+        # Build connection string: prefer vector config, fall back to relational config
+        if vector_db_url and "libsql://" in vector_db_url:
+            connection_string = f"{vector_db_url}?authToken={vector_db_key}&secure=true"
+        else:
+            from cognee.infrastructure.databases.relational import get_relational_config
+
+            relational_config = get_relational_config()
+            if relational_config.turso_url:
+                connection_string = (
+                    f"{relational_config.turso_url}"
+                    f"?authToken={relational_config.turso_auth_token}&secure=true"
+                )
+            else:
+                # Local embedded libSQL file
+                connection_string = (
+                    f"sqlite+libsql:///{vector_db_url}/{vector_db_name}"
+                    if vector_db_url
+                    else f"sqlite+libsql:///{vector_db_name}"
+                )
+
+        return TursoVectorAdapter(
+            connection_string,
+            vector_db_key,
+            embedding_engine,
+        )
+
     else:
         raise EnvironmentError(
             f"Unsupported vector database provider: {vector_db_provider}. "
-            f"Supported providers are: {', '.join(list(supported_databases.keys()) + ['LanceDB', 'PGVector', 'neptune_analytics'])}"
+            f"Supported providers are: {', '.join(list(supported_databases.keys()) + ['LanceDB', 'PGVector', 'neptune_analytics', 'turso'])}"
         )
