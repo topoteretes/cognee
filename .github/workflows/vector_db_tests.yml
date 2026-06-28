@@ -189,7 +189,7 @@ jobs:
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-        run: uv run python ./cognee/tests/test_search_db.py
+        run: uv run pytest cognee/tests/test_search_db.py -v --log-level=INFO
 
   run-turso-multi-user-tests:
     name: Turso Multi-User Tests
@@ -224,4 +224,4 @@ jobs:
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-        run: uv run python ./cognee/tests/test_permissions.py
+        run: uv run pytest cognee/tests/test_permissions.py -v --log-level=INFO
