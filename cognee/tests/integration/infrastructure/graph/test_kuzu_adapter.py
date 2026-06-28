@@ -295,6 +295,75 @@ async def test_get_filtered_graph_data(adapter):
 
 
 # ---------------------------------------------------------------------------
+# get_neighborhood with edge_types filter
+# Regression for #3585: ALL(rel IN r WHERE ...) over a variable-length path
+# binding crashes Kuzu (RECURSIVE_REL vs LIST). Filter in Python instead.
+# ---------------------------------------------------------------------------
+
+
+class _NeighborhoodNode:
+    """Minimal pydantic-shaped payload compatible with add_nodes."""
+
+    def __init__(self, node_id: str, name: str = "", type: str = ""):
+        self._d = {"id": str(node_id), "name": name, "type": type}
+
+    def model_dump(self):
+        return dict(self._d)
+
+
+@pytest.mark.asyncio
+async def test_get_neighborhood_unfiltered_returns_all_reachable(adapter):
+    nodes = [_NeighborhoodNode(i) for i in ["A", "B", "D"]]
+    await adapter.add_nodes(nodes)
+    await adapter.add_edges(
+        [
+            ("A", "B", "KNOWS", {}),
+            ("A", "D", "WORKS_AT", {}),
+        ]
+    )
+
+    rows, _ = await adapter.get_neighborhood(node_ids=["A"], depth=2)
+    ids = sorted(n for n, _ in rows)
+    assert ids == ["A", "B", "D"]
+
+
+@pytest.mark.asyncio
+async def test_get_neighborhood_edge_type_filter_excludes_other_edges(adapter):
+    """Regression for #3585: edge_types filter must not crash and must exclude
+    neighbors reachable only via disallowed edge types."""
+    nodes = [_NeighborhoodNode(i) for i in ["A", "B", "D"]]
+    await adapter.add_nodes(nodes)
+    await adapter.add_edges(
+        [
+            ("A", "B", "KNOWS", {}),
+            ("A", "D", "WORKS_AT", {}),
+        ]
+    )
+
+    # Filter to KNOWS only — D (reachable only via WORKS_AT) must be excluded.
+    rows, _ = await adapter.get_neighborhood(node_ids=["A"], depth=2, edge_types=["KNOWS"])
+    ids = sorted(n for n, _ in rows)
+    assert ids == ["A", "B"]
+
+    # Symmetric: filter to WORKS_AT only — B must be excluded.
+    rows, _ = await adapter.get_neighborhood(node_ids=["A"], depth=2, edge_types=["WORKS_AT"])
+    ids = sorted(n for n, _ in rows)
+    assert ids == ["A", "D"]
+
+    # Both allowed — full neighborhood.
+    rows, _ = await adapter.get_neighborhood(
+        node_ids=["A"], depth=2, edge_types=["KNOWS", "WORKS_AT"]
+    )
+    ids = sorted(n for n, _ in rows)
+    assert ids == ["A", "B", "D"]
+
+    # No matching edge type — only the seed itself is in the neighborhood.
+    rows, _ = await adapter.get_neighborhood(node_ids=["A"], depth=2, edge_types=["NONEXISTENT"])
+    ids = sorted(n for n, _ in rows)
+    assert ids == ["A"]
+
+
+# ---------------------------------------------------------------------------
 # get_predecessors / get_successors
 # Known adapter bug: RETURN properties(m) fails with current Kuzu version.
 # ---------------------------------------------------------------------------

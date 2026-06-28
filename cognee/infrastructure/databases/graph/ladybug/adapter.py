@@ -2719,18 +2719,36 @@ class LadybugAdapter(GraphDBInterface):
                 logger.warning("No node IDs provided for neighborhood retrieval.")
                 return [], []
 
-            # Use variable-length path to find all nodes within depth hops
-            path_query = f"""
-            MATCH (seed:Node)-[r*1..{depth}]-(neighbor:Node)
-            WHERE seed.id IN $node_ids{" AND ALL(rel IN r WHERE rel.relationship_name IN $edge_types)" if edge_types else ""}
-            RETURN DISTINCT neighbor.id
-            """
-            params = {"node_ids": node_ids}
+            # Use variable-length path to find all nodes within depth hops.
+            # Kuzu's `r` from `-[r*1..N]-` is a RECURSIVE_REL, not a LIST, so the
+            # engine rejects `ALL(rel IN r WHERE ...)` with a binder error (and an
+            # internal assertion when combined with a parameter reference). When
+            # edge_types is set, fetch paths unfiltered and discard neighbors whose
+            # every path crosses a disallowed edge type (#3585).
             if edge_types:
-                params["edge_types"] = edge_types
-
-            neighbor_rows = await self.query(path_query, params)
-            neighbor_ids = [row[0] for row in neighbor_rows if row[0]]
+                path_query = f"""
+                MATCH (seed:Node)-[r*1..{depth}]-(neighbor:Node)
+                WHERE seed.id IN $node_ids
+                RETURN neighbor.id, r
+                """
+                path_rows = await self.query(path_query, {"node_ids": node_ids})
+                allowed = set(edge_types)
+                neighbor_ids_set: set = set()
+                for neighbor_id, path in path_rows:
+                    if not neighbor_id or neighbor_id in neighbor_ids_set:
+                        continue
+                    rels = path.get("_RELS", []) if isinstance(path, dict) else []
+                    if rels and all(rel.get("relationship_name") in allowed for rel in rels):
+                        neighbor_ids_set.add(neighbor_id)
+                neighbor_ids = list(neighbor_ids_set)
+            else:
+                path_query = f"""
+                MATCH (seed:Node)-[r*1..{depth}]-(neighbor:Node)
+                WHERE seed.id IN $node_ids
+                RETURN DISTINCT neighbor.id
+                """
+                neighbor_rows = await self.query(path_query, {"node_ids": node_ids})
+                neighbor_ids = [row[0] for row in neighbor_rows if row[0]]
 
             # Combine seed nodes and neighbor nodes
             all_ids = list(set(node_ids) | set(neighbor_ids))
