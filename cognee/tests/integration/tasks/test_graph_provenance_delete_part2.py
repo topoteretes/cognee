@@ -24,6 +24,10 @@ import cognee
 from cognee.api.v1.datasets import datasets
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.databases.provenance import (
+    GRAPH_DELETE_MODE_GRAPH_PROVENANCE,
+    GRAPH_DELETE_MODE_KEY,
+)
 from cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine import (
     LiteLLMEmbeddingEngine,
 )
@@ -140,7 +144,7 @@ async def test_data_item_delete_shared_entities_survive(mock_struct, tmp_path):
     # The graph was marked graph-provenance (Part 1 markers are live on the default stack).
     graph = await get_graph_engine()
     metadata = await graph.get_graph_metadata()
-    assert metadata.get("delete_mode") == "graph_native"
+    assert metadata.get(GRAPH_DELETE_MODE_KEY) == GRAPH_DELETE_MODE_GRAPH_PROVENANCE
 
     before = await _graph_names()
     assert {"alice", "bob", "new york", "berlin", "san francisco"} <= before

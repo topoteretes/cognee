@@ -96,8 +96,8 @@ async def clean_test_environment(request, tmp_path, monkeypatch):
     # marked graph-provenance and skip the ledger entirely. Force the ledger
     # path so add_data_points writes the Node/Edge rows these tests assert on;
     # the rollback handler then also reads the (unmarked) graph as ledger-mode.
-    # Graph-native rollback recovery is covered separately (test_rollback.py,
-    # test_graph_native_delete_default_stack.py).
+    # Graph-provenance rollback recovery is covered separately (test_rollback.py,
+    # test_graph_provenance_delete_default_stack.py).
     async def _force_ledger(_graph_engine):
         return False
 
