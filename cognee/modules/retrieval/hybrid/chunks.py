@@ -35,8 +35,8 @@ async def retrieve_hybrid_chunks(
     query_vector: Optional[list[float]] = None,
     use_truth_weight: bool = False,
     q_coords: Optional[list[float]] = None,
-    truth_state_by_id: Optional[dict] = None,
     current_truth_epoch: Optional[int] = None,
+    graph_engine: Optional[Any] = None,
 ) -> dict[str, Any]:
     candidate_limit = max(0, chunks_top_k * 2)
     summary_limit = summary_candidate_limit(chunks_top_k, text_summaries_top_k)
@@ -79,6 +79,15 @@ async def retrieve_hybrid_chunks(
             node_name_filter_operator,
         )
         attach_source_chunks(pairs, source_chunks)
+
+    truth_state_by_id = {}
+    if use_truth_weight and graph_engine and current_truth_epoch is not None:
+        candidate_ids = list(dict.fromkeys(str(pair["chunk_id"]) for pair in pairs if pair["chunk_id"]))
+        if candidate_ids:
+            try:
+                truth_state_by_id = await graph_engine.get_node_truth_state(candidate_ids)
+            except Exception as error:
+                logger.debug("Truth-subspace graph lookup failed; using baseline: %s", error)
 
     ranked_pairs = rank_chunk_summary_pairs(
         pairs,
