@@ -1,0 +1,2 @@
+import PageLoading from "@/ui/elements/PageLoading";
+export default function Loading() { return <PageLoading name="API Keys" />; }

@@ -1,123 +1,106 @@
 "use client";
 
 import React, { useEffect, useState, useRef } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCogniInstance } from "@/modules/tenant/TenantProvider";
+import { useCogniInstance, useTenant } from "@/modules/tenant/TenantProvider";
+import getCreditsOverview from "@/modules/billing/getCreditsOverview";
 import { useFilter } from "@/ui/layout/FilterContext";
-import searchDataset from "@/modules/datasets/searchDataset";
-import addData from "@/modules/ingestion/addData";
-import cognifyDataset from "@/modules/datasets/cognifyDataset";
+import rememberData from "@/modules/ingestion/rememberData";
 import createDataset from "@/modules/datasets/createDataset";
 import pollDatasetStatus from "@/modules/datasets/pollDatasetStatus";
 import { loadGraphModelsConfig, findModelForDataset, findPromptForDataset, findOntologyForDataset } from "@/modules/configuration/userConfiguration";
 import { toCleanSchema } from "@/modules/graphModels/types";
 import { toGraphModelSchema } from "@/modules/graphModels/toGraphModelSchema";
-import { listSessions, getSessionStats } from "@/modules/sessions/getSessions";
+import { listSessions, SEARCH_SESSION_PREFIX } from "@/modules/sessions/getSessions";
 import getDatasetGraph from "@/modules/datasets/getDatasetGraph";
 import { notifications } from "@mantine/notifications";
-import { Tooltip } from "@mantine/core";
 import { trackEvent, TrackPageView } from "@/modules/analytics";
-import QuickstartCards from "@/ui/elements/QuickstartCards";
+import { CLAUDE_MARKETPLACE_ADD, CLAUDE_PLUGIN_INSTALL, CODEX_HOOKS_ENABLE, CODEX_MARKETPLACE_ADD, CODEX_PLUGIN_INSTALL, OPENCLAW_SKILL_INSTALL, GENERIC_SKILL_INSTALL, UPLOAD_MEMORY_PROMPT, UPLOAD_SAMPLE_PROMPT, RECALL_SAMPLE_PROMPT } from "@/data/prompts";
+import { AgentActivityTerminal, PipelineRun, Range, ownerDisplayName } from "@/ui/elements/AgentActivityTerminal";
+import SkeletonBar from "@/ui/elements/SkeletonBar";
+import DashboardSkeleton from "./DashboardSkeleton";
 
+const AWAITING_DATASET_KEY = "cognee-awaiting-dataset";
 
-interface PipelineRun { id: string; pipeline_name: string; status: string; dataset_id: string | null; dataset_name: string | null; owner_email: string | null; created_at: string | null; pipeline_run_id: string | null }
-
-function timeAgo(dateStr: string): string {
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  return `${Math.floor(hours / 24)}d ago`;
-}
-
-function pipelineLabel(name: string): string {
-  if (name.includes("cognify")) return "cognee.cognify";
-  if (name.includes("add")) return "cognee.add";
-  if (name.includes("search")) return "cognee.search";
-  return name;
-}
-
-function ownerDisplayName(email: string | null): string {
-  if (!email) return "System";
-  if (email.endsWith("@cognee.agent")) {
-    const local = email.split("@")[0];
-    const parts = local.split("-");
-    const shortId = parts.pop() || "";
-    const type = parts.join(" ");
-    return `${type} ${shortId}`;
-  }
-  if (email === "default_user@example.com") return "You";
-  return email.split("@")[0];
-}
-
-function statusDot(status: string): string {
-  if (status.includes("COMPLETED")) return "#22C55E";
-  if (status.includes("ERRORED")) return "#EF4444";
-  if (status.includes("STARTED") || status.includes("INITIATED")) return "#F59E0B";
-  return "#A1A1AA";
-}
-
-type Range = "24h" | "7d" | "30d";
+// Per-integration "Connected" detection. The Claude Code and Codex plugins mint
+// their session_id as `{prefix}_{dir}_{token}` with a fixed prefix per agent
+// (see topoteretes/cognee-integrations: claude-code → "cc", codex → "codex"), so
+// we can tell which agent connected from the session list alone. Detection is
+// coarse on purpose — any session whose id starts with the prefix counts. Openclaw
+// forwards the host session id (no Cognee prefix) and API/MCP is user-defined, so
+// neither is auto-detected. Keep these in sync with the shipped integrations
+// (the plugins' _generate_session_id + the skill prompts in prompts.ts).
+const INTEGRATION_SESSION_PREFIX: Record<string, string> = {
+  "claude-code": "cc_",
+  codex: "codex_",
+};
 
 export default function OverviewPage() {
-  const { cogniInstance, isInitializing } = useCogniInstance();
-  const { agents, datasets, selectedAgent, setSelectedDataset, refreshDatasets, loading: filterLoading } = useFilter();
+  const { cogniInstance, isInitializing, serviceUrl, apiKey } = useCogniInstance();
+  const { tenantReady, tenant, isOwner } = useTenant();
+  const { agents, datasets, selectedDataset, selectedAgent, setSelectedDataset, refreshDatasets, loading: filterLoading } = useFilter();
   const [runs, setRuns] = useState<PipelineRun[]>([]);
   const [loading, setLoading] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
   const [showDatasetPicker, setShowDatasetPicker] = useState(false);
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
-  const [range, setRange] = useState<Range>("24h");
+  const [range] = useState<Range>("24h");
   const [sessions, setSessions] = useState<import("@/modules/sessions/getSessions").SessionRow[]>([]);
-  const [sessionStats, setSessionStats] = useState<import("@/modules/sessions/getSessions").SessionStats | null>(null);
-  const [activityFilter, setActivityFilter] = useState<"all" | "sessions" | "datasets" | "failed">("all");
-  const [graphNodes, setGraphNodes] = useState<number | null>(null);
+  // Which integrations have ever connected (by session_id prefix). Sticky per
+  // tenant via localStorage so the badge survives the 24h session window.
+  const [connectedIntegrations, setConnectedIntegrations] = useState<Record<string, boolean>>({});
+  const [graphNodes, setGraphNodes] = useState<number | null>(() => {
+    try { const v = sessionStorage.getItem("cognee-graph-nodes"); return v !== null ? Number(v) : null; } catch { return null; }
+  });
   const [graphEdges, setGraphEdges] = useState<number | null>(null);
-  const [showSdkModal, setShowSdkModal] = useState(false);
   const [showUploadDoneModal, setShowUploadDoneModal] = useState<{ datasetName: string; datasetId: string } | null>(null);
-  const [bannerDismissed, setBannerDismissed] = useState(() =>
-    typeof window !== "undefined" && !!sessionStorage.getItem("cognee-welcome-banner-dismissed")
-  );
-  const [animKey, setAnimKey] = useState(0);
-  const animTriggered = useRef(false);
   const uploadInputRef = useRef<HTMLInputElement>(null);
+  const sliderRef = useRef<HTMLDivElement>(null);
+  const sliderDragging = useRef(false);
+  const sliderStartX = useRef(0);
+  const sliderScrollLeft = useRef(0);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
+  const [creditsBannerDismissed, setCreditsBannerDismissed] = useState<boolean>(() => {
+    try { return sessionStorage.getItem("cognee-credits-banner-dismissed") === "1"; } catch { return false; }
+  });
+  const [creditsSpentPct, setCreditsSpentPct] = useState<number | null>(null);
+  const [creditsRemainingUsd, setCreditsRemainingUsd] = useState<number | null>(null);
+  // True while a freshly-provisioned default dataset (handed off from onboarding
+  // via sessionStorage) is still processing. Init from the flag so the skeleton
+  // shows on first paint without waiting for the effect below.
+  const [awaitingDataset, setAwaitingDataset] = useState<boolean>(() => {
+    try { return !!sessionStorage.getItem(AWAITING_DATASET_KEY); } catch { return false; }
+  });
   const router = useRouter();
-
-  // Trigger onboarding stream animation once after loading completes (fires on every page open)
-  useEffect(() => {
-    if (loading || isInitializing || filterLoading) return;
-    if (animTriggered.current) return;
-    animTriggered.current = true;
-    setAnimKey(k => k + 1);
-  }, [loading, isInitializing, filterLoading]);
+  // Workspace is functionally ready only when the pod is up AND any in-flight
+  // default-dataset processing has finished.
+  const workspaceReady = !!cogniInstance && tenantReady && !awaitingDataset;
+  const prevWorkspaceReady = useRef(workspaceReady);
 
   async function uploadToDataset(ds: { id: string; name: string }, files: File[]) {
     if (!cogniInstance) return;
     setIsUploading(true);
     try {
-      await addData({ id: ds.id }, files, cogniInstance);
-      trackEvent({ pageName: "Dashboard", eventName: "dashboard_files_uploaded", additionalProperties: { dataset_id: ds.id, dataset_name: ds.name, file_count: String(files.length) } });
-      notifications.show({ title: `Files uploaded to "${ds.name}"`, message: `${files.length} file(s) added. Cognify running.`, color: "blue", autoClose: 5000 });
       // Load graph model, custom prompt, and ontology assignments for this dataset
       const cfg = await loadGraphModelsConfig(cogniInstance);
-      const cognifyOpts: { graphModel?: object; customPrompt?: string; ontologyKey?: string[] } = {};
+      const rememberOpts: { graphModel?: object; customPrompt?: string; ontologyKey?: string[] } = {};
       const assignedModel = findModelForDataset(cfg.models, ds.id);
       if (assignedModel) {
         const cleanSchema = toCleanSchema(assignedModel.schema);
-        cognifyOpts.graphModel = toGraphModelSchema(cleanSchema);
+        rememberOpts.graphModel = toGraphModelSchema(cleanSchema);
       }
       const promptName = findPromptForDataset(cfg.promptAssignments ?? {}, ds.id);
       if (promptName && cfg.customPrompts?.[promptName]) {
-        cognifyOpts.customPrompt = cfg.customPrompts[promptName];
+        rememberOpts.customPrompt = cfg.customPrompts[promptName];
       }
       const ontologyKey = findOntologyForDataset(cfg.ontologyAssignments ?? {}, ds.id);
       if (ontologyKey) {
-        cognifyOpts.ontologyKey = [ontologyKey];
+        rememberOpts.ontologyKey = [ontologyKey];
       }
-      await cognifyDataset({ id: ds.id, name: ds.name, data: [], status: "" }, cogniInstance, cognifyOpts);
+      await rememberData({ id: ds.id }, files, cogniInstance, rememberOpts);
+      trackEvent({ pageName: "Dashboard", eventName: "dashboard_files_uploaded", additionalProperties: { dataset_id: ds.id, dataset_name: ds.name, file_count: String(files.length) } });
+      notifications.show({ title: `Files uploaded to "${ds.name}"`, message: `${files.length} file(s) added. Cognify running.`, color: "blue", autoClose: 5000 });
       await pollDatasetStatus(ds.id, cogniInstance, { intervalMs: 5000 });
       refreshDatasets();
       setShowUploadDoneModal({ datasetName: ds.name, datasetId: ds.id });
@@ -174,13 +157,11 @@ export default function OverviewPage() {
           .fetch("/v1/activity/pipeline-runs")
           .then((r) => (r.ok ? r.json() : []))
           .catch(() => []),
-        listSessions(cogniInstance!, { range, limit: 20 }),
-        getSessionStats(cogniInstance!, range),
-      ]).then(([runData, sessionsPage, stats]) => {
+        listSessions(cogniInstance!, { range, limit: 50 }),
+      ]).then(([runData, sessionsPage]) => {
         if (cancelled) return;
         setRuns(Array.isArray(runData) ? runData : []);
         setSessions(sessionsPage?.sessions ?? []);
-        setSessionStats(stats);
       });
     }
 
@@ -199,12 +180,33 @@ export default function OverviewPage() {
     };
   }, [cogniInstance, isInitializing, filterLoading, range]);
 
-  // Fetch graph node/edge counts whenever datasets or instance change
+  // Derive per-integration "Connected" state from the session_id prefixes, and
+  // persist it per tenant so a card stays "Connected" after its session ages out
+  // of the polled window. Hydrates from localStorage and merges in live matches.
+  const tenantId = tenant?.tenant_id ?? null;
+  useEffect(() => {
+    if (!tenantId) return;
+    const storeKey = `cognee-connected-integrations-${tenantId}`;
+    let persisted: Record<string, boolean> = {};
+    try { persisted = JSON.parse(localStorage.getItem(storeKey) || "{}"); } catch { /* ignore */ }
+    const next = { ...persisted };
+    for (const [key, prefix] of Object.entries(INTEGRATION_SESSION_PREFIX)) {
+      if (sessions.some((s) => s.session_id.startsWith(prefix))) next[key] = true;
+    }
+    if (JSON.stringify(next) !== JSON.stringify(persisted)) {
+      try { localStorage.setItem(storeKey, JSON.stringify(next)); } catch { /* ignore */ }
+    }
+    setConnectedIntegrations((prev) => (JSON.stringify(prev) !== JSON.stringify(next) ? next : prev));
+  }, [sessions, tenantId]);
+
+  // Fetch graph node/edge counts whenever datasets or selected brain changes
   useEffect(() => {
     if (!cogniInstance || !datasets.length) return;
+    const datasetsToFetch = selectedDataset ? datasets.filter(d => d.id === selectedDataset.id) : datasets;
+    if (!datasetsToFetch.length) { setGraphNodes(0); setGraphEdges(0); return; }
     let cancelled = false;
     Promise.all(
-      datasets.map((ds) => getDatasetGraph(ds, cogniInstance).catch(() => null))
+      datasetsToFetch.map((ds) => getDatasetGraph(ds, cogniInstance).catch(() => null))
     ).then((graphs) => {
       if (cancelled) return;
       let totalNodes = 0;
@@ -215,25 +217,153 @@ export default function OverviewPage() {
       }
       setGraphNodes(totalNodes);
       setGraphEdges(totalEdges);
+      try { sessionStorage.setItem("cognee-graph-nodes", String(totalNodes)); } catch {}
     }).catch(() => {});
     return () => { cancelled = true; };
-  }, [cogniInstance, datasets]);
+  }, [cogniInstance, datasets, selectedDataset]);
 
-  // Onboarding redirect: send fresh users to onboarding until they have pipeline activity
+  // Track whether the "What you can build" slider can scroll left/right, so
+  // we can show/hide the edge fades + arrow buttons accordingly.
   useEffect(() => {
-    if (loading || filterLoading) return;
-    if (
-      runs.length === 0 &&
-      !localStorage.getItem("cognee-onboarding-complete") &&
-      !sessionStorage.getItem("cognee-onboarding-skipped")
-    ) {
-      router.replace("/onboarding");
-    }
-  }, [loading, filterLoading, runs, router]);
+    const el = sliderRef.current;
+    if (!el) return;
+    const update = () => {
+      setCanScrollLeft(el.scrollLeft > 4);
+      setCanScrollRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 4);
+    };
+    update();
+    el.addEventListener("scroll", update, { passive: true });
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => { el.removeEventListener("scroll", update); ro.disconnect(); };
+  }, []);
 
-  if (loading || isInitializing || filterLoading) {
-    return <><TrackPageView page="Dashboard" /><div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", background: "#FFFFFF" }}><video src="/videos/mascot-waiting.mp4" autoPlay loop muted playsInline style={{ width: 200, height: "auto" }} /></div></>;
+  function scrollSlider(delta: number) {
+    sliderRef.current?.scrollBy({ left: delta, behavior: "smooth" });
   }
+
+  // Onboarding redirect: send fresh users to onboarding until they have pipeline activity.
+  // First-login case (no cogniInstance yet because the tenant is still being
+  // provisioned in the background) redirects immediately — the data-fetch
+  // effect above doesn't fire without an instance, so `loading` would
+  // otherwise stay true forever.
+  // Notify user when workspace becomes functionally ready (false→true transition).
+  useEffect(() => {
+    if (!prevWorkspaceReady.current && workspaceReady) {
+      notifications.show({
+        title: "Your workspace is ready",
+        message: "All features are now available.",
+        color: "teal",
+        autoClose: 5000,
+      });
+    }
+    prevWorkspaceReady.current = workspaceReady;
+  }, [workspaceReady]);
+
+  // Wait for a freshly-provisioned default dataset (handed off from onboarding)
+  // to finish processing, then clear the flag. Best-effort: any error or a
+  // missing dataset resolves to "ready" so the UI is never blocked indefinitely.
+  useEffect(() => {
+    let datasetId: string | null = null;
+    try { datasetId = sessionStorage.getItem(AWAITING_DATASET_KEY); } catch { /* ignore */ }
+    if (!datasetId) return;
+
+    let cancelled = false;
+    const clear = () => {
+      if (cancelled) return;
+      try { sessionStorage.removeItem(AWAITING_DATASET_KEY); } catch { /* ignore */ }
+      setAwaitingDataset(false);
+    };
+
+    // Safety net: never block the dashboard longer than 30s regardless of pod state.
+    // The polling below also has its own error handling, but if cogniInstance is null
+    // (pod still starting) the poll never runs — this timeout prevents that deadlock.
+    const safetyTimeout = setTimeout(clear, 30000);
+
+    if (!cogniInstance) {
+      return () => { cancelled = true; clearTimeout(safetyTimeout); };
+    }
+
+    pollDatasetStatus(datasetId, cogniInstance, { intervalMs: 5000 })
+      .then(clear)
+      .catch(clear);
+
+    return () => { cancelled = true; clearTimeout(safetyTimeout); };
+  }, [cogniInstance]);
+
+  // Fetch credit usage for the low-balance warning banner. Not gated on
+  // dismissal: the below-$1 red banner must show even after the percentage
+  // banner is dismissed.
+  useEffect(() => {
+    if (!tenant) return;
+    getCreditsOverview().then((ov) => {
+      if (!ov) return;
+      const t = ov.tenants.find((t) => t.tenantId === tenant.tenant_id);
+      if (!t) return;
+      if (t.spentUsd != null && t.maxBudgetUsd) {
+        setCreditsSpentPct(Math.round((t.spentUsd / t.maxBudgetUsd) * 100));
+      }
+      if (t.remainingUsd != null) {
+        setCreditsRemainingUsd(t.remainingUsd);
+      }
+    }).catch(() => {});
+  }, [isOwner, tenant]);
+
+  // Onboarding redirect: check Auth0 app state, then verify user actually has
+  // datasets or runs before trusting onboarding_complete. The flag can be set
+  // incorrectly by the backfill path, so we double-check with real data.
+  useEffect(() => {
+    // tenant === null means new user is in the welcome/provisioning flow — TenantProvider
+    // will redirect to /welcome. Don't race it with an /onboarding redirect.
+    if (isInitializing || !tenant) return;
+    // Don't redirect until both data fetches have settled.
+    if (loading || filterLoading) return;
+
+    let cancelled = false;
+    (async () => {
+      const localSkipped = sessionStorage.getItem("cognee-onboarding-skipped");
+      if (localSkipped) return;
+
+      // Fast path: if user has runs OR datasets they've genuinely onboarded.
+      if (runs.length > 0 || datasets.length > 0) {
+        localStorage.setItem("cognee-onboarding-complete", "1");
+        return;
+      }
+
+      // No local activity — verify via Auth0 before redirecting.
+      // onboarding_complete is only trusted here when there's NO activity
+      // (datasets + runs both empty), which means we should redirect unless
+      // the flag was legitimately set AND the pod is still warming up.
+      // Gate on tenantReady so we don't redirect during pod cold-start.
+      if (!tenantReady) return;
+
+      try {
+        const res = await fetch("/api/user-app-state");
+        if (cancelled) return;
+        const appState = res.ok ? await res.json() : null;
+        if (appState?.onboarding_complete) {
+          // Flag is set but user has zero activity — could be a new workspace
+          // that hasn't finished provisioning, or a genuinely empty account.
+          // Re-check localStorage to see if this session already saw activity.
+          const localComplete = localStorage.getItem("cognee-onboarding-complete");
+          if (localComplete) return; // already validated this session
+          // Otherwise redirect — the onboarding flow will handle re-entry gracefully.
+        }
+      } catch { /* fallback to redirect below */ }
+
+      if (cancelled) return;
+      router.replace("/onboarding");
+    })();
+    return () => { cancelled = true; };
+  }, [cogniInstance, tenantReady, isInitializing, loading, filterLoading, runs, datasets, router, tenant]);
+
+  // Show skeleton until pod is up (cogniInstance + tenantReady) AND any
+  // freshly-provisioned default dataset has finished processing.
+  if (!workspaceReady) {
+    return <DashboardSkeleton />;
+  }
+
+  const dataLoading = loading || isInitializing || filterLoading;
 
   // Deduplicate runs
   const latestRuns: PipelineRun[] = [];
@@ -244,440 +374,358 @@ export default function OverviewPage() {
   }
 
   const filteredRuns = latestRuns;
-  const filteredDatasets = datasets;
+  const filteredDatasets = selectedDataset ? datasets.filter(d => d.id === selectedDataset.id) : datasets;
 
   const apiCalls = filteredRuns.length;
-  const errorCount = filteredRuns.filter((r) => r.status.includes("ERRORED")).length;
-
-  const apiCallsTrend = apiCalls > 0 ? "+12%" : "steady";
   const connectedAgents = agents.filter((a) => a.is_agent && !a.is_default);
   const liveAgentIds = new Set(
     sessions.filter((s) => s.effective_status === "running").map((s) => s.user_id)
   );
   const liveAgents = connectedAgents.filter((a) => liveAgentIds.has(a.id) || a.status === "LIVE");
-  const hasSessionData = sessionStats != null && (sessionStats.completed > 0 || sessionStats.failed > 0);
-  const successRate = hasSessionData ? sessionStats!.success_rate * 100 : (apiCalls > 0 ? ((1 - errorCount / apiCalls) * 100) : 100);
-
-  // Merge sessions + datasets into one activity feed, sort by recency.
-  type ActivityRow =
-    | { kind: "session"; session: import("@/modules/sessions/getSessions").SessionRow; agent: typeof agents[number] | null; dataset: typeof datasets[number] | null; timeStr: number }
-    | { kind: "dataset"; dataset: typeof datasets[number] & { _ds_data?: unknown[]; updated_at?: string | null }; timeStr: number };
-
-  const activity: ActivityRow[] = [];
-  for (const s of sessions) {
-    const agent = agents.find((a) => a.id === s.user_id) || null;
-    const ds = s.dataset_id ? datasets.find((d) => d.id === s.dataset_id) || null : null;
-    const ts = s.last_activity_at ? new Date(s.last_activity_at).getTime() : 0;
-    activity.push({ kind: "session", session: s, agent, dataset: ds, timeStr: ts });
-  }
-  for (const d of filteredDatasets) {
-    // Datasets don't currently carry updated_at via the list endpoint; fall back to recent runs.
-    const latestRun = latestRuns.find((r) => r.dataset_id === d.id && r.created_at);
-    const ts = latestRun?.created_at ? new Date(latestRun.created_at).getTime() : 0;
-    activity.push({ kind: "dataset", dataset: d, timeStr: ts });
-  }
-  activity.sort((a, b) => b.timeStr - a.timeStr);
-
-  const failedSessions = sessions.filter((s) => s.effective_status === "failed" || s.error_count > 0).length;
   const sessionCount = sessions.length;
-
-  const filteredActivity = activity.filter((row) => {
-    if (activityFilter === "all") return true;
-    if (activityFilter === "sessions") return row.kind === "session";
-    if (activityFilter === "datasets") return row.kind === "dataset";
-    if (activityFilter === "failed") {
-      return row.kind === "session" && (row.session.effective_status === "failed" || row.session.error_count > 0);
-    }
-    return true;
-  });
 
   const greeting = greetingForTime();
 
-  // Onboarding completion state — shared between banner and progress bar
-  const onboardingSteps = [
-    { done: true },
-    { done: runs.length > 0 || (graphNodes ?? 0) > 0 },
-    { done: (graphNodes ?? 0) > 0 || runs.some(r => r.status?.includes("COMPLETED")) },
-    { done: agents.some(a => a.is_agent) },
-  ];
-  const onboardingCompletedCount = onboardingSteps.filter(s => s.done).length;
-  // Onboarding is complete when the 3 core steps are done (account + data + graph),
-  // when all 4 steps including agent connection are done, or when the wizard was
-  // finished (localStorage flag). Agent connection (step 4) is optional — not
-  // requiring it prevents the banner from reappearing on every new login.
-  const onboardingComplete = onboardingSteps.slice(0, 3).every(s => s.done)
-    || onboardingCompletedCount === onboardingSteps.length
-    || !!localStorage.getItem("cognee-onboarding-complete");
-  const onboardingNextIncomplete = onboardingSteps.findIndex(s => !s.done);
-  const onboardingNextStep = onboardingNextIncomplete === -1 ? 4 : onboardingNextIncomplete + 1;
-  // The dashboard progress steps are offset by 1 from the wizard steps (step 1 = "account created" = always done).
-  const wizardNextStep = Math.max(1, onboardingNextStep - 1);
+  // Only one banner may show at a time. Priority: the percentage low-credit /
+  // out-of-credits banner wins, then the below-$1 balance banner, then the
+  // promotional voucher banner. The below-$1 banner still resurfaces once the
+  // percentage banner is dismissed, so an out-of-credits workspace is never
+  // left without a warning.
+  const showCreditPctBanner =
+    !creditsBannerDismissed && creditsSpentPct !== null && creditsSpentPct >= 90;
+  const showLowBalanceBanner =
+    !showCreditPctBanner && creditsRemainingUsd !== null && creditsRemainingUsd < 1;
+  const showVoucherBanner = !showCreditPctBanner && !showLowBalanceBanner;
 
   return (
-    <div style={{ backgroundColor: "#FAFAFA", minHeight: "100%", padding: 32, display: "flex", flexDirection: "column", gap: 40, fontFamily: "system-ui, sans-serif" }}>
+    <div style={{ minHeight: "100%", flexShrink: 0 }}>
       {/* Hidden file input for dashboard upload */}
       <input ref={uploadInputRef} type="file" multiple accept=".pdf,.csv,.txt,.md,.json,.docx" className="hidden" onChange={handleDashboardUpload} />
 
       {/* Dataset picker modal */}
       {showDatasetPicker && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.3)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={() => { setShowDatasetPicker(false); setPendingFiles([]); }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, padding: 24, width: 420, display: "flex", flexDirection: "column", gap: 16, boxShadow: "0 16px 48px rgba(0,0,0,0.12)" }}>
-            <h2 style={{ fontSize: 18, fontWeight: 600, color: "#18181B", margin: 0 }}>Upload to which brain?</h2>
-            <p style={{ fontSize: 13, color: "#71717A", margin: 0 }}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", backdropFilter: "blur(4px)", WebkitBackdropFilter: "blur(4px)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={() => { setShowDatasetPicker(false); setPendingFiles([]); }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "rgba(15,15,15,0.92)", backdropFilter: "blur(16px)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: 24, width: 420, maxWidth: "calc(100vw - 32px)", display: "flex", flexDirection: "column", gap: 16, boxShadow: "0 20px 60px rgba(0,0,0,0.6)" }}>
+            <h2 style={{ fontSize: 18, fontWeight: 700, color: "#EDECEA", margin: 0 }}>Upload to which brain?</h2>
+            <p style={{ fontSize: 13, color: "rgba(237,236,234,0.65)", margin: 0 }}>
               {pendingFiles.length} file{pendingFiles.length !== 1 ? "s" : ""} selected. Choose a brain to upload to.
             </p>
             <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 300, overflow: "auto" }}>
               {datasets.map((ds) => (
-                <button key={ds.id} onClick={() => handlePickDataset(ds)} className="cursor-pointer hover:bg-cognee-hover" style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", borderRadius: 8, border: "1px solid #F4F4F5", background: "none", textAlign: "left", fontFamily: "inherit", width: "100%" }}>
+                <button key={ds.id} onClick={() => handlePickDataset(ds)} className="cursor-pointer hover:bg-white/10" style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.1)", background: "none", textAlign: "left", fontFamily: "inherit", width: "100%" }}>
                   <div style={{ width: 8, height: 8, borderRadius: 2, background: "#6510F4", flexShrink: 0 }} />
-                  <span style={{ fontSize: 14, fontWeight: 500, color: "#18181B" }}>{ds.name}</span>
+                  <span style={{ fontSize: 14, fontWeight: 500, color: "#EDECEA" }}>{ds.name}</span>
                 </button>
               ))}
             </div>
             <div style={{ display: "flex", justifyContent: "flex-end" }}>
-              <button onClick={() => { setShowDatasetPicker(false); setPendingFiles([]); }} className="cursor-pointer" style={{ background: "#fff", border: "1px solid #E4E4E7", borderRadius: 8, padding: "8px 16px", fontSize: 13, fontWeight: 500, color: "#3F3F46", fontFamily: "inherit" }}>Cancel</button>
+              <button onClick={() => { setShowDatasetPicker(false); setPendingFiles([]); }} className="cursor-pointer hover:bg-white/10" style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.2)", borderRadius: 8, padding: "8px 16px", fontSize: 13, fontWeight: 500, color: "rgba(237,236,234,0.65)", fontFamily: "inherit" }}>Cancel</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Welcome banner — shown only while onboarding is incomplete */}
-      {!bannerDismissed && !onboardingComplete && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", zIndex: 400, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={() => { setBannerDismissed(true); sessionStorage.setItem("cognee-welcome-banner-dismissed", "1"); }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ background: "#FFFFFF", borderRadius: 20, width: "min(860px, 92vw)", overflow: "hidden", display: "flex", boxShadow: "0 24px 64px rgba(0,0,0,0.16)", position: "relative" }}>
-            {/* Close */}
-            <button onClick={() => { setBannerDismissed(true); sessionStorage.setItem("cognee-welcome-banner-dismissed", "1"); }} style={{ position: "absolute", top: 20, right: 20, background: "none", border: "none", cursor: "pointer", color: "#A1A1AA", fontSize: 18, lineHeight: 1, zIndex: 1 }}>&#10005;</button>
 
-            {/* Left: text + button */}
-            <div style={{ flex: "0 0 50%", padding: "52px 48px 52px 52px", display: "flex", flexDirection: "column", justifyContent: "space-between", gap: 32 }}>
-              <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-                <h2 style={{ margin: 0, fontSize: 52, fontWeight: 300, lineHeight: 1.05, letterSpacing: "-0.02em", color: "#18181B", fontFamily: '"TWK Lausanne", system-ui, sans-serif' }}>
-                  {onboardingNextStep <= 2 ? "Let's start building\nthe graph!" : "Let's finish\nsetting up!"}
-                </h2>
-                <p style={{ margin: 0, fontSize: 16, fontWeight: 400, color: "#3F3F46", lineHeight: 1.6, fontFamily: '"Inter", system-ui, sans-serif' }}>
-                  {onboardingNextStep <= 2
-                    ? <>Upload any document to see<br />what Cognee can do.</>
-                    : onboardingNextStep === 3
-                    ? <>Your data is uploaded. Now let<br />Cognee build your knowledge graph.</>
-                    : <>Your graph is ready. Connect an<br />agent to put it to work.</>}
-                </p>
-              </div>
-              <button
-                onClick={() => { setBannerDismissed(true); sessionStorage.setItem("cognee-welcome-banner-dismissed", "1"); router.push(`/onboarding?step=${wizardNextStep}`); }}
-                style={{ background: "#6510F4", color: "#FFFFFF", border: "none", borderRadius: 100, padding: "16px 0", fontSize: 16, fontWeight: 400, fontFamily: '"Inter", system-ui, sans-serif', cursor: "pointer", width: 220, letterSpacing: "0.01em" }}
-              >
-                {wizardNextStep <= 1 ? "Start onboarding" : `Continue — step ${wizardNextStep} of 4`}
-              </button>
-            </div>
 
-            {/* Right: mascot video */}
-            <div style={{ flex: "0 0 50%", background: "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", minHeight: 340 }}>
-              <video src="/videos/mascot-purple-glow.mp4" autoPlay loop muted playsInline style={{ width: "80%", height: "auto" }} />
-            </div>
-          </div>
-        </div>
-      )}
+      <div style={{ padding: "clamp(16px, 3vw, 32px)", display: "flex", flexDirection: "column", gap: 40 }}>
 
-      {/* Onboarding progress bar — only when not complete */}
-      {!onboardingComplete && (() => {
-        const steps = onboardingSteps;
-        const completed = onboardingCompletedCount;
-        const nextStep = wizardNextStep;
-        // Stream timing: circle=0.55s, line=0.35s, flowing left→right
-        const CDUR = 0.55, LDUR = 0.35, START = 0.15;
-        const circleDelay = (i: number) => START + i * (CDUR + LDUR);
-        const lineDelay = (i: number) => START + (i - 1) * (CDUR + LDUR) + CDUR;
-        return (
-          <div onClick={() => router.push(`/onboarding?step=${nextStep}`)} style={{ position: "sticky", top: 0, zIndex: 50, margin: "-32px -32px 0 -32px", padding: "14px 32px", background: "#FFFFFF", borderBottom: "1px solid #E4E4E7", display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}>
-            <span style={{ fontSize: 20, fontWeight: 300, color: "#1A1A1A", fontFamily: '"TWK Lausanne", system-ui, sans-serif', whiteSpace: "nowrap" }}>
-              Onboarding {completed}/{steps.length} complete
-            </span>
-            <div style={{ display: "flex", alignItems: "center" }}>
-              {steps.map((s, i) => (
-                <span key={i} style={{ display: "flex", alignItems: "center" }}>
-                  {/* Connector line: gray base + purple fill wipes left→right */}
-                  {i > 0 && (
-                    <span style={{ position: "relative", width: 28, height: 2, background: "#D4D4D8", flexShrink: 0, overflow: "hidden" }}>
-                      {s.done && animKey > 0 && (
-                        <span key={`line-${i}-${animKey}`} style={{ position: "absolute", inset: 0, background: "#6510F4", animation: `streamFillLine ${LDUR}s cubic-bezier(0.4,0,0.2,1) ${lineDelay(i)}s backwards` }} />
-                      )}
-                    </span>
-                  )}
-                  {/* Circle: gray border, transparent bg; purple fill wipes left→right when done */}
-                  <span style={{ position: "relative", width: 48, height: 48, borderRadius: "50%", display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0, border: `2px solid ${s.done ? "#6510F4" : "#ADADAD"}`, overflow: "hidden", background: "transparent", transition: s.done ? `border-color 0.2s ease ${circleDelay(i) + CDUR * 0.3}s` : "none" }}>
-                    {s.done && animKey > 0 && (
-                      <span key={`fill-${i}-${animKey}`} style={{ position: "absolute", inset: 0, background: "#6510F4", animation: `streamFill ${CDUR}s cubic-bezier(0.4,0,0.2,1) ${circleDelay(i)}s backwards` }} />
-                    )}
-                    <span style={{ position: "relative", zIndex: 1, fontSize: 15, fontWeight: 600, color: s.done ? "#FFFFFF" : "#8A8A8A", fontFamily: '"TWK Lausanne", system-ui, sans-serif', transition: s.done && animKey > 0 ? `color 0.2s ease ${circleDelay(i) + CDUR * 0.6}s` : "none" }}>{i + 1}</span>
-                  </span>
-                </span>
-              ))}
-            </div>
-            <button onClick={(e) => { e.stopPropagation(); router.push(`/onboarding?step=${nextStep}`); }} style={{ background: "#6510F4", color: "#FFFFFF", border: "none", borderRadius: 6, padding: "8px 16px", fontSize: 13, fontWeight: 500, fontFamily: '"TWK Lausanne", system-ui, sans-serif', cursor: "pointer", whiteSpace: "nowrap" }}>
-              {completed <= 1 ? "Start the onboarding" : "Finish the onboarding"}
-            </button>
-          </div>
-        );
-      })()}
-
-      <style>{`
-        @keyframes streamFill {
-          from { clip-path: inset(0 100% 0 0 round 999px); }
-          to   { clip-path: inset(0 0% 0 0 round 999px); }
-        }
-        @keyframes streamFillLine {
-          from { clip-path: inset(0 100% 0 0); }
-          to   { clip-path: inset(0 0% 0 0); }
-        }
-      `}</style>
-
-      {/* Greeting */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        <div style={{ color: "#A1A1AA", fontSize: 11, letterSpacing: "0.14em", textTransform: "uppercase", lineHeight: "14px" }}>
-          Overview · {formatToday()}
-        </div>
-        <div style={{ color: "#18181B", fontSize: 32, letterSpacing: "-0.02em", lineHeight: "36px" }}>
+      {/* Compact greeting */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <h1 style={{ margin: 0, fontSize: 26, fontWeight: 700, color: "#EDECEA", letterSpacing: "-0.02em", lineHeight: "32px" }}>
           {greeting}{selectedAgent ? `, ${ownerDisplayName(selectedAgent.email)}` : ""}
-        </div>
+        </h1>
         {selectedAgent && (
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
-            <span style={{ fontSize: 12, color: "#A1A1AA" }}>Showing data for:</span>
-            <span style={{ background: "#F0EDFF", borderRadius: 4, padding: "2px 8px", fontSize: 12, fontWeight: 500, color: "#6510F4" }}>{selectedAgent.agent_type}</span>
-          </div>
+          <span style={{ background: "#F0EDFF", borderRadius: 4, padding: "2px 8px", fontSize: 12, fontWeight: 500, color: "#6510F4" }}>{selectedAgent.agent_type}</span>
         )}
       </div>
 
-      {/* Integrate cognee into your system */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-        <span style={{ fontSize: 20, fontWeight: 300, color: "#18181B", fontFamily: '"TWK Lausanne", system-ui, sans-serif' }}>Integrate cognee into your system</span>
-        <QuickstartCards />
-      </div>
-
-      {/* Stat cards */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <div style={{ display: "flex", justifyContent: "flex-end" }}>
-        <RangePicker value={range} onChange={setRange} />
-      </div>
-      <div style={{ display: "flex", gap: 16 }}>
-        {/* Merged metrics box — takes 3 of the 5 flex units */}
-        <div style={{ flex: 3, border: "1px solid #E4E4E7", borderRadius: 12, overflow: "hidden", display: "flex" }}>
-          {/* Column 1 */}
-          <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
-            <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: 4 }}>
-              <span style={{ color: "#71717A", fontSize: 11, letterSpacing: "0.14em", lineHeight: "14px", textTransform: "uppercase" }}>Connected agents</span>
-              <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-                <span style={{ color: "#18181B", fontSize: 32, letterSpacing: "-0.02em", lineHeight: "36px", fontVariantNumeric: "tabular-nums" }}>{connectedAgents.length}</span>
-                <span style={{ color: "#71717A", fontSize: 13, lineHeight: "16px" }}>{liveAgents.length > 0 ? `${liveAgents.length} live now` : "none live"}</span>
-              </div>
-            </div>
-            <div style={{ height: 1, background: "#E4E4E7" }} />
-            <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: 4 }}>
-              <span style={{ color: "#71717A", fontSize: 11, letterSpacing: "0.14em", lineHeight: "14px", textTransform: "uppercase" }}>API calls, {range}</span>
-              <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-                <span style={{ color: "#18181B", fontSize: 32, letterSpacing: "-0.02em", lineHeight: "36px", fontVariantNumeric: "tabular-nums" }}>{apiCalls.toLocaleString()}</span>
-                <span style={{ color: "#71717A", fontSize: 13, lineHeight: "16px" }}>across {sessionCount.toLocaleString()} session{sessionCount !== 1 ? "s" : ""}</span>
-              </div>
-            </div>
+      {/* ── Low-credit warning banner ────────────────────────────────────── */}
+      {showCreditPctBanner && (
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap",
+          background: creditsSpentPct >= 100 ? "rgba(239,68,68,0.10)" : "rgba(234,179,8,0.10)",
+          border: `1px solid ${creditsSpentPct >= 100 ? "rgba(239,68,68,0.30)" : "rgba(234,179,8,0.30)"}`,
+          borderRadius: 10, padding: "12px 16px",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+              stroke={creditsSpentPct >= 100 ? "#EF4444" : "#EAB308"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+              <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+            </svg>
+            <span style={{ fontSize: 13, color: creditsSpentPct >= 100 ? "#FCA5A5" : "#FDE047" }}>
+              {creditsSpentPct >= 100
+                ? "Your workspace has used all available credits — agent requests may fail."
+                : `Your workspace has used ${creditsSpentPct}% of available credits.`}
+            </span>
           </div>
-          {/* Vertical divider */}
-          <div style={{ width: 1, background: "#E4E4E7", flexShrink: 0 }} />
-          {/* Column 2 */}
-          <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
-            <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: 4 }}>
-              <span style={{ color: "#71717A", fontSize: 11, letterSpacing: "0.14em", lineHeight: "14px", textTransform: "uppercase" }}>Brains</span>
-              <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-                <span style={{ color: "#18181B", fontSize: 32, letterSpacing: "-0.02em", lineHeight: "36px", fontVariantNumeric: "tabular-nums" }}>{filteredDatasets.length.toLocaleString()}</span>
-                <span style={{ color: "#71717A", fontSize: 13, lineHeight: "16px" }}>{sessionCount.toLocaleString()} session{sessionCount !== 1 ? "s" : ""}</span>
-              </div>
-            </div>
-            <div style={{ height: 1, background: "#E4E4E7" }} />
-            <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: 4 }}>
-              <span style={{ color: "#71717A", fontSize: 11, letterSpacing: "0.14em", lineHeight: "14px", textTransform: "uppercase" }}>Success rate</span>
-              <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-                <span style={{ color: "#18181B", fontSize: 32, letterSpacing: "-0.02em", lineHeight: "36px", fontVariantNumeric: "tabular-nums" }}>{successRate.toFixed(1)}%</span>
-                <span style={{ color: successRate >= 95 ? "#16A34A" : successRate >= 80 ? "#D97706" : "#DC2626", fontSize: 13, lineHeight: "16px" }}>
-                  {successRate >= 95 ? "healthy" : successRate >= 80 ? "degraded" : "critical"}
-                </span>
-              </div>
-            </div>
-          </div>
-          {/* Vertical divider */}
-          <div style={{ width: 1, background: "#E4E4E7", flexShrink: 0 }} />
-          {/* Column 3 */}
-          <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
-            <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: 4 }}>
-              <span style={{ color: "#71717A", fontSize: 11, letterSpacing: "0.14em", lineHeight: "14px", textTransform: "uppercase" }}>Nodes</span>
-              <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-                <span style={{ color: "#18181B", fontSize: 32, letterSpacing: "-0.02em", lineHeight: "36px", fontVariantNumeric: "tabular-nums" }}>{graphNodes != null ? graphNodes.toLocaleString() : "—"}</span>
-              </div>
-            </div>
-            <div style={{ height: 1, background: "#E4E4E7" }} />
-            <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: 4 }}>
-              <span style={{ color: "#71717A", fontSize: 11, letterSpacing: "0.14em", lineHeight: "14px", textTransform: "uppercase" }}>Edges</span>
-              <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-                <span style={{ color: "#18181B", fontSize: 32, letterSpacing: "-0.02em", lineHeight: "36px", fontVariantNumeric: "tabular-nums" }}>{graphEdges != null ? graphEdges.toLocaleString() : "—"}</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Activity & Memory — takes 2 of the 5 flex units */}
-        <div style={{ flex: 2, border: "1px solid #E4E4E7", borderRadius: 12, padding: "20px 24px", display: "flex", flexDirection: "column", gap: 16 }}>
-          <span style={{ color: "#71717A", fontSize: 11, letterSpacing: "0.14em", lineHeight: "14px", textTransform: "uppercase" }}>Activity & Memory</span>
-          <div style={{ display: "flex", flexDirection: "column", flex: 1 }}>
-            {filteredActivity.slice(0, 3).map((row, i) => (
-              <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 0", borderBottom: i < Math.min(filteredActivity.length, 3) - 1 ? "1px solid #F4F4F5" : "none", minWidth: 0 }}>
-                {row.kind === "session" ? (
-                  <>
-                    <span style={{ width: 6, height: 6, borderRadius: "50%", flexShrink: 0, background: row.session.effective_status === "failed" ? "#EF4444" : row.session.effective_status === "running" ? "#3B82F6" : "#22C55E" }} />
-                    <span style={{ fontSize: 11, fontWeight: 500, color: row.session.effective_status === "failed" ? "#EF4444" : row.session.effective_status === "running" ? "#3B82F6" : "#16A34A", flexShrink: 0, textTransform: "capitalize" }}>{row.session.effective_status || "session"}</span>
-                    <span style={{ fontSize: 12, color: "#18181B", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>{labelFromSession(row.session)}</span>
-                    <span style={{ fontSize: 11, color: "#A1A1AA", flexShrink: 0, whiteSpace: "nowrap" }}>{row.session.last_activity_at ? timeAgo(row.session.last_activity_at) : ""}</span>
-                  </>
-                ) : (
-                  <>
-                    <span style={{ width: 6, height: 6, borderRadius: "50%", flexShrink: 0, background: "#6510F4" }} />
-                    <span style={{ fontSize: 11, fontWeight: 500, color: "#16A34A", flexShrink: 0 }}>ready</span>
-                    <span style={{ fontSize: 12, color: "#18181B", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>{row.dataset.name}</span>
-                    <span style={{ fontSize: 11, color: "#A1A1AA", flexShrink: 0, whiteSpace: "nowrap" }}>{row.timeStr ? timeAgo(new Date(row.timeStr).toISOString()) : ""}</span>
-                  </>
-                )}
-              </div>
-            ))}
-            {filteredActivity.length === 0 && (
-              <span style={{ fontSize: 13, color: "#A1A1AA" }}>No activity yet.</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+            {isOwner ? (
+              <a href="/billing" style={{ fontSize: 13, fontWeight: 500, color: creditsSpentPct >= 100 ? "#FCA5A5" : "#FDE047", textDecoration: "underline", textUnderlineOffset: 3 }}>
+                Top up credits →
+              </a>
+            ) : (
+              <span style={{ fontSize: 13, color: "rgba(237,236,234,0.5)" }}>Ask the workspace owner to top up.</span>
             )}
-          </div>
-        </div>
-      </div>
-      </div>
-
-      {/* SDK modal */}
-      {showSdkModal && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.3)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={() => setShowSdkModal(false)}>
-          <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, width: 520, boxShadow: "0 16px 48px rgba(0,0,0,0.12)", overflow: "hidden", fontFamily: '"Inter", system-ui, sans-serif' }}>
-            {/* Header */}
-            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "16px 20px", borderBottom: "1px solid #E4E4E7" }}>
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M7 8l5 4 5-4M7 16l5-4 5 4" stroke="#6510F4" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
-              <span style={{ fontSize: 14, fontWeight: 600, color: "#18181B" }}>Connect with Python SDK</span>
-              <button onClick={() => setShowSdkModal(false)} className="cursor-pointer" style={{ marginLeft: "auto", background: "none", border: "none", color: "#A1A1AA", fontSize: 16, padding: 2 }}>&#10005;</button>
-            </div>
-            {/* Steps */}
-            <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 16 }}>
-              {/* Step 1 */}
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <div className="flex items-center justify-center flex-shrink-0 rounded-full" style={{ width: 24, height: 24, background: "#F0EDFF" }}>
-                  <span style={{ color: "#6510F4", fontSize: 12, fontWeight: 600 }}>1</span>
-                </div>
-                <span style={{ fontSize: 13, fontWeight: 500, color: "#18181B" }}>Install Cognee</span>
-              </div>
-              <div className="flex items-center justify-between" style={{ background: "#18181B", borderRadius: 8, padding: "10px 16px" }}>
-                <span style={{ fontSize: 13, color: "#A1A1AA", fontFamily: '"Fira Code", monospace' }}>pip install cognee</span>
-                <CopyButton text="pip install cognee" />
-              </div>
-
-              <div style={{ height: 1, background: "#E4E4E7" }} />
-
-              {/* Step 2 */}
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <div className="flex items-center justify-center flex-shrink-0 rounded-full" style={{ width: 24, height: 24, background: "#F0EDFF" }}>
-                  <span style={{ color: "#6510F4", fontSize: 12, fontWeight: 600 }}>2</span>
-                </div>
-                <span style={{ fontSize: 13, fontWeight: 500, color: "#18181B" }}>Get your API Base URL and API key</span>
-              </div>
-              <Link href="/api-keys" style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: "#6510F4", textDecoration: "none", fontWeight: 500 }}>
-                Go to API Keys
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6510F4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14" /><path d="M12 5l7 7-7 7" /></svg>
-              </Link>
-
-              <div style={{ height: 1, background: "#E4E4E7" }} />
-
-              {/* Step 3 */}
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <div className="flex items-center justify-center flex-shrink-0 rounded-full" style={{ width: 24, height: 24, background: "#F0EDFF" }}>
-                  <span style={{ color: "#6510F4", fontSize: 12, fontWeight: 600 }}>3</span>
-                </div>
-                <span style={{ fontSize: 13, fontWeight: 500, color: "#18181B" }}>Connect your agent</span>
-              </div>
-              <div style={{ background: "#18181B", borderRadius: 8, padding: "12px 16px", position: "relative" }}>
-                <pre style={{ margin: 0, fontSize: 12, lineHeight: "20px", fontFamily: '"Fira Code", monospace', color: "#A1A1AA" }}>
-{`import asyncio
-import cognee
-
-async def main():
-    await cognee.serve(
-        url="<your-api-base-url>",
-        api_key="<your-api-key>"
-    )
-
-    await cognee.remember("Your data here")
-
-    results = await cognee.recall("What do we know?")
-    print(results)
-
-asyncio.run(main())`}
-                </pre>
-                <span style={{ position: "absolute", top: 12, right: 16 }}>
-                  <CopyButton text={`import asyncio\nimport cognee\n\nasync def main():\n    await cognee.serve(\n        url="<your-api-base-url>",\n        api_key="<your-api-key>"\n    )\n\n    await cognee.remember("Your data here")\n\n    results = await cognee.recall("What do we know?")\n    print(results)\n\nasyncio.run(main())`} />
-                </span>
-              </div>
-            </div>
+            <button
+              onClick={() => {
+                try { sessionStorage.setItem("cognee-credits-banner-dismissed", "1"); } catch {}
+                setCreditsBannerDismissed(true);
+              }}
+              aria-label="Dismiss"
+              style={{ background: "none", border: "none", cursor: "pointer", padding: 2, color: "rgba(237,236,234,0.4)", lineHeight: 1 }}
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+              </svg>
+            </button>
           </div>
         </div>
       )}
 
+      {/* ── Voucher banner / low-balance red banner ──────────────────────── */}
+      {showLowBalanceBanner ? (
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap",
+          background: "rgba(239,68,68,0.10)",
+          border: "1px solid rgba(239,68,68,0.30)",
+          borderRadius: 10, padding: "12px 16px",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+              stroke="#EF4444" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+              <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+            </svg>
+            <span style={{ fontSize: 13, color: "#FCA5A5" }}>
+              Your Token Balance is below 1 USD. You can recharge credits{" "}
+              <a href="/billing" style={{ color: "#FCA5A5", textDecoration: "underline", textUnderlineOffset: 3 }}>
+                here
+              </a>
+              .
+            </span>
+          </div>
+        </div>
+      ) : showVoucherBanner ? (
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap",
+          background: "rgba(188,155,255,0.10)",
+          border: "1px solid rgba(188,155,255,0.30)",
+          borderRadius: 10, padding: "12px 16px",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+              stroke="#BC9BFF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M20 12a2 2 0 0 1 2-2V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v3a2 2 0 0 1 0 4v3a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-3a2 2 0 0 1-2-2z"/>
+              <line x1="13" y1="5" x2="13" y2="19"/>
+            </svg>
+            <span style={{ fontSize: 13, color: "#D9C7FF" }}>
+              You have a voucher? Redeem it here.
+            </span>
+          </div>
+          <a href="/billing" style={{
+            flexShrink: 0, background: "#BC9BFF", color: "#1e1e1c",
+            borderRadius: 8, padding: "8px 16px", fontSize: 13, fontWeight: 500,
+            textDecoration: "none", whiteSpace: "nowrap",
+          }}>
+            Redeem voucher →
+          </a>
+        </div>
+      ) : null}
+
+      {/* ── KPI strip ────────────────────────────────────────────────────── */}
+      <CompactStatsStrip
+        liveAgents={liveAgents.length}
+        apiCalls={apiCalls}
+        sessionCount={sessionCount}
+        graphNodes={graphNodes}
+        graphEdges={graphEdges}
+        brains={filteredDatasets.length}
+        range={range}
+        dataLoading={dataLoading}
+      />
+
+      {/* Agent + brain connection cards */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <div>
+          <div style={{ fontSize: 18, fontWeight: 700, color: "#EDECEA", lineHeight: "24px" }}>Get started</div>
+          <div style={{ fontSize: 13, color: "rgba(237,236,234,0.65)", marginTop: 3 }}>Connect your AI agents to give them persistent memory</div>
+        </div>
+        <AgentConnectionSection
+          onUploadClick={() => uploadInputRef.current?.click()}
+          isUploading={isUploading}
+          serviceUrl={serviceUrl}
+          apiKey={apiKey}
+          isInitializing={isInitializing}
+          hasDocuments={datasets.length > 0}
+          cogniInstance={cogniInstance}
+          integrationConnected={connectedIntegrations}
+        />
+      </div>
+
+      {/* ── HERO: Agent memory terminal ─────────────────────────────────── */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+
+        {/* Section header */}
+        <div>
+          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#EDECEA", letterSpacing: "-0.01em", lineHeight: "24px" }}>Memory Activity</h2>
+          <p style={{ margin: "3px 0 0", fontSize: 13, color: "rgba(237,236,234,0.55)" }}>A live log of every search against your memory — by your agents and by you. Click any row to see what was searched and why it answered.</p>
+        </div>
+
+        <AgentActivityTerminal
+          sessions={sessions}
+          runs={filteredRuns}
+          agents={agents}
+          datasets={filteredDatasets}
+          selectedDataset={selectedDataset}
+          cogniInstance={cogniInstance}
+          dataLoading={dataLoading}
+          range={range}
+          onNavigate={(path) => router.push(path)}
+        />
+      </div>
+
+      {/* ── Use-case cards — infinite slider ─────────────────────────── */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        <div>
+          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#EDECEA", letterSpacing: "-0.01em", lineHeight: "24px" }}>What you can build</h2>
+          <p style={{ margin: "3px 0 0", fontSize: 13, color: "rgba(237,236,234,0.65)" }}>Persistent memory and knowledge graphs for any domain</p>
+        </div>
+
+        <style>{`
+          .usecase-slider { overflow-x: auto; scrollbar-width: none; -ms-overflow-style: none; cursor: grab; user-select: none; }
+          .usecase-slider::-webkit-scrollbar { display: none; }
+          .usecase-slider.is-dragging { cursor: grabbing; }
+          .usecase-card { transition: border-color 200ms, box-shadow 200ms, background 200ms; flex: 0 0 280px; height: 160px; border-radius: 14px; overflow: hidden; border: 1px solid rgba(255,255,255,0.1); text-decoration: none; display: flex; align-items: center; justify-content: center; padding: 24px; background: rgba(0,0,0,0.45); backdrop-filter: blur(12px); text-align: center; }
+          .usecase-card:hover { border-color: rgba(188,155,255,0.35); box-shadow: 0 8px 32px rgba(188,155,255,0.20); background: rgba(0,0,0,0.6); }
+        `}</style>
+
+        {/* Drag-to-scroll slider with edge fades + arrow affordances.
+            Fades only appear when there's actually more content in that
+            direction — otherwise the leftmost card's left border would be
+            occluded by a constant fade. */}
+        <div style={{ position: "relative" }}>
+          {canScrollLeft && (
+            <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 64, background: "linear-gradient(to right, #000000, rgba(0,0,0,0))", zIndex: 2, pointerEvents: "none" }} />
+          )}
+          {canScrollRight && (
+            <div style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: 64, background: "linear-gradient(to left, #000000, rgba(0,0,0,0))", zIndex: 2, pointerEvents: "none" }} />
+          )}
+          {canScrollLeft && (
+            <button
+              onClick={() => scrollSlider(-320)}
+              aria-label="Scroll use cases left"
+              style={{ position: "absolute", left: 8, top: "50%", transform: "translateY(-50%)", zIndex: 3, width: 36, height: 36, borderRadius: "50%", border: "1px solid rgba(255,255,255,0.15)", background: "rgba(20,20,22,0.85)", backdropFilter: "blur(8px)", color: "#EDECEA", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6" /></svg>
+            </button>
+          )}
+          {canScrollRight && (
+            <button
+              onClick={() => scrollSlider(320)}
+              aria-label="Scroll use cases right"
+              style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", zIndex: 3, width: 36, height: 36, borderRadius: "50%", border: "1px solid rgba(255,255,255,0.15)", background: "rgba(20,20,22,0.85)", backdropFilter: "blur(8px)", color: "#EDECEA", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6" /></svg>
+            </button>
+          )}
+
+          <div
+            ref={sliderRef}
+            className="usecase-slider"
+            onMouseDown={(e) => {
+              sliderDragging.current = true;
+              sliderStartX.current = e.pageX - (sliderRef.current?.offsetLeft ?? 0);
+              sliderScrollLeft.current = sliderRef.current?.scrollLeft ?? 0;
+              sliderRef.current?.classList.add("is-dragging");
+            }}
+            onMouseMove={(e) => {
+              if (!sliderDragging.current || !sliderRef.current) return;
+              e.preventDefault();
+              const x = e.pageX - sliderRef.current.offsetLeft;
+              sliderRef.current.scrollLeft = sliderScrollLeft.current - (x - sliderStartX.current) * 1.2;
+            }}
+            onMouseUp={() => { sliderDragging.current = false; sliderRef.current?.classList.remove("is-dragging"); }}
+            onMouseLeave={() => { sliderDragging.current = false; sliderRef.current?.classList.remove("is-dragging"); }}
+            style={{ display: "flex", gap: 16, padding: "4px 0 8px" }}
+          >
+            {([
+              "A second brain",
+              "Sales & deal intelligence",
+              "Investment & research",
+              "Docs & manuals",
+              "Memory for coding agents",
+            ]).map((title) => (
+              <a
+                key={title}
+                href="https://docs.cognee.ai"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="usecase-card"
+                draggable={false}
+                onClick={(e) => { if (sliderRef.current && sliderRef.current.scrollLeft !== sliderScrollLeft.current) e.preventDefault(); }}
+              >
+                <span style={{ fontSize: 22, fontWeight: 500, color: "#EDECEA", fontFamily: '"TWKLausanne", sans-serif', letterSpacing: "0.08em", lineHeight: 1.25, textTransform: "uppercase" }}>
+                  {title}
+                </span>
+              </a>
+            ))}
+          </div>
+        </div>
+      </div>
+
       {/* Upload done modal */}
       {showUploadDoneModal && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.3)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={() => setShowUploadDoneModal(null)}>
-          <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, padding: 28, width: 440, display: "flex", flexDirection: "column", gap: 20, boxShadow: "0 16px 48px rgba(0,0,0,0.12)" }}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", backdropFilter: "blur(4px)", WebkitBackdropFilter: "blur(4px)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={() => setShowUploadDoneModal(null)}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "rgba(15,15,15,0.92)", backdropFilter: "blur(16px)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: 28, width: 440, maxWidth: "calc(100vw - 32px)", display: "flex", flexDirection: "column", gap: 20, boxShadow: "0 20px 60px rgba(0,0,0,0.6)" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <div style={{ width: 36, height: 36, borderRadius: 8, background: "#DCFCE7", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#16A34A" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
+              <div style={{ width: 36, height: 36, borderRadius: 8, background: "rgba(34,197,94,0.15)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#22C55E" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
               </div>
               <div>
-                <h2 style={{ fontSize: 17, fontWeight: 600, color: "#18181B", margin: 0 }}>Knowledge graph built</h2>
-                <p style={{ fontSize: 13, color: "#71717A", margin: 0 }}>&ldquo;{showUploadDoneModal.datasetName}&rdquo; is now searchable.</p>
+                <h2 style={{ fontSize: 17, fontWeight: 700, color: "#EDECEA", margin: 0 }}>Knowledge graph built</h2>
+                <p style={{ fontSize: 13, color: "rgba(237,236,234,0.65)", margin: 0 }}>&ldquo;{showUploadDoneModal.datasetName}&rdquo; is now searchable.</p>
               </div>
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               <button
                 onClick={() => { setShowUploadDoneModal(null); router.push("/search"); }}
-                className="cursor-pointer hover:bg-cognee-hover"
-                style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", borderRadius: 8, border: "1px solid #E4E4E7", background: "#fff", textAlign: "left", fontFamily: "inherit", width: "100%" }}
+                className="cursor-pointer hover:bg-white/10"
+                style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.06)", textAlign: "left", fontFamily: "inherit", width: "100%" }}
               >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6510F4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgba(188,155,255,0.60)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
                 <div>
-                  <div style={{ fontSize: 14, fontWeight: 500, color: "#18181B" }}>Search your data</div>
-                  <div style={{ fontSize: 12, color: "#71717A" }}>Ask questions about your knowledge graph</div>
+                  <div style={{ fontSize: 14, fontWeight: 500, color: "#EDECEA" }}>Search your data</div>
+                  <div style={{ fontSize: 12, color: "rgba(237,236,234,0.65)" }}>Ask questions about your knowledge graph</div>
                 </div>
               </button>
               <button
                 onClick={() => { setShowUploadDoneModal(null); router.push(`/datasets/${showUploadDoneModal.datasetId}`); }}
-                className="cursor-pointer hover:bg-cognee-hover"
-                style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", borderRadius: 8, border: "1px solid #E4E4E7", background: "#fff", textAlign: "left", fontFamily: "inherit", width: "100%" }}
+                className="cursor-pointer hover:bg-white/10"
+                style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.06)", textAlign: "left", fontFamily: "inherit", width: "100%" }}
               >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6510F4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="6" cy="6" r="3" /><circle cx="18" cy="6" r="3" /><circle cx="12" cy="18" r="3" /><line x1="8.5" y1="7.5" x2="10.5" y2="16" /><line x1="15.5" y1="7.5" x2="13.5" y2="16" /></svg>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgba(188,155,255,0.60)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="6" cy="6" r="3" /><circle cx="18" cy="6" r="3" /><circle cx="12" cy="18" r="3" /><line x1="8.5" y1="7.5" x2="10.5" y2="16" /><line x1="15.5" y1="7.5" x2="13.5" y2="16" /></svg>
                 <div>
-                  <div style={{ fontSize: 14, fontWeight: 500, color: "#18181B" }}>Inspect the knowledge graph</div>
-                  <div style={{ fontSize: 12, color: "#71717A" }}>View entities and relationships</div>
+                  <div style={{ fontSize: 14, fontWeight: 500, color: "#EDECEA" }}>Inspect the knowledge graph</div>
+                  <div style={{ fontSize: 12, color: "rgba(237,236,234,0.65)" }}>View entities and relationships</div>
                 </div>
               </button>
               <button
                 onClick={() => { setShowUploadDoneModal(null); router.push("/knowledge-graph"); }}
-                className="cursor-pointer hover:bg-cognee-hover"
-                style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", borderRadius: 8, border: "1px solid #E4E4E7", background: "#fff", textAlign: "left", fontFamily: "inherit", width: "100%" }}
+                className="cursor-pointer hover:bg-white/10"
+                style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.06)", textAlign: "left", fontFamily: "inherit", width: "100%" }}
               >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6510F4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M3 9h18M9 3v18" /></svg>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgba(188,155,255,0.60)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M3 9h18M9 3v18" /></svg>
                 <div>
-                  <div style={{ fontSize: 14, fontWeight: 500, color: "#18181B" }}>Explore the knowledge graph</div>
-                  <div style={{ fontSize: 12, color: "#71717A" }}>Open the full graph visualization</div>
+                  <div style={{ fontSize: 14, fontWeight: 500, color: "#EDECEA" }}>Explore the knowledge graph</div>
+                  <div style={{ fontSize: 12, color: "rgba(237,236,234,0.65)" }}>Open the full graph visualization</div>
                 </div>
               </button>
             </div>
             <button
               onClick={() => setShowUploadDoneModal(null)}
-              className="cursor-pointer"
-              style={{ background: "none", border: "1px solid #E4E4E7", borderRadius: 8, padding: "8px 16px", fontSize: 13, fontWeight: 500, color: "#71717A", fontFamily: "inherit", alignSelf: "flex-end" }}
+              className="cursor-pointer hover:bg-white/10"
+              style={{ background: "none", border: "1px solid rgba(255,255,255,0.2)", borderRadius: 8, padding: "8px 16px", fontSize: 13, fontWeight: 500, color: "rgba(237,236,234,0.65)", fontFamily: "inherit", alignSelf: "flex-end" }}
             >
               Stay here
             </button>
@@ -685,21 +733,12 @@ asyncio.run(main())`}
         </div>
       )}
 
-      {/* Search */}
-      <DashboardSearch datasets={filteredDatasets} cogniInstance={cogniInstance} sessions={sessions} hasDocuments={filteredRuns.length > 0 || (graphNodes ?? 0) > 0} />
+      </div>{/* end content zIndex:3 wrapper */}
     </div>
   );
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────
-
-function formatToday(): string {
-  const now = new Date();
-  const weekday = now.toLocaleDateString("en-US", { weekday: "long" });
-  const day = now.getDate();
-  const month = now.toLocaleDateString("en-US", { month: "long" });
-  return `${weekday}, ${day} ${month}`;
-}
 
 function greetingForTime(): string {
   const h = new Date().getHours();
@@ -708,612 +747,688 @@ function greetingForTime(): string {
   return "Good evening";
 }
 
-function durationString(startedISO: string | null, endedISO: string | null): string {
-  if (!startedISO) return "—";
-  const start = new Date(startedISO).getTime();
-  const end = endedISO ? new Date(endedISO).getTime() : Date.now();
-  const s = Math.max(0, (end - start) / 1000);
-  if (s < 1) return "0s";
-  if (s < 60) return `${s.toFixed(1)}s`;
-  const m = Math.floor(s / 60);
-  return `${m}m ${Math.round(s % 60)}s`;
-}
-
 // ── Sub-components ───────────────────────────────────────────────────────
 
-function RangePicker({ value, onChange }: { value: Range; onChange: (v: Range) => void }) {
-  const opts: Range[] = ["24h", "7d", "30d"];
-  return (
-    <div style={{ display: "flex", alignItems: "center", background: "#fff", border: "1px solid #E4E4E7", borderRadius: 8, overflow: "hidden" }}>
-      {opts.map((o) => (
-        <button
-          key={o}
-          onClick={() => onChange(o)}
-          style={{
-            paddingBlock: 8,
-            paddingInline: 14,
-            fontFamily: "inherit",
-            fontSize: 13,
-            lineHeight: "16px",
-            color: value === o ? "#FFFFFF" : "#3F3F46",
-            background: value === o ? "#18181B" : "transparent",
-            border: "none",
-            cursor: "pointer",
-          }}
-        >
-          {o === "24h" ? "Last 24 hours" : o === "7d" ? "Last 7 days" : "Last 30 days"}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function StatCard({ label, value, suffix, badge, icon, iconBg, chip }: {
-  label: string;
-  value: string;
-  suffix?: string;
-  badge?: React.ReactNode;
-  icon?: React.ReactNode;
-  iconBg?: string;
-  chip?: { label: string; color: string; bg: string };
+function CompactStatsStrip({
+  liveAgents, apiCalls, sessionCount, graphNodes, graphEdges, brains, dataLoading,
+}: {
+  liveAgents: number; apiCalls: number; sessionCount: number;
+  graphNodes: number | null; graphEdges: number | null;
+  brains: number; range: Range; dataLoading: boolean;
 }) {
-  return (
-    <div style={{ flex: 1, background: "#fff", border: "1px solid #E4E4E7", borderRadius: 12, paddingBlock: 20, paddingInline: 20, display: "flex", flexDirection: "column", gap: 12 }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <span style={{ color: "#71717A", fontSize: 11, letterSpacing: "0.14em", lineHeight: "14px", textTransform: "uppercase" }}>{label}</span>
-        {chip ? (
-          <div style={{ background: chip.bg, borderRadius: 4, paddingBlock: 2, paddingInline: 8 }}>
-            <span style={{ color: chip.color, fontSize: 11, lineHeight: "14px" }}>{chip.label}</span>
-          </div>
-        ) : icon ? (
-          <div style={{ background: iconBg || "#F4F4F5", borderRadius: 6, width: 24, height: 24, display: "flex", alignItems: "center", justifyContent: "center" }}>{icon}</div>
-        ) : null}
-      </div>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-        <span style={{ color: "#18181B", fontSize: 32, letterSpacing: "-0.02em", lineHeight: "36px", fontVariantNumeric: "tabular-nums" }}>{value}</span>
-        {suffix && <span style={{ color: "#71717A", fontSize: 13, lineHeight: "16px" }}>{suffix}</span>}
-      </div>
-      {badge}
-    </div>
-  );
-}
+  // Graph counts arrive on a separate async path (null until fetched).
+  // Gate each metric on ALL inputs needed for its final value being ready,
+  // so we go skeleton → final number ONCE, no intermediate 0 or "—".
+  const graphLoading = dataLoading || graphNodes === null || graphEdges === null;
+  const metrics: { label: string; value: number; loading: boolean; skeletonWidth: number }[] = [
+    {
+      // "Active Agents" — agents with a session currently running. Label stays "Agents".
+      label: "Agents",
+      value: liveAgents,
+      loading: dataLoading,
+      skeletonWidth: 24,
+    },
+    {
+      label: "Sessions",
+      value: sessionCount,
+      loading: dataLoading,
+      skeletonWidth: 36,
+    },
+    {
+      label: "API calls",
+      value: apiCalls,
+      loading: dataLoading,
+      skeletonWidth: 36,
+    },
+    {
+      label: "Graph nodes",
+      value: graphNodes ?? 0,
+      loading: graphLoading,
+      skeletonWidth: 48,
+    },
+    {
+      label: "Graph edges",
+      value: graphEdges ?? 0,
+      loading: graphLoading,
+      skeletonWidth: 48,
+    },
+    {
+      label: "Brains",
+      value: brains,
+      loading: dataLoading,
+      skeletonWidth: 20,
+    },
+  ];
 
-function AgentStack({ agents, live }: { agents: { id: string; agent_type: string }[]; live?: Set<string> }) {
-  const palette = ["#18181B", "#6510F4", "#D97706", "#16A34A"];
   return (
-    <div style={{ display: "flex", alignItems: "center" }}>
-      {agents.slice(0, 3).map((a, i) => {
-        const initials = a.agent_type
-          .split(/[\s-]+/)
-          .filter(Boolean)
-          .map((p) => p[0]?.toUpperCase())
-          .join("")
-          .slice(0, 2) || "?";
-        const isLive = live?.has(a.id);
-        return (
-          <div key={a.id} style={{ position: "relative", marginLeft: i === 0 ? 0 : -6 }}>
-            <div style={{ width: 24, height: 24, borderRadius: "50%", border: "2px solid #FFFFFF", background: palette[i % palette.length], display: "flex", alignItems: "center", justifyContent: "center", color: "#FFFFFF", fontSize: 9, lineHeight: "12px" }}>
-              {initials}
+    <div style={{ background: "rgba(255,255,255,0.06)", backdropFilter: "blur(12px)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, overflow: "hidden" }}>
+      <div style={{ display: "flex", overflowX: "auto" }}>
+        {metrics.map((m, i) => {
+          const isZero = !m.loading && m.value === 0;
+          return (
+            <div key={m.label} style={{ display: "flex", alignItems: "stretch", flex: "1 1 0", minWidth: 88 }}>
+              <div style={{ flex: 1, padding: "14px 18px", display: "flex", flexDirection: "column", gap: 4 }}>
+                <span style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", letterSpacing: "0.05em", textTransform: "uppercase", whiteSpace: "nowrap" }}>{m.label}</span>
+                <span style={{ fontSize: 22, fontWeight: 700, color: isZero ? "rgba(255,255,255,0.2)" : "#EDECEA", fontVariantNumeric: "tabular-nums", lineHeight: "28px", display: "flex", alignItems: "center", minHeight: 28 }}>
+                  {m.loading ? <SkeletonBar width={m.skeletonWidth} height={18} /> : m.value.toLocaleString()}
+                </span>
+              </div>
+              {i < metrics.length - 1 && (
+                <div style={{ width: 1, background: "rgba(255,255,255,0.08)", alignSelf: "stretch", flexShrink: 0 }} />
+              )}
             </div>
-            {isLive && <div style={{ position: "absolute", top: -1, right: -1, width: 8, height: 8, borderRadius: "50%", background: "#22C55E", border: "1.5px solid #FFFFFF" }} />}
-          </div>
-        );
-      })}
-      {agents.length === 0 && <span style={{ fontSize: 12, color: "#A1A1AA" }}>none yet</span>}
+          );
+        })}
+      </div>
     </div>
   );
 }
 
-function DatasetTags({ datasets }: { datasets: { id: string; name: string }[] }) {
-  if (datasets.length === 0) return <span style={{ fontSize: 11, color: "#A1A1AA" }}>no brains yet</span>;
-  const visible = datasets.slice(0, 2);
-  const more = datasets.length - visible.length;
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-      {visible.map((d) => (
-        <span key={d.id} style={{ background: "#F4F4F5", borderRadius: 4, paddingBlock: 2, paddingInline: 8, color: "#3F3F46", fontSize: 11, lineHeight: "14px" }}>{d.name}</span>
-      ))}
-      {more > 0 && <span style={{ color: "#A1A1AA", fontSize: 11 }}>+{more} more</span>}
-    </div>
-  );
-}
+// ── AgentConnectionSection (popup modal flow) ────────────────────────────
 
-function Sparkline() {
-  return (
-    <svg width="100%" height="28" viewBox="0 0 240 28" fill="none" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg" style={{ flexShrink: 0 }}>
-      <path d="M0 22 L15 20 L30 17 L45 18 L60 13 L75 15 L90 10 L105 12 L120 8 L135 11 L150 6 L165 9 L180 4 L195 7 L210 3 L225 5 L240 2" stroke="#71717A" strokeWidth="1.5" fill="none" strokeLinecap="round" />
-      <path d="M0 22 L15 20 L30 17 L45 18 L60 13 L75 15 L90 10 L105 12 L120 8 L135 11 L150 6 L165 9 L180 4 L195 7 L210 3 L225 5 L240 2 L240 28 L0 28 Z" fill="#71717A" style={{ opacity: 0.08 }} />
-    </svg>
-  );
-}
+// ── Skill copy block ──────────────────────────────────────────────────────
 
-function ErrorPipelineTag({ runs }: { runs: PipelineRun[] }) {
-  const errored = runs.find((r) => r.status.includes("ERRORED"));
-  if (!errored) return <span style={{ color: "#71717A", fontSize: 12 }}>no errors</span>;
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-      <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#DC2626" }} />
-      <span style={{ color: "#71717A", fontSize: 12, lineHeight: "16px" }}>{errored.pipeline_name}</span>
-    </div>
-  );
-}
+function SkillCopyBlock({ path, content }: { path: string; content: string }) {
+  const [phase, setPhase] = useState<"idle" | "copying" | "done">("idle");
 
-function OnboardingItem({ title, subtitle, icon, done, accent, loading, href, onClick, highlightSubtitle }: {
-  title: string; subtitle: string; icon: React.ReactNode;
-  done?: boolean; accent?: boolean; loading?: boolean;
-  href?: string; onClick?: () => void; highlightSubtitle?: boolean;
-}) {
-  const content = (
-    <div style={{ display: "flex", alignItems: "center", flex: 1, gap: 12, paddingBlock: 14, paddingInline: 16, background: accent ? "#F0EDFF" : "transparent", borderRadius: 8, borderRight: accent ? "none" : "1px solid #F4F4F5" }}>
-      <div style={{ position: "relative", width: 32, height: 32, flexShrink: 0, borderRadius: 8, background: accent ? "#6510F4" : "#F4F4F5", display: "flex", alignItems: "center", justifyContent: "center" }}>
-        {loading ? (
-          <div style={{ width: 16, height: 16, border: "2px solid #6510F4", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
-        ) : icon}
-        {done && !loading && (
-          <div style={{ position: "absolute", top: -2, right: -2, width: 14, height: 14, borderRadius: "50%", background: "#16A34A", border: "2px solid #FFFFFF", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <svg width="7" height="7" viewBox="0 0 16 16"><path d="M3.5 8.5 L6.5 11.5 L12.5 4.5" stroke="#FFFFFF" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" fill="none" /></svg>
-          </div>
+  function handleCopy(e: React.MouseEvent) {
+    e.stopPropagation();
+    navigator.clipboard.writeText(content);
+    setPhase("copying");
+    setTimeout(() => setPhase("done"), 900);
+    setTimeout(() => setPhase("idle"), 3800);
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }} onClick={(e) => e.stopPropagation()}>
+      {/* Destination path — purely informational, nothing runs here. Mono grey
+          to match the other code snippets in the modal (InlineCodeBlock uses
+          the same 0.85 alpha). */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, background: "#18181B", borderRadius: 8, padding: "10px 14px" }}>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="rgba(237,236,234,0.45)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/>
+        </svg>
+        <code style={{ fontSize: 12, fontFamily: 'ui-monospace, Menlo, Monaco, "Cascadia Mono", "Segoe UI Mono", "Roboto Mono", monospace', color: "rgba(237,236,234,0.85)", flex: 1 }}>{path}</code>
+      </div>
+
+      {/* Copy button — solid lavender so it reads as the primary action. */}
+      <button
+        onClick={handleCopy}
+        disabled={phase !== "idle"}
+        style={{
+          display: "flex", alignItems: "center", justifyContent: "center", gap: 7,
+          background: phase === "done" ? "rgba(34,197,94,0.15)" : phase === "copying" ? "#A87CFF" : "#BC9BFF",
+          border: `1px solid ${phase === "done" ? "rgba(34,197,94,0.4)" : "transparent"}`,
+          borderRadius: 8, padding: "9px 16px", fontSize: 13, fontWeight: 500,
+          cursor: phase === "idle" ? "pointer" : "default",
+          color: phase === "done" ? "#22C55E" : "#1e1e1c", fontFamily: "inherit",
+          transition: "background 200ms, border-color 200ms, color 200ms",
+          width: "100%",
+        }}
+      >
+        {phase === "idle" && (
+          <>
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><rect x="5" y="5" width="8" height="8" rx="1.5" stroke="#1e1e1c" strokeWidth="1.5"/><path d="M11 3H4.5A1.5 1.5 0 003 4.5V11" stroke="#1e1e1c" strokeWidth="1.5" strokeLinecap="round"/></svg>
+            Copy install command
+          </>
         )}
-      </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
-        <span style={{ color: "#18181B", fontSize: 13, lineHeight: "16px" }}>{title}</span>
-        <span style={{ color: accent || highlightSubtitle ? "#6510F4" : "#A1A1AA", fontSize: 12, lineHeight: "14px" }}>{subtitle}</span>
-      </div>
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        {phase === "copying" && (
+          <>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#1e1e1c" strokeWidth="2.5" strokeLinecap="round" style={{ animation: "aci-spin 0.7s linear infinite" }}><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
+            Copying to clipboard…
+          </>
+        )}
+        {phase === "done" && (
+          <>
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M3 8.5L6.5 12L13 5" stroke="#22C55E" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            Copied — paste &amp; run in your local terminal
+          </>
+        )}
+      </button>
+
+      {/* Shows what the user will paste — runs entirely on their machine, not ours */}
+      {phase === "done" && (
+        <div style={{ background: "#18181B", borderRadius: 8, padding: "10px 14px", fontFamily: 'ui-monospace, Menlo, Monaco, "Cascadia Mono", "Segoe UI Mono", "Roboto Mono", monospace', fontSize: 11, lineHeight: "18px" }}>
+          <div style={{ color: "#585B70" }}>$ <span style={{ color: "#CDD6F4" }}>paste &amp; run the command in your terminal</span></div>
+          <div style={{ color: "#A6E3A1", marginTop: 3 }}>↳ writes {path} on your local machine</div>
+        </div>
+      )}
     </div>
   );
-  if (href) return <Link href={href} className="cursor-pointer" style={{ flex: 1, textDecoration: "none" }}>{content}</Link>;
-  if (onClick) return <button onClick={onClick} className="cursor-pointer" style={{ flex: 1, border: "none", background: "transparent", padding: 0, textAlign: "left" }}>{content}</button>;
-  return <div style={{ flex: 1 }}>{content}</div>;
 }
 
-function FilterPill({ active, onClick, children, dot, icon }: { active: boolean; onClick: () => void; children: React.ReactNode; dot?: string; icon?: React.ReactNode }) {
-  return (
-    <button onClick={onClick} className="cursor-pointer" style={{ display: "flex", alignItems: "center", gap: 6, background: active ? "#18181B" : "#FFFFFF", color: active ? "#FFFFFF" : "#3F3F46", border: active ? "none" : "1px solid #E4E4E7", borderRadius: 100, paddingBlock: 6, paddingInline: 12, fontSize: 12, lineHeight: "16px", fontFamily: "inherit" }}>
-      {dot && <span style={{ width: 6, height: 6, borderRadius: "50%", background: dot, flexShrink: 0 }} />}
-      {icon}
-      {children}
-    </button>
-  );
-}
-
-type ActivityRow =
-  | { kind: "session"; session: import("@/modules/sessions/getSessions").SessionRow; agent: unknown; dataset: unknown; timeStr: number }
-  | { kind: "dataset"; dataset: { id: string; name: string }; timeStr: number };
-
-function ActivityTable({ rows, agents }: { rows: ActivityRow[]; agents: { id: string; agent_type: string; is_agent: boolean; is_default: boolean }[] }) {
-  if (rows.length === 0) {
-    return (
-      <div style={{ background: "#FFFFFF", border: "1px solid #E4E4E7", borderRadius: 12, padding: 32, textAlign: "center" }}>
-        <span style={{ color: "#A1A1AA", fontSize: 13 }}>No activity in this time range.</span>
-      </div>
-    );
+function InlineCodeBlock({ code, toCopy, loading }: { code: string; toCopy?: string; loading?: boolean }) {
+  const [copied, setCopied] = useState(false);
+  function doCopy() {
+    if (loading) return;
+    navigator.clipboard.writeText(toCopy ?? code);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1800);
   }
   return (
-    <div style={{ background: "#FFFFFF", border: "1px solid #E4E4E7", borderRadius: 12, overflow: "hidden" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 16, paddingBlock: 12, paddingInline: 20, background: "#FFFFFF", borderBottom: "1px solid #E4E4E7" }}>
-        <span style={{ width: 80, flexShrink: 0, color: "#71717A", fontSize: 11, letterSpacing: "0.08em", lineHeight: "14px", textTransform: "uppercase" }}>Type</span>
-        <span style={{ flex: 1, color: "#71717A", fontSize: 11, letterSpacing: "0.08em", lineHeight: "14px", textTransform: "uppercase" }}>Name</span>
-        <span style={{ width: 140, flexShrink: 0, color: "#71717A", fontSize: 11, letterSpacing: "0.08em", lineHeight: "14px", textTransform: "uppercase" }}>Source</span>
-        <span style={{ width: 100, flexShrink: 0, textAlign: "right", color: "#71717A", fontSize: 11, letterSpacing: "0.08em", lineHeight: "14px", textTransform: "uppercase" }}>Size / Dur</span>
-        <span style={{ width: 80, flexShrink: 0, textAlign: "right", color: "#71717A", fontSize: 11, letterSpacing: "0.08em", lineHeight: "14px", textTransform: "uppercase" }}>Cost</span>
-        <span style={{ width: 80, flexShrink: 0, textAlign: "right", color: "#71717A", fontSize: 11, letterSpacing: "0.08em", lineHeight: "14px", textTransform: "uppercase" }}>Updated</span>
-      </div>
-      {rows.map((row, idx) => {
-        if (row.kind === "session") {
-          const s = row.session;
-          const failed = s.effective_status === "failed" || s.error_count > 0;
-          const dotColor = failed ? "#DC2626" : s.effective_status === "abandoned" ? "#D97706" : "#16A34A";
-          const label = labelFromSession(s);
-          const agentEntry = agents.find((a) => a.is_agent && a.id === s.user_id);
-          const agentName = agentEntry ? agentEntry.agent_type : s.user_id.slice(0, 8);
-          const agentInitial = agentName.split(/[\s-]+/).filter(Boolean).map((p) => p[0]?.toUpperCase()).join("").slice(0, 2) || "?";
-          return (
-            <Link
-              key={`session-${s.session_id}-${s.user_id}`}
-              href={`/activity?session=${encodeURIComponent(s.session_id)}`}
-              className="cursor-pointer hover:bg-cognee-hover"
-              style={{ display: "flex", alignItems: "center", gap: 16, paddingBlock: 14, paddingInline: 20, borderBottom: "1px solid #F4F4F5", background: "transparent", textDecoration: "none", color: "inherit", transition: "background 150ms" }}
-              title="Open in Activity"
-            >
-              <div style={{ width: 80, flexShrink: 0, display: "flex", alignItems: "center", gap: 6 }}>
-                <span style={{ width: 6, height: 6, borderRadius: "50%", background: dotColor, flexShrink: 0 }} />
-                <span style={{ color: failed ? "#DC2626" : "#52525B", fontSize: 11, letterSpacing: "0.04em", textTransform: "uppercase", lineHeight: "14px" }}>Session</span>
-              </div>
-              <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}>
-                <span style={{ color: "#18181B", fontSize: 14, lineHeight: "18px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
-                <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                  <span style={{ color: "#A1A1AA", fontSize: 11, lineHeight: "14px" }}>
-                    {(s.last_model ?? "—")} · {s.tokens_in + s.tokens_out} tokens · {s.error_count} errors
-                  </span>
-                </div>
-              </div>
-              <div style={{ width: 140, flexShrink: 0, display: "flex", alignItems: "center", gap: 6 }}>
-                <div style={{ width: 18, height: 18, background: "#18181B", borderRadius: 4, display: "flex", alignItems: "center", justifyContent: "center", color: "#FFFFFF", fontSize: 9, lineHeight: "12px" }}>{agentInitial}</div>
-                <span style={{ color: "#3F3F46", fontSize: 13, lineHeight: "16px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{agentName}</span>
-              </div>
-              <span style={{ width: 100, flexShrink: 0, textAlign: "right", color: "#18181B", fontSize: 13, lineHeight: "16px", fontVariantNumeric: "tabular-nums" }}>{durationString(s.started_at, s.ended_at)}</span>
-              <span style={{ width: 80, flexShrink: 0, textAlign: "right", color: s.cost_usd > 0 ? "#18181B" : "#A1A1AA", fontSize: 13, lineHeight: "16px", fontVariantNumeric: "tabular-nums" }}>{s.cost_usd > 0 ? `$${s.cost_usd.toFixed(2)}` : "—"}</span>
-              <span style={{ width: 80, flexShrink: 0, textAlign: "right", color: "#A1A1AA", fontSize: 12, lineHeight: "16px" }}>{s.last_activity_at ? timeAgo(s.last_activity_at) : "—"}</span>
-            </Link>
-          );
-        }
-        const d = row.dataset;
-        return (
-          <div key={`dataset-${d.id}`} style={{ display: "flex", alignItems: "center", gap: 16, paddingBlock: 14, paddingInline: 20, borderBottom: "1px solid #F4F4F5", background: "transparent" }}>
-            <div style={{ width: 80, flexShrink: 0, display: "flex", alignItems: "center", gap: 6 }}>
-              <DatasetIconXs color="#6510F4" />
-              <span style={{ color: "#6510F4", fontSize: 11, letterSpacing: "0.04em", textTransform: "uppercase", lineHeight: "14px" }}>Brain</span>
-            </div>
-            <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}>
-              <span style={{ color: "#18181B", fontSize: 14, lineHeight: "18px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.name}</span>
-              <span style={{ color: "#16A34A", fontSize: 11, lineHeight: "14px" }}>ready</span>
-            </div>
-            <span style={{ width: 140, flexShrink: 0, color: "#71717A", fontSize: 12, lineHeight: "16px" }}>—</span>
-            <span style={{ width: 100, flexShrink: 0, textAlign: "right", color: "#A1A1AA", fontSize: 13, lineHeight: "16px" }}>—</span>
-            <span style={{ width: 80, flexShrink: 0, textAlign: "right", color: "#A1A1AA", fontSize: 13, lineHeight: "16px" }}>—</span>
-            <span style={{ width: 80, flexShrink: 0, textAlign: "right", color: "#A1A1AA", fontSize: 12, lineHeight: "16px" }}>{row.timeStr ? timeAgo(new Date(row.timeStr).toISOString()) : "—"}</span>
-          </div>
-        );
-      })}
+    <div
+      onClick={(e) => { e.stopPropagation(); doCopy(); }}
+      style={{ background: "#18181B", borderRadius: 8, padding: "11px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, cursor: loading ? "wait" : "pointer" }}
+    >
+      <pre style={{ margin: 0, fontSize: 12.5, fontFamily: 'ui-monospace, Menlo, Monaco, "Cascadia Mono", "Segoe UI Mono", "Roboto Mono", monospace', color: loading ? "#585B70" : "rgba(237,236,234,0.65)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", flex: 1 }}>
+        {loading ? "Loading…" : code}
+      </pre>
+      <button
+        onClick={(e) => { e.stopPropagation(); doCopy(); }}
+        aria-label={copied ? "Copied" : "Copy"}
+        style={{ background: "none", border: "none", cursor: loading ? "wait" : "pointer", flexShrink: 0, padding: 2, borderRadius: 4 }}
+      >
+        {copied ? (
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M3.5 8.5L6.5 11.5L12.5 4.5" stroke="#22C55E" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+        ) : (
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="5" y="5" width="8" height="8" rx="1.5" stroke="#6B7280" strokeWidth="1.5" /><path d="M11 3H4.5A1.5 1.5 0 003 4.5V11" stroke="#6B7280" strokeWidth="1.5" strokeLinecap="round" /></svg>
+        )}
+      </button>
     </div>
   );
 }
 
-function labelFromSession(s: import("@/modules/sessions/getSessions").SessionRow): string {
-  // Without hitting the detail endpoint we don't have a semantic label —
-  // surface the session id trimmed to something readable. Backend should
-  // expose label on the list endpoint as a follow-up.
-  const id = s.session_id;
-  if (id.length <= 48) return id;
-  return id.slice(0, 48) + "…";
+interface AciStepDef {
+  title: string;
+  description: string;
+  code?: string;
+  codeToCopy?: string;
+  loading?: boolean;
+  /** When set, renders multiple separately-copyable code blocks (e.g. commands run one at a time) */
+  codeBlocks?: { code: string; toCopy?: string; label?: string }[];
+  /** When set, renders a SkillCopyBlock instead of (or alongside) the code block */
+  skillPath?: string;
+  skillContent?: string;
 }
 
-// Tiny icons (kept minimal to match the Paper reference).
-function AgentIconSm() { return <svg width="12" height="12" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="4" stroke="#6510F4" strokeWidth="1.75" /><path d="M5.5 21a6.5 6.5 0 0113 0" stroke="#6510F4" strokeWidth="1.75" strokeLinecap="round" /></svg>; }
-function DatasetIconSm() { return <svg width="12" height="12" viewBox="0 0 24 24" fill="none"><ellipse cx="12" cy="5" rx="9" ry="3" stroke="#6510F4" strokeWidth="1.75" /><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" stroke="#6510F4" strokeWidth="1.75" /></svg>; }
-function DatasetIconXs({ color = "#71717A" }: { color?: string }) { return <svg width="10" height="10" viewBox="0 0 14 14" fill="none"><ellipse cx="7" cy="3" rx="5" ry="1.5" stroke={color} strokeWidth="1.2" /><path d="M12 6.5c0 .83-2.24 1.5-5 1.5s-5-.67-5-1.5M2 3v7.5C2 11.33 4.24 12 7 12s5-.67 5-1.5V3" stroke={color} strokeWidth="1.2" /></svg>; }
-function SdkIcon() { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M7 8l5 4 5-4M7 16l5-4 5 4" stroke="#52525B" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" /></svg>; }
-function KeyIconSm() { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><rect x="4" y="8" width="16" height="8" rx="2" stroke="#52525B" strokeWidth="1.75" /><circle cx="9" cy="12" r="1.5" fill="#52525B" /></svg>; }
-function UploadIconSm() { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 16V8M12 8L8 12M12 8L16 12" stroke="#FFFFFF" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" /><path d="M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" stroke="#FFFFFF" strokeWidth="1.75" strokeLinecap="round" /></svg>; }
+type AciAgentKey = "upload" | "claude-code" | "codex" | "openclaw" | "api-mcp";
 
-// QuickstartCards is imported from @/ui/elements/QuickstartCards
-
-// ── Scope pills (shared) ─────────────────────────────────────────────────
-
-const SCOPE_DESCRIPTIONS: Record<string, string> = {
-  documents: "Search entities and relationships in your knowledge graph.",
-  agent: "Search recent agent sessions and execution traces.",
-};
-
-function ScopePills({
-  value,
-  onChange,
+function AgentConnectionSection({
+  onUploadClick, isUploading, serviceUrl, apiKey, isInitializing, hasDocuments, cogniInstance, integrationConnected = {},
 }: {
-  value: "documents" | "agent";
-  onChange: (v: "documents" | "agent") => void;
-}) {
-  const items: { key: "documents" | "agent"; label: string }[] = [
-    { key: "documents", label: "Brain" },
-    { key: "agent", label: "Agent Memory" },
-  ];
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-      {items.map((it) => {
-        const active = value === it.key;
-        return (
-          <Tooltip key={it.key} label={SCOPE_DESCRIPTIONS[it.key]} withArrow multiline w={220} position="bottom">
-            <button
-              type="button"
-              onClick={() => onChange(it.key)}
-              className="cursor-pointer"
-              style={{
-                background: active ? "#18181B" : "#FFFFFF",
-                color: active ? "#FFFFFF" : "#3F3F46",
-                border: active ? "none" : "1px solid #E4E4E7",
-                borderRadius: 100,
-                paddingBlock: 5,
-                paddingInline: 11,
-                fontSize: 12,
-                lineHeight: "16px",
-                fontFamily: "inherit",
-                cursor: "pointer",
-              }}
-            >
-              {it.label}
-            </button>
-          </Tooltip>
-        );
-      })}
-    </div>
-  );
-}
-
-// ── Inline dashboard search ──
-
-type SearchScope = "documents" | "agent";
-
-function DashboardSearch({
-  datasets,
-  cogniInstance,
-  sessions,
-  hasDocuments,
-}: {
-  datasets: { id: string; name: string }[];
+  onUploadClick: () => void; isUploading: boolean;
+  serviceUrl: string | null; apiKey: string | null; isInitializing: boolean;
+  hasDocuments: boolean;
   cogniInstance: ReturnType<typeof useCogniInstance>["cogniInstance"];
-  sessions: import("@/modules/sessions/getSessions").SessionRow[];
-  hasDocuments?: boolean;
+  integrationConnected?: Record<string, boolean>;
 }) {
-  const [query, setQuery] = useState("");
-  const [scope, setScope] = useState<SearchScope>("documents");
-  const [selectedDatasetId, setSelectedDatasetId] = useState<string>(datasets[0]?.id ?? "");
-  const [results, setResults] = useState<unknown[]>([]);
-  const [searching, setSearching] = useState(false);
-  const [hasSearched, setHasSearched] = useState(false);
+  const router = useRouter();
+  const [activeKey, setActiveKey] = useState<AciAgentKey | null>(null);
+  const [stepIndexMap, setStepIndexMap] = useState<Partial<Record<AciAgentKey, number>>>({});
+  // Live connection check for the Claude Code flow: while the modal is open we
+  // poll for new sessions. A session that wasn't present when the modal opened
+  // means the user's agent successfully connected to Cognee Cloud — we then mark
+  // the "connect" step done and jump to the final step. Index of the connect
+  // step within the claude-code steps (creds, plugin, → connect, review).
+  const CLAUDE_CONNECT_STEP = 2;
+  const [connectVerified, setConnectVerified] = useState(false);
 
-  // Pick the most recently active session the user can see. Required
-  // for session / trace / all scope — recall returns nothing otherwise.
-  const mostRecentSessionId = sessions[0]?.session_id ?? "";
+  const baseUrl = serviceUrl || "https://your-tenant.aws.cognee.ai";
+  const resolvedKey = apiKey || "your-api-key";
+  // Export both URL names: our prompts/skills read COGNEE_BASE_URL, while the
+  // integration plugins (claude-code, codex, …) read COGNEE_SERVICE_URL —
+  // missing it silently drops them into local mode.
+  const CREDS_CODE = `export COGNEE_BASE_URL="${baseUrl}"\nexport COGNEE_SERVICE_URL="${baseUrl}"\nexport COGNEE_API_KEY="${resolvedKey}"`;
 
-  async function handleSearch(q: string) {
-    if (!q.trim() || !cogniInstance) return;
-    setSearching(true);
-    setResults([]);
-    setHasSearched(true);
-    try {
-      const { default: recallKnowledge } = await import("@/modules/datasets/recallKnowledge");
-      // Map UI scope → recall scope. Non-graph scopes require a
-      // session_id; we fall back to graph when none is available.
-      const sendScope = scope === "agent" ? ["session", "trace"] : "graph";
-      const sendSessionId = scope === "agent" ? mostRecentSessionId : undefined;
-      const data = await recallKnowledge(cogniInstance, {
-        query: q,
-        scope: sendScope as never,
-        sessionId: sendSessionId,
-        datasetIds: selectedDatasetId ? [selectedDatasetId] : datasets.map((d) => d.id),
-      });
-      setResults(Array.isArray(data) ? data : []);
-    } catch {
-      setResults([]);
-    } finally {
-      setSearching(false);
+  // Poll for a freshly-created session while the Claude Code modal is open.
+  // Baseline the existing session ids on open; the first new (non-search-ui)
+  // session that appears flips the connect step to "connected".
+  useEffect(() => {
+    if (activeKey !== "claude-code" || !cogniInstance || connectVerified) return;
+    let cancelled = false;
+    const baseline = new Set<string>();
+    let primed = false;
+
+    const realSessionIds = (rows: { session_id: string }[]) =>
+      rows.map((s) => s.session_id).filter((id) => !id.startsWith(SEARCH_SESSION_PREFIX));
+
+    async function check() {
+      const page = await listSessions(cogniInstance!, { range: "24h", limit: 50 });
+      if (cancelled) return;
+      const ids = realSessionIds(page.sessions);
+      if (!primed) {
+        // First tick establishes the baseline of pre-existing sessions.
+        ids.forEach((id) => baseline.add(id));
+        primed = true;
+        return;
+      }
+      if (ids.some((id) => !baseline.has(id))) {
+        setConnectVerified(true);
+        // Mark the connect step done and reveal the final "review" step.
+        setStepIndexMap((prev) => {
+          const cur = prev["claude-code"] ?? 0;
+          return cur <= CLAUDE_CONNECT_STEP ? { ...prev, "claude-code": CLAUDE_CONNECT_STEP + 1 } : prev;
+        });
+      }
+    }
+
+    check();
+    const id = setInterval(check, 7000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [activeKey, cogniInstance, connectVerified]);
+
+  // Reset the verified flag whenever the Claude Code modal is (re)opened.
+  useEffect(() => {
+    if (activeKey === "claude-code") setConnectVerified(false);
+  }, [activeKey]);
+
+  const CARDS_CFG: { key: AciAgentKey; name: string; description: string }[] = [
+    { key: "claude-code", name: "Claude Code", description: "Give Claude Code persistent memory across all your projects" },
+    { key: "codex",       name: "Codex",       description: "Connect OpenAI Codex to your knowledge graph via the Cognee plugin" },
+    { key: "openclaw",    name: "Openclaw",     description: "Connect Openclaw to your knowledge graph via AGENTS.md" },
+    { key: "api-mcp",     name: "API / MCP",    description: "Connect any agent or app via the REST API or MCP" },
+    { key: "upload",      name: "Company Brain", description: "Upload PDFs, docs, and data to build your knowledge graph" },
+  ];
+
+  function getSteps(key: AciAgentKey): AciStepDef[] {
+    const credStep: AciStepDef = {
+      title: "Set your API credentials",
+      description: "Open a terminal and run these commands to configure your Cognee endpoint and key.",
+      code: `export COGNEE_BASE_URL="${baseUrl}"`,
+      codeToCopy: CREDS_CODE,
+      loading: isInitializing,
+    };
+    if (key === "claude-code") return [
+      credStep,
+      {
+        title: "Install the Cognee plugin",
+        description: "Run these in your terminal one at a time — register the Cognee marketplace, then install the memory plugin.",
+        codeBlocks: [
+          { code: CLAUDE_MARKETPLACE_ADD },
+          { code: CLAUDE_PLUGIN_INSTALL },
+        ],
+      },
+      {
+        title: "Upload something to Cognee",
+        description: "Pick one and paste it into Claude — it stores the content in your Cognee memory so you can recall it in the next step.",
+        codeBlocks: [
+          { label: "Option A · Your existing memory", code: UPLOAD_MEMORY_PROMPT },
+          { label: "Option B · Try it with a sample", code: UPLOAD_SAMPLE_PROMPT },
+        ],
+      },
+      {
+        title: connectVerified ? "Connected — session detected ✓" : "Recall it from Cognee",
+        description: connectVerified
+          ? "We detected your new session in Cognee Cloud — you're connected."
+          : "First run /exit to close the session — that syncs it into Cognee Cloud — then reopen Claude Code and ask the question below. Answering from a fresh session proves it's recalling from your cloud memory.",
+        codeBlocks: [
+          { code: "/exit" },
+          { code: RECALL_SAMPLE_PROMPT },
+        ],
+      },
+      {
+        title: "You're all set",
+        description: "The Cognee plugin hooks into Claude Code's lifecycle — no curl or manual API calls — and captures your session as you work. When a session ends (e.g. /exit), it consolidates that session into your Cognee Cloud knowledge graph, and every new session automatically recalls it back. Sessions are disposable; your memory isn't.",
+      },
+    ];
+    if (key === "codex") return [
+      credStep,
+      {
+        title: "Install the Cognee plugin",
+        description: "Run these in your terminal one at a time — enable Codex hooks, register the Cognee marketplace, then install the memory plugin.",
+        codeBlocks: [
+          { code: CODEX_HOOKS_ENABLE },
+          { code: CODEX_MARKETPLACE_ADD },
+          { code: CODEX_PLUGIN_INSTALL },
+        ],
+      },
+      {
+        title: "Upload something to Cognee",
+        description: "Pick one and paste it into Codex — it stores the content in your Cognee memory so you can recall it in the next step.",
+        codeBlocks: [
+          { label: "Option A · Your existing memory", code: UPLOAD_MEMORY_PROMPT },
+          { label: "Option B · Try it with a sample", code: UPLOAD_SAMPLE_PROMPT },
+        ],
+      },
+      {
+        title: "Recall it from Cognee",
+        description: "First run /exit to close the session — that syncs it into Cognee Cloud — then reopen Codex and ask the question below. Answering from a fresh session proves it's recalling from your cloud memory.",
+        codeBlocks: [
+          { code: "/exit" },
+          { code: RECALL_SAMPLE_PROMPT },
+        ],
+      },
+      {
+        title: "You're all set",
+        description: "The Cognee plugin hooks into Codex's lifecycle — no curl or manual API calls — and captures your session as you work. When a session ends (e.g. /exit), it consolidates that session into your Cognee Cloud knowledge graph, and every new session automatically recalls it back. Sessions are disposable; your memory isn't.",
+      },
+    ];
+    if (key === "openclaw") return [
+      credStep,
+      {
+        title: "Install the Cognee skill",
+        description: "Click below to copy the install command to your clipboard, then paste and run it in your local terminal. Nothing is sent to our servers — the skill file is written on your own machine.",
+        skillPath: "~/.openclaw/skills/cognee/SKILL.md",
+        skillContent: OPENCLAW_SKILL_INSTALL,
+      },
+      {
+        title: "Test the connection",
+        description: `Open Openclaw in your project and ask: "What do you know from cognee?" — if it responds with knowledge from your brain, you're connected.`,
+      },
+    ];
+    if (key === "api-mcp") return [
+      credStep,
+      {
+        title: "Query the REST API",
+        description: "Send a recall query to your Cognee endpoint from any HTTP client or language.",
+        code: `curl -X POST ${baseUrl}/api/v1/recall`,
+        codeToCopy: `curl -X POST ${baseUrl}/api/v1/recall \\\n  -H "X-Api-Key: ${resolvedKey}" \\\n  -H "Content-Type: application/json" \\\n  -d '{"query": "What are the main entities?"}'`,
+        loading: isInitializing,
+      },
+      {
+        title: "Or install the Cognee skill",
+        description: "Prefer skills? Run this command from your project root to create the skill file, then point your agent at it (skills directory, instructions file, or system prompt). The skill teaches your agent to call the Cognee API using the credentials from step 1.",
+        code: "skills/cognee/SKILL.md",
+        codeToCopy: GENERIC_SKILL_INSTALL,
+      },
+      {
+        title: "Test the connection",
+        description: `Ask your agent: "What do you know from cognee?" — Cognee's memory should respond with knowledge from your brain.`,
+      },
+    ];
+    return [];
+  }
+
+  function handleCardClick(key: AciAgentKey) {
+    if (key === "upload") { onUploadClick(); return; }
+    setActiveKey(key);
+    // Preserve position if user re-opens the same agent
+    if (stepIndexMap[key] === undefined) {
+      setStepIndexMap(s => ({ ...s, [key]: 0 }));
     }
   }
 
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12, minHeight: 200, opacity: hasDocuments === false ? 0.45 : 1, pointerEvents: hasDocuments === false ? "none" : "auto", transition: "opacity 200ms" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <span style={{ fontSize: 20, fontWeight: 300, color: "#1A1A1A", fontFamily: '"TWK Lausanne", system-ui, sans-serif' }}>Search your knowledge</span>
-      </div>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <ScopePills value={scope} onChange={setScope} />
-        <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "nowrap", marginRight: 24 }}>
-          <span style={{ fontSize: 11, color: "#A1A1AA", letterSpacing: "0.1em", textTransform: "uppercase", whiteSpace: "nowrap", flexShrink: 0 }}>Search in</span>
-          <select
-            value={selectedDatasetId}
-            onChange={(e) => setSelectedDatasetId(e.target.value)}
-            style={{ appearance: "none", background: "none", border: "none", outline: "none", fontSize: 14, fontWeight: 400, color: "#333333", fontFamily: "inherit", cursor: "pointer", padding: 0, paddingRight: 14, backgroundImage: "url(\"data:image/svg+xml,%3Csvg width='8' height='5' viewBox='0 0 8 5' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l3 3 3-3' stroke='%23333333' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E\")", backgroundRepeat: "no-repeat", backgroundPosition: "right center", maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", lineHeight: "20px" }}
-          >
-            {datasets.map((d) => (
-              <option key={d.id} value={d.id}>{d.name}</option>
-            ))}
-          </select>
-        </div>
-      </div>
-      <div style={{ background: "#fff", border: `1px solid ${query ? "#6510F4" : "#EEEEEE"}`, borderRadius: 10, padding: "12px 16px", display: "flex", alignItems: "center", gap: 12, transition: "border-color 0.2s" }}>
-        <svg width="18" height="18" viewBox="0 0 18 18" fill="none" style={{ flexShrink: 0 }}>
-          <circle cx="8" cy="8" r="5.5" stroke="#A1A1AA" strokeWidth="1.5" />
-          <path d="M12.5 12.5L16 16" stroke="#A1A1AA" strokeWidth="1.5" strokeLinecap="round" />
-        </svg>
-        <input
-          type="text"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") handleSearch(query); }}
-          placeholder="Ask a question about your data..."
-          style={{ flex: 1, border: "none", outline: "none", fontSize: 14, color: "#18181B", fontFamily: "inherit", background: "transparent" }}
-        />
-        <button onClick={() => handleSearch(query)} disabled={!query} className="cursor-pointer" style={{ background: query ? "#6510F4" : "#E4E4E7", border: "none", borderRadius: 6, padding: "8px 10px", display: "flex", alignItems: "center", justifyContent: "center", transition: "background 150ms", cursor: query ? "pointer" : "default", flexShrink: 0 }}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={query ? "#fff" : "#A1A1AA"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="5" y1="12" x2="19" y2="12" /><polyline points="12 5 19 12 12 19" /></svg>
-        </button>
-      </div>
+  function goToStep(key: AciAgentKey, idx: number) {
+    setStepIndexMap(prev => ({ ...prev, [key]: idx }));
+  }
 
-      {searching && (
-        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "12px 0" }}>
-          <div style={{ width: 14, height: 14, borderRadius: "50%", border: "2px solid #E4E4E7", borderTopColor: "#6510F4", animation: "spin 1s linear infinite" }} />
-          <span style={{ fontSize: 13, color: "#71717A" }}>Searching...</span>
-        </div>
-      )}
-
-      {results.length > 0 && !searching && (
-        <div style={{ background: "#fff", border: "1px solid #E5E7EB", borderRadius: 10, overflow: "hidden" }}>
-          {results.map((raw, i) => {
-            // searchDataset may return different shapes depending on
-            // search_type / route: { dataset_name, search_result:[...] },
-            // plain strings, or recall rows tagged with _source.
-            const r = raw as { dataset_name?: string; search_result?: unknown; text?: string; raw?: { value?: string }; answer?: string; session_feedback?: string };
-            const label = r.dataset_name || "Result";
-            let lines: string[] = [];
-            if (r.text) {
-              lines = [r.text];
-            } else if (r.raw?.value) {
-              lines = [typeof r.raw.value === "string" ? r.raw.value : JSON.stringify(r.raw.value)];
-            } else if (Array.isArray(r.search_result)) {
-              lines = (r.search_result as unknown[]).map((x) => (typeof x === "string" ? x : JSON.stringify(x)));
-            } else if (typeof r.search_result === "string") {
-              lines = [r.search_result];
-            } else if (r.answer) {
-              lines = [r.answer];
-            } else if (r.session_feedback) {
-              lines = [r.session_feedback];
-            } else if (typeof raw === "string") {
-              lines = [raw as unknown as string];
-            } else {
-              try { lines = [JSON.stringify(raw)]; } catch { lines = [String(raw)]; }
-            }
-            return (
-              <div key={i} style={{ padding: "14px 16px", borderBottom: i < results.length - 1 ? "1px solid #F4F4F5" : "none" }}>
-                <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.04em", color: "#6510F4", textTransform: "uppercase" }}>{label}</span>
-                {lines.map((text, j) => (
-                  <div key={j} style={{ fontSize: 13, color: "#18181B", lineHeight: "20px", whiteSpace: "pre-wrap", wordBreak: "break-word", marginTop: 4 }}>
-                    {text}
-                  </div>
-                ))}
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {hasSearched && !searching && results.length === 0 && (
-        <span style={{ fontSize: 13, color: "#A1A1AA", padding: "8px 0" }}>No results found.</span>
-      )}
-
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-    </div>
-  );
-}
-
-// ── Python SDK card with expandable connect-to-cloud instructions ──
-
-function CopyButton({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false);
-  return (
-    <button
-      onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 1500); }}
-      className="cursor-pointer hover:bg-white/10 rounded p-1 -m-1 active:scale-90 transition-all"
-      style={{ background: "none", border: "none", flexShrink: 0 }}
-      title="Copy"
-    >
-      {copied ? (
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M3.5 8.5L6.5 11.5L12.5 4.5" stroke="#22C55E" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
-      ) : (
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="5" y="5" width="8" height="8" rx="1.5" stroke="#71717A" strokeWidth="1.5" /><path d="M11 3H4.5A1.5 1.5 0 003 4.5V11" stroke="#71717A" strokeWidth="1.5" strokeLinecap="round" /></svg>
-      )}
-    </button>
-  );
-}
-
-function SdkCard() {
-  const [expanded, setExpanded] = useState(false);
+  const popupOpen = activeKey !== null && activeKey !== "upload";
+  const activeCfg = CARDS_CFG.find(c => c.key === activeKey);
 
   return (
-    <div
-      onClick={() => setExpanded(!expanded)}
-      className="cursor-pointer hover:bg-cognee-hover transition-colors"
-      style={{
-        flex: expanded ? 2 : 1,
-        background: "#fff",
-        border: expanded ? "1px solid #DDD6FE" : "1px solid #EEEEEE",
-        borderRadius: 10,
-        padding: expanded ? 0 : "20px 16px",
-        display: "flex",
-        flexDirection: "column",
-        alignItems: expanded ? "stretch" : "center",
-        gap: expanded ? 0 : 8,
-        textDecoration: "none",
-        transition: "flex 200ms ease, border-color 200ms",
-        overflow: "hidden",
-      }}
-    >
-      {!expanded && (
-        <>
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-            <path d="M7 8l5 4 5-4M7 16l5-4 5 4" stroke="#6C47FF" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-          <span style={{ fontSize: 13, fontWeight: 500, color: "#333333" }}>Python SDK</span>
-          <span style={{ fontSize: 11, color: "#999999" }}>pip install cognee</span>
-        </>
-      )}
+    <div>
+      <style>{`
+        @keyframes aci-check  { 0% { transform: scale(0.4); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+        @keyframes aci-spin   { to { transform: rotate(360deg); } }
+        @keyframes aci-popup  { 0% { opacity: 0; transform: scale(0.97) translateY(6px); } 100% { opacity: 1; transform: scale(1) translateY(0); } }
+        .aci-card-logo { transition: transform 300ms ease; }
+        .aci-card:hover .aci-card-logo { transform: scale(1.15); }
+        .aci-card:hover .aci-cta-chip { background: rgba(101,16,244,0.85) !important; }
+        .aci-step-row:hover { background: rgba(255,255,255,0.04); }
+        .aci-step-row[data-active="true"]:hover { background: transparent; }
+        .aci-card-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 16px; }
+        @media (max-width: 1100px) { .aci-card-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+        @media (max-width: 800px) { .aci-card-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+        @media (max-width: 480px) { .aci-card-grid { grid-template-columns: 1fr; } }
+        @media (prefers-reduced-motion: reduce) {
+          .aci-card-logo, .aci-step-body, .aci-popup { transition: none !important; animation: none !important; }
+        }
+      `}</style>
 
-      {expanded && (
-        <div onClick={(e) => e.stopPropagation()} style={{ display: "flex", flexDirection: "column", gap: 0 }}>
-          {/* Header */}
-          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "16px 20px", borderBottom: "1px solid #E4E4E7" }}>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-              <path d="M7 8l5 4 5-4M7 16l5-4 5 4" stroke="#6510F4" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      {/* Agent + brain card grid — visual style from connect-agent page */}
+      <div className="aci-card-grid">
+        {CARDS_CFG.map((card) => {
+          const cardSteps = card.key !== "upload" ? getSteps(card.key as AciAgentKey) : [];
+          const connected = card.key === "upload" ? hasDocuments : !!integrationConnected[card.key];
+          const isActive = activeKey === card.key;
+          const isUpload = card.key === "upload";
+
+          const logoNode = isUpload ? (
+            // Company Brain stacked-document icon (matches main branch CompanyDataIcon)
+            <svg height="110" viewBox="0 0 80 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect x="16" y="6" width="54" height="70" rx="6" fill="#D4D4D8" stroke="#71717A" strokeWidth="3.5"/>
+              <rect x="8" y="14" width="54" height="70" rx="6" fill="#E4E4E7" stroke="#71717A" strokeWidth="3.5"/>
+              <rect x="2" y="22" width="54" height="70" rx="6" fill="#F4F4F5" stroke="#52525B" strokeWidth="3.5"/>
+              <path d="M38 22v16h18" stroke="#52525B" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"/>
+              <line x1="12" y1="52" x2="46" y2="52" stroke="#52525B" strokeWidth="3" strokeLinecap="round"/>
+              <line x1="12" y1="63" x2="46" y2="63" stroke="#52525B" strokeWidth="3" strokeLinecap="round"/>
+              <line x1="12" y1="74" x2="30" y2="74" stroke="#52525B" strokeWidth="3" strokeLinecap="round"/>
             </svg>
-            <span style={{ fontSize: 14, fontWeight: 600, color: "#18181B" }}>Connect with Python SDK</span>
-            <button onClick={() => setExpanded(false)} className="cursor-pointer" style={{ marginLeft: "auto", background: "none", border: "none", color: "#A1A1AA", fontSize: 16, padding: 2 }}>&#10005;</button>
-          </div>
+          ) : card.key === "api-mcp" ? (
+            <svg height="110" viewBox="0 0 90 110" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect x="5" y="20" width="80" height="50" rx="10" fill="#1a1a2e" stroke="rgba(255,255,255,0.15)" strokeWidth="2"/>
+              <path d="M25 35L16 45L25 55" stroke="rgba(188,155,255,0.60)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
+              <path d="M65 35L74 45L65 55" stroke="rgba(188,155,255,0.60)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
+              <line x1="50" y1="30" x2="40" y2="60" stroke="rgba(255,255,255,0.4)" strokeWidth="2.5" strokeLinecap="round"/>
+            </svg>
+          ) : (
+            <img
+              src={card.key === "claude-code" ? "/visuals/logos/claude.svg" : card.key === "codex" ? "/visuals/logos/codex.svg" : "/visuals/logos/openclaw.svg"}
+              alt={card.name}
+              style={{ height: 110, width: "auto" }}
+            />
+          );
 
-          {/* Steps */}
-          <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 16 }}>
-            {/* Step 1 */}
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <div className="flex items-center justify-center flex-shrink-0 rounded-full" style={{ width: 24, height: 24, background: "#F0EDFF" }}>
-                <span style={{ color: "#6510F4", fontSize: 12, fontWeight: 600 }}>1</span>
-              </div>
-              <span style={{ fontSize: 13, fontWeight: 500, color: "#18181B" }}>Install the SDK</span>
-            </div>
-            <div className="flex items-center justify-between" style={{ background: "#18181B", borderRadius: 8, padding: "10px 16px" }}>
-              <span style={{ fontSize: 13, color: "#A1A1AA", fontFamily: '"Fira Code", monospace' }}>pip install cognee</span>
-              <CopyButton text="pip install cognee" />
-            </div>
+          const logoRight = isUpload ? -12 : card.key === "api-mcp" ? -28 : -36;
 
-            <div style={{ height: 1, background: "#E4E4E7" }} />
+          const ctaLabel = isUpload
+            ? (connected ? "Add more data" : "Upload data")
+            : card.key === "api-mcp" ? "Connect" : "Connect agent";
 
-            {/* Step 2 */}
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <div className="flex items-center justify-center flex-shrink-0 rounded-full" style={{ width: 24, height: 24, background: "#F0EDFF" }}>
-                <span style={{ color: "#6510F4", fontSize: 12, fontWeight: 600 }}>2</span>
-              </div>
-              <span style={{ fontSize: 13, fontWeight: 500, color: "#18181B" }}>Set your API key</span>
-            </div>
-            <div className="flex items-center justify-between" style={{ background: "#18181B", borderRadius: 8, padding: "10px 16px" }}>
-              <span style={{ fontSize: 13, color: "#A1A1AA", fontFamily: '"Fira Code", monospace' }}>export COGNEE_API_KEY=your-key</span>
-              <CopyButton text="export COGNEE_API_KEY=your-key" />
-            </div>
+          return (
+            <button
+              key={card.key}
+              className="aci-card"
+              onClick={() => handleCardClick(card.key)}
+              aria-haspopup={!isUpload ? "dialog" : undefined}
+              disabled={isUploading && isUpload}
+              style={{
+                position: "relative",
+                background: isActive ? "rgba(188,155,255,0.20)" : "rgba(255,255,255,0.06)",
+                backdropFilter: "blur(12px)",
+                border: `1px solid ${isActive ? "rgba(188,155,255,0.35)" : "rgba(255,255,255,0.1)"}`,
+                borderRadius: 12,
+                padding: "20px 16px 0 16px",
+                height: 160,
+                overflow: "hidden",
+                cursor: (isUploading && isUpload) ? "wait" : "pointer",
+                textAlign: "left",
+                display: "flex",
+                flexDirection: "column",
+                transition: "border-color 150ms, background 150ms",
+              }}
+            >
+              {/* Top-right: connected status only */}
+              {connected && (
+                <div style={{ position: "absolute", top: 12, right: 12, display: "flex", alignItems: "center", gap: 4, zIndex: 1 }}>
+                  <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#22C55E", flexShrink: 0 }} />
+                  <span style={{ fontSize: 11, fontWeight: 500, color: "#16A34A", whiteSpace: "nowrap" }}>Connected</span>
+                </div>
+              )}
 
-            <div style={{ height: 1, background: "#E4E4E7" }} />
-
-            {/* Step 3 */}
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <div className="flex items-center justify-center flex-shrink-0 rounded-full" style={{ width: 24, height: 24, background: "#F0EDFF" }}>
-                <span style={{ color: "#6510F4", fontSize: 12, fontWeight: 600 }}>3</span>
-              </div>
-              <span style={{ fontSize: 13, fontWeight: 500, color: "#18181B" }}>Connect to your instance</span>
-            </div>
-            <div style={{ background: "#18181B", borderRadius: 8, padding: "12px 16px", position: "relative" }}>
-              <pre style={{ margin: 0, fontSize: 12, lineHeight: "20px", fontFamily: '"Fira Code", monospace', color: "#A1A1AA" }}>
-{`import asyncio
-import cognee
-
-async def main():
-    cognee.config.set_llm_api_key("your-key")
-
-    await cognee.add("Your text data")
-    await cognee.cognify()
-
-    results = await cognee.search("query")
-    print(results)
-
-asyncio.run(main())`}
-              </pre>
-              <span style={{ position: "absolute", top: 12, right: 16 }}>
-                <CopyButton text={`import asyncio\nimport cognee\n\nasync def main():\n    cognee.config.set_llm_api_key("your-key")\n\n    await cognee.add("Your text data")\n    await cognee.cognify()\n\n    results = await cognee.search("query")\n    print(results)\n\nasyncio.run(main())`} />
+              {/* Card name — thin weight, TWK Lausanne matches subpage exactly */}
+              <span style={{
+                fontSize: 16, fontWeight: 300, color: "#EDECEA",
+                lineHeight: 1.25, letterSpacing: "-0.01em",
+                fontFamily: '"TWKLausanne", sans-serif',
+                paddingRight: connected ? 90 : 16,
+              }}>
+                {card.name}
               </span>
+
+              {/* Bottom-left action button chip */}
+              <div style={{ position: "absolute", bottom: 14, left: 16, zIndex: 1 }}>
+                {isUploading && isUpload ? (
+                  <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                    <div style={{ width: 9, height: 9, borderRadius: "50%", border: "1.5px solid #D1D5DB", borderTopColor: "#6510F4", animation: "aci-spin 0.8s linear infinite", flexShrink: 0 }} />
+                    <span style={{ fontSize: 11, fontWeight: 500, color: "rgba(237,236,234,0.65)" }}>Uploading…</span>
+                  </div>
+                ) : (
+                  <span
+                    className="aci-cta-chip"
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 4,
+                      background: "rgba(20,20,22,0.92)",
+                      backdropFilter: "blur(12px)",
+                      WebkitBackdropFilter: "blur(12px)",
+                      border: "1px solid rgba(237,236,234,0.65)",
+                      borderRadius: 6,
+                      padding: "5px 10px",
+                      fontSize: 12,
+                      fontWeight: 500,
+                      color: "rgba(237,236,234,0.65)",
+                      whiteSpace: "nowrap",
+                      transition: "background 150ms",
+                    }}
+                  >
+                    {ctaLabel}
+                  </span>
+                )}
+              </div>
+
+              {/* Large overflowing logo — mirrors connect-agent page layout */}
+              <div className="aci-card-logo" style={{ position: "absolute", bottom: -18, right: logoRight, pointerEvents: "none" }}>
+                {logoNode}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Popup modal */}
+      {popupOpen && activeCfg && activeKey && (() => {
+        const steps = getSteps(activeKey);
+        const currentStep = stepIndexMap[activeKey] ?? 0;
+        return (
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={`Connect ${activeCfg.name}`}
+            style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", backdropFilter: "blur(4px)", WebkitBackdropFilter: "blur(4px)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
+            onClick={() => setActiveKey(null)}
+          >
+            <div
+              className="aci-popup"
+              onClick={(e) => e.stopPropagation()}
+              style={{ background: "rgba(15,15,15,0.92)", backdropFilter: "blur(16px)", borderRadius: 14, width: 520, maxWidth: "100%", boxShadow: "0 20px 60px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.1)", overflow: "hidden", animation: "aci-popup 200ms cubic-bezier(0.22,1,0.36,1) forwards" }}
+            >
+              {/* Modal header */}
+              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "16px 20px", borderBottom: "1px solid rgba(255,255,255,0.1)" }}>
+                {activeKey === "api-mcp" ? (
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" style={{ flexShrink: 0 }}><rect x="3" y="6" width="18" height="12" rx="2" stroke="rgba(237,236,234,0.7)" strokeWidth="1.5"/><path d="M7 9L4 12L7 15" stroke="rgba(188,155,255,0.60)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><path d="M17 9L20 12L17 15" stroke="rgba(188,155,255,0.60)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><line x1="13" y1="8" x2="11" y2="16" stroke="rgba(237,236,234,0.5)" strokeWidth="1.5" strokeLinecap="round"/></svg>
+                ) : (
+                  <img
+                    src={activeKey === "claude-code" ? "/visuals/logos/claude.svg" : activeKey === "codex" ? "/visuals/logos/codex.svg" : "/visuals/logos/openclaw.svg"}
+                    alt={activeCfg?.name}
+                    style={{ width: 24, height: 24, objectFit: "contain", flexShrink: 0 }}
+                  />
+                )}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: "#EDECEA", lineHeight: "20px" }}>Connect {activeCfg.name}</div>
+                  <div style={{ fontSize: 12, color: "rgba(237,236,234,0.45)", marginTop: 1 }}>Step {currentStep + 1} of {steps.length}</div>
+                </div>
+                <button
+                  onClick={() => setActiveKey(null)}
+                  aria-label="Close"
+                  style={{ background: "none", border: "none", color: "rgba(237,236,234,0.65)", cursor: "pointer", padding: 4, borderRadius: 6, lineHeight: 1, flexShrink: 0 }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+                </button>
+              </div>
+
+              {/* Step rows — click any row to navigate to that step */}
+              {steps.map((step, i) => {
+                const isActive = currentStep === i;
+                const isDone = i < currentStep;
+                return (
+                  <div
+                    key={i}
+                    className="aci-step-row"
+                    data-active={isActive ? "true" : undefined}
+                    onClick={() => goToStep(activeKey, i)}
+                    style={{ borderBottom: i < steps.length - 1 ? "1px solid rgba(255,255,255,0.07)" : "none", cursor: isActive ? "default" : "pointer" }}
+                  >
+                    {/* Row header — always visible */}
+                    <div style={{ display: "flex", alignItems: "center", gap: 12, padding: isActive ? "14px 20px 0" : "14px 20px" }}>
+                      {/* Step indicator */}
+                      <div style={{
+                        width: 24, height: 24, borderRadius: "50%", flexShrink: 0,
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        background: isDone ? "rgba(34,197,94,0.18)" : isActive ? "#6510F4" : "rgba(255,255,255,0.1)",
+                        transition: "background 200ms ease",
+                      }}>
+                        {isDone ? (
+                          <svg width="10" height="10" viewBox="0 0 16 16" fill="none" style={{ animation: "aci-check 220ms cubic-bezier(0.22,1,0.36,1) forwards" }}>
+                            <path d="M3 8.5L6.5 12L13 5" stroke="#22C55E" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        ) : (
+                          <span style={{ fontSize: 11, fontWeight: 700, color: isActive ? "#fff" : "rgba(237,236,234,0.65)", lineHeight: 1 }}>{i + 1}</span>
+                        )}
+                      </div>
+                      {/* Step title */}
+                      <span style={{ flex: 1, fontSize: 14, fontWeight: isActive ? 500 : 400, color: isDone ? "rgba(237,236,234,0.45)" : isActive ? "#EDECEA" : "rgba(237,236,234,0.30)" }}>
+                        {step.title}
+                      </span>
+                      {isDone && (
+                        <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", background: "rgba(34,197,94,0.18)", color: "#22C55E", borderRadius: 100, padding: "2px 8px", flexShrink: 0, animation: "aci-check 200ms ease forwards" }}>
+                          Done
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Expanded content — grid-template-rows animates from exact content height,
+                        keeping modal height stable when switching between steps */}
+                    <div
+                      className="aci-step-body"
+                      style={{
+                        display: "grid",
+                        gridTemplateRows: isActive ? "1fr" : "0fr",
+                        opacity: isActive ? 1 : 0,
+                        transition: "grid-template-rows 260ms ease, opacity 200ms ease",
+                      }}
+                    >
+                      <div style={{ overflow: "hidden" }}>
+                      <div
+                        onClick={(e) => e.stopPropagation()}
+                        style={{ padding: "10px 20px 18px 56px" }}
+                      >
+                        {step.description && (
+                          <p style={{ fontSize: 13, color: "rgba(237,236,234,0.65)", margin: "0 0 12px", lineHeight: 1.6 }}>{step.description}</p>
+                        )}
+                        {step.code && (
+                          <InlineCodeBlock code={step.code} toCopy={step.codeToCopy} loading={step.loading} />
+                        )}
+                        {step.codeBlocks && (
+                          <div style={{ display: "flex", flexDirection: "column", gap: step.codeBlocks.some(cb => cb.label) ? 14 : 8 }}>
+                            {step.codeBlocks.map((cb, j) => (
+                              cb.label ? (
+                                <div key={j}>
+                                  <div style={{ fontSize: 13, fontWeight: 600, color: "#EDECEA", marginBottom: 6 }}>{cb.label}</div>
+                                  <InlineCodeBlock code={cb.code} toCopy={cb.toCopy} />
+                                </div>
+                              ) : (
+                                <InlineCodeBlock key={j} code={cb.code} toCopy={cb.toCopy} />
+                              )
+                            ))}
+                          </div>
+                        )}
+                        {step.skillPath && step.skillContent && (
+                          <SkillCopyBlock path={step.skillPath} content={step.skillContent} />
+                        )}
+                        {i < steps.length - 1 ? (
+                          <p style={{ margin: "10px 0 0", fontSize: 12, color: "rgba(237,236,234,0.65)" }}>
+                            Click step {i + 2} when ready ↓
+                          </p>
+                        ) : (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); router.push("/sessions"); }}
+                            style={{ marginTop: 12, display: "inline-flex", alignItems: "center", gap: 5, background: "none", border: "1px solid rgba(255,255,255,0.2)", borderRadius: 8, padding: "7px 14px", fontSize: 13, fontWeight: 500, color: "#EDECEA", fontFamily: "inherit", cursor: "pointer" }}
+                          >
+                            Go to Sessions →
+                          </button>
+                        )}
+                      </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
-        </div>
-      )}
-
-      {/* Dev: onboarding toggle */}
-      <div style={{ display: "flex", gap: 8, paddingTop: 8 }}>
-        <Link href="/onboarding" style={{ fontSize: 12, color: "#A1A1AA", textDecoration: "none" }}>
-          Open onboarding
-        </Link>
-        <span style={{ color: "#E4E4E7" }}>|</span>
-        <Link href="/onboarding?source=serve" style={{ fontSize: 12, color: "#A1A1AA", textDecoration: "none" }}>
-          Serve onboarding
-        </Link>
-      </div>
+        );
+      })()}
     </div>
   );
 }
-
-// ── Icons ──
-
-function UploadIcon() { return <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M12 16V8M12 8L8 12M12 8L16 12" stroke="#6C47FF" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /><path d="M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" stroke="#6C47FF" strokeWidth="1.5" strokeLinecap="round" /></svg>; }
-function KeyNavIcon() { return <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><rect x="4" y="8" width="16" height="8" rx="2" stroke="#6C47FF" strokeWidth="1.5" /><circle cx="9" cy="12" r="1.5" fill="#6C47FF" /><path d="M14 10h3M14 14h3" stroke="#6C47FF" strokeWidth="1.5" strokeLinecap="round" /></svg>; }
-function AgentNavIcon() { return <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="4" stroke="#6C47FF" strokeWidth="1.5" /><path d="M5.5 21a6.5 6.5 0 0113 0" stroke="#6C47FF" strokeWidth="1.5" strokeLinecap="round" /><path d="M15 3l2-2M9 3L7 1" stroke="#6C47FF" strokeWidth="1.5" strokeLinecap="round" /></svg>; }
