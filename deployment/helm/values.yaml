@@ -1,23 +1,190 @@
-# Configuration for the 'cognee' application service
+---
+# Default values for the cognee Helm chart.
+
+nameOverride: ""
+fullnameOverride: ""
+
 cognee:
-  # Image name (using the local image we’ll build in Minikube)
+  replicaCount: 1
+
   image: "cognee/cognee:main"
+  imagePullPolicy: IfNotPresent
+
   port: 8000
+
+  service:
+    type: ClusterIP
+    port: 8000
+
+  serviceAccount:
+    create: true
+    annotations: {}
+    name: ""
+
+  podAnnotations: {}
+
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop:
+        - ALL
+
+  backendAccessControl: false
+
   env:
+    HOST: "0.0.0.0"
     ENV: "local"
     PYTHONPATH: "."
+    PYTHONDONTWRITEBYTECODE: "1"
+    HOME: "/tmp"
+    DATA_ROOT_DIRECTORY: "/var/lib/cognee/data"
+    SYSTEM_ROOT_DIRECTORY: "/var/lib/cognee/system"
+    CACHE_ROOT_DIRECTORY: "/var/lib/cognee/cache"
+    DB_PROVIDER: "postgres"
+    GRAPH_DATABASE_PROVIDER: "kuzu"
+    VECTOR_DB_PROVIDER: "pgvector"
     LLM_MODEL: "openai/gpt-4o-mini"
     LLM_PROVIDER: "openai"
-  resources:
-    cpu: "4.0"
-    memory: "2Gi"
 
-# Configuration for the 'postgres' database service
+  secrets:
+    existingSecret: ""
+    llmApiKeyKey: LLM_API_KEY
+
+  probes:
+    liveness:
+      enabled: true
+      path: /
+      initialDelaySeconds: 30
+      periodSeconds: 30
+      timeoutSeconds: 5
+      failureThreshold: 3
+    readiness:
+      enabled: true
+      path: /health
+      initialDelaySeconds: 10
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 6
+    startup:
+      enabled: true
+      path: /health
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 30
+
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "1Gi"
+    limits:
+      cpu: "2"
+      memory: "2Gi"
+
+  autoscaling:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 75
+
+  podDisruptionBudget:
+    enabled: false
+    minAvailable: 1
+
+  persistence:
+    enabled: false
+    existingClaim: ""
+    storageClassName: ""
+    accessModes:
+      - ReadWriteOnce
+    size: "5Gi"
+
 postgres:
+  enabled: true
+
   image: "pgvector/pgvector:pg17"
+  imagePullPolicy: IfNotPresent
   port: 5432
+
+  service:
+    type: ClusterIP
+    port: 5432
+
+  auth:
+    existingSecret: ""
+    username: cognee
+    database: cognee_db
+    usernameKey: POSTGRES_USER
+    passwordKey: POSTGRES_PASSWORD
+    databaseKey: POSTGRES_DB
+
   env:
-    POSTGRES_USER: "cognee"
-    POSTGRES_PASSWORD: "cognee"
-    POSTGRES_DB: "cognee_db"
+    PGDATA: "/var/lib/postgresql/data/pgdata"
+
   storage: "2Gi"
+
+  podAnnotations: {}
+
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 999
+    runAsGroup: 999
+    fsGroup: 999
+
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop:
+        - ALL
+
+  probes:
+    readiness:
+      enabled: true
+      initialDelaySeconds: 10
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 6
+    liveness:
+      enabled: true
+      initialDelaySeconds: 30
+      periodSeconds: 30
+      timeoutSeconds: 5
+      failureThreshold: 3
+
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "512Mi"
+    limits:
+      cpu: "1"
+      memory: "1Gi"
+
+externalDatabase:
+  host: ""
+  port: 5432
+  existingSecret: ""
+  usernameKey: DB_USERNAME
+  passwordKey: DB_PASSWORD
+  databaseKey: DB_NAME
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: cognee.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+tests:
+  enabled: true
+  image: "curlimages/curl:8.10.1"
