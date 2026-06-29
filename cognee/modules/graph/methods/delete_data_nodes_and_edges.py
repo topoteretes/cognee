@@ -37,8 +37,8 @@ async def delete_data_nodes_and_edges(dataset_id: UUID, data_id: UUID, user_id: 
     dataset_id = dataset.id
 
     # Graph-provenance graphs carry provenance in the graph (no relational ledger
-    # rows). Route them through the unified boundary, which removes the
-    # dataset/data source ref and hard-deletes any artifact left unowned.
+    # rows). The graph marker is a mode boundary, not a migration signal: marked
+    # graphs use this unified path; old/unmarked graphs stay on the ledger path.
     if await try_delete_data_by_graph_provenance(dataset_id, data_id):
         return
 

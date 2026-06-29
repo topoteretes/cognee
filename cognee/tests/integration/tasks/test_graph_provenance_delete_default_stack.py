@@ -46,6 +46,9 @@ class RecordingVectorEngine:
         self.removed_tags: list[list[str]] = []
         self._fail_once_on = fail_once_on
 
+    async def has_collection(self, collection: str) -> bool:
+        return True
+
     async def delete_data_points(self, collection: str, ids) -> None:
         if collection == self._fail_once_on:
             self._fail_once_on = None

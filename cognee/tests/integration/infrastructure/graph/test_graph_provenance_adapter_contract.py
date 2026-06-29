@@ -528,3 +528,25 @@ async def test_concurrent_folded_attach_keeps_all_keys(graph_provenance_adapter)
     assert sorted(snap.source_run_refs) == sorted(
         [make_source_run_ref(UUID(run), key1), make_source_run_ref(UUID(run), key2)]
     )
+
+
+async def test_concurrent_explicit_attach_keeps_all_keys(graph_provenance_adapter):
+    adapter = graph_provenance_adapter
+    ds = uuid4()
+    run = str(uuid4())
+    key1 = make_source_ref_key(ds, uuid4())
+    key2 = make_source_ref_key(ds, uuid4())
+    node = _Ent(id=uuid4(), name="Alice")
+    node_id = str(node.id)
+
+    await adapter.add_nodes([node])
+    await asyncio.gather(
+        adapter.attach_node_source_refs([node_id], [key1], run),
+        adapter.attach_node_source_refs([node_id], [key2], run),
+    )
+
+    snap = (await adapter.get_node_delete_data([node_id]))[node_id]
+    assert sorted(snap.source_ref_keys) == sorted([key1, key2])
+    assert sorted(snap.source_run_refs) == sorted(
+        [make_source_run_ref(UUID(run), key1), make_source_run_ref(UUID(run), key2)]
+    )

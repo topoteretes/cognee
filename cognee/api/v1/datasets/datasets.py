@@ -180,10 +180,9 @@ class datasets:
             raise UnauthorizedDataAccessError(f"Data {data_id} not accessible.")
 
         async with set_database_global_context_variables(dataset_id, dataset.owner_id):
-            # Graph-provenance graphs have no relational ledger rows, so the
-            # ledger gate checks first. Only the ledger-free branch probes the
-            # graph marker, so marked graphs avoid a duplicate metadata read and
-            # old ledger graphs still use the existing legacy gate.
+            # Delete mode is exclusive: ledger rows imply the relational-ledger
+            # path; only ledger-free data probes the graph marker to distinguish
+            # graph-provenance data from legacy data without graph ownership.
             if await has_data_related_nodes(dataset_id, data_id):
                 await delete_data_nodes_and_edges(dataset_id, data_id, user.id)
             elif not await try_delete_data_by_graph_provenance(dataset_id, data_id):

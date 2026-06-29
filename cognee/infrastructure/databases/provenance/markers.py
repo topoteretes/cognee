@@ -1,11 +1,13 @@
 """Graph provenance markers.
 
 A graph "stores its provenance in the graph" when its graph-level metadata
-advertises the graph-provenance delete mode. Marking happens lazily for empty
-graphs only, via ``set_graph_metadata``. On backends that implement provenance
-(e.g. Ladybug + LanceDB) a fresh empty graph gets marked and reads/deletes go
-through the graph instead of the relational ledger; on backends without
-provenance support ``set_graph_metadata`` / ``get_graph_metadata`` raise
+advertises the graph-provenance delete mode. The marker is a delete-mode
+boundary, not a migration flag: a graph is either graph-provenance backed or
+relational-ledger backed. Marking happens lazily for empty graphs only, via
+``set_graph_metadata``. On backends that implement provenance (e.g. Ladybug +
+LanceDB) a fresh empty graph gets marked and reads/deletes go through the graph
+instead of the relational ledger; on backends without provenance support
+``set_graph_metadata`` / ``get_graph_metadata`` raise
 ``UnsupportedProvenanceCapability``, so nothing is marked and old/unmarked
 graphs keep using the relational ledger.
 """

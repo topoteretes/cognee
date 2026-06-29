@@ -40,6 +40,17 @@ def _is_unowned(current_refs: list[str], removed_refs: list[str]) -> bool:
     return len(set(current_refs) - set(removed_refs)) == 0
 
 
+async def _delete_vector_points(vector_engine, collection: str, ids: list[str]) -> None:
+    """Delete vector points, treating absent collections as an idempotent no-op."""
+    if not ids:
+        return
+
+    if not await vector_engine.has_collection(collection):
+        return
+
+    await vector_engine.delete_data_points(collection, ids)
+
+
 async def execute_source_ref_removal(
     graph_engine,
     vector_engine,
@@ -76,7 +87,7 @@ async def execute_source_ref_removal(
             node_vector_collections.setdefault(collection_name, []).append(node_id)
 
     for collection, ids in node_vector_collections.items():
-        await vector_engine.delete_data_points(collection, ids)
+        await _delete_vector_points(vector_engine, collection, ids)
 
     if unowned_edges:
         # Per-edge triplet vectors are tied to a single deleted edge instance, so
@@ -89,11 +100,7 @@ async def execute_source_ref_removal(
             for edge in unowned_edges
         ]
         if triplet_ids:
-            try:
-                await vector_engine.delete_data_points("Triplet_text", triplet_ids)
-            except Exception:
-                # Triplet collection may not exist if triplet embedding was never enabled.
-                pass
+            await _delete_vector_points(vector_engine, "Triplet_text", triplet_ids)
 
     # ------------------------------------------------------------------
     # 3. Remove the targeted refs from SURVIVING artifacts only (idempotent).

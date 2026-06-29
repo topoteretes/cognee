@@ -313,6 +313,7 @@ class LadybugAdapter(GraphDBInterface):
             else:
                 self._initialize_connection()
         self.LADYBUG_ASYNC_LOCK = asyncio.Lock()
+        self._source_ref_change_lock = asyncio.Lock()
         self._connection_lock = asyncio.Lock()
         # Set when ``open_connections == 0``; used by transient teardown
         # paths (e.g. ``delete_graph``) to wait for in-flight queries to
@@ -1310,25 +1311,28 @@ class LadybugAdapter(GraphDBInterface):
         maps an artifact identity to the batch row's match fields, and
         ``transition`` is the pure ``provenance_after_*`` function.
 
-        The read->write is not atomic: concurrent stamps of the same artifact can
-        lose an update in this window (see phase1_storage_capabilities.md).
+        The lock serializes this two-query sequence within one adapter instance
+        so concurrent explicit attach/remove calls do not overwrite each other's
+        provenance updates.
         """
         if not artifacts:
             return
-        current = await read_provenance(artifacts)
-        batch = []
-        for identity, (keys, run_refs) in current.items():
-            cols = transition(keys, run_refs)
-            batch.append(
-                {
-                    **identity_row(identity),
-                    "refs": cols.source_ref_keys,
-                    "datasets": cols.source_dataset_ids,
-                    "runs": cols.source_run_ids,
-                    "run_refs": cols.source_run_refs,
-                }
-            )
-        await write_provenance(batch)
+
+        async with self._source_ref_change_lock:
+            current = await read_provenance(artifacts)
+            batch = []
+            for identity, (keys, run_refs) in current.items():
+                cols = transition(keys, run_refs)
+                batch.append(
+                    {
+                        **identity_row(identity),
+                        "refs": cols.source_ref_keys,
+                        "datasets": cols.source_dataset_ids,
+                        "runs": cols.source_run_ids,
+                        "run_refs": cols.source_run_refs,
+                    }
+                )
+            await write_provenance(batch)
 
     async def attach_node_source_refs(
         self,

@@ -85,6 +85,9 @@ class FakeVectorEngine:
             "EdgeType_relationship_name",
         }
 
+    async def has_collection(self, collection: str) -> bool:
+        return collection in self._existing_collections
+
     async def delete_data_points(self, collection: str, ids: list[str]) -> None:
         if collection == self._fail_on_collection:
             # Arm once, then let the retry succeed.
@@ -480,6 +483,25 @@ async def test_vectors_deleted_before_graph_mutation_and_retry_converges():
     await engine.delete_by_source_ref(ref)
     assert "n1" not in graph.nodes
     assert ("Entity_name", ["n1"]) in vector.deleted
+
+
+async def test_missing_node_vector_collection_is_noop():
+    """An absent node vector collection does not block graph-provenance delete."""
+    dataset = uuid4()
+    ref = make_source_ref_key(dataset, uuid4())
+    run = uuid4()
+
+    graph = FakeProvenanceGraphEngine()
+    graph.add_node("n1", "MissingVectorCollection", ["name"], {"name": "x"})
+    await graph.attach_node_source_refs(["n1"], [ref], run)
+
+    vector = FakeVectorEngine()
+    engine = _build_engine(graph, vector)
+
+    await engine.delete_by_source_ref(ref)
+
+    assert "n1" not in graph.nodes
+    assert vector.deleted == []
 
 
 async def test_rollback_keeps_artifact_a_prior_run_still_owns():
