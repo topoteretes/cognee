@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, BinaryIO
 
 from cognee.infrastructure.files.storage import get_file_storage, get_storage_config
 from cognee.infrastructure.files.utils.get_file_metadata import get_file_metadata
@@ -34,7 +34,13 @@ class PyPdfLoader(LoaderInterface):
 
         return False
 
-    async def load(self, file_path: str, strict: bool = False, **kwargs: Any) -> str:
+    async def load(
+        self,
+        file_path: str,
+        strict: bool = False,
+        file_stream: BinaryIO | None = None,
+        **kwargs: Any,
+    ) -> str:
         """
         Load PDF file and extract text content.
 
@@ -58,12 +64,15 @@ class PyPdfLoader(LoaderInterface):
             ) from e
 
         try:
-            with open(file_path, "rb") as file:
+            file_context = open(file_path, "rb") if file_stream is None else None
+            file = file_context.__enter__() if file_context is not None else file_stream
+            try:
                 file_metadata = await get_file_metadata(file)
                 # Name ingested file of current loader based on original file content hash
                 storage_file_name = "text_" + file_metadata["content_hash"] + ".txt"
 
                 logger.info(f"Reading PDF: {file_path}")
+                file.seek(0)
                 reader = PdfReader(file, strict=strict)
 
                 content_parts = []
@@ -92,6 +101,9 @@ class PyPdfLoader(LoaderInterface):
                 full_file_path = await storage.store(storage_file_name, full_content)
 
                 return full_file_path
+            finally:
+                if file_context is not None:
+                    file_context.__exit__(None, None, None)
 
         except Exception as e:
             logger.error(f"Failed to process PDF {file_path}: {e}")
