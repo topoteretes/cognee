@@ -7,8 +7,6 @@ from cognee.infrastructure.session.feedback_detection import detect_feedback
 from cognee.infrastructure.session.feedback_models import FeedbackDetectionResult
 from cognee.infrastructure.session.session_context_models import (
     CandidateContextUpdate,
-    CandidateLessonLearnedUpdate,
-    CandidateRuleUpdate,
     ServedContextRating,
 )
 
@@ -153,8 +151,9 @@ class TestDetectFeedback:
             ]
         )
 
-        assert isinstance(result.candidate_context_updates[0], CandidateRuleUpdate)
-        assert isinstance(result.candidate_context_updates[1], CandidateLessonLearnedUpdate)
+        # Both items parse as the flat base class — no discriminated union dispatch.
+        assert isinstance(result.candidate_context_updates[0], CandidateContextUpdate)
+        assert isinstance(result.candidate_context_updates[1], CandidateContextUpdate)
         assert result.candidate_context_updates[0].section == "rules"
         assert result.candidate_context_updates[1].section == "lessons_learned"
 
