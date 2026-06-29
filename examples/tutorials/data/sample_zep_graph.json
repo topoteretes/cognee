@@ -1,0 +1,92 @@
+{
+  "episodes": [
+    {
+      "uuid": "ep-001",
+      "name": "Project kickoff discussion",
+      "content": "We decided to use PostgreSQL as the primary database for the new analytics platform. The team agreed that Maria will lead the backend development and James will handle the data pipeline. The deadline for the MVP is end of Q2 2025.",
+      "created_at": "2025-02-01T09:00:00Z",
+      "group_id": "project-alpha"
+    },
+    {
+      "uuid": "ep-002",
+      "name": "Architecture review",
+      "content": "After reviewing the architecture, we decided to add a Redis caching layer between the API and PostgreSQL to handle the expected read-heavy workload. Maria raised concerns about data consistency with the cache invalidation strategy.",
+      "created_at": "2025-02-15T14:00:00Z",
+      "group_id": "project-alpha"
+    }
+  ],
+  "entities": [
+    {
+      "uuid": "ent-001",
+      "name": "Maria",
+      "labels": ["Person", "Engineer"],
+      "summary": "Backend lead for the analytics platform project. Has experience with distributed systems and PostgreSQL."
+    },
+    {
+      "uuid": "ent-002",
+      "name": "James",
+      "labels": ["Person", "Engineer"],
+      "summary": "Data pipeline engineer. Responsible for ETL processes and data quality."
+    },
+    {
+      "uuid": "ent-003",
+      "name": "Analytics Platform",
+      "labels": ["Project"],
+      "summary": "New internal analytics platform with PostgreSQL backend, Redis caching, and a REST API. MVP deadline is Q2 2025."
+    },
+    {
+      "uuid": "ent-004",
+      "name": "PostgreSQL",
+      "labels": ["Technology", "Database"],
+      "summary": "Primary database chosen for the analytics platform."
+    },
+    {
+      "uuid": "ent-005",
+      "name": "Redis",
+      "labels": ["Technology", "Cache"],
+      "summary": "Caching layer added between the API and PostgreSQL for read-heavy workloads."
+    }
+  ],
+  "facts": [
+    {
+      "uuid": "fact-001",
+      "source_node_uuid": "ent-001",
+      "target_node_uuid": "ent-003",
+      "name": "leads_backend",
+      "fact": "Maria leads the backend development of the Analytics Platform.",
+      "valid_at": "2025-02-01T09:00:00Z",
+      "created_at": "2025-02-01T09:00:00Z",
+      "episodes": ["ep-001"]
+    },
+    {
+      "uuid": "fact-002",
+      "source_node_uuid": "ent-002",
+      "target_node_uuid": "ent-003",
+      "name": "handles_pipeline",
+      "fact": "James handles the data pipeline for the Analytics Platform.",
+      "valid_at": "2025-02-01T09:00:00Z",
+      "created_at": "2025-02-01T09:00:00Z",
+      "episodes": ["ep-001"]
+    },
+    {
+      "uuid": "fact-003",
+      "source_node_uuid": "ent-003",
+      "target_node_uuid": "ent-004",
+      "name": "uses",
+      "fact": "The Analytics Platform uses PostgreSQL as its primary database.",
+      "valid_at": "2025-02-01T09:00:00Z",
+      "created_at": "2025-02-01T09:00:00Z",
+      "episodes": ["ep-001"]
+    },
+    {
+      "uuid": "fact-004",
+      "source_node_uuid": "ent-003",
+      "target_node_uuid": "ent-005",
+      "name": "uses",
+      "fact": "The Analytics Platform uses Redis as a caching layer for read-heavy workloads.",
+      "valid_at": "2025-02-15T14:00:00Z",
+      "created_at": "2025-02-15T14:00:00Z",
+      "episodes": ["ep-002"]
+    }
+  ]
+}
