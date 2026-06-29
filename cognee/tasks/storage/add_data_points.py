@@ -70,10 +70,18 @@ async def add_data_points(
                 visited_properties=visited_properties,
             )
             for data_point in data_points
-        ]
+        ],
+        return_exceptions=True,
     )
 
-    for result_nodes, result_edges in results:
+    for result in results:
+        if isinstance(result, BaseException):
+            logger.error(
+                "Error processing data point in add_data_points, skipping.",
+                exc_info=result,
+            )
+            continue
+        result_nodes, result_edges = result
         nodes.extend(result_nodes)
         edges.extend(result_edges)
 
@@ -129,20 +137,28 @@ async def add_data_points(
     if use_hybrid:
         await graph_engine.add_nodes_with_vectors(nodes)
     else:
-        await asyncio.gather(
+        results = await asyncio.gather(
             graph_engine.add_nodes(nodes),
             index_data_points(
                 [node.model_copy(deep=True) for node in nodes],
                 vector_engine=vector_engine,
             ),
+            return_exceptions=True,
         )
+        for result in results:
+            if isinstance(result, BaseException):
+                raise result
 
     if use_hybrid:
         await graph_engine.add_edges_with_vectors(edges)
     else:
-        await asyncio.gather(
-            graph_engine.add_edges(edges), index_graph_edges(edges, vector_engine=vector_engine)
+        results = await asyncio.gather(
+            graph_engine.add_edges(edges), index_graph_edges(edges, vector_engine=vector_engine),
+            return_exceptions=True,
         )
+        for result in results:
+            if isinstance(result, BaseException):
+                raise result
 
     if custom_edges:
         # This must be handled separately from datapoint edges, created a task in linear to dig deeper but (COG-3488)
@@ -151,10 +167,14 @@ async def add_data_points(
         if use_hybrid:
             await graph_engine.add_edges_with_vectors(custom_edges)
         else:
-            await asyncio.gather(
+            results = await asyncio.gather(
                 graph_engine.add_edges(custom_edges),
                 index_graph_edges(custom_edges, vector_engine=vector_engine),
+                return_exceptions=True,
             )
+            for result in results:
+                if isinstance(result, BaseException):
+                    raise result
 
         edges.extend(custom_edges)
 
