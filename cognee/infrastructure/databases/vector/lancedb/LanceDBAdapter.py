@@ -7,9 +7,7 @@ from collections import OrderedDict
 from os import path
 from uuid import UUID
 from enum import Enum
-import lancedb
 from pydantic import BaseModel
-from lancedb.pydantic import LanceModel, Vector
 from typing import List, Optional, Union, get_args, get_origin, get_type_hints
 
 from cognee.infrastructure.databases.exceptions import MissingQueryParameterError
@@ -279,6 +277,8 @@ class LanceDBAdapter(VectorDBInterface):
         # commit under the lock with a re-check. A concurrent ``close()``
         # that ran during our await must NOT be silently overwritten —
         # we discard the new connection and raise instead.
+        import lancedb
+
         new_conn = await lancedb.connect_async(self.url, api_key=self.api_key)
         stale = None
         # Capture the *winning* connection under the lock. Reading
@@ -758,6 +758,8 @@ class LanceDBAdapter(VectorDBInterface):
         vector_size = self.embedding_engine.get_vector_size()
         schema_model = self.get_data_point_schema(payload_schema)
         data_point_types = get_type_hints(schema_model)
+
+        from lancedb.pydantic import LanceModel, Vector
 
         class SchemaProbeDataPoint(LanceModel):
             id: data_point_types["id"]
@@ -1347,6 +1349,8 @@ class LanceDBAdapter(VectorDBInterface):
             if cached is not None:
                 cls._lance_datapoint_class_cache.move_to_end(key)
                 return cached
+
+        from lancedb.pydantic import LanceModel, Vector
 
         class LanceDataPoint(LanceModel):
             id: str
