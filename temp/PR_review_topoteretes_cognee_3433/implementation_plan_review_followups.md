@@ -39,8 +39,11 @@ current recommendations say not to change those paths in this PR.
 - Memory provenance falls back to relational only when the graph is intentionally
   not marked for graph provenance. Unexpected graph-provenance read failures
   surface.
-- Backend-neutral graph-provenance adapter contract tests exist, and Ladybug is
-  registered as the first provider.
+- Backend-neutral graph-provenance graph-adapter contract tests exist, and
+  Ladybug is registered as the first provider.
+- A backend-neutral unified graph-provenance contract exists for the
+  `UnifiedStoreEngine` delete/rollback path, with Ladybug registered as the
+  first graph provider.
 - Ladybug/Kuzu-specific storage, delimiter, and checkpoint tests remain separate
   from backend-neutral contract tests.
 
@@ -60,10 +63,12 @@ current recommendations say not to change those paths in this PR.
   - Stop swallowing unexpected graph-provenance read errors.
   - Add a unit test proving relational fallback is not used after such failures.
 
-- **Phase 4 - Extract Backend-Neutral Adapter Contract Tests**
+- **Phase 4 - Extract Backend-Neutral Graph-Provenance Contract Tests** ✅ DONE
   - Move common real-adapter provenance behavior into a fixture-parametrized
-    contract suite.
-  - Register Ladybug as the first provider.
+    graph-adapter contract suite.
+  - Add a small fixture-parametrized unified-engine contract for delete/rollback
+    behavior.
+  - Register Ladybug as the first graph provider.
   - Keep Ladybug-only storage and checkpoint tests in Ladybug-specific files.
 
 - **Phase 5 - Run Focused Validation**
@@ -78,9 +83,8 @@ current recommendations say not to change those paths in this PR.
   atomicity, or malformed-row vector hardening.
 - Keep routing cleanup small. Do not change the destructive-path safety check in
   `delete_data_nodes_and_edges`.
-- Keep the contract-test extraction lightweight: one provider fixture, one
-  contract test file, no plugin system, no adapter registry abstraction outside
-  tests.
+- Keep the contract-test extraction lightweight: fixture-parametrized test files
+  only, no plugin system, no adapter registry abstraction outside tests.
 
 ## Phase 1 - Normalize Graph-Provenance Naming ✅ DONE
 
@@ -299,12 +303,15 @@ graph-provenance graphs have no relational ledger to fall back to.
 uv run pytest cognee/tests/unit/api/test_memory_provenance_graph_provenance.py -q
 ```
 
-## Phase 4 - Extract Backend-Neutral Adapter Contract Tests
+## Phase 4 - Extract Backend-Neutral Graph-Provenance Contract Tests ✅ DONE
 
 ### Objective
 
 Give future graph-provenance adapter implementers a shared ground-truth test
-suite, with Ladybug registered as the first implementation.
+suite. A colleague should be able to add their provider to these fixtures and
+know whether the graph adapter and unified delete/rollback path satisfy the
+graph-provenance contract. Keep storage-shape assertions out of the shared
+contract.
 
 ### Changes
 
@@ -318,20 +325,73 @@ Create
   - The provider closes the adapter after each test.
   - If Ladybug is unavailable, skip only the Ladybug provider.
 - Test only backend-neutral graph provenance behavior:
-  - graph metadata marker round trip
-  - node attach/remove source refs
-  - edge attach/remove source refs
-  - attach without pipeline run is not rollbackable by run
-  - node and edge source-ref lookups
-  - dataset and pipeline-run lookups
-  - delete snapshots for nodes and edges
-  - `delete_edge_triples`
-  - `belongs_to_set` detag behavior
-  - folded `add_nodes` and `add_edges` provenance behavior
-  - Model A run-ref behavior on re-touch
+  - `get_graph_metadata` starts empty.
+  - `set_graph_metadata` round-trips and merge-updates marker keys.
+  - Graph metadata does not make the user graph non-empty.
+  - node attach/remove source refs materializes and recalculates
+    `source_ref_keys`, `source_dataset_ids`, `source_run_ids`, and
+    `source_run_refs`.
+  - edge attach/remove source refs follows the same derived-field rules.
+  - attach without `pipeline_run_id` is not rollbackable by run.
+  - node and edge lookup by exact valid source ref returns only matching owners.
+  - dataset and pipeline-run source-ref lookups return the expected owners.
+  - delete snapshots for nodes and edges include properties, indexed fields,
+    edge text fallback, and missing-artifact omission.
+  - `delete_edge_triples` deletes only the requested relationship and preserves
+    endpoint nodes.
+  - `belongs_to_set` detag behavior works for scoped, unscoped, and empty tag
+    calls.
+  - rewriting existing nodes and edges preserves provenance while updating
+    content.
+  - `get_edges_created_since` returns edges after the checkpoint, oldest first,
+    respects `limit`, includes endpoint node metadata, and excludes edges at or
+    before the checkpoint.
+  - folded `add_nodes` and `add_edges` stamp provenance in the write operation.
+  - folded `add_edges` preserves multiple owners.
+  - folded writes with no `source_ref_key` stamp no provenance.
+  - Model A run-ref behavior is preserved when a new run re-touches an existing
+    node or edge source ref.
+  - concurrent folded node writes for different source refs preserve both keys.
 - Use only public adapter contract methods and provenance dataclasses/helpers.
-- Do not assert raw Ladybug storage strings, Kuzu schema, Cypher behavior, or
-  checkpoint/reopen behavior in this contract file.
+- Do not call `adapter.query`, `_write_node_provenance`,
+  `_write_edge_provenance`, `_raw_node_source_ref_keys`, or
+  `_raw_edge_source_ref_keys` in this contract file.
+- Do not assert raw Ladybug storage strings, Kuzu schema, Cypher behavior,
+  private helper behavior, or checkpoint/reopen behavior in this contract file.
+- Split mixed tests instead of moving them wholesale:
+  - keep public folded-write assertions in the contract suite;
+  - move raw `source_ref_keys == f"|{key}|"` assertions to the Ladybug storage
+    suite;
+  - keep delimiter/lookalike token stress in the Ladybug storage suite because
+    it uses raw storage tokens that are not valid public source refs.
+
+Create
+`cognee/tests/integration/infrastructure/graph/test_graph_provenance_unified_contract.py`:
+
+- Add a lightweight provider fixture:
+  - `graph_provenance_unified_engine(request, tmp_path)`
+  - The first provider is `ladybug+recording_vector`.
+  - The provider constructs `LadybugAdapter(str(tmp_path / "graph_db"))`.
+  - The provider wraps it in `UnifiedStoreEngine` with a small
+    `RecordingVectorEngine`.
+  - The provider closes the graph adapter after each test.
+  - If Ladybug is unavailable, skip only the Ladybug provider.
+- Test backend-neutral unified graph-provenance behavior:
+  - `delete_by_source_ref` deletes unowned nodes and edges, detaches the removed
+    ref from shared artifacts, and asks the vector engine to delete unowned node
+    and triplet vectors.
+  - `delete_by_dataset_id` removes only the dataset's refs and preserves
+    cross-dataset artifacts.
+  - `rollback_by_pipeline_run_id` removes only refs introduced by that run and
+    preserves artifacts that a prior run still owns.
+  - a vector delete failure leaves graph refs discoverable, and retry converges.
+  - deleting an unowned `NodeSet` triggers graph/vector `belongs_to_set` detag
+    cleanup.
+- Use the recording vector only to prove the unified planner calls the vector
+  contract correctly. Real vector adapter CRUD/detag behavior remains covered by
+  the vector adapter capability tests.
+- Do not duplicate the full default-stack `cognee.add -> cognee.cognify ->
+  delete_data` product tests in this contract file.
 
 Reshape and move
 `cognee/tests/unit/infrastructure/databases/graph/test_ladybug_provenance_capabilities.py`
@@ -339,14 +399,16 @@ to
 `cognee/tests/integration/infrastructure/graph/test_ladybug_provenance_storage.py`:
 
 - Keep Ladybug-specific tests there:
-  - raw scalar storage shape
-  - delimiter decoy behavior
-  - long delimited source-ref round trip
-  - Ladybug metadata table behavior that is not part of the generic adapter
-    contract
+  - raw scalar storage shape for folded node provenance
+  - raw scalar storage shape for folded edge provenance
+  - raw scalar storage shape for multiple edge owners
+  - raw delimiter lookalike token filtering
+  - long raw delimited source-ref round trip seeded through Ladybug storage
+    helpers
 - Move duplicated backend-neutral contract cases into the new contract file.
 - Keep the remaining storage-specific tests under `integration/` because they
   use the real Ladybug/Kuzu adapter.
+- Keep the storage file small; do not create a second behavioral contract there.
 
 Keep
 `cognee/tests/integration/infrastructure/graph/test_ladybug_provenance_checkpoint.py`
@@ -358,13 +420,36 @@ Keep task-level integration tests default-stack specific:
 - `cognee/tests/integration/tasks/test_graph_provenance_delete_part2.py`
 
 Those tests prove the product default stack, not every adapter implementation.
-The new adapter contract file is the ground truth for future adapter work.
+The new contract files are the ground truth for future adapter work.
+
+Adapter readiness means all of these pass for the target implementation:
+
+- the graph-adapter contract with the target graph provider registered;
+- the unified graph-provenance contract with the target graph provider
+  registered;
+- the target vector adapter's provenance delete/detag capability tests;
+- the product-flow integration tests for any supported default stack.
 
 ### Rationale
 
-Future backends need one place to prove they implement graph provenance correctly.
-The contract tests should describe behavior, not Ladybug storage details. Storage
-quirks stay in Ladybug files so the shared suite does not become adapter-shaped.
+Future backends need one place to prove their graph adapter implements graph
+provenance and one small real-adapter path that proves those methods work
+through `UnifiedStoreEngine`. The contract tests should describe behavior, not
+Ladybug storage details. Storage quirks stay in Ladybug files so the shared
+suite does not become adapter-shaped.
+
+### Completion
+
+- Added `test_graph_provenance_adapter_contract.py` as the shared public graph
+  adapter contract, with Ladybug registered as the first provider.
+- Added `test_graph_provenance_unified_contract.py` as the shared
+  `UnifiedStoreEngine` graph-provenance delete/rollback contract, using a real
+  graph adapter and recording vector engine.
+- Moved Ladybug/Kuzu scalar-string storage checks into
+  `test_ladybug_provenance_storage.py`.
+- Removed the old `test_ladybug_provenance_capabilities.py` file so the real
+  adapter tests no longer mix backend-neutral contract behavior with Ladybug
+  storage details.
 
 ### Demo
 
@@ -372,6 +457,7 @@ Run the new contract suite:
 
 ```bash
 uv run pytest cognee/tests/integration/infrastructure/graph/test_graph_provenance_adapter_contract.py -q
+uv run pytest cognee/tests/integration/infrastructure/graph/test_graph_provenance_unified_contract.py -q
 ```
 
 Run Ladybug-specific storage and checkpoint suites:
@@ -401,6 +487,7 @@ uv run pytest cognee/tests/unit/modules/graph/test_graph_provenance_delete_routi
 uv run pytest cognee/tests/unit/api/test_memory_provenance_graph_provenance.py -q
 uv run pytest cognee/tests/unit/infrastructure/databases/provenance/test_unified_graph_provenance_delete.py -q
 uv run pytest cognee/tests/integration/infrastructure/graph/test_graph_provenance_adapter_contract.py -q
+uv run pytest cognee/tests/integration/infrastructure/graph/test_graph_provenance_unified_contract.py -q
 uv run pytest cognee/tests/integration/infrastructure/graph/test_ladybug_provenance_storage.py -q
 uv run pytest cognee/tests/integration/infrastructure/graph/test_ladybug_provenance_checkpoint.py -q
 uv run pytest cognee/tests/integration/tasks/test_graph_provenance_delete_default_stack.py cognee/tests/integration/tasks/test_graph_provenance_delete_part2.py -q
@@ -409,8 +496,8 @@ uv run pytest cognee/tests/integration/tasks/test_graph_provenance_delete_defaul
 Run ruff on touched files:
 
 ```bash
-uv run ruff check cognee/api/v1/datasets/datasets.py cognee/modules/graph/methods/delete_data_nodes_and_edges.py cognee/api/v1/visualize/memory_provenance.py cognee/tests/unit/modules/graph/test_graph_provenance_delete_routing.py cognee/tests/unit/api/test_memory_provenance_graph_provenance.py cognee/tests/unit/infrastructure/databases/provenance/test_unified_graph_provenance_delete.py cognee/tests/integration/infrastructure/graph/test_graph_provenance_adapter_contract.py cognee/tests/integration/infrastructure/graph/test_ladybug_provenance_storage.py cognee/tests/integration/infrastructure/graph/test_ladybug_provenance_checkpoint.py cognee/tests/integration/tasks/test_graph_provenance_delete_default_stack.py cognee/tests/integration/tasks/test_graph_provenance_delete_part2.py
-uv run ruff format --check cognee/api/v1/datasets/datasets.py cognee/modules/graph/methods/delete_data_nodes_and_edges.py cognee/api/v1/visualize/memory_provenance.py cognee/tests/unit/modules/graph/test_graph_provenance_delete_routing.py cognee/tests/unit/api/test_memory_provenance_graph_provenance.py cognee/tests/unit/infrastructure/databases/provenance/test_unified_graph_provenance_delete.py cognee/tests/integration/infrastructure/graph/test_graph_provenance_adapter_contract.py cognee/tests/integration/infrastructure/graph/test_ladybug_provenance_storage.py cognee/tests/integration/infrastructure/graph/test_ladybug_provenance_checkpoint.py cognee/tests/integration/tasks/test_graph_provenance_delete_default_stack.py cognee/tests/integration/tasks/test_graph_provenance_delete_part2.py
+uv run ruff check cognee/api/v1/datasets/datasets.py cognee/modules/graph/methods/delete_data_nodes_and_edges.py cognee/api/v1/visualize/memory_provenance.py cognee/tests/unit/modules/graph/test_graph_provenance_delete_routing.py cognee/tests/unit/api/test_memory_provenance_graph_provenance.py cognee/tests/unit/infrastructure/databases/provenance/test_unified_graph_provenance_delete.py cognee/tests/integration/infrastructure/graph/test_graph_provenance_adapter_contract.py cognee/tests/integration/infrastructure/graph/test_graph_provenance_unified_contract.py cognee/tests/integration/infrastructure/graph/test_ladybug_provenance_storage.py cognee/tests/integration/infrastructure/graph/test_ladybug_provenance_checkpoint.py cognee/tests/integration/tasks/test_graph_provenance_delete_default_stack.py cognee/tests/integration/tasks/test_graph_provenance_delete_part2.py
+uv run ruff format --check cognee/api/v1/datasets/datasets.py cognee/modules/graph/methods/delete_data_nodes_and_edges.py cognee/api/v1/visualize/memory_provenance.py cognee/tests/unit/modules/graph/test_graph_provenance_delete_routing.py cognee/tests/unit/api/test_memory_provenance_graph_provenance.py cognee/tests/unit/infrastructure/databases/provenance/test_unified_graph_provenance_delete.py cognee/tests/integration/infrastructure/graph/test_graph_provenance_adapter_contract.py cognee/tests/integration/infrastructure/graph/test_graph_provenance_unified_contract.py cognee/tests/integration/infrastructure/graph/test_ladybug_provenance_storage.py cognee/tests/integration/infrastructure/graph/test_ladybug_provenance_checkpoint.py cognee/tests/integration/tasks/test_graph_provenance_delete_default_stack.py cognee/tests/integration/tasks/test_graph_provenance_delete_part2.py
 ```
 
 ## Non-Goals
@@ -434,5 +521,9 @@ uv run ruff format --check cognee/api/v1/datasets/datasets.py cognee/modules/gra
   route.
 - Graph-provenance memory read failures surface instead of falling back to the
   relational ledger.
-- A future adapter can opt into the contract suite by adding one provider entry.
+- A future graph adapter can opt into the graph-adapter and unified contracts by
+  adding provider entries.
+- A future adapter combo has a clear readiness checklist: graph contract,
+  unified graph-provenance contract, relevant vector capability tests, and any
+  product-flow integration tests for supported default stacks.
 - Ladybug storage and checkpoint regressions still pass.
