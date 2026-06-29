@@ -21,6 +21,7 @@
     "embla-carousel-autoplay": "^8.6.0",
     "embla-carousel-fade": "^8.6.0",
     "embla-carousel-react": "^8.6.0",
+    "jose": "^6.0.11",
     "mantine-form-valibot-resolver": "^3.0.1",
     "next": "^16.0.8",
     "react": "^19.1.2",
