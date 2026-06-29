@@ -1,4 +1,4 @@
-"""Ladybug/Kuzu checkpoint regressions for graph provenance list columns."""
+"""Ladybug/Kuzu checkpoint regressions for scalar graph provenance columns."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from cognee.infrastructure.databases.provenance import make_source_ref_key
+from cognee.infrastructure.databases.provenance import EdgeIdentity, make_source_ref_key
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.modules.data.processing.document_types.Document import Document
 from cognee.modules.engine.models.EntityType import EntityType
@@ -89,19 +89,8 @@ async def _seed_checkpoint_repro_graph(graph):
     return marie_key, john_key
 
 
-async def test_remove_node_source_refs_rewrites_dataset_provenance_before_checkpoint(tmp_path):
-    """Regression for a Ladybug/Kuzu checkpoint issue with narrow list updates.
-
-    The old implementation only rewrote the shared ``organization`` node:
-
-        MATCH (n:Node) WHERE n.id = $id SET n.source_ref_keys = $refs
-
-    In the four-node repro below, that command was correct and read back
-    correctly before ``CHECKPOINT;``, but checkpoint persisted John's source ref
-    onto the untouched Marie chunk. The adapter now rewrites the complete
-    expected provenance state for nodes in the affected dataset before
-    checkpointing.
-    """
+async def test_remove_node_source_refs_survives_checkpoint(tmp_path):
+    """Scalar provenance survives narrow node source-ref removal + checkpoint."""
     graph = LadybugAdapter(str(tmp_path / "g"))
     try:
         marie_key, john_key = await _seed_checkpoint_repro_graph(graph)
@@ -125,25 +114,63 @@ async def test_remove_node_source_refs_rewrites_dataset_provenance_before_checkp
         await graph.close()
 
 
-@pytest.mark.skip(reason="Documents the Ladybug/Kuzu narrow-update checkpoint bug.")
-async def test_narrow_source_ref_update_checkpoint_corrupts_unrelated_node(tmp_path):
-    """Smallest known repro for the storage-level bug, kept skipped by design."""
-    graph = LadybugAdapter(str(tmp_path / "g"))
+async def test_remove_edge_source_refs_survives_checkpoint_and_reopen(tmp_path):
+    graph_path = tmp_path / "g"
+    graph = LadybugAdapter(str(graph_path))
     try:
         marie_key, john_key = await _seed_checkpoint_repro_graph(graph)
 
-        await graph.query(
-            """
-            MATCH (n:Node)
-            WHERE n.id = $id
-            SET n.source_ref_keys = $refs
-            """,
-            {"id": str(CHECKPOINT_REPRO_ORG_ID), "refs": [marie_key]},
+        shared_edge = EdgeIdentity(
+            str(CHECKPOINT_REPRO_ORG_ID),
+            str(CHECKPOINT_REPRO_TEXT_SUMMARY_ID),
+            "summarizes",
         )
-        await graph.checkpoint()
+        neighbor_edge = EdgeIdentity(
+            str(CHECKPOINT_REPRO_MARIE_CHUNK_ID),
+            str(CHECKPOINT_REPRO_TEXT_SUMMARY_ID),
+            "made_from",
+        )
 
-        rows = await graph.get_node_delete_data([str(CHECKPOINT_REPRO_MARIE_CHUNK_ID)])
-        assert rows[str(CHECKPOINT_REPRO_MARIE_CHUNK_ID)].source_ref_keys == [marie_key]
-        assert rows[str(CHECKPOINT_REPRO_MARIE_CHUNK_ID)].source_ref_keys != [john_key]
+        await graph.add_edges(
+            [
+                (
+                    shared_edge.source_id,
+                    shared_edge.target_id,
+                    shared_edge.relationship_name,
+                    {"edge_text": "organization summarizes Marie summary"},
+                ),
+                (
+                    neighbor_edge.source_id,
+                    neighbor_edge.target_id,
+                    neighbor_edge.relationship_name,
+                    {"edge_text": "Marie chunk made from summary"},
+                ),
+            ],
+            source_ref_key=marie_key,
+            pipeline_run_id=str(uuid4()),
+        )
+        await graph.add_edges(
+            [
+                (
+                    shared_edge.source_id,
+                    shared_edge.target_id,
+                    shared_edge.relationship_name,
+                    {"edge_text": "organization summarizes Marie summary"},
+                )
+            ],
+            source_ref_key=john_key,
+            pipeline_run_id=str(uuid4()),
+        )
+
+        await graph.remove_edge_source_refs([shared_edge], [john_key])
+        await graph.checkpoint()
     finally:
         await graph.close()
+
+    reopened = LadybugAdapter(str(graph_path))
+    try:
+        rows = await reopened.get_edge_delete_data([shared_edge, neighbor_edge])
+        assert rows[shared_edge].source_ref_keys == [marie_key]
+        assert rows[neighbor_edge].source_ref_keys == [marie_key]
+    finally:
+        await reopened.close()

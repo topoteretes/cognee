@@ -1,7 +1,7 @@
 """Backend capability tests for graph provenance on the default graph
 backend (Ladybug/Kuzu) — COG-5522 Part 1.
 
-These exercise the real adapter (declared STRING[] provenance columns + the
+These exercise the real adapter (declared STRING provenance columns + the
 GraphMetadata marker table) against the Part 0 contract: source-ref
 attach/remove invariants, the six lookups, delete-planning snapshots,
 delete_edge_triples, the graph-provenance metadata marker, and belongs_to_set
@@ -62,6 +62,30 @@ async def _seed_two_entities(adapter):
     alice = _Ent(id=uuid4(), name="Alice")
     await adapter.add_nodes([germany, alice])
     return str(germany.id), str(alice.id)
+
+
+async def _raw_node_source_ref_keys(adapter, node_id: str):
+    rows = await adapter.query(
+        "MATCH (n:Node) WHERE n.id = $id RETURN n.source_ref_keys",
+        {"id": node_id},
+    )
+    return rows[0][0]
+
+
+async def _raw_edge_source_ref_keys(adapter, edge: EdgeIdentity):
+    rows = await adapter.query(
+        """
+        MATCH (a:Node)-[r:EDGE]->(b:Node)
+        WHERE a.id = $source_id AND b.id = $target_id AND r.relationship_name = $rel
+        RETURN r.source_ref_keys
+        """,
+        {
+            "source_id": edge.source_id,
+            "target_id": edge.target_id,
+            "rel": edge.relationship_name,
+        },
+    )
+    return rows[0][0]
 
 
 async def test_graph_metadata_round_trip(tmp_path):
@@ -445,6 +469,7 @@ async def test_add_nodes_folds_provenance_in_one_write(tmp_path):
         assert snap.source_run_ids == [str(r1)]
         assert snap.source_run_refs == [make_source_run_ref(r1, key)]
         assert await adapter.find_nodes_by_source_ref(key) == [node_id]
+        assert await _raw_node_source_ref_keys(adapter, node_id) == f"|{key}|"
     finally:
         await adapter.close()
 
@@ -470,6 +495,39 @@ async def test_add_edges_folds_provenance_in_one_write(tmp_path):
         assert snap.source_run_ids == [str(r1)]
         assert snap.source_run_refs == [make_source_run_ref(r1, key)]
         assert await adapter.find_edges_by_source_ref(key) == [edge]
+        assert await _raw_edge_source_ref_keys(adapter, edge) == f"|{key}|"
+    finally:
+        await adapter.close()
+
+
+async def test_add_edges_folds_multiple_owners(tmp_path):
+    adapter = _new_adapter(tmp_path)
+    try:
+        d1, d2, r1, r2 = uuid4(), uuid4(), uuid4(), uuid4()
+        key_a = make_source_ref_key(d1, uuid4())
+        key_b = make_source_ref_key(d2, uuid4())
+        germany_id, alice_id = await _seed_two_entities(adapter)
+        edge = EdgeIdentity(germany_id, alice_id, "knows")
+
+        await adapter.add_edges(
+            [(germany_id, alice_id, "knows", {"edge_text": "t"})],
+            source_ref_key=key_a,
+            pipeline_run_id=str(r1),
+        )
+        await adapter.add_edges(
+            [(germany_id, alice_id, "knows", {"edge_text": "t2"})],
+            source_ref_key=key_b,
+            pipeline_run_id=str(r2),
+        )
+
+        snap = (await adapter.get_edge_delete_data([edge]))[edge]
+        assert snap.source_ref_keys == [key_a, key_b]
+        assert sorted(snap.source_dataset_ids) == sorted({str(d1), str(d2)})
+        assert sorted(snap.source_run_ids) == sorted({str(r1), str(r2)})
+        assert sorted(snap.source_run_refs) == sorted(
+            {make_source_run_ref(r1, key_a), make_source_run_ref(r2, key_b)}
+        )
+        assert await _raw_edge_source_ref_keys(adapter, edge) == f"|{key_a}|{key_b}|"
     finally:
         await adapter.close()
 
@@ -489,10 +547,8 @@ async def test_folded_attach_omitted_when_no_source_ref(tmp_path):
         await adapter.close()
 
 
-async def test_folded_attach_preserves_model_a_on_reattach(tmp_path):
-    """Re-attaching an already-present key via a NEW run records no new run ref,
-    even on the folded path — the in-statement guard reads pre-write ownership
-    (Part 0 invariant preserved atomically)."""
+async def test_folded_attach_preserves_model_a_on_node_and_edge_reattach(tmp_path):
+    """Re-touching an existing node or edge key via a new run records no new run ref."""
     adapter = _new_adapter(tmp_path)
     try:
         key = make_source_ref_key(uuid4(), uuid4())
@@ -501,13 +557,85 @@ async def test_folded_attach_preserves_model_a_on_reattach(tmp_path):
         node_id = str(node.id)
 
         await adapter.add_nodes([node], source_ref_key=key, pipeline_run_id=str(r1))
-        # Re-cognify the same data item in a new run: key already present.
         await adapter.add_nodes([node], source_ref_key=key, pipeline_run_id=str(r2))
 
         snap = (await adapter.get_node_delete_data([node_id]))[node_id]
         assert snap.source_ref_keys == [key]
         assert snap.source_run_refs == [make_source_run_ref(r1, key)]
         assert snap.source_run_ids == [str(r1)]
+
+        germany_id, alice_id = await _seed_two_entities(adapter)
+        edge = EdgeIdentity(germany_id, alice_id, "knows")
+        await adapter.add_edges(
+            [(germany_id, alice_id, "knows", {"edge_text": "t"})],
+            source_ref_key=key,
+            pipeline_run_id=str(r1),
+        )
+        await adapter.add_edges(
+            [(germany_id, alice_id, "knows", {"edge_text": "t2"})],
+            source_ref_key=key,
+            pipeline_run_id=str(r2),
+        )
+
+        edge_snap = (await adapter.get_edge_delete_data([edge]))[edge]
+        assert edge_snap.source_ref_keys == [key]
+        assert edge_snap.source_run_refs == [make_source_run_ref(r1, key)]
+        assert edge_snap.source_run_ids == [str(r1)]
+    finally:
+        await adapter.close()
+
+
+async def test_delimited_source_ref_filter_excludes_lookalike_token(tmp_path):
+    adapter = _new_adapter(tmp_path)
+    try:
+        node = _Ent(id=uuid4(), name="Shared")
+        await adapter.add_nodes([node])
+        node_id = str(node.id)
+        short_ref = "source_ref:v1:prefix"
+        lookalike_ref = "source_ref:v1:prefix-extra"
+
+        await adapter._write_node_provenance(
+            [
+                {
+                    "id": node_id,
+                    "refs": [lookalike_ref],
+                    "datasets": [],
+                    "runs": [],
+                    "run_refs": [],
+                }
+            ]
+        )
+
+        assert await adapter.find_nodes_by_source_ref(short_ref) == []
+        assert await adapter.find_nodes_by_source_ref(lookalike_ref) == [node_id]
+    finally:
+        await adapter.close()
+
+
+async def test_long_delimited_source_refs_round_trip_and_filter(tmp_path):
+    adapter = _new_adapter(tmp_path)
+    try:
+        dataset_id = uuid4()
+        keys = [make_source_ref_key(dataset_id, uuid4()) for _ in range(256)]
+        node = _Ent(id=uuid4(), name="Shared")
+        await adapter.add_nodes([node])
+        node_id = str(node.id)
+
+        await adapter._write_node_provenance(
+            [
+                {
+                    "id": node_id,
+                    "refs": keys,
+                    "datasets": [str(dataset_id)],
+                    "runs": [],
+                    "run_refs": [],
+                }
+            ]
+        )
+
+        snap = (await adapter.get_node_delete_data([node_id]))[node_id]
+        assert snap.source_ref_keys == keys
+        assert await adapter.find_nodes_by_source_ref(keys[128]) == [node_id]
     finally:
         await adapter.close()
 

@@ -31,8 +31,6 @@ from cognee.infrastructure.databases.provenance.source_refs import (
     get_source_ref_key_from_source_run_ref,
 )
 from cognee.infrastructure.databases.provenance.source_ref_state import (
-    derive_dataset_ids,
-    derive_run_ids,
     provenance_after_attach,
     provenance_after_remove,
     provenance_attach_inputs,
@@ -55,12 +53,12 @@ logger = get_logger()
 DEFAULT_KUZU_BUFFER_POOL_SIZE = 1 << 35  # 32 GB (must be a power of 2 for Kuzu)
 DEFAULT_KUZU_MAX_DB_SIZE = 1 << 35  # 32 GB (must be a power of 2 for Kuzu)
 
-# Graph provenance (COG-5522 Part 1). These four fields live in declared
-# STRING[] columns on both Node and EDGE — never inside the JSON `properties`
-# blob — so delete/rollback can filter by source ref, dataset id, or pipeline
-# run id with a column scan. Unset columns read back as NULL on Kuzu, so every
-# read normalizes NULL -> [] (see `_as_str_list`).
-PROVENANCE_LIST_COLUMNS = (
+# Graph provenance (COG-5522 Part 1). These four fields live in declared scalar
+# STRING columns on both Node and EDGE — never inside the JSON `properties` blob
+# — so delete/rollback can filter by source ref, dataset id, or pipeline run id
+# with a column scan. The stored form is a delimiter-wrapped string, e.g.
+# "|ref-a|ref-b|"; "|" means empty provenance.
+PROVENANCE_COLUMNS = (
     "source_ref_keys",
     "source_dataset_ids",
     "source_run_ids",
@@ -74,32 +72,36 @@ def _provenance_fold_clause(alias: str) -> str:
     Appended to the ``MERGE`` in ``add_nodes`` / ``add_edges`` so a node/edge is
     created and stamped in one atomic statement — there is no read-then-write
     window (closes the write-then-attach gap and the concurrent lost update,
-    COG-5522 #4/#8). Set-merge is done with ``list_distinct`` against the
-    committed column. The run ref/id are appended only when the key is *not*
+    COG-5522 #4/#8). Set-merge is done with delimiter-token membership against
+    the committed column. The run ref/id are appended only when the key is *not*
     already present (Model A): the ``CASE`` guard reads ``source_ref_keys`` from
     the pre-SET row, so it sees ownership as it was before this write.
 
     ``alias`` is the bound variable for the artifact (``n`` for nodes, ``r`` for
-    edges). All four ``$``-params are scalars shared across the UNWIND batch
-    because a single source ref key is attached per call.
+    edges). The provenance ``$``-params are scalars shared across the UNWIND
+    batch because a single source ref key is attached per call.
     """
     return f"""
             SET {alias}.source_run_refs = CASE
-                    WHEN list_contains(coalesce({alias}.source_ref_keys, []), $sr_key)
-                    THEN coalesce({alias}.source_run_refs, [])
-                    ELSE list_distinct(coalesce({alias}.source_run_refs, []) + $add_run_refs)
+                    WHEN coalesce({alias}.source_ref_keys, '|') CONTAINS $sr_token
+                    THEN coalesce({alias}.source_run_refs, '|')
+                    ELSE concat(coalesce({alias}.source_run_refs, '|'), $run_ref_tail)
                 END,
                 {alias}.source_run_ids = CASE
-                    WHEN list_contains(coalesce({alias}.source_ref_keys, []), $sr_key)
-                    THEN coalesce({alias}.source_run_ids, [])
-                    ELSE list_distinct(coalesce({alias}.source_run_ids, []) + $add_run_ids)
+                    WHEN coalesce({alias}.source_ref_keys, '|') CONTAINS $sr_token
+                    THEN coalesce({alias}.source_run_ids, '|')
+                    ELSE concat(coalesce({alias}.source_run_ids, '|'), $run_id_tail)
                 END,
-                {alias}.source_ref_keys = list_distinct(
-                    coalesce({alias}.source_ref_keys, []) + $add_keys
-                ),
-                {alias}.source_dataset_ids = list_distinct(
-                    coalesce({alias}.source_dataset_ids, []) + $add_dataset_ids
-                )
+                {alias}.source_ref_keys = CASE
+                    WHEN coalesce({alias}.source_ref_keys, '|') CONTAINS $sr_token
+                    THEN coalesce({alias}.source_ref_keys, '|')
+                    ELSE concat(coalesce({alias}.source_ref_keys, '|'), $sr_tail)
+                END,
+                {alias}.source_dataset_ids = CASE
+                    WHEN coalesce({alias}.source_dataset_ids, '|') CONTAINS $ds_token
+                    THEN coalesce({alias}.source_dataset_ids, '|')
+                    ELSE concat(coalesce({alias}.source_dataset_ids, '|'), $ds_tail)
+                END
             """
 
 
@@ -107,24 +109,44 @@ def _provenance_fold_params(source_ref_key: str, pipeline_run_id: Optional[str])
     """Scalar query params consumed by :func:`_provenance_fold_clause`."""
     inputs = provenance_attach_inputs(source_ref_key, pipeline_run_id)
     return {
-        "sr_key": inputs.source_ref_key,
-        "add_keys": inputs.add_keys,
-        "add_dataset_ids": inputs.add_dataset_ids,
-        "add_run_refs": inputs.add_run_refs,
-        "add_run_ids": inputs.add_run_ids,
+        "sr_token": _provenance_token(inputs.source_ref_key),
+        "sr_tail": inputs.add_keys[0] + "|",
+        "ds_token": _provenance_token(inputs.add_dataset_ids[0]),
+        "ds_tail": inputs.add_dataset_ids[0] + "|",
+        "run_ref_tail": (inputs.add_run_refs[0] + "|") if inputs.add_run_refs else "",
+        "run_id_tail": (inputs.add_run_ids[0] + "|") if inputs.add_run_ids else "",
     }
 
 
-def _as_str_list(value: Any) -> List[str]:
-    """Normalize a Kuzu ``STRING[]`` column read into ``list[str]``.
+def _provenance_token(value: str) -> str:
+    return f"|{value}|"
 
-    An unset array column reads back as ``None`` on Kuzu (e.g. a node written
-    before any source ref was attached), so a missing provenance field is
-    always surfaced as an empty list.
-    """
-    if not value:
+
+def _encode_refs(items: List[str]) -> str:
+    if not items:
+        return "|"
+    for item in items:
+        if "|" in item:
+            raise ValueError("provenance entry must not contain '|'")
+    return "|" + "|".join(items) + "|"
+
+
+def _decode_refs(value: Any) -> List[str]:
+    """Normalize a delimiter-wrapped provenance string into ``list[str]``."""
+    if value is None or value == "":
         return []
-    return [str(item) for item in value]
+    if not isinstance(value, str):
+        raise TypeError("provenance column must be a string or None")
+    return [item for item in value.strip("|").split("|") if item]
+
+
+def _encode_provenance_row(row: dict) -> dict:
+    encoded = dict(row)
+    encoded["refs"] = _encode_refs(row["refs"])
+    encoded["datasets"] = _encode_refs(row["datasets"])
+    encoded["runs"] = _encode_refs(row["runs"])
+    encoded["run_refs"] = _encode_refs(row["run_refs"])
+    return encoded
 
 
 def _parse_properties_blob(raw: Any) -> Dict[str, Any]:
@@ -339,10 +361,10 @@ class LadybugAdapter(GraphDBInterface):
                 created_at TIMESTAMP,
                 updated_at TIMESTAMP,
                 properties STRING,
-                source_ref_keys STRING[],
-                source_dataset_ids STRING[],
-                source_run_ids STRING[],
-                source_run_refs STRING[]
+                source_ref_keys STRING,
+                source_dataset_ids STRING,
+                source_run_ids STRING,
+                source_run_refs STRING
             )
         """)
         self.connection.execute("""
@@ -352,10 +374,10 @@ class LadybugAdapter(GraphDBInterface):
                 created_at TIMESTAMP,
                 updated_at TIMESTAMP,
                 properties STRING,
-                source_ref_keys STRING[],
-                source_dataset_ids STRING[],
-                source_run_ids STRING[],
-                source_run_refs STRING[]
+                source_ref_keys STRING,
+                source_dataset_ids STRING,
+                source_run_ids STRING,
+                source_run_refs STRING
             )
         """)
         self._ensure_graph_metadata_table()
@@ -495,36 +517,7 @@ class LadybugAdapter(GraphDBInterface):
                         e,
                     )
 
-            # Create node table with essential fields and timestamp
-            self.connection.execute("""
-                CREATE NODE TABLE IF NOT EXISTS Node(
-                    id STRING PRIMARY KEY,
-                    name STRING,
-                    type STRING,
-                    created_at TIMESTAMP,
-                    updated_at TIMESTAMP,
-                    properties STRING,
-                    source_ref_keys STRING[],
-                    source_dataset_ids STRING[],
-                    source_run_ids STRING[],
-                    source_run_refs STRING[]
-                )
-            """)
-            # Create relationship table with timestamp
-            self.connection.execute("""
-                CREATE REL TABLE IF NOT EXISTS EDGE(
-                    FROM Node TO Node,
-                    relationship_name STRING,
-                    created_at TIMESTAMP,
-                    updated_at TIMESTAMP,
-                    properties STRING,
-                    source_ref_keys STRING[],
-                    source_dataset_ids STRING[],
-                    source_run_ids STRING[],
-                    source_run_refs STRING[]
-                )
-            """)
-            self._ensure_graph_metadata_table()
+            self._ensure_schema()
             logger.debug("Ladybug database initialized successfully")
         except Exception as e:
             logger.error(f"Failed to initialize Ladybug database: {e}")
@@ -1058,8 +1051,8 @@ class LadybugAdapter(GraphDBInterface):
             for key in core_properties:
                 properties.pop(key, None)
 
-            # Provenance lives in declared STRING[] columns, never the JSON blob.
-            for key in PROVENANCE_LIST_COLUMNS:
+            # Provenance lives in declared STRING columns, never the JSON blob.
+            for key in PROVENANCE_COLUMNS:
                 properties.pop(key, None)
 
             core_properties["properties"] = json.dumps(properties, cls=JSONEncoder)
@@ -1135,8 +1128,8 @@ class LadybugAdapter(GraphDBInterface):
                 for key in core_properties:
                     properties.pop(key, None)
 
-                # Provenance lives in declared STRING[] columns, never the JSON blob.
-                for key in PROVENANCE_LIST_COLUMNS:
+                # Provenance lives in declared STRING columns, never the JSON blob.
+                for key in PROVENANCE_COLUMNS:
                     properties.pop(key, None)
 
                 node_params.append(
@@ -1216,10 +1209,11 @@ class LadybugAdapter(GraphDBInterface):
     # ------------------------------------------------------------------
     # Graph provenance (COG-5522 Part 1)
     #
-    # The four provenance fields live in declared STRING[] columns on Node and
-    # EDGE. attach/remove do a per-artifact read-modify-write (delete/rollback
-    # is a maintenance path, not a hot path); lookups are full column scans via
-    # list_contains. Every read normalizes a NULL column to [].
+    # The four provenance fields live in declared scalar STRING columns on Node
+    # and EDGE. attach/remove do a per-artifact read-modify-write
+    # (delete/rollback is a maintenance path, not a hot path); lookups are full
+    # column scans via delimiter-token string filters. Every read normalizes a
+    # NULL column to [].
     # ------------------------------------------------------------------
 
     async def _read_node_provenance(
@@ -1233,32 +1227,12 @@ class LadybugAdapter(GraphDBInterface):
             """,
             {"ids": list(node_ids)},
         )
-        return {row[0]: (_as_str_list(row[1]), _as_str_list(row[2])) for row in rows}
-
-    async def _read_node_provenance_for_source_ref_datasets(
-        self, source_ref_keys: list[str]
-    ) -> Dict[str, Tuple[List[str], List[str]]]:
-        """Return node provenance for all nodes in the affected source-ref datasets."""
-        dataset_ids = {str(get_dataset_id_from_source_ref_key(key)) for key in source_ref_keys}
-        if not dataset_ids:
-            return {}
-
-        rows = await self.query(
-            """
-            MATCH (n:Node)
-            RETURN n.id, n.source_ref_keys, n.source_run_refs
-            """
-        )
-        result: Dict[str, Tuple[List[str], List[str]]] = {}
-        for row in rows:
-            refs = _as_str_list(row[1])
-            if any(str(get_dataset_id_from_source_ref_key(ref)) in dataset_ids for ref in refs):
-                result[row[0]] = (refs, _as_str_list(row[2]))
-        return result
+        return {row[0]: (_decode_refs(row[1]), _decode_refs(row[2])) for row in rows}
 
     async def _write_node_provenance(self, batch: List[dict]) -> None:
         if not batch:
             return
+        encoded_batch = [_encode_provenance_row(row) for row in batch]
         await self.query(
             """
             UNWIND $batch AS row
@@ -1268,7 +1242,7 @@ class LadybugAdapter(GraphDBInterface):
                 n.source_run_ids = row.runs,
                 n.source_run_refs = row.run_refs
             """,
-            {"batch": batch},
+            {"batch": encoded_batch},
         )
         await self.checkpoint()
 
@@ -1292,12 +1266,13 @@ class LadybugAdapter(GraphDBInterface):
         result: Dict[EdgeIdentity, Tuple[List[str], List[str]]] = {}
         for row in rows:
             edge = EdgeIdentity(source_id=row[0], target_id=row[1], relationship_name=row[2])
-            result[edge] = (_as_str_list(row[3]), _as_str_list(row[4]))
+            result[edge] = (_decode_refs(row[3]), _decode_refs(row[4]))
         return result
 
     async def _write_edge_provenance(self, batch: List[dict]) -> None:
         if not batch:
             return
+        encoded_batch = [_encode_provenance_row(row) for row in batch]
         await self.query(
             """
             UNWIND $batch AS row
@@ -1308,7 +1283,7 @@ class LadybugAdapter(GraphDBInterface):
                 r.source_run_ids = row.runs,
                 r.source_run_refs = row.run_refs
             """,
-            {"batch": batch},
+            {"batch": encoded_batch},
         )
         await self.checkpoint()
 
@@ -1401,43 +1376,13 @@ class LadybugAdapter(GraphDBInterface):
         if not source_ref_keys:
             return
         remove_keys = list(source_ref_keys)
-        target_node_ids = set(node_ids)
-
-        # Ladybug/Kuzu has shown a durability bug with the simpler targeted form:
-        # ``MATCH (n) WHERE n.id = $id SET n.source_ref_keys = $refs; CHECKPOINT``.
-        # In the reduced repro, that command reaches Kuzu with the correct target
-        # and params and reads back correctly before checkpoint, but checkpoint (or
-        # close/reopen) can persist a different untouched node's ``STRING[]``
-        # provenance value. Rewriting the complete expected provenance columns for
-        # all nodes in the affected source-ref dataset keeps the existing node
-        # provenance shape while avoiding the flaky narrow list-column flush.
-        current = await self._read_node_provenance_for_source_ref_datasets(remove_keys)
-        batch = []
-        for node_id, (keys, run_refs) in current.items():
-            if node_id in target_node_ids:
-                cols = provenance_after_remove(keys, run_refs, remove_keys)
-                refs = cols.source_ref_keys
-                datasets = cols.source_dataset_ids
-                runs = cols.source_run_ids
-                next_run_refs = cols.source_run_refs
-            else:
-                refs = list(keys)
-                next_run_refs = list(run_refs)
-                datasets = derive_dataset_ids(refs)
-                runs = derive_run_ids(next_run_refs)
-
-            batch.append(
-                {
-                    "id": node_id,
-                    "refs": refs,
-                    "datasets": datasets,
-                    "runs": runs,
-                    "run_refs": next_run_refs,
-                }
-            )
-
-        if batch:
-            await self._write_node_provenance(batch)
+        await self._apply_source_ref_change(
+            node_ids,
+            self._read_node_provenance,
+            self._write_node_provenance,
+            self._node_row,
+            lambda keys, run_refs: provenance_after_remove(keys, run_refs, remove_keys),
+        )
 
     async def remove_edge_source_refs(
         self,
@@ -1504,10 +1449,10 @@ class LadybugAdapter(GraphDBInterface):
                 node_type=node_type or "",
                 indexed_fields=indexed_fields,
                 node_properties=properties,
-                source_ref_keys=_as_str_list(row[4]),
-                source_dataset_ids=_as_str_list(row[5]),
-                source_run_ids=_as_str_list(row[6]),
-                source_run_refs=_as_str_list(row[7]),
+                source_ref_keys=_decode_refs(row[4]),
+                source_dataset_ids=_decode_refs(row[5]),
+                source_run_ids=_decode_refs(row[6]),
+                source_run_refs=_decode_refs(row[7]),
             )
         return result
 
@@ -1545,17 +1490,21 @@ class LadybugAdapter(GraphDBInterface):
                 edge=edge,
                 edge_text=edge_text,
                 edge_properties=properties,
-                source_ref_keys=_as_str_list(row[4]),
-                source_dataset_ids=_as_str_list(row[5]),
-                source_run_ids=_as_str_list(row[6]),
-                source_run_refs=_as_str_list(row[7]),
+                source_ref_keys=_decode_refs(row[4]),
+                source_dataset_ids=_decode_refs(row[5]),
+                source_run_ids=_decode_refs(row[6]),
+                source_run_refs=_decode_refs(row[7]),
             )
         return result
 
     async def find_nodes_by_source_ref(self, source_ref_key: str) -> list[str]:
         rows = await self.query(
-            "MATCH (n:Node) WHERE list_contains(n.source_ref_keys, $key) RETURN n.id",
-            {"key": source_ref_key},
+            """
+            MATCH (n:Node)
+            WHERE coalesce(n.source_ref_keys, '|') CONTAINS $token
+            RETURN n.id
+            """,
+            {"token": _provenance_token(source_ref_key)},
         )
         return [row[0] for row in rows]
 
@@ -1563,10 +1512,10 @@ class LadybugAdapter(GraphDBInterface):
         rows = await self.query(
             """
             MATCH (a:Node)-[r:EDGE]->(b:Node)
-            WHERE list_contains(r.source_ref_keys, $key)
+            WHERE coalesce(r.source_ref_keys, '|') CONTAINS $token
             RETURN a.id, b.id, r.relationship_name
             """,
-            {"key": source_ref_key},
+            {"token": _provenance_token(source_ref_key)},
         )
         return [
             EdgeIdentity(source_id=row[0], target_id=row[1], relationship_name=row[2])
@@ -1576,16 +1525,17 @@ class LadybugAdapter(GraphDBInterface):
     async def find_node_source_refs_by_dataset(self, dataset_id: str) -> dict[str, list[str]]:
         rows = await self.query(
             """
-            MATCH (n:Node) WHERE list_contains(n.source_dataset_ids, $ds)
+            MATCH (n:Node)
+            WHERE coalesce(n.source_dataset_ids, '|') CONTAINS $token
             RETURN n.id, n.source_ref_keys
             """,
-            {"ds": dataset_id},
+            {"token": _provenance_token(dataset_id)},
         )
         result: dict[str, list[str]] = {}
         for row in rows:
             owned = [
                 key
-                for key in _as_str_list(row[1])
+                for key in _decode_refs(row[1])
                 if str(get_dataset_id_from_source_ref_key(key)) == dataset_id
             ]
             if owned:
@@ -1598,16 +1548,16 @@ class LadybugAdapter(GraphDBInterface):
         rows = await self.query(
             """
             MATCH (a:Node)-[r:EDGE]->(b:Node)
-            WHERE list_contains(r.source_dataset_ids, $ds)
+            WHERE coalesce(r.source_dataset_ids, '|') CONTAINS $token
             RETURN a.id, b.id, r.relationship_name, r.source_ref_keys
             """,
-            {"ds": dataset_id},
+            {"token": _provenance_token(dataset_id)},
         )
         result: dict[EdgeIdentity, list[str]] = {}
         for row in rows:
             owned = [
                 key
-                for key in _as_str_list(row[3])
+                for key in _decode_refs(row[3])
                 if str(get_dataset_id_from_source_ref_key(key)) == dataset_id
             ]
             if owned:
@@ -1620,16 +1570,17 @@ class LadybugAdapter(GraphDBInterface):
     ) -> dict[str, list[str]]:
         rows = await self.query(
             """
-            MATCH (n:Node) WHERE list_contains(n.source_run_ids, $run)
+            MATCH (n:Node)
+            WHERE coalesce(n.source_run_ids, '|') CONTAINS $token
             RETURN n.id, n.source_run_refs
             """,
-            {"run": pipeline_run_id},
+            {"token": _provenance_token(pipeline_run_id)},
         )
         result: dict[str, list[str]] = {}
         for row in rows:
             contributed = [
                 get_source_ref_key_from_source_run_ref(ref)
-                for ref in _as_str_list(row[1])
+                for ref in _decode_refs(row[1])
                 if str(get_pipeline_run_id_from_source_run_ref(ref)) == pipeline_run_id
             ]
             if contributed:
@@ -1642,16 +1593,16 @@ class LadybugAdapter(GraphDBInterface):
         rows = await self.query(
             """
             MATCH (a:Node)-[r:EDGE]->(b:Node)
-            WHERE list_contains(r.source_run_ids, $run)
+            WHERE coalesce(r.source_run_ids, '|') CONTAINS $token
             RETURN a.id, b.id, r.relationship_name, r.source_run_refs
             """,
-            {"run": pipeline_run_id},
+            {"token": _provenance_token(pipeline_run_id)},
         )
         result: dict[EdgeIdentity, list[str]] = {}
         for row in rows:
             contributed = [
                 get_source_ref_key_from_source_run_ref(ref)
-                for ref in _as_str_list(row[3])
+                for ref in _decode_refs(row[3])
                 if str(get_pipeline_run_id_from_source_run_ref(ref)) == pipeline_run_id
             ]
             if contributed:
