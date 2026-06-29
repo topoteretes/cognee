@@ -13,7 +13,10 @@ import asyncio
 import pytest
 
 try:
-    import lancedb  # noqa: F401
+    import importlib.util
+
+    if importlib.util.find_spec("lancedb") is None:
+        raise ModuleNotFoundError
 
     from cognee.infrastructure.databases.vector.lancedb.LanceDBAdapter import (
         LanceDBAdapter,
@@ -47,6 +50,8 @@ async def test_close_during_pending_get_connection_blocks_resurrection(monkeypat
     """
     started = asyncio.Event()
     proceed = asyncio.Event()
+    import lancedb
+
     real_connect = lancedb.connect_async
 
     async def slow_connect_async(*args, **kwargs):
@@ -55,7 +60,8 @@ async def test_close_during_pending_get_connection_blocks_resurrection(monkeypat
         return await real_connect(*args, **kwargs)
 
     monkeypatch.setattr(
-        "cognee.infrastructure.databases.vector.lancedb.LanceDBAdapter.lancedb.connect_async",
+        lancedb,
+        "connect_async",
         slow_connect_async,
     )
 
@@ -153,6 +159,8 @@ async def test_concurrent_first_get_connection_returns_same_object(monkeypatch, 
     post-await re-check, both would build a fresh ``lancedb.AsyncConnection``
     and the second would clobber ``self.connection`` — leaking the first.
     """
+    import lancedb
+
     real_connect = lancedb.connect_async
 
     async def yielding_connect_async(*args, **kwargs):
@@ -161,7 +169,8 @@ async def test_concurrent_first_get_connection_returns_same_object(monkeypatch, 
         return await real_connect(*args, **kwargs)
 
     monkeypatch.setattr(
-        "cognee.infrastructure.databases.vector.lancedb.LanceDBAdapter.lancedb.connect_async",
+        lancedb,
+        "connect_async",
         yielding_connect_async,
     )
 

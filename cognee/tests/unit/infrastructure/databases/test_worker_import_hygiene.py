@@ -66,7 +66,10 @@ def test_kuzu_worker_does_not_import_cognee():
 def test_lancedb_worker_does_not_import_cognee():
     # Skip gracefully if lancedb isn't installed in this environment.
     try:
-        import lancedb  # noqa: F401
+        import importlib.util
+
+        if importlib.util.find_spec("lancedb") is None:
+            raise ModuleNotFoundError
     except ImportError:
         pytest.skip("lancedb not installed")
 
