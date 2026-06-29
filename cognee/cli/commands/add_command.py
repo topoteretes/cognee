@@ -6,6 +6,7 @@ from cognee.cli.reference import SupportsCliCommand
 from cognee.cli import DEFAULT_DOCS_URL
 import cognee.cli.echo as fmt
 from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
+from cognee.cli.first_run import echo_after_add, with_first_run_error_hint
 
 
 class AddCommand(SupportsCliCommand):
@@ -74,11 +75,14 @@ After adding data, use `cognee cognify` to process it into knowledge graphs.
                     await cognee.add(data=data_to_add, dataset_name=args.dataset_name, user=user)
                     fmt.success(f"Successfully added data to dataset '{args.dataset_name}'")
                 except Exception as e:
-                    raise CliCommandInnerException(f"Failed to add data: {str(e)}") from e
+                    message = with_first_run_error_hint(f"Failed to add data: {str(e)}")
+                    raise CliCommandInnerException(message) from e
 
             asyncio.run(run_add())
+            echo_after_add(args.dataset_name)
 
         except Exception as e:
             if isinstance(e, CliCommandInnerException):
                 raise CliCommandException(str(e), error_code=1) from e
-            raise CliCommandException(f"Failed to add data: {str(e)}", error_code=1) from e
+            message = with_first_run_error_hint(f"Failed to add data: {str(e)}")
+            raise CliCommandException(message, error_code=1) from e

@@ -6,6 +6,7 @@ from cognee.cli.reference import SupportsCliCommand
 from cognee.cli import DEFAULT_DOCS_URL
 import cognee.cli.echo as fmt
 from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
+from cognee.cli.first_run import echo_after_forget
 
 
 class ForgetCommand(SupportsCliCommand):
@@ -68,6 +69,7 @@ to delete a dataset, or dataset + --data-id to delete a single item.
 
             result = asyncio.run(run_forget())
             fmt.success(f"Done: {result}")
+            echo_after_forget()
 
         except Exception as e:
             if isinstance(e, CliCommandInnerException):

@@ -6,6 +6,7 @@ from cognee.cli import DEFAULT_DOCS_URL
 from cognee.cli.config import CHUNKER_CHOICES
 import cognee.cli.echo as fmt
 from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
+from cognee.cli.first_run import echo_after_remember, with_first_run_error_hint
 
 
 class RememberCommand(SupportsCliCommand):
@@ -94,7 +95,8 @@ After completion, use `cognee recall` (or `cognee search`) to query the graph.
                     )
                     return result
                 except Exception as e:
-                    raise CliCommandInnerException(f"Failed to remember: {str(e)}") from e
+                    message = with_first_run_error_hint(f"Failed to remember: {str(e)}")
+                    raise CliCommandInnerException(message) from e
 
             result = asyncio.run(run_remember())
 
@@ -112,8 +114,14 @@ After completion, use `cognee recall` (or `cognee search`) to query the graph.
                     fmt.echo(f"  Content hash: {result.content_hash}")
                 if result.elapsed_seconds is not None:
                     fmt.echo(f"  Elapsed: {result.elapsed_seconds:.1f}s")
+            echo_after_remember(
+                args.dataset_name,
+                dataset_id=str(result.dataset_id) if result and result.dataset_id else None,
+                background=args.background,
+            )
 
         except Exception as e:
             if isinstance(e, CliCommandInnerException):
                 raise CliCommandException(str(e), error_code=1) from e
-            raise CliCommandException(f"Failed to remember: {str(e)}", error_code=1) from e
+            message = with_first_run_error_hint(f"Failed to remember: {str(e)}")
+            raise CliCommandException(message, error_code=1) from e
