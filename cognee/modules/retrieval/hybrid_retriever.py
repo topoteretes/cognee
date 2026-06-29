@@ -84,7 +84,7 @@ class HybridRetriever(BaseRetriever):
         query_embeddings = await self._unified_engine.vector.embedding_engine.embed_text([query])
         query_vector = query_embeddings[0]
 
-        q_coords, truth_state_by_id, current_truth_epoch = await self._build_truth_context(
+        q_coords, current_truth_epoch = await self._build_truth_context(
             query_vector
         )
 
@@ -100,8 +100,8 @@ class HybridRetriever(BaseRetriever):
                 query_vector=query_vector,
                 use_truth_weight=self.use_truth_weight,
                 q_coords=q_coords,
-                truth_state_by_id=truth_state_by_id,
                 current_truth_epoch=current_truth_epoch,
+                graph_engine=self._unified_engine.graph,
             ),
             self._retrieve_entities_and_facts(query, query_vector),
         )
@@ -110,59 +110,30 @@ class HybridRetriever(BaseRetriever):
     async def _build_truth_context(self, query_vector: list[float]) -> tuple:
         """Truth-subspace alignment context for the chunk lane.
 
-        Returns ``(q_coords, truth_state_by_id, current_truth_epoch)``. Values
+        Returns ``(q_coords, current_truth_epoch)``. Values
         are ``None`` when the truth weight is off or centroid slots are absent,
         so ranking stays at exact baseline. Fails open to baseline on any error.
         """
         if not self.use_truth_weight:
-            return None, None, None
+            return None, None
 
         try:
             dataset_id = current_dataset_id.get()
             if dataset_id is None:
-                return None, None, None
+                return None, None
 
             centroids = await load_centroids(self._unified_engine.vector, str(dataset_id))
             if not centroids:
-                return None, None, None
+                return None, None
 
             centroid_vectors = [centroid.centroid for centroid in centroids]
             q_coords = pad_coords(align.query_coords(query_vector, centroid_vectors), DEFAULT_K)
             current_truth_epoch = max(centroid.truth_epoch for centroid in centroids)
 
-            candidate_chunk_ids = await self._candidate_chunk_ids(query_vector)
-            if not candidate_chunk_ids:
-                return q_coords, {}, current_truth_epoch
-
-            truth_state_by_id = await self._unified_engine.graph.get_node_truth_state(
-                candidate_chunk_ids
-            )
-            return q_coords, truth_state_by_id, current_truth_epoch
+            return q_coords, current_truth_epoch
         except Exception as error:
             logger.debug("Truth-subspace lookup failed; using baseline ranking: %s", error)
-            return None, None, None
-
-    async def _candidate_chunk_ids(self, query_vector: list[float]) -> list[str]:
-        """Candidate DocumentChunk ids whose truth alignments we batch-fetch.
-
-        Mirrors the chunk lane's vector candidate window so the truth coords map
-        covers the chunks that ranking can surface."""
-        candidate_limit = max(0, self.chunks_top_k * 2)
-        chunk_hits = await search_collection(
-            self._unified_engine.vector,
-            "DocumentChunk_text",
-            "",
-            candidate_limit,
-            self.node_name,
-            self.node_name_filter_operator,
-            query_vector=query_vector,
-        )
-        ids = []
-        for hit in chunk_hits:
-            chunk_id = result_id(hit)
-            if chunk_id:
-                ids.append(str(chunk_id))
-        return ids
+            return None, None
 
     async def _retrieve_entities_and_facts(self, query: str, query_vector: list[float]) -> tuple:
         """Entity lane, run concurrently with the chunk lane so the graph round trip for
