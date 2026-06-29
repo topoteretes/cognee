@@ -14,6 +14,7 @@ from cognee.modules.graph.methods import (
     delete_dataset_nodes_and_edges,
     has_data_related_nodes,
     legacy_delete,
+    try_delete_data_by_graph_provenance,
 )
 from cognee.modules.ingestion import discover_directory_datasets
 from cognee.modules.pipelines.operations.get_pipeline_status import get_pipeline_status
@@ -180,24 +181,13 @@ class datasets:
 
         async with set_database_global_context_variables(dataset_id, dataset.owner_id):
             # Graph-provenance graphs have no relational ledger rows, so the
-            # has_data_related_nodes gate would wrongly route to legacy_delete.
-            # Route them straight to delete_data_nodes_and_edges, which detects
-            # the graph-provenance marker and removes the source ref via the
-            # unified boundary. Old/unmarked graphs keep the existing gate.
-            from cognee.infrastructure.databases.graph.get_graph_engine import (
-                get_graph_engine,
-            )
-            from cognee.infrastructure.databases.provenance.markers import (
-                stores_provenance_in_graph,
-            )
-
-            graph_engine = await get_graph_engine()
-            if await stores_provenance_in_graph(graph_engine):
+            # ledger gate checks first. Only the ledger-free branch probes the
+            # graph marker, so marked graphs avoid a duplicate metadata read and
+            # old ledger graphs still use the existing legacy gate.
+            if await has_data_related_nodes(dataset_id, data_id):
                 await delete_data_nodes_and_edges(dataset_id, data_id, user.id)
-            elif not await has_data_related_nodes(dataset_id, data_id):
+            elif not await try_delete_data_by_graph_provenance(dataset_id, data_id):
                 await legacy_delete(data, "soft")
-            else:
-                await delete_data_nodes_and_edges(dataset_id, data_id, user.id)
 
             await delete_data(data, dataset_id)
 

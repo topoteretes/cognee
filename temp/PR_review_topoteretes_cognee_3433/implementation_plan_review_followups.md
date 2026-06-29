@@ -51,9 +51,10 @@ current recommendations say not to change those paths in this PR.
     `graph_provenance`.
   - Keep the stored token unchanged.
 
-- **Phase 2 - Remove the Duplicate Delete Marker Read**
-  - Add one shared graph-provenance delete helper.
-  - Use it from both the API routing gate and `delete_data_nodes_and_edges`.
+- **Phase 2 - Remove the Duplicate Delete Marker Read** ✅ DONE
+  - Add one small exported graph-method helper for graph-provenance data-item
+    delete.
+  - Use it from both the API ledger gate and `delete_data_nodes_and_edges`.
 
 - **Phase 3 - Make Memory Provenance Fail Closed**
   - Stop swallowing unexpected graph-provenance read errors.
@@ -145,7 +146,7 @@ Run the renamed integration files if Ladybug is available:
 uv run pytest cognee/tests/integration/tasks/test_graph_provenance_delete_default_stack.py cognee/tests/integration/tasks/test_graph_provenance_delete_part2.py -q
 ```
 
-## Phase 2 - Remove the Duplicate Delete Marker Read
+## Phase 2 - Remove the Duplicate Delete Marker Read ✅ DONE
 
 ### Objective
 
@@ -154,20 +155,34 @@ path while preserving the inner safety boundary.
 
 ### Changes
 
-In `cognee/modules/graph/methods/delete_data_nodes_and_edges.py`:
+Create `cognee/modules/graph/methods/try_delete_data_by_graph_provenance.py`:
 
-- Add a private helper:
-  - `_try_delete_data_by_graph_provenance(dataset_id: UUID, data_id: UUID) -> bool`
+- Add one function:
+  - `try_delete_data_by_graph_provenance(dataset_id: UUID, data_id: UUID) -> bool`
   - It assumes dataset/data authorization has already happened.
   - It gets the unified engine.
   - It returns `False` when `unified.supports_graph_provenance_delete()` is
     false.
   - It calls `stores_provenance_in_graph(unified.graph)`.
+  - It returns `False` when the graph is not marked for graph provenance.
   - It calls `unified.delete_by_source_ref(make_source_ref_key(dataset_id, data_id))`
     and returns `True` when the graph is marked.
-  - It allows unexpected marker/read errors to propagate.
-- Make `delete_data_nodes_and_edges` call this helper after authorization and
-  return early when it returns `True`.
+  - It allows unexpected marker/read/delete errors to propagate.
+
+Update `cognee/modules/graph/methods/__init__.py`:
+
+- Export `try_delete_data_by_graph_provenance` beside the other graph delete
+  helpers.
+
+In `cognee/modules/graph/methods/delete_data_nodes_and_edges.py`:
+
+- Import `try_delete_data_by_graph_provenance` directly from its module, not from
+  the package `__init__`.
+- Delete the inline unified-engine marker-routing block.
+- After authorization, call `try_delete_data_by_graph_provenance(dataset_id, data_id)`.
+- Return early when it returns `True`.
+- Keep the existing relational-ledger cleanup path unchanged when it returns
+  `False`.
 
 In `cognee/api/v1/datasets/datasets.py`:
 
@@ -175,16 +190,29 @@ In `cognee/api/v1/datasets/datasets.py`:
 - In the existing `data`-found delete branch:
   - First call `has_data_related_nodes(dataset_id, data_id)`.
   - If it returns true, call `delete_data_nodes_and_edges`.
-  - If it returns false, call `_try_delete_data_by_graph_provenance`.
+  - If it returns false, call `try_delete_data_by_graph_provenance`.
   - If the helper returns false, call `legacy_delete(data, "soft")`.
 - Keep the current `data`-missing custom-graph branch calling
   `delete_data_nodes_and_edges`.
+- This avoids duplicate graph-provenance marker reads:
+  - graph-provenance graphs have no ledger rows, so the API calls the helper and
+    the helper reads the marker once before deleting;
+  - old ledger graphs with related nodes go straight to `delete_data_nodes_and_edges`,
+    where the inner safety-boundary helper reads the marker once before falling
+    through to the ledger cleanup;
+  - old graphs with no ledger rows call the helper once, get `False`, then use
+    `legacy_delete`.
 
 Update routing tests in
 `cognee/tests/unit/modules/graph/test_graph_provenance_delete_routing.py`:
 
-- Assert graph-provenance data delete uses
-  `_try_delete_data_by_graph_provenance` / `unified.delete_by_source_ref`.
+- Add direct helper tests:
+  - marked graph-provenance graph -> calls `unified.delete_by_source_ref` and
+    returns `True`
+  - unsupported unified engine -> returns `False`
+  - supported but unmarked graph -> returns `False`
+- Assert `delete_data_nodes_and_edges` uses the shared helper after authorization
+  and returns before the relational-ledger path when the helper returns `True`.
 - Add a public API route test where `has_data_related_nodes` is false and the
   graph-provenance helper returns true; assert `legacy_delete` is not called.
 - Add a public API route test where `has_data_related_nodes` is false and the
@@ -192,9 +220,21 @@ Update routing tests in
 
 ### Rationale
 
-The API route only needs a way to avoid the legacy gate when a ledger-free graph
-actually stores provenance in the graph. The helper gives it that answer without
-duplicating marker logic or weakening the inner delete method.
+The API route only needs a yes/no operation: "did graph provenance delete this
+data item?" A shared graph-method helper keeps that operation in the graph layer,
+keeps authorization at the existing callers, and avoids exposing private helpers
+or adding status objects/flags to `delete_data_nodes_and_edges`.
+
+### Completion
+
+- Added `try_delete_data_by_graph_provenance` as a small exported graph-method
+  helper.
+- Replaced the inline graph-provenance routing block in
+  `delete_data_nodes_and_edges`.
+- Updated `datasets.delete_data` so the API checks ledger rows first and calls
+  the helper only on the ledger-free branch.
+- Added routing tests for the helper, the inner delete method, and the three API
+  branches: ledger rows, ledger-free graph-provenance, and ledger-free legacy.
 
 ### Demo
 
