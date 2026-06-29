@@ -60,20 +60,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
     && rm -rf /var/lib/apt/lists/*
 
+# Run as a non-root user. Create the user before copying so ownership can be
+# applied directly during COPY, preventing a redundant chown layer.
+RUN groupadd --system --gid 1000 cognee \
+    && useradd --system --uid 1000 --gid cognee --no-create-home --shell /usr/sbin/nologin cognee
+
 WORKDIR /app
 
 # Copy the virtual environment from the uv stage
 COPY --from=uv /usr/local /usr/local
-COPY --from=uv /app /app
+COPY --chown=cognee:cognee --from=uv /app /app
 
 # Strip Windows carriage returns (fixes "no such file" on Windows Docker)
-RUN sed -i 's/\r$//' /app/entrypoint.sh && chmod +x /app/entrypoint.sh
-
-# Run as a non-root user. Create the user before copying ownership so the
-# /app tree (which already exists from the COPY above) is readable.
-RUN groupadd --system --gid 1000 cognee \
-    && useradd --system --uid 1000 --gid cognee --no-create-home --shell /usr/sbin/nologin cognee \
-    && chown -R cognee:cognee /app
+RUN sed -i 's/\r$//' /app/entrypoint.sh && chmod +x /app/entrypoint.sh && chown cognee:cognee /app/entrypoint.sh
 
 # Place executables in the environment at the front of the path
 ENV PATH="/app/.venv/bin:$PATH"
