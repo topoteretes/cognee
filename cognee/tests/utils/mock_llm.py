@@ -26,9 +26,15 @@ Key patch targets (verified against current source):
 from __future__ import annotations
 
 import inspect
+import os
+import shutil
+import tempfile
 from contextlib import contextmanager
-from typing import Any, Type
+from typing import Any, Type, get_args, get_origin
 from unittest.mock import AsyncMock, MagicMock, patch
+import types
+
+from pydantic import BaseModel
 
 import pytest
 import pytest_asyncio
@@ -48,50 +54,89 @@ FAKE_EMBEDDING: list[float] = [0.1] * FAKE_EMBEDDING_DIM
 # ---------------------------------------------------------------------------
 
 
-def make_fake_structured_response(response_model: Type) -> Any:
-    """Return a minimal valid instance of *response_model*.
+def build_mock_pydantic_instance(model_class):
+    """Recursively build a minimal valid instance of a Pydantic model."""
+    if not (isinstance(model_class, type) and issubclass(model_class, BaseModel)):
+        return None
+    
+    field_values = {}
+    # Support both Pydantic v1 and v2
+    try:
+        fields = model_class.model_fields  # Pydantic v2
+    except AttributeError:
+        fields = model_class.__fields__    # Pydantic v1
+    
+    for field_name, field_info in fields.items():
+        # Get the annotation
+        try:
+            annotation = field_info.annotation  # Pydantic v2
+        except AttributeError:
+            annotation = field_info.outer_type_  # Pydantic v1
+        
+        field_values[field_name] = _get_default_for_type(annotation)
+    
+    try:
+        return model_class(**field_values)
+    except Exception:
+        # If construction fails, try with no args (all optional)
+        try:
+            return model_class()
+        except Exception:
+            return None
 
-    For ``str`` (plain-text responses) returns ``FAKE_TEXT_RESPONSE``.
-    For Pydantic models (v1 and v2) fills required fields with safe defaults:
-    ``str`` → ``"mock"``, ``int`` → ``0``, ``float`` → ``0.0``,
-    ``bool`` → ``False``, ``list`` → ``[]``.
-    Unknown / complex field types receive ``None`` (which Pydantic accepts for
-    ``Optional`` fields, and the ``Any`` annotation).
-    """
+
+def _get_default_for_type(annotation):
+    """Return a safe default value for a given type annotation."""
+    if annotation is None:
+        return None
+    
+    origin = get_origin(annotation)
+    args = get_args(annotation)
+    
+    union_type = getattr(types, 'UnionType', None)
+    
+    # Handle Optional[X] → Union[X, None]
+    if (union_type and origin is union_type) or str(origin) in ("<class 'typing.Union'>", "typing.Union"):
+        # Return None for Optional types
+        if type(None) in args:
+            return None
+        # For non-optional unions, use first arg
+        if args:
+            return _get_default_for_type(args[0])
+        return None
+    
+    # Handle List[X]
+    if origin is list or str(origin) in ("<class 'list'>", "typing.List"):
+        return []
+    
+    # Handle Dict[K, V]
+    if origin is dict or str(origin) in ("<class 'dict'>", "typing.Dict"):
+        return {}
+    
+    # Handle basic types
+    if annotation is str or annotation == str:
+        return "mock_value"
+    if annotation is int or annotation == int:
+        return 0
+    if annotation is float or annotation == float:
+        return 0.0
+    if annotation is bool or annotation == bool:
+        return False
+    
+    # Handle nested Pydantic models
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        return build_mock_pydantic_instance(annotation)
+    
+    # Fallback
+    return None
+
+
+def make_fake_structured_response(response_model: Type) -> Any:
+    """Return a minimal valid instance of *response_model*."""
     if response_model is str:
         return FAKE_TEXT_RESPONSE
-
-    # Pydantic v2 exposes model_fields; v1 uses __fields__.
-    try:
-        fields = response_model.model_fields  # pydantic v2
-    except AttributeError:
-        fields = getattr(response_model, "__fields__", {})  # pydantic v1 / fallback
-
-    kwargs: dict[str, Any] = {}
-    _DEFAULTS: dict[type, Any] = {
-        str: "mock",
-        int: 0,
-        float: 0.0,
-        bool: False,
-        list: [],
-        dict: {},
-    }
-    for field_name, field_info in fields.items():
-        # Pydantic v2 FieldInfo has .annotation; v1 ModelField has .outer_type_
-        annotation = getattr(field_info, "annotation", None) or getattr(
-            field_info, "outer_type_", None
-        )
-        # Pick a sensible default, fall back to None
-        kwargs[field_name] = _DEFAULTS.get(annotation, None)  # type: ignore[arg-type]
-
-    try:
-        return response_model(**kwargs)
-    except Exception:
-        # Last resort: try with no arguments (works if all fields have defaults)
-        try:
-            return response_model()
-        except Exception:
-            return MagicMock(spec=response_model)
+        
+    return build_mock_pydantic_instance(response_model) or MagicMock(spec=response_model)
 
 
 def _make_llm_interface_mock() -> MagicMock:
@@ -160,26 +205,30 @@ def patch_llm_gateway():
 @contextmanager
 def patch_embedding_engine():
     """Context manager that prevents any real embedding calls."""
+    from cognee.infrastructure.databases.vector.embeddings import get_embedding_engine
+    
+    real_engine = get_embedding_engine()
     mock_engine = _make_embedding_engine_mock()
-
-    _PATCH_TARGETS = [
-        "cognee.infrastructure.databases.vector.embeddings.get_embedding_engine.get_embedding_engine",
-        # Also patch the re-exported symbol used by vector adapters
-        "cognee.infrastructure.databases.vector.embeddings.get_embedding_engine",
-    ]
-    patches = []
-    for target in _PATCH_TARGETS:
-        try:
-            p = patch(target, return_value=mock_engine)
-            p.start()
-            patches.append(p)
-        except Exception:
-            pass  # target may not exist in all code paths — that's fine
+    
+    # Replace methods on the real engine singleton
+    original_embed_text = real_engine.embed_text
+    original_get_vector_size = real_engine.get_vector_size
+    original_get_batch_size = getattr(real_engine, "get_batch_size", None)
+    
+    real_engine.embed_text = mock_engine.embed_text
+    real_engine.get_vector_size = mock_engine.get_vector_size
+    if hasattr(mock_engine, "get_batch_size"):
+        real_engine.get_batch_size = mock_engine.get_batch_size
+        
     try:
         yield mock_engine
     finally:
-        for p in patches:
-            p.stop()
+        real_engine.embed_text = original_embed_text
+        real_engine.get_vector_size = original_get_vector_size
+        if original_get_batch_size is not None:
+            real_engine.get_batch_size = original_get_batch_size
+        elif hasattr(real_engine, "get_batch_size"):
+            delattr(real_engine, "get_batch_size")
 
 
 # ---------------------------------------------------------------------------
@@ -209,11 +258,11 @@ def mock_cognee_embeddings():
 
 
 @pytest_asyncio.fixture
-async def clean_cognee_state():
+async def clean_cognee_state(isolated_cognee_env):
     """Reset cognee state before and after each test.
 
-    Uses ``cognee.prune.prune_system`` to wipe graph/vector/relational data so
-    tests remain isolated even when run in the same process.
+    Uses `prune_system` to clear any in-memory state. The data path is already
+    isolated by `isolated_cognee_env`.
     """
     import cognee
 
