@@ -1,5 +1,7 @@
-import pathlib
+import ast
 import os
+import pathlib
+import re
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.data.methods.create_authorized_dataset import create_authorized_dataset
 from cognee.modules.users.methods import get_default_user
@@ -27,6 +29,22 @@ def normalize_node_name(node_name: str) -> str:
         prefix = prefix.capitalize()
         return f"{prefix}:{suffix}"
     return node_name
+
+
+def extract_invoice_ids(search_result: str) -> list[int]:
+    try:
+        parsed_result = ast.literal_eval(search_result)
+    except (SyntaxError, ValueError):
+        parsed_result = None
+
+    if isinstance(parsed_result, (list, tuple, set)):
+        return sorted(int(invoice_id) for invoice_id in parsed_result)
+
+    line_start_ids = re.findall(r"(?m)^\s*(\d+)\b", search_result)
+    if line_start_ids:
+        return sorted(int(invoice_id) for invoice_id in line_start_ids)
+
+    return sorted(int(invoice_id) for invoice_id in re.findall(r"\b\d+\b", search_result))
 
 
 async def setup_test_db():
@@ -325,11 +343,8 @@ async def test_search_result_quality():
             )
             print(f"Cognee search result: {search_results}")
 
-            import ast
-
-            lst = ast.literal_eval(search_results[0])  # converts string -> Python list
             # Transfrom both lists to int for comparison, sorting and type consistency
-            lst = sorted([int(x) for x in lst])
+            lst = extract_invoice_ids(search_results[0])
             invoice_ids = sorted([int(x) for x in invoice_ids])
             assert lst == invoice_ids, (
                 f"Search results {lst} do not match expected invoice IDs {invoice_ids} for Customer:{customer_id}"
