@@ -1,12 +1,6 @@
-import localFetch from "@/modules/instances/localFetch";
-
-export default async function deleteApiKey(keyId: string): Promise<void> {
-  const response = await localFetch(`/v1/auth/api-keys/${encodeURIComponent(keyId)}`, {
-    method: "DELETE",
-  });
-
-  if (!response.ok) {
-    const err = await response.text().catch(() => "Failed to delete API key");
-    throw new Error(err);
-  }
+/**
+ * Open-source stub — API key deletion not available in local mode.
+ */
+export default async function deleteApiKey(_keyId: string): Promise<void> {
+  console.warn("API key management requires Cognee Cloud.");
 }
