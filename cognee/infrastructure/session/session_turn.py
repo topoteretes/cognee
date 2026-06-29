@@ -8,7 +8,7 @@ All public coroutines are fail-open so they never block answer generation.
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
@@ -322,7 +322,7 @@ async def apply_session_turn_analysis(
 
         feedback_entry = SessionFeedbackEntry(
             id=str(uuid4()),
-            created_at=datetime.utcnow().isoformat(),
+            created_at=datetime.now(timezone.utc).isoformat(),
             raw_text=query,
             referenced_qa_ids=[previous_qa_id] if previous_qa_id else [],
             influencing_context_ids=list(served_ids or []),
