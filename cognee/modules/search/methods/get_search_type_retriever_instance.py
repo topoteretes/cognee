@@ -32,6 +32,7 @@ from cognee.modules.retrieval.graph_completion_context_extension_retriever impor
 from cognee.modules.retrieval.cypher_search_retriever import CypherSearchRetriever
 from cognee.modules.retrieval.natural_language_retriever import NaturalLanguageRetriever
 from cognee.modules.retrieval.agentic_retriever import AgenticRetriever
+from cognee.modules.retrieval.centrality_retriever import CentralityRetriever
 from cognee.context_global_variables import session_user
 
 
@@ -297,6 +298,16 @@ async def get_search_type_retriever_instance(
                 "node_name": node_name,
                 "node_name_filter_operator": node_name_filter_operator,
                 "include_references": include_references,
+            },
+        ),
+        SearchType.CENTRALITY: (
+            CentralityRetriever,
+            {
+                "top_k": top_k,
+                "mode": retriever_specific_config.get("mode", "degree"),
+                "max_nodes": retriever_specific_config.get("max_nodes", 500),
+                "neighborhood_depth": neighborhood_depth,
+                "neighborhood_seed_top_k": neighborhood_seed_top_k,
             },
         ),
         SearchType.CHUNKS_LEXICAL: (BM25ChunksRetriever, {"top_k": top_k}),
