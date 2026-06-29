@@ -97,7 +97,7 @@ class PostgresAdapter(GraphDBInterface):
         return data
 
     async def query(self, query_str: str, params: Optional[dict] = None) -> List[Any]:
-        """Not supported. Use typed adapter methods or a graph-native backend.
+        """Not supported. Use typed adapter methods or a Cypher-capable graph backend.
 
         Raises:
         -------
@@ -105,7 +105,7 @@ class PostgresAdapter(GraphDBInterface):
         """
         raise NotImplementedError(
             "The Postgres graph backend does not support raw Cypher queries. "
-            "Use a graph-native backend (Neo4j, Ladybug) for raw query support, "
+            "Use a Cypher-capable graph backend (Neo4j, Ladybug) for raw query support, "
             "or use the typed adapter methods (add_nodes, get_neighbors, etc.)."
         )
 
@@ -138,7 +138,12 @@ class PostgresAdapter(GraphDBInterface):
         else:
             await self.add_nodes([node])
 
-    async def add_nodes(self, nodes: Union[List[Tuple[str, Dict]], List[DataPoint]]) -> None:
+    async def add_nodes(
+        self,
+        nodes: Union[List[Tuple[str, Dict]], List[DataPoint]],
+        source_ref_key: Optional[str] = None,
+        pipeline_run_id: Optional[str] = None,
+    ) -> None:
         """Add multiple nodes via batch upsert.
 
         Parameters:
@@ -272,7 +277,10 @@ class PostgresAdapter(GraphDBInterface):
         )
 
     async def add_edges(
-        self, edges: Union[List[Tuple[str, str, str, Optional[Dict[str, Any]]]], List]
+        self,
+        edges: Union[List[Tuple[str, str, str, Optional[Dict[str, Any]]]], List],
+        source_ref_key: Optional[str] = None,
+        pipeline_run_id: Optional[str] = None,
     ) -> None:
         """Add multiple edges via batch upsert.
 

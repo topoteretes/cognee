@@ -18,6 +18,9 @@ from cognee.modules.graph.methods import (
 from cognee.modules.graph.methods.delete_from_graph_and_vector import (
     delete_from_graph_and_vector,
 )
+from cognee.modules.graph.methods.try_delete_data_by_graph_provenance import (
+    try_delete_data_by_graph_provenance,
+)
 from cognee.modules.data.methods.get_authorized_dataset import get_authorized_dataset
 from cognee.modules.users.methods.get_user import get_user
 from cognee.shared.logging_utils import get_logger
@@ -32,6 +35,12 @@ async def delete_data_nodes_and_edges(dataset_id: UUID, data_id: UUID, user_id: 
     # Check if user has delete permissions for the dataset before proceeding with deletion of related graph/vector nodes and edges.
     dataset = await get_authorized_dataset(user, dataset_id, "delete")
     dataset_id = dataset.id
+
+    # Graph-provenance graphs carry provenance in the graph (no relational ledger
+    # rows). The graph marker is a mode boundary, not a migration signal: marked
+    # graphs use this unified path; old/unmarked graphs stay on the ledger path.
+    if await try_delete_data_by_graph_provenance(dataset_id, data_id):
+        return
 
     if backend_access_control_enabled():
         affected_nodes = await get_data_related_nodes(dataset_id, data_id)

@@ -20,6 +20,21 @@ from cognee.infrastructure.files.storage import get_file_storage
 from cognee.infrastructure.databases.graph.graph_db_interface import (
     GraphDBInterface,
 )
+from cognee.infrastructure.databases.provenance import (
+    EdgeDeleteData,
+    EdgeIdentity,
+    NodeDeleteData,
+)
+from cognee.infrastructure.databases.provenance.source_refs import (
+    get_dataset_id_from_source_ref_key,
+    get_pipeline_run_id_from_source_run_ref,
+    get_source_ref_key_from_source_run_ref,
+)
+from cognee.infrastructure.databases.provenance.source_ref_state import (
+    provenance_after_attach,
+    provenance_after_remove,
+    provenance_attach_inputs,
+)
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.storage.utils import JSONEncoder
 from cognee.modules.engine.utils.generate_timestamp_datapoint import date_to_int
@@ -37,6 +52,111 @@ logger = get_logger()
 
 DEFAULT_KUZU_BUFFER_POOL_SIZE = 1 << 35  # 32 GB (must be a power of 2 for Kuzu)
 DEFAULT_KUZU_MAX_DB_SIZE = 1 << 35  # 32 GB (must be a power of 2 for Kuzu)
+
+# Graph provenance (COG-5522 Part 1). These four fields live in declared scalar
+# STRING columns on both Node and EDGE — never inside the JSON `properties` blob
+# — so delete/rollback can filter by source ref, dataset id, or pipeline run id
+# with a column scan. The stored form is a delimiter-wrapped string, e.g.
+# "|ref-a|ref-b|"; "|" means empty provenance.
+PROVENANCE_COLUMNS = (
+    "source_ref_keys",
+    "source_dataset_ids",
+    "source_run_ids",
+    "source_run_refs",
+)
+
+
+def _provenance_fold_clause(alias: str) -> str:
+    """Cypher ``SET`` fragment that stamps provenance inside the artifact write.
+
+    Appended to the ``MERGE`` in ``add_nodes`` / ``add_edges`` so a node/edge is
+    created and stamped in one atomic statement — there is no read-then-write
+    window (closes the write-then-attach gap and the concurrent lost update,
+    COG-5522 #4/#8). Set-merge is done with delimiter-token membership against
+    the committed column. The run ref/id are appended only when the key is *not*
+    already present (Model A): the ``CASE`` guard reads ``source_ref_keys`` from
+    the pre-SET row, so it sees ownership as it was before this write.
+
+    ``alias`` is the bound variable for the artifact (``n`` for nodes, ``r`` for
+    edges). The provenance ``$``-params are scalars shared across the UNWIND
+    batch because a single source ref key is attached per call.
+    """
+    return f"""
+            SET {alias}.source_run_refs = CASE
+                    WHEN coalesce({alias}.source_ref_keys, '|') CONTAINS $sr_token
+                    THEN coalesce({alias}.source_run_refs, '|')
+                    ELSE concat(coalesce({alias}.source_run_refs, '|'), $run_ref_tail)
+                END,
+                {alias}.source_run_ids = CASE
+                    WHEN coalesce({alias}.source_ref_keys, '|') CONTAINS $sr_token
+                    THEN coalesce({alias}.source_run_ids, '|')
+                    ELSE concat(coalesce({alias}.source_run_ids, '|'), $run_id_tail)
+                END,
+                {alias}.source_ref_keys = CASE
+                    WHEN coalesce({alias}.source_ref_keys, '|') CONTAINS $sr_token
+                    THEN coalesce({alias}.source_ref_keys, '|')
+                    ELSE concat(coalesce({alias}.source_ref_keys, '|'), $sr_tail)
+                END,
+                {alias}.source_dataset_ids = CASE
+                    WHEN coalesce({alias}.source_dataset_ids, '|') CONTAINS $ds_token
+                    THEN coalesce({alias}.source_dataset_ids, '|')
+                    ELSE concat(coalesce({alias}.source_dataset_ids, '|'), $ds_tail)
+                END
+            """
+
+
+def _provenance_fold_params(source_ref_key: str, pipeline_run_id: Optional[str]) -> dict:
+    """Scalar query params consumed by :func:`_provenance_fold_clause`."""
+    inputs = provenance_attach_inputs(source_ref_key, pipeline_run_id)
+    return {
+        "sr_token": _provenance_token(inputs.source_ref_key),
+        "sr_tail": inputs.add_keys[0] + "|",
+        "ds_token": _provenance_token(inputs.add_dataset_ids[0]),
+        "ds_tail": inputs.add_dataset_ids[0] + "|",
+        "run_ref_tail": (inputs.add_run_refs[0] + "|") if inputs.add_run_refs else "",
+        "run_id_tail": (inputs.add_run_ids[0] + "|") if inputs.add_run_ids else "",
+    }
+
+
+def _provenance_token(value: str) -> str:
+    return f"|{value}|"
+
+
+def _encode_refs(items: List[str]) -> str:
+    if not items:
+        return "|"
+    for item in items:
+        if "|" in item:
+            raise ValueError("provenance entry must not contain '|'")
+    return "|" + "|".join(items) + "|"
+
+
+def _decode_refs(value: Any) -> List[str]:
+    """Normalize a delimiter-wrapped provenance string into ``list[str]``."""
+    if value is None or value == "":
+        return []
+    if not isinstance(value, str):
+        raise TypeError("provenance column must be a string or None")
+    return [item for item in value.strip("|").split("|") if item]
+
+
+def _encode_provenance_row(row: dict) -> dict:
+    encoded = dict(row)
+    encoded["refs"] = _encode_refs(row["refs"])
+    encoded["datasets"] = _encode_refs(row["datasets"])
+    encoded["runs"] = _encode_refs(row["runs"])
+    encoded["run_refs"] = _encode_refs(row["run_refs"])
+    return encoded
+
+
+def _parse_properties_blob(raw: Any) -> Dict[str, Any]:
+    """Decode a node/edge JSON ``properties`` blob, tolerating empty/invalid input."""
+    if not raw:
+        return {}
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
 
 
 cache_config = get_cache_config()
@@ -193,6 +313,7 @@ class LadybugAdapter(GraphDBInterface):
             else:
                 self._initialize_connection()
         self.LADYBUG_ASYNC_LOCK = asyncio.Lock()
+        self._source_ref_change_lock = asyncio.Lock()
         self._connection_lock = asyncio.Lock()
         # Set when ``open_connections == 0``; used by transient teardown
         # paths (e.g. ``delete_graph``) to wait for in-flight queries to
@@ -240,7 +361,11 @@ class LadybugAdapter(GraphDBInterface):
                 type STRING,
                 created_at TIMESTAMP,
                 updated_at TIMESTAMP,
-                properties STRING
+                properties STRING,
+                source_ref_keys STRING,
+                source_dataset_ids STRING,
+                source_run_ids STRING,
+                source_run_refs STRING
             )
         """)
         self.connection.execute("""
@@ -249,10 +374,32 @@ class LadybugAdapter(GraphDBInterface):
                 relationship_name STRING,
                 created_at TIMESTAMP,
                 updated_at TIMESTAMP,
-                properties STRING
+                properties STRING,
+                source_ref_keys STRING,
+                source_dataset_ids STRING,
+                source_run_ids STRING,
+                source_run_refs STRING
             )
         """)
+        self._ensure_graph_metadata_table()
         logger.debug("Ladybug database schema ensured")
+
+    def _ensure_graph_metadata_table(self) -> None:
+        """Create the GraphMetadata key/value table used by graph-provenance markers.
+
+        A dedicated node table — rather than a sentinel Node row — keeps marker
+        rows out of every ``:Node``-scoped data query and out of ``is_empty()``,
+        so a marked-but-data-empty graph still reads as empty. It carries no
+        EDGE relationships, so the edge-traversal scans never surface it either.
+        """
+        if self.connection is None:
+            raise RuntimeError("Ladybug connection is not initialized; cannot ensure schema.")
+        self.connection.execute("""
+            CREATE NODE TABLE IF NOT EXISTS GraphMetadata(
+                key STRING PRIMARY KEY,
+                value STRING
+            )
+        """)
 
     def _initialize_connection(self) -> None:
         """Initialize the Ladybug database connection and schema."""
@@ -371,27 +518,7 @@ class LadybugAdapter(GraphDBInterface):
                         e,
                     )
 
-            # Create node table with essential fields and timestamp
-            self.connection.execute("""
-                CREATE NODE TABLE IF NOT EXISTS Node(
-                    id STRING PRIMARY KEY,
-                    name STRING,
-                    type STRING,
-                    created_at TIMESTAMP,
-                    updated_at TIMESTAMP,
-                    properties STRING
-                )
-            """)
-            # Create relationship table with timestamp
-            self.connection.execute("""
-                CREATE REL TABLE IF NOT EXISTS EDGE(
-                    FROM Node TO Node,
-                    relationship_name STRING,
-                    created_at TIMESTAMP,
-                    updated_at TIMESTAMP,
-                    properties STRING
-                )
-            """)
+            self._ensure_schema()
             logger.debug("Ladybug database initialized successfully")
         except Exception as e:
             logger.error(f"Failed to initialize Ladybug database: {e}")
@@ -419,8 +546,10 @@ class LadybugAdapter(GraphDBInterface):
             logger.warning(f"Ladybug S3 storage file not found: {self.db_path}")
 
     async def is_empty(self) -> bool:
+        # Scoped to :Node so the GraphMetadata marker table (and any future
+        # non-data node table) never makes a data-empty graph read as non-empty.
         query = """
-        MATCH (n)
+        MATCH (n:Node)
         RETURN true
         LIMIT 1;
         """
@@ -923,6 +1052,10 @@ class LadybugAdapter(GraphDBInterface):
             for key in core_properties:
                 properties.pop(key, None)
 
+            # Provenance lives in declared STRING columns, never the JSON blob.
+            for key in PROVENANCE_COLUMNS:
+                properties.pop(key, None)
+
             core_properties["properties"] = json.dumps(properties, cls=JSONEncoder)
 
             # Add timestamps for new node
@@ -951,7 +1084,12 @@ class LadybugAdapter(GraphDBInterface):
             logger.error(f"Failed to add node: {e}")
             raise
 
-    async def add_nodes(self, nodes: List[DataPoint]) -> None:
+    async def add_nodes(
+        self,
+        nodes: List[DataPoint],
+        source_ref_key: Optional[str] = None,
+        pipeline_run_id: Optional[str] = None,
+    ) -> None:
         """
         Add multiple nodes to the graph in a batch operation.
 
@@ -964,6 +1102,11 @@ class LadybugAdapter(GraphDBInterface):
 
             - nodes (List[DataPoint]): A list of nodes to be added to the graph, each
               represented as a DataPoint.
+            - source_ref_key (Optional[str]): When set, graph provenance for this
+              source ref is stamped atomically in the same statement that writes the nodes
+              (no separate attach pass). Omit for non-graph-provenance writes.
+            - pipeline_run_id (Optional[str]): Run id recorded alongside the provenance
+              stamp, so the write is rollbackable by run. Ignored when source_ref_key is None.
         """
         if not nodes:
             return
@@ -984,6 +1127,10 @@ class LadybugAdapter(GraphDBInterface):
 
                 # Remove core fields from other properties
                 for key in core_properties:
+                    properties.pop(key, None)
+
+                # Provenance lives in declared STRING columns, never the JSON blob.
+                for key in PROVENANCE_COLUMNS:
                     properties.pop(key, None)
 
                 node_params.append(
@@ -1012,7 +1159,12 @@ class LadybugAdapter(GraphDBInterface):
                     n.properties = node.properties,
                     n.updated_at = timestamp(node.updated_at)
                 """
-                await self.query(merge_query, {"nodes": node_params})
+                query_params = {"nodes": node_params}
+                if source_ref_key is not None:
+                    merge_query += _provenance_fold_clause("n")
+                    query_params.update(_provenance_fold_params(source_ref_key, pipeline_run_id))
+
+                await self.query(merge_query, query_params)
                 await self.checkpoint()
                 logger.debug(f"Processed {len(node_params)} nodes in batch")
 
@@ -1054,6 +1206,523 @@ class LadybugAdapter(GraphDBInterface):
         """
         query_str = "MATCH (n:Node) WHERE n.id IN $ids DETACH DELETE n"
         await self.query(query_str, {"ids": node_ids})
+
+    # ------------------------------------------------------------------
+    # Graph provenance (COG-5522 Part 1)
+    #
+    # The four provenance fields live in declared scalar STRING columns on Node
+    # and EDGE. attach/remove do a per-artifact read-modify-write
+    # (delete/rollback is a maintenance path, not a hot path); lookups are full
+    # column scans via delimiter-token string filters. Every read normalizes a
+    # NULL column to [].
+    # ------------------------------------------------------------------
+
+    async def _read_node_provenance(
+        self, node_ids: List[str]
+    ) -> Dict[str, Tuple[List[str], List[str]]]:
+        """Return ``{node_id: (source_ref_keys, source_run_refs)}`` for existing nodes."""
+        rows = await self.query(
+            """
+            MATCH (n:Node) WHERE n.id IN $ids
+            RETURN n.id, n.source_ref_keys, n.source_run_refs
+            """,
+            {"ids": list(node_ids)},
+        )
+        return {row[0]: (_decode_refs(row[1]), _decode_refs(row[2])) for row in rows}
+
+    async def _write_node_provenance(self, batch: List[dict]) -> None:
+        if not batch:
+            return
+        encoded_batch = [_encode_provenance_row(row) for row in batch]
+        await self.query(
+            """
+            UNWIND $batch AS row
+            MATCH (n:Node) WHERE n.id = row.id
+            SET n.source_ref_keys = row.refs,
+                n.source_dataset_ids = row.datasets,
+                n.source_run_ids = row.runs,
+                n.source_run_refs = row.run_refs
+            """,
+            {"batch": encoded_batch},
+        )
+        await self.checkpoint()
+
+    async def _read_edge_provenance(
+        self, edges: list[EdgeIdentity]
+    ) -> Dict[EdgeIdentity, Tuple[List[str], List[str]]]:
+        """Return ``{edge: (source_ref_keys, source_run_refs)}`` for existing edges."""
+        edge_params = [
+            {"s": edge.source_id, "t": edge.target_id, "rel": edge.relationship_name}
+            for edge in edges
+        ]
+        rows = await self.query(
+            """
+            UNWIND $edges AS e
+            MATCH (a:Node)-[r:EDGE]->(b:Node)
+            WHERE a.id = e.s AND b.id = e.t AND r.relationship_name = e.rel
+            RETURN a.id, b.id, r.relationship_name, r.source_ref_keys, r.source_run_refs
+            """,
+            {"edges": edge_params},
+        )
+        result: Dict[EdgeIdentity, Tuple[List[str], List[str]]] = {}
+        for row in rows:
+            edge = EdgeIdentity(source_id=row[0], target_id=row[1], relationship_name=row[2])
+            result[edge] = (_decode_refs(row[3]), _decode_refs(row[4]))
+        return result
+
+    async def _write_edge_provenance(self, batch: List[dict]) -> None:
+        if not batch:
+            return
+        encoded_batch = [_encode_provenance_row(row) for row in batch]
+        await self.query(
+            """
+            UNWIND $batch AS row
+            MATCH (a:Node)-[r:EDGE]->(b:Node)
+            WHERE a.id = row.s AND b.id = row.t AND r.relationship_name = row.rel
+            SET r.source_ref_keys = row.refs,
+                r.source_dataset_ids = row.datasets,
+                r.source_run_ids = row.runs,
+                r.source_run_refs = row.run_refs
+            """,
+            {"batch": encoded_batch},
+        )
+        await self.checkpoint()
+
+    @staticmethod
+    def _node_row(node_id: str) -> dict:
+        return {"id": node_id}
+
+    @staticmethod
+    def _edge_row(edge: EdgeIdentity) -> dict:
+        return {"s": edge.source_id, "t": edge.target_id, "rel": edge.relationship_name}
+
+    async def _apply_source_ref_change(
+        self,
+        artifacts,
+        read_provenance,
+        write_provenance,
+        identity_row,
+        transition,
+    ) -> None:
+        """Read each artifact's provenance, apply a pure transition, write it back.
+
+        Shared by attach/remove for both nodes and edges: ``read_provenance`` /
+        ``write_provenance`` are the Cypher node|edge helpers, ``identity_row``
+        maps an artifact identity to the batch row's match fields, and
+        ``transition`` is the pure ``provenance_after_*`` function.
+
+        The lock serializes this two-query sequence within one adapter instance
+        so concurrent explicit attach/remove calls do not overwrite each other's
+        provenance updates.
+        """
+        if not artifacts:
+            return
+
+        async with self._source_ref_change_lock:
+            current = await read_provenance(artifacts)
+            batch = []
+            for identity, (keys, run_refs) in current.items():
+                cols = transition(keys, run_refs)
+                batch.append(
+                    {
+                        **identity_row(identity),
+                        "refs": cols.source_ref_keys,
+                        "datasets": cols.source_dataset_ids,
+                        "runs": cols.source_run_ids,
+                        "run_refs": cols.source_run_refs,
+                    }
+                )
+            await write_provenance(batch)
+
+    async def attach_node_source_refs(
+        self,
+        node_ids: list[str],
+        source_ref_keys: list[str],
+        pipeline_run_id: str | None = None,
+    ) -> None:
+        if not source_ref_keys:
+            return
+        add_keys = list(source_ref_keys)
+        await self._apply_source_ref_change(
+            node_ids,
+            self._read_node_provenance,
+            self._write_node_provenance,
+            self._node_row,
+            lambda keys, run_refs: provenance_after_attach(
+                keys, run_refs, add_keys, pipeline_run_id
+            ),
+        )
+
+    async def attach_edge_source_refs(
+        self,
+        edges: list[EdgeIdentity],
+        source_ref_keys: list[str],
+        pipeline_run_id: str | None = None,
+    ) -> None:
+        if not source_ref_keys:
+            return
+        add_keys = list(source_ref_keys)
+        await self._apply_source_ref_change(
+            edges,
+            self._read_edge_provenance,
+            self._write_edge_provenance,
+            self._edge_row,
+            lambda keys, run_refs: provenance_after_attach(
+                keys, run_refs, add_keys, pipeline_run_id
+            ),
+        )
+
+    async def remove_node_source_refs(
+        self,
+        node_ids: list[str],
+        source_ref_keys: list[str],
+    ) -> None:
+        if not source_ref_keys:
+            return
+        remove_keys = list(source_ref_keys)
+        await self._apply_source_ref_change(
+            node_ids,
+            self._read_node_provenance,
+            self._write_node_provenance,
+            self._node_row,
+            lambda keys, run_refs: provenance_after_remove(keys, run_refs, remove_keys),
+        )
+
+    async def remove_edge_source_refs(
+        self,
+        edges: list[EdgeIdentity],
+        source_ref_keys: list[str],
+    ) -> None:
+        if not source_ref_keys:
+            return
+        remove_keys = list(source_ref_keys)
+        await self._apply_source_ref_change(
+            edges,
+            self._read_edge_provenance,
+            self._write_edge_provenance,
+            self._edge_row,
+            lambda keys, run_refs: provenance_after_remove(keys, run_refs, remove_keys),
+        )
+
+    async def delete_edge_triples(self, edges: list[EdgeIdentity]) -> None:
+        if not edges:
+            return
+        edge_params = [
+            {"s": edge.source_id, "t": edge.target_id, "rel": edge.relationship_name}
+            for edge in edges
+        ]
+        # DELETE r (not DETACH DELETE) removes only the matched relationships and
+        # preserves the endpoint nodes.
+        await self.query(
+            """
+            UNWIND $edges AS e
+            MATCH (a:Node)-[r:EDGE]->(b:Node)
+            WHERE a.id = e.s AND b.id = e.t AND r.relationship_name = e.rel
+            DELETE r
+            """,
+            {"edges": edge_params},
+        )
+        await self.checkpoint()
+
+    async def get_node_delete_data(self, node_ids: list[str]) -> dict[str, NodeDeleteData]:
+        if not node_ids:
+            return {}
+        rows = await self.query(
+            """
+            MATCH (n:Node) WHERE n.id IN $ids
+            RETURN n.id, n.name, n.type, n.properties,
+                   n.source_ref_keys, n.source_dataset_ids, n.source_run_ids, n.source_run_refs
+            """,
+            {"ids": list(node_ids)},
+        )
+        result: dict[str, NodeDeleteData] = {}
+        for row in rows:
+            node_id, name, node_type, raw_props = row[0], row[1], row[2], row[3]
+            properties = _parse_properties_blob(raw_props)
+            # Reconstruct the flat payload the way get_node does: core columns
+            # merged over the JSON blob.
+            properties["id"] = node_id
+            properties["name"] = name
+            properties["type"] = node_type
+            metadata = properties.get("metadata") or {}
+            indexed_fields = (
+                list(metadata.get("index_fields") or []) if isinstance(metadata, dict) else []
+            )
+            result[node_id] = NodeDeleteData(
+                node_id=node_id,
+                node_type=node_type or "",
+                indexed_fields=indexed_fields,
+                node_properties=properties,
+                source_ref_keys=_decode_refs(row[4]),
+                source_dataset_ids=_decode_refs(row[5]),
+                source_run_ids=_decode_refs(row[6]),
+                source_run_refs=_decode_refs(row[7]),
+            )
+        return result
+
+    async def get_edge_delete_data(
+        self, edges: list[EdgeIdentity]
+    ) -> dict[EdgeIdentity, EdgeDeleteData]:
+        if not edges:
+            return {}
+        edge_params = [
+            {"s": edge.source_id, "t": edge.target_id, "rel": edge.relationship_name}
+            for edge in edges
+        ]
+        rows = await self.query(
+            """
+            UNWIND $edges AS e
+            MATCH (a:Node)-[r:EDGE]->(b:Node)
+            WHERE a.id = e.s AND b.id = e.t AND r.relationship_name = e.rel
+            RETURN a.id, b.id, r.relationship_name, r.properties,
+                   r.source_ref_keys, r.source_dataset_ids, r.source_run_ids, r.source_run_refs
+            """,
+            {"edges": edge_params},
+        )
+        # Lazy import: prepare_edges_for_storage lives in the modules layer, whose
+        # package __init__ imports get_graph_engine -> this adapter. Importing it
+        # at module load would create a cycle; at delete-time it is safe.
+        from cognee.modules.graph.utils.prepare_edges_for_storage import get_edge_retrieval_text
+
+        result: dict[EdgeIdentity, EdgeDeleteData] = {}
+        for row in rows:
+            edge = EdgeIdentity(source_id=row[0], target_id=row[1], relationship_name=row[2])
+            properties = _parse_properties_blob(row[3])
+            # Stored edge_text wins; fall back to relationship_name when absent.
+            edge_text = get_edge_retrieval_text(properties.get("edge_text"), edge.relationship_name)
+            result[edge] = EdgeDeleteData(
+                edge=edge,
+                edge_text=edge_text,
+                edge_properties=properties,
+                source_ref_keys=_decode_refs(row[4]),
+                source_dataset_ids=_decode_refs(row[5]),
+                source_run_ids=_decode_refs(row[6]),
+                source_run_refs=_decode_refs(row[7]),
+            )
+        return result
+
+    async def find_nodes_by_source_ref(self, source_ref_key: str) -> list[str]:
+        rows = await self.query(
+            """
+            MATCH (n:Node)
+            WHERE coalesce(n.source_ref_keys, '|') CONTAINS $token
+            RETURN n.id
+            """,
+            {"token": _provenance_token(source_ref_key)},
+        )
+        return [row[0] for row in rows]
+
+    async def find_edges_by_source_ref(self, source_ref_key: str) -> list[EdgeIdentity]:
+        rows = await self.query(
+            """
+            MATCH (a:Node)-[r:EDGE]->(b:Node)
+            WHERE coalesce(r.source_ref_keys, '|') CONTAINS $token
+            RETURN a.id, b.id, r.relationship_name
+            """,
+            {"token": _provenance_token(source_ref_key)},
+        )
+        return [
+            EdgeIdentity(source_id=row[0], target_id=row[1], relationship_name=row[2])
+            for row in rows
+        ]
+
+    async def find_node_source_refs_by_dataset(self, dataset_id: str) -> dict[str, list[str]]:
+        rows = await self.query(
+            """
+            MATCH (n:Node)
+            WHERE coalesce(n.source_dataset_ids, '|') CONTAINS $token
+            RETURN n.id, n.source_ref_keys
+            """,
+            {"token": _provenance_token(dataset_id)},
+        )
+        result: dict[str, list[str]] = {}
+        for row in rows:
+            owned = [
+                key
+                for key in _decode_refs(row[1])
+                if str(get_dataset_id_from_source_ref_key(key)) == dataset_id
+            ]
+            if owned:
+                result[row[0]] = owned
+        return result
+
+    async def find_edge_source_refs_by_dataset(
+        self, dataset_id: str
+    ) -> dict[EdgeIdentity, list[str]]:
+        rows = await self.query(
+            """
+            MATCH (a:Node)-[r:EDGE]->(b:Node)
+            WHERE coalesce(r.source_dataset_ids, '|') CONTAINS $token
+            RETURN a.id, b.id, r.relationship_name, r.source_ref_keys
+            """,
+            {"token": _provenance_token(dataset_id)},
+        )
+        result: dict[EdgeIdentity, list[str]] = {}
+        for row in rows:
+            owned = [
+                key
+                for key in _decode_refs(row[3])
+                if str(get_dataset_id_from_source_ref_key(key)) == dataset_id
+            ]
+            if owned:
+                edge = EdgeIdentity(source_id=row[0], target_id=row[1], relationship_name=row[2])
+                result[edge] = owned
+        return result
+
+    async def find_node_source_refs_by_pipeline_run(
+        self, pipeline_run_id: str
+    ) -> dict[str, list[str]]:
+        rows = await self.query(
+            """
+            MATCH (n:Node)
+            WHERE coalesce(n.source_run_ids, '|') CONTAINS $token
+            RETURN n.id, n.source_run_refs
+            """,
+            {"token": _provenance_token(pipeline_run_id)},
+        )
+        result: dict[str, list[str]] = {}
+        for row in rows:
+            contributed = [
+                get_source_ref_key_from_source_run_ref(ref)
+                for ref in _decode_refs(row[1])
+                if str(get_pipeline_run_id_from_source_run_ref(ref)) == pipeline_run_id
+            ]
+            if contributed:
+                result[row[0]] = contributed
+        return result
+
+    async def find_edge_source_refs_by_pipeline_run(
+        self, pipeline_run_id: str
+    ) -> dict[EdgeIdentity, list[str]]:
+        rows = await self.query(
+            """
+            MATCH (a:Node)-[r:EDGE]->(b:Node)
+            WHERE coalesce(r.source_run_ids, '|') CONTAINS $token
+            RETURN a.id, b.id, r.relationship_name, r.source_run_refs
+            """,
+            {"token": _provenance_token(pipeline_run_id)},
+        )
+        result: dict[EdgeIdentity, list[str]] = {}
+        for row in rows:
+            contributed = [
+                get_source_ref_key_from_source_run_ref(ref)
+                for ref in _decode_refs(row[3])
+                if str(get_pipeline_run_id_from_source_run_ref(ref)) == pipeline_run_id
+            ]
+            if contributed:
+                edge = EdgeIdentity(source_id=row[0], target_id=row[1], relationship_name=row[2])
+                result[edge] = contributed
+        return result
+
+    async def get_edges_created_since(
+        self,
+        since: Optional[datetime],
+        limit: int,
+    ) -> Tuple[List[Tuple[str, str, str, datetime]], Dict[str, Dict[str, Any]]]:
+        """Return edges created after ``since`` (oldest first) plus endpoint nodes.
+
+        Reads the edge ``created_at`` column directly (``get_graph_data`` drops it),
+        so the session-sync incremental checkpoint keeps the same timestamp model
+        as the relational path. Endpoint node properties are returned so callers
+        can render triplets without a second lookup.
+        """
+        where_clause = ""
+        params: Dict[str, Any] = {"limit": limit}
+        if since is not None:
+            where_clause = "WHERE r.created_at > timestamp($since)"
+            params["since"] = since.strftime("%Y-%m-%d %H:%M:%S.%f")
+
+        rows = await self.query(
+            f"""
+            MATCH (a:Node)-[r:EDGE]->(b:Node)
+            {where_clause}
+            RETURN a.id, a.name, a.type, a.properties,
+                   b.id, b.name, b.type, b.properties,
+                   r.relationship_name, r.created_at
+            ORDER BY r.created_at ASC
+            LIMIT $limit
+            """,
+            params,
+        )
+
+        edges: List[Tuple[str, str, str, datetime]] = []
+        node_map: Dict[str, Dict[str, Any]] = {}
+        for row in rows:
+            source_id, target_id = str(row[0]), str(row[4])
+            for node_id, name, node_type, props_blob in (
+                (source_id, row[1], row[2], row[3]),
+                (target_id, row[5], row[6], row[7]),
+            ):
+                if node_id not in node_map:
+                    node_map[node_id] = {
+                        "id": node_id,
+                        "name": name,
+                        "type": node_type,
+                        **_parse_properties_blob(props_blob),
+                    }
+            edges.append((source_id, target_id, str(row[8]), row[9]))
+
+        return edges, node_map
+
+    async def set_graph_metadata(self, metadata: dict[str, str]) -> None:
+        if not metadata:
+            return
+        for key, value in metadata.items():
+            await self.query(
+                "MERGE (m:GraphMetadata {key: $k}) SET m.value = $v",
+                {"k": str(key), "v": str(value)},
+            )
+        await self.checkpoint()
+
+    async def get_graph_metadata(self) -> dict[str, str]:
+        rows = await self.query("MATCH (m:GraphMetadata) RETURN m.key, m.value")
+        return {row[0]: row[1] for row in rows}
+
+    async def remove_belongs_to_set_tags(
+        self,
+        tags: List[str],
+        node_ids: Optional[List[str]] = None,
+    ) -> None:
+        if not tags:
+            return None
+        if node_ids is not None and not node_ids:
+            return None
+
+        tag_set = set(tags)
+        if node_ids is not None:
+            rows = await self.query(
+                "MATCH (n:Node) WHERE n.id IN $ids RETURN n.id, n.properties",
+                {"ids": [str(nid) for nid in node_ids]},
+            )
+        else:
+            rows = await self.query("MATCH (n:Node) RETURN n.id, n.properties")
+
+        updates = []
+        for row in rows:
+            raw_props = row[1]
+            if not raw_props:
+                continue
+            try:
+                properties = json.loads(raw_props)
+            except json.JSONDecodeError:
+                continue
+            current = properties.get("belongs_to_set")
+            if not isinstance(current, list) or not any(tag in tag_set for tag in current):
+                continue
+            properties["belongs_to_set"] = [tag for tag in current if tag not in tag_set]
+            updates.append({"id": row[0], "properties": json.dumps(properties, cls=JSONEncoder)})
+
+        if updates:
+            await self.query(
+                """
+                UNWIND $rows AS row
+                MATCH (n:Node) WHERE n.id = row.id
+                SET n.properties = row.properties
+                """,
+                {"rows": updates},
+            )
+            await self.checkpoint()
+        return None
 
     async def extract_node(self, node_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -1252,7 +1921,12 @@ class LadybugAdapter(GraphDBInterface):
             logger.error(f"Failed to add edge: {e}")
             raise
 
-    async def add_edges(self, edges: List[Tuple[str, str, str, Dict[str, Any]]]) -> None:
+    async def add_edges(
+        self,
+        edges: List[Tuple[str, str, str, Dict[str, Any]]],
+        source_ref_key: Optional[str] = None,
+        pipeline_run_id: Optional[str] = None,
+    ) -> None:
         """
         Add multiple edges in a batch operation.
 
@@ -1265,6 +1939,11 @@ class LadybugAdapter(GraphDBInterface):
 
             - edges (List[Tuple[str, str, str, Dict[str, Any]]]): A list of edges represented as
               tuples of (from_node, to_node, relationship_name, edge_properties).
+            - source_ref_key (Optional[str]): When set, graph provenance for this
+              source ref is stamped atomically in the same statement that writes the edges
+              (no separate attach pass). Omit for non-graph-provenance writes.
+            - pipeline_run_id (Optional[str]): Run id recorded alongside the provenance
+              stamp, so the write is rollbackable by run. Ignored when source_ref_key is None.
         """
         if not edges:
             return
@@ -1299,8 +1978,12 @@ class LadybugAdapter(GraphDBInterface):
                 r.updated_at = timestamp(edge.updated_at),
                 r.properties = edge.properties
             """
+            query_params = {"edges": edge_params}
+            if source_ref_key is not None:
+                query += _provenance_fold_clause("r")
+                query_params.update(_provenance_fold_params(source_ref_key, pipeline_run_id))
 
-            await self.query(query, {"edges": edge_params})
+            await self.query(query, query_params)
             await self.checkpoint()
 
         except Exception as e:

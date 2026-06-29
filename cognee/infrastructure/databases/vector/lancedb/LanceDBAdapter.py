@@ -1104,15 +1104,21 @@ class LanceDBAdapter(VectorDBInterface):
         )
 
     async def delete_data_points(self, collection_name: str, data_point_ids: list[UUID]):
-        # Skip deletion if collection doesn't exist
+        # Idempotent: a missing collection (or empty id list) is a no-op.
         if not await self.has_collection(collection_name):
+            return
+        if not data_point_ids:
             return
 
         collection = await self.get_collection(collection_name)
 
-        # Delete one at a time to avoid commit conflicts
+        # ids may be UUIDs or graph-computed deterministic strings; the stored
+        # `id` column is a str, so match by string and escape single quotes to
+        # keep the predicate injection-safe (mirrors create_data_points). One
+        # delete per id to avoid commit conflicts; a non-existent id no-ops.
         for data_point_id in data_point_ids:
-            await collection.delete(f"id = '{data_point_id}'")
+            escaped_id = str(data_point_id).replace("'", "''")
+            await collection.delete(f"id = '{escaped_id}'")
 
     async def remove_belongs_to_set_tags(
         self,

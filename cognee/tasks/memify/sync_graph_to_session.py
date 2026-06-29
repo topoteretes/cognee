@@ -1,10 +1,12 @@
 """Sync recent graph knowledge into the session cache for fast retrieval.
 
-Queries the relational Edge/Node tables incrementally (by created_at
-timestamp) so only *new* edges since the last sync are processed.
-The result is stored as a dedicated graph knowledge key — separate
-from the QA conversation history — so it is always available to
-session completions regardless of conversation length.
+Reads new edges incrementally (by created_at timestamp) so only edges added
+since the last sync are processed. On ledger-backed graphs this walks the
+relational Edge/Node tables; on graph-provenance graphs (provenance stored in the
+graph, empty ledger) it reads the edges straight from the graph adapter via
+``get_edges_created_since``. Either way the result is stored as a dedicated
+graph knowledge key — separate from the QA conversation history — so it is
+always available to session completions regardless of conversation length.
 
 A ``max_lines`` cap prevents unbounded growth: when the merged snapshot
 exceeds the limit, only the most recently created edges are kept.
@@ -17,6 +19,8 @@ from uuid import UUID
 from sqlalchemy import select, and_
 
 from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.infrastructure.databases.unified import get_unified_engine
+from cognee.infrastructure.databases.provenance.markers import stores_provenance_in_graph
 from cognee.modules.graph.models.Edge import Edge
 from cognee.modules.graph.models.Node import Node
 from cognee.shared.logging_utils import get_logger
@@ -125,37 +129,98 @@ async def _fetch_new_edges(
         return edges, node_map
 
 
-def _edge_to_text(edge: Edge, node_map: dict) -> Optional[str]:
-    """Render an edge as a structured JSON-line with node metadata.
+def _node_entry(meta: dict) -> dict:
+    """Build the per-endpoint JSON entry from a node metadata dict.
 
-    Preserves node type and description alongside the triplet relationship,
-    giving LLMs richer context than plain ``src —[rel]→ dst`` strings.
+    Works for both a relational ``Node`` (label/type) and a graph node
+    (name/type), preferring the most human-readable label available.
+    """
+    label = meta.get("label") or meta.get("name") or meta.get("type") or str(meta.get("id"))
+    entry = {"label": label}
+    if meta.get("type"):
+        entry["type"] = meta["type"]
+    if meta.get("description"):
+        entry["description"] = meta["description"]
+    return entry
+
+
+def _triplet_line(src_meta: dict, relationship: Optional[str], dst_meta: dict) -> str:
+    """Render a triplet as a structured JSON-line with node metadata.
+
+    Preserves node type and description alongside the relationship, giving LLMs
+    richer context than plain ``src —[rel]→ dst`` strings.
     """
     import json
 
+    entry = {
+        "source": _node_entry(src_meta),
+        "relationship": relationship or "related_to",
+        "target": _node_entry(dst_meta),
+    }
+    return json.dumps(entry, ensure_ascii=False)
+
+
+def _relational_node_meta(node: Node) -> dict:
+    return {
+        "id": node.id,
+        "label": node.label,
+        "type": getattr(node, "type", None),
+        "description": getattr(node, "description", None),
+    }
+
+
+def _edge_to_text(edge: Edge, node_map: dict) -> Optional[str]:
+    """Render a relational ``Edge`` as a triplet JSON-line, or None if an
+    endpoint node is missing."""
     src = node_map.get(edge.source_node_id)
     dst = node_map.get(edge.destination_node_id)
     if not src or not dst:
         return None
+    return _triplet_line(
+        _relational_node_meta(src), edge.relationship_name, _relational_node_meta(dst)
+    )
 
-    src_entry = {"label": src.label or src.type or str(src.id)}
-    dst_entry = {"label": dst.label or dst.type or str(dst.id)}
 
-    if getattr(src, "type", None):
-        src_entry["type"] = src.type
-    if getattr(dst, "type", None):
-        dst_entry["type"] = dst.type
-    if getattr(src, "description", None):
-        src_entry["description"] = src.description
-    if getattr(dst, "description", None):
-        dst_entry["description"] = dst.description
+async def _collect_relational_lines(db_engine, dataset_id: UUID, since: Optional[datetime]):
+    """Walk the relational Edge ledger in created_at order, returning
+    (triplet_lines, latest_timestamp)."""
+    lines: list[str] = []
+    latest = since
+    while True:
+        edges, node_map = await _fetch_new_edges(db_engine, dataset_id, latest, BATCH_SIZE)
+        if not edges:
+            break
+        for edge in edges:
+            text = _edge_to_text(edge, node_map)
+            if text:
+                lines.append(text)
+            if latest is None or edge.created_at > latest:
+                latest = edge.created_at
+        if len(edges) < BATCH_SIZE:
+            break
+    return lines, latest
 
-    entry = {
-        "source": src_entry,
-        "relationship": edge.relationship_name or "related_to",
-        "target": dst_entry,
-    }
-    return json.dumps(entry, ensure_ascii=False)
+
+async def _collect_graph_provenance_lines(graph_engine, since: Optional[datetime]):
+    """Walk new graph edges (by created_at) on a graph-provenance graph, returning
+    (triplet_lines, latest_timestamp). Mirrors the relational collector but reads
+    provenance-carrying edges straight from the graph instead of the ledger."""
+    lines: list[str] = []
+    latest = since
+    while True:
+        edges, node_map = await graph_engine.get_edges_created_since(latest, BATCH_SIZE)
+        if not edges:
+            break
+        for source_id, target_id, relationship, created_at in edges:
+            src = node_map.get(source_id)
+            dst = node_map.get(target_id)
+            if src and dst:
+                lines.append(_triplet_line(src, relationship, dst))
+            if latest is None or created_at > latest:
+                latest = created_at
+        if len(edges) < BATCH_SIZE:
+            break
+    return lines, latest
 
 
 async def sync_graph_to_session(
@@ -192,25 +257,19 @@ async def sync_graph_to_session(
         since.isoformat() if since else "beginning",
     )
 
-    # Collect new triplet lines (ordered by created_at ascending)
-    db_engine = get_relational_engine()
-    new_lines: list[str] = []
-    latest_ts = since
-
-    while True:
-        edges, node_map = await _fetch_new_edges(db_engine, dataset_id, latest_ts, BATCH_SIZE)
-        if not edges:
-            break
-
-        for edge in edges:
-            text = _edge_to_text(edge, node_map)
-            if text:
-                new_lines.append(text)
-            if latest_ts is None or edge.created_at > latest_ts:
-                latest_ts = edge.created_at
-
-        if len(edges) < BATCH_SIZE:
-            break
+    # Collect new triplet lines (ordered by created_at ascending). Graph-provenance
+    # graphs carry their edges in the graph (the relational Edge ledger is empty),
+    # so read new edges straight from the graph adapter; otherwise walk the ledger.
+    unified = await get_unified_engine()
+    stores_provenance = (
+        unified.supports_graph_provenance_delete()
+        and await stores_provenance_in_graph(unified.graph)
+    )
+    if stores_provenance:
+        new_lines, latest_ts = await _collect_graph_provenance_lines(unified.graph, since)
+    else:
+        db_engine = get_relational_engine()
+        new_lines, latest_ts = await _collect_relational_lines(db_engine, dataset_id, since)
 
     if not new_lines:
         logger.info("sync_graph_to_session: no new edges to sync")

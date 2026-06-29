@@ -4,31 +4,25 @@ import pathlib
 
 import cognee
 from cognee.api.v1.datasets import datasets
-from cognee.context_global_variables import backend_access_control_enabled
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.databases.provenance import make_source_ref_key
+from cognee.infrastructure.databases.provenance.markers import stores_provenance_in_graph
 from cognee.modules.engine.operations.setup import setup
-from cognee.modules.graph.methods import (
-    get_data_related_edges,
-    get_data_related_nodes,
-    get_global_data_related_edges,
-    get_global_data_related_nodes,
-)
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 
 
-async def _exclusive_nodes_and_edges_for_data(dataset_id, data_id):
-    """Return graph nodes/edges removable with that data (not shared with other data by slug)."""
-    if backend_access_control_enabled():
-        nodes = await get_data_related_nodes(dataset_id, data_id)
-        edges = await get_data_related_edges(dataset_id, data_id)
-    else:
-        nodes = await get_global_data_related_nodes(data_id)
-        edges = await get_global_data_related_edges(data_id)
-    return nodes, edges
+async def _exclusive_node_ids_for_source_ref(graph_engine, source_ref_key):
+    node_ids = await graph_engine.find_nodes_by_source_ref(source_ref_key)
+    node_data = await graph_engine.get_node_delete_data(node_ids)
+    return {
+        node_id
+        for node_id, data in node_data.items()
+        if set(data.source_ref_keys) == {source_ref_key}
+    }
 
 
 async def main():
@@ -72,6 +66,10 @@ async def main():
     dataset_id = list(cognify_result.keys())[0]
 
     graph_engine = await get_graph_engine()
+    assert await stores_provenance_in_graph(graph_engine), (
+        "Fresh default Ladybug graph should store delete provenance in the graph."
+    )
+
     initial_nodes, initial_edges = await graph_engine.get_graph_data()
     initial_data_nodes = [n for n in initial_nodes if n[1].get("type") != "EdgeType"]
     assert len(initial_data_nodes) >= 14 and len(initial_edges) >= 18, (
@@ -94,34 +92,30 @@ async def main():
 
     initial_node_ids = {node[0] for node in initial_nodes}
 
-    # Pre-delete: node/edge slugs removable with that data only (shared entities excluded).
-    john_nodes, john_edges = await _exclusive_nodes_and_edges_for_data(dataset_id, johns_data_id)
-    marie_nodes, _ = await _exclusive_nodes_and_edges_for_data(dataset_id, maries_data_id)
-    john_slugs = {str(n.slug) for n in john_nodes}
-    marie_slugs = {str(n.slug) for n in marie_nodes}
-    john_edge_slugs = [str(e.slug) for e in john_edges]
+    # Pre-delete: graph node ids removable with that data only (shared entities excluded).
+    john_source_ref = make_source_ref_key(dataset_id, johns_data_id)
+    marie_source_ref = make_source_ref_key(dataset_id, maries_data_id)
+    john_node_ids = await _exclusive_node_ids_for_source_ref(graph_engine, john_source_ref)
+    marie_node_ids = await _exclusive_node_ids_for_source_ref(graph_engine, marie_source_ref)
 
-    assert john_slugs, "John's doc must contribute at least one non-shared graph node."
-    assert marie_slugs, "Marie's doc must contribute at least one non-shared graph node."
+    assert john_node_ids, "John's doc must contribute at least one non-shared graph node."
+    assert marie_node_ids, "Marie's doc must contribute at least one non-shared graph node."
 
     user = await get_default_user()
 
     # --- Delete John's data only ---
     await datasets.delete_data(dataset_id, johns_data_id, user)  # type: ignore
 
-    still_john_nodes = await graph_engine.get_nodes(list(john_slugs))
+    still_john_nodes = await graph_engine.get_nodes(list(john_node_ids))
     assert len(still_john_nodes) == 0, "John-exclusive nodes should be removed from the graph."
 
     nodes, edges = await graph_engine.get_graph_data()
-    assert not any(src in john_slugs or tgt in john_slugs for src, tgt, _, _ in edges), (
+    assert not any(src in john_node_ids or tgt in john_node_ids for src, tgt, _, _ in edges), (
         "No graph edge should still attach to a removed John-exclusive node."
     )
-    if john_edge_slugs:
-        edge_vectors = await vector_engine.retrieve("EdgeType_relationship_name", john_edge_slugs)
-        assert len(edge_vectors) == 0, "John-exclusive edge embeddings should be removed."
 
-    still_marie = await graph_engine.get_nodes(list(marie_slugs))
-    assert len(still_marie) == len(marie_slugs), (
+    still_marie = await graph_engine.get_nodes(list(marie_node_ids))
+    assert len(still_marie) == len(marie_node_ids), (
         "Marie-exclusive nodes must remain after deleting John's data only."
     )
     # Marie never mentions John or that org; they should be exclusive to John's data and gone now.

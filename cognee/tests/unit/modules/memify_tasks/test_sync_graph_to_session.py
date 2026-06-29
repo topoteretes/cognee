@@ -1,6 +1,7 @@
 import asyncio
 import importlib
 import sys
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
@@ -31,6 +32,25 @@ _mod_query_router = importlib.import_module("cognee.api.v1.recall.query_router")
 _mod_search_methods = importlib.import_module("cognee.modules.search.methods.search")
 
 _PATCH_GET_REL = "cognee.tasks.memify.sync_graph_to_session.get_relational_engine"
+_PATCH_GET_UNIFIED = "cognee.tasks.memify.sync_graph_to_session.get_unified_engine"
+_PATCH_STORES_PROVENANCE = "cognee.tasks.memify.sync_graph_to_session.stores_provenance_in_graph"
+
+
+def _patch_unified(graph_provenance: bool, graph=None):
+    """Patch the unified engine lookup. Defaults to the relational (ledger) path."""
+    unified = MagicMock()
+    unified.supports_graph_provenance_delete = MagicMock(return_value=graph_provenance)
+    unified.graph = graph if graph is not None else MagicMock()
+    return patch(_PATCH_GET_UNIFIED, new=AsyncMock(return_value=unified))
+
+
+@contextmanager
+def _patch_remember_startup():
+    with (
+        patch("cognee.modules.migrations.startup.run_migrations_and_block", new=AsyncMock()),
+        patch("cognee.modules.engine.operations.setup.setup", new=AsyncMock()),
+    ):
+        yield
 
 
 # ---------------------------------------------------------------------------
@@ -190,6 +210,7 @@ async def test_sync_no_new_edges():
         patch.object(_mod_sm, "get_session_manager", return_value=sm),
         patch.object(_mod_cache, "get_cache_engine", return_value=cache_engine),
         patch(_PATCH_GET_REL, return_value=db_engine),
+        _patch_unified(graph_provenance=False),
     ):
         result = await sync_graph_to_session(
             user_id="u1",
@@ -248,6 +269,7 @@ async def test_sync_merges_with_existing():
         patch.object(_mod_sm, "get_session_manager", return_value=sm),
         patch.object(_mod_cache, "get_cache_engine", return_value=cache_engine),
         patch(_PATCH_GET_REL, return_value=db_engine),
+        _patch_unified(graph_provenance=False),
     ):
         result = await sync_graph_to_session(
             user_id="u1",
@@ -290,6 +312,7 @@ async def test_sync_caps_at_max_lines():
         patch.object(_mod_sm, "get_session_manager", return_value=sm),
         patch.object(_mod_cache, "get_cache_engine", return_value=cache_engine),
         patch(_PATCH_GET_REL, return_value=db_engine),
+        _patch_unified(graph_provenance=False),
     ):
         result = await sync_graph_to_session(
             user_id="u1",
@@ -306,6 +329,85 @@ async def test_sync_caps_at_max_lines():
     # Old lines should be dropped (they were at the front)
     assert not any("OldA" in line for line in lines)
     assert not any("OldC" in line for line in lines)
+
+
+# ---------------------------------------------------------------------------
+# sync_graph_to_session — graph-provenance path reads edges from the graph
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_sync_graph_provenance_reads_from_graph_adapter():
+    """On a graph-provenance graph the relational ledger is empty, so sync reads new
+    edges via the graph adapter's get_edges_created_since, renders triplets, and
+    advances the checkpoint to the latest edge created_at."""
+    dataset_id = uuid4()
+    created = datetime(2026, 1, 2, 3, 4, 5)
+
+    edges = [("a", "b", "knows", created)]
+    node_map = {
+        "a": {"id": "a", "name": "Alice", "type": "Entity", "description": "a person"},
+        "b": {"id": "b", "name": "Bob", "type": "Entity"},
+    }
+
+    graph = MagicMock()
+    # First call returns the batch; if the loop ever asks again it gets nothing.
+    graph.get_edges_created_since = AsyncMock(side_effect=[(edges, node_map), ([], {})])
+
+    sm = _make_session_manager()
+    cache_engine = _make_cache_engine()
+    # Relational engine must NOT be used on the graph-provenance path.
+    db_engine = _mock_db_engine_empty()
+
+    with (
+        patch.object(_mod_sm, "get_session_manager", return_value=sm),
+        patch.object(_mod_cache, "get_cache_engine", return_value=cache_engine),
+        patch(_PATCH_GET_REL, return_value=db_engine),
+        _patch_unified(graph_provenance=True, graph=graph),
+        patch(_PATCH_STORES_PROVENANCE, new=AsyncMock(return_value=True)),
+    ):
+        result = await sync_graph_to_session(
+            user_id="u1",
+            session_id="s1",
+            dataset_id=dataset_id,
+        )
+
+    assert result["synced"] == 1
+    graph.get_edges_created_since.assert_awaited()
+    db_engine.get_async_session.assert_not_called()
+
+    context = sm.set_graph_context.call_args.kwargs["context"]
+    import json
+
+    entry = json.loads(context)
+    assert entry["source"]["label"] == "Alice"
+    assert entry["source"]["description"] == "a person"
+    assert entry["target"]["label"] == "Bob"
+    assert entry["relationship"] == "knows"
+
+    # Checkpoint advanced to the edge's created_at.
+    cache_engine.async_redis.set.assert_awaited()
+    saved_value = cache_engine.async_redis.set.await_args.args[1]
+    assert saved_value == created.isoformat()
+
+
+# ---------------------------------------------------------------------------
+# _triplet_line — shared renderer (graph-node-style meta)
+# ---------------------------------------------------------------------------
+
+
+def test_triplet_line_uses_name_when_no_label():
+    import json
+
+    from cognee.tasks.memify.sync_graph_to_session import _triplet_line
+
+    src = {"id": "a", "name": "Alice", "type": "Entity"}
+    dst = {"id": "b", "name": "Bob", "type": "Entity", "description": "friend"}
+    parsed = json.loads(_triplet_line(src, "knows", dst))
+    assert parsed["source"]["label"] == "Alice"
+    assert parsed["target"]["label"] == "Bob"
+    assert parsed["target"]["description"] == "friend"
+    assert parsed["relationship"] == "knows"
 
 
 # ---------------------------------------------------------------------------
@@ -457,6 +559,7 @@ async def test_remember_passes_session_ids_to_improve():
     mock_user.id = "u1"
 
     with (
+        _patch_remember_startup(),
         patch("cognee.api.v1.add.add", AsyncMock()),
         patch("cognee.api.v1.cognify.cognify", AsyncMock(return_value={"status": "ok"})),
         patch.object(_pkg_improve, "improve", mock_improve),
@@ -496,6 +599,7 @@ async def test_remember_no_session_ids_skips_in_improve():
     mock_user.id = "u1"
 
     with (
+        _patch_remember_startup(),
         patch("cognee.api.v1.add.add", AsyncMock()),
         patch("cognee.api.v1.cognify.cognify", AsyncMock(return_value={"status": "ok"})),
         patch.object(_pkg_improve, "improve", mock_improve),
@@ -682,6 +786,7 @@ class TestRememberResult:
         mock_user.id = "u1"
 
         with (
+            _patch_remember_startup(),
             patch("cognee.api.v1.add.add", AsyncMock()),
             patch(
                 "cognee.api.v1.cognify.cognify",
@@ -719,6 +824,7 @@ class TestRememberResult:
         mock_sm.add_qa = AsyncMock()
 
         with (
+            _patch_remember_startup(),
             patch(
                 "cognee.modules.users.methods.get_default_user",
                 AsyncMock(return_value=mock_user),
@@ -731,7 +837,7 @@ class TestRememberResult:
         ):
             from cognee.api.v1.remember.remember import RememberResult, remember
 
-            result = await remember("test data", session_id="s1")
+            result = await remember("test data", session_id="s1", self_improvement=False)
 
         assert isinstance(result, RememberResult)
         assert result.status == "session_stored"
@@ -787,6 +893,7 @@ class TestRememberResultSessions:
         mock_user.id = "u1"
 
         with (
+            _patch_remember_startup(),
             patch("cognee.api.v1.add.add", AsyncMock()),
             patch("cognee.api.v1.cognify.cognify", AsyncMock(return_value={})),
             patch.object(_pkg_improve, "improve", AsyncMock()),
