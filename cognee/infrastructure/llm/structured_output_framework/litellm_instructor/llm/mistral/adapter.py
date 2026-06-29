@@ -1,4 +1,3 @@
-import asyncio
 import logging
 from typing import Any
 
@@ -10,7 +9,6 @@ from pydantic import BaseModel
 from tenacity import (
     before_sleep_log,
     retry,
-    retry_if_not_exception_type,
     stop_after_attempt,
     wait_exponential_jitter,
 )
@@ -23,6 +21,9 @@ from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.llm.config import get_llm_config
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.generic_llm_api.adapter import (
     GenericAPIAdapter,
+)
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.retry_predicates import (
+    retry_if_retryable_llm_error,
 )
 from cognee.modules.observability.get_observe import get_observe
 from cognee.shared.logging_utils import get_logger
@@ -81,13 +82,7 @@ class MistralAdapter(GenericAPIAdapter):
     @retry(
         stop=llm_retry_stop_condition,
         wait=wait_exponential_jitter(8, 128),
-        retry=retry_if_not_exception_type(
-            (
-                litellm.exceptions.NotFoundError,
-                litellm.exceptions.AuthenticationError,
-                asyncio.CancelledError,
-            )
-        ),
+        retry=retry_if_retryable_llm_error,
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
@@ -152,13 +147,7 @@ class MistralAdapter(GenericAPIAdapter):
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential_jitter(2, 128),
-        retry=retry_if_not_exception_type(
-            (
-                litellm.exceptions.NotFoundError,
-                litellm.exceptions.AuthenticationError,
-                asyncio.CancelledError,
-            )
-        ),
+        retry=retry_if_retryable_llm_error,
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )

@@ -14,7 +14,6 @@ from pydantic import BaseModel
 from tenacity import (
     before_sleep_log,
     retry,
-    retry_if_not_exception_type,
     stop_after_attempt,
     wait_exponential_jitter,
 )
@@ -27,6 +26,9 @@ from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.llm.exceptions import ContentPolicyFilterError
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.llm_interface import (
     LLMInterface,
+)
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.retry_predicates import (
+    retry_if_retryable_llm_error,
 )
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.types import (
     TranscriptionReturnType,
@@ -139,9 +141,7 @@ class GenericAPIAdapter(LLMInterface):
     @retry(
         stop=llm_retry_stop_condition,
         wait=wait_exponential_jitter(8, 128),
-        retry=retry_if_not_exception_type(
-            (litellm.exceptions.NotFoundError, litellm.exceptions.AuthenticationError)
-        ),
+        retry=retry_if_retryable_llm_error,
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
@@ -261,9 +261,7 @@ class GenericAPIAdapter(LLMInterface):
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential_jitter(2, 128),
-        retry=retry_if_not_exception_type(
-            (litellm.exceptions.NotFoundError, litellm.exceptions.AuthenticationError)
-        ),
+        retry=retry_if_retryable_llm_error,
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
@@ -319,9 +317,7 @@ class GenericAPIAdapter(LLMInterface):
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential_jitter(2, 128),
-        retry=retry_if_not_exception_type(
-            (litellm.exceptions.NotFoundError, litellm.exceptions.AuthenticationError)
-        ),
+        retry=retry_if_retryable_llm_error,
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )

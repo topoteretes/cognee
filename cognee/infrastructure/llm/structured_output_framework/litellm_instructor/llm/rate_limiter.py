@@ -51,6 +51,10 @@ from limits import RateLimitItemPerMinute, storage
 from limits.strategies import MovingWindowRateLimiter
 
 from cognee.infrastructure.llm.config import get_llm_config
+from cognee.infrastructure.llm.exceptions import LLMQuotaExceededError
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.retry_predicates import (
+    is_quota_exceeded_error,
+)
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
@@ -437,6 +441,9 @@ def sleep_and_retry_sync(
                     return func(*args, **kwargs)
                 except Exception as e:
                     attempt += 1
+                    if is_quota_exceeded_error(e):
+                        raise LLMQuotaExceededError() from e
+
                     if not is_rate_limit_error(e) or attempt > max_retries:
                         raise
 
@@ -522,6 +529,9 @@ def sleep_and_retry_async(
                     return await func(*args, **kwargs)
                 except Exception as e:
                     attempt += 1
+                    if is_quota_exceeded_error(e):
+                        raise LLMQuotaExceededError() from e
+
                     if not is_rate_limit_error(e) or attempt > max_retries:
                         raise
 
