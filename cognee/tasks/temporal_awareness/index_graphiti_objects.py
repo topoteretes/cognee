@@ -63,7 +63,7 @@ async def index_and_transform_graphiti_nodes_and_edges():
 
             if getattr(graphiti_node, field_name, None) is not None:
                 indexed_data_point = graphiti_node.model_copy()
-                indexed_data_point.metadata["index_fields"] = [field_name]
+                indexed_data_point.metadata = {**graphiti_node.metadata, "index_fields": [field_name]}
                 index_points[index_name].append(indexed_data_point)
 
     for index_name, indexable_points in index_points.items():
@@ -90,7 +90,7 @@ async def index_and_transform_graphiti_nodes_and_edges():
                 index_points[index_name] = []
 
             indexed_data_point = edge.model_copy()
-            indexed_data_point.metadata["index_fields"] = [field_name]
+            indexed_data_point.metadata = {**edge.metadata, "index_fields": [field_name]}
             index_points[index_name].append(indexed_data_point)
 
     for index_name, indexable_points in index_points.items():
