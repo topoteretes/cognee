@@ -9,7 +9,7 @@ from typing import AsyncGenerator, List
 from contextlib import asynccontextmanager
 from sqlalchemy.orm import joinedload
 from sqlalchemy.exc import NoResultFound
-from sqlalchemy import NullPool, text, select, MetaData, Table, delete, inspect, func
+from sqlalchemy import NullPool, event, text, select, MetaData, Table, delete, inspect, func
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 
 from cognee.modules.data.models.Data import Data
@@ -76,8 +76,33 @@ class SQLAlchemyAdapter:
             self.engine = create_async_engine(
                 connection_string,
                 poolclass=NullPool,
-                connect_args={**{"timeout": 30}, **final_connect_args},
+                connect_args={**{"timeout": 120}, **final_connect_args},
             )
+
+            # SQLite defaults to rollback-journal mode, where a connection that
+            # holds a read lock and then tries to upgrade to a write lock can
+            # deadlock against another reader's lock. Because cognify() fans
+            # work out to parallel greenlets that each open their own connection
+            # (NullPool), those read-then-write transactions race and surface as
+            # "sqlite3.OperationalError: database is locked" (see issue #2717).
+            #
+            # Enabling WAL serializes writers on a single write lock while
+            # letting readers proceed, so concurrent writers wait (bounded by
+            # busy_timeout) instead of deadlocking. These PRAGMAs are connection
+            # scoped, so they must be (re)applied on every new connection.
+            @event.listens_for(self.engine.sync_engine, "connect")
+            def _set_sqlite_pragmas(dbapi_connection, connection_record):
+                cursor = dbapi_connection.cursor()
+                try:
+                    cursor.execute("PRAGMA journal_mode=WAL")
+                    cursor.execute("PRAGMA synchronous=NORMAL")
+                    cursor.execute("PRAGMA busy_timeout=120000")
+                    # Foreign key enforcement is off by default in SQLite and is
+                    # also connection scoped; set it here so it is consistently
+                    # enabled rather than only around individual operations.
+                    cursor.execute("PRAGMA foreign_keys=ON")
+                finally:
+                    cursor.close()
         else:
             # Transform pool_args from tuple into dict if provided
             # Note: For caching purposes, pool_args is stored as a sorted tuple of key-value pairs in the config
