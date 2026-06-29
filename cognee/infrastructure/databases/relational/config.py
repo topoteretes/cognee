@@ -21,6 +21,7 @@ class RelationalConfig(BaseSettings):
     db_username: Union[str, None] = None  # "cognee"
     db_password: Union[str, None] = None  # "cognee"
     db_provider: str = "sqlite"
+    db_url: str = ""  # Optional full connection URL; when set, broken-out fields are not required
     database_connect_args: Union[str, None] = None
     pool_args: Union[str, None] = None
 
@@ -77,6 +78,7 @@ class RelationalConfig(BaseSettings):
             "db_username": self.db_username,
             "db_password": self.db_password,
             "db_provider": self.db_provider,
+            "db_url": self.db_url,
             "database_connect_args": self.database_connect_args,
             "pool_args": self.pool_args,
         }
