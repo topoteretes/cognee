@@ -1,6 +1,7 @@
 import asyncio
 import importlib
 import sys
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
@@ -41,6 +42,15 @@ def _patch_unified(graph_provenance: bool, graph=None):
     unified.supports_graph_provenance_delete = MagicMock(return_value=graph_provenance)
     unified.graph = graph if graph is not None else MagicMock()
     return patch(_PATCH_GET_UNIFIED, new=AsyncMock(return_value=unified))
+
+
+@contextmanager
+def _patch_remember_startup():
+    with (
+        patch("cognee.modules.migrations.startup.run_migrations_and_block", new=AsyncMock()),
+        patch("cognee.modules.engine.operations.setup.setup", new=AsyncMock()),
+    ):
+        yield
 
 
 # ---------------------------------------------------------------------------
@@ -549,6 +559,7 @@ async def test_remember_passes_session_ids_to_improve():
     mock_user.id = "u1"
 
     with (
+        _patch_remember_startup(),
         patch("cognee.api.v1.add.add", AsyncMock()),
         patch("cognee.api.v1.cognify.cognify", AsyncMock(return_value={"status": "ok"})),
         patch.object(_pkg_improve, "improve", mock_improve),
@@ -588,6 +599,7 @@ async def test_remember_no_session_ids_skips_in_improve():
     mock_user.id = "u1"
 
     with (
+        _patch_remember_startup(),
         patch("cognee.api.v1.add.add", AsyncMock()),
         patch("cognee.api.v1.cognify.cognify", AsyncMock(return_value={"status": "ok"})),
         patch.object(_pkg_improve, "improve", mock_improve),
@@ -774,6 +786,7 @@ class TestRememberResult:
         mock_user.id = "u1"
 
         with (
+            _patch_remember_startup(),
             patch("cognee.api.v1.add.add", AsyncMock()),
             patch(
                 "cognee.api.v1.cognify.cognify",
@@ -811,6 +824,7 @@ class TestRememberResult:
         mock_sm.add_qa = AsyncMock()
 
         with (
+            _patch_remember_startup(),
             patch(
                 "cognee.modules.users.methods.get_default_user",
                 AsyncMock(return_value=mock_user),
@@ -823,7 +837,7 @@ class TestRememberResult:
         ):
             from cognee.api.v1.remember.remember import RememberResult, remember
 
-            result = await remember("test data", session_id="s1")
+            result = await remember("test data", session_id="s1", self_improvement=False)
 
         assert isinstance(result, RememberResult)
         assert result.status == "session_stored"
@@ -879,6 +893,7 @@ class TestRememberResultSessions:
         mock_user.id = "u1"
 
         with (
+            _patch_remember_startup(),
             patch("cognee.api.v1.add.add", AsyncMock()),
             patch("cognee.api.v1.cognify.cognify", AsyncMock(return_value={})),
             patch.object(_pkg_improve, "improve", AsyncMock()),
