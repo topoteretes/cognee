@@ -40,11 +40,15 @@ def extract_invoice_ids(search_result: str) -> list[int]:
     if isinstance(parsed_result, (list, tuple, set)):
         return sorted(int(invoice_id) for invoice_id in parsed_result)
 
+    labeled_invoice_ids = re.findall(r"\bInvoiceId:\s*(\d+)\b", search_result)
+    if labeled_invoice_ids:
+        return sorted(int(invoice_id) for invoice_id in labeled_invoice_ids)
+
     line_start_ids = re.findall(r"(?m)^\s*(\d+)\b", search_result)
     if line_start_ids:
         return sorted(int(invoice_id) for invoice_id in line_start_ids)
 
-    return sorted(int(invoice_id) for invoice_id in re.findall(r"\b\d+\b", search_result))
+    return []
 
 
 async def setup_test_db():
