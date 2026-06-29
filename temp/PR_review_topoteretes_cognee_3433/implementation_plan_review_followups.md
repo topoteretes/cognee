@@ -56,7 +56,7 @@ current recommendations say not to change those paths in this PR.
     delete.
   - Use it from both the API ledger gate and `delete_data_nodes_and_edges`.
 
-- **Phase 3 - Make Memory Provenance Fail Closed**
+- **Phase 3 - Make Memory Provenance Fail Closed** ✅ DONE
   - Stop swallowing unexpected graph-provenance read errors.
   - Add a unit test proving relational fallback is not used after such failures.
 
@@ -243,7 +243,7 @@ uv run pytest cognee/tests/unit/modules/graph/test_graph_provenance_delete_routi
 uv run pytest cognee/tests/integration/tasks/test_graph_provenance_delete_default_stack.py -q
 ```
 
-## Phase 3 - Make Memory Provenance Fail Closed
+## Phase 3 - Make Memory Provenance Fail Closed ✅ DONE
 
 ### Objective
 
@@ -283,6 +283,15 @@ Update `cognee/tests/unit/api/test_memory_provenance_graph_provenance.py`:
 `stores_provenance_in_graph` already treats unexpected marker failures as
 fail-closed. The memory read path should follow the same rule: marked
 graph-provenance graphs have no relational ledger to fall back to.
+
+### Completion
+
+- Removed broad graph-provenance import/read fallbacks from
+  `_read_memory_graph_provenance`.
+- Kept the explicit unmarked-graph case returning `None`, so relational fallback
+  still works for ledger-backed graphs.
+- Added tests proving marked graph read errors propagate and the public caller
+  does not call relational fallback after such errors.
 
 ### Demo
 

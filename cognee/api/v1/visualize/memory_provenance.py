@@ -384,38 +384,30 @@ async def _read_memory_graph_provenance(
     if not dataset_ids:
         return None
 
-    try:
-        from cognee.infrastructure.databases.provenance import (
-            EdgeIdentity,
-            get_data_id_from_source_ref_key,
-            get_dataset_id_from_source_ref_key,
-        )
-        from cognee.infrastructure.databases.provenance.markers import (
-            stores_provenance_in_graph,
-        )
-        from cognee.infrastructure.databases.unified import get_unified_engine
-    except Exception as error:  # pragma: no cover - imports unavailable
-        logger.debug(f"graph provenance memory models unavailable: {error}")
+    from cognee.infrastructure.databases.provenance import (
+        EdgeIdentity,
+        get_data_id_from_source_ref_key,
+        get_dataset_id_from_source_ref_key,
+    )
+    from cognee.infrastructure.databases.provenance.markers import (
+        stores_provenance_in_graph,
+    )
+    from cognee.infrastructure.databases.unified import get_unified_engine
+
+    unified = await get_unified_engine()
+    graph = unified.graph
+    if not await stores_provenance_in_graph(graph):
         return None
 
-    try:
-        unified = await get_unified_engine()
-        graph = unified.graph
-        if not await stores_provenance_in_graph(graph):
-            return None
+    refs_by_node: Dict[str, List[str]] = {}
+    refs_by_edge: Dict[Any, List[str]] = {}
+    for dataset_id in dataset_ids:
+        for node_id, refs in (await graph.find_node_source_refs_by_dataset(dataset_id)).items():
+            refs_by_node.setdefault(str(node_id), []).extend(refs)
+        for edge, refs in (await graph.find_edge_source_refs_by_dataset(dataset_id)).items():
+            refs_by_edge.setdefault(edge, []).extend(refs)
 
-        refs_by_node: Dict[str, List[str]] = {}
-        refs_by_edge: Dict[Any, List[str]] = {}
-        for dataset_id in dataset_ids:
-            for node_id, refs in (await graph.find_node_source_refs_by_dataset(dataset_id)).items():
-                refs_by_node.setdefault(str(node_id), []).extend(refs)
-            for edge, refs in (await graph.find_edge_source_refs_by_dataset(dataset_id)).items():
-                refs_by_edge.setdefault(edge, []).extend(refs)
-
-        graph_nodes, graph_edges = await graph.get_graph_data()
-    except Exception as error:  # pragma: no cover - defensive
-        logger.debug(f"graph provenance memory read skipped: {error}")
-        return None
+    graph_nodes, graph_edges = await graph.get_graph_data()
 
     node_ids = set(refs_by_node)
     node_ids.update(edge.source_id for edge in refs_by_edge)
