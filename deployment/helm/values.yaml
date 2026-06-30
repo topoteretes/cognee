@@ -67,6 +67,7 @@ livenessProbe:
   enabled: false
 
 postgres:
+  enabled: true
   image:
     repository: pgvector/pgvector
     tag: pg17
@@ -83,3 +84,11 @@ postgres:
     limits:
       cpu: "1000m"
       memory: "1Gi"
+
+# Used when postgres.enabled=false to point the application at a managed database.
+externalDatabase:
+  host: ""
+  port: "5432"
+  database: ""
+  username: ""
+  existingSecret: ""

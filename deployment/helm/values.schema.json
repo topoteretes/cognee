@@ -85,6 +85,7 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "enabled": { "type": "boolean" },
         "image": {
           "type": "object",
           "additionalProperties": false,
@@ -112,6 +113,17 @@
             "limits": { "type": "object" }
           }
         }
+      }
+    },
+    "externalDatabase": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "host": { "type": "string" },
+        "port": { "type": "string" },
+        "database": { "type": "string" },
+        "username": { "type": "string" },
+        "existingSecret": { "type": "string" }
       }
     }
   }
