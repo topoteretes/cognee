@@ -246,7 +246,7 @@ Subcommands:
                     }
                 )
 
-            if False:
+            if getattr(args, "json", False):
                 result_json = {
                     "datasets": datasets_info,
                     "totals": {
@@ -371,7 +371,7 @@ Subcommands:
                     }
                 )
 
-            if False:
+            if getattr(args, "json", False):
                 result_json = {
                     "dataset_id": str(dataset.id),
                     "dataset_name": dataset.name,
@@ -431,7 +431,7 @@ Subcommands:
 
             sessions_info = [s.to_dict() for s in sessions_list]
 
-            if False:
+            if getattr(args, "json", False):
                 print(json.dumps(sessions_info, indent=2))
                 return
 
@@ -486,7 +486,7 @@ Subcommands:
                     }
                 )
 
-            if False:
+            if getattr(args, "json", False):
                 print(json.dumps(recent_info, indent=2))
                 return
 
