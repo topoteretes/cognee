@@ -13,6 +13,9 @@ spec:
     metadata:
       labels:
         {{- include "cognee.selectorLabels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secrets.yml") . | sha256sum }}
     spec:
       serviceAccountName: {{ include "cognee.serviceAccountName" . }}
       automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}
@@ -30,25 +33,10 @@ spec:
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "cognee.fullname" . }}-config
           env:
-            - name: ENABLE_BACKEND_ACCESS_CONTROL
-              value: {{ .Values.cognee.enableBackendAccessControl | quote }}
-            - name: ENV
-              value: {{ .Values.cognee.env | quote }}
-            - name: PYTHONPATH
-              value: "."
-            - name: VECTOR_DB_PROVIDER
-              value: {{ .Values.cognee.vectorDbProvider | quote }}
-            - name: DB_PROVIDER
-              value: postgres
-            - name: DB_HOST
-              value: {{ include "cognee.postgres.fullname" . }}
-            - name: DB_PORT
-              value: {{ .Values.postgres.port | quote }}
-            - name: DB_NAME
-              value: {{ .Values.postgres.auth.database | quote }}
-            - name: DB_USERNAME
-              value: {{ .Values.postgres.auth.username | quote }}
             - name: DB_PASSWORD
               valueFrom:
                 secretKeyRef:
@@ -59,10 +47,6 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.existingSecret | default (printf "%s-secret" (include "cognee.fullname" .)) }}
                   key: LLM_API_KEY
-            - name: LLM_MODEL
-              value: {{ .Values.cognee.llmModel | quote }}
-            - name: LLM_PROVIDER
-              value: {{ .Values.cognee.llmProvider | quote }}
           resources:
             requests:
               cpu: {{ .Values.resources.requests.cpu | quote }}
