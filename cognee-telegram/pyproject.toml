@@ -1,0 +1,32 @@
+[project]
+name = "cognee-telegram"
+version = "0.1.0"
+description = "Telegram bot powered by cognee memory — each chat is a session you can remember, recall, and forget."
+readme = "README.md"
+requires-python = ">=3.10"
+
+dependencies = [
+    "cognee>=1.1.0,<2.0.0",
+    "python-telegram-bot>=21.0,<22.0",
+]
+
+[project.scripts]
+cognee-telegram = "cognee_telegram.__main__:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cognee_telegram"]
+
+[dependency-groups]
+dev = [
+    "pytest>=7.4.0,<9",
+    "pytest-asyncio>=0.23.0,<2",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["src"]
