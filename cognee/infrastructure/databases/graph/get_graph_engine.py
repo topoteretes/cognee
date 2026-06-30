@@ -56,63 +56,24 @@ def _normalize_optional_create_graph_engine_params(params: dict) -> dict:
     return normalized
 
 
-class _GraphEngineHandle:
-    """Stable reference to the current graph engine that survives cache invalidation.
-
-    Database engine instances are cached via ``closing_lru_cache``.  Several
-    operations invalidate that cache — ``prune_system`` calls ``cache_clear()``,
-    ``delete_dataset`` evicts individual entries, and the ``__aexit__`` of
-    ``set_database_global_context_variables`` evicts subprocess-mode engines to
-    release file locks.  When an entry is evicted the underlying adapter is
-    closed, so any direct proxy reference becomes a dead object that raises
-    "adapter is closed" on use.
-
-    This handle solves the problem by deferring resolution: every attribute
-    access calls ``create_graph_engine(**config)`` which either returns the
-    existing cached proxy (fast path) or transparently creates a fresh adapter
-    if the old one was evicted (recovery path).  Code that stores the return
-    value of ``get_graph_engine()`` — even across ``cognify``, ``search``,
-    ``prune``, or ``delete`` calls — always reaches a live adapter without
-    needing to re-call ``get_graph_engine()``.
-
-    For adapters that expose ``initialize()`` (Postgres, Neo4j), the handle
-    tracks which engine proxy was last initialized and re-runs the idempotent
-    schema setup when the underlying engine changes.
-    """
-
-    __slots__ = ("_config", "_last_initialized_id")
-
-    def __init__(self, config: dict):
-        object.__setattr__(self, "_config", config)
-        object.__setattr__(self, "_last_initialized_id", None)
-
-    def _engine(self):
-        return create_graph_engine(**self._config)
-
-    async def _ensure_initialized(self):
-        engine = self._engine()
-        engine_id = id(engine)
-        if engine_id != self._last_initialized_id and hasattr(engine, "initialize"):
-            await engine.initialize()
-        object.__setattr__(self, "_last_initialized_id", engine_id)
-
-    @property
-    def __class__(self):
-        return self._engine().__class__
-
-    def __getattr__(self, name):
-        return getattr(self._engine(), name)
-
-    def __repr__(self):
-        return f"<GraphEngineHandle config={self._config!r}>"
-
-
 async def get_graph_engine() -> GraphDBInterface:
-    """Factory function to get the appropriate graph client based on the graph type."""
+    """Factory function to get the appropriate graph client based on the graph type.
+
+    SPIKE NOTE (async-engine-resolution): this previously returned a
+    ``_GraphEngineHandle`` whose ``__getattr__`` synchronously re-resolved the
+    engine via ``create_graph_engine(**config)`` on every attribute access. We
+    now resolve the engine eagerly and return the live adapter (a leased proxy
+    from ``closing_lru_cache``) directly, so resolution can ``await`` in the
+    caller's event loop. Trade-off: callers that *store* the result across a
+    cache-invalidating op (prune / delete / context exit) hold a proxy whose
+    entry may be detached and must re-call ``get_graph_engine()`` afterwards
+    instead of relying on the old transparent re-resolution.
+    """
     config = get_graph_context_config()
-    handle = _GraphEngineHandle(config)
-    await handle._ensure_initialized()
-    return handle
+    engine = create_graph_engine(**config)
+    if hasattr(engine, "initialize"):
+        await engine.initialize()
+    return engine
 
 
 def create_graph_engine(

@@ -39,7 +39,7 @@ class LangchainChunker(Chunker):
         document_name = self.document.name or basename(self.document.raw_data_location)
         async for content_text in self.get_text():
             for chunk in self.splitter.split_text(content_text):
-                embedding_engine = get_vector_engine().embedding_engine
+                embedding_engine = (await get_vector_engine()).embedding_engine
                 token_count = embedding_engine.tokenizer.count_tokens(chunk)
                 if token_count <= self.max_chunk_tokens:
                     yield DocumentChunk(

@@ -49,7 +49,7 @@ async def code_description_to_code_part(
         raise ValueError("top_k must be a positive integer.")
 
     try:
-        vector_engine = get_vector_engine()
+        vector_engine = await get_vector_engine()
         graph_engine = await get_graph_engine()
     except Exception as init_error:
         logger.error("Failed to initialize engines: %s", init_error, exc_info=True)

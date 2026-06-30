@@ -111,7 +111,7 @@ async def main(mock_create_structured_output: AsyncMock):
 
     mock_create_structured_output.side_effect = mock_llm_output
 
-    vector_engine = get_vector_engine()
+    vector_engine = await get_vector_engine()
 
     assert not await vector_engine.has_collection("EdgeType_relationship_name")
     assert not await vector_engine.has_collection("Entity_name")
@@ -187,7 +187,7 @@ async def main(mock_create_structured_output: AsyncMock):
             after_delete_nodes_by_vector_collection[collection_name] = []
         after_delete_nodes_by_vector_collection[collection_name].append(node)
 
-    vector_engine = get_vector_engine()
+    vector_engine = await get_vector_engine()
 
     removed_node_ids = initial_node_ids - after_first_delete_node_ids
 
