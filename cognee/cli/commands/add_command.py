@@ -6,6 +6,7 @@ from cognee.cli.reference import SupportsCliCommand
 from cognee.cli import DEFAULT_DOCS_URL
 import cognee.cli.echo as fmt
 from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
+from cognee.cli.commands._next_step import format_next_step_hint
 
 
 class AddCommand(SupportsCliCommand):
@@ -73,6 +74,9 @@ After adding data, use `cognee cognify` to process it into knowledge graphs.
                     fmt.echo("Processing data...")
                     await cognee.add(data=data_to_add, dataset_name=args.dataset_name, user=user)
                     fmt.success(f"Successfully added data to dataset '{args.dataset_name}'")
+                    hint = format_next_step_hint("add", args.dataset_name)
+                    if hint:
+                        fmt.note(hint)
                 except Exception as e:
                     raise CliCommandInnerException(f"Failed to add data: {str(e)}") from e
 
