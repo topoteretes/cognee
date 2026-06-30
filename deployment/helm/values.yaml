@@ -85,6 +85,17 @@ postgres:
       cpu: "1000m"
       memory: "1Gi"
 
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: cognee.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
 # Used when postgres.enabled=false to point the application at a managed database.
 externalDatabase:
   host: ""
