@@ -85,6 +85,16 @@ postgres:
       cpu: "1000m"
       memory: "1Gi"
 
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 80
+
+podDisruptionBudget:
+  enabled: false
+  maxUnavailable: 1
+
 ingress:
   enabled: false
   className: ""
