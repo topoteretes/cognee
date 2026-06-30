@@ -58,6 +58,18 @@ class RelationalConfig(BaseSettings):
 
         return self
 
+    @pydantic.model_validator(mode="after")
+    def warn_on_unknown_db_env_vars(self):
+        # Surface typo'd ``DB_*`` env vars (extra="allow" otherwise swallows them).
+        # Imported lazily: a module-level import would pull in the utils package
+        # __init__ (which imports the configs back) and create a circular import.
+        from cognee.infrastructure.databases.utils.resolve_postgres_connection import (
+            warn_unknown_db_env_vars,
+        )
+
+        warn_unknown_db_env_vars(self.model_extra, prefixes=["DB_"])
+        return self
+
     def to_dict(self) -> dict:
         """
         Return the database configuration as a dictionary.
