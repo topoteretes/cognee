@@ -81,6 +81,13 @@ class EmbeddingConfig(BaseSettings):
     embedding_max_completion_tokens: Optional[int] = 8191
     embedding_batch_size: Optional[int] = None
     huggingface_tokenizer: Optional[str] = None
+    # When True, embed_text calls are coalesced via AccumulatingEmbeddingEngine:
+    # concurrent callers share a queue and are flushed together once either
+    # embedding_batch_size strings are pending or the oldest item has waited
+    # accumulate_embedding_timeout_ms milliseconds. Helps when the cognify
+    # pipeline emits many small (bs=1..3) requests.
+    accumulate_embedding_calls: bool = True
+    accumulate_embedding_timeout_ms: int = 20
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
     def model_post_init(self, __context) -> None:
@@ -106,6 +113,12 @@ class EmbeddingConfig(BaseSettings):
         elif not self.embedding_batch_size:
             self.embedding_batch_size = 36
 
+        if self.accumulate_embedding_timeout_ms <= 0:
+            raise ValueError(
+                f"ACCUMULATE_EMBEDDING_TIMEOUT_MS must be > 0, got "
+                f"{self.accumulate_embedding_timeout_ms}."
+            )
+
     def to_dict(self) -> dict:
         """
         Serialize all embedding configuration settings to a dictionary.
@@ -124,6 +137,8 @@ class EmbeddingConfig(BaseSettings):
             "embedding_api_version": self.embedding_api_version,
             "embedding_max_completion_tokens": self.embedding_max_completion_tokens,
             "huggingface_tokenizer": self.huggingface_tokenizer,
+            "accumulate_embedding_calls": self.accumulate_embedding_calls,
+            "accumulate_embedding_timeout_ms": self.accumulate_embedding_timeout_ms,
         }
 
 
