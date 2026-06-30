@@ -10,7 +10,8 @@ def create_jwt(user_id: str, tenant_id: str, roles: list[str]):
         "user_id": user_id,
         "tenant_id": tenant_id,
         "roles": roles,
-        "exp": datetime.datetime.utcnow() + datetime.timedelta(hours=1),  # 1 hour expiry
+        "exp": datetime.datetime.now(datetime.timezone.utc)
+        + datetime.timedelta(hours=1),  # 1 hour expiry
     }
     return jwt.encode(payload, SECRET_KEY, algorithm="HS256")
 
