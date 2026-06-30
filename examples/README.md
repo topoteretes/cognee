@@ -23,7 +23,7 @@ to verify behaviour across the SDK.
 | [`configurations/`](configurations/) | Database & permissions configuration recipes | 8 |
 | [`custom_pipelines/`](custom_pipelines/) | Build your own pipeline / extend `cognify` | 7 |
 | [`database_examples/`](database_examples/) | Smoke tests per supported backend | 5 |
-| [`demos/`](demos/) | Feature demos — broadest coverage | 24 |
+| [`demos/`](demos/) | Feature demos — broadest coverage | 25 |
 | [`guides/`](guides/) | Short focused how-to guides | 13 |
 | [`pocs/`](pocs/) | Research-grade proofs of concept (entity disambiguation, canonicalization, prefetch) | 7 |
 
@@ -95,6 +95,7 @@ Most runnable demos and backend examples use the v1.0 memory API (`remember`, `r
 | [`complex_relational_database_migration_example/complex_relational_database_migration_example.py`](demos/complex_relational_database_migration_example/complex_relational_database_migration_example.py) | SQL → graph (richer schema) |
 | [`schema_inventory_demo.py`](demos/schema_inventory_demo.py) | Schema and entity inventory visualization |
 | [`memory_provenance_demo.py`](demos/memory_provenance_demo.py) | Memory provenance projection and visualization |
+| [`sync_local_to_cloud_example.py`](demos/sync_local_to_cloud_example.py) | Sync a local dataset to Cognee Cloud |
 | [`pipeline_api_proposal.py`](demos/pipeline_api_proposal.py) | Proposal-style API exploration |
 | [`start_local_ui_frontend_example.py`](demos/start_local_ui_frontend_example.py) | Spin up cognee UI + backend |
 
