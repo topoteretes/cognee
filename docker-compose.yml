@@ -73,6 +73,13 @@ services:
       # (the MCP server still listens on 8000 inside the container).
       - "8001:8000" # MCP port
       - "5679:5678" # MCP debugger port
+    healthcheck:
+      # The MCP runtime image is python-slim (no curl), so probe with urllib.
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health', timeout=5).status==200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
     deploy:
       resources:
         limits:
@@ -125,11 +132,21 @@ services:
       POSTGRES_USER: cognee
       POSTGRES_PASSWORD: cognee
       POSTGRES_DB: cognee_db
-      # - postgres_data:/var/lib/postgresql/data
+    # Persist data on a named volume so it survives container recreate. The
+    # docker-compose e2e (test_postgres_persistence_across_recreate) depends on
+    # this — without it, a recreated postgres container starts empty.
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
     ports:
       - 5432:5432
     networks:
       - cognee-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cognee -d cognee_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   redis:
     image: redis:7-alpine
