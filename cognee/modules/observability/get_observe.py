@@ -29,17 +29,27 @@ def _wrap_with_otel(inner_decorator):
                     if not is_tracing_enabled():
                         return await wrapped(*args, **kwargs)
 
+                    from opentelemetry.trace import SpanKind
                     from cognee.modules.observability.tracing import (
                         get_tracer,
                         COGNEE_SPAN_CATEGORY,
+                        COGNEE_LLM_MODEL,
+                        COGNEE_LLM_PROVIDER,
                     )
 
                     tracer = get_tracer()
                     if tracer is None:
                         return await wrapped(*args, **kwargs)
 
-                    with tracer.start_as_current_span(f"cognee.observe.{func.__name__}") as span:
+                    kind = SpanKind.CLIENT if category == "generation" else SpanKind.INTERNAL
+                    with tracer.start_as_current_span(f"cognee.observe.{func.__name__}", kind=kind) as span:
                         span.set_attribute(COGNEE_SPAN_CATEGORY, category)
+                        if category == "generation" and len(args) > 0:
+                            adapter = args[0]
+                            if hasattr(adapter, "model"):
+                                span.set_attribute(COGNEE_LLM_MODEL, adapter.model)
+                            if hasattr(adapter, "name"):
+                                span.set_attribute(COGNEE_LLM_PROVIDER, adapter.name.lower())
                         return await wrapped(*args, **kwargs)
 
                 @functools.wraps(func)
@@ -49,17 +59,27 @@ def _wrap_with_otel(inner_decorator):
                     if not is_tracing_enabled():
                         return wrapped(*args, **kwargs)
 
+                    from opentelemetry.trace import SpanKind
                     from cognee.modules.observability.tracing import (
                         get_tracer,
                         COGNEE_SPAN_CATEGORY,
+                        COGNEE_LLM_MODEL,
+                        COGNEE_LLM_PROVIDER,
                     )
 
                     tracer = get_tracer()
                     if tracer is None:
                         return wrapped(*args, **kwargs)
 
-                    with tracer.start_as_current_span(f"cognee.observe.{func.__name__}") as span:
+                    kind = SpanKind.CLIENT if category == "generation" else SpanKind.INTERNAL
+                    with tracer.start_as_current_span(f"cognee.observe.{func.__name__}", kind=kind) as span:
                         span.set_attribute(COGNEE_SPAN_CATEGORY, category)
+                        if category == "generation" and len(args) > 0:
+                            adapter = args[0]
+                            if hasattr(adapter, "model"):
+                                span.set_attribute(COGNEE_LLM_MODEL, adapter.model)
+                            if hasattr(adapter, "name"):
+                                span.set_attribute(COGNEE_LLM_PROVIDER, adapter.name.lower())
                         return wrapped(*args, **kwargs)
 
                 import asyncio

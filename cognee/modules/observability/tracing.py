@@ -256,11 +256,21 @@ class LangfuseAttributeProcessor(SimpleSpanProcessor):
     def on_end(self, span: "ReadableSpan") -> None:
         if hasattr(span, "_attributes") and span._attributes is not None:
             attrs = span._attributes
+            
+            # OpenTelemetry freezes attributes on span end. We temporarily unfreeze them to map to Langfuse conventions.
+            was_immutable = getattr(attrs, "_immutable", False)
+            if was_immutable:
+                attrs._immutable = False
+                
             if COGNEE_LLM_MODEL in attrs:
                 attrs["gen_ai.request.model"] = attrs[COGNEE_LLM_MODEL]
             if COGNEE_LLM_PROVIDER in attrs:
                 attrs["gen_ai.system"] = attrs[COGNEE_LLM_PROVIDER]
-
+            
+            # Hard override to guarantee Langfuse parses it as a generation
+            if attrs.get(COGNEE_SPAN_CATEGORY) == "generation":
+                attrs["langfuse.observation.type"] = "generation"
+            
             # Anticipating hackathon PR #3606 token metering
             if "cognee.llm.input_tokens" in attrs:
                 attrs["gen_ai.usage.input_tokens"] = attrs["cognee.llm.input_tokens"]
@@ -268,6 +278,9 @@ class LangfuseAttributeProcessor(SimpleSpanProcessor):
                 attrs["gen_ai.usage.output_tokens"] = attrs["cognee.llm.output_tokens"]
             if "cognee.llm.cost" in attrs:
                 attrs["gen_ai.usage.cost"] = attrs["cognee.llm.cost"]
+
+            if was_immutable:
+                attrs._immutable = True
 
         super().on_end(span)
 
