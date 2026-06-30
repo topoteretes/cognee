@@ -1,0 +1,37 @@
+name: Helm CI
+
+on:
+  push:
+    paths:
+      - 'deployment/helm/**'
+  pull_request:
+    paths:
+      - 'deployment/helm/**'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v4
+
+      - name: Lint
+        run: helm lint deployment/helm
+
+      - name: Template
+        run: helm template test deployment/helm
+
+      - name: Install kubeconform
+        run: |
+          curl -sL https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz \
+            | tar xz -C /usr/local/bin
+
+      - name: Validate manifests
+        run: helm template test deployment/helm | kubeconform -strict -summary
+
+      - name: Schema validation
+        run: |
+          helm install test deployment/helm --dry-run \
+            --set postgres.auth.password=test \
+            --set existingSecret=test-secret

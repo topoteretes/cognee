@@ -1,10 +1,1 @@
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: {{ .Release.Name }}-postgres-pvc
-spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: {{ .Values.postgres.storage }}
+{{- /* PVC is now managed by the StatefulSet volumeClaimTemplates */ -}}
