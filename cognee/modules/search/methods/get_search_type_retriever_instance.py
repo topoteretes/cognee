@@ -65,6 +65,7 @@ async def get_search_type_retriever_instance(
     node_name = kwargs.get("node_name")
     node_name_filter_operator = kwargs.get("node_name_filter_operator", "OR")
     wide_search_top_k = kwargs.get("wide_search_top_k", 100)
+    wide_search_max_distance = kwargs.get("wide_search_max_distance", 1.5)
     triplet_distance_penalty = kwargs.get("triplet_distance_penalty", 6.5)
     feedback_influence = kwargs.get(
         "feedback_influence", get_base_config().default_feedback_influence
@@ -143,6 +144,7 @@ async def get_search_type_retriever_instance(
                 "node_name_filter_operator": node_name_filter_operator,
                 "system_prompt": system_prompt,
                 "wide_search_top_k": wide_search_top_k,
+                "wide_search_max_distance": wide_search_max_distance,
                 "triplet_distance_penalty": triplet_distance_penalty,
                 "feedback_influence": feedback_influence,
                 "session_id": session_id,
@@ -168,6 +170,7 @@ async def get_search_type_retriever_instance(
                 "node_name_filter_operator": node_name_filter_operator,
                 "system_prompt": system_prompt,
                 "wide_search_top_k": wide_search_top_k,
+                "wide_search_max_distance": wide_search_max_distance,
                 "triplet_distance_penalty": triplet_distance_penalty,
                 "feedback_influence": feedback_influence,
                 "session_id": session_id,
@@ -190,6 +193,7 @@ async def get_search_type_retriever_instance(
                 "node_name_filter_operator": node_name_filter_operator,
                 "system_prompt": system_prompt,
                 "wide_search_top_k": wide_search_top_k,
+                "wide_search_max_distance": wide_search_max_distance,
                 "triplet_distance_penalty": triplet_distance_penalty,
                 "feedback_influence": feedback_influence,
                 "max_iter": retriever_specific_config.get("max_iter", 4),
@@ -222,6 +226,7 @@ async def get_search_type_retriever_instance(
                 "node_name_filter_operator": node_name_filter_operator,
                 "system_prompt": system_prompt,
                 "wide_search_top_k": wide_search_top_k,
+                "wide_search_max_distance": wide_search_max_distance,
                 "triplet_distance_penalty": triplet_distance_penalty,
                 "feedback_influence": feedback_influence,
                 "context_extension_rounds": retriever_specific_config.get(
@@ -244,6 +249,7 @@ async def get_search_type_retriever_instance(
                 "node_name_filter_operator": node_name_filter_operator,
                 "system_prompt": system_prompt,
                 "wide_search_top_k": wide_search_top_k,
+                "wide_search_max_distance": wide_search_max_distance,
                 "triplet_distance_penalty": triplet_distance_penalty,
                 "feedback_influence": feedback_influence,
                 "session_id": session_id,
@@ -280,6 +286,7 @@ async def get_search_type_retriever_instance(
             {
                 "top_k": top_k,
                 "wide_search_top_k": wide_search_top_k,
+                "wide_search_max_distance": wide_search_max_distance,
                 "triplet_distance_penalty": triplet_distance_penalty,
                 "feedback_influence": feedback_influence,
                 "session_id": session_id,
@@ -345,6 +352,7 @@ async def get_search_type_retriever_instance(
             node_name=node_name,
             node_name_filter_operator=node_name_filter_operator,
             wide_search_top_k=wide_search_top_k,
+            wide_search_max_distance=wide_search_max_distance,
             triplet_distance_penalty=triplet_distance_penalty,
             feedback_influence=feedback_influence,
             session_id=session_id,
