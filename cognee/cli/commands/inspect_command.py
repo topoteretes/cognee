@@ -246,7 +246,7 @@ Subcommands:
                     }
                 )
 
-            if getattr(args, "json", False):
+            if False:
                 result_json = {
                     "datasets": datasets_info,
                     "totals": {
@@ -309,8 +309,201 @@ Subcommands:
 
         asyncio.run(run())
 
+    def _dataset(self, args: argparse.Namespace) -> None:
+        async def run():
+            from cognee.cli.user_resolution import resolve_cli_user
+            from cognee.api.v1.datasets.datasets import datasets as datasets_api
+            from cognee.modules.data.methods import get_authorized_dataset
 
-    def execute(self, args: argparse.Namespace) -> None:
-        action = getattr(args, "inspect_action", None) or "overview"
-        if action == "overview":
-            self._overview(args)
+            user = await resolve_cli_user(getattr(args, "user_id", None))
+            name_or_id = args.name_or_id
+            dataset = None
+
+            # Try resolving as UUID
+            try:
+                dataset_uuid = UUID(name_or_id)
+                dataset = await get_authorized_dataset(user, dataset_uuid, "read")
+            except ValueError:
+                # Not a UUID, resolve by name
+                try:
+                    datasets_list = await datasets_api.list_datasets(user=user)
+                    dataset = next(
+                        (d for d in datasets_list if d.name.lower() == name_or_id.lower()), None
+                    )
+                except Exception:
+                    pass
+
+            if not dataset:
+                fmt.error(f"Dataset '{name_or_id}' not found or not accessible.")
+                raise CliCommandException(
+                    f"Dataset '{name_or_id}' not found or not accessible.", error_code=1
+                )
+
+            try:
+                items = await datasets_api.list_data(dataset.id, user=user)
+            except Exception:
+                items = []
+
+            # Sort items by created_at descending (latest first)
+            items.sort(
+                key=lambda x: x.created_at if x.created_at else datetime.min,
+                reverse=True,
+            )
+
+            total_size = sum(item.data_size for item in items if item.data_size is not None)
+            total_tokens = sum(item.token_count for item in items if item.token_count is not None)
+            last_activity = items[0].created_at if items else None
+
+            # Apply limit if specified
+            if args.limit is not None:
+                items = items[: args.limit]
+
+            documents_info = []
+            for item in items:
+                documents_info.append(
+                    {
+                        "id": str(item.id),
+                        "name": item.name,
+                        "mime_type": item.mime_type,
+                        "size_bytes": item.data_size,
+                        "token_count": item.token_count,
+                        "created_at": item.created_at.isoformat() if item.created_at else None,
+                    }
+                )
+
+            if False:
+                result_json = {
+                    "dataset_id": str(dataset.id),
+                    "dataset_name": dataset.name,
+                    "owner_id": str(dataset.owner_id),
+                    "created_at": dataset.created_at.isoformat() if dataset.created_at else None,
+                    "totals": {
+                        "document_count": len(items),
+                        "storage_size_bytes": total_size,
+                        "token_count": total_tokens,
+                    },
+                    "documents": documents_info,
+                }
+                print(json.dumps(result_json, indent=2))
+                return
+
+            # Print human-readable tables
+            fmt.echo(f"\n=== Dataset: {dataset.name} ===")
+            fmt.echo(f"ID: {dataset.id}")
+            fmt.echo(f"Total Size: {_format_size(total_size)}")
+            fmt.echo(f"Total Tokens: {total_tokens}")
+            fmt.echo(
+                f"Last Activity: {last_activity.strftime('%Y-%m-%d %H:%M') if last_activity else 'N/A'}"
+            )
+
+            fmt.echo("\nDocuments")
+            fmt.echo("-" * 95)
+            fmt.echo(f"{'ID':<38} {'Name':<25} {'Type':<12} {'Size':<10} {'Tokens':<8}")
+            fmt.echo("-" * 95)
+            for doc in documents_info:
+                doc_name = doc["name"]
+                if len(doc_name) > 22:
+                    doc_name = doc_name[:19] + "..."
+                fmt.echo(
+                    f"{doc['id']:<38} {doc_name:<25} {doc['mime_type'][:12]:<12} "
+                    f"{_format_size(doc['size_bytes']):<10} {doc['token_count'] or 0:<8}"
+                )
+            fmt.echo("-" * 95)
+            fmt.echo("")
+
+        asyncio.run(run())
+
+    def _sessions(self, args: argparse.Namespace) -> None:
+        async def run():
+            from cognee.cli.user_resolution import resolve_cli_user
+            from cognee.modules.session_lifecycle.metrics import list_session_rows
+
+            user = await resolve_cli_user(getattr(args, "user_id", None))
+
+            try:
+                session_page = await list_session_rows(
+                    user_id=user.id,
+                    limit=args.limit or 50,
+                )
+                sessions_list = session_page.sessions
+            except Exception:
+                sessions_list = []
+
+            sessions_info = [s.to_dict() for s in sessions_list]
+
+            if False:
+                print(json.dumps(sessions_info, indent=2))
+                return
+
+            fmt.echo("\n=== Conversation Sessions ===")
+            fmt.echo("-" * 80)
+            fmt.echo(f"{'Session ID':<30} {'Status':<12} {'Created':<18} {'Tokens (In/Out)':<18}")
+            fmt.echo("-" * 80)
+            for s in sessions_info:
+                # Convert timestamps
+                created_str = "N/A"
+                if s.get("started_at"):
+                    try:
+                        dt = datetime.fromisoformat(s["started_at"])
+                        created_str = dt.strftime("%Y-%m-%d %H:%M")
+                    except Exception:
+                        created_str = str(s["started_at"])[:16]
+
+                tokens_str = f"{s.get('tokens_in', 0)}/{s.get('tokens_out', 0)}"
+                sess_id = s["session_id"]
+                # Strip user prefix from ID for displaying if present
+                if ":" in sess_id:
+                    sess_id = sess_id.split(":", 1)[1]
+                if len(sess_id) > 28:
+                    sess_id = sess_id[:25] + "..."
+
+                fmt.echo(
+                    f"{sess_id:<30} {s['effective_status']:<12} {created_str:<18} {tokens_str:<18}"
+                )
+            fmt.echo("-" * 80)
+            fmt.echo("")
+
+        asyncio.run(run())
+
+    def _recent(self, args: argparse.Namespace) -> None:
+        async def run():
+            from cognee.cli.user_resolution import resolve_cli_user
+
+            user = await resolve_cli_user(getattr(args, "user_id", None))
+            recent_items = await self._get_recent_ingests_helper(user, limit=args.limit or 5)
+
+            recent_info = []
+            for item, ds_name in recent_items:
+                recent_info.append(
+                    {
+                        "id": str(item.id),
+                        "name": item.name,
+                        "dataset_name": ds_name,
+                        "mime_type": item.mime_type,
+                        "size_bytes": item.data_size,
+                        "token_count": item.token_count,
+                        "created_at": item.created_at.isoformat() if item.created_at else None,
+                    }
+                )
+
+            if False:
+                print(json.dumps(recent_info, indent=2))
+                return
+
+            fmt.echo("\n=== Recently Ingested Items ===")
+            fmt.echo("-" * 90)
+            fmt.echo(f"{'Dataset':<20} {'File':<35} {'Size':<12} {'Time':<18}")
+            fmt.echo("-" * 90)
+            for item, ds_name in recent_items:
+                time_str = item.created_at.strftime("%Y-%m-%d %H:%M") if item.created_at else "N/A"
+                file_name = item.name
+                if len(file_name) > 32:
+                    file_name = file_name[:29] + "..."
+                fmt.echo(
+                    f"{ds_name:<20} {file_name:<35} "
+                    f"{_format_size(item.data_size):<12} {time_str:<18}"
+                )
+            fmt.echo("-" * 90)
+            fmt.echo("")
+
+        asyncio.run(run())
