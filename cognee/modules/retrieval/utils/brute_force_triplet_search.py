@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, List, Optional, Type, Union
 
 from cognee.modules.observability import OtelStatusCode as StatusCode
 
+from cognee.base_config import get_base_config
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
@@ -54,7 +55,7 @@ async def get_memory_fragment(
     relevant_ids_to_filter: Optional[List[str]] = None,
     memory_fragment_filter: Optional[List[dict]] = None,
     triplet_distance_penalty: Optional[float] = 6.5,
-    feedback_influence: float = 0.0,
+    feedback_influence: float = get_base_config().default_feedback_influence,
     graph_engine=None,
     neighborhood_depth: Optional[int] = None,
     neighborhood_seed_top_k: Optional[int] = 10,
@@ -127,6 +128,7 @@ async def _get_top_triplet_importances(
     feedback_influence: float,
     wide_search_limit: Optional[int],
     top_k: int,
+    wide_search_max_distance: Optional[float] = 1.5,
     query_list_length: Optional[int] = None,
     graph_engine=None,
     neighborhood_depth: Optional[int] = None,
@@ -152,7 +154,7 @@ async def _get_top_triplet_importances(
         if wide_search_limit is None:
             relevant_node_ids = None
         else:
-            relevant_node_ids = vector_search.extract_relevant_node_ids()
+            relevant_node_ids = vector_search.extract_relevant_node_ids(max_distance=wide_search_max_distance)
 
         memory_fragment = await get_memory_fragment(
             properties_to_project=properties_to_project,
@@ -224,8 +226,9 @@ async def brute_force_triplet_search(
     node_name: Optional[List[str]] = None,
     node_name_filter_operator: str = "OR",
     wide_search_top_k: Optional[int] = 100,
+    wide_search_max_distance: Optional[float] = 1.5,
     triplet_distance_penalty: Optional[float] = 6.5,
-    feedback_influence: float = 0.0,
+    feedback_influence: float = get_base_config().default_feedback_influence,
     unified_engine: Optional[UnifiedStoreEngine] = None,
     neighborhood_depth: Optional[int] = None,
     neighborhood_seed_top_k: Optional[int] = 10,
@@ -303,6 +306,7 @@ async def brute_force_triplet_search(
                 query_batch=query_batch if query_list_length else None,
                 collections=collections,
                 wide_search_limit=wide_search_limit,
+            wide_search_max_distance=wide_search_max_distance,
                 node_name=node_name,
                 node_name_filter_operator=node_name_filter_operator,
             )
@@ -326,6 +330,7 @@ async def brute_force_triplet_search(
                 feedback_influence,
                 wide_search_limit,
                 top_k,
+                wide_search_max_distance,
                 query_list_length=query_list_length,
                 graph_engine=graph_engine,
                 neighborhood_depth=neighborhood_depth,

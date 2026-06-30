@@ -1,6 +1,7 @@
 import asyncio
 from typing import Any, List, Optional, Type
 
+from cognee.base_config import get_base_config
 from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import read_query_prompt
@@ -39,13 +40,15 @@ class GraphCompletionDecompositionRetriever(GraphCompletionRetriever):
         node_name: Optional[List[str]] = None,
         node_name_filter_operator: str = "OR",
         wide_search_top_k: Optional[int] = 100,
+        wide_search_max_distance: Optional[float] = 1.5,
         triplet_distance_penalty: Optional[float] = 6.5,
-        feedback_influence: float = 0.0,
+        feedback_influence: float = get_base_config().default_feedback_influence,
         session_id: Optional[str] = None,
         response_model: Type = str,
         neighborhood_depth: Optional[int] = None,
         neighborhood_seed_top_k: Optional[int] = 10,
         decomposition_mode: DecompositionMode = DecompositionMode.ANSWER_PER_SUBQUERY,
+        include_references: bool = False,
     ):
         super().__init__(
             user_prompt_path=user_prompt_path,
@@ -56,12 +59,14 @@ class GraphCompletionDecompositionRetriever(GraphCompletionRetriever):
             node_name=node_name,
             node_name_filter_operator=node_name_filter_operator,
             wide_search_top_k=wide_search_top_k,
+            wide_search_max_distance=wide_search_max_distance,
             triplet_distance_penalty=triplet_distance_penalty,
             feedback_influence=feedback_influence,
             session_id=session_id,
             response_model=response_model,
             neighborhood_depth=neighborhood_depth,
             neighborhood_seed_top_k=neighborhood_seed_top_k,
+            include_references=include_references,
         )
         self.decomposition_mode = DecompositionMode(decomposition_mode)
         self._decomposition_state: Optional[DecompositionRunState] = None
@@ -233,6 +238,8 @@ class GraphCompletionDecompositionRetriever(GraphCompletionRetriever):
         query_batch: Optional[List[str]] = None,
         retrieved_objects: Optional[List[Edge]] = None,
         context: str = None,
+        effective_query: Optional[str] = None,
+        turn_preparation=None,
     ) -> List[Any]:
         """Generate the final completion for the original query."""
 
@@ -250,4 +257,6 @@ class GraphCompletionDecompositionRetriever(GraphCompletionRetriever):
             query=query,
             retrieved_objects=retrieved_objects,
             context=context,
+            effective_query=effective_query,
+            turn_preparation=turn_preparation,
         )

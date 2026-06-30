@@ -1,6 +1,7 @@
 import asyncio
 from typing import Any, Dict, List, Optional, Type, Union
 
+from cognee.base_config import get_base_config
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.modules.retrieval.utils.validate_queries import validate_retriever_input
@@ -17,6 +18,7 @@ from cognee.modules.retrieval.utils.used_graph_elements import (
     is_edge_list,
     extract_from_edges,
 )
+from cognee.modules.retrieval.utils.references import append_answer_grounded_evidence
 from cognee.modules.retrieval.utils.completion import (
     generate_completion,
     generate_completion_batch,
@@ -49,14 +51,16 @@ class GraphCompletionRetriever(BaseRetriever):
         node_name: Optional[List[str]] = None,
         node_name_filter_operator: str = "OR",
         wide_search_top_k: Optional[int] = 100,
+        wide_search_max_distance: Optional[float] = 1.5,
         triplet_distance_penalty: Optional[float] = 6.5,
-        feedback_influence: float = 0.0,
+        feedback_influence: float = get_base_config().default_feedback_influence,
         session_id: Optional[str] = None,
         response_model: Type = str,
         neighborhood_depth: Optional[int] = None,
         neighborhood_seed_top_k: Optional[int] = 10,
         include_global_context_index: bool = False,
         global_context_index_top_k: int = 3,
+        include_references: bool = False,
     ):
         """Initialize retriever with prompt paths and search parameters."""
         self.user_prompt_path = user_prompt_path
@@ -64,6 +68,7 @@ class GraphCompletionRetriever(BaseRetriever):
         self.system_prompt = system_prompt
         self.top_k = top_k if top_k is not None else 5
         self.wide_search_top_k = wide_search_top_k
+        self.wide_search_max_distance = wide_search_max_distance
         self.node_type = node_type
         self.node_name = node_name
         self.node_name_filter_operator = node_name_filter_operator
@@ -77,6 +82,7 @@ class GraphCompletionRetriever(BaseRetriever):
         self.neighborhood_seed_top_k = neighborhood_seed_top_k
         self.include_global_context_index = include_global_context_index
         self.global_context_index_top_k = global_context_index_top_k
+        self.include_references = include_references
 
     def _use_session_cache(self) -> bool:
         """Check if session caching is enabled for the current user."""
@@ -180,6 +186,7 @@ class GraphCompletionRetriever(BaseRetriever):
             node_name=self.node_name,
             node_name_filter_operator=self.node_name_filter_operator,
             wide_search_top_k=self.wide_search_top_k,
+            wide_search_max_distance=self.wide_search_max_distance,
             triplet_distance_penalty=self.triplet_distance_penalty,
             feedback_influence=self.feedback_influence,
             unified_engine=unified_engine,
@@ -302,12 +309,29 @@ class GraphCompletionRetriever(BaseRetriever):
         completion = await generate_completion(query=query, **kwargs)
         return [completion]
 
+    async def _append_graph_evidence(self, completions: List[Any]) -> List[Any]:
+        """Append an answer-grounded chunk Evidence block to string completions.
+
+        Each answer is run as a vector query against the chunk index, so the
+        Evidence bullets reflect where the answer text is grounded in the corpus
+        rather than which graph elements happened to be retrieved. Evidence is
+        appended only when references are enabled and the completion is a plain
+        string (never corrupt a structured response_model); search failures
+        degrade to no Evidence.
+        """
+        return await append_answer_grounded_evidence(
+            completions,
+            enabled=self.include_references and self.response_model is str,
+        )
+
     async def get_completion_from_context(
         self,
         query: Optional[str] = None,
         query_batch: Optional[List[str]] = None,
         retrieved_objects: Optional[List[Edge]] = None,
         context: str = None,
+        effective_query: Optional[str] = None,
+        turn_preparation=None,
     ) -> List[Any]:
         """
         Generates an LLM response based on the query, context, and conversation history.
@@ -342,9 +366,20 @@ class GraphCompletionRetriever(BaseRetriever):
                 summarize_context=False,
                 used_graph_element_ids=used_graph_element_ids,
                 max_context_chars=getattr(self, "max_context_chars", None),
+                effective_query=effective_query,
+                turn_preparation=turn_preparation,
             )
-            return [completion]
-        return await self._generate_completion_without_session(query, query_batch, context)
+            completions = [completion]
+        else:
+            completions = await self._generate_completion_without_session(
+                query, query_batch, context
+            )
+
+        # Session and non-session branches rejoin here so every variant that calls
+        # this method (including via super()) appends references once. Evidence is
+        # grounded in each completion's own text, so a cache-hit answer never
+        # cites chunks that share nothing with it.
+        return await self._append_graph_evidence(completions)
 
     async def get_completion(
         self, query: Optional[str] = None, query_batch: Optional[List[str]] = None
@@ -361,15 +396,30 @@ class GraphCompletionRetriever(BaseRetriever):
         """
         validate_retriever_input(query, query_batch)
 
-        retrieved_objects = await self.get_retrieved_objects(query=query, query_batch=query_batch)
+        effective_query = query
+        turn_preparation = None
+        if query is not None and not query_batch:
+            turn_preparation = await self.prepare_session_turn_for_retrieval(query)
+            if not turn_preparation.should_answer:
+                return [turn_preparation.response_to_user or "Got it."]
+            effective_query = turn_preparation.effective_query or query
+
+        retrieved_objects = await self.get_retrieved_objects(
+            query=effective_query,
+            query_batch=query_batch,
+        )
         context = await self.get_context_from_objects(
-            query=query, query_batch=query_batch, retrieved_objects=retrieved_objects
+            query=effective_query,
+            query_batch=query_batch,
+            retrieved_objects=retrieved_objects,
         )
         completion = await self.get_completion_from_context(
             query=query,
             query_batch=query_batch,
             retrieved_objects=retrieved_objects,
             context=context,
+            effective_query=effective_query,
+            turn_preparation=turn_preparation,
         )
 
         return completion
