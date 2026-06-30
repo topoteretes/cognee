@@ -85,6 +85,11 @@ postgres:
       cpu: "1000m"
       memory: "1Gi"
 
+networkPolicy:
+  enabled: false
+  ingress: []
+  egress: []
+
 autoscaling:
   enabled: false
   minReplicas: 2

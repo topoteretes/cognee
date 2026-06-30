@@ -1,6 +1,6 @@
 # Cognee Helm Chart
 
-Deploys the Cognee backend with a bundled PostgreSQL + pgvector database.
+Deploys the Cognee backend with optional bundled PostgreSQL + pgvector.
 
 ## Prerequisites
 
@@ -12,41 +12,52 @@ Deploys the Cognee backend with a bundled PostgreSQL + pgvector database.
 
 ## Install
 
-### Development (inline credentials)
+### Development (bundled postgres, inline credentials)
 
 ```bash
 helm upgrade --install cognee deployment/helm \
   --namespace cognee --create-namespace \
-  --set postgres.auth.password="changeme" \
-  --set cognee.llmProvider="openai" \
-  --set cognee.llmModel="openai/gpt-4o-mini"
+  --set postgres.auth.password="changeme"
 ```
 
-> **Note:** Without `existingSecret`, the chart creates a Secret from `postgres.auth.password`.  
-> `LLM_API_KEY` will be empty — patch it manually or use `existingSecret` instead.
-
 ### Production (recommended)
-
-Create the Secret outside Helm (kubectl, External Secrets, Vault, etc.):
 
 ```bash
 kubectl create secret generic cognee-credentials \
   --namespace cognee \
   --from-literal=LLM_API_KEY="sk-..." \
   --from-literal=DB_PASSWORD="strongpassword"
+
+helm upgrade --install cognee deployment/helm \
+  --namespace cognee --create-namespace \
+  --set existingSecret="cognee-credentials"
 ```
 
-Then install referencing it:
+### Production with external managed database
 
 ```bash
 helm upgrade --install cognee deployment/helm \
   --namespace cognee --create-namespace \
   --set existingSecret="cognee-credentials" \
-  --set postgres.auth.password=""
+  --set postgres.enabled=false \
+  --set externalDatabase.host="my-db.rds.amazonaws.com" \
+  --set externalDatabase.database="cognee_db" \
+  --set externalDatabase.username="cognee"
 ```
 
-The Deployment and Postgres both read credentials from this Secret.  
-Rotating the Secret triggers an automatic rolling restart via checksum annotations.
+### Production with Ingress + TLS
+
+```bash
+helm upgrade --install cognee deployment/helm \
+  --namespace cognee --create-namespace \
+  --set existingSecret="cognee-credentials" \
+  --set ingress.enabled=true \
+  --set ingress.className=nginx \
+  --set "ingress.hosts[0].host=cognee.example.com" \
+  --set "ingress.hosts[0].paths[0].path=/" \
+  --set "ingress.tls[0].secretName=cognee-tls" \
+  --set "ingress.tls[0].hosts[0]=cognee.example.com"
+```
 
 ---
 
@@ -69,68 +80,126 @@ helm uninstall cognee --namespace cognee
 ## Scaling
 
 `replicaCount` is configurable, but the repository currently contains process-local
-LRU caches, asyncio locks, and semaphores, and documents single-worker assumptions
-in `session_lock.py`. Scaling beyond one replica should be validated against the
-application's distributed coordination requirements before use in production.
+LRU caches, asyncio locks, and semaphores documented in `session_lock.py`. Validate
+distributed coordination requirements before scaling beyond one replica in production.
 
 ---
 
 ## Values
 
+### Core
+
 | Key | Default | Description |
 |-----|---------|-------------|
-| `replicaCount` | `1` | Number of Cognee replicas. See Scaling note above. |
-| `image.repository` | `cognee/cognee` | Cognee image repository |
+| `replicaCount` | `1` | Replicas. See Scaling note. |
+| `image.repository` | `cognee/cognee` | Image repository |
 | `image.tag` | `main` | Image tag |
-| `image.pullPolicy` | `IfNotPresent` | Image pull policy |
-| `service.type` | `ClusterIP` | `ClusterIP`, `NodePort`, or `LoadBalancer` |
-| `service.port` | `8000` | Service port |
-| `cognee.env` | `local` | Runtime environment (`ENV`) |
+| `image.pullPolicy` | `IfNotPresent` | Pull policy |
+| `existingSecret` | `""` | Secret name with `LLM_API_KEY` and `DB_PASSWORD` |
+
+### Application
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `cognee.env` | `local` | `ENV` environment value |
 | `cognee.llmProvider` | `openai` | LLM provider |
 | `cognee.llmModel` | `openai/gpt-4o-mini` | LLM model |
-| `cognee.vectorDbProvider` | `pgvector` | Vector database provider |
-| `cognee.enableBackendAccessControl` | `false` | Enable multi-tenant access control |
-| `existingSecret` | `""` | Name of existing Secret with `LLM_API_KEY` and `DB_PASSWORD` |
+| `cognee.vectorDbProvider` | `pgvector` | Vector DB provider |
+| `cognee.enableBackendAccessControl` | `false` | Multi-tenant isolation |
+
+### Networking
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `service.type` | `ClusterIP` | `ClusterIP`, `NodePort`, or `LoadBalancer` |
+| `service.port` | `8000` | Service port |
+| `ingress.enabled` | `false` | Enable Ingress |
+| `ingress.className` | `""` | Ingress class (nginx, traefik, alb, etc.) |
+| `ingress.annotations` | `{}` | Ingress annotations |
+| `ingress.hosts` | `[{host: cognee.local, paths: [{path: /}]}]` | Host routing |
+| `ingress.tls` | `[]` | TLS configuration. References existing Secrets only. |
+
+### Resources
+
+| Key | Default | Description |
+|-----|---------|-------------|
 | `resources.requests.cpu` | `500m` | CPU request |
 | `resources.requests.memory` | `512Mi` | Memory request |
 | `resources.limits.cpu` | `4000m` | CPU limit |
 | `resources.limits.memory` | `2Gi` | Memory limit |
-| `serviceAccount.create` | `true` | Create a dedicated ServiceAccount |
-| `serviceAccount.name` | `""` | Override ServiceAccount name |
-| `serviceAccount.automountServiceAccountToken` | `false` | Mount API token into pods |
-| `podSecurityContext` | `{}` | Pod-level security context |
+
+### Security
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `serviceAccount.create` | `true` | Create dedicated ServiceAccount |
+| `serviceAccount.automountServiceAccountToken` | `false` | Mount API token |
+| `podSecurityContext` | `{}` | Pod security context |
 | `securityContext.allowPrivilegeEscalation` | `false` | Prevent privilege escalation |
 | `securityContext.capabilities.drop` | `[ALL]` | Drop Linux capabilities |
-| `startupProbe.enabled` | `true` | Guard against traffic before migration completes |
-| `startupProbe.failureThreshold` | `30` | Attempts before pod is failed |
-| `startupProbe.periodSeconds` | `10` | Seconds between probe attempts |
-| `readinessProbe.enabled` | `true` | Remove pod from Service when dependencies are unhealthy |
-| `readinessProbe.initialDelaySeconds` | `10` | Delay before first readiness check |
-| `readinessProbe.periodSeconds` | `10` | Seconds between readiness checks |
-| `livenessProbe.enabled` | `false` | Disabled — see note below |
-| `postgres.image.repository` | `pgvector/pgvector` | Postgres image |
-| `postgres.image.tag` | `pg17` | Postgres image tag |
-| `postgres.port` | `5432` | Postgres port |
-| `postgres.auth.username` | `cognee` | Postgres username |
-| `postgres.auth.password` | `""` | Postgres password (dev only; use `existingSecret` in production) |
-| `postgres.auth.database` | `cognee_db` | Postgres database name |
-| `postgres.storage` | `2Gi` | PVC size for Postgres data |
-| `postgres.resources.requests.cpu` | `250m` | Postgres CPU request |
-| `postgres.resources.requests.memory` | `256Mi` | Postgres memory request |
-| `postgres.resources.limits.cpu` | `1000m` | Postgres CPU limit |
-| `postgres.resources.limits.memory` | `1Gi` | Postgres memory limit |
+| `networkPolicy.enabled` | `false` | Enable NetworkPolicy |
+| `networkPolicy.ingress` | `[]` | Ingress rules (allow-all if empty) |
+| `networkPolicy.egress` | `[]` | Egress rules (allow-all if empty) |
+
+### Availability
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `autoscaling.enabled` | `false` | Enable HPA (transfers replica ownership from Deployment) |
+| `autoscaling.minReplicas` | `2` | HPA minimum replicas |
+| `autoscaling.maxReplicas` | `5` | HPA maximum replicas |
+| `autoscaling.targetCPUUtilizationPercentage` | `80` | CPU target |
+| `podDisruptionBudget.enabled` | `false` | Enable PDB (only renders when replicaCount > 1) |
+| `podDisruptionBudget.maxUnavailable` | `1` | Max pods unavailable during disruption |
+
+### Probes
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `startupProbe.enabled` | `true` | Guards traffic until Alembic migration completes |
+| `startupProbe.failureThreshold` | `30` | Max attempts |
+| `startupProbe.periodSeconds` | `10` | Seconds between attempts |
+| `readinessProbe.enabled` | `true` | Removes pod from Service when dependencies unhealthy |
+| `readinessProbe.initialDelaySeconds` | `10` | Initial delay |
+| `readinessProbe.periodSeconds` | `10` | Period |
+| `livenessProbe.enabled` | `false` | See note below |
+
+### PostgreSQL (bundled)
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `postgres.enabled` | `true` | Deploy bundled PostgreSQL StatefulSet |
+| `postgres.image.repository` | `pgvector/pgvector` | Image |
+| `postgres.image.tag` | `pg17` | Tag |
+| `postgres.port` | `5432` | Port |
+| `postgres.auth.username` | `cognee` | Username |
+| `postgres.auth.password` | `""` | Password (dev only; use `existingSecret`) |
+| `postgres.auth.database` | `cognee_db` | Database name |
+| `postgres.storage` | `2Gi` | PVC size |
+| `postgres.resources.requests.cpu` | `250m` | CPU request |
+| `postgres.resources.requests.memory` | `256Mi` | Memory request |
+| `postgres.resources.limits.cpu` | `1000m` | CPU limit |
+| `postgres.resources.limits.memory` | `1Gi` | Memory limit |
+
+### External Database
+
+Used when `postgres.enabled=false`.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `externalDatabase.host` | `""` | Database host |
+| `externalDatabase.port` | `5432` | Database port |
+| `externalDatabase.database` | `""` | Database name |
+| `externalDatabase.username` | `""` | Database username |
+| `externalDatabase.existingSecret` | `""` | Secret with credentials |
 
 ---
 
 ## Liveness Probe
 
-`livenessProbe` is disabled by default. The repository's `/health` endpoint verifies
-external dependencies (database, vector store, graph store, filesystem). Wiring it
-to liveness causes `CrashLoopBackOff` during transient dependency failures — the pod
-restarts when the database is temporarily unavailable, preventing natural recovery.
-
-Enable liveness only when the repository exposes a process-only health endpoint
-(e.g. `/live`) that answers "is the process alive?" independently of external systems.
+Disabled by default. `/health` verifies external dependencies (DB, vector store, graph
+store, filesystem). Wiring it to liveness causes `CrashLoopBackOff` during transient
+dependency failures. Enable only when the repository exposes a process-only endpoint.
 
 ---
 

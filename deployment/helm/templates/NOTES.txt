@@ -14,6 +14,14 @@ Cognee has been deployed.
 
    kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/name={{ include "cognee.name" . }} -f
 
+{{- if .Values.ingress.enabled }}
+
+Ingress enabled. Cognee is reachable at:
+{{- range .Values.ingress.hosts }}
+  http{{ if $.Values.ingress.tls }}s{{ end }}://{{ .host }}
+{{- end }}
+{{- end }}
+
 {{- if not .Values.existingSecret }}
 
 WARNING: No existingSecret is set. A dev Secret with an empty LLM_API_KEY
@@ -24,8 +32,13 @@ was created. Patch it before use:
     --type=merge \
     -p '{"data":{"LLM_API_KEY":"'$(echo -n "YOUR_KEY" | base64)'"}}'
 
-For production, set existingSecret to the name of a pre-created Secret
-containing LLM_API_KEY and DB_PASSWORD.
+For production set existingSecret to a pre-created Secret containing
+LLM_API_KEY and DB_PASSWORD.
+{{- end }}
+
+{{- if not .Values.postgres.enabled }}
+
+Using external database: {{ .Values.externalDatabase.host }}
 {{- end }}
 
 {{- if gt (int .Values.replicaCount) 1 }}
