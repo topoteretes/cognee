@@ -1,13 +1,15 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ .Release.Name }}-postgres
+  name: {{ include "cognee.postgres.fullname" . }}
   labels:
-    app: {{ .Release.Name }}-postgres
+    {{- include "cognee.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres
 spec:
   type: ClusterIP
   ports:
     - port: {{ .Values.postgres.port }}
       targetPort: {{ .Values.postgres.port }}
   selector:
-    app: {{ .Release.Name }}-postgres
+    {{- include "cognee.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres
