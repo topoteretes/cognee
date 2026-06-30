@@ -16,6 +16,8 @@ spec:
       labels:
         {{- include "cognee.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: postgres
+      annotations:
+        checksum/secret: {{ include (print $.Template.BasePath "/secrets.yml") . | sha256sum }}
     spec:
       containers:
         - name: postgres
@@ -26,7 +28,10 @@ spec:
             - name: POSTGRES_USER
               value: {{ .Values.postgres.auth.username | quote }}
             - name: POSTGRES_PASSWORD
-              value: {{ .Values.postgres.auth.password | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.existingSecret | default (printf "%s-secret" (include "cognee.fullname" .)) }}
+                  key: DB_PASSWORD
             - name: POSTGRES_DB
               value: {{ .Values.postgres.auth.database | quote }}
           volumeMounts:
@@ -39,6 +44,20 @@ spec:
             limits:
               cpu: {{ .Values.postgres.resources.limits.cpu | quote }}
               memory: {{ .Values.postgres.resources.limits.memory | quote }}
+          startupProbe:
+            exec:
+              command: [pg_isready, -U, {{ .Values.postgres.auth.username | quote }}, -d, {{ .Values.postgres.auth.database | quote }}]
+            failureThreshold: 30
+            periodSeconds: 10
+          readinessProbe:
+            exec:
+              command: [pg_isready, -U, {{ .Values.postgres.auth.username | quote }}, -d, {{ .Values.postgres.auth.database | quote }}]
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: [pg_isready, -U, {{ .Values.postgres.auth.username | quote }}, -d, {{ .Values.postgres.auth.database | quote }}]
+            periodSeconds: 30
+            failureThreshold: 3
       volumes:
         - name: postgres-storage
           persistentVolumeClaim:
