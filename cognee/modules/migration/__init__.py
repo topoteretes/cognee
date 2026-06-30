@@ -33,6 +33,8 @@ from .sources import (
     Mem0Source,
     MemorySource,
     ZepSource,
+    LangChainMemorySource,
+    LlamaIndexMemorySource,
 )
 
 __all__ = [
@@ -75,4 +77,6 @@ __all__ = [
     "Mem0Source",
     "MemorySource",
     "ZepSource",
+    "LangChainMemorySource",
+    "LlamaIndexMemorySource",
 ]
