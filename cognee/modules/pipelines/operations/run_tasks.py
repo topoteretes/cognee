@@ -87,6 +87,15 @@ async def run_tasks(
         payload=data,
     )
 
+    # Test-only delay injection. When COGNEE_TEST_PIPELINE_DELAY_SECONDS > 0 the
+    # pipeline sleeps before executing tasks, giving crash/restart durability tests
+    # a reliable window to `docker kill` the container mid-pipeline. Defaults to 0
+    # (no effect in production). See issue #3371.
+    _test_delay = float(os.getenv("COGNEE_TEST_PIPELINE_DELAY_SECONDS", "0"))
+    if _test_delay > 0:
+        logger.info("Test delay: sleeping %.1fs before pipeline execution", _test_delay)
+        await asyncio.sleep(_test_delay)
+
     # Note: Setting of global context has to be done after yielding PipelineRunStarted due to running in
     #       background mode requiring the pipeline run started yield.
     async with set_database_global_context_variables(
