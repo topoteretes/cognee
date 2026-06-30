@@ -130,10 +130,12 @@ MemoryEntry = Union[QAEntry, TraceEntry, FeedbackEntry, SkillRunEntry]
 MEMORY_ENTRY_TYPES = (QAEntry, TraceEntry, FeedbackEntry, SkillRunEntry)
 
 
-RecallScope = Literal["auto", "graph", "session", "trace", "graph_context", "all"]
+RecallScope = Literal[
+    "auto", "graph", "session", "trace", "graph_context", "session_context", "all"
+]
 
 
-_VALID_SCOPES = {"auto", "graph", "session", "trace", "graph_context", "all"}
+_VALID_SCOPES = {"auto", "graph", "session", "trace", "graph_context", "session_context", "all"}
 
 
 def normalize_scope(scope: Optional[Union[str, list[str]]]) -> list[str]:
@@ -161,7 +163,7 @@ def normalize_scope(scope: Optional[Union[str, list[str]]]) -> list[str]:
         )
 
     if "all" in scopes:
-        return ["graph", "session", "trace", "graph_context"]
+        return ["graph", "session", "trace", "graph_context", "session_context"]
 
     # Dedupe while preserving order
     seen: set = set()

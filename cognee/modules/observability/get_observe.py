@@ -118,11 +118,7 @@ def _wrap_with_otel(inner_decorator):
 def get_observe():
     monitoring = get_base_config().monitoring_tool
 
-    if monitoring == Observer.LANGFUSE:
-        from langfuse.decorators import observe
-
-        return _wrap_with_otel(observe)
-    elif monitoring == Observer.NONE:
+    if monitoring == Observer.NONE:
         # Return a no-op decorator that handles keyword arguments
         def no_op_decorator(*args, **kwargs):
             if len(args) == 1 and callable(args[0]) and not kwargs:
