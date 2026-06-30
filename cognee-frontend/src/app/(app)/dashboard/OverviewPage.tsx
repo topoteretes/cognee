@@ -1046,6 +1046,7 @@ function DashboardSearch({
 }) {
   const [query, setQuery] = useState("");
   const [scope, setScope] = useState<SearchScope>("documents");
+  const [searchType, setSearchType] = useState<string>("GRAPH_COMPLETION");
   const [selectedDatasetId, setSelectedDatasetId] = useState<string>(datasets[0]?.id ?? "");
   const [results, setResults] = useState<unknown[]>([]);
   const [searching, setSearching] = useState(false);
@@ -1071,6 +1072,7 @@ function DashboardSearch({
         scope: sendScope as never,
         sessionId: sendSessionId,
         datasetIds: selectedDatasetId ? [selectedDatasetId] : datasets.map((d) => d.id),
+        searchType: scope === "documents" ? searchType : undefined,
       });
       setResults(Array.isArray(data) ? data : []);
     } catch {
@@ -1085,8 +1087,41 @@ function DashboardSearch({
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <span style={{ fontSize: 20, fontWeight: 300, color: "#1A1A1A", fontFamily: '"TWK Lausanne", system-ui, sans-serif' }}>Search your knowledge</span>
       </div>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <ScopePills value={scope} onChange={setScope} />
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <ScopePills value={scope} onChange={setScope} />
+          {scope === "documents" && (
+            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              {([
+                { value: "GRAPH_COMPLETION", label: "Graph" },
+                { value: "CHUNKS", label: "Chunks" },
+                { value: "SUMMARIES", label: "Summaries" },
+                { value: "RAG_COMPLETION", label: "RAG" },
+                { value: "FEELING_LUCKY", label: "Auto" },
+              ] as const).map(({ value, label }) => {
+                const active = searchType === value;
+                return (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setSearchType(value)}
+                    className="cursor-pointer"
+                    style={{
+                      background: active ? "#6510F4" : "#FFFFFF",
+                      color: active ? "#FFFFFF" : "#71717A",
+                      border: active ? "none" : "1px solid #E4E4E7",
+                      borderRadius: 100, paddingBlock: 5, paddingInline: 11,
+                      fontSize: 12, lineHeight: "16px", fontFamily: "inherit",
+                      cursor: "pointer",
+                    }}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
         <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "nowrap", marginRight: 24 }}>
           <span style={{ fontSize: 11, color: "#A1A1AA", letterSpacing: "0.1em", textTransform: "uppercase", whiteSpace: "nowrap", flexShrink: 0 }}>Search in</span>
           <select
