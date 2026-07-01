@@ -83,7 +83,7 @@ async def cache_and_replace_nodes(graphs, **kwargs):
     similarity_threshold = kwargs.get("similarity_threshold", 1.0)
     stats = kwargs.get("stats", None)
 
-    vector_engine = get_vector_engine()
+    vector_engine = await get_vector_engine()
     df_new = pd.DataFrame()
     for graph in graphs:
         await asyncio.gather(
