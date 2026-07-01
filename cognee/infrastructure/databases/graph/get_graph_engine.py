@@ -2,6 +2,7 @@
 
 import inspect
 import os
+import weakref
 from numbers import Number
 
 from cognee.infrastructure.databases.utils.closing_lru_cache import closing_lru_cache
@@ -14,6 +15,15 @@ from .graph_db_interface import GraphDBInterface
 from .supported_databases import supported_databases
 
 logger = get_logger("GraphEngine")
+
+# Engines whose idempotent ``initialize()`` (schema/constraint setup for
+# Postgres/Neo4j) has already run this process. Keyed by the leased engine proxy
+# (stable per cache entry) via a WeakSet so entries drop automatically when the
+# engine is evicted + collected, and a freshly created engine for the same key
+# re-initializes. Replaces the old ``_GraphEngineHandle._last_initialized_id``
+# guard so we don't issue a redundant ``initialize()`` round-trip on every
+# ``get_graph_engine()`` resolution. (Ladybug has no ``initialize`` — no effect.)
+_INITIALIZED_ENGINES: "weakref.WeakSet" = weakref.WeakSet()
 
 
 def _normalize_graph_database_provider(provider: str) -> str:
@@ -74,8 +84,12 @@ async def get_graph_engine() -> GraphDBInterface:
     """
     config = get_graph_context_config()
     engine = await acreate_graph_engine(**config)
-    if hasattr(engine, "initialize"):
+    # Run the idempotent schema/constraint setup once per engine instance, not on
+    # every resolve — guarded by ``_INITIALIZED_ENGINES`` (membership is by proxy
+    # identity, so a re-created engine after eviction initializes again).
+    if hasattr(engine, "initialize") and engine not in _INITIALIZED_ENGINES:
         await engine.initialize()
+        _INITIALIZED_ENGINES.add(engine)
     return engine
 
 
