@@ -5,3 +5,4 @@ returns a JavaScript chunk implementing a layout strategy. The orchestrator
 injects the chunk into the main story-view script block via a
 ``__PIPELINE_LAYOUT_JS__`` placeholder.
 """
+from cognee.modules.visualization.layouts import clustering
