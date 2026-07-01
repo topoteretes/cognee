@@ -29,6 +29,7 @@ from .api.v1.datasets.datasets import datasets
 from .api.v1.agents.agents import agents
 from .api.v1.prune import prune
 from .api.v1.search import SearchType, search
+from .api.v1.versioning import get_version_history, snapshot, undo_forget_data
 from .api.v1.visualize import (
     visualize_graph,
     start_visualization_server,
