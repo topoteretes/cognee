@@ -30,6 +30,7 @@ COMMAND_DESCRIPTIONS = {
     "history": "List the data-migration chain, newest first",
     "current": "Show each database's stamped migration revision (and last failure, if any)",
     "push": "Upload a local dataset's knowledge graph to Cognee Cloud",
+    "report": "Generate a Graph Insight Report (hub nodes, surprising links, confidence tags, suggested questions)",
 }
 
 # Search type choices
@@ -40,6 +41,7 @@ SEARCH_TYPE_CHOICES = [
     "SUMMARIES",
     "CODE",
     "CYPHER",
+    "GRAPH_REPORT",
 ]
 
 # Chunker choices
