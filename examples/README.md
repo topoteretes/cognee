@@ -23,8 +23,9 @@ to verify behaviour across the SDK.
 | [`configurations/`](configurations/) | Database & permissions configuration recipes | 8 |
 | [`custom_pipelines/`](custom_pipelines/) | Build your own pipeline / extend `cognify` | 7 |
 | [`database_examples/`](database_examples/) | Smoke tests per supported backend | 5 |
-| [`demos/`](demos/) | Feature demos — broadest coverage | 21 |
+| [`demos/`](demos/) | Feature demos — broadest coverage | 22 |
 | [`guides/`](guides/) | Short focused how-to guides | 13 |
+| [`integrations/`](integrations/) | Integrations Hub — first-class SaaS connectors (Gmail, …) | 1 |
 | [`pocs/`](pocs/) | Research-grade proofs of concept (entity disambiguation, canonicalization, prefetch) | 7 |
 
 Most runnable demos and backend examples use the v1.0 memory API (`remember`, `recall`, `forget`, `improve`). The lower-level `add`, `cognify`, `search`, and `prune` calls are intentionally kept in examples that demonstrate pipeline internals, permissions, relational migrations, or research POCs.
@@ -88,6 +89,7 @@ Most runnable demos and backend examples use the v1.0 memory API (`remember`, `r
 | [`ontology_reference_vocabulary/ontology_as_reference_vocabulary_example.py`](demos/ontology_reference_vocabulary/ontology_as_reference_vocabulary_example.py) | Ontology as a constraining vocabulary for extraction |
 | [`web_url_content_ingestion_example.py`](demos/web_url_content_ingestion_example.py) | Crawl a URL and cognify the content |
 | [`dlt_ingestion_example.py`](demos/dlt_ingestion_example.py) | Ingest via [dlt](https://dlthub.com/) sources |
+| [`gmail_connector_example.py`](demos/gmail_connector_example.py) | "Ask my inbox" — Gmail connector (incremental + forget-on-delete) |
 | [`multimedia_processing/multimedia_audio_image_processing_example.py`](demos/multimedia_processing/multimedia_audio_image_processing_example.py) | Audio + image ingestion |
 | [`simple_document_qa/simple_document_qa_demo.py`](demos/simple_document_qa/simple_document_qa_demo.py) | Q&A over a single document |
 | [`simple_relational_database_migration_example/simple_relational_database_migration_example.py`](demos/simple_relational_database_migration_example/simple_relational_database_migration_example.py) | SQL → graph (small schema) |
@@ -157,6 +159,10 @@ Same scripts, indexed by what they demonstrate.
 - [`demos/multimedia_processing/multimedia_audio_image_processing_example.py`](demos/multimedia_processing/multimedia_audio_image_processing_example.py)
 - [`demos/web_url_content_ingestion_example.py`](demos/web_url_content_ingestion_example.py)
 - [`demos/dlt_ingestion_example.py`](demos/dlt_ingestion_example.py)
+
+### Connectors / Integrations Hub
+- [`integrations/`](integrations/) — first-class SaaS connectors (DLT-based)
+- [`demos/gmail_connector_example.py`](demos/gmail_connector_example.py) — Gmail ("ask my inbox")
 
 ### SQL → knowledge graph
 - [`custom_pipelines/relational_database_to_knowledge_graph_migration_example.py`](custom_pipelines/relational_database_to_knowledge_graph_migration_example.py)
