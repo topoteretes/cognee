@@ -89,6 +89,37 @@ async def test_concurrent_recreate_after_evict_single_worker(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_held_engine_reference_survives_eviction(tmp_path):
+    """A held engine reference must keep working after the engine is evicted
+    from the cache — which is what dataset-context teardown
+    (``_teardown_subprocess_engines``) does on context exit. The lease defers
+    the close until the reference is dropped rather than force-closing it, so
+    reuse returns a stale-but-live adapter instead of raising "adapter is
+    closed". Regression for the CI failures where reusing a ``get_*_engine()``
+    result after prune/delete/context-exit crashed.
+    """
+    cfg = _config(tmp_path)
+    engine = await acreate_graph_engine(**cfg)
+    await engine.query("MATCH (n) RETURN 1 LIMIT 1")
+
+    # Simulate what _teardown_subprocess_engines does on context exit: evict
+    # (detach), NOT force-close. The held `engine` reference keeps it alive.
+    evict_graph_engine(**cfg)
+    gc.collect()
+
+    # Reuse must still work (stale-but-live), NOT raise "adapter is closed".
+    await engine.query("MATCH (n) RETURN 1 LIMIT 1")
+
+    # Dropping the reference releases the lease → close fires; a fresh resolve
+    # for the same path then awaits that close and opens cleanly.
+    del engine
+    gc.collect()
+    fresh = await acreate_graph_engine(**cfg)
+    await fresh.query("MATCH (n) RETURN 1 LIMIT 1")
+    await fresh.close()
+
+
+@pytest.mark.asyncio
 async def test_close_waits_for_worker_process_exit(tmp_path):
     """``close()`` must not return until the worker process has actually exited
     (and thus released its on-disk file lock)."""

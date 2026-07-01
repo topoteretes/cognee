@@ -195,42 +195,41 @@ class DatasetQueue:
 
     # ----------------------------------------- subprocess engine teardown
     async def _teardown_subprocess_engines(self) -> None:
-        """Evict and close subprocess-mode engines so DB file locks are released.
+        """Evict subprocess-mode engines so their DB file locks get released.
 
         Reads the current task's ContextVar-based graph/vector config to
-        identify which cached engines to tear down.  Lazy imports avoid
+        identify which cached engines to tear down. Lazy imports avoid
         circular dependencies at module load time.
+
+        We **evict** (detach) rather than force-``close()``: the
+        ``ClosingLRUCache`` lease then closes the underlying adapter — releasing
+        the worker and its on-disk file lock — as soon as the last outstanding
+        reference is dropped. In the normal pipeline flow nothing holds the
+        engine past the context, so the close fires immediately (the leased
+        proxy is collected right after eviction). A caller that still holds the
+        engine reference keeps a working (stale-but-live) adapter until it drops
+        the reference, instead of getting an "adapter is closed" error on reuse
+        — restoring the pre-async-resolution contract without re-adding the
+        re-resolving handles. A later re-creation for the same key awaits any
+        in-flight close via the cache's closing registry, so the file lock is
+        never double-acquired.
         """
         from cognee.infrastructure.databases.graph.config import get_graph_context_config
         from cognee.infrastructure.databases.vector.config import get_vectordb_context_config
 
         g_cfg = get_graph_context_config()
         if g_cfg.get("graph_database_subprocess_enabled"):
-            from cognee.infrastructure.databases.graph.get_graph_engine import (
-                create_graph_engine,
-                evict_graph_engine,
-                is_graph_engine_cached,
-            )
+            from cognee.infrastructure.databases.graph.get_graph_engine import evict_graph_engine
 
-            if is_graph_engine_cached(**g_cfg):
-                engine = create_graph_engine(**g_cfg)
-                evict_graph_engine(**g_cfg)
-                if hasattr(engine, "close"):
-                    await engine.close()
+            evict_graph_engine(**g_cfg)
 
         v_cfg = get_vectordb_context_config()
         if v_cfg.get("vector_db_subprocess_enabled"):
             from cognee.infrastructure.databases.vector.create_vector_engine import (
-                create_vector_engine,
                 evict_vector_engine,
-                is_vector_engine_cached,
             )
 
-            if is_vector_engine_cached(**v_cfg):
-                engine = create_vector_engine(**v_cfg)
-                evict_vector_engine(**v_cfg)
-                if hasattr(engine, "close"):
-                    await engine.close()
+            evict_vector_engine(**v_cfg)
 
     # -------------------------------------------------------- release_slot_for
     async def release_slot_for(self, dataset_id: Any = None) -> None:
