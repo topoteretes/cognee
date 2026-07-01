@@ -3,18 +3,18 @@ from .create_vector_engine import acreate_vector_engine
 
 
 async def get_vector_engine():
-    """Factory function to get the appropriate vector client.
+    """Resolve the vector engine for the current context and return the live
+    adapter (a leased proxy from ``closing_lru_cache``).
 
-    Resolves the engine eagerly and returns the live adapter (a leased proxy
-    from ``closing_lru_cache``) directly. Uses the async creation path
-    (``acreate_vector_engine``) so that if the engine for this config key is
-    currently closing, we await that close before constructing a new one.
+    Resolution is asynchronous and goes through :func:`acreate_vector_engine`
+    so engine *creation* can ``await`` an in-flight close of the same cache key
+    before constructing (see :func:`acreate_vector_engine` for the rationale —
+    the same async-factory reasoning as the graph side keeps the two engines
+    symmetric, even though LanceDB itself takes no exclusive file lock).
 
-    SPIKE NOTE (async-engine-resolution): this previously was SYNC and returned
-    a ``_VectorEngineHandle`` whose ``__getattr__`` re-resolved the engine on
-    every attribute access. Every call site must now ``await get_vector_engine()``.
-    Trade-off: callers that store the result across a cache-invalidating op
-    (prune / delete / context exit) must re-call instead of relying on the old
-    transparent re-resolution.
+    ``get_vector_engine()`` is ``async`` — every call site must ``await`` it.
+    The returned adapter is a live reference for the *current* async scope; do
+    not stash it and reuse it across a cache-invalidating operation (prune /
+    delete / per-dataset context exit) — call ``get_vector_engine()`` again.
     """
     return await acreate_vector_engine(**get_vectordb_context_config())

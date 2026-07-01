@@ -14,6 +14,7 @@ Drives the REAL graph-engine cache in subprocess mode — no LLM/full config nee
 
 from __future__ import annotations
 
+import asyncio
 import gc
 import os
 
@@ -58,6 +59,33 @@ async def test_async_recreate_after_evict_no_lock_error(tmp_path):
         gc.collect()
     engine = await acreate_graph_engine(**cfg)
     await engine.close()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_recreate_after_evict_single_worker(tmp_path):
+    """Many coroutines concurrently re-acquiring the same path while the prior
+    worker is mid-close must all wait on that one close and converge on a single
+    new worker — no lock error, no thundering herd of workers racing the lock.
+
+    Exercises the real subprocess worker (not stub closeables), the gap both the
+    sync- and async-approach test suites otherwise leave uncovered.
+    """
+    cfg = _config(tmp_path)
+    engine = await acreate_graph_engine(**cfg)
+    await engine.query("MATCH (n) RETURN 1 LIMIT 1")
+    old_pid = engine._session.pid
+    del engine
+    evict_graph_engine(**cfg)  # close starts; worker still shutting down
+    gc.collect()
+
+    engines = await asyncio.gather(*[acreate_graph_engine(**cfg) for _ in range(8)])
+
+    pids = {e._session.pid for e in engines}
+    assert len(pids) == 1, f"expected a single live worker, got {pids}"
+    assert old_pid not in pids, "must be a fresh worker, not the closed one"
+    # The single resolved engine is functional (lock was acquired cleanly).
+    await engines[0].query("MATCH (n) RETURN 1 LIMIT 1")
+    await engines[0].close()
 
 
 @pytest.mark.asyncio

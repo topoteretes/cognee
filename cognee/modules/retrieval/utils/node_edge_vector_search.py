@@ -15,10 +15,9 @@ class NodeEdgeVectorSearch:
 
     def __init__(self, edge_collection: str = "EdgeType_relationship_name", vector_engine=None):
         self.edge_collection = edge_collection
-        # SPIKE NOTE (async-engine-resolution): vector engine resolution is now
-        # async, so a sync ``__init__`` can no longer eagerly resolve it. We keep
-        # the (possibly-None) injected engine and resolve lazily in the first
-        # async method via ``_get_vector_engine()``.
+        # ``get_vector_engine()`` is async, so this sync ``__init__`` can't
+        # eagerly resolve it. Keep the (possibly-None) injected engine and
+        # resolve lazily in the first async method via ``_get_vector_engine()``.
         self.vector_engine = vector_engine
         self.query_vector: Optional[Any] = None
         self.node_distances: dict[str, list[Any]] = {}

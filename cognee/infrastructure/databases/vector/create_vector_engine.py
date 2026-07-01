@@ -113,11 +113,17 @@ def create_vector_engine(
 
 
 async def acreate_vector_engine(**kwargs):
-    """Async counterpart of :func:`create_vector_engine` that waits for any
-    in-flight close of the same cache key before constructing a new engine.
+    """Async counterpart of :func:`create_vector_engine`, used as the primary
+    creation path (via :func:`get_vector_engine`).
 
-    Used by ``get_vector_engine`` so a freshly evicted subprocess engine's worker
-    has fully torn down before a new one is built.
+    Async for the same reason as the graph factory
+    (:func:`cognee.infrastructure.databases.graph.get_graph_engine.acreate_graph_engine`):
+    the cache's ``aget_or_create`` can ``await`` an in-flight close of the same
+    key before constructing, so a re-created engine never races a
+    still-shutting-down worker. Kept symmetric with the graph side even though
+    LanceDB connects without an exclusive on-disk file lock. Delegates to the
+    shared normalization (:func:`_resolve_vector_engine_args`) so the cache key
+    matches the sync path.
     """
     args = _resolve_vector_engine_args(kwargs)
     if os.environ.get("USE_UNIFIED_PROVIDER", "") == "pghybrid":

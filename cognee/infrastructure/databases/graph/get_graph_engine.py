@@ -57,17 +57,20 @@ def _normalize_optional_create_graph_engine_params(params: dict) -> dict:
 
 
 async def get_graph_engine() -> GraphDBInterface:
-    """Factory function to get the appropriate graph client based on the graph type.
+    """Resolve the graph engine for the current context and return the live
+    adapter (a leased proxy from ``closing_lru_cache``).
 
-    SPIKE NOTE (async-engine-resolution): this previously returned a
-    ``_GraphEngineHandle`` whose ``__getattr__`` synchronously re-resolved the
-    engine via ``create_graph_engine(**config)`` on every attribute access. We
-    now resolve the engine eagerly and return the live adapter (a leased proxy
-    from ``closing_lru_cache``) directly, so resolution can ``await`` in the
-    caller's event loop. Trade-off: callers that *store* the result across a
-    cache-invalidating op (prune / delete / context exit) hold a proxy whose
-    entry may be detached and must re-call ``get_graph_engine()`` afterwards
-    instead of relying on the old transparent re-resolution.
+    Resolution is asynchronous and goes through :func:`acreate_graph_engine` so
+    that engine *creation* can ``await`` an in-flight close of the same cache
+    key before constructing — see that function for why the factory is async.
+    This is what makes the fix for the subprocess DB file-lock race (#3708)
+    deterministic: a re-created engine never opens a DB path whose previous
+    worker is still shutting down and holding the lock.
+
+    Note: the returned adapter is a live reference for the *current* async
+    scope. Callers should not stash it on a long-lived object and reuse it
+    across a cache-invalidating operation (prune / delete / per-dataset context
+    exit); call ``get_graph_engine()`` again after such an operation.
     """
     config = get_graph_context_config()
     engine = await acreate_graph_engine(**config)
@@ -147,12 +150,29 @@ def create_graph_engine(
 
 
 async def acreate_graph_engine(**kwargs):
-    """Async counterpart of :func:`create_graph_engine` that waits for any
-    in-flight close of the same cache key before constructing a new engine.
+    """Async counterpart of :func:`create_graph_engine`, used as the primary
+    creation path (via :func:`get_graph_engine`).
 
-    Used by ``get_graph_engine`` so a freshly evicted subprocess engine's worker
-    has fully exited (releasing its file lock) before a new worker opens the
-    same DB path.
+    Why the factory is async
+    ------------------------
+    The subprocess-backed graph engine (Ladybug/Kuzu) holds an exclusive on-disk
+    file lock for the worker's lifetime. Engines are cached in
+    ``closing_lru_cache``; when an entry is evicted its ``close()`` (worker
+    shutdown, which releases the lock) runs asynchronously. A *synchronous*
+    factory has no way to wait for that close, so re-creating an engine for the
+    same DB path could spawn a second worker that races the still-closing first
+    one and fails with "Could not set lock on file" (#3708).
+
+    Making creation ``async`` lets the cache's ``aget_or_create`` **await the
+    in-flight close of the same key on the caller's event loop** before
+    constructing — the awaiting creator yields the loop so the close task runs
+    to completion (worker exits, lock released) first. This is what removes the
+    race deterministically, without needing an off-loop close thread or a
+    re-resolving engine handle.
+
+    Delegates to :func:`create_graph_engine`'s normalization
+    (:func:`_resolve_graph_engine_args`) so the cache key is identical to the
+    sync path.
     """
     if os.environ.get("USE_UNIFIED_PROVIDER", "") == "pghybrid":
         return _make_pghybrid_adapter()
