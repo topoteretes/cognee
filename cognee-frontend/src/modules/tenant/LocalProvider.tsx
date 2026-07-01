@@ -78,7 +78,9 @@ export function LocalProvider({ children }: { children: React.ReactNode }) {
       cogniInstance: localInstance,
       localInstance,
       serviceUrl: localApiUrl,
+      apiKey: "",
       isInitializing,
+      tenantReady: true,
       error,
       statusMessage: null,
       availableTenants: [],
@@ -86,6 +88,8 @@ export function LocalProvider({ children }: { children: React.ReactNode }) {
       planType: null,
       hasAccess: true,
       requestCreateWorkspace: () => {},
+      nameModalOpen: false,
+      releaseLoader: () => {},
     }}>
       {children}
     </TenantContext.Provider>
@@ -102,7 +106,6 @@ function ErrorScreen({ message }: { message: string }) {
       minHeight: "100vh",
       padding: "2rem",
       textAlign: "center",
-      fontFamily: "system-ui, sans-serif",
     }}>
       <div style={{
         backgroundColor: "#ffffff",
@@ -112,10 +115,10 @@ function ErrorScreen({ message }: { message: string }) {
         width: "100%",
         boxShadow: "0 4px 12px rgba(0, 0, 0, 0.08)",
       }}>
-        <h2 style={{ margin: "0 0 0.75rem", fontSize: "1.25rem", fontWeight: 600, color: tokens.textDark }}>
+        <h2 style={{ margin: "0 0 0.75rem", fontSize: "1.25rem", fontWeight: 700, color: tokens.textDark }}>
           Connection Error
         </h2>
-        <p style={{ margin: "0 0 1.5rem", fontSize: "0.875rem", color: tokens.textSecondary, lineHeight: 1.5 }}>
+        <p style={{ margin: "0 0 1.5rem", fontSize: "0.875rem", color: tokens.textSecondary }}>
           {message}
         </p>
         <button

@@ -34,8 +34,8 @@ export default function TextArea({
     // Cache maxHeight on first calculation
     if (maxHeightRef.current === null) {
       const computedStyle = getComputedStyle(textarea);
-      maxHeightRef.current = computedStyle.maxHeight === "none"
-        ? Infinity
+      maxHeightRef.current = computedStyle.maxHeight === "none" 
+        ? Infinity 
         : parseInt(computedStyle.maxHeight) || Infinity;
     }
 
@@ -96,7 +96,7 @@ export default function TextArea({
         "border border-cognee-border",
         "placeholder:text-cognee-placeholder",
         "hover:bg-cognee-hover",
-        "focus:border-cognee-purple focus:border-2 focus:shadow-[0_0_0_3px_rgba(101,16,244,0.1)] focus:outline-none",
+        "focus:border-[#6510F4] focus:border-2 focus:shadow-[0_0_0_3px_rgba(188,155,255,0.10)] focus:outline-none",
         className,
       )}
       onChange={handleChange}
