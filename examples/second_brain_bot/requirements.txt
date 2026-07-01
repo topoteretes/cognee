@@ -1,0 +1,7 @@
+# Transports for the runnable bot. No key needed for USE_FAKE_ADAPTER=true.
+fastapi
+uvicorn
+httpx
+
+# For real cognee-backed memory, also: pip install cognee (and set LLM_API_KEY).
+# For the offline test suite, also: pip install pytest
