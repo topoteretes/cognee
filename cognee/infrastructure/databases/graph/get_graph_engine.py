@@ -70,10 +70,51 @@ async def get_graph_engine() -> GraphDBInterface:
     instead of relying on the old transparent re-resolution.
     """
     config = get_graph_context_config()
-    engine = create_graph_engine(**config)
+    engine = await acreate_graph_engine(**config)
     if hasattr(engine, "initialize"):
         await engine.initialize()
     return engine
+
+
+def _make_pghybrid_adapter():
+    """Build the uncached Postgres hybrid adapter used when
+    ``USE_UNIFIED_PROVIDER=pghybrid``. Not cached — the caller owns it, matching
+    the original inline behavior."""
+    from .postgres.adapter import PostgresAdapter
+    from cognee.infrastructure.databases.relational.get_relational_engine import (
+        get_relational_engine,
+    )
+
+    return PostgresAdapter(connection_string=get_relational_engine().db_uri)
+
+
+def _resolve_graph_engine_args(params: dict) -> tuple:
+    """Normalize engine parameters and return the positional argument tuple
+    passed to ``_create_graph_engine``.
+
+    Shared by the sync (:func:`create_graph_engine`) and async
+    (:func:`acreate_graph_engine`) entry points so both produce the *identical*
+    cache key (the positional tuple) — and so it matches the key built by
+    ``evict_graph_engine`` / ``is_graph_engine_cached``.
+    """
+    normalized = _normalize_optional_create_graph_engine_params(params)
+    return (
+        _normalize_graph_database_provider(params.get("graph_database_provider")),
+        params.get("graph_file_path"),
+        normalized["graph_database_url"],
+        normalized["graph_database_name"],
+        normalized["graph_database_username"],
+        normalized["graph_database_password"],
+        normalized["graph_database_host"],
+        normalized["graph_database_allow_anonymous"],
+        normalized["graph_database_port"],
+        normalized["graph_database_key"],
+        normalized["graph_dataset_database_handler"],
+        normalized["graph_database_subprocess_enabled"],
+        normalized["kuzu_num_threads"],
+        normalized["kuzu_buffer_pool_size"],
+        normalized["kuzu_max_db_size"],
+    )
 
 
 def create_graph_engine(
@@ -98,54 +139,25 @@ def create_graph_engine(
     For a detailed description, see _create_graph_engine.
     """
 
-    normalized_optional_params = _normalize_optional_create_graph_engine_params(locals())
-    graph_database_url = normalized_optional_params["graph_database_url"]
-    graph_database_provider = _normalize_graph_database_provider(graph_database_provider)
-    graph_database_name = normalized_optional_params["graph_database_name"]
-    graph_database_username = normalized_optional_params["graph_database_username"]
-    graph_database_password = normalized_optional_params["graph_database_password"]
-    graph_database_host = normalized_optional_params["graph_database_host"]
-    graph_database_allow_anonymous = normalized_optional_params["graph_database_allow_anonymous"]
-    graph_database_port = normalized_optional_params["graph_database_port"]
-    graph_database_key = normalized_optional_params["graph_database_key"]
-    graph_dataset_database_handler = normalized_optional_params["graph_dataset_database_handler"]
-    # The Kuzu/subprocess params also went through ``_normalize_optional_*``;
-    # reassign so callers passing ``None`` see the function-default applied
-    # (otherwise ``None`` would flow into the cache key and the factory).
-    graph_database_subprocess_enabled = normalized_optional_params[
-        "graph_database_subprocess_enabled"
-    ]
-    kuzu_num_threads = normalized_optional_params["kuzu_num_threads"]
-    kuzu_buffer_pool_size = normalized_optional_params["kuzu_buffer_pool_size"]
-    kuzu_max_db_size = normalized_optional_params["kuzu_max_db_size"]
-
     # Check USE_UNIFIED_PROVIDER outside the cache so it's always re-read
-    unified_provider = os.environ.get("USE_UNIFIED_PROVIDER", "")
-    if unified_provider == "pghybrid":
-        from .postgres.adapter import PostgresAdapter
-        from cognee.infrastructure.databases.relational.get_relational_engine import (
-            get_relational_engine,
-        )
+    if os.environ.get("USE_UNIFIED_PROVIDER", "") == "pghybrid":
+        return _make_pghybrid_adapter()
 
-        return PostgresAdapter(connection_string=get_relational_engine().db_uri)
+    return _create_graph_engine(*_resolve_graph_engine_args(locals()))
 
-    return _create_graph_engine(
-        graph_database_provider,
-        graph_file_path,
-        graph_database_url,
-        graph_database_name,
-        graph_database_username,
-        graph_database_password,
-        graph_database_host,
-        graph_database_allow_anonymous,
-        graph_database_port,
-        graph_database_key,
-        graph_dataset_database_handler,
-        graph_database_subprocess_enabled,
-        kuzu_num_threads,
-        kuzu_buffer_pool_size,
-        kuzu_max_db_size,
-    )
+
+async def acreate_graph_engine(**kwargs):
+    """Async counterpart of :func:`create_graph_engine` that waits for any
+    in-flight close of the same cache key before constructing a new engine.
+
+    Used by ``get_graph_engine`` so a freshly evicted subprocess engine's worker
+    has fully exited (releasing its file lock) before a new worker opens the
+    same DB path.
+    """
+    if os.environ.get("USE_UNIFIED_PROVIDER", "") == "pghybrid":
+        return _make_pghybrid_adapter()
+
+    return await _create_graph_engine.acall(*_resolve_graph_engine_args(kwargs))
 
 
 def evict_graph_engine(**kwargs) -> bool:

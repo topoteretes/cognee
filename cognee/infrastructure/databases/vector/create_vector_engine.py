@@ -48,6 +48,45 @@ def _normalize_optional_create_vector_engine_params(params: dict) -> dict:
     return normalized
 
 
+def _make_pghybrid_vector_adapter(vector_db_key):
+    """Build the uncached PGVector hybrid adapter used when
+    ``USE_UNIFIED_PROVIDER=pghybrid``. Not cached — matches the original inline
+    behavior."""
+    from cognee.infrastructure.databases.relational import get_relational_config
+
+    embedding_engine = get_embedding_engine()
+    relational_config = get_relational_config()
+    connection_string = (
+        f"postgresql+asyncpg://{relational_config.db_username}:{relational_config.db_password}"
+        f"@{relational_config.db_host}:{relational_config.db_port}"
+        f"/{relational_config.db_name}"
+    )
+
+    from .pgvector.PGVectorAdapter import PGVectorAdapter
+
+    return PGVectorAdapter(connection_string, vector_db_key, embedding_engine)
+
+
+def _resolve_vector_engine_args(params: dict) -> tuple:
+    """Normalize vector engine parameters and return the positional argument
+    tuple passed to ``_create_vector_engine`` — identical for the sync and async
+    entry points and matching ``evict_vector_engine`` / ``is_vector_engine_cached``.
+    """
+    normalized = _normalize_optional_create_vector_engine_params(params)
+    return (
+        params.get("vector_db_provider", ""),
+        params.get("vector_db_url", ""),
+        params.get("vector_db_name", ""),
+        normalized["vector_db_port"],
+        normalized["vector_db_key"],
+        normalized["vector_dataset_database_handler"],
+        normalized["vector_db_username"],
+        normalized["vector_db_password"],
+        normalized["vector_db_host"],
+        normalized["vector_db_subprocess_enabled"],
+    )
+
+
 def create_vector_engine(
     vector_db_provider: str,
     vector_db_url: str,
@@ -65,51 +104,26 @@ def create_vector_engine(
     For a detailed description, see _create_vector_engine.
     """
 
-    normalized_optional_params = _normalize_optional_create_vector_engine_params(locals())
-    vector_db_port = normalized_optional_params["vector_db_port"]
-    vector_db_key = normalized_optional_params["vector_db_key"]
-    vector_dataset_database_handler = normalized_optional_params["vector_dataset_database_handler"]
-    vector_db_username = normalized_optional_params["vector_db_username"]
-    vector_db_password = normalized_optional_params["vector_db_password"]
-    vector_db_host = normalized_optional_params["vector_db_host"]
-    # ``vector_db_subprocess_enabled`` also went through normalization;
-    # reassign so callers passing ``None`` see the function-default applied
-    # instead of having ``None`` flow into the cache key + factory.
-    vector_db_subprocess_enabled = normalized_optional_params["vector_db_subprocess_enabled"]
-
+    args = _resolve_vector_engine_args(locals())
     # Check USE_UNIFIED_PROVIDER outside the cache so it's always re-read
-    unified_provider = os.environ.get("USE_UNIFIED_PROVIDER", "")
-    if unified_provider == "pghybrid":
-        from cognee.infrastructure.databases.relational import get_relational_config
+    if os.environ.get("USE_UNIFIED_PROVIDER", "") == "pghybrid":
+        return _make_pghybrid_vector_adapter(args[4])  # args[4] == vector_db_key
 
-        embedding_engine = get_embedding_engine()
-        relational_config = get_relational_config()
-        connection_string = (
-            f"postgresql+asyncpg://{relational_config.db_username}:{relational_config.db_password}"
-            f"@{relational_config.db_host}:{relational_config.db_port}"
-            f"/{relational_config.db_name}"
-        )
+    return _create_vector_engine(*args)
 
-        from .pgvector.PGVectorAdapter import PGVectorAdapter
 
-        return PGVectorAdapter(
-            connection_string,
-            vector_db_key,
-            embedding_engine,
-        )
+async def acreate_vector_engine(**kwargs):
+    """Async counterpart of :func:`create_vector_engine` that waits for any
+    in-flight close of the same cache key before constructing a new engine.
 
-    return _create_vector_engine(
-        vector_db_provider,
-        vector_db_url,
-        vector_db_name,
-        vector_db_port,
-        vector_db_key,
-        vector_dataset_database_handler,
-        vector_db_username,
-        vector_db_password,
-        vector_db_host,
-        vector_db_subprocess_enabled,
-    )
+    Used by ``get_vector_engine`` so a freshly evicted subprocess engine's worker
+    has fully torn down before a new one is built.
+    """
+    args = _resolve_vector_engine_args(kwargs)
+    if os.environ.get("USE_UNIFIED_PROVIDER", "") == "pghybrid":
+        return _make_pghybrid_vector_adapter(args[4])  # args[4] == vector_db_key
+
+    return await _create_vector_engine.acall(*args)
 
 
 def evict_vector_engine(**kwargs) -> bool:

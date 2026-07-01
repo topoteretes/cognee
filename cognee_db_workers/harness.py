@@ -64,6 +64,15 @@ def _env_int(name: str, default: int) -> int:
 _DEFAULT_CALL_TIMEOUT: Optional[float] = _env_float("SUBPROCESS_CALL_TIMEOUT", 300.0)
 _DEFAULT_MAX_RETRIES = _env_int("SUBPROCESS_MAX_RETRIES", 2)
 _PROCESS_CHECK_INTERVAL = 1.0
+
+# Number of times the worker retries opening a database that is currently
+# lock-held by another (still-shutting-down) worker for the same file, and the
+# initial backoff between attempts (seconds, exponential). Backstop for the
+# brief window where one worker is releasing a file lock while another opens the
+# same path; see ``kuzu_worker._open_database``. Override with
+# ``SUBPROCESS_OPEN_LOCK_RETRIES`` / ``SUBPROCESS_OPEN_LOCK_BACKOFF``.
+OPEN_LOCK_RETRIES = _env_int("SUBPROCESS_OPEN_LOCK_RETRIES", 10)
+OPEN_LOCK_BACKOFF = _env_float("SUBPROCESS_OPEN_LOCK_BACKOFF", 0.1) or 0.1
 _READY_SENTINEL = "__SUBPROCESS_HARNESS_READY__"
 
 # Universal op code — every worker's DISPATCH includes an entry for it so
@@ -1056,9 +1065,20 @@ class SubprocessSession:
         self._handle_remap.clear()
 
     def _terminate(self, timeout: float = 2.0) -> None:
-        """Force-terminate the worker process. Idempotent and serialized by
-        ``self._terminate_lock`` so concurrent ``shutdown`` / ``__del__`` /
-        ``clean`` paths can't race each other.
+        """Force-terminate the worker process and wait until it has actually
+        exited. Idempotent and serialized by ``self._terminate_lock`` so
+        concurrent ``shutdown`` / ``__del__`` / ``clean`` paths can't race.
+
+        The escalating join/terminate/kill chain is followed by a bounded poll
+        that does not return while ``is_alive()`` is still True. This matters
+        for the on-disk file lock held by DB workers (Ladybug/LanceDB): the OS
+        releases a process's file locks only once the process is truly gone, so
+        a caller that re-opens the same DB path right after ``shutdown()``
+        returns would hit "Could not set lock on file" if we returned while the
+        child were still alive. ``join(timeout)`` alone can return early (e.g.
+        right after ``kill()`` the SIGKILL may not have been delivered yet), so
+        we poll ``is_alive()`` until the process is reaped, capped so a wedged
+        kernel state can't hang teardown forever.
         """
         with self._terminate_lock:
             try:
@@ -1069,6 +1089,13 @@ class SubprocessSession:
                 if self._proc.is_alive():
                     self._proc.kill()
                     self._proc.join(timeout=timeout)
+                # Final wait for true exit: after SIGKILL the process should die
+                # promptly, but ``join`` above may have timed out before the
+                # kernel reaped it. Poll up to a generous cap so we don't return
+                # while the child still holds its file lock.
+                deadline = time.monotonic() + max(timeout, 5.0)
+                while self._proc.is_alive() and time.monotonic() < deadline:
+                    self._proc.join(timeout=0.05)
             except Exception:
                 pass
 

@@ -1,6 +1,7 @@
 """LRU cache that closes entries after they leave the cache and caller scope."""
 
 import asyncio
+import concurrent.futures
 import inspect
 import logging
 import weakref
@@ -39,14 +40,28 @@ _PENDING_CLOSE_TASKS: set = set()
 _KW_MARK = object()
 
 
-def _close_value(value):
-    """Call close() on a value, scheduling it as a task if it returns a coroutine.
+def _start_close(value) -> Optional[concurrent.futures.Future]:
+    """Begin closing a value and return a ``concurrent.futures.Future`` that
+    resolves once the close (including any async worker-process teardown) has
+    completed — or ``None`` when there is nothing to wait for (no ``close()``,
+    a sync ``close()`` that already finished, or a ``close()`` that raised
+    synchronously).
 
-    If close() is async and no event loop is running, falls back to
-    ``asyncio.run()`` to ensure cleanup is not silently skipped.
+    The returned future lets the cache track "this key is still closing" so a
+    later async creation for the same key can ``await`` it before opening a new
+    DB worker on the same path (see ``ClosingLRUCache._track_close`` /
+    ``aget_or_create``). It is a thread-safe ``concurrent.futures.Future`` so an
+    async waiter can ``await asyncio.wrap_future(...)`` it and sync callers can
+    poll it.
+
+    Because engine resolution is async (see ``get_graph_engine`` /
+    ``get_vector_engine``), the async ``close()`` is run as an ordinary task on
+    the running loop and the awaiting creator yields the loop so it can run — no
+    off-loop thread is needed. Falls back to ``asyncio.run()`` when no loop is
+    running (e.g. a GC finalizer firing off-loop, or interpreter teardown).
     """
     if not hasattr(value, "close"):
-        return
+        return None
     try:
         result = value.close()
     except Exception:
@@ -59,55 +74,88 @@ def _close_value(value):
             type(value).__name__,
             exc_info=True,
         )
-        return
-    if asyncio.iscoroutine(result):
+        return None
+    if not asyncio.iscoroutine(result):
+        # Sync close() already completed.
+        return None
+
+    value_type = type(value).__name__
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        # No running loop: run to completion now (original fallback). Return an
+        # already-resolved future so callers see a uniform type and never block
+        # on it (it's done before they look).
+        cf: concurrent.futures.Future = concurrent.futures.Future()
         try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            try:
-                asyncio.run(result)
-            except Exception:
-                logger.warning(
-                    "Failed to run async close() for %s during eviction",
-                    type(value).__name__,
-                    exc_info=True,
-                )
-            return
+            asyncio.run(result)
+        except Exception:
+            logger.warning(
+                "Failed to run async close() for %s during eviction",
+                value_type,
+                exc_info=True,
+            )
+        cf.set_result(None)
+        return cf
 
-        task = loop.create_task(result)
-        _PENDING_CLOSE_TASKS.add(task)
+    # Running loop: schedule the close as a task and mirror its completion into a
+    # concurrent.futures.Future. A creator awaiting on the same loop via
+    # ``asyncio.wrap_future`` yields control so this task can run (no deadlock).
+    cf = concurrent.futures.Future()
+    task = loop.create_task(result)
+    _PENDING_CLOSE_TASKS.add(task)
 
-        def _on_close_done(done_task, _value_type=type(value).__name__):
-            # Always drop the strong ref so the task can be collected.
-            _PENDING_CLOSE_TASKS.discard(done_task)
-            # Retrieve the result so failures surface through the same
-            # structured ``logger.warning`` channel as the sync /
-            # ``asyncio.run()`` branches above. Without this, an async
-            # ``close()`` that raises only surfaces as Python's
-            # "Task exception was never retrieved" warning at GC time,
-            # which ops greps for ``Failed to run async close()`` would miss.
-            try:
-                done_task.result()
-            except Exception:
-                logger.warning(
-                    "Failed to run async close() for %s during eviction",
-                    _value_type,
-                    exc_info=True,
-                )
+    def _on_close_done(done_task, _value_type=value_type, _cf=cf):
+        # Always drop the strong ref so the task can be collected.
+        _PENDING_CLOSE_TASKS.discard(done_task)
+        # Retrieve the result so failures surface through the same structured
+        # ``logger.warning`` channel as the ``asyncio.run()`` branch. Without
+        # this, an async ``close()`` that raises only surfaces as Python's
+        # "Task exception was never retrieved" warning at GC time.
+        try:
+            done_task.result()
+        except Exception:
+            logger.warning(
+                "Failed to run async close() for %s during eviction",
+                _value_type,
+                exc_info=True,
+            )
+        # Always resolve the mirror future as done (never propagate the close
+        # failure to waiters — a creator should proceed regardless; the worker
+        # open-retry covers a still-held lock).
+        if not _cf.done():
+            _cf.set_result(None)
 
-        task.add_done_callback(_on_close_done)
+    task.add_done_callback(_on_close_done)
+    return cf
 
 
 class _LeasedCacheEntry:
     """Own one cached value and close it after cache + returned proxy are gone."""
 
-    def __init__(self, value):
+    def __init__(self, value, key=None, cache=None):
         self.value = value
+        # ``key`` + ``cache`` let the deferred close paths (``proxy_released``,
+        # ``detach_from_cache``) register the close as in-flight under this
+        # entry's cache key, so a later ``aget_or_create`` for the same key can
+        # wait for the lock-holding worker to exit. ``cache`` is the owning
+        # ``ClosingLRUCache``; ``None`` keeps the entry usable in isolation
+        # (tests construct it directly).
+        self.key = key
+        self.cache = cache
         self.proxy = None
         self.in_cache = True
         self.close_requested = False
         self.closed = False
         self._lock = Lock()
+
+    def _close(self, value):
+        """Route a close through the owning cache so it is tracked as in-flight
+        for this key; fall back to an untracked close when there is no cache."""
+        if self.cache is not None:
+            self.cache._track_close(self.key, value)
+        else:
+            _start_close(value)
 
     def lease(self):
         with self._lock:
@@ -126,7 +174,7 @@ class _LeasedCacheEntry:
                 value_to_close = self.value
 
         if value_to_close is not None:
-            _close_value(value_to_close)
+            self._close(value_to_close)
 
     def detach_from_cache(self):
         value_to_close = None
@@ -141,7 +189,7 @@ class _LeasedCacheEntry:
                 value_to_close = self.value
 
         if value_to_close is not None:
-            _close_value(value_to_close)
+            self._close(value_to_close)
         # Keep ``proxy_to_drop`` alive until after ``self._lock`` is released.
         # If the cache held the last proxy reference, dropping it can run the
         # weakref finalizer, which re-enters ``proxy_released()``.
@@ -232,20 +280,49 @@ class ClosingLRUCache:
         self._maxsize = maxsize
         self._lease = lease
         self._lock = Lock()
+        # Keyed registry of in-flight closes. A key is present here from the
+        # moment its value's ``close()`` actually starts until that close
+        # (including async worker-process teardown) completes. ``aget_or_create``
+        # waits on the matching future before constructing a new value, so a new
+        # DB worker never opens a file path whose previous worker is still
+        # releasing its lock. Guarded by ``self._lock``.
+        self._closing: dict = {}
+
+    def _track_close(self, key, value) -> None:
+        """Close ``value`` and, if the close is async/in-flight, record it under
+        ``key`` so a concurrent ``aget_or_create`` for the same key waits for it.
+
+        A ``None`` / already-resolved future means the close finished
+        synchronously, so there is nothing to register.
+        """
+        cf = _start_close(value)
+        if cf is None or cf.done():
+            return
+        with self._lock:
+            self._closing[key] = cf
+
+        def _cleanup(done_future, _key=key):
+            with self._lock:
+                # Only clear if we are still the registered future — a newer
+                # close for the same key may have superseded us.
+                if self._closing.get(_key) is done_future:
+                    self._closing.pop(_key, None)
+
+        cf.add_done_callback(_cleanup)
 
     def _wrap_cached_value(self, entry):
         if self._lease:
             return entry.lease()
         return entry.value
 
-    def _make_entry(self, value):
-        return _LeasedCacheEntry(value)
+    def _make_entry(self, key, value):
+        return _LeasedCacheEntry(value, key=key, cache=self)
 
     def _detach_entry(self, entry):
         if self._lease:
             entry.detach_from_cache()
         else:
-            _close_value(entry.value)
+            self._track_close(entry.key, entry.value)
 
     def get_or_create(self, key, factory):
         # Disabled-cache mode: act as a pass-through. Caller owns the value's
@@ -259,10 +336,10 @@ class ClosingLRUCache:
                 return self._wrap_cached_value(self._cache[key])
 
         value = factory()
-        entry = self._make_entry(value)
+        entry = self._make_entry(key, value)
 
-        # Decide outcome under the lock; defer ``_close_value`` until
-        # after release. ``_close_value`` can run arbitrary user code
+        # Decide outcome under the lock; defer ``_track_close`` until
+        # after release. The close can run arbitrary user code
         # (sync ``close()``, ``asyncio.run`` for an async ``close()``,
         # logging) and even re-enter cache creation in some adapter
         # close paths — running it under ``self._lock`` would either
@@ -283,10 +360,45 @@ class ClosingLRUCache:
                 cached = self._wrap_cached_value(entry)
 
         if loser_value is not None:
-            _close_value(loser_value)
+            self._track_close(key, loser_value)
         if evicted_value is not None:
             self._detach_entry(evicted_value)
         return cached
+
+    async def aget_or_create(self, key, factory):
+        """Async counterpart of :meth:`get_or_create` that waits for an in-flight
+        close of the same key before constructing a new value.
+
+        This is the point of the closing registry: when an entry was just
+        evicted and its DB worker is still shutting down (still holding the
+        on-disk file lock), constructing a new value here would spawn a second
+        worker that races the first for the lock and fails. Awaiting the close
+        future via ``asyncio.wrap_future`` suspends this coroutine without
+        blocking the loop, so the close (which runs as a task on this same loop)
+        can complete — releasing the lock — before we construct.
+
+        Construction itself still goes through the synchronous
+        :meth:`get_or_create` (which re-checks the cache and only calls
+        ``factory`` on a miss).
+        """
+        if self._maxsize == 0:
+            return factory()
+
+        with self._lock:
+            if key in self._cache:
+                self._cache.move_to_end(key)
+                return self._wrap_cached_value(self._cache[key])
+            pending_close = self._closing.get(key)
+
+        if pending_close is not None and not pending_close.done():
+            try:
+                await asyncio.wrap_future(pending_close)
+            except Exception:
+                # The close future never propagates failures (see _start_close);
+                # this guard is belt-and-suspenders so a creator always proceeds.
+                pass
+
+        return self.get_or_create(key, factory)
 
     def cache_clear(self):
         """Close and remove all cached entries."""
@@ -352,6 +464,13 @@ def closing_lru_cache(maxsize: Optional[int] = 128, lease: bool = True):
         def wrapper(*args, **kwargs):
             return cache.get_or_create(_key(args, kwargs), lambda: fn(*args, **kwargs))
 
+        async def acall(*args, **kwargs):
+            """Async acquisition that waits for an in-flight close of the same
+            key before constructing. Pass exactly the args the sync ``wrapper``
+            would use so the cache key matches.
+            """
+            return await cache.aget_or_create(_key(args, kwargs), lambda: fn(*args, **kwargs))
+
         def cache_evict(*args, **kwargs) -> bool:
             """Evict a single entry whose key matches the given args.
 
@@ -369,6 +488,7 @@ def closing_lru_cache(maxsize: Optional[int] = 128, lease: bool = True):
         wrapper.cache_evict = cache_evict
         wrapper.cache_contains = cache_contains
         wrapper.cache_info = cache.cache_info
+        wrapper.acall = acall
         wrapper.__wrapped__ = fn
         return wrapper
 
