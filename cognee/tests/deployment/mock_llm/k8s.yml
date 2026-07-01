@@ -1,0 +1,47 @@
+# In-cluster deterministic mock LLM for the Helm/kind e2e test.
+# Applied by the CI workflow (and local dry-run) BEFORE `helm install`, so the
+# cognee pod can reach it at http://mock-llm:11434 via LLM_ENDPOINT/EMBEDDING_ENDPOINT.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mock-llm
+  labels:
+    app: mock-llm
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mock-llm
+  template:
+    metadata:
+      labels:
+        app: mock-llm
+    spec:
+      containers:
+        - name: mock-llm
+          image: mock-llm:ci-test
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 11434
+          env:
+            - name: MOCK_ENTITY
+              value: "Alice"
+            - name: MOCK_EMBED_DIM
+              value: "1536"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 11434
+            initialDelaySeconds: 2
+            periodSeconds: 3
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mock-llm
+spec:
+  selector:
+    app: mock-llm
+  ports:
+    - port: 11434
+      targetPort: 11434

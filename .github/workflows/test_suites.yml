@@ -221,6 +221,10 @@ jobs:
     uses: ./.github/workflows/backend_docker_build_test.yml
     secrets: inherit
 
+  helm-kind-test:
+    name: Helm Kind E2E Test
+    uses: ./.github/workflows/helm_kind_test.yml
+    secrets: inherit
   temporal-graph-tests:
     name: Temporal Graph Test
     needs: [ build-ci-env ]
@@ -293,6 +297,7 @@ jobs:
       search-db-tests,
       relational-db-migration-tests,
       db-examples-tests,
+      helm-kind-test,
     ]
     runs-on: ubuntu-latest
     if: ${{ !cancelled() }}
@@ -319,7 +324,8 @@ jobs:
                 "${{ needs.temporal-graph-tests.result }}" == "success" &&
                 "${{ needs.search-db-tests.result }}" == "success" &&
                 "${{ needs.relational-db-migration-tests.result }}" == "success" &&
-                "${{ needs.db-examples-tests.result }}" == "success" ]]; then
+                "${{ needs.db-examples-tests.result }}" == "success" &&
+                "${{ needs.helm-kind-test.result }}" == "success" ]]; then
             echo "All test suites completed successfully!"
           else
             echo "One or more test suites failed."
