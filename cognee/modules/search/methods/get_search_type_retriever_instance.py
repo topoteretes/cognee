@@ -30,6 +30,7 @@ from cognee.modules.retrieval.graph_completion_context_extension_retriever impor
     GraphCompletionContextExtensionRetriever,
 )
 from cognee.modules.retrieval.cypher_search_retriever import CypherSearchRetriever
+from cognee.modules.retrieval.connection_path_retriever import ConnectionPathRetriever
 from cognee.modules.retrieval.natural_language_retriever import NaturalLanguageRetriever
 from cognee.modules.retrieval.agentic_retriever import AgenticRetriever
 from cognee.context_global_variables import session_user
@@ -303,6 +304,16 @@ async def get_search_type_retriever_instance(
         SearchType.CODING_RULES: (
             CodingRulesRetriever,
             {"rules_nodeset_name": node_name},
+        ),
+        SearchType.CONNECTION_PATH: (
+            ConnectionPathRetriever,
+            {
+                "system_prompt_path": system_prompt_path,
+                "system_prompt": system_prompt,
+                "max_depth": retriever_specific_config.get("max_depth", 5),
+                "session_id": session_id,
+                "response_model": retriever_specific_config.get("response_model", str),
+            },
         ),
     }
 

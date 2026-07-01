@@ -299,6 +299,102 @@ class GraphDBInterface(ABC):
         """
         raise NotImplementedError
 
+    async def find_paths(
+        self,
+        source_id: Union[str, UUID],
+        target_id: Union[str, UUID],
+        max_depth: int = 5,
+        excluded_node_types: Optional[List[str]] = None,
+    ) -> List[List[Tuple[NodeData, Dict[str, Any], NodeData]]]:
+        """
+        Find the connecting path between two nodes, portably.
+
+        This is a backend-agnostic default that runs a breadth-first search over
+        ``get_connections``, so every graph adapter supports path queries out of the
+        box. Backends with native pathfinding (for example Neo4j via ``shortestPath``)
+        can override this for speed.
+
+        The traversal is undirected (it follows edges in either direction, matching
+        ``get_connections``) and returns the shortest path found. Each returned path is
+        an ordered list of ``(source_node, edge, target_node)`` triplets oriented in the
+        direction of travel, from ``source_id`` to ``target_id``. An empty list means the
+        two nodes are not connected within ``max_depth`` hops.
+
+        ``excluded_node_types`` lets a caller skip structural backbone nodes so the path
+        follows meaningful relationships. In cognee every entity in a document hangs off
+        the same DocumentChunk node, so without excluding it the shortest path between any
+        two entities is a trivial hop through that shared chunk rather than the real
+        relationship chain.
+
+        Parameters:
+        -----------
+
+            - source_id (Union[str, UUID]): Identifier of the start node.
+            - target_id (Union[str, UUID]): Identifier of the end node.
+            - max_depth (int): Maximum number of hops to traverse. (default 5)
+            - excluded_node_types (Optional[List[str]]): Node ``type`` values that must
+              not be used as intermediate stepping stones. (default None)
+        """
+        from collections import deque
+
+        def node_id_of(node: Any) -> Optional[str]:
+            value = node.get("id") if isinstance(node, dict) else node
+            return str(value) if value is not None else None
+
+        def node_type_of(node: Any) -> Optional[str]:
+            return node.get("type") if isinstance(node, dict) else None
+
+        excluded_types = set(excluded_node_types or [])
+        source = str(source_id)
+        target = str(target_id)
+
+        if source == target:
+            return [[]]
+        if max_depth < 1:
+            return []
+
+        visited = {source}
+        queue = deque([(source, [])])
+
+        while queue:
+            current_id, path = queue.popleft()
+            if len(path) >= max_depth:
+                continue
+
+            for connection in await self.get_connections(current_id):
+                if not connection or len(connection) != 3:
+                    continue
+                left, edge, right = connection
+                left_id, right_id = node_id_of(left), node_id_of(right)
+
+                # get_connections is not consistent across backends about which side
+                # of the triplet is the current node (Neo4j returns incoming edges as
+                # (neighbour, edge, current)). Pick the endpoint that is not the current
+                # node as the neighbour, and orient the step in the direction of travel.
+                if left_id == current_id:
+                    neighbor_id, neighbor_node, step = right_id, right, (left, edge, right)
+                elif right_id == current_id:
+                    neighbor_id, neighbor_node, step = left_id, left, (right, edge, left)
+                else:
+                    continue
+
+                if not neighbor_id or neighbor_id in visited:
+                    continue
+
+                new_path = path + [step]
+                # The target is always reachable, even if its own type is excluded.
+                if neighbor_id == target:
+                    return [new_path]
+
+                # Do not route through excluded structural nodes.
+                if excluded_types and node_type_of(neighbor_node) in excluded_types:
+                    continue
+
+                visited.add(neighbor_id)
+                queue.append((neighbor_id, new_path))
+
+        return []
+
     @abstractmethod
     async def get_neighborhood(
         self,
