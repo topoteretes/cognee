@@ -88,7 +88,7 @@ async def main(
     print(f"  - print_results: {print_results}")
 
     # Generate unique timestamp for this benchmark session
-    base_timestamp = datetime.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    base_timestamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     config_params_list = []
 
     for run_num in range(runs):

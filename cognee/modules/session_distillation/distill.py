@@ -365,7 +365,7 @@ async def publish_distilled_lessons(
     scope: SessionDistillationScope,
     accepted: List[WrittenLesson],
 ) -> List[str]:
-    distilled_on = datetime.utcnow().strftime("%Y-%m-%d")
+    distilled_on = datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
     documents = [
         render_lesson_document(lesson, session_id=scope.session_id, distilled_on=distilled_on)
         for lesson in accepted
