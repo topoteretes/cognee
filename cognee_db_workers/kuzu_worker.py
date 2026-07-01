@@ -43,10 +43,12 @@ def _retry_open_locked(ladybug, kwargs, original_exc):
     the previous worker exits the next attempt succeeds. Only the lock-held
     error is retried; any other ``RuntimeError`` propagates unchanged.
 
-    ``original_exc`` is the first lock-held failure the caller already saw; it is
-    re-raised when retries are exhausted — or immediately when retries are
-    disabled (``SUBPROCESS_OPEN_LOCK_RETRIES <= 0``), so a misconfigured value
-    surfaces the real lock error instead of a spurious ``TypeError``.
+    ``original_exc`` is the first lock-held failure the caller already saw and
+    seeds ``last_exc``. When every retry still hits the lock the *last* lock
+    error is raised (``last_exc``, updated each attempt); when retries are
+    disabled (``SUBPROCESS_OPEN_LOCK_RETRIES <= 0``) the loop never runs so
+    ``original_exc`` is raised immediately — either way a real lock error
+    surfaces rather than a spurious ``TypeError`` from ``raise None``.
     """
     import time
 

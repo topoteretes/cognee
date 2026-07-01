@@ -72,7 +72,12 @@ _PROCESS_CHECK_INTERVAL = 1.0
 # another opens the same path; see ``kuzu_worker._open_database``. Override with
 # ``SUBPROCESS_OPEN_LOCK_RETRIES`` / ``SUBPROCESS_OPEN_LOCK_BACKOFF``.
 OPEN_LOCK_RETRIES = _env_int("SUBPROCESS_OPEN_LOCK_RETRIES", 10)
-OPEN_LOCK_BACKOFF = _env_float("SUBPROCESS_OPEN_LOCK_BACKOFF", 0.1) or 0.1
+# ``_env_float`` returns the default (0.1) when unset/invalid and ``None`` for an
+# explicit ``<= 0``. Treat that explicit ``<= 0`` as ``0.0`` (immediate retries,
+# no delay) rather than resetting to the default, so ``SUBPROCESS_OPEN_LOCK_BACKOFF=0``
+# is honored.
+_OPEN_LOCK_BACKOFF_RAW = _env_float("SUBPROCESS_OPEN_LOCK_BACKOFF", 0.1)
+OPEN_LOCK_BACKOFF = 0.0 if _OPEN_LOCK_BACKOFF_RAW is None else _OPEN_LOCK_BACKOFF_RAW
 _READY_SENTINEL = "__SUBPROCESS_HARNESS_READY__"
 
 # Universal op code — every worker's DISPATCH includes an entry for it so
