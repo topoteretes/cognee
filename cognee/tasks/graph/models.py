@@ -87,3 +87,37 @@ class GraphOntology(BaseModel):
 
     nodes: list[OntologyNode]
     edges: list[OntologyEdge]
+
+
+class PairJudgment(BaseModel):
+    """
+    The LLM judge's verdict for a single candidate entity pair (issue #3629).
+
+    Instance variables:
+
+    - pair_index: Index of the candidate pair this judgment answers, so a batched
+      response can be mapped back to the entities that were submitted.
+    - is_same_entity: Whether the two candidate entities refer to the same real-world entity.
+    - canonical_name: The preferred canonical surface form for the merged entity.
+    - reconciled_description: The merged description written onto the surviving entity.
+    - confidence: The judge's confidence in [0.0, 1.0].
+    - rationale: A short justification for the verdict.
+
+    Note: per-property reconciliation (property_overrides) is intentionally out of
+    scope for this iteration; only ``description`` is reconciled today.
+    """
+
+    pair_index: int
+    is_same_entity: bool
+    canonical_name: str
+    reconciled_description: str
+    confidence: float
+    rationale: str
+
+
+class CanonicalizationJudgment(BaseModel):
+    """
+    Batched judge response: one PairJudgment per submitted candidate pair.
+    """
+
+    judgments: list[PairJudgment]
