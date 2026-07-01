@@ -35,6 +35,43 @@ except ModuleNotFoundError:
 pytestmark = pytest.mark.asyncio
 
 
+def _postgres_graph_url_from_env():
+    """Postgres graph connection URL when the configured backend is postgres, else None.
+
+    Driven entirely by ``.env`` (which CI sets): the postgres graph adapter talks
+    to the relational engine's database, so the postgres contract params run
+    exactly when ``GRAPH_DATABASE_PROVIDER=postgres`` and ``DB_PROVIDER=postgres``
+    are configured, and skip on any other stack (keeps kuzu/sqlite CI green).
+    """
+    from cognee.infrastructure.databases.graph.config import get_graph_config
+
+    if get_graph_config().graph_database_provider != "postgres":
+        return None
+    from cognee.infrastructure.databases.relational import get_relational_engine
+
+    return get_relational_engine().db_uri
+
+
+async def _make_postgres_adapter():
+    """Fresh-schema Postgres graph adapter, or skip when ``.env`` isn't postgres."""
+    url = _postgres_graph_url_from_env()
+    if not url:
+        pytest.skip("postgres graph backend not configured (set GRAPH_DATABASE_PROVIDER=postgres)")
+
+    from cognee.infrastructure.databases.graph.postgres.adapter import PostgresAdapter
+    from cognee.infrastructure.databases.graph.postgres.tables import _meta
+
+    adapter = PostgresAdapter(url)
+    try:
+        async with adapter.engine.begin() as conn:
+            await conn.run_sync(_meta.drop_all)
+        await adapter.initialize()
+    except Exception as exc:  # pragma: no cover - environment dependent
+        await adapter.close()
+        pytest.skip(f"postgres graph backend not reachable: {exc}")
+    return adapter
+
+
 class _Ent(DataPoint):
     """Minimal entity DataPoint with an indexed field and tag membership."""
 
@@ -48,12 +85,14 @@ class _Structural(DataPoint):
     metadata: dict = {"index_fields": []}
 
 
-@pytest_asyncio.fixture(params=["ladybug"])
+@pytest_asyncio.fixture(params=["ladybug", "postgres"])
 async def graph_provenance_adapter(request, tmp_path):
     if request.param == "ladybug":
         if not HAS_LADYBUG:
             pytest.skip("ladybug not installed")
         adapter = LadybugAdapter(str(tmp_path / "graph_db"))
+    elif request.param == "postgres":
+        adapter = await _make_postgres_adapter()
     else:
         raise AssertionError(f"Unknown graph provenance provider: {request.param}")
 
