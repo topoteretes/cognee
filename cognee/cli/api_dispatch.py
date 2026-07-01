@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+from pathlib import Path
 
 import cognee.cli.echo as fmt
 from cognee.cli.api_client import CogneeApiClient
@@ -110,8 +111,16 @@ def _dispatch_cognify(client: CogneeApiClient, args: argparse.Namespace) -> None
     )
     if getattr(args, "background", False):
         fmt.success("Cognification started in background!")
+        if getattr(args, "report", False):
+            fmt.warning("Skipping report generation until background processing completes.")
     else:
         fmt.success("Cognification completed successfully!")
+        if getattr(args, "report", False):
+            _write_graph_report_from_api(
+                client,
+                datasets=datasets,
+                destination_file_path=args.report_path,
+            )
     if result:
         fmt.echo(json.dumps(result, indent=2, default=str))
 
@@ -267,8 +276,16 @@ def _dispatch_remember(client: CogneeApiClient, args: argparse.Namespace) -> Non
     )
     if getattr(args, "background", False):
         fmt.success("Data ingested and cognification started in background!")
+        if getattr(args, "report", False):
+            fmt.warning("Skipping report generation until background processing completes.")
     else:
         fmt.success("Data ingested and knowledge graph built successfully!")
+        if getattr(args, "report", False):
+            _write_graph_report_from_api(
+                client,
+                datasets=[args.dataset_name],
+                destination_file_path=args.report_path,
+            )
     if isinstance(result, dict):
         for key in ("dataset_id", "items_processed", "content_hash", "elapsed_seconds"):
             value = result.get(key)
@@ -342,6 +359,43 @@ def _dispatch_recall(client: CogneeApiClient, args: argparse.Namespace) -> None:
             for i, result in enumerate(results, 1):
                 fmt.echo(f"{fmt.bold(f'Result {i}:')} {result}")
                 fmt.echo()
+
+
+def _write_graph_report_from_api(
+    client: CogneeApiClient,
+    *,
+    datasets: list[str] | None,
+    destination_file_path: str,
+) -> None:
+    results = client.search(
+        query="Create a graph insight report",
+        search_type="GRAPH_REPORT",
+        datasets=datasets,
+        top_k=10,
+        only_context=True,
+    )
+    markdown_parts = _extract_markdown_parts(results)
+    if not markdown_parts:
+        raise RuntimeError("The API returned no Markdown content for the Graph Insight Report.")
+
+    destination = Path(destination_file_path).expanduser()
+    if destination.suffix.lower() not in {".md", ".markdown"}:
+        destination = destination / "graph_report.md"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text("\n\n".join(markdown_parts), encoding="utf-8")
+    fmt.echo(f"Graph Insight Report written to {destination}")
+
+
+def _extract_markdown_parts(value) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list):
+        return [part for item in value for part in _extract_markdown_parts(item)]
+    if isinstance(value, dict):
+        for key in ("search_result", "context_result"):
+            if key in value:
+                return _extract_markdown_parts(value[key])
+    return []
 
 
 def _dispatch_improve(client: CogneeApiClient, args: argparse.Namespace) -> None:

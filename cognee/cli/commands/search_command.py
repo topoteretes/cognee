@@ -27,6 +27,10 @@ Search Types & Use Cases:
     Natural language Q&A using full graph context and LLM reasoning.
     Best for: Complex questions, analysis, summaries, insights.
 
+**GRAPH_REPORT**:
+    Structured graph analysis with hub nodes, surprising links, confidence tags,
+    and suggested follow-up questions.
+
 **RAG_COMPLETION**:
     Traditional RAG using document chunks without graph structure.
     Best for: Direct document retrieval, specific fact-finding.

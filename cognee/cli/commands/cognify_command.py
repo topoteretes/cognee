@@ -1,6 +1,6 @@
 import argparse
 import asyncio
-from typing import Optional
+from pathlib import Path
 
 from cognee.cli.reference import SupportsCliCommand
 from cognee.cli import DEFAULT_DOCS_URL
@@ -67,6 +67,16 @@ After successful cognify processing, use `cognee search` to query the knowledge 
             type=int,
             help="Number of chunks to process per task batch (try 50 for large single documents).",
         )
+        parser.add_argument(
+            "--report",
+            action="store_true",
+            help="Write a Graph Insight Report after processing completes.",
+        )
+        parser.add_argument(
+            "--report-path",
+            default="graph_report.md",
+            help="Markdown report file or directory (default: graph_report.md).",
+        )
 
     def execute(self, args: argparse.Namespace) -> None:
         try:
@@ -123,6 +133,12 @@ After successful cognify processing, use `cognee search` to query the knowledge 
                         run_in_background=args.background,
                         chunks_per_batch=getattr(args, "chunks_per_batch", None),
                     )
+                    if getattr(args, "report", False) and not args.background:
+                        await cognee.report(
+                            datasets=datasets,
+                            user=user,
+                            destination_file_path=getattr(args, "report_path", "graph_report.md"),
+                        )
                     return result
                 except Exception as e:
                     raise CliCommandInnerException(f"Failed to cognify: {str(e)}") from e
@@ -131,12 +147,19 @@ After successful cognify processing, use `cognee search` to query the knowledge 
 
             if args.background:
                 fmt.success("Cognification started in background!")
+                if getattr(args, "report", False):
+                    fmt.warning("Skipping report generation until background processing completes.")
                 if args.verbose and result:
                     fmt.echo(
                         "Background processing initiated. Use pipeline monitoring to track progress."
                     )
             else:
                 fmt.success("Cognification completed successfully!")
+                if getattr(args, "report", False):
+                    report_path = _report_destination(
+                        getattr(args, "report_path", "graph_report.md")
+                    )
+                    fmt.echo(f"Graph Insight Report written to {report_path}")
                 if args.verbose and result:
                     fmt.echo(f"Processing results: {result}")
 
@@ -144,3 +167,10 @@ After successful cognify processing, use `cognee search` to query the knowledge 
             if isinstance(e, CliCommandInnerException):
                 raise CliCommandException(str(e), error_code=1) from e
             raise CliCommandException(f"Error during cognification: {str(e)}", error_code=1) from e
+
+
+def _report_destination(destination_file_path: str) -> str:
+    destination = Path(destination_file_path).expanduser()
+    if destination.suffix.lower() not in {".md", ".markdown"}:
+        destination = destination / "graph_report.md"
+    return str(destination)

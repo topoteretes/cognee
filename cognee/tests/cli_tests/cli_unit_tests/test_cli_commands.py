@@ -229,9 +229,13 @@ class TestCognifyCommand:
         assert "chunker" in actions
         assert "background" in actions
         assert "verbose" in actions
+        assert "report" in actions
+        assert "report_path" in actions
 
         # Check default values
         assert actions["chunker"].default == "TextChunker"
+        assert actions["report"].default is False
+        assert actions["report_path"].default == "graph_report.md"
 
     @patch(_RESOLVE_USER_PATCH, new_callable=lambda: AsyncMock(return_value=_mock_user()))
     @patch("cognee.cli.commands.cognify_command.asyncio.run", side_effect=_mock_run)
