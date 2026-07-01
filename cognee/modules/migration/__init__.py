@@ -28,6 +28,7 @@ from .snapshot import GraphEdge, GraphSnapshot, build_snapshot, datapoint_regist
 from .sources import (
     IMPORT_MODES,
     COGXArchiveSource,
+    GoogleMemorySource,
     GraphitiSource,
     LettaSource,
     Mem0Source,
@@ -70,6 +71,7 @@ __all__ = [
     "translate_records",
     "IMPORT_MODES",
     "COGXArchiveSource",
+    "GoogleMemorySource",
     "GraphitiSource",
     "LettaSource",
     "Mem0Source",

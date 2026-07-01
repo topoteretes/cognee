@@ -1,0 +1,22 @@
+[
+  {
+    "id": "memory-001",
+    "content": {
+      "role": "user",
+      "parts": [{ "text": "Alice works at Acme" }]
+    },
+    "timestamp": "2024-01-01T00:00:00Z",
+    "custom_metadata": {
+      "user_id": "u1",
+      "app_name": "career_assistant",
+      "session_id": "session_abc"
+    }
+  },
+  {
+    "id": "memory-002",
+    "content": {
+      "role": "user",
+      "parts": [{ "text": "from file" }]
+    }
+  }
+]
