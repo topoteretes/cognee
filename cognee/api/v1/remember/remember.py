@@ -59,6 +59,7 @@ class RememberKwargs(TypedDict, total=False):
     write_disposition: str
     query: str
     max_rows_per_table: int
+    dlt_content_column: str
     llm_config: Any
     embedding_config: Any
 
@@ -75,6 +76,7 @@ _ADD_ONLY = frozenset(
         "write_disposition",
         "query",
         "max_rows_per_table",
+        "dlt_content_column",
     }
 )
 _COGNIFY_ONLY = frozenset({"graph_model", "chunks_per_batch", "config", "temporal_cognify"})

@@ -278,7 +278,7 @@ await cognee.disconnect()
 
 ## Examples
 
-Browse more examples in the [`examples/`](examples/) folder — demos, guides, custom pipelines, and database configurations.
+Browse more examples in the [`examples/`](examples/) folder — demos, guides, custom pipelines, and database configurations. For data source connectors (Google Drive, and more to come), see the [Integrations Hub](docs/integrations/README.md).
 
 **Use Case 1 — Customer Support Agent**
 
