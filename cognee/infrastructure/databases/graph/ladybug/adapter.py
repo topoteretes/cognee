@@ -39,6 +39,56 @@ DEFAULT_KUZU_BUFFER_POOL_SIZE = 1 << 35  # 32 GB (must be a power of 2 for Kuzu)
 DEFAULT_KUZU_MAX_DB_SIZE = 1 << 35  # 32 GB (must be a power of 2 for Kuzu)
 
 
+def _weakly_connected_component_sizes(
+    node_ids: List[Any], edges: List[Tuple[Any, Any]]
+) -> List[int]:
+    """Return the sizes of the graph's weakly connected components, largest first.
+
+    The graph is treated as undirected (edge direction is ignored). Nodes without
+    any edge form their own singleton component, and edge endpoints missing from
+    ``node_ids`` are ignored defensively. Implemented as a self-contained union-find
+    so the whole component — at any distance — is counted, with no traversal-depth
+    cap and no dependency on a graph-algorithm extension.
+
+    Parameters:
+    -----------
+
+        - node_ids (List[Any]): Identifiers of every node in the graph.
+        - edges (List[Tuple[Any, Any]]): ``(source, target)`` endpoint id pairs.
+
+    Returns:
+    --------
+
+        - List[int]: Component sizes ordered from largest to smallest.
+    """
+    parent = {node_id: node_id for node_id in node_ids}
+
+    def find(node):
+        root = node
+        while parent[root] != root:
+            root = parent[root]
+        # Path compression keeps repeated lookups cheap on large graphs.
+        while parent[node] != root:
+            parent[node], node = root, parent[node]
+        return root
+
+    def union(left, right):
+        left_root, right_root = find(left), find(right)
+        if left_root != right_root:
+            parent[left_root] = right_root
+
+    for source, target in edges:
+        if source in parent and target in parent:
+            union(source, target)
+
+    sizes: Dict[Any, int] = {}
+    for node_id in node_ids:
+        root = find(node_id)
+        sizes[root] = sizes.get(root, 0) + 1
+
+    return sorted(sizes.values(), reverse=True)
+
+
 cache_config = get_cache_config()
 if cache_config.shared_ladybug_lock:
     from cognee.infrastructure.databases.cache.get_cache_engine import get_cache_engine
@@ -2466,13 +2516,14 @@ class LadybugAdapter(GraphDBInterface):
             num_edges = edge_count_result[0][0] if edge_count_result else 0
 
             # Calculate mandatory metrics
+            component_sizes = await self._get_size_of_connected_components()
             mandatory_metrics = {
                 "num_nodes": num_nodes,
                 "num_edges": num_edges,
                 "mean_degree": (2 * num_edges) / num_nodes if num_nodes != 0 else None,
                 "edge_density": num_edges / (num_nodes * (num_nodes - 1)) if num_nodes > 1 else 0,
-                "num_connected_components": await self._get_num_connected_components(),
-                "sizes_of_connected_components": await self._get_size_of_connected_components(),
+                "num_connected_components": len(component_sizes),
+                "sizes_of_connected_components": component_sizes,
             }
 
             if include_optional:
@@ -2512,32 +2563,24 @@ class LadybugAdapter(GraphDBInterface):
                 "avg_clustering": -1,
             }
 
+    async def _get_size_of_connected_components(self) -> List[int]:
+        """Get the sizes of all connected components in the graph, largest first.
+
+        The previous Cypher walked a bounded ``[:EDGE*1..3]`` neighborhood per node
+        and counted those per-node neighborhoods as "components", so it ignored
+        connectivity beyond 3 hops, never collapsed a component to a single entry,
+        and dropped isolated nodes. Instead, fetch every node id and edge endpoint
+        pair and compute true weakly-connected components with union-find.
+        """
+        node_rows = await self.query("MATCH (n:Node) RETURN n.id")
+        edge_rows = await self.query("MATCH (a:Node)-[:EDGE]->(b:Node) RETURN a.id, b.id")
+        node_ids = [row[0] for row in node_rows] if node_rows else []
+        edges = [(row[0], row[1]) for row in edge_rows] if edge_rows else []
+        return _weakly_connected_component_sizes(node_ids, edges)
+
     async def _get_num_connected_components(self) -> int:
         """Get the number of connected components in the graph."""
-        query = """
-        MATCH (n:Node)
-        WITH n, n.id AS node_id
-        MATCH path = (n)-[:EDGE*1..3]-(m)
-        WITH node_id, COLLECT(DISTINCT m.id) AS connected_nodes
-        WITH COLLECT(DISTINCT connected_nodes + [node_id]) AS components
-        RETURN SIZE(components) AS num_components
-        """
-        result = await self.query(query)
-        return result[0][0] if result else 0
-
-    async def _get_size_of_connected_components(self) -> List[int]:
-        """Get the sizes of all connected components in the graph."""
-        query = """
-        MATCH (n:Node)
-        WITH n, n.id AS node_id
-        MATCH path = (n)-[:EDGE*1..3]-(m)
-        WITH node_id, COLLECT(DISTINCT m.id) AS connected_nodes
-        WITH COLLECT(DISTINCT connected_nodes + [node_id]) AS components
-        UNWIND components AS component
-        RETURN SIZE(component) AS component_size
-        """
-        result = await self.query(query)
-        return [row[0] for row in result] if result else []
+        return len(await self._get_size_of_connected_components())
 
     async def _get_shortest_path_lengths(self) -> List[int]:
         """Get the lengths of shortest paths between all pairs of nodes."""
