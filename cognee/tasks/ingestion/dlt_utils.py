@@ -24,6 +24,25 @@ def is_dlt_sourced(metadata) -> bool:
     return False
 
 
+def is_dlt_document_mode(metadata) -> bool:
+    """Check whether a DLT-sourced item is in document mode (``dlt_mode == "document"``).
+
+    Accepts a dict, a JSON string, or an object with an ``external_metadata``
+    attribute. Set by ``resolve_dlt_sources`` for content-bearing rows (via
+    ``dlt_content_column``) so ``classify_documents`` routes them through
+    ``TextDocument`` instead of ``DltRowDocument``.
+    """
+    ext = getattr(metadata, "external_metadata", metadata)
+    if isinstance(ext, dict):
+        return ext.get("dlt_mode") == "document"
+    if isinstance(ext, str):
+        try:
+            return json.loads(ext).get("dlt_mode") == "document"
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return False
+
+
 def parse_external_metadata(obj) -> dict | None:
     """Parse external_metadata from an object (may be JSON string or dict).
 

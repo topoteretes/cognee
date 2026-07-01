@@ -55,6 +55,7 @@ async def resolve_dlt_sources(
     write_disposition = kwargs["write_disposition"] if "write_disposition" in kwargs else "replace"
     query = kwargs["query"] if "query" in kwargs else None
     max_rows_per_table = kwargs.get("max_rows_per_table")
+    content_column = kwargs.get("dlt_content_column")
 
     # --- Auto-detect structured data (CSV paths / connection strings) ------
     if isinstance(data, str):
@@ -144,8 +145,7 @@ async def resolve_dlt_sources(
     for row in all_rows:
         data_id = row_id_lookup[(row.table_name, row.primary_key_value, row.content_hash)]
 
-        enriched_text = _build_schema_context_text(row)
-        fk_references = _resolve_fk_references(row, fk_lookup, missing_fk_targets)
+        document_text = _get_document_mode_text(row, content_column)
         table_meta = _get_table_meta(row)
 
         ext_metadata = {
@@ -155,11 +155,22 @@ async def resolve_dlt_sources(
             "primary_key_value": row.primary_key_value,
             "schema_info": table_meta["schema_info"],
             "schema_hash": table_meta["schema_hash"],
-            "foreign_keys": table_meta["foreign_keys"],
-            "fk_references": fk_references,
             "dlt_db_name": table_meta["dlt_db_name"],
             "content_hash": row.content_hash,
         }
+
+        if document_text is not None:
+            # Document mode: content-bearing rows (e.g. Google Drive files) get
+            # normal chunking + LLM graph extraction via TextDocument, instead
+            # of the schema-wrapped, FK-only treatment DltRowDocument gives
+            # relational rows. See classify_documents.py's dlt_mode branch.
+            enriched_text = document_text
+            ext_metadata["dlt_mode"] = "document"
+        else:
+            enriched_text = _build_schema_context_text(row)
+            fk_references = _resolve_fk_references(row, fk_lookup, missing_fk_targets)
+            ext_metadata["foreign_keys"] = table_meta["foreign_keys"]
+            ext_metadata["fk_references"] = fk_references
 
         item = DataItem(
             data=enriched_text,
@@ -209,6 +220,22 @@ async def resolve_dlt_sources(
 # ---------------------------------------------------------------------------
 # Helpers (moved from ingest_data.py)
 # ---------------------------------------------------------------------------
+
+
+def _get_document_mode_text(dlt_row: DltRowData, content_column: Optional[str]) -> Optional[str]:
+    """Return the raw content for document-mode rows, or None for row-mode rows.
+
+    When ``content_column`` is set and present on this row, the row is treated
+    as a content-bearing document (e.g. a Google Drive file) rather than a
+    relational table row: the column value becomes the document text as-is,
+    with none of the schema/FK wrapping ``_build_schema_context_text`` adds.
+    """
+    if not content_column:
+        return None
+    value = dlt_row.row_data.get(content_column)
+    if value is None:
+        return None
+    return str(value)
 
 
 def _build_schema_context_text(dlt_row: DltRowData) -> str:

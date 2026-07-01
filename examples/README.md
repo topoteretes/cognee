@@ -88,6 +88,7 @@ Most runnable demos and backend examples use the v1.0 memory API (`remember`, `r
 | [`ontology_reference_vocabulary/ontology_as_reference_vocabulary_example.py`](demos/ontology_reference_vocabulary/ontology_as_reference_vocabulary_example.py) | Ontology as a constraining vocabulary for extraction |
 | [`web_url_content_ingestion_example.py`](demos/web_url_content_ingestion_example.py) | Crawl a URL and cognify the content |
 | [`dlt_ingestion_example.py`](demos/dlt_ingestion_example.py) | Ingest via [dlt](https://dlthub.com/) sources |
+| [`google_drive_ingestion_example.py`](demos/google_drive_ingestion_example.py) | Incrementally sync a Google Drive folder (Docs/Sheets/PDFs/text), with forget-on-delete |
 | [`multimedia_processing/multimedia_audio_image_processing_example.py`](demos/multimedia_processing/multimedia_audio_image_processing_example.py) | Audio + image ingestion |
 | [`simple_document_qa/simple_document_qa_demo.py`](demos/simple_document_qa/simple_document_qa_demo.py) | Q&A over a single document |
 | [`simple_relational_database_migration_example/simple_relational_database_migration_example.py`](demos/simple_relational_database_migration_example/simple_relational_database_migration_example.py) | SQL → graph (small schema) |
@@ -157,6 +158,7 @@ Same scripts, indexed by what they demonstrate.
 - [`demos/multimedia_processing/multimedia_audio_image_processing_example.py`](demos/multimedia_processing/multimedia_audio_image_processing_example.py)
 - [`demos/web_url_content_ingestion_example.py`](demos/web_url_content_ingestion_example.py)
 - [`demos/dlt_ingestion_example.py`](demos/dlt_ingestion_example.py)
+- [`demos/google_drive_ingestion_example.py`](demos/google_drive_ingestion_example.py)
 
 ### SQL → knowledge graph
 - [`custom_pipelines/relational_database_to_knowledge_graph_migration_example.py`](custom_pipelines/relational_database_to_knowledge_graph_migration_example.py)
