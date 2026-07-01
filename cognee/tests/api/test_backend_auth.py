@@ -161,3 +161,169 @@ class TestHashApiKey:
         assert stored_key == compute_hash(raw_key), (
             "Stored key should be SHA-256 hash of the raw key"
         )
+
+
+class TestSettingsAuthorization:
+    @pytest.fixture(scope="class")
+    def client(self):
+        from cognee.api.client import app
+
+        with TestClient(app) as client:
+            yield client
+
+    @staticmethod
+    def login(client, email: str, password: str) -> dict[str, str]:
+        response = client.post(
+            "/api/v1/auth/login",
+            data={"username": email, "password": password},
+        )
+        assert response.status_code == 200
+        return {"Authorization": f"Bearer {response.json()['access_token']}"}
+
+    def test_regular_user_cannot_read_or_modify_global_settings(self, client):
+        from cognee.infrastructure.databases.vector import get_vectordb_config
+        from cognee.infrastructure.llm import get_llm_config
+
+        email = f"settings-user-{uuid.uuid4()}@example.com"
+        password = "securepassword123!"
+        register_response = client.post(
+            "/api/v1/auth/register",
+            json={"email": email, "password": password},
+        )
+        assert register_response.status_code == 201
+        assert register_response.json()["is_superuser"] is False
+
+        headers = self.login(client, email, password)
+        llm_config = get_llm_config()
+        vector_config = get_vectordb_config()
+        original_llm = (
+            llm_config.llm_provider,
+            llm_config.llm_model,
+            llm_config.llm_api_key,
+        )
+        original_vector = (
+            vector_config.vector_db_provider,
+            vector_config.vector_db_url,
+            vector_config.vector_db_key,
+        )
+
+        get_response = client.get("/api/v1/settings", headers=headers)
+        post_response = client.post(
+            "/api/v1/settings",
+            headers=headers,
+            json={
+                "llm": {
+                    "provider": "openai",
+                    "model": "attacker-model",
+                    "api_key": "attacker-key",
+                },
+                "vector_db": {
+                    "provider": "lancedb",
+                    "url": "https://attacker.example/vector",
+                    "api_key": "attacker-vector-key",
+                },
+            },
+        )
+
+        assert get_response.status_code == 403
+        assert post_response.status_code == 403
+        assert (llm_config.llm_provider, llm_config.llm_model, llm_config.llm_api_key) == (
+            original_llm
+        )
+        assert (
+            vector_config.vector_db_provider,
+            vector_config.vector_db_url,
+            vector_config.vector_db_key,
+        ) == original_vector
+
+    def test_superuser_can_manage_settings(self, client):
+        from cognee.infrastructure.databases.vector import get_vectordb_config
+        from cognee.infrastructure.llm import get_llm_config
+        from cognee.modules.users.methods import create_user
+
+        email = f"settings-admin-{uuid.uuid4()}@example.com"
+        password = "securepassword123!"
+        asyncio.run(
+            create_user(
+                email=email,
+                password=password,
+                is_superuser=True,
+                is_verified=True,
+            )
+        )
+        headers = self.login(client, email, password)
+        llm_config = get_llm_config()
+        vector_config = get_vectordb_config()
+        original_llm = (
+            llm_config.llm_provider,
+            llm_config.llm_model,
+            llm_config.llm_api_key,
+            llm_config.llm_endpoint,
+        )
+        original_vector = (
+            vector_config.vector_db_provider,
+            vector_config.vector_db_url,
+            vector_config.vector_db_key,
+        )
+
+        try:
+            llm_config.llm_api_key = "existing-llm-key"
+            vector_config.vector_db_key = "existing-vector-key"
+
+            get_response = client.get("/api/v1/settings", headers=headers)
+            assert get_response.status_code == 200
+
+            post_response = client.post(
+                "/api/v1/settings",
+                headers=headers,
+                json={
+                    "llm": {
+                        "provider": "openai",
+                        "model": "updated-model",
+                        "api_key": "updated-key",
+                    },
+                    "vector_db": {
+                        "provider": "lancedb",
+                        "url": "updated-vector-url",
+                        "api_key": "updated-vector-key",
+                    },
+                },
+            )
+            assert post_response.status_code == 200
+            assert (llm_config.llm_provider, llm_config.llm_model, llm_config.llm_api_key) == (
+                "openai",
+                "updated-model",
+                "updated-key",
+            )
+            assert (
+                vector_config.vector_db_provider,
+                vector_config.vector_db_url,
+                vector_config.vector_db_key,
+            ) == ("lancedb", "updated-vector-url", "updated-vector-key")
+
+            invalid_response = client.post(
+                "/api/v1/settings",
+                headers=headers,
+                json={
+                    "llm": {
+                        "provider": "openai",
+                        "model": "updated-model",
+                        "api_key": "updated-key",
+                        "endpoint": "https://attacker.example/v1",
+                    }
+                },
+            )
+            assert invalid_response.status_code == 400
+            assert llm_config.llm_endpoint == original_llm[3]
+        finally:
+            (
+                llm_config.llm_provider,
+                llm_config.llm_model,
+                llm_config.llm_api_key,
+                llm_config.llm_endpoint,
+            ) = original_llm
+            (
+                vector_config.vector_db_provider,
+                vector_config.vector_db_url,
+                vector_config.vector_db_key,
+            ) = original_vector

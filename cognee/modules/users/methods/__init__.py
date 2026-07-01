@@ -9,6 +9,7 @@ from .get_authenticated_user import (
     get_authenticated_user,
     REQUIRE_AUTHENTICATION,
 )
+from .get_authenticated_superuser import get_authenticated_superuser
 from .get_principal_configuration import get_principal_configuration
 from .get_principal_configuration import get_principal_all_configuration
 from .store_principal_configuration import store_principal_configuration
