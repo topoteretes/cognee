@@ -87,6 +87,8 @@ async def run_tasks(
         payload=data,
     )
 
+    logger.info("Pipeline run started: `%s` (run: `%s`)", pipeline_name, pipeline_run_id)
+
     # Note: Setting of global context has to be done after yielding PipelineRunStarted due to running in
     #       background mode requiring the pipeline run started yield.
     async with set_database_global_context_variables(
@@ -175,6 +177,7 @@ async def run_tasks(
                 pipeline_run_id, pipeline_id, pipeline_name, dataset.id, data
             )
 
+            logger.info("Pipeline run completed: `%s` (run: `%s`)", pipeline_name, pipeline_run_id)
             yield PipelineRunCompleted(
                 pipeline_run_id=pipeline_run_id,
                 dataset_id=dataset.id,
@@ -202,6 +205,13 @@ async def run_tasks(
                 pipeline_run_id, pipeline_id, pipeline_name, dataset.id, data, error
             )
 
+            logger.error(
+                "Pipeline run errored: `%s` (run: `%s`)\n%s\n",
+                pipeline_name,
+                pipeline_run_id,
+                str(error),
+                exc_info=True,
+            )
             yield PipelineRunErrored(
                 pipeline_run_id=pipeline_run_id,
                 payload=repr(error),

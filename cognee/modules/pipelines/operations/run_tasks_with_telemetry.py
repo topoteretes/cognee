@@ -19,16 +19,19 @@ async def run_tasks_with_telemetry(
     tasks: list[Task], data, user: User, pipeline_name: str, ctx: Optional[PipelineContext] = None
 ):
     config = get_current_settings()
+    run_id = ctx.pipeline_run_id if ctx else "N/A"
+    pname = ctx.pipeline_name if ctx else pipeline_name
 
     logger.debug("\nRunning pipeline with configuration:\n%s\n", json.dumps(config, indent=1))
 
     try:
-        logger.info("Pipeline run started: `%s`", pipeline_name)
+        logger.info("Processing data item for pipeline `%s` (run: `%s`)", pname, run_id)
         send_telemetry(
-            "Pipeline Run Started",
+            "Processing Data Item",
             user.id,
             additional_properties={
-                "pipeline_name": str(pipeline_name),
+                "pipeline_name": str(pname),
+                "pipeline_run_id": str(run_id),
                 "cognee_version": cognee_version,
                 "tenant_id": str(user.tenant_id) if user.tenant_id else "Single User Tenant",
             }
@@ -38,12 +41,13 @@ async def run_tasks_with_telemetry(
         async for result in run_tasks_base(tasks, data, user, ctx):
             yield result
 
-        logger.info("Pipeline run completed: `%s`", pipeline_name)
+        logger.info("Finished processing data item for pipeline `%s` (run: `%s`)", pname, run_id)
         send_telemetry(
-            "Pipeline Run Completed",
+            "Data Item Processed",
             user.id,
             additional_properties={
-                "pipeline_name": str(pipeline_name),
+                "pipeline_name": str(pname),
+                "pipeline_run_id": str(run_id),
                 "cognee_version": cognee_version,
                 "tenant_id": str(user.tenant_id) if user.tenant_id else "Single User Tenant",
             }
@@ -51,16 +55,18 @@ async def run_tasks_with_telemetry(
         )
     except Exception as error:
         logger.error(
-            "Pipeline run errored: `%s`\n%s\n",
-            pipeline_name,
+            "Error processing data item for pipeline `%s` (run: `%s`)\n%s\n",
+            pname,
+            run_id,
             str(error),
             exc_info=True,
         )
         send_telemetry(
-            "Pipeline Run Errored",
+            "Data Item Errored",
             user.id,
             additional_properties={
-                "pipeline_name": str(pipeline_name),
+                "pipeline_name": str(pname),
+                "pipeline_run_id": str(run_id),
                 "cognee_version": cognee_version,
                 "tenant_id": str(user.tenant_id) if user.tenant_id else "Single User Tenant",
             }
