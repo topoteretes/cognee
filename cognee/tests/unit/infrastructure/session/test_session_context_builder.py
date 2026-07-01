@@ -28,7 +28,7 @@ def _entry(section, content, **kwargs):
         section=section,
         content=content,
         normalized_content=normalize_content(content),
-        created_at=kwargs.pop("created_at", datetime.utcnow().isoformat()),
+        created_at=kwargs.pop("created_at", datetime.now(datetime.timezone.utc).isoformat()),
         **kwargs,
     )
 

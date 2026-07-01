@@ -1,7 +1,9 @@
 import json
 import os
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
+
+
 
 import diskcache as dc
 from pydantic import ValidationError
@@ -66,7 +68,8 @@ class FSCacheAdapter(CacheDBInterface):
     ) -> dict:
         """Serialize one QA entry into the normalized cache payload shape."""
         entry = SessionQAEntry(
-            time=datetime.utcnow().isoformat(),
+            time=datetime.now(timezone.utc).isoformat(),
+
             question=question,
             context=context,
             answer=answer,

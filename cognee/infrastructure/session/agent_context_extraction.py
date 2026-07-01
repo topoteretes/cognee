@@ -182,7 +182,7 @@ async def _save_processed_trace_count(
         "id": TRACE_EXTRACTION_STATE_ID,
         "kind": TRACE_EXTRACTION_STATE_KIND,
         "processed_trace_count": max(0, int(processed_trace_count)),
-        "updated_at": datetime.utcnow().isoformat(),
+        "updated_at": datetime.now(datetime.timezone.utc).isoformat(),
     }
     updated = await session_manager.update_session_context_entry(
         user_id=user_id,

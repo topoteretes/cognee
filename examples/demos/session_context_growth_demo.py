@@ -303,7 +303,7 @@ class InMemorySessionCache:
     ):
         self.qa_entries[self._key(user_id, session_id)].append(
             SessionQAEntry(
-                time=datetime.utcnow().isoformat(),
+                time=datetime.now(datetime.timezone.utc).isoformat(),
                 qa_id=qa_id,
                 question=question,
                 context=context,
