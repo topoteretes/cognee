@@ -1,0 +1,46 @@
+name: Fly.io Deploy E2E
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '30 3 * * *'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fly-deploy-e2e:
+    name: Deploy to Fly.io and run golden_flow
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+      FLY_VOLUME_SIZE: '1'
+      FLY_REGION: 'iad'
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+
+      - name: Install flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Run Fly.io deploy e2e
+        run: uv run pytest cognee/tests/deployment/test_fly_deploy.py -m deployment -v
+
+      - name: Ensure ephemeral app is destroyed
+        if: always()
+        run: |
+          APP_NAME="cognee-ci-${GITHUB_RUN_ID}"
+          if [ -n "${FLY_API_TOKEN}" ]; then
+            fly apps destroy "${APP_NAME}" --yes || true
+          fi
