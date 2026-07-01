@@ -1,0 +1,5 @@
+# #product-memory: Weekly launch notes
+[ana@topoteretes.com, 2026-06-10T09:05] @veljko@topoteretes.com can you send the two launch risks you mentioned yesterday? I want to fold them into the weekly launch notes by EOW, Friday 2026-06-12 at 16:00.
+[marko@topoteretes.com, 2026-06-10T09:11] Especially the risk about OAuth review, please. That one changes the rollout order.
+[veljko@topoteretes.com, 2026-06-10T09:33] Yes. The risks are: OAuth review can slip if we do not get app verification back by Thursday, and billing export still needs a dry run with production-like data.
+[ana@topoteretes.com, 2026-06-10T09:41] Great, I added those. No more action needed from Veljko on launch notes.

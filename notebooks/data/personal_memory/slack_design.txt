@@ -1,0 +1,5 @@
+# #design-studio: Portfolio screenshots for Friday demo
+[mina@topoteretes.com, 2026-06-11T09:12] @veljko@topoteretes.com can you upload three screenshots from the new memory graph flow before EOD 2026-06-11? I need them for the Friday demo deck.
+[nikola@topoteretes.com, 2026-06-11T09:18] The deck is in Drive under Demo / June / Memory graph.
+[mina@topoteretes.com, 2026-06-11T11:03] Reminder that the screenshots should show the inbox item, the extracted obligation, and the final reminder card.
+[nikola@topoteretes.com, 2026-06-11T14:26] I updated slide 4, but I still do not have Veljko's screenshots.
