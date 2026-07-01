@@ -137,7 +137,13 @@ class PostgresAdapter(GraphDBInterface):
         await self.engine.dispose(close=True)
 
     async def initialize(self) -> None:
-        """Create tables and indexes if they do not exist."""
+        """Create tables and indexes if they do not exist.
+
+        This creates a fresh schema (including the graph-provenance columns defined
+        in tables.py). Adding those columns to a graph_node/graph_edge left over from
+        a pre-provenance release is handled by the ``postgres_graph_provenance_columns``
+        data migration (create_all cannot ALTER an existing table).
+        """
         async with self.engine.begin() as conn:
             await conn.run_sync(_meta.create_all, checkfirst=True)
 
