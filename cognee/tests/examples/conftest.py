@@ -19,7 +19,7 @@ entire test session, keeping the suite fast.
 from __future__ import annotations
 
 import inspect
-from typing import Any
+from typing import Any, Union
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -117,7 +117,15 @@ def _build_minimal_instance(response_model: type) -> Any:
             # dict
             elif origin is dict or annotation is dict:
                 defaults[field_name] = {}
-            # Optional / union → skip (None is default)
+            # Nested Pydantic model (e.g. DataPoint subclass) → recurse
+            elif annotation is not None and hasattr(annotation, "model_fields"):
+                defaults[field_name] = _build_minimal_instance(annotation)
+            # Optional[X] / Union[X, None] → recurse into first non-None arg
+            elif origin is Union:
+                inner_args = [a for a in getattr(annotation, "__args__", ()) if a is not type(None)]
+                if inner_args and hasattr(inner_args[0], "model_fields"):
+                    defaults[field_name] = _build_minimal_instance(inner_args[0])
+            # else: skip (None is default)
         try:
             return response_model(**defaults)
         except Exception:
