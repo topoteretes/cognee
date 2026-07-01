@@ -36,12 +36,12 @@ def _retry_open_locked(ladybug, kwargs, original_exc):
     """Re-attempt ``ladybug.Database(**kwargs)`` after an initial lock-held
     failure, with bounded exponential backoff.
 
-    Backstop for the brief window where another worker for the same DB path is
-    still releasing its on-disk file lock (e.g. a cache eviction whose close is
-    driven by a GC finalizer and so can't be cleanly awaited by the creator).
-    The OS frees a dead process's file locks immediately, so once the previous
-    worker exits the next attempt succeeds. Only the lock-held error is retried;
-    any other ``RuntimeError`` propagates unchanged.
+    This is a backstop for the brief window where another worker for the same
+    DB path is still releasing its on-disk file lock (e.g. a cache eviction
+    whose close is driven by a GC finalizer and so can't be cleanly awaited by
+    the creator). The OS frees a dead process's file locks immediately, so once
+    the previous worker exits the next attempt succeeds. Only the lock-held
+    error is retried; any other ``RuntimeError`` propagates unchanged.
 
     ``original_exc`` is the first lock-held failure the caller already saw; it is
     re-raised when retries are exhausted — or immediately when retries are

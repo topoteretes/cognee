@@ -2,7 +2,6 @@
 
 import inspect
 import os
-import weakref
 from numbers import Number
 
 from cognee.infrastructure.databases.utils.closing_lru_cache import closing_lru_cache
@@ -15,15 +14,6 @@ from .graph_db_interface import GraphDBInterface
 from .supported_databases import supported_databases
 
 logger = get_logger("GraphEngine")
-
-# Engines whose idempotent ``initialize()`` (schema/constraint setup for
-# Postgres/Neo4j) has already run this process. Keyed by the leased engine proxy
-# (stable per cache entry) via a WeakSet so entries drop automatically when the
-# engine is evicted + collected, and a freshly created engine for the same key
-# re-initializes. Replaces the old ``_GraphEngineHandle._last_initialized_id``
-# guard so we don't issue a redundant ``initialize()`` round-trip on every
-# ``get_graph_engine()`` resolution. (Ladybug has no ``initialize`` — no effect.)
-_INITIALIZED_ENGINES: "weakref.WeakSet" = weakref.WeakSet()
 
 
 def _normalize_graph_database_provider(provider: str) -> str:
@@ -66,31 +56,140 @@ def _normalize_optional_create_graph_engine_params(params: dict) -> dict:
     return normalized
 
 
-async def get_graph_engine() -> GraphDBInterface:
-    """Resolve the graph engine for the current context and return the live
-    adapter (a leased proxy from ``closing_lru_cache``).
+class _GraphEngineHandle:
+    """Stable reference to the current graph engine that survives cache invalidation.
 
-    Resolution is asynchronous and goes through :func:`acreate_graph_engine` so
-    that engine *creation* can ``await`` an in-flight close of the same cache
-    key before constructing — see that function for why the factory is async.
-    This is what makes the fix for the subprocess DB file-lock race (#3708)
-    deterministic: a re-created engine never opens a DB path whose previous
-    worker is still shutting down and holding the lock.
+    Database engine instances are cached via ``closing_lru_cache``.  Several
+    operations invalidate that cache — ``prune_system`` calls ``cache_clear()``,
+    ``delete_dataset`` evicts individual entries, and the ``__aexit__`` of
+    ``set_database_global_context_variables`` evicts subprocess-mode engines to
+    release file locks.  When an entry is evicted the underlying adapter is
+    closed, so any direct proxy reference becomes a dead object that raises
+    "adapter is closed" on use.
 
-    Note: the returned adapter is a live reference for the *current* async
-    scope. Callers should not stash it on a long-lived object and reuse it
-    across a cache-invalidating operation (prune / delete / per-dataset context
-    exit); call ``get_graph_engine()`` again after such an operation.
+    This handle solves the problem by deferring resolution: every attribute
+    access calls ``create_graph_engine(**config)`` which either returns the
+    existing cached proxy (fast path) or transparently creates a fresh adapter
+    if the old one was evicted (recovery path).  Code that stores the return
+    value of ``get_graph_engine()`` — even across ``cognify``, ``search``,
+    ``prune``, or ``delete`` calls — always reaches a live adapter without
+    needing to re-call ``get_graph_engine()``.
+
+    For adapters that expose ``initialize()`` (Postgres, Neo4j), the handle
+    tracks which engine proxy was last initialized and re-runs the idempotent
+    schema setup when the underlying engine changes.
+
+    Known limitation (subprocess + exclusive file lock, e.g. Ladybug): the cache
+    leases a single shared proxy per entry, so two concurrently-held handles for
+    the same DB path pin the *same* proxy. If that entry is evicted while one
+    handle keeps holding it and never re-resolves (a long-lived, idle second
+    handle), the old worker's close stays deferred — it does not release the
+    file lock, and a fresh engine for the same path falls back to the worker's
+    open-retry (``SUBPROCESS_OPEN_LOCK_RETRIES``) rather than the deterministic
+    await-the-close path. This is inherent to "one exclusive lock per path with
+    concurrent live holders" and is narrow in practice: the primary multi-tenant
+    teardown path (``dataset_queue._teardown_subprocess_engines``) ``await``s
+    ``engine.close()`` to completion before any re-creation, and a handle that is
+    accessed again or garbage-collected drops its stale pin and converges. A
+    permanently-idle second handle is the only unrescued case.
     """
+
+    __slots__ = ("_config", "_last_initialized_id", "_pinned")
+
+    def __init__(self, config: dict):
+        object.__setattr__(self, "_config", config)
+        object.__setattr__(self, "_last_initialized_id", None)
+        # Pinned leased engine proxy. Holding it avoids re-entering the cache on
+        # every attribute access (and the create-vs-close race that re-entry
+        # caused). It is dropped + re-resolved once the pin is no longer the
+        # live cache entry (see ``_pin_is_live``) so prune/delete eviction still
+        # recovers a fresh engine instead of keeping an evicted DB worker alive.
+        object.__setattr__(self, "_pinned", None)
+
+    @staticmethod
+    def _pin_is_live(engine) -> bool:
+        """Whether a pinned engine is still the live cached value and safe to
+        reuse. A leased proxy whose entry was evicted must be released so its
+        deferred close can run (otherwise a pinned handle would keep an evicted
+        Ladybug worker alive holding the file lock, blocking a new worker)."""
+        active = getattr(engine, "_leased_entry_active", None)
+        if active is not None:
+            try:
+                if not active():
+                    return False
+            except Exception:
+                return False
+        # Subprocess adapters latch ``_permanently_closed`` on close.
+        if getattr(engine, "_permanently_closed", False):
+            return False
+        return True
+
+    def _release_stale_pin(self, pinned) -> None:
+        """Drop the stale pinned proxy BEFORE re-resolving a replacement.
+
+        Critical for the lock race: the pinned proxy is (typically) the last
+        reference keeping an evicted adapter alive. Releasing it lets the
+        deferred close start — and a subprocess adapter's close runs off-loop,
+        releasing the on-disk file lock — *before* a new worker opens the same
+        path. Holding the pin across the re-resolution would keep the old worker
+        alive and the new one would fail to take the lock.
+        """
+        object.__setattr__(self, "_pinned", None)
+        del pinned
+
+    def _engine(self):
+        """Synchronous resolution used on the hot attribute-access path. Reuses
+        the pin when live; otherwise drops it and re-resolves through the (sync)
+        cache. A mid-flow re-resolution can't await an in-flight close — the
+        off-loop close + worker open-retry backstop cover that residual race."""
+        pinned = self._pinned
+        if pinned is not None and self._pin_is_live(pinned):
+            return pinned
+        if pinned is not None:
+            self._release_stale_pin(pinned)
+            pinned = None
+        engine = create_graph_engine(**self._config)
+        object.__setattr__(self, "_pinned", engine)
+        return engine
+
+    async def _aengine(self):
+        """Async resolution used at initialization. Goes through the cache's
+        async acquisition path so it waits for any in-flight close of the same
+        key before constructing a new engine + pinning it."""
+        pinned = self._pinned
+        if pinned is not None and self._pin_is_live(pinned):
+            return pinned
+        if pinned is not None:
+            self._release_stale_pin(pinned)
+            pinned = None
+        engine = await acreate_graph_engine(**self._config)
+        object.__setattr__(self, "_pinned", engine)
+        return engine
+
+    async def _ensure_initialized(self):
+        engine = await self._aengine()
+        engine_id = id(engine)
+        if engine_id != self._last_initialized_id and hasattr(engine, "initialize"):
+            await engine.initialize()
+        object.__setattr__(self, "_last_initialized_id", engine_id)
+
+    @property
+    def __class__(self):
+        return self._engine().__class__
+
+    def __getattr__(self, name):
+        return getattr(self._engine(), name)
+
+    def __repr__(self):
+        return f"<GraphEngineHandle config={self._config!r}>"
+
+
+async def get_graph_engine() -> GraphDBInterface:
+    """Factory function to get the appropriate graph client based on the graph type."""
     config = get_graph_context_config()
-    engine = await acreate_graph_engine(**config)
-    # Run the idempotent schema/constraint setup once per engine instance, not on
-    # every resolve — guarded by ``_INITIALIZED_ENGINES`` (membership is by proxy
-    # identity, so a re-created engine after eviction initializes again).
-    if hasattr(engine, "initialize") and engine not in _INITIALIZED_ENGINES:
-        await engine.initialize()
-        _INITIALIZED_ENGINES.add(engine)
-    return engine
+    handle = _GraphEngineHandle(config)
+    await handle._ensure_initialized()
+    return handle
 
 
 def _make_pghybrid_adapter():
@@ -106,7 +205,7 @@ def _make_pghybrid_adapter():
 
 
 def _resolve_graph_engine_args(params: dict) -> tuple:
-    """Normalize engine parameters and return the positional argument tuple
+    """Normalize the engine parameters and return the positional argument tuple
     passed to ``_create_graph_engine``.
 
     Shared by the sync (:func:`create_graph_engine`) and async
@@ -155,7 +254,6 @@ def create_graph_engine(
     Wrapper function to call create graph engine with caching.
     For a detailed description, see _create_graph_engine.
     """
-
     # Check USE_UNIFIED_PROVIDER outside the cache so it's always re-read
     if os.environ.get("USE_UNIFIED_PROVIDER", "") == "pghybrid":
         return _make_pghybrid_adapter()
@@ -164,29 +262,12 @@ def create_graph_engine(
 
 
 async def acreate_graph_engine(**kwargs):
-    """Async counterpart of :func:`create_graph_engine`, used as the primary
-    creation path (via :func:`get_graph_engine`).
+    """Async counterpart of :func:`create_graph_engine` that waits for any
+    in-flight close of the same cache key before constructing a new engine.
 
-    Why the factory is async
-    ------------------------
-    The subprocess-backed graph engine (Ladybug/Kuzu) holds an exclusive on-disk
-    file lock for the worker's lifetime. Engines are cached in
-    ``closing_lru_cache``; when an entry is evicted its ``close()`` (worker
-    shutdown, which releases the lock) runs asynchronously. A *synchronous*
-    factory has no way to wait for that close, so re-creating an engine for the
-    same DB path could spawn a second worker that races the still-closing first
-    one and fails with "Could not set lock on file" (#3708).
-
-    Making creation ``async`` lets the cache's ``aget_or_create`` **await the
-    in-flight close of the same key on the caller's event loop** before
-    constructing — the awaiting creator yields the loop so the close task runs
-    to completion (worker exits, lock released) first. This is what removes the
-    race deterministically, without needing an off-loop close thread or a
-    re-resolving engine handle.
-
-    Delegates to :func:`create_graph_engine`'s normalization
-    (:func:`_resolve_graph_engine_args`) so the cache key is identical to the
-    sync path.
+    Used by ``get_graph_engine``'s handle at initialization so a freshly evicted
+    subprocess engine's worker has fully exited (releasing its file lock) before
+    a new worker opens the same DB path.
     """
     if os.environ.get("USE_UNIFIED_PROVIDER", "") == "pghybrid":
         return _make_pghybrid_adapter()

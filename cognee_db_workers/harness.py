@@ -67,9 +67,9 @@ _PROCESS_CHECK_INTERVAL = 1.0
 
 # Number of times the worker retries opening a database that is currently
 # lock-held by another (still-shutting-down) worker for the same file, and the
-# initial backoff between attempts (seconds, exponential). Backstop for the
-# brief window where one worker is releasing a file lock while another opens the
-# same path; see ``kuzu_worker._open_database``. Override with
+# initial backoff between attempts (seconds, exponential). These exist as a
+# backstop for the brief window where one worker is releasing a file lock while
+# another opens the same path; see ``kuzu_worker._open_database``. Override with
 # ``SUBPROCESS_OPEN_LOCK_RETRIES`` / ``SUBPROCESS_OPEN_LOCK_BACKOFF``.
 OPEN_LOCK_RETRIES = _env_int("SUBPROCESS_OPEN_LOCK_RETRIES", 10)
 OPEN_LOCK_BACKOFF = _env_float("SUBPROCESS_OPEN_LOCK_BACKOFF", 0.1) or 0.1
@@ -1067,7 +1067,8 @@ class SubprocessSession:
     def _terminate(self, timeout: float = 2.0) -> None:
         """Force-terminate the worker process and wait until it has actually
         exited. Idempotent and serialized by ``self._terminate_lock`` so
-        concurrent ``shutdown`` / ``__del__`` / ``clean`` paths can't race.
+        concurrent ``shutdown`` / ``__del__`` / ``clean`` paths can't race each
+        other.
 
         The escalating join/terminate/kill chain is followed by a bounded poll
         that does not return while ``is_alive()`` is still True. This matters
