@@ -154,6 +154,7 @@ graphiti = ["graphiti-core>=0.28.0"]
 # Always use comaptible fixed versions of these two dependencies
 aws = ["s3fs[boto3]==2025.3.2"]
 dlt = ["dlt[sqlalchemy]>=1.9.0,<2"]
+notion = ["dlt[sqlalchemy]>=1.9.0,<2", "notion-client>=2.2.1,<3"]
 baml = ["baml-py (==0.206.0)"]
 dev = [
     "pytest>=7.4.0,<8",
