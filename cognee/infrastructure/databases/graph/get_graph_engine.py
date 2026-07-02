@@ -593,6 +593,26 @@ def _create_graph_engine(
         return NeptuneAnalyticsAdapter(
             graph_id=graph_identifier,
         )
+    elif graph_database_provider == "turso":
+        if not graph_database_url:
+            raise EnvironmentError("Missing required Turso database URL.")
+
+        auth_token = graph_database_key if graph_database_key else ""
+
+        if auth_token:
+            raise NotImplementedError(
+                "Remote Turso support is not yet implemented. "
+                "Set GRAPH_DATABASE_KEY to an empty string to use local SQLite mode."
+            )
+        else:
+            # Local mode — graph_database_url must be an absolute path.
+            # sqlite+aioturso:/// + /abs/path => sqlite+aioturso:////abs/path (4 slashes = absolute)
+            # pyturso provides Rust-backed async via turso.aio worker thread (same model as aiosqlite).
+            connection_string: str = f"sqlite+aioturso:///{graph_database_url}"
+
+        from .turso.adapter import TursoAdapter
+
+        return TursoAdapter(connection_string=connection_string)
 
     all_providers = list(supported_databases.keys()) + [
         "neo4j",
@@ -603,6 +623,7 @@ def _create_graph_engine(
         "postgres",
         "neptune",
         "neptune_analytics",
+        "turso",
     ]
     raise EnvironmentError(
         f"Unsupported graph database provider: {graph_database_provider}. "

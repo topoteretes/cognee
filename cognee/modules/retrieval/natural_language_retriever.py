@@ -107,11 +107,12 @@ class NaturalLanguageRetriever(BaseRetriever):
     async def get_retrieved_objects(self, query: str) -> Any:
         graph_engine = await get_graph_engine()
 
-        # Postgres backends do not support Cypher generation/execution
+        # Postgres and Turso backends do not support Cypher generation/execution
         from cognee.infrastructure.databases.graph.postgres.adapter import PostgresAdapter
         from cognee.infrastructure.databases.hybrid.postgres.adapter import PostgresHybridAdapter
+        from cognee.infrastructure.databases.graph.turso.adapter import TursoAdapter
 
-        if isinstance(graph_engine, (PostgresAdapter, PostgresHybridAdapter)):
+        if isinstance(graph_engine, (PostgresAdapter, PostgresHybridAdapter, TursoAdapter)):
             raise SearchTypeNotSupported(
                 "Natural language search is not supported with the Postgres graph backend. "
                 "This retriever generates and executes Cypher queries, which require a "
