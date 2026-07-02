@@ -382,6 +382,7 @@ async def recall(
     neighborhood_depth: int | None = None,
     neighborhood_seed_top_k: int | None = None,
     include_references: bool = False,
+    include_subgraph: bool = False,
     user: object | None = None,
     llm_config: LLMConfig | None = None,
     embedding_config: EmbeddingConfig | None = None,
@@ -613,13 +614,16 @@ async def recall(
                 neighborhood_depth=neighborhood_depth,
                 neighborhood_seed_top_k=neighborhood_seed_top_k,
                 include_references=include_references,
+                include_subgraph=include_subgraph,
                 llm_config=llm_config,
                 embedding_config=embedding_config,
             )
 
             tagged = []
             for r in graph_results:
-                items: list[SearchResultItem] = normalize_search_payload(r)
+                items: list[SearchResultItem] = normalize_search_payload(
+                    r, include_subgraph=include_subgraph
+                )
                 tagged.extend(
                     [ResponseGraphEntry(**item.model_dump(), source="graph") for item in items]
                 )

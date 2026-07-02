@@ -28,6 +28,8 @@ class SearchResultPayload(BaseModel):
     dataset_id: Optional[UUID] = None
     dataset_tenant_id: Optional[UUID] = None
 
+    retrieved_subgraph: Optional[Any] = None
+
     @field_serializer("result_object")
     def serialize_complex_types(self, v: Any):
         """

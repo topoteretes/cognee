@@ -95,6 +95,13 @@ class SearchPayloadDTO(InDTO):
         default=False,
         description="Attach source references to completion-type results.",
     )
+    include_subgraph: bool = Field(
+        default=False,
+        description=(
+            "Include a lightweight stub of the retrieved graph subgraph "
+            "(nodes + edges) in the response for graph-based search types."
+        ),
+    )
 
 
 def get_search_router() -> APIRouter:
@@ -215,6 +222,7 @@ def get_search_router() -> APIRouter:
                 "tools": payload.tools,
                 "max_iter": payload.max_iter,
                 "include_references": payload.include_references,
+                "include_subgraph": payload.include_subgraph,
                 "cognee_version": cognee_version,
             },
         )
@@ -239,6 +247,7 @@ def get_search_router() -> APIRouter:
                 tools=payload.tools,
                 max_iter=payload.max_iter,
                 include_references=payload.include_references,
+                include_subgraph=payload.include_subgraph,
             )
 
             return jsonable_encoder(results)

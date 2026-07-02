@@ -53,6 +53,7 @@ async def search(
     tools: Optional[List[str]] = None,
     max_iter: Optional[int] = None,
     include_references: bool = False,
+    include_subgraph: bool = False,
     llm_config: Optional[LLMConfig] = None,
     embedding_config: Optional[EmbeddingConfig] = None,
 ) -> List[SearchResult]:
@@ -330,6 +331,7 @@ async def search(
             neighborhood_depth=neighborhood_depth,
             neighborhood_seed_top_k=neighborhood_seed_top_k,
             include_references=include_references,
+            include_subgraph=include_subgraph,
             llm_config=llm_config,
             embedding_config=embedding_config,
         )
