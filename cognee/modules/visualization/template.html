@@ -272,9 +272,15 @@ canvas:active{cursor:grabbing}
 <div id="semantic-view" style="display:none;position:fixed;inset:0;padding:56px 0 0;overflow:hidden;z-index:900;background:var(--bg);">
   <div id="semantic-header" style="position:absolute;top:56px;left:0;right:0;padding:12px 28px;display:flex;align-items:center;gap:16px;">
     <div id="semantic-status" style="font-size:13px;color:var(--text2);"></div>
-    <div id="semantic-controls" style="margin-left:auto;display:flex;gap:4px;">
-      <button class="sem-color-btn active" data-colorby="cluster" style="background:var(--accent);color:#fff;border:none;padding:5px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;">Cluster</button>
-      <button class="sem-color-btn" data-colorby="type" style="background:var(--surface);color:var(--text2);border:1px solid var(--border);padding:5px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;">Type</button>
+    <div id="semantic-controls" style="margin-left:auto;display:flex;gap:16px;">
+      <div style="display:flex;gap:4px;">
+        <button class="sem-layout-btn active" data-layout="semantic" style="background:var(--accent);color:#fff;border:none;padding:5px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;">Semantic</button>
+        <button class="sem-layout-btn" data-layout="structural" style="background:var(--surface);color:var(--text2);border:1px solid var(--border);padding:5px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;">Structural</button>
+      </div>
+      <div style="display:flex;gap:4px;">
+        <button class="sem-color-btn active" data-colorby="cluster" style="background:var(--accent);color:#fff;border:none;padding:5px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;">Cluster</button>
+        <button class="sem-color-btn" data-colorby="type" style="background:var(--surface);color:var(--text2);border:1px solid var(--border);padding:5px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;">Type</button>
+      </div>
     </div>
   </div>
   <div id="semantic-diagram-section" style="position:absolute;top:100px;left:0;right:0;bottom:0;overflow:hidden;">

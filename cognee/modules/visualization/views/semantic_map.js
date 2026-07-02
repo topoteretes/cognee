@@ -21,9 +21,32 @@
   }
 
   let colorBy = 'cluster';
+  let layoutMode = 'semantic';
   let zoomBehavior = null;
   let isolatedCluster = null;
   let isolatedType = null;
+
+  // Structural layout: relax the same nodes over graph topology (window._vizLinks)
+  // with a bounded, synchronous force sim. This is the one place a sim is allowed —
+  // it explicitly leaves the pinned semantic view. Bounded by the 2000-node payload
+  // and a fixed tick count, seeded from the semantic screen positions.
+  function structuralPositions(ids, semanticScreen, width, height) {
+    const idSet = new Set(ids);
+    const nodes = ids.map((id) => ({ id, x: semanticScreen[id].x, y: semanticScreen[id].y }));
+    const links = (window._vizLinks || [])
+      .filter((l) => idSet.has(String(l.source)) && idSet.has(String(l.target)))
+      .map((l) => ({ source: String(l.source), target: String(l.target) }));
+    const sim = d3.forceSimulation(nodes)
+      .force('link', d3.forceLink(links).id((d) => d.id).distance(40))
+      .force('charge', d3.forceManyBody().strength(-30))
+      .force('center', d3.forceCenter(width / 2, height / 2))
+      .force('collide', d3.forceCollide(8))
+      .stop();
+    for (let i = 0; i < 200; i++) sim.tick();
+    const out = {};
+    nodes.forEach((n) => { out[n.id] = { x: n.x, y: n.y }; });
+    return out;
+  }
 
   function clusterColor(clusters) {
     // Deterministic palette indexed by cluster id.
@@ -118,18 +141,29 @@
     const sx = d3.scaleLinear().domain([-1.2, 1.2]).range([pad, width - pad]);
     const sy = d3.scaleLinear().domain([-1.2, 1.2]).range([height - pad, pad]);
 
+    // Screen positions: pinned embedding projection (semantic) or a bounded
+    // force relaxation over the graph topology (structural). Structural seeds
+    // from the semantic screen positions so the toggle reads as a relax, not a
+    // jump; Semantic snaps straight back to the pinned coordinates.
+    const semanticScreen = {};
+    ids.forEach((id) => {
+      semanticScreen[id] = { x: sx(positions[id].x), y: sy(positions[id].y) };
+    });
+    const screenPos =
+      layoutMode === 'structural'
+        ? structuralPositions(ids, semanticScreen, width, height)
+        : semanticScreen;
+
     const prevTransform = preserve ? d3.zoomTransform(svgEl) : d3.zoomIdentity;
     svg.selectAll('*').remove();
     const g = svg.append('g');
 
     // Cluster labels at the on-screen centroid of each cluster's members.
     clusters.forEach((c) => {
-      const pts = (c.node_ids || []).map((id) => positions[id]).filter(Boolean);
+      const pts = (c.node_ids || []).map((id) => screenPos[id]).filter(Boolean);
       if (!pts.length) return;
-      const cx = d3.mean(pts, (p) => p.x);
-      const cy = d3.mean(pts, (p) => p.y);
       g.append('text')
-        .attr('x', sx(cx)).attr('y', sy(cy))
+        .attr('x', d3.mean(pts, (p) => p.x)).attr('y', d3.mean(pts, (p) => p.y))
         .attr('text-anchor', 'middle')
         .attr('fill', clusterColors[c.id])
         .attr('font-size', 13).attr('font-weight', 700)
@@ -139,8 +173,8 @@
     });
 
     const circles = g.selectAll('circle').data(ids, (d) => d).enter().append('circle')
-      .attr('cx', (id) => sx(positions[id].x))
-      .attr('cy', (id) => sy(positions[id].y))
+      .attr('cx', (id) => screenPos[id].x)
+      .attr('cy', (id) => screenPos[id].y)
       .attr('r', 5)
       .attr('fill', (id) => colorForNode(id, clusterColors, nodeCluster))
       .attr('stroke', 'rgba(0,0,0,0.25)').attr('stroke-width', 0.5)
@@ -225,17 +259,30 @@
     render(preserve);
   };
 
+  function setActive(group, btn) {
+    document.querySelectorAll(group).forEach((b) => {
+      b.classList.remove('active');
+      b.style.background = 'var(--surface)'; b.style.color = 'var(--text2)'; b.style.border = '1px solid var(--border)';
+    });
+    btn.classList.add('active');
+    btn.style.background = 'var(--accent)'; btn.style.color = '#fff'; btn.style.border = 'none';
+  }
+
   // Color-mode toggle (Cluster / Type).
   document.querySelectorAll('.sem-color-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
-      document.querySelectorAll('.sem-color-btn').forEach((b) => {
-        b.classList.remove('active');
-        b.style.background = 'var(--surface)'; b.style.color = 'var(--text2)'; b.style.border = '1px solid var(--border)';
-      });
-      btn.classList.add('active');
-      btn.style.background = 'var(--accent)'; btn.style.color = '#fff'; btn.style.border = 'none';
+      setActive('.sem-color-btn', btn);
       colorBy = btn.dataset.colorby;
       isolatedCluster = null; isolatedType = null;  // isolation is per-mode
+      render(true);
+    });
+  });
+
+  // Layout toggle (Semantic / Structural).
+  document.querySelectorAll('.sem-layout-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      setActive('.sem-layout-btn', btn);
+      layoutMode = btn.dataset.layout;
       render(true);
     });
   });

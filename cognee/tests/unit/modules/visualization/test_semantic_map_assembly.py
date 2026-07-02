@@ -48,6 +48,11 @@ def test_semantic_tab_and_view_are_wired(tmp_path, monkeypatch):
     # Type-filter wiring: the legend follows the color mode and isolates a type.
     assert "isolatedType" in html
     assert "colorBy === 'type'" in html
+    # Layout-toggle wiring: Semantic/Structural buttons + the force sim path.
+    assert 'class="sem-layout-btn' in html
+    assert 'data-layout="structural"' in html
+    assert "structuralPositions" in html
+    assert "d3.forceSimulation" in html
 
 
 def test_no_token_leaks_with_embeddings(tmp_path, monkeypatch):
