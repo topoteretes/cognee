@@ -265,3 +265,56 @@ async def test_extract_graph_from_data_quiet_for_normalized_skip_config(
     )
 
     mock_logger.info.assert_not_called()
+
+
+@pytest.mark.asyncio
+@patch.object(egd_module, "retrieve_existing_edges", new_callable=AsyncMock)
+async def test_stub_resolver_reaches_expand_via_task(mock_retrieve):
+    from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
+    from cognee.modules.ontology.models import AttachedOntologyNode
+
+    class _TaskStubResolver(BaseOntologyResolver):
+        def build_lookup(self) -> None:
+            return None
+
+        def refresh_lookup(self) -> None:
+            return None
+
+        def find_closest_match(self, name: str, category: str):
+            return None
+
+        def get_subgraph(
+            self, node_name: str, node_type: str = "individuals", directed: bool = True
+        ):
+            if node_type == "classes" and node_name == "person":
+                return (
+                    [AttachedOntologyNode("person", "classes")],
+                    [],
+                    AttachedOntologyNode("person", "classes"),
+                )
+            if node_type == "individuals" and node_name == "alice":
+                return (
+                    [AttachedOntologyNode("alice", "individuals")],
+                    [],
+                    AttachedOntologyNode("alice", "individuals"),
+                )
+            return [], [], None
+
+    mock_retrieve.return_value = {}
+    chunk = _make_chunk()
+    graph = KnowledgeGraph(
+        nodes=[Node(id="n1", name="Alice", type="Person", description="desc")],
+        edges=[],
+    )
+    resolver = _TaskStubResolver()
+
+    await extract_graph_from_data(
+        [chunk],
+        KnowledgeGraph,
+        config={"ontology_config": {"ontology_resolver": resolver}},
+        calculate_chunk_graphs=lambda *args, **kwargs: [graph],
+    )
+
+    _, entity = chunk.contains[0]
+    assert entity.name == "alice"
+    assert entity.ontology_valid is True

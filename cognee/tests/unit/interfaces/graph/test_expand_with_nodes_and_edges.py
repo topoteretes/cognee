@@ -3,8 +3,34 @@ from unittest.mock import MagicMock
 import pytest
 
 from cognee.infrastructure.engine.models.Edge import Edge
+from cognee.modules.engine.models import Entity, EntityType
 from cognee.modules.graph.utils.expand_with_nodes_and_edges import expand_with_nodes_and_edges
+from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
+from cognee.modules.ontology.models import AttachedOntologyNode
 from cognee.shared.data_models import KnowledgeGraph, Node, Edge as KGEdge
+
+
+class _StubOntologyResolver(BaseOntologyResolver):
+    """Minimal resolver proving the BaseOntologyResolver seam is usable."""
+
+    def build_lookup(self) -> None:
+        return None
+
+    def refresh_lookup(self) -> None:
+        return None
+
+    def find_closest_match(self, name: str, category: str):
+        return None
+
+    def get_subgraph(self, node_name: str, node_type: str = "individuals", directed: bool = True):
+        if node_type == "classes" and node_name == "gadget":
+            root = AttachedOntologyNode("gadget", "classes")
+            parent = AttachedOntologyNode("thing", "classes")
+            return [root, parent], [("gadget", "is_a", "thing")], root
+        if node_type == "individuals" and node_name == "widget":
+            root = AttachedOntologyNode("widget_canonical", "individuals")
+            return [root], [], root
+        return [], [], None
 
 
 def _mock_resolver():
@@ -195,3 +221,31 @@ def test_default_importance_weight_propagates_to_created_nodes():
     assert alice.importance_weight == 0.5
     assert person.importance_weight == 0.5
     assert contained_entity.importance_weight == 0.5
+
+
+def test_stub_resolver_plugs_in_at_util():
+    chunk = _make_chunk()
+    graph = _make_graph(
+        [Node(id="widget", name="Widget", type="Gadget", description="A widget.")],
+        [KGEdge(source_node_id="widget", target_node_id="widget", relationship_name="self_ref")],
+    )
+    resolver = _StubOntologyResolver()
+
+    _, entity_nodes = expand_with_nodes_and_edges([chunk], [graph], resolver)
+
+    widget = next(
+        node
+        for node in entity_nodes
+        if isinstance(node, Entity) and node.name == "widget_canonical"
+    )
+    gadget = next(
+        node for node in entity_nodes if isinstance(node, EntityType) and node.name == "gadget"
+    )
+    thing = next(
+        node for node in entity_nodes if isinstance(node, EntityType) and node.name == "thing"
+    )
+
+    assert widget.ontology_valid is True
+    assert gadget.ontology_valid is True
+    assert thing.ontology_valid is True
+    assert widget.is_a.name == "gadget"
