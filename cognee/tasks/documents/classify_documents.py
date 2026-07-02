@@ -19,6 +19,14 @@ from cognee.tasks.ingestion.dlt_utils import is_dlt_sourced
 EXTENSION_TO_DOCUMENT_CLASS = {
     "pdf": PdfDocument,  # Text documents
     "txt": TextDocument,
+    "md": TextDocument,
+    "markdown": TextDocument,
+    "json": TextDocument,
+    "xml": TextDocument,
+    "yaml": TextDocument,
+    "yml": TextDocument,
+    "log": TextDocument,
+    "html": TextDocument,
     "csv": CsvDocument,
     "docx": UnstructuredDocument,
     "doc": UnstructuredDocument,
@@ -127,7 +135,8 @@ async def classify_documents(data_documents: list[Data]) -> list[Document]:
         if is_dlt_sourced(data_item):
             doc_class = DltRowDocument
         else:
-            doc_class = EXTENSION_TO_DOCUMENT_CLASS[data_item.extension]
+            extension = data_item.extension.lower() if data_item.extension else "txt"
+            doc_class = EXTENSION_TO_DOCUMENT_CLASS.get(extension, TextDocument)
 
         document = doc_class(
             id=data_item.id,
