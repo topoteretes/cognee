@@ -423,6 +423,17 @@ def test_scenario_a_no_ontology_golden():
     assert len({row[1] for row in output["nodes"]}) == len(output["nodes"])
 
 
+@pytest.mark.parametrize(
+    "resolver",
+    [get_default_ontology_resolver(), None],
+    ids=["empty_resolver", "skip_none"],
+)
+def test_scenario_a_skip_equals_empty_resolver(resolver):
+    """Skip path must match today's empty-resolver graph."""
+    chunks, entity_nodes = run_scenario_a(resolver)
+    assert serialize_output(chunks, entity_nodes) == GOLDEN_A
+
+
 def test_scenario_b_matching_ontology_golden():
     chunks, entity_nodes = run_scenario_b()
     output = serialize_output(chunks, entity_nodes)

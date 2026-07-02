@@ -8,6 +8,7 @@ from cognee.tasks.graph.extract_graph_from_data import (
     extract_graph_from_data,
     integrate_chunk_graphs,
 )
+from cognee.tasks.graph.exceptions import InvalidOntologyAdapterError
 
 egd_module = importlib.import_module("cognee.tasks.graph.extract_graph_from_data")
 
@@ -179,3 +180,88 @@ async def test_non_knowledge_graph_model_unchanged():
 
     assert chunk.contains == custom_graph
     assert result == [chunk]
+
+
+@pytest.mark.asyncio
+@patch.object(egd_module, "retrieve_existing_edges", new_callable=AsyncMock)
+async def test_integrate_chunk_graphs_accepts_none_resolver(mock_retrieve):
+    mock_retrieve.return_value = {}
+    chunk = _make_chunk()
+    graph = _two_node_graph()
+
+    await integrate_chunk_graphs([chunk], [graph], KnowledgeGraph, None, {})
+
+    assert chunk.contains is not None and len(chunk.contains) > 0
+
+
+@pytest.mark.asyncio
+async def test_integrate_chunk_graphs_rejects_invalid_resolver():
+    chunk = _make_chunk()
+    graph = _two_node_graph()
+
+    with pytest.raises(InvalidOntologyAdapterError):
+        await integrate_chunk_graphs([chunk], [graph], KnowledgeGraph, object(), {})
+
+
+@pytest.mark.asyncio
+@patch.object(egd_module, "get_configured_ontology_resolver")
+@patch.object(egd_module, "integrate_chunk_graphs", new_callable=AsyncMock)
+async def test_extract_graph_from_data_passes_none_resolver(mock_integrate, mock_get_resolver):
+    mock_get_resolver.return_value = None
+    mock_integrate.side_effect = lambda *a, **kw: a[0]
+    chunk = _make_chunk()
+
+    async def fake_calc(chunks, graph_model, custom_prompt, **kwargs):
+        return [_two_node_graph()]
+
+    await extract_graph_from_data(
+        [chunk],
+        KnowledgeGraph,
+        config={"ontology_config": {"ontology_resolver": None}},
+        calculate_chunk_graphs=fake_calc,
+    )
+
+    assert mock_integrate.await_args.args[3] is None
+
+
+@pytest.mark.asyncio
+@patch.object(egd_module, "logger")
+@patch.object(egd_module, "get_configured_ontology_resolver", return_value=None)
+@patch.object(egd_module, "integrate_chunk_graphs", new_callable=AsyncMock)
+async def test_extract_graph_from_data_logs_malformed_config(
+    mock_integrate, mock_get_resolver, mock_logger
+):
+    mock_integrate.side_effect = lambda *a, **kw: a[0]
+    chunk = _make_chunk()
+
+    async def fake_calc(chunks, graph_model, custom_prompt, **kwargs):
+        return [_two_node_graph()]
+
+    await extract_graph_from_data(
+        [chunk], KnowledgeGraph, config={}, calculate_chunk_graphs=fake_calc
+    )
+
+    mock_logger.info.assert_called_once()
+
+
+@pytest.mark.asyncio
+@patch.object(egd_module, "logger")
+@patch.object(egd_module, "get_configured_ontology_resolver", return_value=None)
+@patch.object(egd_module, "integrate_chunk_graphs", new_callable=AsyncMock)
+async def test_extract_graph_from_data_quiet_for_normalized_skip_config(
+    mock_integrate, mock_get_resolver, mock_logger
+):
+    mock_integrate.side_effect = lambda *a, **kw: a[0]
+    chunk = _make_chunk()
+
+    async def fake_calc(chunks, graph_model, custom_prompt, **kwargs):
+        return [_two_node_graph()]
+
+    await extract_graph_from_data(
+        [chunk],
+        KnowledgeGraph,
+        config={"ontology_config": {"ontology_resolver": None}},
+        calculate_chunk_graphs=fake_calc,
+    )
+
+    mock_logger.info.assert_not_called()

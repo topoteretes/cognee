@@ -8,13 +8,7 @@ from cognee.modules.engine.utils import (
     generate_node_name,
 )
 from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
-from cognee.modules.ontology.ontology_env_config import get_ontology_env_config
 from cognee.shared.data_models import KnowledgeGraph
-from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
-from cognee.modules.ontology.get_default_ontology_resolver import (
-    get_default_ontology_resolver,
-    get_ontology_resolver_from_env,
-)
 
 
 def _create_node_key(node_id: str, category: str) -> str:
@@ -109,7 +103,7 @@ def _process_ontology_edges(
 
 def _create_type_node(
     node_type: str,
-    ontology_resolver: RDFLibOntologyResolver,
+    ontology_resolver: Optional[BaseOntologyResolver],
     added_nodes_map: dict,
     added_ontology_nodes_map: dict,
     name_mapping: dict,
@@ -128,12 +122,13 @@ def _create_type_node(
             key_mapping.get(type_node_key)
         )
 
-    # Get ontology validation
-    ontology_nodes, ontology_edges, closest_class = ontology_resolver.get_subgraph(
-        node_name=node_name, node_type="classes"
-    )
-
-    ontology_validated = bool(closest_class)
+    ontology_nodes, ontology_edges, closest_class = [], [], None
+    ontology_validated = False
+    if ontology_resolver is not None:
+        ontology_nodes, ontology_edges, closest_class = ontology_resolver.get_subgraph(
+            node_name=node_name, node_type="classes"
+        )
+        ontology_validated = bool(closest_class)
 
     if ontology_validated:
         old_key = type_node_key
@@ -156,11 +151,13 @@ def _create_type_node(
 
     added_nodes_map[type_node_key] = type_node
 
-    # Process ontology nodes and edges
-    _process_ontology_nodes(ontology_nodes, data_chunk, added_nodes_map, added_ontology_nodes_map)
-    _process_ontology_edges(
-        ontology_nodes, ontology_edges, existing_edges_map, ontology_relationships
-    )
+    if ontology_resolver is not None:
+        _process_ontology_nodes(
+            ontology_nodes, data_chunk, added_nodes_map, added_ontology_nodes_map
+        )
+        _process_ontology_edges(
+            ontology_nodes, ontology_edges, existing_edges_map, ontology_relationships
+        )
 
     return type_node
 
@@ -170,7 +167,7 @@ def _create_entity_node(
     node_name: str,
     node_description: str,
     type_node: EntityType,
-    ontology_resolver: RDFLibOntologyResolver,
+    ontology_resolver: Optional[BaseOntologyResolver],
     added_nodes_map: dict,
     added_ontology_nodes_map: dict,
     name_mapping: dict,
@@ -189,12 +186,13 @@ def _create_entity_node(
             key_mapping.get(entity_node_key)
         )
 
-    # Get ontology validation
-    ontology_nodes, ontology_edges, start_ent_ont = ontology_resolver.get_subgraph(
-        node_name=generated_node_name, node_type="individuals"
-    )
-
-    ontology_validated = bool(start_ent_ont)
+    ontology_nodes, ontology_edges, start_ent_ont = [], [], None
+    ontology_validated = False
+    if ontology_resolver is not None:
+        ontology_nodes, ontology_edges, start_ent_ont = ontology_resolver.get_subgraph(
+            node_name=generated_node_name, node_type="individuals"
+        )
+        ontology_validated = bool(start_ent_ont)
 
     if ontology_validated:
         old_key = entity_node_key
@@ -219,11 +217,13 @@ def _create_entity_node(
 
     added_nodes_map[entity_node_key] = entity_node
 
-    # Process ontology nodes and edges
-    _process_ontology_nodes(ontology_nodes, data_chunk, added_nodes_map, added_ontology_nodes_map)
-    _process_ontology_edges(
-        ontology_nodes, ontology_edges, existing_edges_map, ontology_relationships
-    )
+    if ontology_resolver is not None:
+        _process_ontology_nodes(
+            ontology_nodes, data_chunk, added_nodes_map, added_ontology_nodes_map
+        )
+        _process_ontology_edges(
+            ontology_nodes, ontology_edges, existing_edges_map, ontology_relationships
+        )
 
     return entity_node
 
@@ -231,7 +231,7 @@ def _create_entity_node(
 def _process_graph_nodes(
     data_chunk: DocumentChunk,
     graph: KnowledgeGraph,
-    ontology_resolver: RDFLibOntologyResolver,
+    ontology_resolver: Optional[BaseOntologyResolver],
     added_nodes_map: dict,
     added_ontology_nodes_map: dict,
     name_mapping: dict,
@@ -373,8 +373,7 @@ def expand_with_nodes_and_edges(
             data chunk. Each graph contains nodes (entities) and edges (relationships) extracted
             from the chunk content.
         ontology_resolver (BaseOntologyResolver, optional): Resolver for validating entities and
-            types against an ontology. If None, a default RDFLibOntologyResolver is created.
-            Defaults to None.
+            types against an ontology. None means skip ontology enrichment.
         existing_edges_map (dict[str, bool], optional): Mapping of existing edge keys to prevent
             duplicate edge creation. Keys are formatted as "{source_id}_{target_id}_{relation}".
             If None, an empty dictionary is created. Defaults to None.
@@ -394,17 +393,6 @@ def expand_with_nodes_and_edges(
     """
     if existing_edges_map is None:
         existing_edges_map = {}
-
-    if ontology_resolver is None:
-        ontology_config = get_ontology_env_config()
-        if (
-            ontology_config.ontology_file_path
-            and ontology_config.ontology_resolver
-            and ontology_config.matching_strategy
-        ):
-            ontology_resolver = get_ontology_resolver_from_env(**ontology_config.to_dict())
-        else:
-            ontology_resolver = get_default_ontology_resolver()
 
     added_nodes_map = {}
     added_ontology_nodes_map = {}

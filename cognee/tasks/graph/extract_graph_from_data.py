@@ -4,12 +4,8 @@ from typing import Type, List, Optional
 from pydantic import BaseModel
 
 from cognee.modules.pipelines.tasks.task import task_summary
-from cognee.modules.ontology.ontology_env_config import get_ontology_env_config
 from cognee.modules.ontology.ontology_config import Config
-from cognee.modules.ontology.get_default_ontology_resolver import (
-    get_default_ontology_resolver,
-    get_ontology_resolver_from_env,
-)
+from cognee.modules.ontology.get_default_ontology_resolver import get_configured_ontology_resolver
 from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.modules.graph.utils import (
@@ -19,12 +15,26 @@ from cognee.modules.graph.utils import (
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.infrastructure.llm.extraction import extract_content_graph
 from cognee.infrastructure.engine import DataPoint
+from cognee.shared.logging_utils import get_logger
 from cognee.tasks.graph.exceptions import (
     InvalidGraphModelError,
     InvalidDataChunksError,
     InvalidChunkGraphInputError,
     InvalidOntologyAdapterError,
 )
+
+
+logger = get_logger(__name__)
+
+
+def _should_log_skip_for_provided_config(config: Optional[Config], resolver) -> bool:
+    """Return True when caller provided malformed config that resolves to skip."""
+    if config is None or resolver is not None:
+        return False
+    ontology_config = config.get("ontology_config")
+    if ontology_config is None:
+        return True
+    return "ontology_resolver" not in ontology_config
 
 
 def _stamp_provenance_deep(data, pipeline_name, task_name, visited=None):
@@ -57,7 +67,7 @@ async def integrate_chunk_graphs(
     data_chunks: list[DocumentChunk],
     chunk_graphs: list,
     graph_model: Type[BaseModel],
-    ontology_resolver: BaseOntologyResolver,
+    ontology_resolver: Optional[BaseOntologyResolver],
     pipeline_name: str = None,
     task_name: str = None,
     **kwargs,
@@ -91,10 +101,8 @@ async def integrate_chunk_graphs(
         )
     if not isinstance(graph_model, type) or not issubclass(graph_model, BaseModel):
         raise InvalidGraphModelError(graph_model)
-    if ontology_resolver is None or not hasattr(ontology_resolver, "get_subgraph"):
-        raise InvalidOntologyAdapterError(
-            type(ontology_resolver).__name__ if ontology_resolver else "None"
-        )
+    if ontology_resolver is not None and not hasattr(ontology_resolver, "get_subgraph"):
+        raise InvalidOntologyAdapterError(type(ontology_resolver).__name__)
 
     if not issubclass(graph_model, KnowledgeGraph):
         for chunk_index, chunk_graph in enumerate(chunk_graphs):
@@ -187,25 +195,11 @@ async def extract_graph_from_data(
                 if edge.source_node_id in valid_node_ids and edge.target_node_id in valid_node_ids
             ]
 
-    # Extract resolver from config if provided, otherwise get default
-    if config is None:
-        ontology_config = get_ontology_env_config()
-        if (
-            ontology_config.ontology_file_path
-            and ontology_config.ontology_resolver
-            and ontology_config.matching_strategy
-        ):
-            config: Config = {
-                "ontology_config": {
-                    "ontology_resolver": get_ontology_resolver_from_env(**ontology_config.to_dict())
-                }
-            }
-        else:
-            config: Config = {
-                "ontology_config": {"ontology_resolver": get_default_ontology_resolver()}
-            }
-
-    ontology_resolver = config["ontology_config"]["ontology_resolver"]
+    ontology_resolver = get_configured_ontology_resolver(config)
+    if _should_log_skip_for_provided_config(config, ontology_resolver):
+        logger.info(
+            "No ontology resolver configured in provided config — skipping ontology enrichment."
+        )
 
     task_name = "extract_graph_from_data"
 
