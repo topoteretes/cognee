@@ -21,6 +21,7 @@ when there is nothing usable, and never raise on backend failures.
 import re
 from typing import Any, List, Optional, Set, Tuple
 
+from cognee.modules.retrieval.utils.citation_models import Citation, CitationKind
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("references")
@@ -271,6 +272,115 @@ def format_chunk_references(
     ]
 
     return EVIDENCE_HEADER + "\n" + "\n".join(bullets)
+
+
+def build_chunk_citations(
+    retrieved_objects: Any, answer: Optional[str] = None, limit: int = 5
+) -> List[Citation]:
+    """Build structured chunk Citations from retrieved vector payloads.
+
+    Structured parallel to :func:`format_chunk_references`: same
+    filtering (answer term overlap, dedup), same 3-5 cap, same source
+    field extraction. Returns a list of :class:`Citation` objects so
+    agents can rank and cite programmatically instead of parsing the
+    text Evidence block.
+
+    Returns an empty list rather than raising when nothing is usable
+    (empty input, unusable payloads, no term overlap with the answer),
+    so callers can compose it into a :class:`SearchResultItem` without
+    guard clauses.
+    """
+    if not retrieved_objects:
+        return []
+
+    try:
+        iterator = list(retrieved_objects)
+    except TypeError:
+        return []
+
+    answer_terms: Optional[Set[str]] = None
+    if answer is not None:
+        answer_terms = _significant_terms(answer)
+        if not answer_terms:
+            return []
+
+    candidates: List[Tuple[int, str, int, str, Optional[str], Optional[str]]] = []
+    seen: set = set()
+
+    for obj in iterator:
+        payload = _get_payload(obj)
+        if payload is None:
+            continue
+
+        document_name = _clean_str(payload.get("document_name"))
+        number = _chunk_number(payload)
+        text = _clean_str(payload.get("text"))
+
+        if document_name is None or number is None or text is None:
+            continue
+
+        chunk_id = _chunk_id(obj, payload)
+        data_id = _clean_str(payload.get("document_id"))
+
+        dedup_key = chunk_id or f"{document_name}#{number}"
+        if dedup_key in seen:
+            continue
+        seen.add(dedup_key)
+
+        score = 0
+        if answer_terms is not None:
+            chunk_terms = set(re.findall(r"[a-z0-9]+", text.lower()))
+            score = len(answer_terms & chunk_terms)
+            if score == 0:
+                continue
+
+        candidates.append((score, document_name, number, text, data_id, chunk_id))
+
+    if not candidates:
+        return []
+
+    if answer_terms is not None:
+        candidates.sort(key=lambda candidate: -candidate[0])
+
+    max_cited = _clamp_limit(limit)
+    return [
+        Citation(
+            kind=CitationKind.CHUNK,
+            document_name=document_name,
+            chunk_number=number,
+            snippet=_snippet(text),
+            chunk_id=chunk_id,
+            data_id=data_id,
+        )
+        for _, document_name, number, text, data_id, chunk_id in candidates[:max_cited]
+    ]
+
+
+async def build_answer_grounded_chunk_citations(
+    answer: str, vector_engine: Any, limit: int = 5
+) -> List[Citation]:
+    """Async structured parallel to :func:`build_answer_grounded_chunk_references`.
+
+    Runs the answer text as a vector query against the chunk index and
+    returns matches as :class:`Citation` objects. Never raises: a
+    missing collection or backend failure degrades to ``[]``.
+    """
+    cleaned_answer = _clean_str(answer)
+    if cleaned_answer is None or vector_engine is None:
+        return []
+
+    try:
+        found_chunks = await vector_engine.search(
+            _CHUNK_COLLECTION,
+            cleaned_answer,
+            limit=_CANDIDATE_POOL,
+            include_payload=True,
+        )
+    except Exception as error:
+        logger.debug(f"Answer-grounded citation search failed: {error}")
+        return []
+
+    return build_chunk_citations(found_chunks, answer=cleaned_answer, limit=limit)
 
 
 async def build_answer_grounded_chunk_references(
