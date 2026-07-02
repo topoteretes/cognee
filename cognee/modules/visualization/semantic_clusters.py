@@ -16,6 +16,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 import numpy as np
 
+from cognee.modules.visualization.preprocessor import looks_like_identifier
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("semantic_clusters")
@@ -23,6 +24,8 @@ logger = get_logger("semantic_clusters")
 CLUSTER_SEED = 42
 TOP_NEIGHBORS = 5
 _EPS = 1e-12
+# Names longer than this read as chunk/summary text, not entity labels.
+_MAX_LABEL_NAME = 40
 
 
 def default_k(n: int) -> int:
@@ -84,15 +87,32 @@ def _nearest_neighbors(ids: List[str], x: np.ndarray, top: int) -> Dict[str, Lis
     return out
 
 
+def _usable_name(nd: Dict[str, Any]) -> Optional[str]:
+    """A node's name if it reads as a clean label — not a UUID/hash or a text blob."""
+    name = nd.get("name")
+    if not isinstance(name, str):
+        return None
+    name = name.strip()
+    if not name or len(name) > _MAX_LABEL_NAME or looks_like_identifier(name):
+        return None
+    return name
+
+
 def _cluster_label(member_nodes: List[Dict[str, Any]]) -> str:
-    """Label a cluster by its top-3 nodes by (degree, importance)."""
+    """Label a cluster by its top-3 real ``Entity`` nodes (by degree, importance).
+
+    Entities win over DocumentChunk/TextSummary/EntityType so labels read as
+    concepts, not chunk text or type names. Identifier-shaped or over-long names
+    are skipped; a cluster with no usable entity names falls back to any usable
+    name, then to ``"cluster"``.
+    """
     ranked = sorted(
         member_nodes,
-        key=lambda nd: (nd.get("degree", 0), nd.get("importance", 0.0)),
+        key=lambda nd: (nd.get("type") == "Entity", nd.get("degree", 0), nd.get("importance", 0.0)),
         reverse=True,
     )
-    names = [nd.get("name") for nd in ranked[:3] if nd.get("name")]
-    return ", ".join(names) if names else "cluster"
+    names = [n for nd in ranked if (n := _usable_name(nd))]
+    return ", ".join(names[:3]) if names else "cluster"
 
 
 def compute_clusters(

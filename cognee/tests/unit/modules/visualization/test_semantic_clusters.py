@@ -81,6 +81,26 @@ def test_labels_use_top_degree_entities():
     assert labels[pos_cluster].startswith("Nb")  # name of highest-degree member
 
 
+def test_label_prefers_entities_over_chunk_text():
+    # One blob mixes a low-degree Entity with a high-degree DocumentChunk whose
+    # "name" is a long text blob. The label must use the entity, never the chunk.
+    chunk_text = "This is a long document chunk sentence that should never become a label."
+    nodes = [
+        {"id": "a", "type": "DocumentChunk", "name": chunk_text, "degree": 99},
+        {"id": "b", "type": "Entity", "name": "Ada Lovelace", "degree": 1},
+        {"id": "c", "type": "Entity", "name": "deadbeefdeadbeefdeadbeefdeadbeef", "degree": 5},
+        {"id": "d", "type": "Entity", "name": "Turing", "degree": 2},
+        {"id": "e", "type": "Entity", "name": "Babbage", "degree": 2},
+        {"id": "f", "type": "Entity", "name": "London", "degree": 2},
+    ]
+    result = compute_clusters(nodes, BLOB, k=2, seed=42)
+    labels = [c["label"] for c in result["clusters"]]
+    pos_label = labels[result["node_cluster"]["a"]]
+    assert "document chunk" not in pos_label.lower()  # chunk text excluded
+    assert "deadbeef" not in pos_label  # identifier-shaped name skipped
+    assert "Ada Lovelace" in pos_label  # real entity used despite low degree
+
+
 def test_summarize_seam_is_used_when_provided():
     nodes = _nodes(["a", "b", "c", "d", "e", "f"])
     summarize = Mock(return_value="SUMMARY")
