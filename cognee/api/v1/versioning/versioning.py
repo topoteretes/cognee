@@ -1,6 +1,7 @@
 """Public API surface for dataset versioning (event sourcing + checkpoints)."""
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Dict, List, Optional
 from uuid import UUID
 
@@ -8,6 +9,7 @@ from cognee.modules.versioning.models.Checkpoint import Checkpoint
 from cognee.modules.versioning.operations.create_checkpoint import create_checkpoint
 from cognee.modules.versioning.operations.get_events import get_event_log
 from cognee.modules.versioning.operations.log_event import log_version_event
+from cognee.modules.versioning.operations.time_travel import get_nodes_at_time
 from cognee.modules.versioning.operations.undo_forget import UndoForgetResult, undo_forget
 
 
@@ -109,3 +111,34 @@ async def undo_forget_data(
         print("Re-ingest these node slugs:", result.node_slugs[:5])
     """
     return await undo_forget(dataset_id, data_id=data_id, event_id=event_id)
+
+
+async def time_travel(
+    dataset_id: UUID,
+    target_time: datetime,
+) -> Dict:
+    """Return the alive node-slug set for *dataset_id* at *target_time*.
+
+    Uses the nearest checkpoint before *target_time* as the base, then
+    replays ADD and FORGET events up to *target_time* to reconstruct the
+    exact node set that was alive at that moment.
+
+    Args:
+        dataset_id: The dataset to inspect.
+        target_time: Point in time to reconstruct. Timezone-aware recommended;
+            naive datetimes are treated as UTC.
+
+    Returns:
+        Dict with ``alive_node_slugs`` (sorted list), ``dataset_id``,
+        ``target_time``, ``checkpoint_id``, and ``checkpoint_time``.
+
+    Example::
+
+        import cognee
+        from datetime import datetime, timezone, timedelta
+
+        one_hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
+        state = await cognee.time_travel(dataset_id, one_hour_ago)
+        print(state["alive_node_slugs"])
+    """
+    return await get_nodes_at_time(dataset_id, target_time)

@@ -5,6 +5,7 @@ from .operations import (
     undo_forget,
     UndoForgetResult,
     get_event_log,
+    get_nodes_at_time,
 )
 
 __all__ = [
@@ -15,4 +16,5 @@ __all__ = [
     "undo_forget",
     "UndoForgetResult",
     "get_event_log",
+    "get_nodes_at_time",
 ]
