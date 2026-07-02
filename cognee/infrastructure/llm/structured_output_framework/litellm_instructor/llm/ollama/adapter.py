@@ -255,7 +255,7 @@ class OllamaAPIAdapter(LLMInterface):
                 }
             ],
             max_completion_tokens=300,
-        )
+        )  # ty:ignore[no-matching-overload]
 
         # Ensure response is valid before accessing .choices[0].message.content
         if (
@@ -265,8 +265,4 @@ class OllamaAPIAdapter(LLMInterface):
         ):
             raise ValueError("Image transcription failed. No response received.")
 
-        content = response.choices[0].message.content
-        if content is None:
-            raise ValueError("Image transcription failed. No content returned.")
-
-        return content
+        return response.choices[0].message.content

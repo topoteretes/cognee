@@ -10,7 +10,7 @@ Public orchestration coroutines are fail-open so they can never block answer gen
 helpers are deliberately strict so tests catch malformed stored data and scoring mistakes.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import List, Protocol, Tuple
 from uuid import uuid4
 
@@ -225,7 +225,7 @@ async def _stamp_served_entries(*, session_manager, user_id, session_id, entry_i
     if not entry_ids:
         return
 
-    served_at = datetime.now(timezone.utc).isoformat()
+    served_at = datetime.utcnow().isoformat()
     for entry_id in entry_ids:
         try:
             await session_manager.update_session_context_entry(
@@ -392,7 +392,7 @@ async def _apply_single_candidate(
         content=content,
         normalized_content=normalized,
         confidence=float(candidate.confidence),
-        created_at=datetime.now(timezone.utc).isoformat(),
+        created_at=datetime.utcnow().isoformat(),
         source_feedback_ids=linked_ids if source_field == "source_feedback_ids" else [],
         source_trace_ids=linked_ids if source_field == "source_trace_ids" else [],
         kind="context",

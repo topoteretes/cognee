@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable
-from typing import Any
 
 from cognee.infrastructure.data.chunking.DefaultChunkEngine import DefaultChunkEngine
 from cognee.shared.data_models import ChunkStrategy
@@ -29,7 +28,7 @@ class LangchainChunkEngine:
         source_data: Iterable[str],
         chunk_size: int,
         chunk_overlap: int,
-    ) -> tuple[list[Any], list[Any]]:
+    ) -> tuple[list[str], list[int]]:
         """
         Chunk data based on the specified strategy.
 
@@ -74,7 +73,7 @@ class LangchainChunkEngine:
         chunk_size: int,
         chunk_overlap: int = 10,
         language=None,
-    ) -> tuple[list[str], list[Any]]:
+    ) -> tuple[list[str], list[int]]:
         """
         Chunk data specifically for code snippets.
 
@@ -110,7 +109,7 @@ class LangchainChunkEngine:
 
         only_content = [chunk.page_content for chunk in code_chunks]
 
-        numbered_chunks: list[Any] = []
+        numbered_chunks = []
         for i, chunk in enumerate(code_chunks):
             numbered_chunk = [i + 1, chunk]
             numbered_chunks.append(numbered_chunk)
@@ -119,7 +118,7 @@ class LangchainChunkEngine:
 
     def chunk_data_by_character(
         self, data_chunks: Iterable[str], chunk_size: int = 1500, chunk_overlap: int = 10
-    ) -> tuple[list[str], list[Any]]:
+    ) -> tuple[list[str], list[int]]:
         """
         Chunk data based on character count.
 
@@ -150,7 +149,7 @@ class LangchainChunkEngine:
 
         only_content = [chunk.page_content for chunk in data_chunks]
 
-        numbered_chunks: list[Any] = []
+        numbered_chunks = []
         for i, chunk in enumerate(data_chunks):
             numbered_chunk = [i + 1, chunk]
             numbered_chunks.append(numbered_chunk)
