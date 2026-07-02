@@ -17,12 +17,18 @@ Run:  python examples/python/versioning_as_of_benchmark.py
 """
 
 import asyncio
+import os
 import statistics
 import tempfile
 import time
 from uuid import uuid4
 
-from cognee.infrastructure.databases.graph.ladybug.adapter import LadybugAdapter
+# Keep the benchmark truly offline: importing cognee pulls in litellm, whose
+# import-time model-cost-map fetch would otherwise hit the network (and fail
+# in air-gapped environments). Must be set before the first cognee import.
+os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
+
+from cognee.infrastructure.databases.graph.ladybug.adapter import LadybugAdapter  # noqa: E402
 from cognee.infrastructure.databases.provenance import make_source_ref_key
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.versioning.methods.as_of_read import _is_visible
