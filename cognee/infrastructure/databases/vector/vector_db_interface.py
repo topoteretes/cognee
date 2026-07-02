@@ -79,7 +79,9 @@ class VectorDBInterface(Protocol):
         raise NotImplementedError("upsert_raw_vectors is not implemented for this adapter")
 
     @abstractmethod
-    async def retrieve(self, collection_name: str, data_point_ids: list[str]):
+    async def retrieve(
+        self, collection_name: str, data_point_ids: list[str], *, include_vector: bool = False
+    ):
         """
         Retrieve data points from a collection using their IDs.
 
@@ -89,6 +91,10 @@ class VectorDBInterface(Protocol):
             - collection_name (str): The name of the collection from which to retrieve data
               points.
             - data_point_ids (Union[List[str], list[str]]): A list of IDs of the data points to retrieve.
+            - include_vector (bool): When True, the stored embedding is attached to each result
+              under ``payload["vector"]``. Only adapters that can return raw vectors implement
+              this (LanceDB); others ignore the flag. Callers that need vectors from an adapter
+              without support should re-embed the indexed field instead.
         """
         raise NotImplementedError
 
