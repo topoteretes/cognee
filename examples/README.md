@@ -211,7 +211,7 @@ uv run python examples/demos/simple_cognee_example.py
 ```
 
 For non-OpenAI providers (Anthropic, Bedrock, Ollama, fastembed, …) see
-[the cognee docs](https://docs.cognee.ai) and `.env.template`.
+[the cognee docs](https://docs.cognee.ai), the [Ollama model matrix guide](../docs/ollama_models.md), and `.env.template`.
 
 ## 🤝 Contributing a new example
 
