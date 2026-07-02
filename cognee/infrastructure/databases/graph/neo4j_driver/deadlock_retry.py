@@ -10,7 +10,7 @@ logger = get_logger("deadlock_retry")
 
 def deadlock_retry(max_retries=10):
     """
-    Decorator that automatically retries an asynchronous function when rate limit errors occur.
+    Decorator that automatically retries an asynchronous function on transient Neo4j errors.
 
     This decorator implements an exponential backoff strategy with jitter
     to handle rate limit errors efficiently.
@@ -54,7 +54,7 @@ def deadlock_retry(max_retries=10):
                     else:
                         raise  # Re-raise the original error
                 except DatabaseUnavailable:
-                    if attempt >= max_retries:
+                    if attempt > max_retries:
                         raise  # Re-raise the original error
 
                     await wait()
