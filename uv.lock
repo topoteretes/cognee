@@ -1403,6 +1403,9 @@ tracing = [
     { name = "opentelemetry-exporter-otlp-proto-http" },
     { name = "opentelemetry-sdk" },
 ]
+turso = [
+    { name = "pyturso" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -1513,6 +1516,7 @@ requires-dist = [
     { name = "python-dotenv", specifier = ">=1.0.1,<2.0.0" },
     { name = "python-magic-bin", marker = "sys_platform == 'win32'", specifier = "<0.5" },
     { name = "python-multipart", specifier = ">=0.0.22,<1.0.0" },
+    { name = "pyturso", marker = "extra == 'turso'", specifier = ">=0.6.1" },
     { name = "rdflib", specifier = ">=7.1.4,<7.2.0" },
     { name = "redis", marker = "extra == 'redis'", specifier = ">=5.0.3,<6.0.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.9.2,<=0.16.0" },
@@ -1538,7 +1542,7 @@ requires-dist = [
     { name = "uvicorn", specifier = ">=0.34.0,<1.0.0" },
     { name = "websockets", specifier = ">=15.0.1,<16.0.0" },
 ]
-provides-extras = ["api", "distributed", "scraping", "fastembed", "neo4j", "neptune", "postgres", "postgres-binary", "notebook", "langchain", "llama-index", "huggingface", "ollama", "mistral", "anthropic", "azure", "deepeval", "posthog", "groq", "llama-cpp", "docs", "codegraph", "evals", "graphiti", "aws", "dlt", "baml", "dev", "debug", "redis", "tracing", "docling"]
+provides-extras = ["api", "distributed", "scraping", "fastembed", "neo4j", "turso", "neptune", "postgres", "postgres-binary", "notebook", "langchain", "llama-index", "huggingface", "ollama", "mistral", "anthropic", "azure", "deepeval", "posthog", "groq", "llama-cpp", "docs", "codegraph", "evals", "graphiti", "aws", "dlt", "baml", "dev", "debug", "redis", "tracing", "docling"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -9414,6 +9418,39 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/52/a0/07907b6ff512674d9b201859f7d212298c44933633c946703a20c25e9d81/pytokens-0.4.1-cp314-cp314t-musllinux_1_2_x86_64.whl", hash = "sha256:967cf6e3fd4adf7de8fc73cd3043754ae79c36475c1c11d514fc72cf5490094a", size = 306698, upload-time = "2026-01-30T01:03:29.653Z" },
     { url = "https://files.pythonhosted.org/packages/39/2a/cbbf9250020a4a8dd53ba83a46c097b69e5eb49dd14e708f496f548c6612/pytokens-0.4.1-cp314-cp314t-win_amd64.whl", hash = "sha256:584c80c24b078eec1e227079d56dc22ff755e0ba8654d8383b2c549107528918", size = 116287, upload-time = "2026-01-30T01:03:30.912Z" },
     { url = "https://files.pythonhosted.org/packages/c6/78/397db326746f0a342855b81216ae1f0a32965deccfd7c830a2dbc66d2483/pytokens-0.4.1-py3-none-any.whl", hash = "sha256:26cef14744a8385f35d0e095dc8b3a7583f6c953c2e3d269c7f82484bf5ad2de", size = 13729, upload-time = "2026-01-30T01:03:45.029Z" },
+]
+
+[[package]]
+name = "pyturso"
+version = "0.6.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/a8/67/49879858c34e5c861084c611807a56392a15fa0bc7a2c6c43dd88317a919/pyturso-0.6.1.tar.gz", hash = "sha256:f33b2faad0f38af5256fb54457a8cd14aa0c6c17c846e850d7f8e6c5c9d29044", size = 2388457, upload-time = "2026-05-22T15:43:12.435Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/32/86/903f06b4b47b795f8f720b5f7692e83a9158c1cbd2a80869e031cb4c2df8/pyturso-0.6.1-cp310-cp310-macosx_10_12_x86_64.whl", hash = "sha256:5bb0129dd02abb732eebc9154f09123bbb8350ea92b251c4788095bf5b64c789", size = 5902526, upload-time = "2026-05-22T09:45:00.347Z" },
+    { url = "https://files.pythonhosted.org/packages/6f/37/9ab192818cd0f45b8ac76af0a634c1b2261ee582a8723e98f50cc56bcf18/pyturso-0.6.1-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:060b07a8c76d16943f65050e3be21c04538da0240c53564d423a030e828aa4c2", size = 5186457, upload-time = "2026-05-22T15:42:12.924Z" },
+    { url = "https://files.pythonhosted.org/packages/9d/b4/0f333d0299f876c10f0fc5a78418e082b5862c313845dd62202c4083df3e/pyturso-0.6.1-cp310-cp310-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:caabf0cca238cfcb52e34ed753df968d9d5a1a619891b0d0193655919cec6910", size = 16216193, upload-time = "2026-05-22T15:42:15.26Z" },
+    { url = "https://files.pythonhosted.org/packages/fe/a6/538883d13fd7cecad7c6b604819cd19cfad1ecf8442b89acb900287f1c6f/pyturso-0.6.1-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:fbdf84c72836cbfd64854d68003c25bdcd3991d0674c0d8b27149147a0d48f00", size = 16347253, upload-time = "2026-05-22T15:42:17.8Z" },
+    { url = "https://files.pythonhosted.org/packages/50/b5/dd656a985b6612d3bbe0ad56001bbe2d8848a6c731af3fbbb49b7f77a4d5/pyturso-0.6.1-cp311-cp311-macosx_10_12_x86_64.whl", hash = "sha256:253b45929aaf59969adf3dc2a94c6ff18cfce4eeba56361238ec7f78d9636c00", size = 5902322, upload-time = "2026-05-22T15:42:20.487Z" },
+    { url = "https://files.pythonhosted.org/packages/f3/af/3811975f7a36db8c59d061d6db1397a61ae7c3a79d49d64633eb9a2161e3/pyturso-0.6.1-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:95aea3a9cb3e8630591229a5c8d98b4a6f43635dc2575e93ccbd3c99402a910f", size = 5186260, upload-time = "2026-05-22T15:42:22.537Z" },
+    { url = "https://files.pythonhosted.org/packages/9d/41/705e0f7a1bf9495021182afc267479a33b4d7ed2a84cb42007fe7dcf80e9/pyturso-0.6.1-cp311-cp311-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:31506f07f06894408b1bd2b0a3d7ea7df5a20069065f76a71f76bfb588e586b7", size = 16216845, upload-time = "2026-05-22T15:42:24.734Z" },
+    { url = "https://files.pythonhosted.org/packages/db/a7/c804661d7bc83e02530099c69c4d5128f2b08dee39781ad8dd43dadac324/pyturso-0.6.1-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:386b18e1342924c2d892dc43d03644a320b96aed45630247df892482d1808b85", size = 16349060, upload-time = "2026-05-22T15:42:27.854Z" },
+    { url = "https://files.pythonhosted.org/packages/87/41/e0fa9fb527759028df080953a276b89811cd3e1ccf5275901caeb7d132c4/pyturso-0.6.1-cp312-cp312-macosx_10_12_x86_64.whl", hash = "sha256:b9e0c693b49ff733f7cb77518b21c3794a67955d6bd1d632a6abdd4b5eb0816f", size = 5901914, upload-time = "2026-05-22T15:42:30.277Z" },
+    { url = "https://files.pythonhosted.org/packages/99/9f/5aab0366e7f43d9069488d771597f631264dd3ab52c224306440fb11b6b8/pyturso-0.6.1-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:99dcf2a0914776abdfacad213a9bf279999bbc3b58935d10db0258e5d2082dbc", size = 5187249, upload-time = "2026-05-22T15:42:32.033Z" },
+    { url = "https://files.pythonhosted.org/packages/22/5c/7c63e78258686f700526504786f49af9ed58d4804c6e0f0560cea559199c/pyturso-0.6.1-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:c93f389c5639b1758fbfec924d9d0950869915924bb1280f1db1da40e625fdab", size = 16232544, upload-time = "2026-05-22T15:42:34.362Z" },
+    { url = "https://files.pythonhosted.org/packages/7a/42/55a2f42709f7b2d99025b83db163c1ca1aceebf7ad6d7e8ec6343e583c3b/pyturso-0.6.1-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:013638e8ba1f7bd56efe7d6c01e5c271631c27463392f9f243292ece81efa3f0", size = 16362706, upload-time = "2026-05-22T15:42:38.084Z" },
+    { url = "https://files.pythonhosted.org/packages/85/1d/fa6963dd4d2b23a2b2d07e12b0a87e0df417770a16b8c66826c19b601961/pyturso-0.6.1-cp313-cp313-macosx_10_12_x86_64.whl", hash = "sha256:847d13b91ad502b401bf7a23536d441197fd82c16010327954e453044032e8ec", size = 5901619, upload-time = "2026-05-22T15:42:40.607Z" },
+    { url = "https://files.pythonhosted.org/packages/15/95/456c8ffed65a6a964e1ca6880a244588db4729f0c79abe42c037d5c40d4a/pyturso-0.6.1-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:be94ba46332d2a7f01f4c29dfa30f472f51f893c828ee3af794190c630dea157", size = 5186429, upload-time = "2026-05-22T15:42:42.526Z" },
+    { url = "https://files.pythonhosted.org/packages/e1/a4/045ccaff725e5d3f3d78265ac56ff11cab793adc2ccdbfb441d96e534f81/pyturso-0.6.1-cp313-cp313-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:d76b1cb2afef9bd785ebdaa6d04f43f500eac0c7648e62514ac52b0c545ec1b6", size = 16232575, upload-time = "2026-05-22T15:42:44.84Z" },
+    { url = "https://files.pythonhosted.org/packages/00/04/ad7c9529273d664cf059dd6ad80b507b32caa7d2bcbe06da6d0264653108/pyturso-0.6.1-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:a93a304eb883a66fd82411f68943c427f18c26264a3d009d92b0ee639ea7f811", size = 16361020, upload-time = "2026-05-22T15:42:47.588Z" },
+    { url = "https://files.pythonhosted.org/packages/0a/28/e6f0cf37cc53a45681556f91f17a5f7dd15737f02375a317bdb0a831c016/pyturso-0.6.1-cp314-cp314-macosx_10_12_x86_64.whl", hash = "sha256:964890a6280b3e67a84ab24479fac0342b99caa23c52a75ff1e84279b557467f", size = 5899806, upload-time = "2026-05-22T15:42:50.385Z" },
+    { url = "https://files.pythonhosted.org/packages/59/29/cc52192523e07243dd60f9fed650f83c5c23229d5f8dfb0a79e6f50af2d1/pyturso-0.6.1-cp314-cp314-macosx_11_0_arm64.whl", hash = "sha256:e16cd6af73251cd7d00b0c1f10139f526160a3d7bbf2ff89d2f03e81e3964f2f", size = 5184871, upload-time = "2026-05-22T15:42:52.329Z" },
+    { url = "https://files.pythonhosted.org/packages/ac/7b/eaf87196515be9cbe808bfb178db570d4e051a397eedb50ebebb7d051e73/pyturso-0.6.1-cp314-cp314-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:72cff3ea527e674668db9321f618e65078579c4f423892243d7d079d1b318332", size = 16220304, upload-time = "2026-05-22T15:42:54.317Z" },
+    { url = "https://files.pythonhosted.org/packages/b6/fc/b3aab38ebee7b51fcc9ec5c7482eba187b761cb8b57e858705ca8c5c59f6/pyturso-0.6.1-cp314-cp314-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:466d92918a8e8a991f6433ba366d7b630a4ddcc2ec3c9b003629636e18ef611b", size = 16352139, upload-time = "2026-05-22T15:42:57.19Z" },
+    { url = "https://files.pythonhosted.org/packages/68/37/821e12255e9aedd1acdc2aaca540fc9b3b6c799e683f966c26177a2df90d/pyturso-0.6.1-pp311-pypy311_pp73-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:2ce4f5e41da42d05dc3b1c5ef360530886b9192120986c2f6930ef6ffc4358a5", size = 16213804, upload-time = "2026-05-22T15:43:06.564Z" },
+    { url = "https://files.pythonhosted.org/packages/77/ed/8928ad781f01627e98acf775bf2da312cac38860b8976b5984851f805ab6/pyturso-0.6.1-pp311-pypy311_pp73-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:006648939bee3f2794c76128e2b57e36abedf79971a0909b0a3c59ac87a64514", size = 16340889, upload-time = "2026-05-22T15:43:09.697Z" },
 ]
 
 [[package]]
