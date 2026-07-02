@@ -57,6 +57,7 @@ class DataPoint(BaseModel):
     ontology_valid: bool = False
     version: int = 1  # Default version
     topological_rank: int | None = 0
+    valid_to: int | None = None  # ms epoch when this fact was superseded; None = still valid
     metadata: MetaData = {"index_fields": []}
     type: str = Field(default_factory=lambda: DataPoint.__name__)
     belongs_to_set: "list[DataPoint] | list[str] | None" = None
