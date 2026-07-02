@@ -927,23 +927,35 @@ class LadybugAdapter(GraphDBInterface):
 
             # Add timestamps for new node
             now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
-            fields = []
+            # Build per-property SET assignments. The map-literal form
+            # (``SET n += {{...}}``) does not parse on the Kuzu/Ladybug backend, so
+            # mirror the batch add_nodes which assigns each property individually.
+            create_assignments = []
+            match_assignments = []
             params = {}
             for key, value in core_properties.items():
-                if value is not None:
-                    param_name = f"param_{key}"
-                    fields.append(f"{key}: ${param_name}")
-                    params[param_name] = value
+                if value is None:
+                    continue
+                param_name = f"param_{key}"
+                params[param_name] = value
+                # id is the MERGE key; no need to re-assign it.
+                if key == "id":
+                    continue
+                create_assignments.append(f"n.{key} = ${param_name}")
+                match_assignments.append(f"n.{key} = ${param_name}")
 
-            # Add timestamp fields
-            fields.extend(
-                ["created_at: timestamp($created_at)", "updated_at: timestamp($updated_at)"]
-            )
             params.update({"created_at": now, "updated_at": now})
+            create_assignments.append("n.created_at = timestamp($created_at)")
+            create_assignments.append("n.updated_at = timestamp($updated_at)")
+            # ON MATCH updates the same fields but preserves the original created_at,
+            # and must be present at all — without it, re-adding an existing node
+            # silently drops the update (the batch add_nodes already does this).
+            match_assignments.append("n.updated_at = timestamp($updated_at)")
 
             merge_query = f"""
             MERGE (n:Node {{id: $param_id}})
-            ON CREATE SET n += {{{", ".join(fields)}}}
+            ON CREATE SET {", ".join(create_assignments)}
+            ON MATCH SET {", ".join(match_assignments)}
             """
             await self.query(merge_query, params)
 
