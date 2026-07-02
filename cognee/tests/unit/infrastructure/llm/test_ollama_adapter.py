@@ -49,7 +49,7 @@ async def test_acreate_structured_output_awaits_async_client():
 
     with (
         patch(f"{_MODULE}.llm_rate_limiter_context_manager", _null_rate_limiter),
-        patch(f"{_MODULE}.asyncio.to_thread", wraps=asyncio.to_thread) as to_thread_spy,
+        patch("asyncio.to_thread", wraps=asyncio.to_thread) as to_thread_spy,
     ):
         result = await adapter.acreate_structured_output("hello", "system prompt", _Resp)
 
