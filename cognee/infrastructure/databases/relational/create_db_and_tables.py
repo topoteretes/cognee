@@ -1,8 +1,8 @@
-import asyncio
+from cognee.infrastructure.locks.loop_bound_lock import LoopBoundLock
 
 from .get_relational_engine import get_relational_engine
 
-_create_db_lock = asyncio.Lock()
+_create_db_lock = LoopBoundLock()
 
 
 async def create_db_and_tables():

@@ -19,25 +19,25 @@ row-level SQL advisory lock or Redis SETNX on top — the call sites
 are factored so that's a local change.
 """
 
-import asyncio
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
+from cognee.infrastructure.locks.loop_bound_lock import LoopBoundLock
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("session_lock")
 
 
-_locks: dict[tuple[str, str], asyncio.Lock] = {}
-_registry_lock = asyncio.Lock()
+_locks: dict[tuple[str, str], LoopBoundLock] = {}
+_registry_lock = LoopBoundLock()
 
 
-async def _get_lock(session_id: str, op: str) -> asyncio.Lock:
+async def _get_lock(session_id: str, op: str) -> LoopBoundLock:
     key = (session_id, op)
     async with _registry_lock:
         lock = _locks.get(key)
         if lock is None:
-            lock = asyncio.Lock()
+            lock = LoopBoundLock()
             _locks[key] = lock
         return lock
 
@@ -70,7 +70,7 @@ async def session_lock(session_id: str, op: str = "write") -> AsyncGenerator[Non
 # registry lock's critical section, so the test is atomic.
 
 _improving_sessions: set[str] = set()
-_improve_registry_lock = asyncio.Lock()
+_improve_registry_lock = LoopBoundLock()
 
 
 async def try_acquire_improve_lock(session_id: str) -> bool:
