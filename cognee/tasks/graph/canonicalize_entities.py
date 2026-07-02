@@ -37,6 +37,7 @@ import numpy as np
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.infrastructure.engine.models.Edge import Edge
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
+from cognee.infrastructure.llm.prompts import render_prompt
 from cognee.modules.cognify.config import get_cognify_config
 from cognee.modules.engine.models import Entity
 from cognee.modules.pipelines.tasks.task import task_summary
@@ -45,23 +46,6 @@ from cognee.tasks.graph.models import CanonicalizationJudgment
 from cognee.tasks.summarization.models import TextSummary
 
 logger = get_logger("canonicalize_entities")
-
-# Inline system prompt for the judge. A later commit moves this to a dedicated
-# prompt file loaded via ``render_prompt("canonicalize_entities.txt", {})``,
-# matching the extraction convention.
-_JUDGE_SYSTEM_PROMPT = (
-    "You are an entity-resolution judge. You are given candidate pairs of entities "
-    "extracted from text. For each pair decide whether the two entities refer to the "
-    "SAME real-world entity.\n\n"
-    "For each pair return, keyed by its pair_index:\n"
-    "- is_same_entity: true only if they are clearly the same real-world entity.\n"
-    "- canonical_name: the single preferred surface form for the merged entity.\n"
-    "- reconciled_description: a merged description that combines both descriptions "
-    "WITHOUT inventing facts not present in either.\n"
-    "- confidence: your confidence in [0.0, 1.0].\n"
-    "- rationale: one short sentence explaining the verdict.\n\n"
-    "Be conservative: when unsure, set is_same_entity to false with low confidence."
-)
 
 
 def _safe_setattr(obj, name: str, value) -> None:
@@ -199,10 +183,12 @@ async def _judge_pairs(
     indexed = list(enumerate(pairs))
     batches = [indexed[i : i + batch_size] for i in range(0, len(indexed), batch_size)]
 
+    system_prompt = render_prompt("canonicalize_entities.txt", {})
+
     async def judge_batch(batch):
         result = await LLMGateway.acreate_structured_output(
             text_input=_render_pairs(batch),
-            system_prompt=_JUDGE_SYSTEM_PROMPT,
+            system_prompt=system_prompt,
             response_model=CanonicalizationJudgment,
         )
         return result.judgments
