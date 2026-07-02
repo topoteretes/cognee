@@ -5,7 +5,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from cognee.cli.api_dispatch import can_dispatch, dispatch, SUPPORTED_COMMANDS
+from cognee.cli.api_dispatch import (
+    SUPPORTED_COMMANDS,
+    _extract_markdown_parts,
+    can_dispatch,
+    dispatch,
+)
 
 
 class TestCanDispatch:
@@ -20,6 +25,19 @@ class TestCanDispatch:
     def test_true_when_api_url_set(self):
         args = argparse.Namespace(api_url="http://localhost:8000", command="add")
         assert can_dispatch(args) is True
+
+
+class TestGraphReportResponse:
+    def test_extracts_markdown_from_supported_search_response_shapes(self):
+        assert _extract_markdown_parts(["# Local report"]) == ["# Local report"]
+        assert _extract_markdown_parts(
+            [
+                {
+                    "dataset_name": "demo",
+                    "search_result": "# Scoped report",
+                }
+            ]
+        ) == ["# Scoped report"]
 
 
 class TestDispatchRouting:

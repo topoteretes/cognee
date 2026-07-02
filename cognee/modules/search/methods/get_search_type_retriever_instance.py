@@ -25,6 +25,7 @@ from cognee.modules.retrieval.bm25_retriever import BM25ChunksRetriever
 from cognee.modules.retrieval.graph_summary_completion_retriever import (
     GraphSummaryCompletionRetriever,
 )
+from cognee.modules.retrieval.graph_report_retriever import GraphReportRetriever
 from cognee.modules.retrieval.graph_completion_cot_retriever import GraphCompletionCotRetriever
 from cognee.modules.retrieval.graph_completion_context_extension_retriever import (
     GraphCompletionContextExtensionRetriever,
@@ -73,6 +74,8 @@ async def get_search_type_retriever_instance(
     neighborhood_depth = kwargs.get("neighborhood_depth")
     neighborhood_seed_top_k = kwargs.get("neighborhood_seed_top_k")
     include_references = kwargs.get("include_references", False)
+    graph_report_top_n = retriever_specific_config.get("top_n") or top_k or 10
+    graph_report_use_llm_questions = retriever_specific_config.get("use_llm_questions", True)
 
     # Registry mapping search types to their corresponding retriever classes and input parameters
     search_core_registry: dict[SearchType, Tuple[BaseRetriever, dict]] = {
@@ -251,6 +254,15 @@ async def get_search_type_retriever_instance(
                     "summarize_prompt_path", "summarize_search_results.txt"
                 ),
                 "include_references": include_references,
+            },
+        ),
+        SearchType.GRAPH_REPORT: (
+            GraphReportRetriever,
+            {
+                "top_n": graph_report_top_n,
+                "node_name": node_name,
+                "node_name_filter_operator": node_name_filter_operator,
+                "use_llm_questions": graph_report_use_llm_questions,
             },
         ),
         SearchType.CYPHER: (

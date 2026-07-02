@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+from pathlib import Path
 
 from cognee.cli.reference import SupportsCliCommand
 from cognee.cli import DEFAULT_DOCS_URL
@@ -55,6 +56,16 @@ After completion, use `cognee recall` (or `cognee search`) to query the graph.
             type=int,
             help="Number of chunks to process per task batch",
         )
+        parser.add_argument(
+            "--report",
+            action="store_true",
+            help="Write a Graph Insight Report after the knowledge graph is built.",
+        )
+        parser.add_argument(
+            "--report-path",
+            default="graph_report.md",
+            help="Markdown report file or directory (default: graph_report.md).",
+        )
 
     def execute(self, args: argparse.Namespace) -> None:
         try:
@@ -92,6 +103,11 @@ After completion, use `cognee recall` (or `cognee search`) to query the graph.
                         chunks_per_batch=args.chunks_per_batch,
                         run_in_background=args.background,
                     )
+                    if getattr(args, "report", False) and not args.background:
+                        await cognee.report(
+                            datasets=[args.dataset_name],
+                            destination_file_path=getattr(args, "report_path", "graph_report.md"),
+                        )
                     return result
                 except Exception as e:
                     raise CliCommandInnerException(f"Failed to remember: {str(e)}") from e
@@ -100,8 +116,15 @@ After completion, use `cognee recall` (or `cognee search`) to query the graph.
 
             if args.background:
                 fmt.success("Data ingested and cognification started in background!")
+                if getattr(args, "report", False):
+                    fmt.warning("Skipping report generation until background processing completes.")
             else:
                 fmt.success("Data ingested and knowledge graph built successfully!")
+                if getattr(args, "report", False):
+                    report_path = _report_destination(
+                        getattr(args, "report_path", "graph_report.md")
+                    )
+                    fmt.echo(f"Graph Insight Report written to {report_path}")
 
             if result:
                 if result.dataset_id:
@@ -117,3 +140,10 @@ After completion, use `cognee recall` (or `cognee search`) to query the graph.
             if isinstance(e, CliCommandInnerException):
                 raise CliCommandException(str(e), error_code=1) from e
             raise CliCommandException(f"Failed to remember: {str(e)}", error_code=1) from e
+
+
+def _report_destination(destination_file_path: str) -> str:
+    destination = Path(destination_file_path).expanduser()
+    if destination.suffix.lower() not in {".md", ".markdown"}:
+        destination = destination / "graph_report.md"
+    return str(destination)

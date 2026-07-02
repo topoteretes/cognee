@@ -149,11 +149,13 @@ class CogneeApiClient:
         search_type: str = "GRAPH_COMPLETION",
         datasets: Optional[list[str]] = None,
         top_k: int = 15,
+        only_context: bool = False,
     ) -> list:
         payload: dict[str, Any] = {
             "query": query,
             "search_type": search_type,
             "top_k": top_k,
+            "only_context": only_context,
         }
         if datasets:
             payload["datasets"] = datasets
