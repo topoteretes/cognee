@@ -47,7 +47,7 @@ class _DuplicateTwinResolver(BaseOntologyResolver):
 
 
 class _EdgeCollisionResolver(BaseOntologyResolver):
-    """Ontology and extracted edges share the audi -> car is_a key."""
+    """Ontology and extracted edges share the audi -> bob knows key."""
 
     def build_lookup(self) -> None:
         return None
@@ -59,13 +59,16 @@ class _EdgeCollisionResolver(BaseOntologyResolver):
         return None
 
     def get_subgraph(self, node_name: str, node_type: str = "individuals", directed: bool = True):
-        if node_type == "classes" and node_name == "car":
-            root = AttachedOntologyNode("car", "classes")
+        if node_type == "classes" and node_name == "person":
+            root = AttachedOntologyNode("person", "classes")
             return [root], [], root
         if node_type == "individuals" and node_name == "audi":
             root = AttachedOntologyNode("audi", "individuals")
-            parent = AttachedOntologyNode("car", "classes")
-            return [root, parent], [("audi", "is_a", "car")], root
+            bob = AttachedOntologyNode("bob", "individuals")
+            return [root, bob], [("audi", "knows", "bob")], root
+        if node_type == "individuals" and node_name == "bob":
+            root = AttachedOntologyNode("bob", "individuals")
+            return [root], [], root
         return [], [], None
 
 
@@ -180,16 +183,19 @@ def run_duplicate_twin_scenario():
 
 
 def run_edge_collision_scenario():
-    """Extracted and ontology edges collide on audi -> car is_a."""
+    """Extracted and ontology edges collide on audi -> bob knows."""
     chunk = _make_chunk()
     graph = _make_graph(
-        [Node(id="e1", name="Audi", type="Car", description="audi entity")],
+        [
+            Node(id="e-audi", name="Audi", type="Person", description="audi entity"),
+            Node(id="e-bob", name="Bob", type="Person", description="bob entity"),
+        ],
         [
             KGEdge(
                 source_node_id="audi",
-                target_node_id="car",
-                relationship_name="is_a",
-                description="extracted is_a wins later",
+                target_node_id="bob",
+                relationship_name="knows",
+                description="extracted knows wins later",
             )
         ],
     )
@@ -557,6 +563,58 @@ def test_scenario_b_matching_ontology_golden():
     audi_nodes = [row for row in output["nodes"] if row[2] == "audi" and row[0] == "Entity"]
     assert len(audi_nodes) == 1
     assert audi_nodes[0][4] == "Second collision desc."
+    assert output["relations"] == GOLDEN_B["relations"]
+
+
+def test_scenario_d_relation_membership_unchanged():
+    """Scenario D relation filtering must stay stable when injection moves post-pass."""
+    resolver = _build_scenario_b_ontology()
+    extracted_edge_key = _create_edge_key(
+        str(Entity.id_for("porsche_911")),
+        str(Entity.id_for("audi")),
+        generate_edge_name("raced_against"),
+    )
+    ontology_edge_key = _create_edge_key(
+        str(Entity.id_for("audi")),
+        str(EntityType.id_for("car")),
+        generate_edge_name("is_a"),
+    )
+    seeded = {extracted_edge_key: True, ontology_edge_key: True}
+    chunk_main = _make_chunk(importance_weight=0.99, belongs_to_set=["set-marker-1"])
+    chunk_extra = _make_chunk(importance_weight=0.4)
+    graph_main = _make_graph(
+        [
+            Node(id="e-audi", name="Audi", type="Car", description="Audi from chunk."),
+            Node(id="porsche_911s", name="porsche_911s", type="Car", description="Porsche note."),
+            Node(
+                id="ghost-1", name="ghost_entity", type="Phantom", description="No ontology match."
+            ),
+            Node(id="collide-1", name="audi", type="Car", description="First collision desc."),
+            Node(id="collide-2", name="Audi", type="Car", description="Second collision desc."),
+        ],
+        [
+            KGEdge(
+                source_node_id="porsche_911s",
+                target_node_id="audi",
+                relationship_name="raced_against",
+            ),
+        ],
+    )
+    graph_extra = _make_graph(
+        [
+            Node(
+                id="n-alice", name="Alice", type="Person", description="Exact type and entity path."
+            )
+        ],
+        [],
+    )
+    _, filtered_nodes = expand_with_nodes_and_edges(
+        [chunk_main, chunk_extra], [graph_main, graph_extra], resolver, seeded
+    )
+    filtered = serialize_output([chunk_main, chunk_extra], filtered_nodes)
+    filtered_rels = {rel for rel in filtered["relations"]}
+    assert not any(rel[1] == "raced_against" for rel in filtered_rels)
+    assert not any(rel[1] == "is_a" for rel in filtered_rels)
 
 
 def test_positive_ontology_edge_pin():
@@ -570,25 +628,49 @@ def test_positive_ontology_edge_pin():
     assert ("audi", "is_a", "car") in _relation_triples(entity_nodes)
 
 
-def test_duplicate_twin_pin_two_nodes_same_id():
-    """Phase 1 should collapse injected and extracted twins sharing one canonical id."""
+def test_duplicate_twin_pin_single_node_after_post_pass_injection():
+    """Post-pass injection dedupes against the complete converted node set."""
     _, entity_nodes = run_duplicate_twin_scenario()
     shared_id = str(Entity.id_for("shared_p"))
     shared_nodes = [node for node in entity_nodes if str(node.id) == shared_id]
-    assert len(shared_nodes) == 2
+    assert len(shared_nodes) == 1
 
 
-def test_edge_collision_pin_ontology_edge_wins_today():
-    """Phase 1 should let the extracted edge win on a shared key (delta 3)."""
+def test_duplicate_twin_order_invariant():
+    """Duplicate-twin output is stable when chunk order is permuted."""
+    chunk1 = _make_chunk(importance_weight=0.9)
+    chunk2 = _make_chunk(importance_weight=0.1)
+    graph1 = _make_graph(
+        [Node(id="anchor", name="Anchor", type="Team", description="chunk1 anchor")],
+        [],
+    )
+    graph2 = _make_graph(
+        [Node(id="ext", name="shared_p", type="Other", description="chunk2 extracted")],
+        [],
+    )
+    forward, forward_nodes = expand_with_nodes_and_edges(
+        [chunk1, chunk2], [graph1, graph2], _DuplicateTwinResolver()
+    )
+    reverse, reverse_nodes = expand_with_nodes_and_edges(
+        [chunk2, chunk1], [graph2, graph1], _DuplicateTwinResolver()
+    )
+
+    forward_out = serialize_output(forward, forward_nodes)
+    reverse_out = serialize_output(reverse, reverse_nodes)
+    assert forward_out["nodes"] == reverse_out["nodes"]
+    assert forward_out["relations"] == reverse_out["relations"]
+
+
+def test_edge_collision_pin_extracted_edge_wins():
+    """Extracted edges are emitted before ontology edges on a shared key (delta 3)."""
     _, entity_nodes = run_edge_collision_scenario()
-    is_a_rels = [
-        (edge.edge_text,)
+    knows_rels = [
+        edge.edge_text
         for node in entity_nodes
         for edge, target in node.relations
-        if edge.relationship_type == "is_a" and node.name == "audi" and target.name == "car"
+        if edge.relationship_type == "knows" and node.name == "audi" and target.name == "bob"
     ]
-    assert len(is_a_rels) == 1
-    assert is_a_rels[0] == (None,)
+    assert knows_rels == ["extracted knows wins later"]
 
 
 def test_scenario_c_dedup_before_matching_call_count():
