@@ -29,6 +29,36 @@ def _strip_nonblank_text(value: str | None) -> str | None:
     return stripped_value or None
 
 
+def _resolve_ontology_match(
+    node_name: str,
+    node_type: str,
+    ontology_resolver: BaseOntologyResolver,
+) -> tuple[Optional[str], list, list]:
+    """Return (canonical_raw_name, ontology_nodes, ontology_edges)."""
+    ontology_nodes, ontology_edges, match = ontology_resolver.get_subgraph(
+        node_name=node_name, node_type=node_type
+    )
+    if not match:
+        return None, [], []
+    return match.name, ontology_nodes, ontology_edges
+
+
+def _inject_ontology_subgraph(
+    ontology_nodes: list,
+    ontology_edges: list,
+    data_chunk: DocumentChunk,
+    added_nodes_map: dict,
+    added_ontology_nodes_map: dict,
+    existing_edges_map: dict,
+    ontology_relationships: list,
+) -> None:
+    """Inject the matched subgraph closure after the canonical node is in added_nodes_map."""
+    _process_ontology_nodes(ontology_nodes, data_chunk, added_nodes_map, added_ontology_nodes_map)
+    _process_ontology_edges(
+        ontology_nodes, ontology_edges, existing_edges_map, ontology_relationships
+    )
+
+
 def _process_ontology_nodes(
     ontology_nodes: list,
     data_chunk: DocumentChunk,
@@ -115,6 +145,7 @@ def _create_type_node(
     """Create or retrieve a type node with ontology validation"""
     node_id = EntityType.id_for(node_type)
     node_name = generate_node_name(node_type)
+    extracted_node_name = node_name
     type_node_key = _create_node_key(node_id, "type")
 
     if type_node_key in added_nodes_map or type_node_key in key_mapping:
@@ -122,41 +153,40 @@ def _create_type_node(
             key_mapping.get(type_node_key)
         )
 
-    ontology_nodes, ontology_edges, closest_class = [], [], None
-    ontology_validated = False
+    canonical_name, ontology_nodes, ontology_edges = None, [], []
     if ontology_resolver is not None:
-        ontology_nodes, ontology_edges, closest_class = ontology_resolver.get_subgraph(
-            node_name=node_name, node_type="classes"
+        canonical_name, ontology_nodes, ontology_edges = _resolve_ontology_match(
+            node_name, "classes", ontology_resolver
         )
-        ontology_validated = bool(closest_class)
 
-    if ontology_validated:
+    if canonical_name is not None:
         old_key = type_node_key
-        node_id = EntityType.id_for(closest_class.name)
+        node_id = EntityType.id_for(canonical_name)
         type_node_key = _create_node_key(node_id, "type")
-        new_node_name = generate_node_name(closest_class.name)
+        node_name = generate_node_name(canonical_name)
 
-        name_mapping[node_name] = closest_class.name
+        name_mapping[extracted_node_name] = canonical_name
         key_mapping[old_key] = type_node_key
-        node_name = new_node_name
 
     type_node = EntityType(
         id=node_id,
         name=node_name,
-        type=node_name,
         description=node_name,
-        ontology_valid=ontology_validated,
+        ontology_valid=canonical_name is not None,
         importance_weight=data_chunk.importance_weight,
     )
 
     added_nodes_map[type_node_key] = type_node
 
     if ontology_resolver is not None:
-        _process_ontology_nodes(
-            ontology_nodes, data_chunk, added_nodes_map, added_ontology_nodes_map
-        )
-        _process_ontology_edges(
-            ontology_nodes, ontology_edges, existing_edges_map, ontology_relationships
+        _inject_ontology_subgraph(
+            ontology_nodes,
+            ontology_edges,
+            data_chunk,
+            added_nodes_map,
+            added_ontology_nodes_map,
+            existing_edges_map,
+            ontology_relationships,
         )
 
     return type_node
@@ -179,6 +209,7 @@ def _create_entity_node(
     """Create or retrieve an entity node with ontology validation"""
     generated_node_id = Entity.id_for(node_id)
     generated_node_name = generate_node_name(node_name)
+    extracted_node_name = generated_node_name
     entity_node_key = _create_node_key(generated_node_id, "entity")
 
     if entity_node_key in added_nodes_map or entity_node_key in key_mapping:
@@ -186,30 +217,27 @@ def _create_entity_node(
             key_mapping.get(entity_node_key)
         )
 
-    ontology_nodes, ontology_edges, start_ent_ont = [], [], None
-    ontology_validated = False
+    canonical_name, ontology_nodes, ontology_edges = None, [], []
     if ontology_resolver is not None:
-        ontology_nodes, ontology_edges, start_ent_ont = ontology_resolver.get_subgraph(
-            node_name=generated_node_name, node_type="individuals"
+        canonical_name, ontology_nodes, ontology_edges = _resolve_ontology_match(
+            generated_node_name, "individuals", ontology_resolver
         )
-        ontology_validated = bool(start_ent_ont)
 
-    if ontology_validated:
+    if canonical_name is not None:
         old_key = entity_node_key
-        generated_node_id = Entity.id_for(start_ent_ont.name)
+        generated_node_id = Entity.id_for(canonical_name)
         entity_node_key = _create_node_key(generated_node_id, "entity")
-        new_node_name = generate_node_name(start_ent_ont.name)
+        generated_node_name = generate_node_name(canonical_name)
 
-        name_mapping[generated_node_name] = start_ent_ont.name
+        name_mapping[extracted_node_name] = canonical_name
         key_mapping[old_key] = entity_node_key
-        generated_node_name = new_node_name
 
     entity_node = Entity(
         id=generated_node_id,
         name=generated_node_name,
         is_a=type_node,
         description=node_description,
-        ontology_valid=ontology_validated,
+        ontology_valid=canonical_name is not None,
         belongs_to_set=data_chunk.belongs_to_set,
         # TODO add importance_weight calculation if an entity with that id already exits
         importance_weight=data_chunk.importance_weight,
@@ -218,11 +246,14 @@ def _create_entity_node(
     added_nodes_map[entity_node_key] = entity_node
 
     if ontology_resolver is not None:
-        _process_ontology_nodes(
-            ontology_nodes, data_chunk, added_nodes_map, added_ontology_nodes_map
-        )
-        _process_ontology_edges(
-            ontology_nodes, ontology_edges, existing_edges_map, ontology_relationships
+        _inject_ontology_subgraph(
+            ontology_nodes,
+            ontology_edges,
+            data_chunk,
+            added_nodes_map,
+            added_ontology_nodes_map,
+            existing_edges_map,
+            ontology_relationships,
         )
 
     return entity_node
