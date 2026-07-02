@@ -134,6 +134,11 @@ docs = [
     "unstructured[csv, doc, docx, epub, md, odt, org, ppt, pptx, rst, rtf, tsv, xlsx, pdf]>=0.18.1,<19",
     "nltk>=3.9.3,<4", # TODO: Remove when unstructured is above v0.21.0 as it won't use nltk anymore
 ]
+video = [
+    # Bundles a static ffmpeg binary so video audio-track extraction works
+    # without a system ffmpeg install. A system ffmpeg on PATH is used first.
+    "imageio-ffmpeg>=0.5.1,<1",
+]
 codegraph = [
     "fastembed<=0.8.0 ; python_version < '3.14'",
     "transformers>=4.46.3,<5",
