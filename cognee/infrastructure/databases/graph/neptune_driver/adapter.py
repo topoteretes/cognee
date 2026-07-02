@@ -764,7 +764,7 @@ class NeptuneGraphDB(GraphDBInterface):
             - Dict[str, Any]: A dictionary containing graph metrics and statistics.
         """
         num_nodes, num_edges = await self._get_model_independent_graph_data()
-        num_cluster, list_clsuter_size = await self._get_connected_components_stat()
+        list_clsuter_size, num_cluster = await self._get_connected_components_stat()
 
         mandatory_metrics = {
             "num_nodes": num_nodes,
