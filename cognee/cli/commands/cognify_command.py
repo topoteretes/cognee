@@ -7,6 +7,7 @@ from cognee.cli import DEFAULT_DOCS_URL
 from cognee.cli.config import CHUNKER_CHOICES
 import cognee.cli.echo as fmt
 from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
+from cognee.cli.first_run import echo_after_cognify, with_first_run_error_hint
 
 
 class CognifyCommand(SupportsCliCommand):
@@ -125,7 +126,8 @@ After successful cognify processing, use `cognee search` to query the knowledge 
                     )
                     return result
                 except Exception as e:
-                    raise CliCommandInnerException(f"Failed to cognify: {str(e)}") from e
+                    message = with_first_run_error_hint(f"Failed to cognify: {str(e)}")
+                    raise CliCommandInnerException(message) from e
 
             result = asyncio.run(run_cognify())
 
@@ -139,8 +141,10 @@ After successful cognify processing, use `cognee search` to query the knowledge 
                 fmt.success("Cognification completed successfully!")
                 if args.verbose and result:
                     fmt.echo(f"Processing results: {result}")
+            echo_after_cognify(datasets, background=args.background)
 
         except Exception as e:
             if isinstance(e, CliCommandInnerException):
                 raise CliCommandException(str(e), error_code=1) from e
-            raise CliCommandException(f"Error during cognification: {str(e)}", error_code=1) from e
+            message = with_first_run_error_hint(f"Error during cognification: {str(e)}")
+            raise CliCommandException(message, error_code=1) from e

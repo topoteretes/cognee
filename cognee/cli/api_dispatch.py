@@ -13,6 +13,13 @@ import os
 
 import cognee.cli.echo as fmt
 from cognee.cli.api_client import CogneeApiClient
+from cognee.cli.first_run import (
+    echo_after_add,
+    echo_after_cognify,
+    echo_after_forget,
+    echo_after_remember,
+    echo_empty_query_hint,
+)
 
 SUPPORTED_COMMANDS = {
     "add",
@@ -98,6 +105,7 @@ def _dispatch_add(client: CogneeApiClient, args: argparse.Namespace) -> None:
     fmt.success(f"Successfully added data to dataset '{args.dataset_name}'")
     if result:
         fmt.echo(json.dumps(result, indent=2, default=str))
+    echo_after_add(args.dataset_name)
 
 
 def _dispatch_cognify(client: CogneeApiClient, args: argparse.Namespace) -> None:
@@ -114,6 +122,7 @@ def _dispatch_cognify(client: CogneeApiClient, args: argparse.Namespace) -> None
         fmt.success("Cognification completed successfully!")
     if result:
         fmt.echo(json.dumps(result, indent=2, default=str))
+    echo_after_cognify(datasets, background=getattr(args, "background", False))
 
 
 def _dispatch_search(client: CogneeApiClient, args: argparse.Namespace) -> None:
@@ -130,6 +139,7 @@ def _dispatch_search(client: CogneeApiClient, args: argparse.Namespace) -> None:
         fmt.echo(json.dumps(results, indent=2, default=str))
     elif not results:
         fmt.warning("No results found for your query.")
+        echo_empty_query_hint("search")
     else:
         fmt.echo(f"\nFound {len(results)} result(s):")
         fmt.echo("=" * 60)
@@ -274,6 +284,12 @@ def _dispatch_remember(client: CogneeApiClient, args: argparse.Namespace) -> Non
             value = result.get(key)
             if value is not None:
                 fmt.echo(f"  {key}: {value}")
+    dataset_id = result.get("dataset_id") if isinstance(result, dict) else None
+    echo_after_remember(
+        args.dataset_name,
+        dataset_id=str(dataset_id) if dataset_id else None,
+        background=getattr(args, "background", False),
+    )
 
 
 def _dispatch_recall(client: CogneeApiClient, args: argparse.Namespace) -> None:
@@ -309,6 +325,7 @@ def _dispatch_recall(client: CogneeApiClient, args: argparse.Namespace) -> None:
 
     if not results:
         fmt.warning("No results found for your query.")
+        echo_empty_query_hint("recall")
         return
 
     is_session = isinstance(results[0], dict) and results[0].get("_source") == "session"
@@ -381,3 +398,4 @@ def _dispatch_forget(client: CogneeApiClient, args: argparse.Namespace) -> None:
         everything=everything,
     )
     fmt.success(f"Done: {result}")
+    echo_after_forget()
