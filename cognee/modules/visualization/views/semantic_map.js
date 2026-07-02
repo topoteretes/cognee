@@ -23,6 +23,7 @@
   let colorBy = 'cluster';
   let zoomBehavior = null;
   let isolatedCluster = null;
+  let isolatedType = null;
 
   function clusterColor(clusters) {
     // Deterministic palette indexed by cluster id.
@@ -146,8 +147,14 @@
       .style('cursor', 'pointer');
 
     function applyIsolation() {
-      circles.attr('opacity', (id) =>
-        isolatedCluster == null || nodeCluster[id] === isolatedCluster ? 1 : 0.12);
+      circles.attr('opacity', (id) => {
+        if (colorBy === 'type') {
+          if (isolatedType == null) return 1;
+          const nd = nodeById(id);
+          return nd && nd.type === isolatedType ? 1 : 0.12;
+        }
+        return isolatedCluster == null || nodeCluster[id] === isolatedCluster ? 1 : 0.12;
+      });
     }
 
     circles.on('mouseover', function (event, id) {
@@ -169,7 +176,7 @@
     svg.call(zoomBehavior.transform, prevTransform);
 
     applyIsolation();
-    renderLegend(clusters, clusterColors, applyIsolation);
+    renderLegend(clusters, clusterColors, applyIsolation, ids);
 
     const status = document.getElementById('semantic-status');
     if (status) {
@@ -177,21 +184,40 @@
     }
   }
 
-  function renderLegend(clusters, clusterColors, applyIsolation) {
+  function legendRow(color, text, onClick) {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;gap:8px;cursor:pointer;padding:1px 0;';
+    row.innerHTML = '<span style="width:10px;height:10px;border-radius:50%;background:'
+      + color + ';display:inline-block;flex:0 0 auto;"></span>'
+      + '<span>' + esc(text.length > 30 ? text.slice(0, 29) + '…' : text) + '</span>';
+    row.addEventListener('click', onClick);
+    return row;
+  }
+
+  function renderLegend(clusters, clusterColors, applyIsolation, ids) {
     const legend = document.getElementById('semantic-legend');
     if (!legend) return;
     legend.innerHTML = '';
+    if (colorBy === 'type') {
+      // Legend follows the color mode: list ontology types, click isolates one.
+      const typeColor = {};
+      ids.forEach((id) => {
+        const nd = nodeById(id);
+        if (nd && nd.type && !(nd.type in typeColor)) typeColor[nd.type] = nd.color || '#8a8a8a';
+      });
+      Object.keys(typeColor).sort().forEach((t) => {
+        legend.appendChild(legendRow(typeColor[t], t, () => {
+          isolatedType = isolatedType === t ? null : t;
+          applyIsolation();
+        }));
+      });
+      return;
+    }
     clusters.forEach((c) => {
-      const row = document.createElement('div');
-      row.style.cssText = 'display:flex;align-items:center;gap:8px;cursor:pointer;padding:1px 0;';
-      row.innerHTML = '<span style="width:10px;height:10px;border-radius:50%;background:'
-        + clusterColors[c.id] + ';display:inline-block;flex:0 0 auto;"></span>'
-        + '<span>' + esc(c.label.length > 30 ? c.label.slice(0, 29) + '…' : c.label) + '</span>';
-      row.addEventListener('click', () => {
+      legend.appendChild(legendRow(clusterColors[c.id], c.label, () => {
         isolatedCluster = isolatedCluster === c.id ? null : c.id;
         applyIsolation();
-      });
-      legend.appendChild(row);
+      }));
     });
   }
 
@@ -209,6 +235,7 @@
       btn.classList.add('active');
       btn.style.background = 'var(--accent)'; btn.style.color = '#fff'; btn.style.border = 'none';
       colorBy = btn.dataset.colorby;
+      isolatedCluster = null; isolatedType = null;  // isolation is per-mode
       render(true);
     });
   });

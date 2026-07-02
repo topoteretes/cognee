@@ -45,6 +45,9 @@ def test_semantic_tab_and_view_are_wired(tmp_path, monkeypatch):
     assert 'id="semantic-view"' in html
     assert "window._renderSemanticView" in html
     assert "window._semanticPositions" in html
+    # Type-filter wiring: the legend follows the color mode and isolates a type.
+    assert "isolatedType" in html
+    assert "colorBy === 'type'" in html
 
 
 def test_no_token_leaks_with_embeddings(tmp_path, monkeypatch):
