@@ -12,29 +12,48 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@master
+      uses: actions/checkout@v4
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v6
+
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.12'
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
 
-    - name: Build Docker images
+    - name: Create docker-compose test environment
+      run: |
+        cat > .env <<'EOF'
+        ENV=dev
+        LOG_LEVEL=INFO
+        REQUIRE_AUTHENTICATION=False
+        ENABLE_BACKEND_ACCESS_CONTROL=False
+        COGNEE_SKIP_CONNECTION_TEST=true
+        LLM_API_KEY=mock
+        DB_PROVIDER=postgres
+        DB_HOST=postgres
+        DB_PORT=5432
+        DB_NAME=cognee_db
+        DB_USERNAME=cognee
+        DB_PASSWORD=cognee
+        EOF
+
+    - name: Run Docker Compose full-stack E2E
       env:
         ENV: dev
       run: |
-        docker compose -f docker-compose.yml build
-
-    - name: Run Docker Compose
-      env:
-        ENV: dev
-      run: |
-        docker compose -f docker-compose.yml up -d
-
-    - name: Wait for services to be ready
-      run: |
-        # Add any necessary health checks or wait commands
-        sleep 30
+        docker compose -f docker-compose.yml --profile postgres --profile mcp up -d --build --wait --wait-timeout 300
+        uv run --no-project \
+          --with pytest \
+          --with httpx \
+          --with 'mcp>=1.12.0,<2.0.0' \
+          pytest cognee/tests/e2e/docker_compose/test_full_stack.py -v
 
     - name: Shut down Docker Compose
       if: always()
       run: |
-        docker compose -f docker-compose.yml down
+        docker compose -f docker-compose.yml --profile postgres --profile mcp down -v
