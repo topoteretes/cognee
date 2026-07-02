@@ -37,8 +37,12 @@ class BaseConfig(BaseSettings):
         self.system_root_directory = ensure_absolute_path(self.system_root_directory)
         self.logs_root_directory = ensure_absolute_path(self.logs_root_directory)
 
+        if self.langsmith_api_key:
+            self.monitoring_tool = Observer.LANGSMITH
+
         return self
 
+    langsmith_api_key: Optional[str] = os.getenv("LANGSMITH_API_KEY")
     default_user_email: Optional[str] = os.getenv("DEFAULT_USER_EMAIL")
     default_user_password: Optional[str] = os.getenv("DEFAULT_USER_PASSWORD")
 
