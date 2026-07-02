@@ -95,9 +95,7 @@ def test_deoverlap_separates_coincident_points():
     pos = compute_positions(nodes, [], same, seed=42)
     pts = np.array([[pos[i]["x"], pos[i]["y"]] for i in ["a", "b", "c", "d"]])
     dists = [
-        np.linalg.norm(pts[i] - pts[j])
-        for i in range(len(pts))
-        for j in range(i + 1, len(pts))
+        np.linalg.norm(pts[i] - pts[j]) for i in range(len(pts)) for j in range(i + 1, len(pts))
     ]
     assert min(dists) >= MIN_SEPARATION * SPREAD * 0.9
 

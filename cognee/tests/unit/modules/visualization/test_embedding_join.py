@@ -149,11 +149,9 @@ def test_reembed_uses_text_field_for_text_types():
 
 
 def test_sampling_cap_deterministic():
-    store = {}  # collection absent -> no retrieve, but sampling still runs
-    engine = FakeVectorEngine(store)
     nodes = [_node(f"{i:05d}", "Entity") for i in range(3000)]
 
-    # Patch _select_nodes indirectly: cap at 2000 and assert two runs agree.
+    # Cap at 2000 and assert two runs agree (deterministic seeded sample).
     from cognee.modules.visualization import embedding_join
 
     picked1 = embedding_join._select_nodes(nodes, 2000)

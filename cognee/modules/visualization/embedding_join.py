@@ -143,9 +143,7 @@ async def fetch_node_embeddings(
                 continue
             found = await _fetch_for_collection(vector_engine, collection, type_nodes, field)
         except Exception as exc:  # never let a vector-store failure break the render
-            logger.warning(
-                "fetch_node_embeddings: fetch failed for %s: %s", collection, exc
-            )
+            logger.warning("fetch_node_embeddings: fetch failed for %s: %s", collection, exc)
             continue
         for nid, vector in found.items():
             if nid not in embeddings:

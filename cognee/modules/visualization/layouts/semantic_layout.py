@@ -136,7 +136,6 @@ def _deoverlap(
     pts = np.array([positioned[nid] for nid in ordered_ids], dtype=float)
     # Seeded tie-breaking nudge so exactly-coincident points separate deterministically.
     pts = pts + rng.uniform(-min_dist / 4, min_dist / 4, size=pts.shape)
-    n = len(pts)
     for _ in range(iterations):
         diff = pts[:, None, :] - pts[None, :, :]  # (n, n, 2)
         dist = np.sqrt((diff**2).sum(axis=2))  # (n, n)

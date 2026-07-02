@@ -1,0 +1,236 @@
+// Semantic-map view.
+//
+// A meaning-space scatter of the graph: each node is pinned at the 2-D
+// projection of its embedding (window._semanticPositions, from the layout's
+// __SEMANTIC_POSITIONS__ token), shaded by cluster (__SEMANTIC_CLUSTERS__).
+// Positions are computed once in Python and never simulated here (layout-once
+// rule). Hovering a node lights up its precomputed nearest neighbors and lists
+// its graph relations. Node/cluster payloads carry structure only; node detail
+// is read from window._vizNodeById / window._vizLinks (exposed by story_view.js).
+(function () {
+  'use strict';
+
+  const CLUSTERS = __SEMANTIC_CLUSTERS__;
+
+  function nodeById(id) {
+    return (window._vizNodeById && window._vizNodeById[id]) || null;
+  }
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  let colorBy = 'cluster';
+  let zoomBehavior = null;
+  let isolatedCluster = null;
+
+  function clusterColor(clusters) {
+    // Deterministic palette indexed by cluster id.
+    const map = {};
+    const n = Math.max(1, clusters.length);
+    clusters.forEach((c, i) => {
+      map[c.id] = d3.interpolateTurbo((i + 0.5) / n);
+    });
+    return map;
+  }
+
+  function colorForNode(id, clusterColors, nodeCluster) {
+    if (colorBy === 'type') {
+      const nd = nodeById(id);
+      return (nd && nd.color) || '#8a8a8a';
+    }
+    const cid = nodeCluster[id];
+    return cid == null ? '#8a8a8a' : clusterColors[cid];
+  }
+
+  function relationsFor(id) {
+    const links = window._vizLinks || [];
+    const out = [];
+    for (const l of links) {
+      const s = String(l.source), t = String(l.target);
+      if (s === id) out.push({ other: t, rel: l.relation || l.label || 'related' });
+      else if (t === id) out.push({ other: s, rel: l.relation || l.label || 'related' });
+      if (out.length >= 8) break;
+    }
+    return out;
+  }
+
+  function showPanel(id, clusterColors, nodeCluster) {
+    const panel = document.getElementById('semantic-panel');
+    if (!panel) return;
+    const nd = nodeById(id) || {};
+    const cid = nodeCluster[id];
+    const cluster = (CLUSTERS.clusters || []).find((c) => c.id === cid);
+    const neighbors = (CLUSTERS.neighbors && CLUSTERS.neighbors[id]) || [];
+    const rels = relationsFor(id);
+
+    let html = '<div style="font-size:15px;font-weight:700;margin-bottom:6px;">' + esc(nd.name || id) + '</div>';
+    html += '<div style="font-size:12px;color:var(--text2);margin-bottom:12px;">' + esc(nd.type || 'node') + '</div>';
+    if (cluster) {
+      html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;">'
+        + '<span style="width:11px;height:11px;border-radius:50%;background:' + clusterColors[cid] + ';display:inline-block;"></span>'
+        + '<span style="font-size:12.5px;">' + esc(cluster.label) + '</span></div>';
+    }
+    if (neighbors.length) {
+      html += '<div style="font-size:11px;text-transform:uppercase;letter-spacing:0.04em;color:var(--text2);margin-bottom:6px;">Nearest in meaning</div>';
+      html += '<div style="margin-bottom:14px;">';
+      neighbors.forEach((nid) => {
+        const nn = nodeById(nid) || {};
+        html += '<div style="font-size:12.5px;padding:2px 0;">' + esc(nn.name || nid) + '</div>';
+      });
+      html += '</div>';
+    }
+    if (rels.length) {
+      html += '<div style="font-size:11px;text-transform:uppercase;letter-spacing:0.04em;color:var(--text2);margin-bottom:6px;">Relations</div>';
+      rels.forEach((r) => {
+        const on = nodeById(r.other) || {};
+        html += '<div style="font-size:12px;padding:2px 0;color:var(--text2);">'
+          + esc(r.rel) + ' &rarr; <span style="color:var(--text);">' + esc(on.name || r.other) + '</span></div>';
+      });
+    }
+    panel.innerHTML = html;
+    panel.style.display = 'block';
+  }
+
+  function render(preserve) {
+    const svgEl = document.getElementById('semantic-svg');
+    const empty = document.getElementById('semantic-empty');
+    const positions = window._semanticPositions || null;
+    const ids = positions ? Object.keys(positions) : [];
+
+    if (!positions || ids.length === 0 || !CLUSTERS) {
+      if (empty) empty.style.display = 'flex';
+      if (svgEl) svgEl.style.display = 'none';
+      return;
+    }
+    if (empty) empty.style.display = 'none';
+    if (svgEl) svgEl.style.display = 'block';
+
+    const svg = d3.select(svgEl);
+    const width = svgEl.clientWidth || 800;
+    const height = svgEl.clientHeight || 600;
+    const pad = 60;
+    const clusters = CLUSTERS.clusters || [];
+    const nodeCluster = CLUSTERS.node_cluster || {};
+    const clusterColors = clusterColor(clusters);
+
+    const sx = d3.scaleLinear().domain([-1.2, 1.2]).range([pad, width - pad]);
+    const sy = d3.scaleLinear().domain([-1.2, 1.2]).range([height - pad, pad]);
+
+    const prevTransform = preserve ? d3.zoomTransform(svgEl) : d3.zoomIdentity;
+    svg.selectAll('*').remove();
+    const g = svg.append('g');
+
+    // Cluster labels at the on-screen centroid of each cluster's members.
+    clusters.forEach((c) => {
+      const pts = (c.node_ids || []).map((id) => positions[id]).filter(Boolean);
+      if (!pts.length) return;
+      const cx = d3.mean(pts, (p) => p.x);
+      const cy = d3.mean(pts, (p) => p.y);
+      g.append('text')
+        .attr('x', sx(cx)).attr('y', sy(cy))
+        .attr('text-anchor', 'middle')
+        .attr('fill', clusterColors[c.id])
+        .attr('font-size', 13).attr('font-weight', 700)
+        .attr('opacity', 0.85)
+        .attr('pointer-events', 'none')
+        .text(c.label.length > 34 ? c.label.slice(0, 33) + '…' : c.label);
+    });
+
+    const circles = g.selectAll('circle').data(ids, (d) => d).enter().append('circle')
+      .attr('cx', (id) => sx(positions[id].x))
+      .attr('cy', (id) => sy(positions[id].y))
+      .attr('r', 5)
+      .attr('fill', (id) => colorForNode(id, clusterColors, nodeCluster))
+      .attr('stroke', 'rgba(0,0,0,0.25)').attr('stroke-width', 0.5)
+      .style('cursor', 'pointer');
+
+    function applyIsolation() {
+      circles.attr('opacity', (id) =>
+        isolatedCluster == null || nodeCluster[id] === isolatedCluster ? 1 : 0.12);
+    }
+
+    circles.on('mouseover', function (event, id) {
+      const nbrs = new Set([(id), ...((CLUSTERS.neighbors && CLUSTERS.neighbors[id]) || [])]);
+      circles.attr('opacity', (d) => (nbrs.has(d) ? 1 : 0.15));
+      d3.select(this).attr('r', 8);
+      showPanel(id, clusterColors, nodeCluster);
+    }).on('mouseout', function () {
+      d3.select(this).attr('r', 5);
+      applyIsolation();
+      const panel = document.getElementById('semantic-panel');
+      if (panel) panel.style.display = 'none';
+    });
+
+    zoomBehavior = d3.zoom().scaleExtent([0.2, 12]).on('zoom', (event) => {
+      g.attr('transform', event.transform);
+    });
+    svg.call(zoomBehavior);
+    svg.call(zoomBehavior.transform, prevTransform);
+
+    applyIsolation();
+    renderLegend(clusters, clusterColors, applyIsolation);
+
+    const status = document.getElementById('semantic-status');
+    if (status) {
+      status.textContent = ids.length + ' nodes · ' + clusters.length + ' clusters';
+    }
+  }
+
+  function renderLegend(clusters, clusterColors, applyIsolation) {
+    const legend = document.getElementById('semantic-legend');
+    if (!legend) return;
+    legend.innerHTML = '';
+    clusters.forEach((c) => {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;align-items:center;gap:8px;cursor:pointer;padding:1px 0;';
+      row.innerHTML = '<span style="width:10px;height:10px;border-radius:50%;background:'
+        + clusterColors[c.id] + ';display:inline-block;flex:0 0 auto;"></span>'
+        + '<span>' + esc(c.label.length > 30 ? c.label.slice(0, 29) + '…' : c.label) + '</span>';
+      row.addEventListener('click', () => {
+        isolatedCluster = isolatedCluster === c.id ? null : c.id;
+        applyIsolation();
+      });
+      legend.appendChild(row);
+    });
+  }
+
+  window._renderSemanticView = function (preserve) {
+    render(preserve);
+  };
+
+  // Color-mode toggle (Cluster / Type).
+  document.querySelectorAll('.sem-color-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.sem-color-btn').forEach((b) => {
+        b.classList.remove('active');
+        b.style.background = 'var(--surface)'; b.style.color = 'var(--text2)'; b.style.border = '1px solid var(--border)';
+      });
+      btn.classList.add('active');
+      btn.style.background = 'var(--accent)'; btn.style.color = '#fff'; btn.style.border = 'none';
+      colorBy = btn.dataset.colorby;
+      render(true);
+    });
+  });
+
+  // Zoom controls.
+  function zoomBy(factor) {
+    const svgEl = document.getElementById('semantic-svg');
+    if (svgEl && zoomBehavior) d3.select(svgEl).transition().duration(150).call(zoomBehavior.scaleBy, factor);
+  }
+  const zi = document.getElementById('semantic-zoom-in');
+  const zo = document.getElementById('semantic-zoom-out');
+  const zf = document.getElementById('semantic-zoom-fit');
+  if (zi) zi.addEventListener('click', () => zoomBy(1.4));
+  if (zo) zo.addEventListener('click', () => zoomBy(1 / 1.4));
+  if (zf) zf.addEventListener('click', () => {
+    const svgEl = document.getElementById('semantic-svg');
+    if (svgEl && zoomBehavior) d3.select(svgEl).transition().duration(200).call(zoomBehavior.transform, d3.zoomIdentity);
+  });
+
+  // Deep link: #semantic opens the tab on load.
+  if (window.location.hash === '#semantic') {
+    const btn = document.querySelector('.tab-btn[data-view="semantic"]');
+    if (btn) btn.click();
+  }
+})();
