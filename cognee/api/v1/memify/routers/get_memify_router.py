@@ -111,7 +111,12 @@ def get_memify_router() -> APIRouter:
             )
 
             if isinstance(memify_run, PipelineRunErrored):
-                detail = getattr(memify_run, "error", None) or str(memify_run)
+                # The failing task's error is carried on ``payload`` (set to
+                # ``repr(error)`` by the pipeline runner); PipelineRunErrored has
+                # no ``error`` attribute. Surface it so the client gets an
+                # actionable message instead of the model's repr.
+                payload = memify_run.payload if isinstance(memify_run.payload, str) else None
+                detail = payload or str(memify_run)
 
                 return JSONResponse(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
