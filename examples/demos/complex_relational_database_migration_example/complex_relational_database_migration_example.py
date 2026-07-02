@@ -5,7 +5,8 @@ import os
 import sqlalchemy as sa
 
 # This example uses a local Postgres migration database and no backend ACL.
-# Set these before importing Cognee so Cognee reads the example values instead of defaults or .env settings.
+# Set os.environ before importing Cognee: Cognee reads env-backed settings at import time, so values
+# assigned later may not override defaults or `.env`. See https://docs.cognee.ai/setup-configuration/overview#using-os-environ
 os.environ["ENABLE_BACKEND_ACCESS_CONTROL"] = "false"
 os.environ["MIGRATION_DB_PROVIDER"] = "postgres"
 os.environ.setdefault("MIGRATION_DB_HOST", "127.0.0.1")

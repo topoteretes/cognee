@@ -17,7 +17,8 @@ import tempfile
 from pathlib import Path
 
 _DATA_DIR = tempfile.mkdtemp(prefix="cognee_references_example_")
-# Set these before importing Cognee so Cognee reads the example values instead of defaults or .env settings.
+# Set os.environ before importing Cognee: Cognee reads env-backed settings at import time, so values
+# assigned later may not override defaults or `.env`. See https://docs.cognee.ai/setup-configuration/overview#using-os-environ
 os.environ["ENABLE_BACKEND_ACCESS_CONTROL"] = "false"
 os.environ["CACHING"] = "false"
 

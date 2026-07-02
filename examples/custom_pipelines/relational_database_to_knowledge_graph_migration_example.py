@@ -7,7 +7,8 @@ from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
-# Set these before importing Cognee so Cognee reads the example values instead of defaults or .env settings.
+# Set os.environ before importing Cognee: Cognee reads env-backed settings at import time, so values
+# assigned later may not override defaults or `.env`. See https://docs.cognee.ai/setup-configuration/overview#using-os-environ
 os.environ["ENABLE_BACKEND_ACCESS_CONTROL"] = "False"
 
 # In case environment variables are not set use the example database from the Cognee repo.

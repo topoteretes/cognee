@@ -8,7 +8,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Notes: Nodesets cognee feature only works with Ladybug and Neo4j graph databases
-# Set these before importing Cognee so Cognee reads the example values instead of defaults or .env settings.
+# Set os.environ before importing Cognee: Cognee reads env-backed settings at import time, so values
+# assigned later may not override defaults or `.env`. See https://docs.cognee.ai/setup-configuration/overview#using-os-environ
 os.environ["GRAPH_DATABASE_PROVIDER"] = "ladybug"
 
 import cognee  # noqa: E402
