@@ -1,5 +1,6 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload
 
 from cognee.infrastructure.databases.relational import with_async_session
@@ -33,6 +34,23 @@ async def create_dataset(dataset_name: str, user: User, session: AsyncSession) -
 
         session.add(dataset)
 
-        await session.commit()
+        try:
+            await session.commit()
+        except IntegrityError:
+            # Concurrent calls race between the SELECT above and this INSERT
+            # and, because the dataset id is deterministic, collide on the
+            # primary key: another coroutine, worker, or process committed
+            # this dataset first. Return its row.
+            await session.rollback()
+            dataset = (
+                await session.scalars(
+                    select(Dataset)
+                    .options(joinedload(Dataset.data))
+                    .filter(Dataset.id == dataset_id)
+                )
+            ).first()
+            if dataset is None:
+                # Winner's row vanished (concurrent delete) — surface the original error.
+                raise
 
     return dataset
