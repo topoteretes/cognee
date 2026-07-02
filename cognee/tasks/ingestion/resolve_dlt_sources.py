@@ -21,6 +21,7 @@ from .create_dlt_source import (
 from .data_item import DataItem
 from .dlt_row_data import DltRowData
 from .ingest_dlt_source import ingest_dlt_source
+from .notion_source import NOTION_MAX_ROWS, NOTION_SOURCE_NAME, expand_notion_rows
 
 logger = get_logger("resolve_dlt_sources")
 
@@ -79,9 +80,15 @@ async def resolve_dlt_sources(
         # Nothing to expand — return original data unchanged
         return data, None
 
+    # Notion sources take the document path (each page → a text document that
+    # goes through normal cognify); every other dlt source takes the relational
+    # schema-context path below.
+    notion_items = [i for i in dlt_items if getattr(i, "name", None) == NOTION_SOURCE_NAME]
+    relational_items = [i for i in dlt_items if getattr(i, "name", None) != NOTION_SOURCE_NAME]
+
     # --- Run DLT pipelines and collect rows ---------------------------------
     all_rows: List[DltRowData] = []
-    for dlt_item in dlt_items:
+    for dlt_item in relational_items:
         rows = await ingest_dlt_source(
             dlt_item,
             dataset_name,
@@ -90,6 +97,20 @@ async def resolve_dlt_sources(
             max_rows_per_table=max_rows_per_table,
         )
         all_rows.extend(rows)
+
+    # Notion always merges on page id and reads the full current staging state
+    # back, so orphan cleanup can detect pages that were archived/deleted
+    # (dropped from staging via the resource's hard_delete hint).
+    notion_rows: List[DltRowData] = []
+    for dlt_item in notion_items:
+        rows = await ingest_dlt_source(
+            dlt_item,
+            dataset_name,
+            primary_key="id",
+            write_disposition="merge",
+            max_rows_per_table=NOTION_MAX_ROWS,
+        )
+        notion_rows.extend(rows)
 
     # --- Phase 1: compute stable data_ids for all rows (for FK resolution) --
     # Primary lookup uses content_hash for uniqueness (handles tables with
@@ -184,6 +205,12 @@ async def resolve_dlt_sources(
             sample,
         )
 
+    # --- Expand Notion rows into document DataItems -------------------------
+    # Notion pages skip the schema-context treatment above: each becomes a text
+    # document (source "notion") that flows through normal cognify.
+    notion_expanded, notion_fresh_ids = await expand_notion_rows(notion_rows, user)
+    expanded_items.extend(notion_expanded)
+
     # --- Phase 3: prepare deferred orphan cleanup ---------------------------
     # Deletion of orphaned dlt rows is deferred to *after* the fresh rows are
     # committed by the add pipeline, to avoid a data-loss window: if ingestion
@@ -191,14 +218,23 @@ async def resolve_dlt_sources(
     # replacements never stored. We return a cleanup coroutine for the caller
     # to await post-commit instead of deleting here.
     #
-    # Skip orphan deletion for "append" disposition — each run intentionally
-    # adds new rows, so prior batches should not be treated as orphans.
+    # Relational sources skip cleanup for "append" (each run intentionally adds
+    # new rows). Notion always reconciles: it reads the full current page set
+    # back, so pages missing from it (archived/deleted) must be forgotten. The
+    # two paths are cleaned separately so an append relational run never treats
+    # Notion pages as orphans, or vice versa.
+    relational_fresh: Set[UUID] = set(row_id_lookup.values())
+    do_relational_cleanup = write_disposition != "append" and bool(relational_fresh)
+    do_notion_cleanup = bool(notion_items)
+
     orphan_cleanup: Optional[Callable[[], Any]] = None
-    if write_disposition != "append":
-        fresh_data_ids: Set[UUID] = set(row_id_lookup.values())
+    if do_relational_cleanup or do_notion_cleanup:
 
         async def _cleanup() -> None:
-            await _delete_dlt_orphans(dataset_name, user, fresh_data_ids)
+            if do_relational_cleanup:
+                await _delete_dlt_orphans(dataset_name, user, relational_fresh, sources=("dlt",))
+            if do_notion_cleanup:
+                await _delete_dlt_orphans(dataset_name, user, notion_fresh_ids, sources=("notion",))
 
         orphan_cleanup = _cleanup
 
@@ -316,6 +352,7 @@ async def _delete_dlt_orphans(
     dataset_name: str,
     user: User,
     fresh_data_ids: Set[UUID],
+    sources: tuple[str, ...] = ("dlt",),
 ) -> None:
     """Delete dlt-sourced Data records (and their graph/vector artifacts) that
     are no longer present in the freshly-ingested dlt source.
@@ -323,6 +360,11 @@ async def _delete_dlt_orphans(
     This handles the case where rows are deleted from the upstream database
     and the user re-ingests.  dlt cleans its own staging DB, but cognee's
     relational, graph, and vector stores still hold stale data.
+
+    ``sources`` restricts cleanup to Data whose ``external_metadata["source"]``
+    is one of the given tags (e.g. ``("dlt",)`` for relational rows or
+    ``("notion",)`` for Notion pages), so reconciling one source never removes
+    the other's records.
     """
     from cognee.modules.data.methods.get_dataset_data import get_dataset_data
     from cognee.modules.data.methods import get_authorized_existing_datasets
@@ -346,7 +388,7 @@ async def _delete_dlt_orphans(
     orphans = []
     for data_item in all_data:
         ext = data_item.external_metadata
-        if not isinstance(ext, dict) or ext.get("source") != "dlt":
+        if not isinstance(ext, dict) or ext.get("source") not in sources:
             continue
         if data_item.id not in fresh_data_ids:
             orphans.append(data_item)
