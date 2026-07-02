@@ -37,14 +37,16 @@ class TestSQLAlchemyAdapterConnectArgs:
         assert kwargs["connect_args"] == {"sslmode": "require"}
 
     @patch(
+        "cognee.infrastructure.databases.relational.sqlalchemy.SqlAlchemyAdapter.sa_event"
+    )
+    @patch(
         "cognee.infrastructure.databases.relational.sqlalchemy.SqlAlchemyAdapter.create_async_engine"
     )
-    def test_sqlite_always_passes_connect_args_with_timeout(self, mock_create_engine):
+    def test_sqlite_always_passes_connect_args_with_timeout(self, mock_create_engine, mock_sa_event):
         """SQLite should always pass connect_args with at least the timeout default."""
         mock_create_engine.return_value = MagicMock()
-
+        mock_sa_event.listens_for.return_value = lambda fn: fn
         SQLAlchemyAdapter("sqlite+aiosqlite:///tmp/test.db")
-
         _, kwargs = mock_create_engine.call_args
         assert "timeout" in kwargs["connect_args"]
         assert kwargs["connect_args"]["timeout"] == 30
