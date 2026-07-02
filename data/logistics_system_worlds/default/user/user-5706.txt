@@ -1,0 +1,1 @@
+Ethan Cole is a business customer in US Central. Weekend delivery eligibility is False, and the default shipping range is domestic.

@@ -82,6 +82,11 @@ def _estimate_cost_usd(model: Optional[str], tokens_in: int, tokens_out: int) ->
     return 0.0
 
 
+def estimate_cost_usd(model: Optional[str], tokens_in: int, tokens_out: int) -> float:
+    """Estimate USD cost for a model using Cognee's rough pricing table."""
+    return _estimate_cost_usd(model, tokens_in, tokens_out)
+
+
 async def record_llm_call(
     *,
     input_text: str,

@@ -24,6 +24,19 @@ class UnsupportedLLMProviderError(CogneeValidationError):
         super().__init__(message=message, name="UnsupportedLLMProviderError")
 
 
+class LLMQuotaExceededError(CogneeValidationError):
+    """Raised when an LLM provider reports non-retryable quota or billing exhaustion."""
+
+    def __init__(self, detail: str | None = None) -> None:
+        message = (
+            "LLM provider quota or billing limit was reached. This is not retryable. "
+            "Check the provider billing/quota dashboard, raise the limit, or switch credentials."
+        )
+        if detail:
+            message = f"{message} Provider error: {detail}"
+        super().__init__(message=message, name="LLMQuotaExceededError")
+
+
 class MissingSystemPromptPathError(CogneeValidationError):
     def __init__(
         self,

@@ -1,0 +1,1 @@
+Chloe Martin is a standard customer in US North. Weekend delivery eligibility is True, and the default shipping range is intercontinental.
