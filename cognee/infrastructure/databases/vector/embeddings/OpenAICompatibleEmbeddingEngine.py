@@ -32,8 +32,7 @@ from tenacity import (
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import (
     EmbeddingEngine,
 )
-from cognee.infrastructure.llm.tokenizer.HuggingFace import HuggingFaceTokenizer
-from cognee.infrastructure.llm.tokenizer.TikToken import TikTokenTokenizer
+from cognee.infrastructure.llm.tokenizer.resolver import resolve_embedding_tokenizer
 from cognee.infrastructure.databases.vector.embeddings.utils import (
     handle_embedding_response,
     sanitize_embedding_text_inputs,
@@ -244,17 +243,14 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
         return self.batch_size
 
     def get_tokenizer(self):
-        """Load a tokenizer for chunk sizing against OpenAI-compatible embedding servers."""
-        logger.debug("Loading HuggingfaceTokenizer for OpenAICompatibleEmbeddingEngine...")
-        try:
-            tokenizer = HuggingFaceTokenizer(
-                model=self.model,
-                max_completion_tokens=self.max_completion_tokens,
-            )
-        except Exception as error:
-            logger.warning("Could not get tokenizer from HuggingFace due to: %s", error)
-            logger.info("Switching to TikToken default tokenizer.")
-            tokenizer = TikTokenTokenizer(
-                model=None, max_completion_tokens=self.max_completion_tokens
-            )
-        return tokenizer
+        """Load a tokenizer for chunk sizing against OpenAI-compatible embedding servers.
+
+        The served model id is usually a HuggingFace repo, so resolution uses the
+        model's own tokenizer and warns/falls back safely on mismatch (issue #3646).
+        """
+        logger.debug("Loading tokenizer for OpenAICompatibleEmbeddingEngine...")
+        return resolve_embedding_tokenizer(
+            provider="openai_compatible",
+            model=self.model,
+            max_completion_tokens=self.max_completion_tokens,
+        )
