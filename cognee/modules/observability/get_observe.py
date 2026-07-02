@@ -1,4 +1,5 @@
 import functools
+import inspect
 
 from cognee.base_config import get_base_config
 from .observers import Observer
@@ -64,7 +65,7 @@ def _wrap_with_otel(inner_decorator):
 
                 import asyncio
 
-                if asyncio.iscoroutinefunction(func):
+                if inspect.iscoroutinefunction(func):
                     return async_wrapper
                 return sync_wrapper
 
@@ -108,7 +109,7 @@ def _wrap_with_otel(inner_decorator):
 
         import asyncio
 
-        if asyncio.iscoroutinefunction(func):
+        if inspect.iscoroutinefunction(func):
             return async_wrapper
         return sync_wrapper
 
