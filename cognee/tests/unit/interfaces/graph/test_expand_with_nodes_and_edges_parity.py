@@ -9,14 +9,87 @@ from unittest.mock import MagicMock
 import pytest
 from rdflib import OWL, RDF, RDFS, Graph, Namespace
 
+from cognee.modules.engine.models import Entity, EntityType
+from cognee.modules.engine.utils import generate_edge_name
 from cognee.modules.graph.utils.expand_with_nodes_and_edges import (
     _create_edge_key,
     expand_with_nodes_and_edges,
 )
+from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
 from cognee.modules.ontology.get_default_ontology_resolver import get_default_ontology_resolver
+from cognee.modules.ontology.models import AttachedOntologyNode
 from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
 from cognee.shared.data_models import Edge as KGEdge
 from cognee.shared.data_models import KnowledgeGraph, Node
+
+
+class _DuplicateTwinResolver(BaseOntologyResolver):
+    """Chunk 1 class match injects shared_p; chunk 2 extracts the same individual."""
+
+    def build_lookup(self) -> None:
+        return None
+
+    def refresh_lookup(self) -> None:
+        return None
+
+    def find_closest_match(self, name: str, category: str):
+        return None
+
+    def get_subgraph(self, node_name: str, node_type: str = "individuals", directed: bool = True):
+        if node_type == "classes" and node_name == "team":
+            root = AttachedOntologyNode("team", "classes")
+            twin = AttachedOntologyNode("shared_p", "individuals")
+            return [root, twin], [], root
+        if node_type == "individuals" and node_name == "shared_p":
+            root = AttachedOntologyNode("shared_p", "individuals")
+            return [root], [], root
+        return [], [], None
+
+
+class _EdgeCollisionResolver(BaseOntologyResolver):
+    """Ontology and extracted edges share the audi -> car is_a key."""
+
+    def build_lookup(self) -> None:
+        return None
+
+    def refresh_lookup(self) -> None:
+        return None
+
+    def find_closest_match(self, name: str, category: str):
+        return None
+
+    def get_subgraph(self, node_name: str, node_type: str = "individuals", directed: bool = True):
+        if node_type == "classes" and node_name == "car":
+            root = AttachedOntologyNode("car", "classes")
+            return [root], [], root
+        if node_type == "individuals" and node_name == "audi":
+            root = AttachedOntologyNode("audi", "individuals")
+            parent = AttachedOntologyNode("car", "classes")
+            return [root, parent], [("audi", "is_a", "car")], root
+        return [], [], None
+
+
+class _PositiveOntologyEdgeResolver(BaseOntologyResolver):
+    """Minimal resolver that emits one ontology is_a relation."""
+
+    def build_lookup(self) -> None:
+        return None
+
+    def refresh_lookup(self) -> None:
+        return None
+
+    def find_closest_match(self, name: str, category: str):
+        return None
+
+    def get_subgraph(self, node_name: str, node_type: str = "individuals", directed: bool = True):
+        if node_type == "classes" and node_name == "car":
+            root = AttachedOntologyNode("car", "classes")
+            return [root], [], root
+        if node_type == "individuals" and node_name == "audi":
+            root = AttachedOntologyNode("audi", "individuals")
+            parent = AttachedOntologyNode("car", "classes")
+            return [root, parent], [("audi", "is_a", "car")], root
+        return [], [], None
 
 
 def _belongs_to_set_tuple(belongs_to_set) -> tuple[str, ...]:
@@ -80,6 +153,47 @@ def serialize_output(chunks, entity_nodes) -> dict[str, Any]:
         "relations": _serialize_relations(entity_nodes),
         "contains": _serialize_contains(chunks),
     }
+
+
+def _relation_triples(entity_nodes) -> set[tuple[str, str, str]]:
+    """Return (source_name, relationship_type, target_name) for attached relations."""
+    triples = set()
+    for node in entity_nodes:
+        for edge_obj, target in node.relations:
+            triples.add((node.name, edge_obj.relationship_type, target.name))
+    return triples
+
+
+def run_duplicate_twin_scenario():
+    """Chunk 1 injects shared_p; chunk 2 extracts the same canonical individual."""
+    chunk1 = _make_chunk(importance_weight=0.9)
+    chunk2 = _make_chunk(importance_weight=0.1)
+    graph1 = _make_graph(
+        [Node(id="anchor", name="Anchor", type="Team", description="chunk1 anchor")],
+        [],
+    )
+    graph2 = _make_graph(
+        [Node(id="ext", name="shared_p", type="Other", description="chunk2 extracted")],
+        [],
+    )
+    return expand_with_nodes_and_edges([chunk1, chunk2], [graph1, graph2], _DuplicateTwinResolver())
+
+
+def run_edge_collision_scenario():
+    """Extracted and ontology edges collide on audi -> car is_a."""
+    chunk = _make_chunk()
+    graph = _make_graph(
+        [Node(id="e1", name="Audi", type="Car", description="audi entity")],
+        [
+            KGEdge(
+                source_node_id="audi",
+                target_node_id="car",
+                relationship_name="is_a",
+                description="extracted is_a wins later",
+            )
+        ],
+    )
+    return expand_with_nodes_and_edges([chunk], [graph], _EdgeCollisionResolver())
 
 
 def _make_chunk(importance_weight=0.5, belongs_to_set=None):
@@ -445,6 +559,38 @@ def test_scenario_b_matching_ontology_golden():
     assert audi_nodes[0][4] == "Second collision desc."
 
 
+def test_positive_ontology_edge_pin():
+    """Prove ontology edge injection attaches at least one ontology-derived relation."""
+    chunk = _make_chunk()
+    graph = _make_graph(
+        [Node(id="e1", name="Audi", type="Car", description="audi entity")],
+        [],
+    )
+    _, entity_nodes = expand_with_nodes_and_edges([chunk], [graph], _PositiveOntologyEdgeResolver())
+    assert ("audi", "is_a", "car") in _relation_triples(entity_nodes)
+
+
+def test_duplicate_twin_pin_two_nodes_same_id():
+    """Phase 1 should collapse injected and extracted twins sharing one canonical id."""
+    _, entity_nodes = run_duplicate_twin_scenario()
+    shared_id = str(Entity.id_for("shared_p"))
+    shared_nodes = [node for node in entity_nodes if str(node.id) == shared_id]
+    assert len(shared_nodes) == 2
+
+
+def test_edge_collision_pin_ontology_edge_wins_today():
+    """Phase 1 should let the extracted edge win on a shared key (delta 3)."""
+    _, entity_nodes = run_edge_collision_scenario()
+    is_a_rels = [
+        (edge.edge_text,)
+        for node in entity_nodes
+        for edge, target in node.relations
+        if edge.relationship_type == "is_a" and node.name == "audi" and target.name == "car"
+    ]
+    assert len(is_a_rels) == 1
+    assert is_a_rels[0] == (None,)
+
+
 def test_scenario_c_dedup_before_matching_call_count():
     resolver = _build_scenario_b_ontology()
     call_count = {"n": 0}
@@ -461,9 +607,6 @@ def test_scenario_c_dedup_before_matching_call_count():
 
 
 def test_scenario_d_existing_edges_map_filters_relations():
-    from cognee.modules.engine.models import Entity, EntityType
-    from cognee.modules.engine.utils import generate_edge_name
-
     resolver = _build_scenario_b_ontology()
     extracted_edge_key = _create_edge_key(
         str(Entity.id_for("porsche_911")),
