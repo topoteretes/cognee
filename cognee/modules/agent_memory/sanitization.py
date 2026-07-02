@@ -11,6 +11,10 @@ def truncate_text(value: str, limit: int) -> str:
     """Bound stored trace strings so unusually large params/returns do not create oversized trace payloads."""
     if len(value) <= limit:
         return value
+    if limit <= 0:
+        return ""
+    if limit < 3:
+        return value[:limit]
     return value[: limit - 3] + "..."
 
 
