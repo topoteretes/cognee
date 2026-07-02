@@ -1,0 +1,25 @@
+id: openclaw
+title: Cognee memory for OpenClaw
+kind: integration
+stack: agent-runtime
+tags:
+  - openclaw
+  - typescript
+  - auto-recall
+  - session-memory
+summary: Give OpenClaw sessions persistent, recall-able memory through the cognee HTTP API.
+what_youll_build: An OpenClaw session that transparently remembers what happened before and can be queried by tool call.
+quickstart: |
+  npm install @cognee/cognee-openclaw
+  export COGNEE_API_URL=https://cognee.example.com
+  export COGNEE_API_TOKEN=your_token
+  # register the plugin in your OpenClaw config, then run a session
+expected_output: |
+  A running OpenClaw session that pushes turns to cognee via `remember` and
+  can recall past context on request. Confirm by triggering a recall and
+  seeing prior turn content in the response.
+difficulty: easy
+repo: topoteretes/cognee-integrations
+path: integrations/openclaw
+inventory_slug: openclaw
+docs_url: https://docs.cognee.ai/integrations/openclaw

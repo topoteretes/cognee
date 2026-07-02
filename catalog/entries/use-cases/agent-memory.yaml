@@ -1,0 +1,20 @@
+id: agent-memory
+title: Give an agent persistent memory in three calls
+kind: use-case
+stack: use-case
+tags:
+  - agent-memory
+  - remember
+  - recall
+  - quickstart
+summary: The minimum-viable path from a fresh cognee install to an agent that can remember and recall.
+what_youll_build: A Python script that ingests a few facts, cognifies them into a knowledge graph, and answers a natural-language question about them.
+quickstart: |
+  uv pip install cognee
+  export LLM_API_KEY=your_openai_key
+  python examples/guides/agent_memory_quickstart.py
+expected_output: |
+  Console output showing the graph was built, followed by a natural-language
+  answer to the sample question that cites the ingested facts.
+difficulty: easy
+example_path: examples/guides/agent_memory_quickstart.py
