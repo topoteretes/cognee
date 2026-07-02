@@ -44,8 +44,8 @@ queries(factor) =
 
 Parity, the cross-over where both cumulative costs are equal, is `factor = 1`.
 For example, the `7` milestone is the query count where full-context has spent
-7× as many tokens as cognee overall, so cognee is 7× cheaper at that point. No
-milestone is privileged — break-even is just one of them.
+7× as many input/context tokens as cognee, so cognee uses 7× fewer input tokens
+at that point. No milestone is privileged — break-even is just one of them.
 
 Token usage is read from the **real LLM responses** (prompt + completion), so the
 instruction wrapper and the Pydantic graph schema are included with no estimated
