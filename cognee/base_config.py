@@ -35,6 +35,7 @@ class BaseConfig(BaseSettings):
         # Require absolute paths for root directories
         self.data_root_directory = ensure_absolute_path(self.data_root_directory)
         self.system_root_directory = ensure_absolute_path(self.system_root_directory)
+        self.cache_root_directory = ensure_absolute_path(self.cache_root_directory)
         self.logs_root_directory = ensure_absolute_path(self.logs_root_directory)
 
         return self
