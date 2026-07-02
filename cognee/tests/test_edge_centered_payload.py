@@ -135,7 +135,7 @@ async def main():
         graph_engine = await get_graph_engine()
         nodes_phase2, edges_phase2 = await graph_engine.get_graph_data()
 
-        vector_engine = get_vector_engine()
+        vector_engine = await get_vector_engine()
         triplets_phase2 = await vector_engine.search(
             query_text="technology", limit=None, collection_name="Triplet_text"
         )

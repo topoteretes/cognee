@@ -60,7 +60,7 @@ async def main():
     )
     maries_data_id = add_result.data_ingestion_info[0]["data_id"]
 
-    vector_engine = get_vector_engine()
+    vector_engine = await get_vector_engine()
 
     assert not await vector_engine.has_collection("EdgeType_relationship_name")
     assert not await vector_engine.has_collection("Entity_name")
