@@ -1,0 +1,1 @@
+Lea Schneider is a enterprise customer in France. Weekend delivery eligibility is True, and the default shipping range is regional.

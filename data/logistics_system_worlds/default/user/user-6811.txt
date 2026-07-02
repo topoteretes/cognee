@@ -1,0 +1,1 @@
+Elena Rossi is a business customer in Italy. Weekend delivery eligibility is True, and the default shipping range is regional.

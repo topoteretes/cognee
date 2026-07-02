@@ -1,0 +1,1 @@
+Noah Fischer is a enterprise customer in US West. Weekend delivery eligibility is True, and the default shipping range is domestic.

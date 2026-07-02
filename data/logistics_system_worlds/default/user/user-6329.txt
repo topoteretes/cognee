@@ -1,0 +1,1 @@
+Maya West is a business customer in Germany. Weekend delivery eligibility is True, and the default shipping range is domestic.

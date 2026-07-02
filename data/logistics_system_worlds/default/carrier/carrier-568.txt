@@ -1,0 +1,1 @@
+Iberia Cargo Partners is a carrier in Spain. It supports flight, shipment, freight_rail, truck transport across domestic, intercontinental, regional shipping ranges. Temperature controlled support is True, hazardous certification is True, weekend operations is False, maximum weight is 10000.0 kg, reliability score is 5, and base delay is 1 day(s).

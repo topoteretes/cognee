@@ -18,13 +18,17 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from pydantic import BaseModel
+
+from cognee.infrastructure.llm.exceptions import LLMQuotaExceededError
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.openai.adapter import (
     OpenAIAdapter,
 )
 from cognee.infrastructure.llm.retry_config import (
     LLM_MIN_RETRY_ATTEMPTS,
     LLM_MIN_RETRY_SECONDS,
+    is_quota_or_billing_error,
     llm_retry_stop_condition,
+    should_retry_llm_exception,
 )
 
 _MODULE = (
@@ -48,6 +52,20 @@ async def _null_rate_limiter():
 def _build_adapter() -> OpenAIAdapter:
     # Constructs fully offline — ``instructor.from_litellm`` makes no network call.
     return OpenAIAdapter(api_key="test-key", model="gpt-4o-mini", max_completion_tokens=128)
+
+
+def test_quota_and_billing_errors_are_terminal():
+    error = RuntimeError({"error": {"code": "insufficient_quota", "type": "billing"}})
+
+    assert is_quota_or_billing_error(error) is True
+    assert should_retry_llm_exception(error) is False
+
+
+def test_generic_billing_text_is_not_terminal_without_quota_signal():
+    error = RuntimeError("temporary billing service unavailable")
+
+    assert is_quota_or_billing_error(error) is False
+    assert should_retry_llm_exception(error) is True
 
 
 # --------------------------------------------------------------------------- #
@@ -74,6 +92,21 @@ def test_combined_stop_requires_both_conditions(attempts, elapsed, should_stop):
 #    failure that clears returns the mocked response. (tenacity consults `stop`
 #    only after a *failure*, so a success short-circuits both floors.)
 # --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_structured_output_does_not_retry_quota_errors():
+    adapter = _build_adapter()
+    adapter.aclient = Mock()
+    adapter.aclient.chat.completions.create = AsyncMock(
+        side_effect=RuntimeError("insufficient_quota: exceeded your current quota")
+    )
+
+    with patch(f"{_MODULE}.llm_rate_limiter_context_manager", _null_rate_limiter):
+        with pytest.raises(LLMQuotaExceededError):
+            await adapter.acreate_structured_output("hi", "system", _Resp)
+
+    assert adapter.aclient.chat.completions.create.await_count == 1
+
+
 @pytest.mark.asyncio
 async def test_structured_output_retries_then_returns_mocked_response():
     adapter = _build_adapter()

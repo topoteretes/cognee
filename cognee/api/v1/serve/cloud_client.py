@@ -67,6 +67,8 @@ class CloudClient:
             form.add_field("session_id", kwargs["session_id"])
         if kwargs.get("run_in_background"):
             form.add_field("run_in_background", "true")
+        if kwargs.get("dry_run"):
+            form.add_field("dry_run", "true")
         if kwargs.get("custom_prompt"):
             form.add_field("custom_prompt", kwargs["custom_prompt"])
         if kwargs.get("chunk_size") is not None:
@@ -280,6 +282,8 @@ class CloudClient:
             )
         if kwargs.get("run_in_background"):
             payload["run_in_background"] = True
+        if kwargs.get("dry_run"):
+            payload["dry_run"] = True
         if kwargs.get("custom_prompt"):
             payload["custom_prompt"] = kwargs["custom_prompt"]
         if kwargs.get("chunk_size") is not None:
