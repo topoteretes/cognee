@@ -1,0 +1,1 @@
+Sol Freight is a carrier in Spain. It supports flight, shipment, freight_rail, truck transport across domestic, intercontinental, regional shipping ranges. Temperature controlled support is True, hazardous certification is True, weekend operations is True, maximum weight is 500.0 kg, reliability score is 2, and base delay is 2 day(s).

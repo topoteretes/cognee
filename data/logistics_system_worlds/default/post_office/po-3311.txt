@@ -1,0 +1,1 @@
+Germany Warehouse B is a origin_warehouse in Germany. It supports domestic shipping, cold chain support is True, and hazardous materials support is False.
