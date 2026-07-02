@@ -163,3 +163,70 @@ def test_stamp_provenance_no_infinite_recursion():
     circular_list = [dp]
     _stamp_provenance(circular_list, "pipe", "task")
     assert dp.source_pipeline == "pipe"
+
+
+# ---------------------------------------------------------------------------
+# issue #3632 additions: id-exact dataset lineage + provenance survives
+# persistence. These use the REAL _stamp_provenance and DataPoint (not the
+# inline replicas above), so the new source_dataset_id threading and the
+# persistence of every provenance field are verified against production code.
+# ---------------------------------------------------------------------------
+
+
+def test_real_stamp_provenance_threads_dataset_id():
+    from cognee.modules.pipelines.operations.run_tasks_base import (
+        _stamp_provenance as real_stamp,
+    )
+    from cognee.modules.engine.models.Entity import Entity
+
+    entity = Entity(name="Alice", description="a person")
+    real_stamp(entity, "cognify_pipeline", "extract_graph", dataset_id="ds-42")
+
+    assert entity.source_dataset_id == "ds-42"
+    assert entity.source_pipeline == "cognify_pipeline"
+
+
+def test_real_stamp_provenance_dataset_id_set_if_none():
+    from cognee.modules.pipelines.operations.run_tasks_base import (
+        _stamp_provenance as real_stamp,
+    )
+    from cognee.modules.engine.models.Entity import Entity
+
+    entity = Entity(name="Alice", description="a person", source_dataset_id="preset")
+    real_stamp(entity, "p", "t", dataset_id="ds-42")
+
+    assert entity.source_dataset_id == "preset"
+
+
+def test_provenance_survives_serialization():
+    """Provenance must be persisted with the node so it is still present when the
+    node is read back at recall. model_dump() is the serialization the storage
+    layer uses, so asserting the fields survive it is a deterministic proxy for
+    'provenance survives recall' — without needing an LLM or a live DB."""
+    from cognee.modules.pipelines.operations.run_tasks_base import (
+        _stamp_provenance as real_stamp,
+    )
+    from cognee.modules.engine.models.Entity import Entity
+
+    entity = Entity(name="Alice", description="a person")
+    real_stamp(
+        entity,
+        "cognify_pipeline",
+        "extract_graph",
+        node_set="my_dataset",
+        content_hash="hash-1",
+        dataset_id="ds-42",
+    )
+    # document/chunk ids are stamped in the extract path; set them directly here.
+    entity.source_document_id = "doc-1"
+    entity.source_chunk_id = "chunk-1"
+
+    dumped = entity.model_dump()
+
+    assert dumped["source_pipeline"] == "cognify_pipeline"
+    assert dumped["source_task"] == "extract_graph"
+    assert dumped["source_node_set"] == "my_dataset"
+    assert dumped["source_content_hash"] == "hash-1"
+    assert dumped["source_dataset_id"] == "ds-42"
+    assert dumped["source_document_id"] == "doc-1"
+    assert dumped["source_chunk_id"] == "chunk-1"

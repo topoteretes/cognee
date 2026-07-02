@@ -13,6 +13,7 @@ from cognee.modules.observability import (
     COGNEE_RESULT_COUNT,
 )
 from cognee.infrastructure.engine import DataPoint
+from cognee.base_config import get_base_config
 from ..tasks.task import Task
 
 logger = get_logger("run_tasks_base")
@@ -39,6 +40,7 @@ def _stamp_provenance(
     user_label=None,
     content_hash=None,
     task_index=None,
+    dataset_id=None,
 ):
     """Recursively stamp DataPoints with provenance. Only sets if currently None.
 
@@ -88,6 +90,11 @@ def _stamp_provenance(
         elif current_hash is not None and data.source_content_hash is None:
             data.source_content_hash = current_hash
 
+        # Id-exact dataset lineage (issue #3632). The dataset id is a single
+        # value for the whole run, so it threads down like node_set/content_hash.
+        if dataset_id is not None and data.source_dataset_id is None:
+            data.source_dataset_id = dataset_id
+
         # Recurse into DataPoint model fields to stamp nested DataPoints
         for field_name in data.model_fields:
             field_value = getattr(data, field_name, None)
@@ -101,6 +108,7 @@ def _stamp_provenance(
                     user_label,
                     current_hash,
                     task_index,
+                    dataset_id,
                 )
 
     elif isinstance(data, (list, tuple)):
@@ -114,6 +122,7 @@ def _stamp_provenance(
                 user_label,
                 content_hash,
                 task_index,
+                dataset_id,
             )
 
 
@@ -201,6 +210,17 @@ async def handle_task(
             # Reuse the visited set across tasks so already-stamped
             # DataPoints are skipped in subsequent pipeline stages.
             provenance_visited = ctx._provenance_visited if ctx else None
+            # Provenance-by-default (issue #3632): stamping is on unless
+            # explicitly disabled via PROVENANCE_ENABLED / provenance_enabled.
+            provenance_enabled = get_base_config().provenance_enabled
+            # Id-exact dataset lineage: ctx.dataset is the Dataset object on the
+            # cognify path (has .id); on other paths it may be a name string, so
+            # read the id defensively.
+            input_dataset_id = None
+            if ctx is not None:
+                _ds_id = getattr(getattr(ctx, "dataset", None), "id", None)
+                if _ds_id is not None:
+                    input_dataset_id = str(_ds_id)
 
             async for result_data in running_task.execute(args, kwargs, next_task_batch_size):
                 if isinstance(result_data, list):
@@ -208,16 +228,18 @@ async def handle_task(
                 else:
                     result_count += 1
 
-                _stamp_provenance(
-                    result_data,
-                    pipe_name,
-                    task_name,
-                    visited=provenance_visited,
-                    node_set=input_node_set,
-                    user_label=user_label,
-                    content_hash=input_content_hash,
-                    task_index=task_index,
-                )
+                if provenance_enabled:
+                    _stamp_provenance(
+                        result_data,
+                        pipe_name,
+                        task_name,
+                        visited=provenance_visited,
+                        node_set=input_node_set,
+                        user_label=user_label,
+                        content_hash=input_content_hash,
+                        task_index=task_index,
+                        dataset_id=input_dataset_id,
+                    )
 
                 async for result in run_tasks_base(leftover_tasks, result_data, user, ctx):
                     yield result

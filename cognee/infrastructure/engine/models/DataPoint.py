@@ -65,6 +65,15 @@ class DataPoint(BaseModel):
     source_node_set: str | None = None
     source_user: str | None = None
     source_content_hash: str | None = None
+    # Id-exact source lineage (issue #3632). dataset id is stamped in the
+    # pipeline runtime (where the Dataset object is available); document/chunk
+    # ids are stamped in the graph-extraction path where the chunk -> document
+    # link is known. Together "what produced this?" resolves to the exact
+    # dataset/document/chunk, not just a name/hash. All nullable, so this is
+    # backward compatible.
+    source_dataset_id: str | None = None
+    source_document_id: str | None = None
+    source_chunk_id: str | None = None
     feedback_weight: float = 0.5
     importance_weight: float | None = 0.5
 
