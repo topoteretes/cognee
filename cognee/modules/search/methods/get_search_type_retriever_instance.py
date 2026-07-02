@@ -21,6 +21,7 @@ from cognee.modules.retrieval.graph_completion_decomposition_retriever import (
 )
 from cognee.modules.retrieval.temporal_retriever import TemporalRetriever
 from cognee.modules.retrieval.coding_rules_retriever import CodingRulesRetriever
+from cognee.modules.retrieval.code_graph_retriever import CodeGraphRetriever
 from cognee.modules.retrieval.bm25_retriever import BM25ChunksRetriever
 from cognee.modules.retrieval.graph_summary_completion_retriever import (
     GraphSummaryCompletionRetriever,
@@ -303,6 +304,10 @@ async def get_search_type_retriever_instance(
         SearchType.CODING_RULES: (
             CodingRulesRetriever,
             {"rules_nodeset_name": node_name},
+        ),
+        SearchType.CODE_GRAPH: (
+            CodeGraphRetriever,
+            {"top_k": top_k},
         ),
     }
 
