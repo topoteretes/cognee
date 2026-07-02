@@ -31,6 +31,7 @@ from .api.v1.prune import prune
 from .api.v1.search import SearchType, search
 from .api.v1.visualize import (
     visualize_graph,
+    visualize_search_subgraph,
     start_visualization_server,
     get_schema_inventory,
     get_memory_provenance_graph,
