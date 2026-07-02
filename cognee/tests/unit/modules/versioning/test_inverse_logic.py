@@ -12,7 +12,15 @@ from cognee.modules.versioning.methods.inverse import (
 )
 
 
-def test_is_unowned_mirrors_planner_rule():
+def test_is_unowned_is_the_planner_rule():
+    """The capture partitions with the planner's own function (imported, not
+    mirrored), so this pins the shared rule both paths use."""
+    from cognee.infrastructure.databases.unified.provenance_delete_planner import (
+        _is_unowned as planner_is_unowned,
+    )
+
+    assert _is_unowned is planner_is_unowned
+
     key_a, key_b = "source_ref:v1:d:1", "source_ref:v1:d:2"
     assert _is_unowned([key_a], [key_a])
     assert not _is_unowned([key_a, key_b], [key_a])

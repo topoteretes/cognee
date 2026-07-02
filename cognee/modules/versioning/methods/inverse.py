@@ -35,6 +35,10 @@ from cognee.infrastructure.databases.provenance.source_refs import (
     get_pipeline_run_id_from_source_run_ref,
     get_source_ref_key_from_source_run_ref,
 )
+
+# The capture MUST partition deleted-vs-detached with the delete planner's own
+# ownership rule — a mirrored copy could drift and make undo silently lossy.
+from cognee.infrastructure.databases.unified.provenance_delete_planner import _is_unowned
 from cognee.modules.engine.utils import generate_node_id
 from cognee.modules.graph.models.EdgeType import EdgeType
 from cognee.shared.logging_utils import get_logger
@@ -62,11 +66,6 @@ def _edge_key(source_id: str, target_id: str, relationship_name: str) -> EdgeIde
     return EdgeIdentity(
         source_id=source_id, target_id=target_id, relationship_name=relationship_name
     )
-
-
-def _is_unowned(current_refs: List[str], removed_refs: List[str]) -> bool:
-    """Mirror of the delete planner's ownership rule (kept in lockstep)."""
-    return len(set(current_refs) - set(removed_refs)) == 0
 
 
 def _group_keys_by_owning_run(
