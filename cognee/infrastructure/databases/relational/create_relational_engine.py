@@ -17,6 +17,8 @@ def create_relational_engine(
     db_provider: str,
     database_connect_args: tuple = None,
     pool_args: tuple = None,
+    db_turso_url: str = None,
+    db_turso_auth_token: str = None,
 ) -> SQLAlchemyAdapter:
     """
     Create a relational database engine based on the specified parameters.
@@ -68,6 +70,30 @@ def create_relational_engine(
             raise ImportError(
                 "PostgreSQL dependencies are not installed. Please install with 'pip install cognee\"[postgres]\"' or 'pip install cognee\"[postgres-binary]\"' to use PostgreSQL functionality."
             )
+
+    elif db_provider == "turso":
+        try:
+            # pyturso registers the "sqlite+aioturso" SQLAlchemy dialect on import.
+            import turso  # noqa: F401
+        except ImportError:
+            raise ImportError(
+                "Turso/libSQL dependencies are not installed. Please install with 'pip install cognee\"[turso]\"' to use Turso functionality."
+            )
+
+        from .sqlalchemy.TursoAdapter import TursoAdapter
+
+        # Local / embedded libSQL, driven by the aioturso (Rust) async engine.
+        # A libSQL file is a SQLite file, so the adapter's existing sqlite-dialect
+        # behavior (PRAGMA foreign_keys, schema-less DROP, reflection) and the
+        # sqlite-dialect Alembic migrations apply unchanged. Remote Turso is
+        # wired in the following step.
+        connection_string = f"sqlite+aioturso:///{db_path}/{db_name}"
+
+        return TursoAdapter(
+            connection_string,
+            connect_args=database_connect_args,
+            pool_args=pool_args,
+        )
 
     else:
         raise ConnectionError("unsupported DB type: " + db_provider)

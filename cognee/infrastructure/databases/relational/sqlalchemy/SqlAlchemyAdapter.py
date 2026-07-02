@@ -31,6 +31,10 @@ class SQLAlchemyAdapter:
     functions.
     """
 
+    # Default connect_args applied on the sqlite-family branch. aiosqlite accepts
+    # `timeout`; subclasses on drivers that don't (e.g. aioturso) override this.
+    _sqlite_default_connect_args: dict = {"timeout": 30}
+
     def __init__(self, connection_string: str, connect_args: dict = None, pool_args: dict = None):
         """
         Initialize the SQLAlchemy adapter with connection settings.
@@ -76,7 +80,7 @@ class SQLAlchemyAdapter:
             self.engine = create_async_engine(
                 connection_string,
                 poolclass=NullPool,
-                connect_args={**{"timeout": 120}, **final_connect_args},
+                connect_args={**self._sqlite_default_connect_args, **final_connect_args},
             )
 
             # SQLite defaults to rollback-journal mode, where a connection that

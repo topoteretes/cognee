@@ -110,6 +110,7 @@ postgres-binary = [
     "pgvector>=0.3.5,<0.4",
     "asyncpg>=0.30.0,<1.0.0",
 ]
+turso = ["pyturso>=0.6.1"]
 notebook = ["notebook>=7.1.0,<8"]
 langchain = [
     "langsmith>=0.2.3,<1.0.0",
