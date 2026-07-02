@@ -538,6 +538,14 @@ await cognee.cognify(datasets=["my_project"])
 ### DataPoints
 Atomic knowledge units that form the foundation of graph structures. All graph nodes extend the `DataPoint` base class with versioning and metadata support.
 
+### Entity Canonicalization
+Opt-in LLM-judge deduplication that runs during `cognify()` (default **off**). After entity extraction and before storage, near-duplicate entities are blocked by embedding cosine similarity, an LLM judges whether each candidate pair is the same real-world entity, and confident matches are merged: the losing entity is renamed onto the winner's canonical identity (so the existing UUID5 dedup collapses them), its description is reconciled, and its edges are preserved.
+
+- **Enable**: set `ENTITY_CANONICALIZATION=true`. When off, the cognify pipeline is unchanged.
+- **Tuning** (env): `CANONICALIZATION_SIMILARITY_THRESHOLD` (default 0.8, blocking), `CANONICALIZATION_CONFIDENCE_THRESHOLD` (default 0.85, minimum merge confidence), `CANONICALIZATION_MAX_PAIRS` (default 200), `CANONICALIZATION_JUDGE_BATCH_SIZE` (default 8).
+- **Audit**: each merge emits a structured `entity_canonicalization_merge` log record and is stamped on the surviving entity (`merged_aliases`, `merge_confidence`).
+- **Scope / limitations**: blocking is within the current cognify batch only (no cross-batch or cross-run dedup); only the entity `description` is reconciled; the temporal cognify path is not covered.
+
 ### Permissions System
 Multi-tenant architecture with users, roles, and Access Control Lists (ACLs):
 - Read, write, delete, and share permissions per dataset
