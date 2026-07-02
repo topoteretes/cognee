@@ -29,11 +29,13 @@ curl -X POST "http://localhost:8000/api/v1/notetaker/ingest" \
 }'
 ```
 
-This endpoint returns `202 Accepted` and immediately delegates processing to a background worker.
+This endpoint returns `202 Accepted` and immediately delegates cognify to a background worker. The response
+includes `data_ids` (the ingested occurrence's Data UUIDs — keep these to forget a single meeting later) and a
+`pipeline_run_id`.
 
 ## 3. Track Processing Status
 
-You will receive a `pipeline_info` object in the ingest response. Use the dataset status endpoint to check if the background pipeline has finished cognifying:
+Use the dataset status endpoint to check if the background pipeline has finished cognifying:
 
 ```bash
 curl -X GET "http://localhost:8000/api/v1/datasets/status"
@@ -41,10 +43,12 @@ curl -X GET "http://localhost:8000/api/v1/datasets/status"
 
 ## 4. Recall Action Items or Decisions
 
-Once the pipeline is complete, query the temporal graph using the recall endpoint:
+Once the pipeline is complete, query the temporal graph using the recall endpoint. Recall is **scoped to the
+series** via `series_id`, so temporal "what changed" spans that series' occurrences without leaking across
+other meetings:
 
 ```bash
-curl -X GET "http://localhost:8000/api/v1/notetaker/recall?query=What%20are%20the%20action%20items?&query_type=action_items"
+curl -X GET "http://localhost:8000/api/v1/notetaker/recall?series_id=weekly_standup&query=What%20are%20the%20action%20items?&query_type=action_items"
 ```
 
 *Supported `query_type` values:*
@@ -52,15 +56,20 @@ curl -X GET "http://localhost:8000/api/v1/notetaker/recall?query=What%20are%20th
 - `decisions`
 - `temporal_delta` (e.g., for "what changed since last week?")
 
-The response will include the exact citation prefix `[Speaker, Date, permalink=...]` injected during ingestion.
+Results are grounded in the citation prefix `[Speaker, Date, permalink=...]` injected during ingestion.
 
 ## 5. Forget Data
 
-If you need to delete a specific occurrence or an entire meeting series:
+Delete an entire series, or a single occurrence by the `data_id` returned from `/ingest`:
 
 ```bash
-# Forget the entire series
+# Forget the entire series (dataset)
 curl -X POST "http://localhost:8000/api/v1/notetaker/forget" \
 -H "Content-Type: application/json" \
 -d '{"series_id": "weekly_standup"}'
+
+# Forget a single occurrence within the series
+curl -X POST "http://localhost:8000/api/v1/notetaker/forget" \
+-H "Content-Type: application/json" \
+-d '{"series_id": "weekly_standup", "data_id": "<data_id-from-ingest>"}'
 ```
