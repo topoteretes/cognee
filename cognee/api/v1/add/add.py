@@ -270,6 +270,12 @@ async def add(
         embedding_config=embedding_config,
     )
 
+    # Foreground runs: the fresh rows are committed by pipeline_executor_func
+    # above, so it's now safe to clean up orphans. (Background runs already
+    # ran this up front and set orphan_cleanup to None.)
+    if orphan_cleanup is not None:
+        await orphan_cleanup()
+
     # run_pipeline_blocking returns {dataset_id: PipelineRunInfo} but callers
     # expect a single PipelineRunInfo (add always processes one dataset).
     if isinstance(result, dict) and len(result) == 1:

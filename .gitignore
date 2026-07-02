@@ -4,6 +4,11 @@
 .prod.env
 cognee/.data/
 
+# Google Drive / GCP service-account credentials (never commit real keys)
+service.json
+service-account*.json
+*-service-account.json
+
 code_pipeline_output*/
 
 # Test output files

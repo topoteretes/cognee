@@ -154,6 +154,12 @@ graphiti = ["graphiti-core>=0.28.0"]
 # Always use comaptible fixed versions of these two dependencies
 aws = ["s3fs[boto3]==2025.3.2"]
 dlt = ["dlt[sqlalchemy]>=1.9.0,<2"]
+google-drive = [
+    "google-api-python-client>=2.100.0,<3",
+    "google-auth>=2.30.0,<3",
+    "google-auth-oauthlib>=1.2.0,<2",
+    "google-auth-httplib2>=0.2.0,<1",
+]
 baml = ["baml-py (==0.206.0)"]
 dev = [
     "pytest>=7.4.0,<8",
