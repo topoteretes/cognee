@@ -1,4 +1,5 @@
 from inspect import Parameter, signature
+from typing import Any
 
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.observability import (
@@ -8,6 +9,10 @@ from cognee.modules.observability import (
     new_span,
 )
 from cognee.modules.retrieval.utils.access_tracking import update_node_access_timestamps
+from cognee.modules.retrieval.utils.used_graph_elements import (
+    build_retrieved_subgraph,
+    supports_subgraph_search_type,
+)
 from cognee.modules.search.methods.get_search_type_retriever_instance import (
     get_search_type_retriever_instance,
 )
@@ -26,6 +31,18 @@ def _method_accepts_kwarg(method, name: str) -> bool:
     )
 
 
+def _subgraph_counts(subgraph: Any) -> tuple[int, int]:
+    if subgraph is None:
+        return 0, 0
+    if isinstance(subgraph, list):
+        node_count = sum(len(item.get("nodes", [])) for item in subgraph if isinstance(item, dict))
+        edge_count = sum(len(item.get("edges", [])) for item in subgraph if isinstance(item, dict))
+        return node_count, edge_count
+    if isinstance(subgraph, dict):
+        return len(subgraph.get("nodes", [])), len(subgraph.get("edges", []))
+    return 0, 0
+
+
 async def get_retriever_output(
     query_type: SearchType, query_text: str, **kwargs
 ) -> SearchResultPayload:
@@ -41,13 +58,14 @@ async def get_retriever_output(
 
     retriever_class = type(retriever_instance).__name__
     only_context = kwargs.get("only_context", False)
+    include_subgraph = kwargs.get("include_subgraph", False)
     effective_query = query_text
     turn_preparation = None
 
     if not only_context:
         turn_preparation = await retriever_instance.prepare_session_turn_for_retrieval(query_text)
         if not turn_preparation.should_answer:
-            return SearchResultPayload(
+            payload_kwargs = dict(
                 result_object=None,
                 context=None,
                 completion=[turn_preparation.response_to_user or "Got it."],
@@ -59,9 +77,13 @@ async def get_retriever_output(
                 if kwargs.get("dataset")
                 else None,
             )
+            if include_subgraph:
+                payload_kwargs["retrieved_subgraph"] = None
+            return SearchResultPayload(**payload_kwargs)
         effective_query = turn_preparation.effective_query or query_text
 
     # Get raw result objects from retriever and forward to context and completion methods to avoid duplicate retrievals.
+    retrieved_subgraph = None
     with new_span("cognee.retrieval.get_objects") as span:
         span.set_attribute("cognee.retrieval.retriever", retriever_class)
         span.set_attribute(COGNEE_SEARCH_TYPE, query_type.value)
@@ -72,6 +94,17 @@ async def get_retriever_output(
             COGNEE_RESULT_SUMMARY,
             f"{retriever_class} retrieved {obj_count} object(s)",
         )
+        if include_subgraph:
+            retrieved_subgraph = (
+                build_retrieved_subgraph(retrieved_objects, query_type)
+                if supports_subgraph_search_type(query_type)
+                else None
+            )
+            node_count, edge_count = _subgraph_counts(retrieved_subgraph)
+            span.set_attribute("cognee.retrieval.subgraph_node_count", node_count)
+            span.set_attribute("cognee.retrieval.subgraph_edge_count", edge_count)
+        else:
+            retrieved_subgraph = None
 
     # Centralized access tracking for all retriever types
     if retrieved_objects:
@@ -120,6 +153,7 @@ async def get_retriever_output(
         dataset_name=kwargs.get("dataset").name if kwargs.get("dataset") else None,
         dataset_id=kwargs.get("dataset").id if kwargs.get("dataset") else None,
         dataset_tenant_id=kwargs.get("dataset").tenant_id if kwargs.get("dataset") else None,
+        retrieved_subgraph=retrieved_subgraph if include_subgraph else None,
     )
 
     return search_result

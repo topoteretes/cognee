@@ -68,6 +68,13 @@ class RecallPayloadDTO(InDTO):
         default=False,
         description="Include source/provenance references in completion results.",
     )
+    include_subgraph: bool = Field(
+        default=False,
+        description=(
+            "Include a lightweight stub of the retrieved graph subgraph "
+            "(nodes + edges) in graph search results."
+        ),
+    )
     session_id: Optional[str] = Field(
         default=None,
         examples=[None],
@@ -190,6 +197,7 @@ def get_recall_router() -> APIRouter:
                 scope=payload.scope,
                 context_profile=payload.context_profile,
                 include_references=payload.include_references,
+                include_subgraph=payload.include_subgraph,
             )
             return jsonable_encoder(results)
         except (DatabaseNotCreatedError, UserNotFoundError, CogneeValidationError) as e:

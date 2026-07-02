@@ -101,6 +101,7 @@ def _build_item(
     entry: Any,
     payload: SearchResultPayload,
     kind: SearchResultKind,
+    include_subgraph: bool = False,
 ) -> SearchResultItem:
     """Build a single SearchResultItem from one retriever output element."""
     if isinstance(entry, str):
@@ -119,7 +120,7 @@ def _build_item(
         raw = _coerce_to_dict(entry)
         text = _text_from_dict(raw) if raw else str(entry)
 
-    return SearchResultItem(
+    item_kwargs = dict(
         kind=kind,
         search_type=payload.search_type,
         text=text,
@@ -129,6 +130,9 @@ def _build_item(
         metadata=_provenance_metadata(raw),
         raw=raw,
     )
+    if include_subgraph:
+        item_kwargs["retrieved_subgraph"] = payload.retrieved_subgraph
+    return SearchResultItem(**item_kwargs)
 
 
 def _flatten(value: Any) -> list[Any]:
@@ -140,7 +144,9 @@ def _flatten(value: Any) -> list[Any]:
     return [value]
 
 
-def normalize_search_payload(payload: SearchResultPayload) -> list[SearchResultItem]:
+def normalize_search_payload(
+    payload: SearchResultPayload, include_subgraph: bool = False
+) -> list[SearchResultItem]:
     """Normalize one dataset's retriever payload into SearchResultItems."""
     kind = _KIND_BY_SEARCH_TYPE.get(payload.search_type, SearchResultKind.UNKNOWN)
 
@@ -153,4 +159,6 @@ def normalize_search_payload(payload: SearchResultPayload) -> list[SearchResultI
     else:
         entries = _flatten(payload.result_object)
 
-    return [_build_item(entry, payload, kind) for entry in entries]
+    return [
+        _build_item(entry, payload, kind, include_subgraph=include_subgraph) for entry in entries
+    ]
