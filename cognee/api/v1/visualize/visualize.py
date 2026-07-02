@@ -1,10 +1,16 @@
-from typing import Any, List, Tuple, Optional, Union
+from typing import Any, List, Literal, Optional, Tuple, Union
 from uuid import UUID
 from cognee.modules.users.models.User import User
 
 from cognee.modules.visualization.cognee_network_visualization import (
     cognee_network_visualization,
     aggregate_multi_user_graphs,
+)
+from cognee.modules.visualization.subgraph_data import (
+    DEFAULT_MAX_NODES,
+    DEFAULT_NEIGHBORHOOD_DEPTH,
+    DEFAULT_SEED_TOP_K,
+    fetch_visualization_graph_data,
 )
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.data.methods import get_authorized_existing_datasets
@@ -25,8 +31,21 @@ async def visualize_graph(
     session_ids: list = None,
     user: Optional[User] = None,
     dataset: Optional[Union[str, UUID]] = "main_dataset",
+    *,
+    full: bool = False,
+    scope: Optional[Literal["subgraph", "all"]] = None,
+    query: Optional[str] = None,
+    seed_node_ids: Optional[List[str]] = None,
+    neighborhood_depth: int = DEFAULT_NEIGHBORHOOD_DEPTH,
+    neighborhood_seed_top_k: int = DEFAULT_SEED_TOP_K,
+    max_nodes: int = DEFAULT_MAX_NODES,
+    recall_result: Optional[Any] = None,
 ) -> str:
     """Render the knowledge graph to a self-contained HTML file.
+
+    By default renders a bounded subgraph around relevant seed nodes instead of
+    the entire graph. Pass ``full=True`` or ``scope="all"`` for legacy full-graph
+    rendering.
 
     Args:
         destination_file_path: Where to write the HTML (default: home dir).
@@ -45,9 +64,20 @@ async def visualize_graph(
             visualized. Defaults to "main_dataset" (the same default used by
             add/cognify/remember). Pass None to skip dataset resolution and
             render the current context's graph.
+        full: When True, render the entire graph (legacy behavior).
+        scope: ``"all"`` is equivalent to ``full=True``; ``"subgraph"`` is the
+            default bounded view.
+        query: Optional query string; vector search hits become subgraph seeds.
+        seed_node_ids: Explicit seed node IDs for neighborhood expansion.
+        neighborhood_depth: k-hop expansion depth (default: 2).
+        neighborhood_seed_top_k: Maximum number of seed nodes (default: 10).
+        max_nodes: Hard cap on rendered nodes after expansion (default: 500).
+        recall_result: Recall/search payload whose provenance seeds the subgraph.
     """
     if not user:
         user = await get_default_user()
+
+    render_full_graph = full or scope == "all"
 
     # Only authorize when a dataset is given. get_authorized_existing_datasets
     # expects a list, so wrap the single dataset. With no dataset the context
@@ -61,7 +91,27 @@ async def visualize_graph(
         dataset[0].owner_id if dataset else None,
     ):
         graph_engine = await get_graph_engine()
-        graph_data = await graph_engine.get_graph_data()
+        graph_data, subgraph_meta = await fetch_visualization_graph_data(
+            graph_engine,
+            full=render_full_graph,
+            query=query,
+            seed_node_ids=seed_node_ids,
+            recall_result=recall_result,
+            neighborhood_depth=neighborhood_depth,
+            seed_top_k=neighborhood_seed_top_k,
+            max_nodes=max_nodes,
+            user=user,
+            session_ids=session_ids,
+        )
+        if subgraph_meta.scope == "subgraph":
+            logger.info(
+                "Rendering bounded subgraph: seeds=%d source=%s depth=%d max_nodes=%d truncated=%s",
+                len(subgraph_meta.seed_ids),
+                subgraph_meta.seed_source,
+                subgraph_meta.depth,
+                subgraph_meta.max_nodes,
+                subgraph_meta.truncated,
+            )
 
         search_events = None
         if include_session_events:
@@ -81,6 +131,19 @@ async def visualize_graph(
             )
 
         return graph
+
+
+async def visualize_search_subgraph(
+    recall_responses: Any,
+    destination_file_path: str = None,
+    **kwargs: Any,
+) -> str:
+    """Visualize the subgraph behind a recall/search result."""
+    return await visualize_graph(
+        destination_file_path=destination_file_path,
+        recall_result=recall_responses,
+        **kwargs,
+    )
 
 
 async def visualize_multi_user_graph(
