@@ -940,7 +940,7 @@ class NeptuneGraphDB(GraphDBInterface):
         results = await self.query(query)
         return results[0]["ids"] if len(results) > 0 else []
 
-    async def get_predecessors(self, node_id: str, edge_label: str = "") -> list[str]:
+    async def get_predecessors(self, node_id: str, edge_label: str = None) -> list[str]:
         """
         Retrieve the predecessor nodes of a specified node based on an optional edge label.
 
@@ -967,7 +967,7 @@ class NeptuneGraphDB(GraphDBInterface):
 
         return [result["predecessor"] for result in results]
 
-    async def get_successors(self, node_id: str, edge_label: str = "") -> list[str]:
+    async def get_successors(self, node_id: str, edge_label: str = None) -> list[str]:
         """
         Retrieve the successor nodes of a specified node based on an optional edge label.
 
@@ -985,7 +985,7 @@ class NeptuneGraphDB(GraphDBInterface):
 
         edge_label = f" :{edge_label}" if edge_label is not None else ""
         query = f"""
-        MATCH (node)-[r {edge_label}]->(successor)
+        MATCH (node)-[r{edge_label}]->(successor)
         WHERE node.id = $node_id
         RETURN successor
         """
