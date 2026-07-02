@@ -1,0 +1,26 @@
+id: claude-code
+title: Cognee plugin for Claude Code
+kind: integration
+stack: agent-runtime
+tags:
+  - claude-code
+  - python
+  - session-storage
+  - context-lookup
+summary: Persist Claude Code sessions to cognee and surface relevant prior context automatically on prompt.
+what_youll_build: A Claude Code setup where each session's history is captured to a knowledge graph and past decisions surface as context on future prompts.
+quickstart: |
+  # inside your Claude Code plugin directory
+  git clone https://github.com/topoteretes/cognee-integrations.git
+  cd cognee-integrations/integrations/claude-code
+  cp .env.example .env  # fill in LLM_API_KEY and cognee endpoint
+  # register the plugin in Claude Code, then run any coding session
+expected_output: |
+  A confirmation from the plugin that turns are being stored, plus a recall
+  invoked from a follow-up session that returns prior context about the same
+  project.
+difficulty: medium
+repo: topoteretes/cognee-integrations
+path: integrations/claude-code
+inventory_slug: claude-code
+docs_url: https://docs.cognee.ai/integrations/claude-code
