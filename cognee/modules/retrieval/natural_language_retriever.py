@@ -114,7 +114,7 @@ class NaturalLanguageRetriever(BaseRetriever):
 
         if isinstance(graph_engine, (PostgresAdapter, PostgresHybridAdapter, TursoAdapter)):
             raise SearchTypeNotSupported(
-                "Natural language search is not supported with the Postgres graph backend. "
+                "Natural language search is not supported with the Postgres or Turso graph backends. "
                 "This retriever generates and executes Cypher queries, which require a "
                 "graph-native backend (Neo4j, Ladybug)."
             )
