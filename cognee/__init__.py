@@ -84,6 +84,17 @@ from cognee.modules.observability.trace_context import (
 # Agent memory
 from cognee.modules.agent_memory import agent_memory
 
+# Dataset versioning (issue #3650, Approach 1: run-ledger time-travel)
+from .api.v1.version import (
+    graph_as_of,
+    list_snapshots,
+    rollback,
+    search_as_of,
+    snapshot,
+    undo,
+)
+
 # Relational DB models
 from cognee.modules.session_lifecycle.models import SessionModelUsage, SessionRecord
 import cognee.modules.migrations.models  # noqa: F401  (registers global_database_version)
+import cognee.modules.versioning.models  # noqa: F401  (registers dataset_snapshots, version_ops)

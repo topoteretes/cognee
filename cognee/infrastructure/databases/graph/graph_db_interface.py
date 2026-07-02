@@ -402,6 +402,33 @@ class GraphDBInterface(ABC):
         """
         raise UnsupportedProvenanceCapability()
 
+    async def find_all_node_source_run_refs(self) -> dict[str, list[str]]:
+        """
+        Map every provenanced node id to its source_run_refs in one scan.
+
+        Powers "as of T" visibility reads: an artifact is visible at T when one
+        of its run refs belongs to a run completed at or before T.
+
+        Returns:
+        --------
+
+            - dict[str, list[str]]: source_run_refs keyed by node id; nodes
+              without run refs are omitted.
+        """
+        raise UnsupportedProvenanceCapability()
+
+    async def find_all_edge_source_run_refs(self) -> dict[EdgeIdentity, list[str]]:
+        """
+        Map every provenanced edge to its source_run_refs in one scan.
+
+        Returns:
+        --------
+
+            - dict[EdgeIdentity, list[str]]: source_run_refs keyed by edge
+              identity; edges without run refs are omitted.
+        """
+        raise UnsupportedProvenanceCapability()
+
     async def set_graph_metadata(
         self,
         metadata: dict[str, str],

@@ -78,6 +78,32 @@ class VectorDBInterface(Protocol):
         """
         raise NotImplementedError("upsert_raw_vectors is not implemented for this adapter")
 
+    async def get_raw_rows(self, collection_name: str, data_point_ids: list[str]) -> list[dict]:
+        """
+        Return raw rows (id, vector, payload) for exact capture-and-restore.
+
+        Used by the versioning inverse ledger: unlike ``retrieve``, the stored
+        embedding is included so a later restore does not re-embed. A missing
+        collection returns an empty list. Adapters that cannot expose raw rows
+        raise UnsupportedProvenanceCapability so reversible operations fail
+        closed instead of silently losing vectors.
+        """
+        from cognee.infrastructure.databases.exceptions import UnsupportedProvenanceCapability
+
+        raise UnsupportedProvenanceCapability()
+
+    async def restore_raw_rows(self, collection_name: str, rows: list[dict]) -> None:
+        """
+        Upsert rows previously captured with ``get_raw_rows`` (idempotent).
+
+        The rows carry the original embeddings and payloads; restoring must not
+        invoke the embedding engine. Adapters that cannot restore raw rows
+        raise UnsupportedProvenanceCapability.
+        """
+        from cognee.infrastructure.databases.exceptions import UnsupportedProvenanceCapability
+
+        raise UnsupportedProvenanceCapability()
+
     @abstractmethod
     async def retrieve(self, collection_name: str, data_point_ids: list[str]):
         """

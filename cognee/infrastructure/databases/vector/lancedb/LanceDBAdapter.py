@@ -602,6 +602,114 @@ class LanceDBAdapter(VectorDBInterface):
                 .execute(self._records_for_write(raw_points))
             )
 
+    async def get_raw_rows(self, collection_name: str, data_point_ids: list[str]) -> list[dict]:
+        """Raw (id, vector, payload) rows for the versioning inverse ledger.
+
+        Unlike ``retrieve``, the stored embedding is returned so a later
+        restore is exact (no re-embedding). Missing collections yield [].
+        """
+        if not data_point_ids:
+            return []
+        try:
+            collection = await self.get_collection(collection_name)
+        except CollectionNotFoundError:
+            return []
+
+        escaped_ids = [str(point_id).replace("'", "''") for point_id in data_point_ids]
+        if len(escaped_ids) == 1:
+            where_clause = f"id = '{escaped_ids[0]}'"
+        else:
+            id_list = ", ".join(f"'{point_id}'" for point_id in escaped_ids)
+            where_clause = f"id IN ({id_list})"
+
+        results = await collection.query().where(where_clause).to_list()
+
+        rows = []
+        for result in results:
+            vector = result.get("vector")
+            rows.append(
+                {
+                    "id": result["id"],
+                    "vector": [float(value) for value in vector] if vector is not None else None,
+                    "payload": result.get("payload"),
+                }
+            )
+        return rows
+
+    @staticmethod
+    def _coerce_value_to_arrow_type(value, arrow_type):
+        """Re-typing for JSON round-tripped rows: ISO strings back to timestamps.
+
+        Captured rows pass through a JSON ledger column, which stringifies
+        datetimes inside payload structs; arrow will not coerce a string into
+        a timestamp field, so walk the schema and parse them back.
+        """
+        import pyarrow as pa
+        from datetime import datetime
+
+        if value is None:
+            return None
+        if pa.types.is_timestamp(arrow_type) and isinstance(value, str):
+            return datetime.fromisoformat(value)
+        if pa.types.is_struct(arrow_type) and isinstance(value, dict):
+            return {
+                field.name: LanceDBAdapter._coerce_value_to_arrow_type(
+                    value.get(field.name), field.type
+                )
+                for field in arrow_type
+            }
+        if (
+            pa.types.is_list(arrow_type)
+            or pa.types.is_large_list(arrow_type)
+            or pa.types.is_fixed_size_list(arrow_type)
+        ) and isinstance(value, list):
+            return [
+                LanceDBAdapter._coerce_value_to_arrow_type(item, arrow_type.value_type)
+                for item in value
+            ]
+        return value
+
+    async def restore_raw_rows(self, collection_name: str, rows: list[dict]) -> None:
+        """Upsert rows captured with ``get_raw_rows`` without re-embedding.
+
+        Requires the collection to still exist (deletes remove rows, never
+        tables); restoring into a dropped collection cannot recover the typed
+        schema and raises instead of guessing.
+        """
+        if not rows:
+            return
+        if not await self.has_collection(collection_name):
+            raise CollectionNotFoundError(
+                f"Cannot restore raw vector rows: collection '{collection_name}' no longer exists."
+            )
+
+        import pyarrow as pa
+
+        collection = await self.get_collection(collection_name)
+        if hasattr(collection, "schema"):
+            schema = await collection.schema()
+        else:
+            # Subprocess-proxy tables don't expose schema(); derive it from an
+            # arrow snapshot instead.
+            schema = (await collection.to_arrow()).schema
+
+        coerced_rows = [
+            {
+                field.name: self._coerce_value_to_arrow_type(row.get(field.name), field.type)
+                for field in schema
+            }
+            for row in rows
+        ]
+        table = pa.Table.from_pylist(coerced_rows, schema=schema)
+
+        async with self.VECTOR_DB_LOCK:
+            await (
+                collection.merge_insert("id")
+                .when_matched_update_all()
+                .when_not_matched_insert_all()
+                .execute(table)
+            )
+
     async def _migrate_collection_schema(
         self,
         collection_name: str,
