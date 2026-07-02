@@ -640,6 +640,16 @@ class SQLAlchemyAdapter:
                             await connection.execute(drop_table_query)
                         metadata.clear()
 
+                # Dispose the engine and clear the cache so the next
+                # get_relational_engine() creates a fresh pool. Without this,
+                # existing connections retain cached asyncpg prepared statements
+                # that become invalid after the schema is recreated by setup().
+                await self.engine.dispose(close=True)
+                from cognee.infrastructure.databases.relational.create_relational_engine import (
+                    create_relational_engine,
+                )
+                create_relational_engine.cache_clear()
+
         except Exception as e:
             logger.error(f"Error deleting database: {e}")
             raise e
