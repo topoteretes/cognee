@@ -1,0 +1,23 @@
+id: custom-ontology
+title: Ground the knowledge graph in a custom ontology
+kind: use-case
+stack: use-case
+tags:
+  - ontology
+  - owl
+  - domain-vocabulary
+  - entity-extraction
+summary: Constrain cognee's entity extraction to a domain ontology (OWL or similar) so the graph reflects your vocabulary, not the LLM's guesses.
+what_youll_build: A cognify run configured with a custom ontology file where entity types and relationships come from the ontology, and recall answers respect the domain's terminology.
+quickstart: |
+  uv pip install cognee
+  export LLM_API_KEY=your_openai_key
+  export ONTOLOGY_FILE_PATH=/path/to/your/domain.owl
+  export MATCHING_STRATEGY=fuzzy
+  python examples/guides/ontology_quickstart.py
+expected_output: |
+  A graph where node types and edge labels come from the ontology, plus a
+  recall answer that uses the ontology's terms instead of ad-hoc LLM
+  paraphrases.
+difficulty: advanced
+example_path: examples/guides/ontology_quickstart.py

@@ -1,0 +1,25 @@
+id: langgraph
+title: Cognee memory node for LangGraph
+kind: integration
+stack: framework
+tags:
+  - langgraph
+  - langchain
+  - python
+  - graph-workflow
+summary: Drop cognee remember and recall as first-class nodes into a LangGraph workflow.
+what_youll_build: A LangGraph agent that stores every meaningful state transition to cognee and can recall past runs when planning the next step.
+quickstart: |
+  pip install "cognee-integration-langgraph"
+  export LLM_API_KEY=your_openai_key
+  # in your LangGraph app:
+  from cognee_langgraph import CogneeRememberNode, CogneeRecallNode
+  # wire them into your StateGraph like any other node
+expected_output: |
+  A workflow run where the graph transitions include cognee remember calls
+  and a recall step returns prior runs relevant to the new input.
+difficulty: medium
+repo: topoteretes/cognee-integrations
+path: integrations/langgraph
+inventory_slug: langgraph
+docs_url: https://docs.cognee.ai/integrations/langgraph
