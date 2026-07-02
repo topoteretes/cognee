@@ -157,47 +157,62 @@ Key differences from the repo's local compose file:
 
 In the Dokploy service editor, open the **Environment** tab and add your configuration.
 
+> **Important — do not wrap values in quotes.** Dokploy passes environment variables to the
+> container literally, including any surrounding quotes (the same way a Docker `--env-file`
+> does — quotes are **not** stripped, unlike a shell). A value such as `LITELLM_LOG="ERROR"`
+> is delivered as the literal string `"ERROR"` (quotes included), which crashes Cognee on
+> startup with `AttributeError: module 'logging' has no attribute '"ERROR"'`. Always write
+> `LITELLM_LOG=ERROR`, never `LITELLM_LOG="ERROR"`.
+
 ### Minimum required setup
 
 ```env
-LLM_API_KEY="your_openai_api_key"
+LLM_API_KEY=your_openai_api_key
 ```
 
 That single variable is all that is needed to start. Everything else uses sensible defaults
-(SQLite for relational storage, LanceDB for vector storage, Kuzu for graph storage — all
+(SQLite for relational storage, LanceDB for vector storage, Ladybug for graph storage — all
 file-based, no extra setup required).
 
 ### Recommended production additions
 
 ```env
 # LLM provider
-LLM_API_KEY="your_openai_api_key"
-LLM_MODEL="openai/gpt-4o-mini"
-LLM_PROVIDER="openai"
+LLM_API_KEY=your_openai_api_key
+LLM_MODEL=openai/gpt-5-mini
+LLM_PROVIDER=openai
 
 # Restrict CORS in production
-CORS_ALLOWED_ORIGINS="https://yourdomain.com"
-
-# Authentication (set true to enable JWT auth)
-REQUIRE_AUTHENTICATION="false"
-
-# Single-user mode: set false to disable per-user DB isolation
-ENABLE_BACKEND_ACCESS_CONTROL="false"
+CORS_ALLOWED_ORIGINS=https://yourdomain.com
 
 # Skip LLM connectivity check on startup (useful if services start in parallel)
-COGNEE_SKIP_CONNECTION_TEST="false"
+COGNEE_SKIP_CONNECTION_TEST=false
 
 # Logging
-LITELLM_LOG="ERROR"
-ENV="local"
+LITELLM_LOG=ERROR
+ENV=local
 ```
+
+> **A note on authentication.** By default `ENABLE_BACKEND_ACCESS_CONTROL=true`, which turns
+> multi-tenant mode **on** and therefore requires authentication (JWT) on all API calls —
+> `REQUIRE_AUTHENTICATION` inherits that value when it is unset. Setting
+> `REQUIRE_AUTHENTICATION=false` on its own is **ignored** while access control is on (Cognee
+> logs a warning and forces auth back on). For a genuine single-user, no-auth deployment you
+> must disable access control explicitly:
+>
+> ```env
+> ENABLE_BACKEND_ACCESS_CONTROL=false
+> REQUIRE_AUTHENTICATION=false
+> ```
+>
+> Only do this for a private, single-user instance — never on a publicly reachable endpoint.
 
 ### Full environment variable reference
 
 | Variable | Default | Description |
 |---|---|---|
 | `LLM_API_KEY` | *(required)* | API key for your LLM provider |
-| `LLM_MODEL` | `openai/gpt-4o-mini` | LLM model identifier |
+| `LLM_MODEL` | `openai/gpt-5-mini` | LLM model identifier |
 | `LLM_PROVIDER` | `openai` | Provider: `openai`, `anthropic`, `gemini`, `ollama`, … |
 | `LLM_ENDPOINT` | — | Custom LLM API endpoint (for Azure, local, or custom providers) |
 | `EMBEDDING_PROVIDER` | `openai` | Embedding provider (defaults to `LLM_PROVIDER` if unset) |
@@ -208,18 +223,18 @@ ENV="local"
 | `DB_USERNAME` | `cognee` | Postgres username |
 | `DB_PASSWORD` | — | Postgres password |
 | `DB_NAME` | `cognee_db` | Postgres database name |
-| `GRAPH_DATABASE_PROVIDER` | `kuzu` | Graph DB: `kuzu`, `neo4j`, `postgres`, … |
+| `GRAPH_DATABASE_PROVIDER` | `ladybug` | Graph DB: `ladybug`, `kuzu`, `neo4j`, `postgres`, … |
 | `VECTOR_DB_PROVIDER` | `lancedb` | Vector DB: `lancedb`, `pgvector`, `chromadb`, … |
 | `DATA_ROOT_DIRECTORY` | `.data_storage` | Where Cognee stores raw data files |
 | `SYSTEM_ROOT_DIRECTORY` | `.cognee_system` | Where Cognee stores database files |
 | `CORS_ALLOWED_ORIGINS` | `*` | Restrict to your domain in production |
-| `REQUIRE_AUTHENTICATION` | `false` | Set `true` to require JWT auth on all API calls |
+| `REQUIRE_AUTHENTICATION` | *(inherits `ENABLE_BACKEND_ACCESS_CONTROL`)* | Require JWT auth on all API calls. Unset → follows access control (so effectively `true` by default). Ignored if set `false` while access control is `true`. |
 | `ENABLE_BACKEND_ACCESS_CONTROL` | `true` | Multi-tenant isolation per user and dataset |
 | `FASTAPI_USERS_JWT_SECRET` | `super_secret` | **Change this** to a long random string in production |
 | `JWT_LIFETIME_SECONDS` | `3600` | Token lifetime in seconds |
 | `COGNEE_SKIP_CONNECTION_TEST` | `false` | Skip LLM connectivity check at startup |
-| `CACHING` | `false` | Enable session caching (set `true` to activate) |
-| `CACHE_BACKEND` | `fs` | Session cache backend: `fs`, `redis`, `sqlite`, or `postgres` |
+| `CACHING` | `true` | Session caching is on by default (set `false` to disable) |
+| `CACHE_BACKEND` | `sqlite` | Session cache backend: `sqlite`, `fs`, `redis`, or `postgres` |
 | `CACHE_HOST` | `localhost` | Redis hostname (when `CACHE_BACKEND=redis`) |
 | `CACHE_PORT` | `6379` | Redis port |
 | `LLM_RATE_LIMIT_ENABLED` | `false` | Enable client-side rate limiting for LLM calls |
@@ -240,20 +255,24 @@ identified by `(user_id, session_id)` and stores recent queries, responses, and 
 Sessions are used automatically when you pass a `session_id` to `cognee.search()` or the
 `/api/v1/search` endpoint.
 
-**To enable sessions, add these variables:**
+Session caching is **on by default** (`CACHING=true`, backend `sqlite`), so sessions work with no
+extra configuration. You only need these variables to change the backend. As in Step 4, enter them
+**without surrounding quotes**.
+
+To use the filesystem backend instead of SQLite:
 
 ```env
-CACHING="true"
-CACHE_BACKEND="fs"       # filesystem cache, no extra service needed
+CACHING=true
+CACHE_BACKEND=fs         # filesystem cache, no extra service needed
 ```
 
 For multi-process or distributed setups, use Redis instead:
 
 ```env
-CACHING="true"
-CACHE_BACKEND="redis"
-CACHE_HOST="your-redis-host"
-CACHE_PORT="6379"
+CACHING=true
+CACHE_BACKEND=redis
+CACHE_HOST=your-redis-host
+CACHE_PORT=6379
 ```
 
 > The filesystem backend stores sessions in `{DATA_ROOT_DIRECTORY}/.cognee_fs_cache/sessions_db`.
@@ -264,7 +283,7 @@ CACHE_PORT="6379"
 
 ## Step 6: Set Up the Database (Optional)
 
-The default file-based databases (SQLite, LanceDB, Kuzu) work out of the box for single-user or
+The default file-based databases (SQLite, LanceDB, Ladybug) work out of the box for single-user or
 development use. For production, PostgreSQL with pgvector is the recommended relational and vector
 database backend.
 
@@ -277,24 +296,27 @@ database backend.
 
 ### Update your environment variables
 
+Remember: enter these in the Dokploy **Environment** tab **without surrounding quotes** (see the
+warning in Step 4).
+
 ```env
 # Relational database
-DB_PROVIDER="postgres"
-DB_HOST="cognee-db-postgres"   # internal Dokploy hostname
-DB_PORT="5432"
-DB_USERNAME="postgres"
-DB_PASSWORD="your_password"
-DB_NAME="cognee_db"
+DB_PROVIDER=postgres
+DB_HOST=cognee-db-postgres   # internal Dokploy hostname
+DB_PORT=5432
+DB_USERNAME=postgres
+DB_PASSWORD=your_password
+DB_NAME=cognee_db
 
 # Vector database (pgvector, shares the same Postgres instance)
-VECTOR_DB_PROVIDER="pgvector"
-VECTOR_DB_URL="postgresql://postgres:your_password@cognee-db-postgres:5432/cognee_db"
+VECTOR_DB_PROVIDER=pgvector
+VECTOR_DB_URL=postgresql://postgres:your_password@cognee-db-postgres:5432/cognee_db
 
-# Graph database (keep Kuzu for single-node, switch to neo4j for multi-agent)
-GRAPH_DATABASE_PROVIDER="kuzu"
+# Graph database (keep the default Ladybug for single-node, switch to neo4j for multi-agent)
+GRAPH_DATABASE_PROVIDER=ladybug
 ```
 
-> **Multi-agent note:** The default Kuzu graph store uses file-based locking and is not suitable
+> **Multi-agent note:** The default Ladybug graph store uses file-based locking and is not suitable
 > for concurrent access from multiple agents. Switch to Neo4j or the Postgres graph backend for
 > multi-agent deployments.
 
@@ -305,13 +327,17 @@ GRAPH_DATABASE_PROVIDER="kuzu"
 Click **Deploy** in the Dokploy service panel. Dokploy pulls the `cognee/cognee:main` image and
 starts the container. Watch the real-time log output in the **Logs** tab.
 
-A successful startup produces output like this:
+The image runs under **Gunicorn with Uvicorn workers**. A successful startup produces output like
+this:
 
 ```
-INFO:     Started server process [1]
-INFO:     Waiting for application startup.
-INFO:     Application startup complete.
-INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+Running database migrations...
+Database migrations done.
+Starting server...
+[INFO] Starting gunicorn 23.0.0
+[INFO] Listening at: http://0.0.0.0:8000 (1)
+[INFO] Using worker: uvicorn.workers.UvicornWorker
+[INFO] Application startup complete.
 ```
 
 If the startup fails, check the Logs tab first. The most common cause is a missing or incorrect
@@ -332,7 +358,7 @@ curl http://YOUR-SERVER-IP:8000/health
 Expected response:
 
 ```json
-{"status": "ok"}
+{"status": "ready", "health": "healthy", "version": "1.2.2-local"}
 ```
 
 ### Open the interactive API docs
@@ -353,10 +379,13 @@ TOKEN=$(curl -s -X POST "http://YOUR-SERVER-IP:8000/api/v1/auth/login" \
   -H "Content-Type: application/x-www-form-urlencoded" \
   -d "username=test@example.com&password=testpassword123" | jq -r .access_token)
 
-# 3. Add a piece of text to the knowledge graph
+# 3. Add a file to the knowledge graph.
+#    The `data` field is a file upload, so write the text to a file first and
+#    reference it with `@` — sending a bare string returns a 422 validation error.
+echo "Cognee is an open-source AI memory platform." > note.txt
 curl -X POST "http://YOUR-SERVER-IP:8000/api/v1/add" \
   -H "Authorization: Bearer $TOKEN" \
-  -F "data=Cognee is an open-source AI memory platform." \
+  -F "data=@note.txt" \
   -F "datasetName=test_dataset"
 
 # 4. Build the knowledge graph from the ingested data
@@ -397,37 +426,34 @@ Once the certificate is issued, your Cognee API is accessible at:
 
 ## Optional: Enable the Web UI
 
-The Cognee frontend is an experimental web interface. To add it alongside the API, extend your
-compose definition:
+The Cognee frontend is an experimental web interface.
+
+> **There is no prebuilt `cognee/cognee-frontend` image on Docker Hub.** Only `cognee/cognee`
+> (the API) and `cognee/cognee-mcp` (the MCP server) are published. The frontend must therefore
+> be **built from source**, which means pointing Dokploy at the Git repository rather than using
+> the compose-with-prebuilt-image approach used above for the API.
+
+To add it, create a **second Dokploy service** of type **Docker Compose**, set its build context to
+the cloned repo's `cognee-frontend/` directory, and use a compose definition like this:
 
 ```yaml
 services:
-  cognee:
-    image: cognee/cognee:main
-    ports:
-      - "8000:8000"
-    volumes:
-      - cognee_data:/app/cognee/.data_storage
-      - cognee_system:/app/cognee/.cognee_system
-    restart: unless-stopped
-
   frontend:
-    image: cognee/cognee-frontend:main
+    build:
+      context: ./cognee-frontend
+      dockerfile: Dockerfile
     ports:
       - "3001:3000"
     environment:
-      NEXT_PUBLIC_API_URL: "http://YOUR-SERVER-IP:8000"
-    depends_on:
-      - cognee
+      NEXT_PUBLIC_BACKEND_API_URL: "http://YOUR-SERVER-IP:8000"
     restart: unless-stopped
-
-volumes:
-  cognee_data:
-  cognee_system:
 ```
 
 > The frontend runs on port `3001` here to avoid conflicting with the Dokploy dashboard on
 > port `3000`. Adjust as needed.
+>
+> The correct environment variable is `NEXT_PUBLIC_BACKEND_API_URL` (this is what the frontend
+> reads — see the repository's `docker-compose.yml` and `cognee-frontend/.env.template`).
 >
 > Note: do not add `env_file: .env` or source bind mounts to any service in a Dokploy deployment.
 > Dokploy injects all environment variables through its UI; `.env` files are a local-only pattern.
@@ -480,6 +506,13 @@ to point to that URL.
 Check the **Logs** tab in Dokploy. A missing or invalid `LLM_API_KEY` is the most common cause.
 Verify the value, update the environment variable in Dokploy, and redeploy.
 
+### `AttributeError: module 'logging' has no attribute '"ERROR"'` (or similar quoted-value error)
+
+You wrapped an environment variable value in quotes in the Dokploy **Environment** tab. Dokploy
+passes values literally including the quotes, so `LITELLM_LOG="ERROR"` becomes the string
+`"ERROR"` (with quotes) and crashes startup. Remove the surrounding quotes from **all** values in
+the Environment tab — write `LITELLM_LOG=ERROR`, not `LITELLM_LOG="ERROR"` — and redeploy.
+
 ### `PermissionError: [Errno 13] Permission denied` on `.data_storage`
 
 This means the container cannot write to its data directory. The named volumes in the compose
@@ -489,18 +522,18 @@ databases are configured.
 
 ### `[Errno 111] Connection refused` when using PostgreSQL
 
-Cognee started before PostgreSQL finished initialising. Set `COGNEE_SKIP_CONNECTION_TEST="true"`
+Cognee started before PostgreSQL finished initialising. Set `COGNEE_SKIP_CONNECTION_TEST=true`
 as a temporary workaround while the database comes up, then remove it after the first successful
 deployment. Alternatively, use Dokploy's service ordering to ensure the database starts first.
 
-### API returns `403 Forbidden` on search
+### API returns `403 Forbidden` (or `401 Unauthorized`) on search
 
-When `ENABLE_BACKEND_ACCESS_CONTROL="true"` (the default), all API calls require a valid JWT.
-For a single-user deployment without auth, set:
+When `ENABLE_BACKEND_ACCESS_CONTROL=true` (the default), all API calls require a valid JWT.
+For a single-user deployment without auth, set both (remember: no quotes in the Environment tab):
 
 ```env
-ENABLE_BACKEND_ACCESS_CONTROL="false"
-REQUIRE_AUTHENTICATION="false"
+ENABLE_BACKEND_ACCESS_CONTROL=false
+REQUIRE_AUTHENTICATION=false
 ```
 
 ### Domain is not resolving after adding it in Dokploy
@@ -519,14 +552,14 @@ challenge).
 Enable client-side rate limiting to avoid hitting your provider's limits:
 
 ```env
-LLM_RATE_LIMIT_ENABLED="true"
-LLM_RATE_LIMIT_REQUESTS="60"
-LLM_RATE_LIMIT_INTERVAL="60"
+LLM_RATE_LIMIT_ENABLED=true
+LLM_RATE_LIMIT_REQUESTS=60
+LLM_RATE_LIMIT_INTERVAL=60
 ```
 
 ### Session data is not persisting between searches
 
-Confirm that `CACHING="true"` is set and that `CACHE_BACKEND` matches an available backend.
+Confirm that `CACHING=true` is set and that `CACHE_BACKEND` matches an available backend.
 For filesystem caching, the named `cognee_data` volume must be mounted so the cache directory
 at `{DATA_ROOT_DIRECTORY}/.cognee_fs_cache/` survives redeployments.
 
