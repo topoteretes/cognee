@@ -225,3 +225,91 @@ For non-OpenAI providers (Anthropic, Bedrock, Ollama, fastembed, …) see
 4. If your example demonstrates a feature, add it to the **By feature** cross-index too.
 
 See [`CONTRIBUTING.md`](../CONTRIBUTING.md) for the broader contribution flow.
+
+---
+
+## 🧪 Adding a Mocked Test for a New Example
+
+Every script in `examples/guides/` has a corresponding mocked test under
+`cognee/tests/examples/guides/`.  These tests run in CI with **zero real API
+calls** — LLM completions and vector embeddings are fully mocked.
+
+### Quick anatomy
+
+| Layer | Where | What it does |
+|---|---|---|
+| Mock harness | [`cognee/tests/utils/mock_llm.py`](../cognee/tests/utils/mock_llm.py) | `mock_cognee_llm`, `mock_cognee_embeddings`, `clean_cognee_state` fixtures |
+| conftest | [`cognee/tests/examples/conftest.py`](../cognee/tests/examples/conftest.py) | Sets lightweight backends (`lancedb`, `networkx`, `sqlite`) + re-exports fixtures |
+| Test files | `cognee/tests/examples/guides/test_<name>.py` | One file per guide script |
+
+### Step-by-step
+
+1. **Create the test file** at `cognee/tests/examples/<folder>/test_<name>.py`.
+
+2. **Use the shared fixtures** — they are auto-available from the `conftest.py`:
+
+   ```python
+   import importlib.util
+   from pathlib import Path
+   import pytest
+
+   def _load_example(rel_path: str):
+       path = Path(__file__).parents[4] / rel_path
+       spec = importlib.util.spec_from_file_location("example_module", path)
+       module = importlib.util.module_from_spec(spec)
+       spec.loader.exec_module(module)
+       return module
+
+   @pytest.mark.asyncio
+   async def test_my_example_runs_without_error(
+       mock_cognee_llm, mock_cognee_embeddings, clean_cognee_state
+   ):
+       module = _load_example("examples/guides/my_example.py")
+       await module.main()   # or module.run(), depending on the script
+   ```
+
+3. **Assert output shape** where the guide returns a value:
+
+   ```python
+   result = await module.main()
+   assert isinstance(result, list)   # adapt to your example
+   ```
+
+4. **Skip expensive or credential-gated examples** rather than making them
+   fail:
+
+   ```python
+   if not os.getenv("COGNEE_TEST_RUN_S3"):
+       pytest.skip("Requires AWS credentials. Set COGNEE_TEST_RUN_S3=1 to enable.")
+   ```
+
+5. **Tolerate visualization side-effects** — several guides write HTML files.
+   Wrap the call:
+
+   ```python
+   try:
+       await module.main()
+   except (OSError, FileNotFoundError):
+       pass   # .artifacts/ dir may not exist in CI
+   ```
+
+### Running locally
+
+```bash
+# All mocked guide tests (fast, no API keys needed)
+uv run pytest cognee/tests/examples/guides/ -v
+
+# Single test
+uv run pytest cognee/tests/examples/guides/test_recall_core.py -v
+
+# Include the S3 test (requires real AWS creds)
+COGNEE_TEST_RUN_S3=1 uv run pytest cognee/tests/examples/guides/test_s3_storage.py -v
+```
+
+### Fixture reference
+
+| Fixture | Purpose |
+|---|---|
+| `mock_cognee_llm` | Replaces `get_llm_client()` — all `LLMGateway.acreate_structured_output` calls return deterministic mocked values |
+| `mock_cognee_embeddings` | Replaces `get_embedding_engine()` — `embed_text()` returns `[0.1] * 1536` per chunk |
+| `clean_cognee_state` | Calls `cognee.prune.prune_system(metadata=True)` before **and** after each test for isolation |
