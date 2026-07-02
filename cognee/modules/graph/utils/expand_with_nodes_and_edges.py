@@ -7,10 +7,6 @@ from cognee.modules.engine.utils import (
     generate_edge_name,
     generate_node_name,
 )
-from cognee.modules.ontology.graph_enrichment import (
-    canonicalize_graphs,
-    extend_graph_with_ontology,
-)
 from cognee.shared.data_models import KnowledgeGraph
 
 
@@ -150,17 +146,26 @@ def _process_graph_edges(
             existing_edges_map[edge_key] = True
 
 
-def _resolve_node(node_id: str, all_nodes: dict):
+def _resolve_node(node_id: str, nodes_by_key: dict):
     entity_key = f"{node_id}_entity"
     type_key = f"{node_id}_type"
-    return all_nodes.get(entity_key) or all_nodes.get(type_key)
+    return nodes_by_key.get(entity_key) or nodes_by_key.get(type_key)
 
 
-def _populate_node_relations(all_nodes: dict, relationships: list) -> None:
+def build_nodes_by_key(entity_nodes: list) -> dict:
+    """Build the expand dedup lookup from returned entity/type nodes."""
+    nodes_by_key = {}
+    for node in entity_nodes:
+        category = "type" if isinstance(node, EntityType) else "entity"
+        nodes_by_key[_create_node_key(str(node.id), category)] = node
+    return nodes_by_key
+
+
+def populate_node_relations(nodes_by_key: dict, relationships: list) -> None:
     """Attach edges to nodes via .relations for downstream traversal and persistence."""
     for src_id, tgt_id, rel_name, properties in relationships:
-        src_node = _resolve_node(src_id, all_nodes)
-        tgt_node = _resolve_node(tgt_id, all_nodes)
+        src_node = _resolve_node(src_id, nodes_by_key)
+        tgt_node = _resolve_node(tgt_id, nodes_by_key)
 
         if src_node is None or tgt_node is None:
             continue
@@ -179,48 +184,11 @@ def _populate_node_relations(all_nodes: dict, relationships: list) -> None:
 def expand_with_nodes_and_edges(
     data_chunks: list[DocumentChunk],
     chunk_graphs: list[KnowledgeGraph],
-    ontology_resolver=None,
     existing_edges_map: Optional[dict[str, bool]] = None,
 ):
-    """
-
-    - LLM generated docstring
-    Expand knowledge graphs with validated nodes and edges, integrating ontology information.
-
-    This function processes document chunks and their associated knowledge graphs to create
-    a comprehensive graph structure with entity nodes, entity type nodes, and their relationships.
-    It validates entities against an ontology resolver and adds ontology-derived nodes and edges
-    to enhance the knowledge representation.
-
-    Args:
-        data_chunks (list[DocumentChunk]): List of document chunks that contain the source data.
-            Each chunk should have metadata about what entities it contains.
-        chunk_graphs (list[KnowledgeGraph]): List of knowledge graphs corresponding to each
-            data chunk. Each graph contains nodes (entities) and edges (relationships) extracted
-            from the chunk content.
-        ontology_resolver (BaseOntologyResolver, optional): Resolver for validating entities and
-            types against an ontology. None means skip ontology enrichment.
-        existing_edges_map (dict[str, bool], optional): Mapping of existing edge keys to prevent
-            duplicate edge creation. Keys are formatted as "{source_id}_{target_id}_{relation}".
-            If None, an empty dictionary is created. Defaults to None.
-
-    Returns:
-        tuple[list, list]: A tuple containing:
-            - graph_nodes (list): Combined list of data chunks and ontology nodes (EntityType and Entity objects)
-            - graph_edges (list): List of edge tuples in format (source_id, target_id, relationship_name, properties)
-
-    Note:
-        - Entity nodes are created for each entity found in the knowledge graphs
-        - EntityType nodes are created for each unique entity type
-        - Ontology validation is performed to map entities to canonical ontology terms
-        - Duplicate nodes and edges are prevented using internal mapping and the existing_edges_map
-        - The function modifies data_chunks in-place by adding entities to their 'contains' attribute
-
-    """
+    """Convert chunk graphs to entity nodes and extracted edges."""
     if existing_edges_map is None:
         existing_edges_map = {}
-
-    chunk_graphs, matches = canonicalize_graphs(chunk_graphs, data_chunks, ontology_resolver)
 
     added_nodes_map = {}
     relationships = []
@@ -232,14 +200,37 @@ def expand_with_nodes_and_edges(
         _process_graph_nodes(data_chunk, graph, added_nodes_map)
         _process_graph_edges(graph, existing_edges_map, relationships)
 
-    added_ontology_nodes_map, ontology_relationships = extend_graph_with_ontology(
-        matches, added_nodes_map, existing_edges_map
+    populate_node_relations(added_nodes_map, relationships)
+
+    return data_chunks, list(added_nodes_map.values())
+
+
+def expand_with_nodes_and_edges_and_ontology(
+    data_chunks: list[DocumentChunk],
+    chunk_graphs: list[KnowledgeGraph],
+    ontology_resolver,
+    existing_edges_map: Optional[dict[str, bool]] = None,
+):
+    """Canonicalize, convert, then extend with ontology subgraphs."""
+    from cognee.modules.ontology.graph_enrichment import (
+        canonicalize_graphs,
+        extend_graph_with_ontology,
     )
 
-    all_nodes = {**added_nodes_map, **added_ontology_nodes_map}
-    all_relationships = relationships + ontology_relationships
-    _populate_node_relations(all_nodes, all_relationships)
+    if existing_edges_map is None:
+        existing_edges_map = {}
 
-    entity_nodes = list(added_nodes_map.values()) + list(added_ontology_nodes_map.values())
+    chunk_graphs, matches = canonicalize_graphs(chunk_graphs, data_chunks, ontology_resolver)
+    data_chunks, entity_nodes = expand_with_nodes_and_edges(
+        data_chunks, chunk_graphs, existing_edges_map
+    )
 
+    nodes_by_key = build_nodes_by_key(entity_nodes)
+    added_ontology_nodes_map, ontology_relationships = extend_graph_with_ontology(
+        matches, nodes_by_key, existing_edges_map
+    )
+    nodes_by_key.update(added_ontology_nodes_map)
+    populate_node_relations(nodes_by_key, ontology_relationships)
+
+    entity_nodes.extend(added_ontology_nodes_map.values())
     return data_chunks, entity_nodes

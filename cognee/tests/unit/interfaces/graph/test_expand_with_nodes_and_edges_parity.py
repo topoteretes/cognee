@@ -14,6 +14,7 @@ from cognee.modules.engine.utils import generate_edge_name
 from cognee.modules.graph.utils.expand_with_nodes_and_edges import (
     _create_edge_key,
     expand_with_nodes_and_edges,
+    expand_with_nodes_and_edges_and_ontology,
 )
 from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
 from cognee.modules.ontology.get_default_ontology_resolver import get_default_ontology_resolver
@@ -179,7 +180,9 @@ def run_duplicate_twin_scenario():
         [Node(id="ext", name="shared_p", type="Other", description="chunk2 extracted")],
         [],
     )
-    return expand_with_nodes_and_edges([chunk1, chunk2], [graph1, graph2], _DuplicateTwinResolver())
+    return expand_with_nodes_and_edges_and_ontology(
+        [chunk1, chunk2], [graph1, graph2], _DuplicateTwinResolver()
+    )
 
 
 def run_edge_collision_scenario():
@@ -199,7 +202,7 @@ def run_edge_collision_scenario():
             )
         ],
     )
-    return expand_with_nodes_and_edges([chunk], [graph], _EdgeCollisionResolver())
+    return expand_with_nodes_and_edges_and_ontology([chunk], [graph], _EdgeCollisionResolver())
 
 
 def _make_chunk(importance_weight=0.5, belongs_to_set=None):
@@ -264,7 +267,9 @@ def run_scenario_a(resolver=None):
         [Node(id="n1", name="Alice", type="Person", description="Alice lives in Paris.")],
         [KGEdge(source_node_id="n1", target_node_id="n-blank", relationship_name="knows")],
     )
-    return expand_with_nodes_and_edges([chunk1, chunk2], [graph1, graph2], resolver)
+    if resolver is None:
+        return expand_with_nodes_and_edges([chunk1, chunk2], [graph1, graph2])
+    return expand_with_nodes_and_edges_and_ontology([chunk1, chunk2], [graph1, graph2], resolver)
 
 
 def run_scenario_b(resolver=None):
@@ -303,7 +308,7 @@ def run_scenario_b(resolver=None):
         ],
         [],
     )
-    return expand_with_nodes_and_edges(
+    return expand_with_nodes_and_edges_and_ontology(
         [chunk_main, chunk_extra], [graph_main, graph_extra], resolver
     )
 
@@ -608,7 +613,7 @@ def test_scenario_d_relation_membership_unchanged():
         ],
         [],
     )
-    _, filtered_nodes = expand_with_nodes_and_edges(
+    _, filtered_nodes = expand_with_nodes_and_edges_and_ontology(
         [chunk_main, chunk_extra], [graph_main, graph_extra], resolver, seeded
     )
     filtered = serialize_output([chunk_main, chunk_extra], filtered_nodes)
@@ -624,7 +629,9 @@ def test_positive_ontology_edge_pin():
         [Node(id="e1", name="Audi", type="Car", description="audi entity")],
         [],
     )
-    _, entity_nodes = expand_with_nodes_and_edges([chunk], [graph], _PositiveOntologyEdgeResolver())
+    _, entity_nodes = expand_with_nodes_and_edges_and_ontology(
+        [chunk], [graph], _PositiveOntologyEdgeResolver()
+    )
     assert ("audi", "is_a", "car") in _relation_triples(entity_nodes)
 
 
@@ -648,10 +655,10 @@ def test_duplicate_twin_order_invariant():
         [Node(id="ext", name="shared_p", type="Other", description="chunk2 extracted")],
         [],
     )
-    forward, forward_nodes = expand_with_nodes_and_edges(
+    forward, forward_nodes = expand_with_nodes_and_edges_and_ontology(
         [chunk1, chunk2], [graph1, graph2], _DuplicateTwinResolver()
     )
-    reverse, reverse_nodes = expand_with_nodes_and_edges(
+    reverse, reverse_nodes = expand_with_nodes_and_edges_and_ontology(
         [chunk2, chunk1], [graph2, graph1], _DuplicateTwinResolver()
     )
 
@@ -728,7 +735,7 @@ def test_scenario_d_existing_edges_map_filters_relations():
         ],
         [],
     )
-    _, filtered_nodes = expand_with_nodes_and_edges(
+    _, filtered_nodes = expand_with_nodes_and_edges_and_ontology(
         [chunk_main, chunk_extra], [graph_main, graph_extra], resolver, seeded
     )
     filtered = serialize_output([chunk_main, chunk_extra], filtered_nodes)

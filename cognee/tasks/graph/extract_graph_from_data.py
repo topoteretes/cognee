@@ -8,9 +8,10 @@ from cognee.modules.ontology.ontology_config import Config
 from cognee.modules.ontology.get_default_ontology_resolver import get_configured_ontology_resolver
 from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
-from cognee.modules.graph.utils import (
+from cognee.modules.graph.utils import retrieve_existing_edges
+from cognee.modules.graph.utils.expand_with_nodes_and_edges import (
     expand_with_nodes_and_edges,
-    retrieve_existing_edges,
+    expand_with_nodes_and_edges_and_ontology,
 )
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.infrastructure.llm.extraction import extract_content_graph
@@ -115,9 +116,14 @@ async def integrate_chunk_graphs(
         chunk_graphs,
     )
 
-    data_chunks, entity_nodes = expand_with_nodes_and_edges(
-        data_chunks, chunk_graphs, ontology_resolver, existing_edges_map
-    )
+    if ontology_resolver is None:
+        data_chunks, entity_nodes = expand_with_nodes_and_edges(
+            data_chunks, chunk_graphs, existing_edges_map
+        )
+    else:
+        data_chunks, entity_nodes = expand_with_nodes_and_edges_and_ontology(
+            data_chunks, chunk_graphs, ontology_resolver, existing_edges_map
+        )
 
     if entity_nodes:
         if pipeline_name or task_name:

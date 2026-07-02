@@ -4,7 +4,10 @@ import pytest
 
 from cognee.infrastructure.engine.models.Edge import Edge
 from cognee.modules.engine.models import Entity, EntityType
-from cognee.modules.graph.utils.expand_with_nodes_and_edges import expand_with_nodes_and_edges
+from cognee.modules.graph.utils.expand_with_nodes_and_edges import (
+    expand_with_nodes_and_edges,
+    expand_with_nodes_and_edges_and_ontology,
+)
 from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
 from cognee.modules.ontology.models import AttachedOntologyNode
 from cognee.shared.data_models import KnowledgeGraph, Node, Edge as KGEdge
@@ -59,7 +62,9 @@ def test_chunk_contains_populated():
         [Node(id="n1", name="Alice", type="Person", description="A person")],
         [],
     )
-    chunks, entity_nodes = expand_with_nodes_and_edges([chunk], [graph], _mock_resolver())
+    chunks, entity_nodes = expand_with_nodes_and_edges_and_ontology(
+        [chunk], [graph], _mock_resolver()
+    )
 
     assert chunk.contains is not None
     assert len(chunk.contains) == 1
@@ -76,7 +81,7 @@ def test_entity_relations_populated_from_graph_edges():
         ],
         [KGEdge(source_node_id="n1", target_node_id="n2", relationship_name="knows")],
     )
-    _, entity_nodes = expand_with_nodes_and_edges([chunk], [graph], _mock_resolver())
+    _, entity_nodes = expand_with_nodes_and_edges_and_ontology([chunk], [graph], _mock_resolver())
 
     alice = next(e for e in entity_nodes if e.name == "alice")
     assert len(alice.relations) == 1
@@ -97,7 +102,7 @@ def test_chunk_contains_edge_text_uses_per_chunk_description():
         [],
     )
 
-    expand_with_nodes_and_edges([chunk1, chunk2], [graph1, graph2], _mock_resolver())
+    expand_with_nodes_and_edges_and_ontology([chunk1, chunk2], [graph1, graph2], _mock_resolver())
 
     first_edge, first_entity = chunk1.contains[0]
     second_edge, second_entity = chunk2.contains[0]
@@ -114,7 +119,7 @@ def test_blank_chunk_description_leaves_edge_text_none_before_storage():
         [],
     )
 
-    expand_with_nodes_and_edges([chunk], [graph], _mock_resolver())
+    expand_with_nodes_and_edges_and_ontology([chunk], [graph], _mock_resolver())
 
     edge_obj, _ = chunk.contains[0]
     assert edge_obj.edge_text is None
@@ -137,7 +142,7 @@ def test_entity_relation_preserves_llm_edge_description():
         ],
     )
 
-    _, entity_nodes = expand_with_nodes_and_edges([chunk], [graph], _mock_resolver())
+    _, entity_nodes = expand_with_nodes_and_edges_and_ontology([chunk], [graph], _mock_resolver())
 
     alice = next(e for e in entity_nodes if e.name == "alice")
     edge_obj, target = alice.relations[0]
@@ -156,7 +161,7 @@ def test_returns_chunks_and_entity_nodes():
         [Node(id="n1", name="Thing", type="Object", description="a thing")],
         [],
     )
-    result = expand_with_nodes_and_edges([chunk], [graph], _mock_resolver())
+    result = expand_with_nodes_and_edges_and_ontology([chunk], [graph], _mock_resolver())
 
     assert isinstance(result, tuple) and len(result) == 2
     returned_chunks, entity_nodes = result
@@ -166,7 +171,9 @@ def test_returns_chunks_and_entity_nodes():
 
 def test_empty_graph_skipped():
     chunk = _make_chunk()
-    chunks, entity_nodes = expand_with_nodes_and_edges([chunk], [None], _mock_resolver())
+    chunks, entity_nodes = expand_with_nodes_and_edges_and_ontology(
+        [chunk], [None], _mock_resolver()
+    )
 
     assert chunk.contains is None
     assert entity_nodes == []
@@ -178,7 +185,7 @@ def test_entity_deduplication_across_chunks():
     graph1 = _make_graph([node], [])
     graph2 = _make_graph([node], [])
 
-    _, entity_nodes = expand_with_nodes_and_edges(
+    _, entity_nodes = expand_with_nodes_and_edges_and_ontology(
         [chunk1, chunk2], [graph1, graph2], _mock_resolver()
     )
 
@@ -194,7 +201,7 @@ def test_importance_weight_propagates_to_created_nodes():
         [],
     )
 
-    _, entity_nodes = expand_with_nodes_and_edges([chunk], [graph], _mock_resolver())
+    _, entity_nodes = expand_with_nodes_and_edges_and_ontology([chunk], [graph], _mock_resolver())
 
     alice = next(node for node in entity_nodes if node.name == "alice")
     person = next(node for node in entity_nodes if node.name == "person")
@@ -212,7 +219,7 @@ def test_default_importance_weight_propagates_to_created_nodes():
         [],
     )
 
-    _, entity_nodes = expand_with_nodes_and_edges([chunk], [graph], _mock_resolver())
+    _, entity_nodes = expand_with_nodes_and_edges_and_ontology([chunk], [graph], _mock_resolver())
 
     alice = next(node for node in entity_nodes if node.name == "alice")
     person = next(node for node in entity_nodes if node.name == "person")
@@ -231,7 +238,7 @@ def test_stub_resolver_plugs_in_at_util():
     )
     resolver = _StubOntologyResolver()
 
-    _, entity_nodes = expand_with_nodes_and_edges([chunk], [graph], resolver)
+    _, entity_nodes = expand_with_nodes_and_edges_and_ontology([chunk], [graph], resolver)
 
     widget = next(
         node
