@@ -108,7 +108,7 @@ def get_datasets_router() -> APIRouter:
         - **owner_id**: ID of the dataset owner
 
         ## Error Codes
-        - **418 I'm a teapot**: Error retrieving datasets
+        - **500 Internal Server Error**: Error retrieving datasets
         """
         send_telemetry(
             "Datasets API Endpoint Invoked",
@@ -126,7 +126,7 @@ def get_datasets_router() -> APIRouter:
         except Exception as error:
             logger.error(f"Error retrieving datasets: {str(error)}")
             raise HTTPException(
-                status_code=status.HTTP_418_IM_A_TEAPOT,
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Error retrieving datasets: {str(error)}",
             ) from error
 
@@ -156,7 +156,7 @@ def get_datasets_router() -> APIRouter:
         - **owner_id**: ID of the dataset owner
 
         ## Error Codes
-        - **418 I'm a teapot**: Error creating dataset
+        - **500 Internal Server Error**: Error creating dataset
         """
         send_telemetry(
             "Datasets API Endpoint Invoked",
@@ -179,7 +179,7 @@ def get_datasets_router() -> APIRouter:
         except Exception as error:
             logger.error(f"Error creating dataset: {str(error)}")
             raise HTTPException(
-                status_code=status.HTTP_418_IM_A_TEAPOT,
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Error creating dataset: {str(error)}",
             ) from error
 
