@@ -98,6 +98,13 @@ class Neo4jAdapter(GraphDBInterface):
             keep_alive=True,
         )
 
+    async def close(self) -> None:
+        """
+        Close the underlying Neo4j driver connection pool.
+        """
+        if hasattr(self, "driver") and self.driver is not None:
+            await self.driver.close()
+
     async def initialize(self) -> None:
         """
         Initializes the database: adds uniqueness constraint on id and performs indexing
