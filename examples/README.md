@@ -163,6 +163,9 @@ Same scripts, indexed by what they demonstrate.
 - [`demos/simple_relational_database_migration_example/simple_relational_database_migration_example.py`](demos/simple_relational_database_migration_example/simple_relational_database_migration_example.py)
 - [`demos/complex_relational_database_migration_example/complex_relational_database_migration_example.py`](demos/complex_relational_database_migration_example/complex_relational_database_migration_example.py)
 
+### External connectors (dlt)
+- [`python/notion_connector_example.py`](python/notion_connector_example.py) — Notion pages with incremental sync + forget-on-delete (needs `cognee[notion]` and `NOTION_API_KEY`)
+
 ### Custom pipelines / tasks
 - [`custom_pipelines/custom_cognify_pipeline_example.py`](custom_pipelines/custom_cognify_pipeline_example.py)
 - [`custom_pipelines/agentic_reasoning_procurement_example.py`](custom_pipelines/agentic_reasoning_procurement_example.py)
