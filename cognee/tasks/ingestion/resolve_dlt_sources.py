@@ -196,9 +196,12 @@ async def resolve_dlt_sources(
     orphan_cleanup: Optional[Callable[[], Any]] = None
     if write_disposition != "append":
         fresh_data_ids: Set[UUID] = set(row_id_lookup.values())
+        fresh_table_names: Set[str] = {row.table_name for row in all_rows}
 
         async def _cleanup() -> None:
-            await _delete_dlt_orphans(dataset_name, user, fresh_data_ids)
+            await _delete_dlt_orphans(
+                dataset_name, user, fresh_data_ids, fresh_table_names
+            )
 
         orphan_cleanup = _cleanup
 
@@ -312,13 +315,34 @@ def _resolve_fk_references(
     return references
 
 
+def _is_dlt_orphan_candidate(
+    external_metadata: dict,
+    data_id: UUID,
+    fresh_data_ids: Set[UUID],
+    fresh_table_names: Set[str],
+) -> bool:
+    """Return True if a Data row should be removed during DLT orphan cleanup."""
+    if external_metadata.get("source") != "dlt":
+        return False
+    table_name = external_metadata.get("table_name")
+    if table_name not in fresh_table_names:
+        return False
+    if data_id in fresh_data_ids:
+        return False
+    return True
+
+
 async def _delete_dlt_orphans(
     dataset_name: str,
     user: User,
     fresh_data_ids: Set[UUID],
+    fresh_table_names: Set[str],
 ) -> None:
     """Delete dlt-sourced Data records (and their graph/vector artifacts) that
     are no longer present in the freshly-ingested dlt source.
+
+    Only rows whose ``table_name`` appears in the current ingest run are
+    considered for deletion. Tables not loaded in this run are left untouched.
 
     This handles the case where rows are deleted from the upstream database
     and the user re-ingests.  dlt cleans its own staging DB, but cognee's
@@ -346,10 +370,11 @@ async def _delete_dlt_orphans(
     orphans = []
     for data_item in all_data:
         ext = data_item.external_metadata
-        if not isinstance(ext, dict) or ext.get("source") != "dlt":
+        if not isinstance(ext, dict):
             continue
-        if data_item.id not in fresh_data_ids:
-            orphans.append(data_item)
+        if not _is_dlt_orphan_candidate(ext, data_item.id, fresh_data_ids, fresh_table_names):
+            continue
+        orphans.append(data_item)
 
     if not orphans:
         return

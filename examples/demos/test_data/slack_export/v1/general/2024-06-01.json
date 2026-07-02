@@ -1,0 +1,21 @@
+[
+  {
+    "type": "message",
+    "user": "U001",
+    "text": "Morning standup at 10am",
+    "ts": "1717200000.000100"
+  },
+  {
+    "type": "message",
+    "user": "U002",
+    "text": "I'll demo the new connector today",
+    "ts": "1717200001.000200",
+    "thread_ts": "1717200000.000100"
+  },
+  {
+    "type": "message",
+    "user": "U001",
+    "text": "Great, looking forward to it",
+    "ts": "1717200002.000300"
+  }
+]
