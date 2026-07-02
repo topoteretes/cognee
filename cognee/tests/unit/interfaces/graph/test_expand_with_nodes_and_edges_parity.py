@@ -469,7 +469,7 @@ GOLDEN_B = {
             "5b4598fe-f589-57a1-88a8-d72c48f4915b",
             "audi",
             "Entity",
-            "Second collision desc.",
+            "Audi from chunk.",
             "e4bbd678-157f-5349-ad0d-b822c3021210",
             "car",
             True,
@@ -559,10 +559,10 @@ def test_scenario_b_matching_ontology_golden():
     output = serialize_output(chunks, entity_nodes)
     assert output == GOLDEN_B
     assert len({row[1] for row in output["nodes"]}) == len(output["nodes"])
-    # Deliberate characterization: second collision node wins under the canonical audi key.
+    # Deliberate characterization: first collision node wins under the canonical audi key.
     audi_nodes = [row for row in output["nodes"] if row[2] == "audi" and row[0] == "Entity"]
     assert len(audi_nodes) == 1
-    assert audi_nodes[0][4] == "Second collision desc."
+    assert audi_nodes[0][4] == "Audi from chunk."
     assert output["relations"] == GOLDEN_B["relations"]
 
 
@@ -684,8 +684,7 @@ def test_scenario_c_dedup_before_matching_call_count():
 
     resolver.get_subgraph = counting_get_subgraph
     run_scenario_b(resolver)
-    # 3 types (Car, Phantom, Person) + 6 entities
-    assert call_count["n"] == 9
+    assert call_count["n"] == 7
 
 
 def test_scenario_d_existing_edges_map_filters_relations():

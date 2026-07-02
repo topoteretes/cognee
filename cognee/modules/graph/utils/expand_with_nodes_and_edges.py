@@ -7,8 +7,10 @@ from cognee.modules.engine.utils import (
     generate_edge_name,
     generate_node_name,
 )
-from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
-from cognee.modules.ontology.graph_enrichment import OntologyMatch, extend_graph_with_ontology
+from cognee.modules.ontology.graph_enrichment import (
+    canonicalize_graphs,
+    extend_graph_with_ontology,
+)
 from cognee.shared.data_models import KnowledgeGraph
 
 
@@ -30,76 +32,26 @@ def _strip_nonblank_text(value: str | None) -> str | None:
     return stripped_value or None
 
 
-def _resolve_ontology_match(
-    node_name: str,
-    node_type: str,
-    ontology_resolver: BaseOntologyResolver,
-) -> tuple[Optional[str], list, list]:
-    """Return (canonical_raw_name, ontology_nodes, ontology_edges)."""
-    ontology_nodes, ontology_edges, match = ontology_resolver.get_subgraph(
-        node_name=node_name, node_type=node_type
-    )
-    if not match:
-        return None, [], []
-    return match.name, ontology_nodes, ontology_edges
-
-
 def _create_type_node(
     node_type: str,
-    ontology_resolver: Optional[BaseOntologyResolver],
     added_nodes_map: dict,
-    name_mapping: dict,
-    key_mapping: dict,
     data_chunk: DocumentChunk,
-    matches: list[OntologyMatch],
 ) -> EntityType:
-    """Create or retrieve a type node with ontology validation."""
+    """Create or retrieve a type node."""
     node_id = EntityType.id_for(node_type)
     node_name = generate_node_name(node_type)
-    extracted_node_name = node_name
     type_node_key = _create_node_key(node_id, "type")
 
-    if type_node_key in added_nodes_map or type_node_key in key_mapping:
-        return added_nodes_map.get(type_node_key) or added_nodes_map.get(
-            key_mapping.get(type_node_key)
-        )
-
-    canonical_name, ontology_nodes, ontology_edges = None, [], []
-    if ontology_resolver is not None:
-        canonical_name, ontology_nodes, ontology_edges = _resolve_ontology_match(
-            node_name, "classes", ontology_resolver
-        )
-
-    if canonical_name is not None:
-        old_key = type_node_key
-        node_id = EntityType.id_for(canonical_name)
-        type_node_key = _create_node_key(node_id, "type")
-        node_name = generate_node_name(canonical_name)
-
-        name_mapping[extracted_node_name] = canonical_name
-        key_mapping[old_key] = type_node_key
+    if type_node_key in added_nodes_map:
+        return added_nodes_map[type_node_key]
 
     type_node = EntityType(
         id=node_id,
         name=node_name,
         description=node_name,
-        ontology_valid=canonical_name is not None,
         importance_weight=data_chunk.importance_weight,
     )
-
     added_nodes_map[type_node_key] = type_node
-
-    if ontology_resolver is not None:
-        matches.append(
-            OntologyMatch(
-                category="classes",
-                canonical_name=canonical_name or node_name,
-                subgraph_nodes=ontology_nodes,
-                subgraph_edges=ontology_edges,
-                triggering_chunk=data_chunk,
-            )
-        )
-
     return type_node
 
 
@@ -108,97 +60,44 @@ def _create_entity_node(
     node_name: str,
     node_description: str,
     type_node: EntityType,
-    ontology_resolver: Optional[BaseOntologyResolver],
     added_nodes_map: dict,
-    name_mapping: dict,
-    key_mapping: dict,
     data_chunk: DocumentChunk,
-    matches: list[OntologyMatch],
 ) -> Entity:
-    """Create or retrieve an entity node with ontology validation."""
+    """Create or retrieve an entity node."""
     generated_node_id = Entity.id_for(node_id)
     generated_node_name = generate_node_name(node_name)
-    extracted_node_name = generated_node_name
     entity_node_key = _create_node_key(generated_node_id, "entity")
 
-    if entity_node_key in added_nodes_map or entity_node_key in key_mapping:
-        return added_nodes_map.get(entity_node_key) or added_nodes_map.get(
-            key_mapping.get(entity_node_key)
-        )
-
-    canonical_name, ontology_nodes, ontology_edges = None, [], []
-    if ontology_resolver is not None:
-        canonical_name, ontology_nodes, ontology_edges = _resolve_ontology_match(
-            generated_node_name, "individuals", ontology_resolver
-        )
-
-    if canonical_name is not None:
-        old_key = entity_node_key
-        generated_node_id = Entity.id_for(canonical_name)
-        entity_node_key = _create_node_key(generated_node_id, "entity")
-        generated_node_name = generate_node_name(canonical_name)
-
-        name_mapping[extracted_node_name] = canonical_name
-        key_mapping[old_key] = entity_node_key
+    if entity_node_key in added_nodes_map:
+        return added_nodes_map[entity_node_key]
 
     entity_node = Entity(
         id=generated_node_id,
         name=generated_node_name,
         is_a=type_node,
         description=node_description,
-        ontology_valid=canonical_name is not None,
         belongs_to_set=data_chunk.belongs_to_set,
         importance_weight=data_chunk.importance_weight,
     )
-
     added_nodes_map[entity_node_key] = entity_node
-
-    if ontology_resolver is not None:
-        matches.append(
-            OntologyMatch(
-                category="individuals",
-                canonical_name=canonical_name or generated_node_name,
-                subgraph_nodes=ontology_nodes,
-                subgraph_edges=ontology_edges,
-                triggering_chunk=data_chunk,
-            )
-        )
-
     return entity_node
 
 
 def _process_graph_nodes(
     data_chunk: DocumentChunk,
     graph: KnowledgeGraph,
-    ontology_resolver: Optional[BaseOntologyResolver],
     added_nodes_map: dict,
-    name_mapping: dict,
-    key_mapping: dict,
-    matches: list[OntologyMatch],
 ) -> None:
     """Process nodes in a knowledge graph."""
     for node in graph.nodes:
-        type_node = _create_type_node(
-            node.type,
-            ontology_resolver,
-            added_nodes_map,
-            name_mapping,
-            key_mapping,
-            data_chunk,
-            matches,
-        )
-
+        type_node = _create_type_node(node.type, added_nodes_map, data_chunk)
         entity_node = _create_entity_node(
             node.id,
             node.name,
             node.description,
             type_node,
-            ontology_resolver,
             added_nodes_map,
-            name_mapping,
-            key_mapping,
             data_chunk,
-            matches,
         )
 
         if data_chunk.contains is None:
@@ -223,15 +122,12 @@ def _process_graph_nodes(
 
 
 def _process_graph_edges(
-    graph: KnowledgeGraph, name_mapping: dict, existing_edges_map: dict, relationships: list
+    graph: KnowledgeGraph, existing_edges_map: dict, relationships: list
 ) -> None:
     """Process edges in a knowledge graph."""
     for edge in graph.edges:
-        source_id = name_mapping.get(generate_node_name(edge.source_node_id), edge.source_node_id)
-        target_id = name_mapping.get(generate_node_name(edge.target_node_id), edge.target_node_id)
-
-        source_node_id = Entity.id_for(source_id)
-        target_node_id = Entity.id_for(target_id)
+        source_node_id = Entity.id_for(edge.source_node_id)
+        target_node_id = Entity.id_for(edge.target_node_id)
         relationship_name = generate_edge_name(edge.relationship_name)
         edge_key = _create_edge_key(source_node_id, target_node_id, relationship_name)
         edge_text = _strip_nonblank_text(edge.description)
@@ -254,17 +150,17 @@ def _process_graph_edges(
             existing_edges_map[edge_key] = True
 
 
-def _resolve_node(node_id: str, all_nodes: dict, key_mapping: dict):
-    entity_key = key_mapping.get(f"{node_id}_entity", f"{node_id}_entity")
-    type_key = key_mapping.get(f"{node_id}_type", f"{node_id}_type")
+def _resolve_node(node_id: str, all_nodes: dict):
+    entity_key = f"{node_id}_entity"
+    type_key = f"{node_id}_type"
     return all_nodes.get(entity_key) or all_nodes.get(type_key)
 
 
-def _populate_node_relations(all_nodes: dict, relationships: list, key_mapping: dict) -> None:
+def _populate_node_relations(all_nodes: dict, relationships: list) -> None:
     """Attach edges to nodes via .relations for downstream traversal and persistence."""
     for src_id, tgt_id, rel_name, properties in relationships:
-        src_node = _resolve_node(src_id, all_nodes, key_mapping)
-        tgt_node = _resolve_node(tgt_id, all_nodes, key_mapping)
+        src_node = _resolve_node(src_id, all_nodes)
+        tgt_node = _resolve_node(tgt_id, all_nodes)
 
         if src_node is None or tgt_node is None:
             continue
@@ -283,7 +179,7 @@ def _populate_node_relations(all_nodes: dict, relationships: list, key_mapping: 
 def expand_with_nodes_and_edges(
     data_chunks: list[DocumentChunk],
     chunk_graphs: list[KnowledgeGraph],
-    ontology_resolver: BaseOntologyResolver = None,
+    ontology_resolver=None,
     existing_edges_map: Optional[dict[str, bool]] = None,
 ):
     """
@@ -324,26 +220,17 @@ def expand_with_nodes_and_edges(
     if existing_edges_map is None:
         existing_edges_map = {}
 
+    chunk_graphs, matches = canonicalize_graphs(chunk_graphs, data_chunks, ontology_resolver)
+
     added_nodes_map = {}
     relationships = []
-    name_mapping = {}
-    key_mapping = {}
-    matches: list[OntologyMatch] = []
 
     for data_chunk, graph in zip(data_chunks, chunk_graphs):
         if not graph:
             continue
 
-        _process_graph_nodes(
-            data_chunk,
-            graph,
-            ontology_resolver,
-            added_nodes_map,
-            name_mapping,
-            key_mapping,
-            matches,
-        )
-        _process_graph_edges(graph, name_mapping, existing_edges_map, relationships)
+        _process_graph_nodes(data_chunk, graph, added_nodes_map)
+        _process_graph_edges(graph, existing_edges_map, relationships)
 
     added_ontology_nodes_map, ontology_relationships = extend_graph_with_ontology(
         matches, added_nodes_map, existing_edges_map
@@ -351,7 +238,7 @@ def expand_with_nodes_and_edges(
 
     all_nodes = {**added_nodes_map, **added_ontology_nodes_map}
     all_relationships = relationships + ontology_relationships
-    _populate_node_relations(all_nodes, all_relationships, key_mapping)
+    _populate_node_relations(all_nodes, all_relationships)
 
     entity_nodes = list(added_nodes_map.values()) + list(added_ontology_nodes_map.values())
 
