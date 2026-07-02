@@ -1,0 +1,24 @@
+{{- if .Values.tests.enabled }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "cognee.backendName" . }}-test
+  labels:
+    {{- include "cognee.labels" . | nindent 4 }}
+    app.kubernetes.io/component: test
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  containers:
+    - name: curl
+      image: {{ .Values.tests.image | quote }}
+      imagePullPolicy: IfNotPresent
+      command:
+        - curl
+      args:
+        - --fail
+        - --silent
+        - http://{{ include "cognee.backendName" . }}:{{ .Values.cognee.service.port }}/health
+{{- end }}

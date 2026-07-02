@@ -1,0 +1,18 @@
+{{- if and .Values.cognee.persistence.enabled (not .Values.cognee.persistence.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "cognee.persistenceClaimName" . }}
+  labels:
+    {{- include "cognee.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backend
+spec:
+  accessModes:
+    {{- toYaml .Values.cognee.persistence.accessModes | nindent 4 }}
+  {{- with .Values.cognee.persistence.storageClassName }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.cognee.persistence.size }}
+{{- end }}

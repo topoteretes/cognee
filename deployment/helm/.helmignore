@@ -1,0 +1,10 @@
+.DS_Store
+.git/
+.github/
+.idea/
+.vscode/
+*.swp
+*.tmp
+*.bak
+docker-compose-helm.yml
+Dockerfile
