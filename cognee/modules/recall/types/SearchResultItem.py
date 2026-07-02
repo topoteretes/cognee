@@ -13,10 +13,11 @@ renderable ``text`` plus the original payload preserved under ``raw``.
 """
 
 from enum import Enum
-from typing import Any
+from typing import Any, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from cognee.modules.retrieval.utils.citation_models import Citation
 from cognee.modules.search.types.SearchType import SearchType
 
 
@@ -60,6 +61,13 @@ class SearchResultItem(BaseModel):
 
     text: str
     score: float | None = None
+    # Normalized relevance in [0, 1], higher-is-better. Populated when
+    # the underlying retriever can map its raw score onto the shared
+    # scale (see cognee.infrastructure.databases.vector.models.
+    # ScoredResult.normalize_distance_to_relevance). Left unset when no
+    # calibrated signal is available; downstream confidence derivation
+    # treats "unset" and "explicitly 0" differently.
+    relevance: Optional[float] = None
 
     dataset_id: str | None = None
     dataset_name: str | None = None
@@ -68,3 +76,10 @@ class SearchResultItem(BaseModel):
     raw: dict[str, Any] = {}
 
     structured: Any | None = None
+
+    # Structured provenance an agent can cite. Empty list means "no
+    # citation surfaced" rather than "the item has no source"; a
+    # retriever that doesn't emit citations yet returns [] instead of
+    # unset. Keep it additive to the existing text-based Evidence
+    # blocks in cognee.modules.retrieval.utils.references.
+    citations: List[Citation] = Field(default_factory=list)
