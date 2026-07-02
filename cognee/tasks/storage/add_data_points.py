@@ -15,6 +15,7 @@ from cognee.modules.graph.utils import (
 from .index_data_points import index_data_points
 from .index_graph_edges import index_graph_edges
 from cognee.modules.engine.models import Triplet
+from cognee.modules.versioning.operations.log_event import log_version_event
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.storage.exceptions import (
     InvalidDataPointsInAddDataPointsError,
@@ -125,6 +126,25 @@ async def add_data_points(
                     pipeline_run_id=pipeline_run_id,
                 )
             await session.commit()
+
+        # Log ADD event AFTER the relational upserts succeed.
+        # Capture full DataPoint JSON so undo_forget can signal re-ingestion
+        # with the exact original payload.  Non-fatal: logging must never block
+        # the actual ingest pipeline.
+        try:
+            datapoint_snapshots = [dp.to_json() for dp in data_points]
+            node_ids = [str(n.id) for n in nodes]
+            await log_version_event(
+                "ADD",
+                dataset.id,
+                data_id=data_item.id,
+                user_id=user.id,
+                run_id=pipeline_run_id,
+                node_slugs=node_ids,
+                datapoint_snapshots=datapoint_snapshots,
+            )
+        except Exception as _exc:
+            logger.warning("Failed to log ADD version event (non-fatal): %s", _exc)
 
     if use_hybrid:
         await graph_engine.add_nodes_with_vectors(nodes)
