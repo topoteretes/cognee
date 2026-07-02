@@ -35,8 +35,8 @@ def deadlock_retry(max_retries=10):
             async def wait():
                 backoff_time = calculate_backoff(attempt)
                 logger.warning(
-                    f"Neo4j rate limit hit, retrying in {backoff_time:.2f}s "
-                    f"Attempt {attempt}/{max_retries}"
+                    f"Neo4j transient error, retrying in {backoff_time:.2f}s "
+                    f"(attempt {attempt}/{max_retries})"
                 )
                 await asyncio.sleep(backoff_time)
 
