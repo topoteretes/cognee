@@ -123,22 +123,17 @@ class MistralAdapter(GenericAPIAdapter):
             merged_kwargs = {**self.llm_args, **kwargs}
             try:
                 async with llm_rate_limiter_context_manager():
-                    response = await self.aclient.chat.completions.create(
+                    # self.aclient is an instructor client, so create() returns the
+                    # validated `response_model` instance directly (not a raw
+                    # ChatCompletion). Return it as-is, like the other adapters;
+                    # reaching into `.choices` would raise AttributeError.
+                    return await self.aclient.chat.completions.create(
                         model=self.model,
                         max_retries=2,
                         messages=messages,
                         response_model=response_model,
                         **merged_kwargs,
                     )
-                if (
-                    response.choices
-                    and response.choices[0].message is not None
-                    and response.choices[0].message.content
-                ):
-                    content = response.choices[0].message.content
-                    return response_model.model_validate_json(content)
-                else:
-                    raise ValueError("Failed to get valid response after retries")
             except litellm.exceptions.BadRequestError as e:
                 logger.error(f"Bad request error: {str(e)}")
                 raise ValueError(f"Invalid request: {str(e)}")
