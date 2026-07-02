@@ -93,13 +93,13 @@ class LLMGateway:
         return _record_session_usage_after(inner, text_input=text_input)
 
     @staticmethod
-    def create_transcript(input) -> Coroutine[Any, Any, TranscriptionReturnType | None]:
+    def create_transcript(input, **kwargs) -> Coroutine[Any, Any, TranscriptionReturnType | None]:
         from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.get_llm_client import (
             get_llm_client,
         )
 
         llm_client = get_llm_client()
-        return llm_client.create_transcript(input=input)
+        return llm_client.create_transcript(input=input, **kwargs)
 
     @staticmethod
     def transcribe_image(input: str) -> Coroutine[Any, Any, Any]:
