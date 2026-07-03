@@ -8,7 +8,6 @@ per cluster.
 
 k-means is pure numpy (seeded k-means++ init, fixed iteration order) so results
 are identical across runs — no scikit-learn, which lives only in the evals extra.
-HDBSCAN is an optional lazy path for density clustering.
 """
 
 import math

@@ -69,5 +69,5 @@ A runnable end-to-end example lives at
   reflect real structure rather than layout artifacts.
 - **Determinism**: PCA sign convention, seeded k-means/sampling, and pinned
   positions make the layout reproducible — unit tests assert exact equality.
-- **Zero new dependencies**: numpy (already core) does PCA and k-means; UMAP and
-  HDBSCAN are optional lazy imports.
+- **Zero new dependencies**: numpy (already core) does PCA and k-means; UMAP is
+  an optional lazy import (ImportError falls back to PCA).
