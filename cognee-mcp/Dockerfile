@@ -62,18 +62,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
+# Run as a non-root user. Create the user *before* copying /app so the copy can
+# set ownership inline via `--chown`. A separate `chown -R /app` after the COPY
+# would rewrite metadata on every file, forcing overlayfs to copy up the entire
+# ~9 GB /app tree into a second layer — storing the venv twice. Doing it in the
+# COPY keeps it to a single layer.
+RUN groupadd --system --gid 1000 cognee \
+    && useradd --system --uid 1000 --gid cognee --no-create-home --shell /usr/sbin/nologin cognee
+
 # Copy the virtual environment from the uv stage
 COPY --from=uv /usr/local /usr/local
-COPY --from=uv /app /app
+COPY --from=uv --chown=cognee:cognee /app /app
 
 # Strip Windows carriage returns (fixes "no such file" on Windows Docker)
 RUN sed -i 's/\r$//' /app/entrypoint.sh && chmod +x /app/entrypoint.sh
-
-# Run as a non-root user. Create the user before copying ownership so the
-# /app tree (which already exists from the COPY above) is readable.
-RUN groupadd --system --gid 1000 cognee \
-    && useradd --system --uid 1000 --gid cognee --no-create-home --shell /usr/sbin/nologin cognee \
-    && chown -R cognee:cognee /app
 
 # Place executables in the environment at the front of the path
 ENV PATH="/app/.venv/bin:$PATH"
