@@ -26,7 +26,7 @@ export async function recallCommand(runtime: Runtime): Promise<void> {
     return;
   }
 
-  await presentResult(rendered);
+  await presentResult(runtime, rendered);
 }
 
 /**
@@ -61,7 +61,7 @@ export async function runRecall(
   );
 }
 
-async function presentResult(rendered: RenderedRecall): Promise<void> {
+async function presentResult(runtime: Runtime, rendered: RenderedRecall): Promise<void> {
   const document = await vscode.workspace.openTextDocument({
     language: "markdown",
     content: toMarkdown(rendered),
@@ -82,7 +82,7 @@ async function presentResult(rendered: RenderedRecall): Promise<void> {
     { placeHolder: "Open a cited source" },
   );
   if (picked) {
-    await openCitation(picked.citation);
+    await openCitation(picked.citation, runtime.pathIndex);
   }
 }
 

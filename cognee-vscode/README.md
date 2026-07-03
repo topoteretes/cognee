@@ -67,9 +67,10 @@ settings and secret storage.
 The extension talks to Cognee over the HTTP API:
 
 - **Ask / Recall** → `POST /api/v1/recall` with `include_references: true`, scoped to the workspace dataset.
-  Citations are parsed from the answer's `Evidence` block (chunk/document level today). When several
-  files share the cited name, the one whose content matches the snippet is opened; otherwise you're
-  asked to pick.
+  Citations are parsed from the answer's `Evidence` block (chunk/document level today). Because Cognee
+  returns only a document *basename*, the extension keeps a per-workspace path index (files you
+  remember are recorded with their exact relative path) so a citation opens the right file directly.
+  It falls back to snippet-content matching, then a user pick, only when genuinely ambiguous.
 - **Remember / Index** → `POST /api/v1/remember` (ingest + graph build in one call).
 - **Forget** → `POST /api/v1/forget`.
 

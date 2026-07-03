@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 
+import { basenameOf } from "../paths";
 import type { Runtime } from "../runtime";
 
 const INCLUDE_GLOB =
@@ -85,10 +86,11 @@ async function runIndexing(
           }
           await runtime.client.remember(`Source: ${label}\n\n${text}`, {
             datasetName: runtime.datasetName,
-            filename: label.split("/").pop() || "file.txt",
+            filename: basenameOf(label),
             runInBackground: true,
             signal: controller.signal,
           });
+          await runtime.pathIndex.record(label);
           indexed += 1;
         } catch (error) {
           failed += 1;
