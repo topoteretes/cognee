@@ -34,9 +34,13 @@ class CorpusBuilderExecutor:
         limit: Optional[int] = None,
         load_golden_context: bool = False,
         instance_filter: Optional[Union[str, List[str], List[int]]] = None,
+        seed: int = 42,
     ) -> Tuple[List[Dict], List[str]]:
         self.raw_corpus, self.questions = self.adapter.load_corpus(
-            limit=limit, load_golden_context=load_golden_context, instance_filter=instance_filter
+            limit=limit,
+            seed=seed,
+            load_golden_context=load_golden_context,
+            instance_filter=instance_filter,
         )
         return self.raw_corpus, self.questions
 
@@ -47,10 +51,14 @@ class CorpusBuilderExecutor:
         chunker=TextChunker,
         load_golden_context: bool = False,
         instance_filter: Optional[Union[str, List[str], List[int]]] = None,
+        seed: int = 42,
     ) -> List[str]:
         await self.adapter.prepare_corpus()
         self.load_corpus(
-            limit=limit, load_golden_context=load_golden_context, instance_filter=instance_filter
+            limit=limit,
+            load_golden_context=load_golden_context,
+            instance_filter=instance_filter,
+            seed=seed,
         )
         await self.run_cognee(chunk_size=chunk_size, chunker=chunker)
         return self.questions

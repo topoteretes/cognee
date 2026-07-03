@@ -149,6 +149,14 @@ evals = [
     "locust>=2.0.0,<3",
 ]
 
+# Umbrella extra for the evaluation harness: pulls in the analysis/dashboard
+# dependencies (evals) plus the DeepEval engine. Core cognee never imports these;
+# they are lazily loaded only when the harness or DeepEval engine is used.
+# One-liner install:  pip install "cognee[eval]"
+eval = [
+    "cognee[evals,deepeval]",
+]
+
 graphiti = ["graphiti-core>=0.28.0"]
 # Note: New s3fs and boto3 versions don't work well together
 # Always use comaptible fixed versions of these two dependencies
