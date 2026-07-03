@@ -51,7 +51,6 @@ dependencies = [
     "fastapi-users[sqlalchemy]>=15.0.2",
     "structlog>=25.2.0,<26",
     "pympler>=1.1,<2.0.0",
-    "pylance>=0.22.0,<=0.36.0",
     "ladybug>=0.16.0,<0.18",
     "python-magic-bin<0.5 ; platform_system == 'Windows'", # Only needed for Windows
     "networkx>=3.4.2,<4",
@@ -70,6 +69,10 @@ dependencies = [
 
 [project.optional-dependencies]
 api=[]
+
+dev = [
+    "pylance>=0.22.0,<=0.36.0",
+]
 
 distributed = [
     "modal>=1.0.5,<2.0.0",
