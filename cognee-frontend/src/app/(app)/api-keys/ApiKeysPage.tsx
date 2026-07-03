@@ -81,15 +81,15 @@ export default function ApiKeysPage() {
   const apiDocsUrl = serviceUrl ? `${serviceUrl}/docs` : null;
 
   useEffect(() => {
-    if (isInitializing) return;
+    if (isInitializing || !cogniInstance) return;
     loadKeys();
-    // Fetch user ID from control plane (not tenant pod)
-    getMyUserId().then((id) => { if (id) setUserId(id); }).catch(() => {});
+    getMyUserId(cogniInstance).then((id) => { if (id) setUserId(id); }).catch(() => {});
   }, [cogniInstance, isInitializing]);
 
   async function loadKeys() {
+    if (!cogniInstance) return;
     try {
-      const data = await getApiKeys();
+      const data = await getApiKeys(cogniInstance);
       setKeys(Array.isArray(data) ? data.map((k) => ({ ...k, name: k.name || k.label || "", isNew: false })) : []);
     } catch {
       setKeys([]);
@@ -99,10 +99,10 @@ export default function ApiKeysPage() {
   }
 
   async function handleCreate() {
-    if (!newName.trim()) return;
+    if (!newName.trim() || !cogniInstance) return;
     setCreating(true);
     try {
-      const created = await createApiKey({ name: newName.trim(), noRedirectOnAuth: true });
+      const created = await createApiKey(cogniInstance, { name: newName.trim() });
       trackEvent({ pageName: "API Keys", eventName: "api_key_created", additionalProperties: { key_name: newName.trim() } });
       setNewName("");
       setShowCreateModal(false);
@@ -118,8 +118,9 @@ export default function ApiKeysPage() {
   }
 
   async function handleRevoke(id: string) {
+    if (!cogniInstance) return;
     try {
-      await deleteApiKey(id);
+      await deleteApiKey(cogniInstance, id);
       trackEvent({ pageName: "API Keys", eventName: "api_key_revoked", additionalProperties: { key_id: id } });
       setKeys((prev) => prev.filter((k) => k.id !== id));
     } catch (err) {
@@ -252,21 +253,23 @@ export default function ApiKeysPage() {
 
       {/* Documentation links */}
       <div style={{ display: "flex", gap: 12 }}>
-        <a
-          href={isDev ? "https://api.dev-aws.cognee.ai/docs" : "https://api.aws.cognee.ai/docs"}
-          target="_blank"
-          rel="noopener noreferrer"
-          onClick={() => trackEvent({ pageName: "API Keys", eventName: "click_out", additionalProperties: { target_url: isDev ? "https://api.dev-aws.cognee.ai/docs" : "https://api.aws.cognee.ai/docs" } })}
-          style={{ flex: 1, display: "flex", alignItems: "center", gap: 10, background: "rgba(255,255,255,0.06)", backdropFilter: "blur(12px)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, padding: "14px 18px", textDecoration: "none", transition: "border-color 150ms" }}
-          className="hover:border-[#6510F4]"
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6510F4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z" /><path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z" /></svg>
-          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-            <span style={{ fontSize: 13, fontWeight: 500, color: "#EDECEA" }}>API Reference</span>
-            <span style={{ fontSize: 12, color: "rgba(237,236,234,0.35)" }}>Interactive Swagger docs for the shared API</span>
-          </div>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(237,236,234,0.35)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginLeft: "auto", flexShrink: 0 }}><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" /></svg>
-        </a>
+        {isCloud && (
+          <a
+            href={isDev ? "https://api.dev-aws.cognee.ai/docs" : "https://api.aws.cognee.ai/docs"}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={() => trackEvent({ pageName: "API Keys", eventName: "click_out", additionalProperties: { target_url: isDev ? "https://api.dev-aws.cognee.ai/docs" : "https://api.aws.cognee.ai/docs" } })}
+            style={{ flex: 1, display: "flex", alignItems: "center", gap: 10, background: "rgba(255,255,255,0.06)", backdropFilter: "blur(12px)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, padding: "14px 18px", textDecoration: "none", transition: "border-color 150ms" }}
+            className="hover:border-[#6510F4]"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6510F4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z" /><path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z" /></svg>
+            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              <span style={{ fontSize: 13, fontWeight: 500, color: "#EDECEA" }}>API Reference</span>
+              <span style={{ fontSize: 12, color: "rgba(237,236,234,0.35)" }}>Interactive Swagger docs for the shared API</span>
+            </div>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(237,236,234,0.35)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginLeft: "auto", flexShrink: 0 }}><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" /></svg>
+          </a>
+        )}
         {apiDocsUrl && (
           <a
             href={apiDocsUrl}
@@ -278,8 +281,8 @@ export default function ApiKeysPage() {
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6510F4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><rect x="2" y="3" width="20" height="14" rx="2" ry="2" /><line x1="8" y1="21" x2="16" y2="21" /><line x1="12" y1="17" x2="12" y2="21" /></svg>
             <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-              <span style={{ fontSize: 13, fontWeight: 500, color: "#EDECEA" }}>API Tenant Reference</span>
-              <span style={{ fontSize: 12, color: "rgba(237,236,234,0.35)" }}>Swagger docs for your tenant instance</span>
+              <span style={{ fontSize: 13, fontWeight: 500, color: "#EDECEA" }}>{isCloud ? "API Tenant Reference" : "API Reference"}</span>
+              <span style={{ fontSize: 12, color: "rgba(237,236,234,0.35)" }}>{isCloud ? "Swagger docs for your tenant instance" : "Interactive Swagger docs for your local backend"}</span>
             </div>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(237,236,234,0.35)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginLeft: "auto", flexShrink: 0 }}><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" /></svg>
           </a>
