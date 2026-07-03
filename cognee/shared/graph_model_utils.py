@@ -1,4 +1,5 @@
 import asyncio
+import keyword
 import re
 import sys
 import types
@@ -111,7 +112,83 @@ def datapoint_model_to_basemodel(
     return _to_base_model(model, {})
 
 
+# Names in the schema become Python class/attribute identifiers in code that is
+# subsequently exec()'d. Restrict them to plain identifiers so a crafted schema
+# cannot smuggle arbitrary code into the generated source. Also bound the schema
+# size/depth to reject abusive inputs.
+_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_MAX_SCHEMA_MODELS = 200
+_MAX_SCHEMA_PROPERTIES = 200
+_MAX_SCHEMA_DEPTH = 20
+
+
+def _is_valid_identifier(name: Any) -> bool:
+    return (
+        isinstance(name, str)
+        and _IDENTIFIER_RE.match(name) is not None
+        and not keyword.iskeyword(name)
+    )
+
+
+def _validate_schema_node(node: Any, depth: int) -> None:
+    if depth > _MAX_SCHEMA_DEPTH:
+        raise ValueError("Graph schema nesting is too deep.")
+    if not isinstance(node, dict):
+        return
+
+    properties = node.get("properties")
+    if isinstance(properties, dict):
+        if len(properties) > _MAX_SCHEMA_PROPERTIES:
+            raise ValueError("Graph schema object has too many properties.")
+        for prop_name, prop_schema in properties.items():
+            if not _is_valid_identifier(prop_name):
+                raise ValueError(
+                    f"Graph schema property name is not a valid identifier: {prop_name!r}."
+                )
+            _validate_schema_node(prop_schema, depth + 1)
+
+    items = node.get("items")
+    if isinstance(items, dict):
+        _validate_schema_node(items, depth + 1)
+
+
+def _validate_graph_schema(schema: dict) -> None:
+    """Reject graph schemas whose names would produce unsafe generated code.
+
+    ``graph_schema_to_graph_model`` feeds a caller-supplied JSON schema (reachable
+    via ``POST /v1/cognify``) to a code generator whose output is ``exec()``'d.
+    Every name that becomes a generated identifier — the top-level ``title``, each
+    ``$defs``/``definitions`` key, and every property name — must be a plain Python
+    identifier.
+    """
+    if not isinstance(schema, dict):
+        raise ValueError("Graph schema must be a JSON object.")
+
+    if not _is_valid_identifier(schema.get("title")):
+        raise ValueError(
+            f"Graph schema 'title' must be a valid Python identifier, got "
+            f"{schema.get('title')!r}."
+        )
+
+    defs = schema.get("$defs") or schema.get("definitions") or {}
+    if not isinstance(defs, dict):
+        raise ValueError("Graph schema '$defs' must be an object.")
+    if len(defs) > _MAX_SCHEMA_MODELS:
+        raise ValueError("Graph schema has too many model definitions.")
+    for def_name in defs:
+        if not _is_valid_identifier(def_name):
+            raise ValueError(
+                f"Graph schema definition name is not a valid identifier: {def_name!r}."
+            )
+
+    _validate_schema_node(schema, 0)
+    for def_schema in defs.values():
+        _validate_schema_node(def_schema, 0)
+
+
 def graph_schema_to_graph_model(pydantic_json_schema: dict) -> BaseModel:
+    # Validate the untrusted schema before any code generation / exec.
+    _validate_graph_schema(pydantic_json_schema)
     # If a custom graph model is provided, convert it from dict to a Pydantic model class
     config = GenerateConfig(
         input_file_type=InputFileType.JsonSchema,
