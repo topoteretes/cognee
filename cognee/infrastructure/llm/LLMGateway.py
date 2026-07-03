@@ -74,6 +74,18 @@ class LLMGateway:
                 system_prompt=system_prompt,
                 response_model=response_model,
             )
+        elif llm_config.structured_output_framework.upper() == "LITELLM_NATIVE":
+            from cognee.infrastructure.llm.structured_output_framework.litellm_native.get_native_client import (
+                get_native_client,
+            )
+
+            llm_client = get_native_client()
+            inner = llm_client.acreate_structured_output(
+                text_input=text_input,
+                system_prompt=system_prompt,
+                response_model=response_model,
+                **kwargs,
+            )
         else:
             from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.get_llm_client import (
                 get_llm_client,
