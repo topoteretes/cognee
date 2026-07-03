@@ -173,6 +173,22 @@ def test_empty_buffer_flush_is_noop():
     assert buffer.pending_count("A") == 0
 
 
+def test_forget_clears_pending_and_delegates_to_adapter():
+    memory = _fake_memory()
+    buffer = IngestionBuffer(memory, settings=IngestionSettings(cognify_batch_size=100))
+
+    _add(buffer, REF_A, 2)  # A has pending
+    _add(buffer, REF_B, 1)
+    assert buffer.pending_count("A") == 2
+
+    asyncio.run(buffer.forget(REF_A))
+
+    memory.forget.assert_awaited_once()
+    assert memory.forget.await_args.args[0] is REF_A
+    assert buffer.pending_count("A") == 0  # A's buffered state dropped
+    assert buffer.pending_count("B") == 1  # B untouched
+
+
 def test_flush_is_noop_again_immediately_after_flushing():
     memory = _fake_memory()
     buffer = IngestionBuffer(memory, settings=IngestionSettings(cognify_batch_size=2))
