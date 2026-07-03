@@ -21,6 +21,7 @@ import { AgentActivityTerminal, PipelineRun, Range, ownerDisplayName } from "@/u
 import SkeletonBar from "@/ui/elements/SkeletonBar";
 import DashboardSkeleton from "./DashboardSkeleton";
 import isCloudEnvironment from "@/utils/isCloudEnvironment";
+import { getLLMSettings, saveLLMApiKey, type LLMSettings } from "@/modules/settings/llmSettings";
 
 const AWAITING_DATASET_KEY = "cognee-awaiting-dataset";
 
@@ -69,6 +70,15 @@ export default function OverviewPage() {
   });
   const [creditsSpentPct, setCreditsSpentPct] = useState<number | null>(null);
   const [creditsRemainingUsd, setCreditsRemainingUsd] = useState<number | null>(null);
+  // Local/OSS only: whether the backend has an LLM API key configured. Without
+  // one, cognify fails on every upload, so the dashboard surfaces a banner
+  // with a paste-your-key modal that applies the key to the running backend.
+  const [llmSettings, setLlmSettings] = useState<LLMSettings | null>(null);
+  const [llmKeyMissing, setLlmKeyMissing] = useState(false);
+  const [showLlmKeyModal, setShowLlmKeyModal] = useState(false);
+  const [llmKeyInput, setLlmKeyInput] = useState("");
+  const [llmKeySaving, setLlmKeySaving] = useState(false);
+  const [llmKeyError, setLlmKeyError] = useState<string | null>(null);
   // True while a freshly-provisioned default dataset (handed off from onboarding
   // via sessionStorage) is still processing. Init from the flag so the skeleton
   // shows on first paint without waiting for the effect below.
@@ -85,6 +95,38 @@ export default function OverviewPage() {
   // default-dataset processing has finished.
   const workspaceReady = !!cogniInstance && tenantReady && !awaitingDataset;
   const prevWorkspaceReady = useRef(workspaceReady);
+
+  useEffect(() => {
+    if (isCloudEnvironment() || !cogniInstance) return;
+    let cancelled = false;
+    getLLMSettings(cogniInstance)
+      .then((llm) => {
+        if (cancelled) return;
+        setLlmSettings(llm);
+        setLlmKeyMissing(!llm.apiKey);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [cogniInstance]);
+
+  async function handleSaveLlmKey() {
+    if (!cogniInstance || !llmKeyInput.trim() || llmKeySaving) return;
+    setLlmKeySaving(true);
+    setLlmKeyError(null);
+    try {
+      await saveLLMApiKey(cogniInstance, {
+        provider: llmSettings?.provider || "openai",
+        model: llmSettings?.model || "gpt-5-mini",
+        apiKey: llmKeyInput.trim(),
+      });
+      trackEvent({ pageName: "Dashboard", eventName: "llm_api_key_saved" });
+      // Reload so every widget starts from the now-working backend state.
+      window.location.reload();
+    } catch (err) {
+      setLlmKeyError(err instanceof Error && err.message ? err.message : "Failed to save the API key. Is the backend running?");
+      setLlmKeySaving(false);
+    }
+  }
 
   async function uploadToDataset(ds: { id: string; name: string }, files: File[]) {
     if (!cogniInstance) return;
@@ -488,6 +530,37 @@ export default function OverviewPage() {
 
       <div style={{ padding: "clamp(16px, 3vw, 32px)", display: "flex", flexDirection: "column", gap: 40 }}>
 
+      {/* LLM API key modal (local mode only) */}
+      {showLlmKeyModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", backdropFilter: "blur(4px)", WebkitBackdropFilter: "blur(4px)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={() => { if (!llmKeySaving) setShowLlmKeyModal(false); }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "rgba(15,15,15,0.92)", backdropFilter: "blur(16px)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: 24, width: 420, maxWidth: "calc(100vw - 32px)", display: "flex", flexDirection: "column", gap: 16, boxShadow: "0 20px 60px rgba(0,0,0,0.6)" }}>
+            <h2 style={{ fontSize: 18, fontWeight: 700, color: "#EDECEA", margin: 0 }}>Add your LLM API key</h2>
+            <p style={{ fontSize: 13, color: "rgba(237,236,234,0.65)", margin: 0 }}>
+              Cognee uses <strong style={{ color: "#EDECEA" }}>{llmSettings?.provider || "openai"}</strong> ({llmSettings?.model || "gpt-5-mini"}) to build your knowledge graph. Paste your API key — it&apos;s applied to the running backend right away.
+            </p>
+            <input
+              type="password"
+              value={llmKeyInput}
+              onChange={(e) => { setLlmKeyInput(e.target.value); setLlmKeyError(null); }}
+              onKeyDown={(e) => { if (e.key === "Enter") handleSaveLlmKey(); }}
+              placeholder="sk-…"
+              autoFocus
+              disabled={llmKeySaving}
+              style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 8, padding: "10px 12px", fontSize: 13, color: "#EDECEA", fontFamily: "inherit", outline: "none", width: "100%", boxSizing: "border-box" }}
+            />
+            {llmKeyError && (
+              <p style={{ fontSize: 12, color: "#FCA5A5", margin: 0 }}>{llmKeyError}</p>
+            )}
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              <button onClick={() => setShowLlmKeyModal(false)} disabled={llmKeySaving} className="cursor-pointer hover:bg-white/10" style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.2)", borderRadius: 8, padding: "8px 16px", fontSize: 13, fontWeight: 500, color: "rgba(237,236,234,0.65)", fontFamily: "inherit" }}>Cancel</button>
+              <button onClick={handleSaveLlmKey} disabled={llmKeySaving || !llmKeyInput.trim()} className="cursor-pointer" style={{ background: "#BC9BFF", border: "none", borderRadius: 8, padding: "8px 16px", fontSize: 13, fontWeight: 500, color: "#1e1e1c", fontFamily: "inherit", opacity: llmKeySaving || !llmKeyInput.trim() ? 0.6 : 1 }}>
+                {llmKeySaving ? "Saving…" : "Save key"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Compact greeting */}
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
         <h1 style={{ margin: 0, fontSize: 26, fontWeight: 700, color: "#EDECEA", letterSpacing: "-0.02em", lineHeight: "32px" }}>
@@ -497,6 +570,33 @@ export default function OverviewPage() {
           <span style={{ background: "#F0EDFF", borderRadius: 4, padding: "2px 8px", fontSize: 12, fontWeight: 500, color: "#6510F4" }}>{selectedAgent.agent_type}</span>
         )}
       </div>
+
+      {/* ── Missing LLM API key banner (local mode only) ─────────────────── */}
+      {llmKeyMissing && (
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap",
+          background: "rgba(234,179,8,0.10)", border: "1px solid rgba(234,179,8,0.30)",
+          borderRadius: 10, padding: "12px 16px",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+              stroke="#EAB308" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+              <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+            </svg>
+            <span style={{ fontSize: 13, color: "#FDE047" }}>
+              No LLM API key configured — Cognee can&apos;t process uploads until you add one.
+            </span>
+          </div>
+          <button
+            onClick={() => { trackEvent({ pageName: "Dashboard", eventName: "llm_api_key_banner_clicked" }); setShowLlmKeyModal(true); }}
+            className="cursor-pointer"
+            style={{ background: "none", border: "none", padding: 0, fontSize: 13, fontWeight: 500, color: "#FDE047", textDecoration: "underline", textUnderlineOffset: 3, fontFamily: "inherit", flexShrink: 0 }}
+          >
+            Add your API key now →
+          </button>
+        </div>
+      )}
 
       {/* ── Low-credit warning banner ────────────────────────────────────── */}
       {showCreditPctBanner && (
