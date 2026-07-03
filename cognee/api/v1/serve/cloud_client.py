@@ -221,6 +221,10 @@ class CloudClient:
             payload["run_in_background"] = True
         if kwargs.get("node_name"):
             payload["node_name"] = kwargs["node_name"]
+        if kwargs.get("session_ids"):
+            payload["session_ids"] = list(kwargs["session_ids"])
+        if kwargs.get("build_global_context_index"):
+            payload["build_global_context_index"] = True
 
         async with session.post(
             f"{self.service_url}/api/v1/improve",
