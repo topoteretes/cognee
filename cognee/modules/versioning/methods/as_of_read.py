@@ -130,6 +130,10 @@ async def search_chunks_as_of(
     Chunk vectors are keyed by their graph node id (the provenance the delete
     path relies on), so the graph-derived visible set is the exact filter for
     the vector hits: post-filter, then truncate to ``top_k``.
+
+    Hits carry ``id`` + ``score`` with ``payload=None`` by design: the
+    over-fetch runs with ``include_payload=False`` so visibility filtering
+    stays cheap. Callers needing chunk text re-fetch payloads by the ids.
     """
     visible_nodes, _visible_edges = await get_visible_artifacts_as_of(
         graph_engine, dataset_id, as_of

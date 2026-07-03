@@ -239,5 +239,10 @@ async def test_snapshot_mutate_time_travel_rollback_and_undo_forget(e2e_env):
     async with set_database_global_context_variables(dataset_id, user.id):
         graph = await get_graph_engine()
         vector = get_vector_engine()
+        # DO NOT REMOVE / weaken: full-state equality is the capture<->delete
+        # invariant. Reversible forget is correct only if capture
+        # (find_{node,edge}_source_refs_by_dataset) discovers exactly what
+        # delete (delete_dataset_nodes_and_edges) removes. If the delete path
+        # ever changes, this equality is what catches silent undo loss.
         assert await _all_node_ids(graph) == live_node_ids
         assert await _chunk_ids(vector) == live_chunk_ids

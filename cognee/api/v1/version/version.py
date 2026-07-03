@@ -132,7 +132,12 @@ async def search_as_of(
     top_k: int = 15,
     user: Any = None,
 ) -> List[Any]:
-    """Chunk search over the dataset as it existed at ``as_of``."""
+    """Chunk search over the dataset as it existed at ``as_of``.
+
+    Returns scored hits (``id`` + ``score``) with ``payload=None`` by design:
+    the visibility over-fetch runs with ``include_payload=False`` for speed.
+    Callers needing chunk text should re-fetch payloads by the returned ids.
+    """
     from cognee.infrastructure.databases.graph import get_graph_engine
     from cognee.infrastructure.databases.vector import get_vector_engine
 
