@@ -6,6 +6,9 @@ import threading
 from typing import Any, cast
 
 import instructor
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.instructor_modes import (
+    get_instructor_mode,
+)
 from instructor.core.patch import InstructorChatCompletionCreate
 from openai import AsyncOpenAI
 from pydantic import BaseModel
@@ -65,7 +68,7 @@ class LlamaCppAPIAdapter(LLMInterface):
     model: str | None
     model_path: str | None
     mode_type: str  # "server" or "local"
-    default_instructor_mode = instructor.Mode.JSON
+    default_instructor_mode = get_instructor_mode("llama_cpp")
 
     def __init__(
         self,

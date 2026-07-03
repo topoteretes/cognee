@@ -4,6 +4,9 @@ import logging
 from typing import Any
 
 import instructor
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.instructor_modes import (
+    get_instructor_mode,
+)
 import litellm
 from instructor.core import InstructorRetryException
 from litellm.exceptions import ContentPolicyViolationError
@@ -49,7 +52,7 @@ class GeminiAdapter(GenericAPIAdapter):
     - transcribe_image(input) -> BaseModel: Inherited from GenericAPIAdapter
     """
 
-    default_instructor_mode = "json_mode"
+    default_instructor_mode = get_instructor_mode("gemini")
 
     def __init__(
         self,

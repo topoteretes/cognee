@@ -3,6 +3,9 @@ import logging
 from typing import Any
 
 import instructor
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.instructor_modes import (
+    get_instructor_mode,
+)
 import litellm
 from instructor.core import InstructorRetryException
 from litellm.exceptions import ContentPolicyViolationError
@@ -63,7 +66,7 @@ class OpenAIAdapter(GenericAPIAdapter):
     - MAX_RETRIES
     """
 
-    default_instructor_mode = "json_schema_mode"
+    default_instructor_mode = get_instructor_mode("openai")
     MAX_RETRIES = 2
 
     """Adapter for OpenAI's GPT-3, GPT=4 API"""

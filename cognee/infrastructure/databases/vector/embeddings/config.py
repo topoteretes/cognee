@@ -81,6 +81,12 @@ class EmbeddingConfig(BaseSettings):
     embedding_max_completion_tokens: Optional[int] = 8191
     embedding_batch_size: Optional[int] = None
     huggingface_tokenizer: Optional[str] = None
+    # Rate-limiting for embedding requests. Lives here (not in LLMConfig) so the
+    # knobs sit with the embedding settings they govern.
+    embedding_rate_limit_enabled: bool = False
+    embedding_rate_limit_requests: int = 60
+    embedding_rate_limit_interval: int = 60  # seconds (default: 60 requests per minute)
+    embedding_rate_limit_tokens: int = 0  # max tokens per interval (0 = disabled)
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
     def model_post_init(self, __context) -> None:
@@ -125,6 +131,10 @@ class EmbeddingConfig(BaseSettings):
             "embedding_max_completion_tokens": self.embedding_max_completion_tokens,
             "huggingface_tokenizer": self.huggingface_tokenizer,
             "embedding_batch_size": self.embedding_batch_size,
+            "embedding_rate_limit_enabled": self.embedding_rate_limit_enabled,
+            "embedding_rate_limit_requests": self.embedding_rate_limit_requests,
+            "embedding_rate_limit_interval": self.embedding_rate_limit_interval,
+            "embedding_rate_limit_tokens": self.embedding_rate_limit_tokens,
         }
 
 
