@@ -1,4 +1,3 @@
-import os
 import re
 import json
 import uuid
@@ -14,6 +13,7 @@ from contextlib import asynccontextmanager
 
 from .models import User
 from .get_user_db import get_user_db
+from .authentication.secret_utils import get_auth_secret
 from cognee.modules.users.models.UserApiKey import UserApiKey
 from cognee.modules.users.api_key.hash_api_key import prepare_api_key
 from cognee.infrastructure.databases.relational import get_relational_engine
@@ -22,10 +22,8 @@ logger = logging.getLogger(__name__)
 
 
 class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
-    reset_password_token_secret = os.getenv(
-        "FASTAPI_USERS_RESET_PASSWORD_TOKEN_SECRET", "super_secret"
-    )
-    verification_token_secret = os.getenv("FASTAPI_USERS_VERIFICATION_TOKEN_SECRET", "super_secret")
+    reset_password_token_secret = get_auth_secret("FASTAPI_USERS_RESET_PASSWORD_TOKEN_SECRET")
+    verification_token_secret = get_auth_secret("FASTAPI_USERS_VERIFICATION_TOKEN_SECRET")
 
     async def on_after_login(
         self, user: User, request: Optional[Request] = None, response: Optional[Response] = None
