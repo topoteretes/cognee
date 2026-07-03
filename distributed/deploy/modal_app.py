@@ -17,12 +17,19 @@ Your API will be available at:
     https://<your-org>--cognee-api-serve.modal.run
 """
 
+import os
+
 import modal
 
-app = modal.App("cognee-api")
+# App and volume names are overridable so CI can deploy an isolated, ephemeral
+# instance per run (see distributed/deploy/tests/test_modal_serve_e2e.py).
+# The defaults keep production deployments unchanged.
+app = modal.App(os.getenv("MODAL_APP_NAME", "cognee-api"))
 
 # Persistent volume for file-based databases
-volume = modal.Volume.from_name("cognee-data", create_if_missing=True)
+volume = modal.Volume.from_name(
+    os.getenv("MODAL_VOLUME_NAME", "cognee-data"), create_if_missing=True
+)
 
 # Build image from existing Dockerfile
 image = (
