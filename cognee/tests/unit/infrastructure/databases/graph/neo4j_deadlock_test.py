@@ -15,13 +15,16 @@ except ModuleNotFoundError:
         pass
 
 
-    neo4j_module = types.ModuleType("neo4j")
-    exceptions_module = types.ModuleType("neo4j.exceptions")
-    exceptions_module.DatabaseUnavailable = DatabaseUnavailable
-    exceptions_module.Neo4jError = Neo4jError
-    neo4j_module.exceptions = exceptions_module
-    sys.modules.setdefault("neo4j", neo4j_module)
-    sys.modules["neo4j.exceptions"] = exceptions_module
+@pytest.fixture(autouse=True)
+def stub_neo4j_modules(monkeypatch):
+    if "neo4j" not in sys.modules:
+        neo4j_module = types.ModuleType("neo4j")
+        exceptions_module = types.ModuleType("neo4j.exceptions")
+        exceptions_module.DatabaseUnavailable = DatabaseUnavailable
+        exceptions_module.Neo4jError = Neo4jError
+        neo4j_module.exceptions = exceptions_module
+        monkeypatch.setitem(sys.modules, "neo4j", neo4j_module)
+        monkeypatch.setitem(sys.modules, "neo4j.exceptions", exceptions_module)
 
 from cognee.infrastructure.databases.graph.neo4j_driver.deadlock_retry import deadlock_retry
 
