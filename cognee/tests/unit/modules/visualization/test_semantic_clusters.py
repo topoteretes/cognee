@@ -101,6 +101,24 @@ def test_label_prefers_entities_over_chunk_text():
     assert "Ada Lovelace" in pos_label  # real entity used despite low degree
 
 
+def test_label_falls_back_to_dominant_type_when_no_names():
+    # A cluster of nameless chunks/summaries: no usable name, so the label is the
+    # dominant node type rather than the generic "cluster".
+    nodes = [
+        {"id": "a", "type": "TextSummary", "text": "summary one"},
+        {"id": "b", "type": "TextSummary", "text": "summary two"},
+        {"id": "c", "type": "DocumentChunk", "text": "a chunk"},
+        {"id": "d", "type": "TextSummary", "text": "summary three"},
+        {"id": "e", "type": "TextSummary", "text": "summary four"},
+        {"id": "f", "type": "DocumentChunk", "text": "another chunk"},
+    ]
+    result = compute_clusters(nodes, BLOB, k=2, seed=42)
+    labels = [c["label"] for c in result["clusters"]]
+    assert labels  # every cluster is labelled
+    assert all(lbl in {"TextSummary", "DocumentChunk"} for lbl in labels)
+    assert "cluster" not in labels  # generic fallback no longer reached
+
+
 def test_summarize_seam_is_used_when_provided():
     nodes = _nodes(["a", "b", "c", "d", "e", "f"])
     summarize = Mock(return_value="SUMMARY")

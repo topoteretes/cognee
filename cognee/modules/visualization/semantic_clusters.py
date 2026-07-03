@@ -12,6 +12,7 @@ HDBSCAN is an optional lazy path for density clustering.
 """
 
 import math
+from collections import Counter
 from typing import Any, Callable, Dict, List, Optional
 
 import numpy as np
@@ -103,8 +104,8 @@ def _cluster_label(member_nodes: List[Dict[str, Any]]) -> str:
 
     Entities win over DocumentChunk/TextSummary/EntityType so labels read as
     concepts, not chunk text or type names. Identifier-shaped or over-long names
-    are skipped; a cluster with no usable entity names falls back to any usable
-    name, then to ``"cluster"``.
+    are skipped; a cluster with no usable name falls back to its dominant node
+    type (e.g. ``"TextSummary"``), then to ``"cluster"``.
     """
     ranked = sorted(
         member_nodes,
@@ -112,7 +113,11 @@ def _cluster_label(member_nodes: List[Dict[str, Any]]) -> str:
         reverse=True,
     )
     names = [n for nd in ranked if (n := _usable_name(nd))]
-    return ", ".join(names[:3]) if names else "cluster"
+    if names:
+        return ", ".join(names[:3])
+    # No usable names (e.g. a cluster of chunks/summaries): name it by dominant type.
+    types = [nd.get("type") for nd in member_nodes if nd.get("type")]
+    return Counter(types).most_common(1)[0][0] if types else "cluster"
 
 
 def compute_clusters(
