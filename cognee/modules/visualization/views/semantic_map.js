@@ -11,6 +11,10 @@
   'use strict';
 
   const CLUSTERS = __SEMANTIC_CLUSTERS__;
+  // Recall events from the session layer (same token the Memory tab uses). Each
+  // 'search' event carries the node_ids a recall query retrieved — the overlay
+  // lights up where that query landed in meaning-space.
+  const SEARCH_EVENTS = __SEARCH_EVENTS__;
 
   function nodeById(id) {
     return (window._vizNodeById && window._vizNodeById[id]) || null;
@@ -25,6 +29,8 @@
   let zoomBehavior = null;
   let isolatedCluster = null;
   let isolatedType = null;
+  let recallSet = null;       // Set of node_ids from the active recall overlay, or null
+  let refreshStyles = null;   // set by render() so overlay changes restyle without a re-render
 
   // Structural layout: relax the same nodes over graph topology (window._vizLinks)
   // with a bounded, synchronous force sim. This is the one place a sim is allowed —
@@ -180,16 +186,25 @@
       .attr('stroke', 'rgba(0,0,0,0.25)').attr('stroke-width', 0.5)
       .style('cursor', 'pointer');
 
-    function applyIsolation() {
-      circles.attr('opacity', (id) => {
-        if (colorBy === 'type') {
-          if (isolatedType == null) return 1;
-          const nd = nodeById(id);
-          return nd && nd.type === isolatedType ? 1 : 0.12;
-        }
-        return isolatedCluster == null || nodeCluster[id] === isolatedCluster ? 1 : 0.12;
-      });
+    function isolationOpacity(id) {
+      if (colorBy === 'type') {
+        if (isolatedType == null) return 1;
+        const nd = nodeById(id);
+        return nd && nd.type === isolatedType ? 1 : 0.12;
+      }
+      return isolatedCluster == null || nodeCluster[id] === isolatedCluster ? 1 : 0.12;
     }
+
+    // Base styling: the recall overlay (when active) dims everything except the
+    // retrieved nodes and rings them; otherwise the legend isolation applies.
+    function refresh() {
+      circles
+        .attr('opacity', (id) => (recallSet ? (recallSet.has(id) ? 1 : 0.06) : isolationOpacity(id)))
+        .attr('stroke', (id) => (recallSet && recallSet.has(id) ? '#ff3b3b' : 'rgba(0,0,0,0.25)'))
+        .attr('stroke-width', (id) => (recallSet && recallSet.has(id) ? 2.5 : 0.5))
+        .attr('r', (id) => (recallSet && recallSet.has(id) ? 7 : 5));
+    }
+    refreshStyles = refresh;
 
     circles.on('mouseover', function (event, id) {
       const nbrs = new Set([(id), ...((CLUSTERS.neighbors && CLUSTERS.neighbors[id]) || [])]);
@@ -197,8 +212,7 @@
       d3.select(this).attr('r', 8);
       showPanel(id, clusterColors, nodeCluster);
     }).on('mouseout', function () {
-      d3.select(this).attr('r', 5);
-      applyIsolation();
+      refresh();
       const panel = document.getElementById('semantic-panel');
       if (panel) panel.style.display = 'none';
     });
@@ -209,8 +223,8 @@
     svg.call(zoomBehavior);
     svg.call(zoomBehavior.transform, prevTransform);
 
-    applyIsolation();
-    renderLegend(clusters, clusterColors, applyIsolation, ids);
+    refresh();
+    renderLegend(clusters, clusterColors, refresh, ids);
 
     const status = document.getElementById('semantic-status');
     if (status) {
@@ -228,7 +242,7 @@
     return row;
   }
 
-  function renderLegend(clusters, clusterColors, applyIsolation, ids) {
+  function renderLegend(clusters, clusterColors, refresh, ids) {
     const legend = document.getElementById('semantic-legend');
     if (!legend) return;
     legend.innerHTML = '';
@@ -242,7 +256,7 @@
       Object.keys(typeColor).sort().forEach((t) => {
         legend.appendChild(legendRow(typeColor[t], t, () => {
           isolatedType = isolatedType === t ? null : t;
-          applyIsolation();
+          refresh();
         }));
       });
       return;
@@ -250,7 +264,7 @@
     clusters.forEach((c) => {
       legend.appendChild(legendRow(clusterColors[c.id], c.label, () => {
         isolatedCluster = isolatedCluster === c.id ? null : c.id;
-        applyIsolation();
+        refresh();
       }));
     });
   }
@@ -301,6 +315,42 @@
     const svgEl = document.getElementById('semantic-svg');
     if (svgEl && zoomBehavior) d3.select(svgEl).transition().duration(200).call(zoomBehavior.transform, d3.zoomIdentity);
   });
+
+  // Recall overlay: pick a past recall query, light up the nodes it retrieved.
+  (function initRecall() {
+    const wrap = document.getElementById('semantic-recall-wrap');
+    const select = document.getElementById('semantic-recall');
+    const note = document.getElementById('semantic-recall-note');
+    if (!select) return;
+    const queries = (SEARCH_EVENTS || []).filter(
+      (e) => e && e.kind === 'search' && (e.node_ids || []).length,
+    );
+    if (!queries.length) {
+      if (wrap) wrap.style.display = 'none';  // nothing to overlay
+      return;
+    }
+    queries.forEach((e, i) => {
+      const opt = document.createElement('option');
+      opt.value = String(i);
+      const q = (e.question || 'recall ' + (i + 1)).trim();
+      opt.textContent = q.length > 40 ? q.slice(0, 39) + '…' : q;
+      select.appendChild(opt);
+    });
+    select.addEventListener('change', () => {
+      const idx = select.value;
+      if (idx === '') {
+        recallSet = null;
+        if (note) note.textContent = '';
+      } else {
+        const evt = queries[+idx];
+        recallSet = new Set((evt.node_ids || []).map(String));
+        const positions = window._semanticPositions || {};
+        const onMap = (evt.node_ids || []).filter((id) => positions[String(id)]).length;
+        if (note) note.textContent = onMap + ' of ' + (evt.node_ids || []).length + ' on map';
+      }
+      if (refreshStyles) refreshStyles();
+    });
+  })();
 
   // Deep link: #semantic opens the tab on load.
   if (window.location.hash === '#semantic') {

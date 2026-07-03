@@ -272,7 +272,13 @@ canvas:active{cursor:grabbing}
 <div id="semantic-view" style="display:none;position:fixed;inset:0;padding:56px 0 0;overflow:hidden;z-index:900;background:var(--bg);">
   <div id="semantic-header" style="position:absolute;top:56px;left:0;right:0;padding:12px 28px;display:flex;align-items:center;gap:16px;">
     <div id="semantic-status" style="font-size:13px;color:var(--text2);"></div>
-    <div id="semantic-controls" style="margin-left:auto;display:flex;gap:16px;">
+    <div id="semantic-controls" style="margin-left:auto;display:flex;gap:16px;align-items:center;">
+      <div id="semantic-recall-wrap" style="display:flex;gap:6px;align-items:center;">
+        <select id="semantic-recall" title="Overlay a recall query's retrieved nodes" style="background:var(--surface);color:var(--text);border:1px solid var(--border);padding:5px 8px;border-radius:6px;cursor:pointer;font-size:12px;max-width:200px;">
+          <option value="">Recall overlay: off</option>
+        </select>
+        <span id="semantic-recall-note" style="font-size:11px;color:var(--text2);"></span>
+      </div>
       <div style="display:flex;gap:4px;">
         <button class="sem-layout-btn active" data-layout="semantic" style="background:var(--accent);color:#fff;border:none;padding:5px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;">Semantic</button>
         <button class="sem-layout-btn" data-layout="structural" style="background:var(--surface);color:var(--text2);border:1px solid var(--border);padding:5px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;">Structural</button>
