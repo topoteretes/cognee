@@ -3,6 +3,7 @@ from abc import abstractmethod, ABC
 from typing import Optional, Dict, Any, List, Tuple, Type, Union
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.engine import DataPoint
+from cognee.infrastructure.databases.versioning.models import VersionStamp
 
 logger = get_logger()
 
@@ -431,3 +432,32 @@ class GraphDBInterface(ABC):
         Returns per-id update success.
         """
         raise NotImplementedError("set_edge_frequency_weights is not implemented for this adapter")
+
+    async def add_node_versioned(self, node: Union[DataPoint, str], version_stamp: VersionStamp) -> None:
+        """Add a single node to the graph stamped with version metadata.
+
+        Args:
+            node: The DataPoint or string identifier representing the node.
+            version_stamp: The version metadata to apply to the node.
+        """
+        raise NotImplementedError("add_node_versioned is not implemented for this adapter")
+
+    async def get_nodes_as_of(self, version_id: int) -> List[Any]:
+        """Retrieve graph nodes that were active as of a specific version ID.
+
+        Args:
+            version_id: The version ID to query.
+
+        Returns:
+            A list of nodes active during the specified version.
+        """
+        raise NotImplementedError("get_nodes_as_of is not implemented for this adapter")
+
+    async def tombstone_nodes(self, node_ids: List[str], version_stamp: VersionStamp) -> None:
+        """Soft-delete nodes by marking them as expired/tombstoned in the graph.
+
+        Args:
+            node_ids: A list of unique node identifiers to soft-delete.
+            version_stamp: The version stamp containing the expiration timestamp.
+        """
+        raise NotImplementedError("tombstone_nodes is not implemented for this adapter")
