@@ -11,6 +11,8 @@ response ingested and later retrievable via search. The documented
 import ipaddress
 import os
 import socket
+import tempfile
+from pathlib import Path
 from urllib.parse import urlparse
 
 from cognee.modules.ingestion.exceptions import IngestionError
@@ -56,3 +58,56 @@ def assert_url_allowed(url: str) -> None:
             raise IngestionError(
                 message=f"Refusing to fetch non-public address for host {host!r}: {ip}"
             )
+
+
+def _allowed_local_roots() -> list[str]:
+    """Directories that local files may be ingested from.
+
+    Overridable via the comma-separated ``LOCAL_FILE_ALLOWED_ROOTS`` env var. The
+    default set covers legitimate use (cognee's data directory, the working
+    directory, and the system temp dir) while excluding sensitive locations like
+    ``/etc``, ``/root``, ``~/.ssh`` and ``/proc``.
+    """
+    env = os.getenv("LOCAL_FILE_ALLOWED_ROOTS")
+    if env:
+        raw_roots = [r.strip() for r in env.split(",") if r.strip()]
+    else:
+        # Imported lazily to avoid a heavy import at module load.
+        from cognee.base_config import get_base_config
+
+        raw_roots = [
+            get_base_config().data_root_directory,
+            os.getcwd(),
+            tempfile.gettempdir(),
+        ]
+
+    resolved: list[str] = []
+    for root in raw_roots:
+        # Skip non-local roots (e.g. s3:// data directories); realpath them so
+        # symlinked roots compare correctly.
+        if "://" in root:
+            continue
+        resolved.append(os.path.realpath(root))
+    return resolved
+
+
+def assert_local_path_allowed(path: str) -> None:
+    """Raise ``IngestionError`` if ``path`` resolves outside the allowed roots.
+
+    ``os.path.realpath`` canonicalises the path, so symlinks that point outside an
+    allowed root are rejected rather than followed.
+    """
+    resolved = os.path.realpath(path)
+    for root in _allowed_local_roots():
+        try:
+            Path(resolved).relative_to(root)
+            return
+        except ValueError:
+            continue
+
+    raise IngestionError(
+        message=(
+            f"Refusing to ingest local file outside the allowed roots: {path!r}. "
+            "Set LOCAL_FILE_ALLOWED_ROOTS to permit additional directories."
+        )
+    )
