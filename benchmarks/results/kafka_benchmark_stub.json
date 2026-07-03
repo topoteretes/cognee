@@ -1,0 +1,25 @@
+{
+  "_comment": "Stub file. Run `python benchmarks/kafka/harness.py --messages 10000` to populate with real numbers.",
+  "run_id": "kafka-bench-stub-000",
+  "schema_version": "1.0",
+  "corpus_seed": 42,
+  "topic": "cognee-benchmark-v1",
+  "corpus_size": 10000,
+  "batch_size": 10,
+  "max_concurrency": 4,
+  "smoke_mode": false,
+  "total_messages_ingested": 0,
+  "total_elapsed_sec": 0,
+  "ingestion_throughput_msgs_per_sec": 0,
+  "batch_latency_p50_sec": 0,
+  "batch_latency_p95_sec": 0,
+  "batch_latency_p99_sec": 0,
+  "batch_latency_mean_sec": 0,
+  "batch_latency_samples": 0,
+  "search_latency_by_corpus_size": {
+    "100":   {"p50_sec": 0, "p95_sec": 0, "p99_sec": 0, "mean_sec": 0, "samples": 0},
+    "1000":  {"p50_sec": 0, "p95_sec": 0, "p99_sec": 0, "mean_sec": 0, "samples": 0},
+    "10000": {"p50_sec": 0, "p95_sec": 0, "p99_sec": 0, "mean_sec": 0, "samples": 0}
+  },
+  "cross_sdk_note": "Comparable to cognee-rs#26 using SEED=42, TOPIC=cognee-benchmark-v1, schema={id,text,seed_idx}"
+}
