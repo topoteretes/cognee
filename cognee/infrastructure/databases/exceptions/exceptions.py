@@ -43,10 +43,7 @@ class EntityNotFoundError(CogneeValidationError):
         name: str = "EntityNotFoundError",
         status_code=status.HTTP_404_NOT_FOUND,
     ):
-        self.message = message
-        self.name = name
-        self.status_code = status_code
-        # super().__init__(message, name, status_code) :TODO: This is not an error anymore with the dynamic exception handling therefore we shouldn't log error
+        super().__init__(message, name, status_code, log=False)
 
 
 class EntityAlreadyExistsError(CogneeValidationError):
@@ -81,9 +78,7 @@ class NodesetFilterNotSupportedError(CogneeConfigurationError):
         name: str = "NodeSetFilterNotSupportedError",
         status_code=status.HTTP_404_NOT_FOUND,
     ):
-        self.message = message
-        self.name = name
-        self.status_code = status_code
+        super().__init__(message, name, status_code)
 
 
 class EmbeddingException(CogneeConfigurationError):
