@@ -19,6 +19,20 @@ from cognee.infrastructure.databases.graph.graph_db_interface import (
 )
 from cognee.infrastructure.databases.exceptions import DatabaseCredentialsError
 from cognee.modules.storage.utils import JSONEncoder
+from datetime import datetime, timezone
+from cognee.infrastructure.databases.provenance import (
+    EdgeDeleteData,
+    EdgeIdentity,
+    NodeDeleteData,
+    get_dataset_id_from_source_ref_key,
+    get_pipeline_run_id_from_source_run_ref,
+    get_source_ref_key_from_source_run_ref,
+)
+from cognee.infrastructure.databases.provenance.source_ref_state import (
+    provenance_after_attach,
+    provenance_after_remove,
+    provenance_attach_inputs,
+)
 
 from distributed.utils import override_distributed
 from distributed.tasks.queued_add_nodes import queued_add_nodes
@@ -47,6 +61,93 @@ logger = get_logger("Neo4jAdapter")
 
 
 BASE_LABEL = "__Node__"
+
+# ------------------------------------------------------------------
+# Graph provenance (COG-5522)
+#
+# The four provenance fields live in NATIVE list properties on the node /
+# relationship (Neo4j's graph-native analogue of the Postgres varchar[] columns;
+# no delimiter encoding like Ladybug/Kuzu needs). Every read normalizes a missing
+# property to []. Provenance is storage-internal, so it is stripped out of the
+# domain node/edge dicts returned to retrieval and DataPoint reconstruction —
+# the same hygiene Postgres/Ladybug get for free by holding provenance in
+# dedicated columns rather than the property blob.
+# ------------------------------------------------------------------
+PROVENANCE_COLUMNS = (
+    "source_ref_keys",
+    "source_dataset_ids",
+    "source_run_ids",
+    "source_run_refs",
+)
+_PROVENANCE_KEY_SET = frozenset(PROVENANCE_COLUMNS)
+
+
+def _strip_provenance(properties: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Return ``properties`` without the four provenance list properties."""
+    if not properties:
+        return properties
+    if any(key in properties for key in _PROVENANCE_KEY_SET):
+        return {key: value for key, value in properties.items() if key not in _PROVENANCE_KEY_SET}
+    return properties
+
+
+def _prov_list(value: Any) -> List[str]:
+    """Normalize a native provenance list property (or None) to ``list[str]``."""
+    return list(value) if value else []
+
+
+def _provenance_fold_clause(alias: str) -> str:
+    """Cypher ``SET`` fragment that stamps provenance inside the artifact write.
+
+    Appended to ``add_nodes`` / ``add_edges`` so a node/edge is created and
+    stamped in one atomic statement — no read-then-write window (closes the
+    write-then-attach gap and the concurrent lost update, COG-5522 #4/#8). Sets
+    are native-list appends against the committed property. The run ref/id are
+    appended only when the key is *not* already present (Model A): the ``CASE``
+    guards read ``source_ref_keys`` before this statement mutates it, because
+    that column is assigned AFTER the run columns in the SET list (verified: an
+    earlier SET item reads the pre-mutation value of a column a later item
+    changes).
+
+    ``alias`` is the bound variable (``n`` for nodes, ``rel`` for edges). The
+    ``$prov_*`` params are scalars shared across the UNWIND batch — one source
+    ref key is attached per call.
+    """
+    return f"""
+            SET {alias}.source_run_refs = CASE
+                    WHEN $prov_sr_key IN coalesce({alias}.source_ref_keys, [])
+                    THEN coalesce({alias}.source_run_refs, [])
+                    ELSE coalesce({alias}.source_run_refs, []) + $prov_add_run_refs
+                END,
+                {alias}.source_run_ids = CASE
+                    WHEN $prov_sr_key IN coalesce({alias}.source_ref_keys, [])
+                    THEN coalesce({alias}.source_run_ids, [])
+                    ELSE coalesce({alias}.source_run_ids, []) + $prov_add_run_ids
+                END,
+                {alias}.source_ref_keys = CASE
+                    WHEN $prov_sr_key IN coalesce({alias}.source_ref_keys, [])
+                    THEN coalesce({alias}.source_ref_keys, [])
+                    ELSE coalesce({alias}.source_ref_keys, []) + $prov_add_keys
+                END,
+                {alias}.source_dataset_ids = CASE
+                    WHEN $prov_ds_id IN coalesce({alias}.source_dataset_ids, [])
+                    THEN coalesce({alias}.source_dataset_ids, [])
+                    ELSE coalesce({alias}.source_dataset_ids, []) + $prov_add_dataset_ids
+                END
+            """
+
+
+def _provenance_fold_params(source_ref_key: str, pipeline_run_id: Optional[str]) -> Dict[str, Any]:
+    """Scalar query params consumed by :func:`_provenance_fold_clause`."""
+    inputs = provenance_attach_inputs(source_ref_key, pipeline_run_id)
+    return {
+        "prov_sr_key": inputs.source_ref_key,
+        "prov_add_keys": list(inputs.add_keys),
+        "prov_ds_id": inputs.add_dataset_ids[0],
+        "prov_add_dataset_ids": list(inputs.add_dataset_ids),
+        "prov_add_run_refs": list(inputs.add_run_refs),
+        "prov_add_run_ids": list(inputs.add_run_ids),
+    }
 
 
 class Neo4jAdapter(GraphDBInterface):
@@ -97,6 +198,11 @@ class Neo4jAdapter(GraphDBInterface):
             notifications_min_severity="OFF",
             keep_alive=True,
         )
+        # Serializes the read-modify-write in explicit attach/remove source-ref
+        # calls so two concurrent updates to the same artifact within this
+        # adapter instance cannot overwrite each other (the atomic fold path in
+        # add_nodes/add_edges does not need it).
+        self._source_ref_change_lock = asyncio.Lock()
 
     async def initialize(self) -> None:
         """
@@ -114,12 +220,21 @@ class Neo4jAdapter(GraphDBInterface):
         async with self.driver.session(database=self.graph_database_name) as session:
             yield session
 
+    async def close(self) -> None:
+        """Close the underlying Neo4j driver and its connection pool."""
+        await self.driver.close()
+
     async def is_empty(self) -> bool:
-        """Return True if the graph contains no nodes."""
-        query = """
-        RETURN EXISTS {
-        MATCH (n)
-        } AS node_exists;
+        """Return True if the graph contains no data nodes.
+
+        Scoped to ``:__Node__`` so the ``GraphMetadata`` marker (written by
+        ``set_graph_metadata``) never makes a data-empty graph read as non-empty
+        — the graph-provenance marking gate depends on this.
+        """
+        query = f"""
+        RETURN EXISTS {{
+        MATCH (n:`{BASE_LABEL}`)
+        }} AS node_exists;
         """
         query_result = await self.query(query)
         return not query_result[0]["node_exists"]
@@ -176,7 +291,7 @@ class Neo4jAdapter(GraphDBInterface):
 
             - bool: True if the node exists, otherwise False.
         """
-        results = self.query(
+        results = await self.query(
             f"""
                 MATCH (n:`{BASE_LABEL}`)
                 WHERE n.id = $node_id
@@ -252,6 +367,16 @@ class Neo4jAdapter(GraphDBInterface):
         # write back the union so the property on a shared DataPoint reflects
         # every dataset that cognified it (consistent with the additive
         # belongs_to_set edges). See add_node for the single-node variant.
+        # When a source ref is supplied the provenance stamp is folded into the
+        # same statement that MERGEs the node (atomic — no write-then-attach
+        # window). The fold SET must run while `n` and `node` are still bound,
+        # i.e. before the aggregating `WITH n, node.label`.
+        fold_clause = ""
+        provenance_params: Dict[str, Any] = {}
+        if source_ref_key is not None:
+            fold_clause = _provenance_fold_clause("n")
+            provenance_params = _provenance_fold_params(source_ref_key, pipeline_run_id)
+
         query = f"""
         UNWIND $nodes AS node
         MERGE (n: `{BASE_LABEL}`{{id: node.node_id}})
@@ -261,6 +386,7 @@ class Neo4jAdapter(GraphDBInterface):
         ) AS merged_belongs_to_set
         SET n += node.properties, n.updated_at = timestamp()
         SET n.belongs_to_set = merged_belongs_to_set
+        {fold_clause}
         WITH n, node.label AS label
         CALL apoc.create.addLabels(n, [label]) YIELD node AS labeledNode
         RETURN ID(labeledNode) AS internal_id, labeledNode.id AS nodeId
@@ -303,7 +429,7 @@ class Neo4jAdapter(GraphDBInterface):
                     "properties": props,
                 }
 
-        results = await self.query(query, dict(nodes=list(deduped.values())))
+        results = await self.query(query, {"nodes": list(deduped.values()), **provenance_params})
         return results
 
     async def remove_belongs_to_set_tags(
@@ -404,7 +530,7 @@ class Neo4jAdapter(GraphDBInterface):
 
         results = await self.query(query, params)
 
-        return [result["node"] for result in results]
+        return [_strip_provenance(result["node"]) for result in results]
 
     async def delete_node(self, node_id: str):
         """
@@ -447,6 +573,493 @@ class Neo4jAdapter(GraphDBInterface):
         params = {"node_ids": node_ids}
 
         return await self.query(query, params)
+
+    # ------------------------------------------------------------------
+    # Graph provenance (COG-5522)
+    #
+    # The four provenance fields live in native list properties on the node /
+    # relationship. attach/remove do a per-artifact read-modify-write under a
+    # lock (delete/rollback is a maintenance path, not a hot path); lookups are
+    # native list-membership scans. Every read normalizes a missing property
+    # to []. Edges are addressed by (source id, target id, relationship type):
+    # Neo4j stores the relationship name AS the type, so all provenance queries
+    # match on ``type(r)``.
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _node_identity_row(node_id: str) -> dict:
+        return {"id": node_id}
+
+    @staticmethod
+    def _edge_identity_row(edge: EdgeIdentity) -> dict:
+        return {"s": edge.source_id, "t": edge.target_id, "rel": edge.relationship_name}
+
+    @staticmethod
+    def _indexed_fields_from_properties(properties: Dict[str, Any]) -> List[str]:
+        """Read ``metadata.index_fields`` from a node's stored properties.
+
+        ``metadata`` is stored as a JSON string (serialize_properties JSON-encodes
+        dict values), so it is parsed here before the index fields are read.
+        """
+        metadata = properties.get("metadata")
+        if isinstance(metadata, str):
+            try:
+                metadata = json.loads(metadata)
+            except (json.JSONDecodeError, TypeError):
+                metadata = {}
+        if isinstance(metadata, dict):
+            return list(metadata.get("index_fields") or [])
+        return []
+
+    @staticmethod
+    def _datetime_to_ms(value: Any) -> int:
+        """Epoch millis for the edge created_at filter (naive datetimes are UTC)."""
+        if isinstance(value, datetime):
+            aware = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+            return round(aware.timestamp() * 1000)
+        return int(value)
+
+    @staticmethod
+    def _ms_to_datetime(value: Any) -> Optional[datetime]:
+        """Convert an edge's stored epoch-millis created_at to an aware UTC datetime."""
+        if value is None:
+            return None
+        return datetime.fromtimestamp(int(value) / 1000, tz=timezone.utc)
+
+    async def _read_node_provenance(
+        self, node_ids: List[str]
+    ) -> Dict[str, Tuple[List[str], List[str]]]:
+        """Return ``{node_id: (source_ref_keys, source_run_refs)}`` for existing nodes."""
+        rows = await self.query(
+            f"""
+            MATCH (n:`{BASE_LABEL}`) WHERE n.id IN $ids
+            RETURN n.id AS id,
+                   coalesce(n.source_ref_keys, []) AS keys,
+                   coalesce(n.source_run_refs, []) AS run_refs
+            """,
+            {"ids": list(node_ids)},
+        )
+        return {row["id"]: (list(row["keys"]), list(row["run_refs"])) for row in rows}
+
+    async def _write_node_provenance(self, batch: List[dict]) -> None:
+        if not batch:
+            return
+        await self.query(
+            f"""
+            UNWIND $batch AS row
+            MATCH (n:`{BASE_LABEL}`) WHERE n.id = row.id
+            SET n.source_ref_keys = row.refs,
+                n.source_dataset_ids = row.datasets,
+                n.source_run_ids = row.runs,
+                n.source_run_refs = row.run_refs
+            """,
+            {"batch": batch},
+        )
+
+    async def _read_edge_provenance(
+        self, edges: List[EdgeIdentity]
+    ) -> Dict[EdgeIdentity, Tuple[List[str], List[str]]]:
+        """Return ``{edge: (source_ref_keys, source_run_refs)}`` for existing edges."""
+        edge_params = [self._edge_identity_row(edge) for edge in edges]
+        rows = await self.query(
+            f"""
+            UNWIND $edges AS e
+            MATCH (a:`{BASE_LABEL}`)-[r]->(b:`{BASE_LABEL}`)
+            WHERE a.id = e.s AND b.id = e.t AND type(r) = e.rel
+            RETURN a.id AS s, b.id AS t, type(r) AS rel,
+                   coalesce(r.source_ref_keys, []) AS keys,
+                   coalesce(r.source_run_refs, []) AS run_refs
+            """,
+            {"edges": edge_params},
+        )
+        result: Dict[EdgeIdentity, Tuple[List[str], List[str]]] = {}
+        for row in rows:
+            edge = EdgeIdentity(
+                source_id=row["s"], target_id=row["t"], relationship_name=row["rel"]
+            )
+            result[edge] = (list(row["keys"]), list(row["run_refs"]))
+        return result
+
+    async def _write_edge_provenance(self, batch: List[dict]) -> None:
+        if not batch:
+            return
+        await self.query(
+            f"""
+            UNWIND $batch AS row
+            MATCH (a:`{BASE_LABEL}`)-[r]->(b:`{BASE_LABEL}`)
+            WHERE a.id = row.s AND b.id = row.t AND type(r) = row.rel
+            SET r.source_ref_keys = row.refs,
+                r.source_dataset_ids = row.datasets,
+                r.source_run_ids = row.runs,
+                r.source_run_refs = row.run_refs
+            """,
+            {"batch": batch},
+        )
+
+    async def _apply_source_ref_change(
+        self,
+        artifacts,
+        read_provenance,
+        write_provenance,
+        identity_row,
+        transition,
+    ) -> None:
+        """Read each artifact's provenance, apply a pure transition, write it back.
+
+        Shared by attach/remove for both nodes and edges. The lock serializes the
+        read-modify-write within one adapter instance so concurrent explicit
+        attach/remove calls do not overwrite each other's provenance updates.
+        """
+        if not artifacts:
+            return
+        async with self._source_ref_change_lock:
+            current = await read_provenance(artifacts)
+            batch = []
+            for identity, (keys, run_refs) in current.items():
+                cols = transition(keys, run_refs)
+                batch.append(
+                    {
+                        **identity_row(identity),
+                        "refs": cols.source_ref_keys,
+                        "datasets": cols.source_dataset_ids,
+                        "runs": cols.source_run_ids,
+                        "run_refs": cols.source_run_refs,
+                    }
+                )
+            await write_provenance(batch)
+
+    async def attach_node_source_refs(
+        self,
+        node_ids: list[str],
+        source_ref_keys: list[str],
+        pipeline_run_id: str | None = None,
+    ) -> None:
+        if not source_ref_keys:
+            return
+        add_keys = list(source_ref_keys)
+        await self._apply_source_ref_change(
+            node_ids,
+            self._read_node_provenance,
+            self._write_node_provenance,
+            self._node_identity_row,
+            lambda keys, run_refs: provenance_after_attach(
+                keys, run_refs, add_keys, pipeline_run_id
+            ),
+        )
+
+    async def attach_edge_source_refs(
+        self,
+        edges: list[EdgeIdentity],
+        source_ref_keys: list[str],
+        pipeline_run_id: str | None = None,
+    ) -> None:
+        if not source_ref_keys:
+            return
+        add_keys = list(source_ref_keys)
+        await self._apply_source_ref_change(
+            edges,
+            self._read_edge_provenance,
+            self._write_edge_provenance,
+            self._edge_identity_row,
+            lambda keys, run_refs: provenance_after_attach(
+                keys, run_refs, add_keys, pipeline_run_id
+            ),
+        )
+
+    async def remove_node_source_refs(
+        self,
+        node_ids: list[str],
+        source_ref_keys: list[str],
+    ) -> None:
+        if not source_ref_keys:
+            return
+        remove_keys = list(source_ref_keys)
+        await self._apply_source_ref_change(
+            node_ids,
+            self._read_node_provenance,
+            self._write_node_provenance,
+            self._node_identity_row,
+            lambda keys, run_refs: provenance_after_remove(keys, run_refs, remove_keys),
+        )
+
+    async def remove_edge_source_refs(
+        self,
+        edges: list[EdgeIdentity],
+        source_ref_keys: list[str],
+    ) -> None:
+        if not source_ref_keys:
+            return
+        remove_keys = list(source_ref_keys)
+        await self._apply_source_ref_change(
+            edges,
+            self._read_edge_provenance,
+            self._write_edge_provenance,
+            self._edge_identity_row,
+            lambda keys, run_refs: provenance_after_remove(keys, run_refs, remove_keys),
+        )
+
+    async def delete_edge_triples(self, edges: list[EdgeIdentity]) -> None:
+        if not edges:
+            return
+        edge_params = [self._edge_identity_row(edge) for edge in edges]
+        # DELETE r (not DETACH DELETE) removes only the matched relationships and
+        # preserves the endpoint nodes.
+        await self.query(
+            f"""
+            UNWIND $edges AS e
+            MATCH (a:`{BASE_LABEL}`)-[r]->(b:`{BASE_LABEL}`)
+            WHERE a.id = e.s AND b.id = e.t AND type(r) = e.rel
+            DELETE r
+            """,
+            {"edges": edge_params},
+        )
+
+    async def get_node_delete_data(self, node_ids: list[str]) -> dict[str, NodeDeleteData]:
+        if not node_ids:
+            return {}
+        rows = await self.query(
+            f"""
+            MATCH (n:`{BASE_LABEL}`) WHERE n.id IN $ids
+            RETURN n.id AS id, properties(n) AS properties,
+                   coalesce(n.source_ref_keys, []) AS srk,
+                   coalesce(n.source_dataset_ids, []) AS sdi,
+                   coalesce(n.source_run_ids, []) AS sri,
+                   coalesce(n.source_run_refs, []) AS srr
+            """,
+            {"ids": list(node_ids)},
+        )
+        result: dict[str, NodeDeleteData] = {}
+        for row in rows:
+            properties = row["properties"] or {}
+            result[row["id"]] = NodeDeleteData(
+                node_id=row["id"],
+                node_type=properties.get("type") or "",
+                indexed_fields=self._indexed_fields_from_properties(properties),
+                node_properties=_strip_provenance(properties),
+                source_ref_keys=list(row["srk"]),
+                source_dataset_ids=list(row["sdi"]),
+                source_run_ids=list(row["sri"]),
+                source_run_refs=list(row["srr"]),
+            )
+        return result
+
+    async def get_edge_delete_data(
+        self, edges: list[EdgeIdentity]
+    ) -> dict[EdgeIdentity, EdgeDeleteData]:
+        if not edges:
+            return {}
+        edge_params = [self._edge_identity_row(edge) for edge in edges]
+        rows = await self.query(
+            f"""
+            UNWIND $edges AS e
+            MATCH (a:`{BASE_LABEL}`)-[r]->(b:`{BASE_LABEL}`)
+            WHERE a.id = e.s AND b.id = e.t AND type(r) = e.rel
+            RETURN a.id AS s, b.id AS t, type(r) AS rel, properties(r) AS properties,
+                   coalesce(r.source_ref_keys, []) AS srk,
+                   coalesce(r.source_dataset_ids, []) AS sdi,
+                   coalesce(r.source_run_ids, []) AS sri,
+                   coalesce(r.source_run_refs, []) AS srr
+            """,
+            {"edges": edge_params},
+        )
+        # Lazy import: prepare_edges_for_storage lives in the modules layer, whose
+        # package __init__ imports get_graph_engine -> this adapter. Importing it
+        # at module load would create a cycle; at delete-time it is safe.
+        from cognee.modules.graph.utils.prepare_edges_for_storage import get_edge_retrieval_text
+
+        result: dict[EdgeIdentity, EdgeDeleteData] = {}
+        for row in rows:
+            edge = EdgeIdentity(
+                source_id=row["s"], target_id=row["t"], relationship_name=row["rel"]
+            )
+            properties = row["properties"] or {}
+            # Stored edge_text wins; fall back to relationship_name when absent.
+            edge_text = get_edge_retrieval_text(properties.get("edge_text"), edge.relationship_name)
+            result[edge] = EdgeDeleteData(
+                edge=edge,
+                edge_text=edge_text,
+                edge_properties=_strip_provenance(properties),
+                source_ref_keys=list(row["srk"]),
+                source_dataset_ids=list(row["sdi"]),
+                source_run_ids=list(row["sri"]),
+                source_run_refs=list(row["srr"]),
+            )
+        return result
+
+    async def find_nodes_by_source_ref(self, source_ref_key: str) -> list[str]:
+        rows = await self.query(
+            f"""
+            MATCH (n:`{BASE_LABEL}`)
+            WHERE $token IN coalesce(n.source_ref_keys, [])
+            RETURN n.id AS id
+            """,
+            {"token": source_ref_key},
+        )
+        return [row["id"] for row in rows]
+
+    async def find_edges_by_source_ref(self, source_ref_key: str) -> list[EdgeIdentity]:
+        rows = await self.query(
+            f"""
+            MATCH (a:`{BASE_LABEL}`)-[r]->(b:`{BASE_LABEL}`)
+            WHERE $token IN coalesce(r.source_ref_keys, [])
+            RETURN a.id AS s, b.id AS t, type(r) AS rel
+            """,
+            {"token": source_ref_key},
+        )
+        return [
+            EdgeIdentity(source_id=row["s"], target_id=row["t"], relationship_name=row["rel"])
+            for row in rows
+        ]
+
+    async def find_node_source_refs_by_dataset(self, dataset_id: str) -> dict[str, list[str]]:
+        rows = await self.query(
+            f"""
+            MATCH (n:`{BASE_LABEL}`)
+            WHERE $token IN coalesce(n.source_dataset_ids, [])
+            RETURN n.id AS id, coalesce(n.source_ref_keys, []) AS keys
+            """,
+            {"token": dataset_id},
+        )
+        result: dict[str, list[str]] = {}
+        for row in rows:
+            owned = [
+                key
+                for key in row["keys"]
+                if str(get_dataset_id_from_source_ref_key(key)) == dataset_id
+            ]
+            if owned:
+                result[row["id"]] = owned
+        return result
+
+    async def find_edge_source_refs_by_dataset(
+        self, dataset_id: str
+    ) -> dict[EdgeIdentity, list[str]]:
+        rows = await self.query(
+            f"""
+            MATCH (a:`{BASE_LABEL}`)-[r]->(b:`{BASE_LABEL}`)
+            WHERE $token IN coalesce(r.source_dataset_ids, [])
+            RETURN a.id AS s, b.id AS t, type(r) AS rel, coalesce(r.source_ref_keys, []) AS keys
+            """,
+            {"token": dataset_id},
+        )
+        result: dict[EdgeIdentity, list[str]] = {}
+        for row in rows:
+            owned = [
+                key
+                for key in row["keys"]
+                if str(get_dataset_id_from_source_ref_key(key)) == dataset_id
+            ]
+            if owned:
+                edge = EdgeIdentity(
+                    source_id=row["s"], target_id=row["t"], relationship_name=row["rel"]
+                )
+                result[edge] = owned
+        return result
+
+    async def find_node_source_refs_by_pipeline_run(
+        self, pipeline_run_id: str
+    ) -> dict[str, list[str]]:
+        rows = await self.query(
+            f"""
+            MATCH (n:`{BASE_LABEL}`)
+            WHERE $token IN coalesce(n.source_run_ids, [])
+            RETURN n.id AS id, coalesce(n.source_run_refs, []) AS run_refs
+            """,
+            {"token": pipeline_run_id},
+        )
+        result: dict[str, list[str]] = {}
+        for row in rows:
+            contributed = [
+                get_source_ref_key_from_source_run_ref(ref)
+                for ref in row["run_refs"]
+                if str(get_pipeline_run_id_from_source_run_ref(ref)) == pipeline_run_id
+            ]
+            if contributed:
+                result[row["id"]] = contributed
+        return result
+
+    async def find_edge_source_refs_by_pipeline_run(
+        self, pipeline_run_id: str
+    ) -> dict[EdgeIdentity, list[str]]:
+        rows = await self.query(
+            f"""
+            MATCH (a:`{BASE_LABEL}`)-[r]->(b:`{BASE_LABEL}`)
+            WHERE $token IN coalesce(r.source_run_ids, [])
+            RETURN a.id AS s, b.id AS t, type(r) AS rel, coalesce(r.source_run_refs, []) AS run_refs
+            """,
+            {"token": pipeline_run_id},
+        )
+        result: dict[EdgeIdentity, list[str]] = {}
+        for row in rows:
+            contributed = [
+                get_source_ref_key_from_source_run_ref(ref)
+                for ref in row["run_refs"]
+                if str(get_pipeline_run_id_from_source_run_ref(ref)) == pipeline_run_id
+            ]
+            if contributed:
+                edge = EdgeIdentity(
+                    source_id=row["s"], target_id=row["t"], relationship_name=row["rel"]
+                )
+                result[edge] = contributed
+        return result
+
+    async def get_edges_created_since(
+        self,
+        since: Optional[datetime],
+        limit: int,
+    ) -> Tuple[List[Tuple[str, str, str, datetime]], Dict[str, Dict[str, Any]]]:
+        """Return edges created after ``since`` (oldest first) plus endpoint nodes.
+
+        Reads the edge ``created_at`` column (stamped once on create) so the
+        session-sync incremental checkpoint keeps the same created-order model as
+        the relational path. created_at is stored as epoch millis and returned as
+        an aware UTC datetime, matching the Ladybug/Postgres adapters.
+        """
+        params: Dict[str, Any] = {"limit": limit}
+        where_clause = ""
+        if since is not None:
+            where_clause = "WHERE r.created_at > $since_ms"
+            params["since_ms"] = self._datetime_to_ms(since)
+
+        rows = await self.query(
+            f"""
+            MATCH (a:`{BASE_LABEL}`)-[r]->(b:`{BASE_LABEL}`)
+            {where_clause}
+            RETURN a.id AS s, properties(a) AS a_props,
+                   b.id AS t, properties(b) AS b_props,
+                   type(r) AS rel, r.created_at AS created_at
+            ORDER BY r.created_at ASC
+            LIMIT $limit
+            """,
+            params,
+        )
+
+        edges: List[Tuple[str, str, str, datetime]] = []
+        node_map: Dict[str, Dict[str, Any]] = {}
+        for row in rows:
+            source_id, target_id = str(row["s"]), str(row["t"])
+            for node_id, props in ((source_id, row["a_props"]), (target_id, row["b_props"])):
+                if node_id not in node_map:
+                    node_map[node_id] = _strip_provenance(props or {})
+            edges.append(
+                (source_id, target_id, str(row["rel"]), self._ms_to_datetime(row["created_at"]))
+            )
+        return edges, node_map
+
+    async def set_graph_metadata(self, metadata: dict[str, str]) -> None:
+        if not metadata:
+            return
+        # GraphMetadata carries no `__Node__` label so is_empty()/get_graph_data()
+        # (both scoped to `__Node__`) never count the marker as data.
+        for key, value in metadata.items():
+            await self.query(
+                "MERGE (m:GraphMetadata {key: $k}) SET m.value = $v",
+                {"k": str(key), "v": str(value)},
+            )
+
+    async def get_graph_metadata(self) -> dict[str, str]:
+        rows = await self.query("MATCH (m:GraphMetadata) RETURN m.key AS key, m.value AS value")
+        return {row["key"]: row["value"] for row in rows}
 
     async def has_edge(self, from_node: UUID, to_node: UUID, edge_label: str) -> bool:
         """
@@ -616,6 +1229,18 @@ class Neo4jAdapter(GraphDBInterface):
 
             - None: None
         """
+        # Properties are set explicitly after the merge so they apply on BOTH
+        # create and match (a re-cognify updates the edge); apoc's 4th arg is
+        # onCreate-only. created_at is stamped once (coalesce keeps the original
+        # on match) so get_edges_created_since can order edges by first write.
+        # When a source ref is supplied its provenance stamp is folded into the
+        # same statement (atomic — no write-then-attach window).
+        fold_clause = ""
+        provenance_params: Dict[str, Any] = {}
+        if source_ref_key is not None:
+            fold_clause = _provenance_fold_clause("rel")
+            provenance_params = _provenance_fold_params(source_ref_key, pipeline_run_id)
+
         query = f"""
             UNWIND $edges AS edge
             MATCH (from_node: `{BASE_LABEL}`{{id: edge.from_node}})
@@ -627,9 +1252,13 @@ class Neo4jAdapter(GraphDBInterface):
                     source_node_id: edge.from_node,
                     target_node_id: edge.to_node
                 }},
-                edge.properties,
+                {{}},
                 to_node
             ) YIELD rel
+            SET rel += edge.properties,
+                rel.updated_at = timestamp(),
+                rel.created_at = coalesce(rel.created_at, timestamp())
+            {fold_clause}
             RETURN rel"""
 
         edges = [
@@ -649,7 +1278,7 @@ class Neo4jAdapter(GraphDBInterface):
         ]
 
         try:
-            results = await self.query(query, dict(edges=edges))
+            results = await self.query(query, {"edges": edges, **provenance_params})
             return results
         except Neo4jError as error:
             logger.error("Neo4j query error: %s", error, exc_info=True)
@@ -844,7 +1473,7 @@ class Neo4jAdapter(GraphDBInterface):
            """
         try:
             result = await self.query(query, {"node_id": node_id})
-            return [row["properties"] for row in result] if result else []
+            return [_strip_provenance(row["properties"]) for row in result] if result else []
         except Exception as exc:
             logger.error(f"Failed to get neighbors for node {node_id}: {exc}")
             raise exc
@@ -869,7 +1498,7 @@ class Neo4jAdapter(GraphDBInterface):
         RETURN node
         """
         results = await self.query(query, {"node_id": node_id})
-        return results[0]["node"] if results else None
+        return _strip_provenance(results[0]["node"]) if results else None
 
     async def get_nodes(self, node_ids: List[str]) -> List[Dict[str, Any]]:
         """
@@ -891,7 +1520,7 @@ class Neo4jAdapter(GraphDBInterface):
         RETURN node
         """
         results = await self.query(query, {"node_ids": node_ids})
-        return [result["node"] for result in results]
+        return [_strip_provenance(result["node"]) for result in results]
 
     def _build_node_feedback_items(
         self, node_feedback_weights: Dict[str, float]
@@ -1042,11 +1671,23 @@ class Neo4jAdapter(GraphDBInterface):
 
         for neighbour in predecessors:
             neighbour = neighbour["relation"]
-            connections.append((neighbour[0], {"relationship_name": neighbour[1]}, neighbour[2]))
+            connections.append(
+                (
+                    _strip_provenance(neighbour[0]),
+                    {"relationship_name": neighbour[1]},
+                    _strip_provenance(neighbour[2]),
+                )
+            )
 
         for neighbour in successors:
             neighbour = neighbour["relation"]
-            connections.append((neighbour[0], {"relationship_name": neighbour[1]}, neighbour[2]))
+            connections.append(
+                (
+                    _strip_provenance(neighbour[0]),
+                    {"relationship_name": neighbour[1]},
+                    _strip_provenance(neighbour[2]),
+                )
+            )
 
         return connections
 
@@ -1172,10 +1813,13 @@ class Neo4jAdapter(GraphDBInterface):
 
             A tuple of nodes and edges data.
         """
-        query_nodes = "MATCH (n) RETURN collect(n) AS nodes"
+        query_nodes = f"MATCH (n:`{BASE_LABEL}`) RETURN collect(n) AS nodes"
         nodes = await self.query(query_nodes)
 
-        query_edges = "MATCH (n)-[r]->(m) RETURN collect([n, r, m]) AS elements"
+        query_edges = (
+            f"MATCH (n:`{BASE_LABEL}`)-[r]->(m:`{BASE_LABEL}`) "
+            "RETURN collect([n, r, m]) AS elements"
+        )
         edges = await self.query(query_edges)
 
         return (nodes, edges)
@@ -1194,34 +1838,40 @@ class Neo4jAdapter(GraphDBInterface):
         start_time = time.time()
 
         try:
-            # Retrieve nodes
-            query = "MATCH (n) RETURN ID(n) AS id, labels(n) AS labels, properties(n) AS properties"
+            # Retrieve nodes (scoped to `__Node__` so the GraphMetadata marker is
+            # not returned as a data node — it has no `id` property either).
+            query = (
+                f"MATCH (n:`{BASE_LABEL}`) "
+                "RETURN ID(n) AS id, labels(n) AS labels, properties(n) AS properties"
+            )
             result = await self.query(query)
 
             nodes = []
             for record in result:
+                properties = _strip_provenance(record["properties"])
                 nodes.append(
                     (
-                        record["properties"]["id"],
-                        record["properties"],
+                        properties["id"],
+                        properties,
                     )
                 )
 
             # Retrieve edges
-            query = """
-            MATCH (n)-[r]->(m)
+            query = f"""
+            MATCH (n:`{BASE_LABEL}`)-[r]->(m:`{BASE_LABEL}`)
             RETURN ID(n) AS source, ID(m) AS target, TYPE(r) AS type, properties(r) AS properties
             """
             result = await self.query(query)
 
             edges = []
             for record in result:
+                properties = _strip_provenance(record["properties"])
                 edges.append(
                     (
-                        record["properties"]["source_node_id"],
-                        record["properties"]["target_node_id"],
+                        properties["source_node_id"],
+                        properties["target_node_id"],
                         record["type"],
-                        record["properties"],
+                        properties,
                     )
                 )
 
@@ -1290,7 +1940,8 @@ class Neo4jAdapter(GraphDBInterface):
             nodes_result = await self.query(nodes_query, {"ids": all_ids})
             nodes = []
             for record in nodes_result:
-                nodes.append((record["properties"]["id"], record["properties"]))
+                properties = _strip_provenance(record["properties"])
+                nodes.append((properties["id"], properties))
 
             # Step 3: Fetch all edges between collected nodes
             edges_query = """
@@ -1301,12 +1952,13 @@ class Neo4jAdapter(GraphDBInterface):
             edges_result = await self.query(edges_query, {"ids": all_ids})
             edges = []
             for record in edges_result:
+                properties = _strip_provenance(record["properties"])
                 edges.append(
                     (
-                        record["properties"]["source_node_id"],
-                        record["properties"]["target_node_id"],
+                        properties["source_node_id"],
+                        properties["target_node_id"],
                         record["type"],
-                        record["properties"],
+                        properties,
                     )
                 )
 
@@ -1355,9 +2007,9 @@ class Neo4jAdapter(GraphDBInterface):
             edges = []
 
             for record in result:
-                n_props = record["n_properties"]
-                m_props = record["m_properties"]
-                r_props = record["properties"]
+                n_props = _strip_provenance(record["n_properties"])
+                m_props = _strip_provenance(record["m_properties"])
+                r_props = _strip_provenance(record["properties"])
                 r_type = record["type"]
 
                 nodes_dict[n_props["id"]] = (n_props["id"], n_props)
@@ -1460,17 +2112,19 @@ class Neo4jAdapter(GraphDBInterface):
             # Process nodes
             nodes = []
             for n in raw_nodes:
-                nodes.append((n["properties"]["id"], n["properties"]))
+                properties = _strip_provenance(n["properties"])
+                nodes.append((properties["id"], properties))
 
             # Process edges
             edges = []
             for r in raw_rels:
+                properties = _strip_provenance(r["properties"])
                 edges.append(
                     (
-                        r["properties"]["source_node_id"],
-                        r["properties"]["target_node_id"],
+                        properties["source_node_id"],
+                        properties["target_node_id"],
                         r["type"],
-                        r["properties"],
+                        properties,
                     )
                 )
 
@@ -1519,7 +2173,7 @@ class Neo4jAdapter(GraphDBInterface):
         nodes = [
             (
                 record["id"],
-                record["properties"],
+                _strip_provenance(record["properties"]),
             )
             for record in result_nodes
         ]
@@ -1536,7 +2190,7 @@ class Neo4jAdapter(GraphDBInterface):
                 record["properties"]["source_node_id"],
                 record["properties"]["target_node_id"],
                 record["type"],
-                record["properties"],
+                _strip_provenance(record["properties"]),
             )
             for record in result_edges
         ]
@@ -1616,7 +2270,9 @@ class Neo4jAdapter(GraphDBInterface):
         if await self.graph_exists(graph_name):
             return
 
-        node_labels = await self.get_node_labels()
+        # Exclude the GraphMetadata marker label so its (edge-less) node is not
+        # projected as a spurious isolated component in the GDS metrics.
+        node_labels = [label for label in await self.get_node_labels() if label != "GraphMetadata"]
         relationship_types_undirected_str = await self.get_relationship_labels_string()
 
         query = f"""

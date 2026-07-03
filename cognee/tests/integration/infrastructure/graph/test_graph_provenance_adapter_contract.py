@@ -72,6 +72,39 @@ async def _make_postgres_adapter():
     return adapter
 
 
+async def _make_neo4j_adapter():
+    """Fresh (fully wiped) Neo4j graph adapter, or skip when ``.env`` isn't neo4j.
+
+    Driven entirely by ``.env`` (which CI sets): runs exactly when
+    ``GRAPH_DATABASE_PROVIDER=neo4j`` is configured and skips on any other stack.
+    Each case starts from an empty graph, so the target Neo4j must be a
+    disposable test instance — the fixture wipes every node before yielding.
+    """
+    from cognee.infrastructure.databases.graph.config import get_graph_config
+
+    config = get_graph_config()
+    if config.graph_database_provider.lower() != "neo4j":
+        pytest.skip("neo4j graph backend not configured (set GRAPH_DATABASE_PROVIDER=neo4j)")
+    if not config.graph_database_url:
+        pytest.skip("neo4j graph backend URL not configured")
+
+    from cognee.infrastructure.databases.graph.neo4j_driver.adapter import Neo4jAdapter
+
+    adapter = Neo4jAdapter(
+        graph_database_url=config.graph_database_url,
+        graph_database_username=config.graph_database_username or None,
+        graph_database_password=config.graph_database_password or None,
+        graph_database_name=config.graph_database_name or None,
+    )
+    try:
+        await adapter.initialize()
+        await adapter.query("MATCH (n) DETACH DELETE n")
+    except Exception as exc:  # pragma: no cover - environment dependent
+        await adapter.close()
+        pytest.skip(f"neo4j graph backend not reachable: {exc}")
+    return adapter
+
+
 class _Ent(DataPoint):
     """Minimal entity DataPoint with an indexed field and tag membership."""
 
@@ -85,7 +118,7 @@ class _Structural(DataPoint):
     metadata: dict = {"index_fields": []}
 
 
-@pytest_asyncio.fixture(params=["ladybug", "postgres"])
+@pytest_asyncio.fixture(params=["ladybug", "postgres", "neo4j"])
 async def graph_provenance_adapter(request, tmp_path):
     if request.param == "ladybug":
         if not HAS_LADYBUG:
@@ -93,6 +126,8 @@ async def graph_provenance_adapter(request, tmp_path):
         adapter = LadybugAdapter(str(tmp_path / "graph_db"))
     elif request.param == "postgres":
         adapter = await _make_postgres_adapter()
+    elif request.param == "neo4j":
+        adapter = await _make_neo4j_adapter()
     else:
         raise AssertionError(f"Unknown graph provenance provider: {request.param}")
 
