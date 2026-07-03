@@ -19,6 +19,16 @@ POSTGRES_PARAMS = {
     "db_provider": "postgres",
 }
 
+TURSO_PARAMS = {
+    "db_path": "/tmp",
+    "db_name": "test_db",
+    "db_host": "",
+    "db_port": "",
+    "db_username": "",
+    "db_password": "",
+    "db_provider": "turso",
+}
+
 
 @pytest.fixture(autouse=True)
 def _clear_lru_cache():
@@ -61,3 +71,24 @@ class TestCreateRelationalEngineConnectArgs:
 
         _, kwargs = mock_adapter.call_args
         assert kwargs.get("connect_args") == {}
+
+
+class TestCreateRelationalEngineTurso:
+    """Verify the DB_PROVIDER=turso branch builds the aioturso URL and returns a TursoAdapter."""
+
+    @patch("cognee.infrastructure.databases.relational.sqlalchemy.TursoAdapter.TursoAdapter")
+    def test_turso_returns_turso_adapter_with_aioturso_url(self, mock_turso_adapter):
+        """turso provider builds a local sqlite+aioturso connection string and returns a TursoAdapter."""
+        engine = create_relational_engine(**TURSO_PARAMS)
+
+        assert engine is mock_turso_adapter.return_value
+        connection_string = mock_turso_adapter.call_args[0][0]
+        expected = f"sqlite+aioturso:///{TURSO_PARAMS['db_path']}/{TURSO_PARAMS['db_name']}"
+        assert connection_string == expected
+
+    def test_turso_missing_driver_raises_actionable_import_error(self):
+        """When the pyturso driver is missing, raise a clear cognee[turso] install error."""
+        # Setting the module to None in sys.modules makes `import turso` raise ImportError.
+        with patch.dict(sys.modules, {"turso": None}):
+            with pytest.raises(ImportError, match="Turso/libSQL"):
+                create_relational_engine(**TURSO_PARAMS)
