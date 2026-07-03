@@ -24,6 +24,7 @@ def _make_adapter(max_retries: int = 3) -> TursoAdapter:
     adapter._write_lock = asyncio.Lock()
     adapter._write_max_retries = max_retries
     adapter._write_retry_base_delay = 0.0  # no real sleeping in tests
+    adapter._is_remote = False  # local mode: _run_write skips the remote sync flush
     return adapter
 
 

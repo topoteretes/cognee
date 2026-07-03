@@ -1,16 +1,18 @@
 """Relational adapter for Turso (libSQL) on the aioturso async engine.
 
 Turso is a SQLite-compatible database with a from-scratch, async-first Rust engine
-(shipped as the ``pyturso`` package, imported as ``turso``). For local/embedded use
-a libSQL database file is byte-compatible with SQLite, so this adapter reuses all of
-:class:`SQLAlchemyAdapter`'s behavior unchanged and only bridges one packaging skew.
+(shipped as the ``pyturso`` package, imported as ``turso``). This adapter supports two
+modes, both driven by the ``sqlite+aioturso://`` dialect so the base
+:class:`SQLAlchemyAdapter` behavior (PRAGMA ``foreign_keys=ON``, schema-less
+``DROP TABLE``, ``metadata.reflect``) and the sqlite-dialect Alembic migrations apply
+unchanged, and so all existing ``get_async_session`` call sites keep working:
 
-Why we can subclass with almost no overrides: the connection string uses the
-``sqlite+aioturso://`` dialect, so every place the base adapter branches on
-``"sqlite" in connection_string`` or ``dialect.name == "sqlite"`` (PRAGMA
-``foreign_keys=ON``, schema-less ``DROP TABLE``, ``metadata.reflect``) behaves
-exactly as it does for the built-in sqlite backend, and the sqlite-dialect Alembic
-migrations apply unchanged.
+* **Local / embedded** — a libSQL file, byte-compatible with SQLite. Reuses the base
+  adapter with almost no overrides.
+* **Remote** — a local *embedded replica* bound to a remote Turso database. Reads and
+  writes hit the fast local replica (real async, no thread-queue), and a lightweight
+  background task syncs it with the remote primary (``push`` local writes up,
+  ``pull`` remote changes down). This is Turso's recommended production model.
 
 Write conflicts
 ---------------
@@ -24,11 +26,20 @@ with bounded backoff for cross-process / remote-primary contention.
 """
 
 import asyncio
+import os
 import random
+from contextlib import asynccontextmanager
+from typing import AsyncGenerator
 
+from sqlalchemy import NullPool
 from sqlalchemy.exc import DBAPIError, OperationalError
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+from cognee.shared.logging_utils import get_logger
 
 from .SqlAlchemyAdapter import SQLAlchemyAdapter
+
+logger = get_logger()
 
 # Substrings that mark a transient single-writer contention error worth retrying.
 _BUSY_MARKERS = ("database is locked", "busy", "sqlite_busy", "write-write conflict")
@@ -66,25 +77,119 @@ class TursoAdapter(SQLAlchemyAdapter):
     _write_max_retries: int = 5
     _write_retry_base_delay: float = 0.02
 
-    def __init__(self, connection_string: str, connect_args: dict = None, pool_args: dict = None):
+    def __init__(
+        self,
+        connection_string: str = None,
+        connect_args: dict = None,
+        pool_args: dict = None,
+        turso_url: str = None,
+        auth_token: str = None,
+        replica_path: str = None,
+        sync_interval: float = 2.0,
+    ):
         ensure_turso_dialect_compatibility()
-        super().__init__(connection_string, connect_args=connect_args, pool_args=pool_args)
         # Serializes this adapter's writes against other in-process async tasks so a
         # single-writer libSQL database never sees two concurrent writers from cognee.
         self._write_lock = asyncio.Lock()
 
+        self._is_remote = bool(turso_url)
+        if self._is_remote:
+            self._init_remote(
+                replica_path, turso_url, auth_token, connect_args or {}, sync_interval
+            )
+        else:
+            super().__init__(connection_string, connect_args=connect_args, pool_args=pool_args)
+
+    # ── Remote (embedded-replica) setup ────────────────────────────────────────
+    def _init_remote(self, replica_path, turso_url, auth_token, connect_args, sync_interval):
+        import turso.aio.sync
+
+        os.makedirs(os.path.dirname(replica_path), exist_ok=True)
+        self._turso_url = turso_url
+        self._auth_token = auth_token
+        self._replica_path = replica_path
+        self._sync_interval = sync_interval
+        self._sync_conn = None
+        self._sync_task = None
+        self._sync_lock = asyncio.Lock()
+
+        self.db_path = replica_path
+        self.db_uri = f"sqlite+aioturso://embedded-replica/{turso_url}"
+
+        def _make_conn(*_args, **_kwargs):
+            # The aioturso dialect awaits this to obtain its DBAPI connection; we hand
+            # it an embedded-replica connection bound to the remote primary.
+            return turso.aio.sync.connect(replica_path, turso_url, auth_token=auth_token)
+
+        self.engine = create_async_engine(
+            "sqlite+aioturso://",
+            poolclass=NullPool,
+            connect_args={**connect_args, "async_creator_fn": _make_conn},
+        )
+        self.sessionmaker = async_sessionmaker(bind=self.engine, expire_on_commit=False)
+
+    async def _get_sync_conn(self):
+        import turso.aio.sync
+
+        if self._sync_conn is None:
+            self._sync_conn = await turso.aio.sync.connect(
+                self._replica_path, self._turso_url, auth_token=self._auth_token
+            )
+        return self._sync_conn
+
+    async def sync(self) -> None:
+        """Push local replica writes to the remote primary and pull remote changes.
+
+        Sync is file-level (a push from any connection flushes all committed local
+        writes), so one dedicated connection covers writes made by every pooled
+        session. Serialized so overlapping ticks/flushes never sync concurrently.
+        """
+        if not self._is_remote:
+            return
+        async with self._sync_lock:
+            conn = await self._get_sync_conn()
+            await conn.push()
+            await conn.pull()
+
+    def _ensure_sync_loop(self) -> None:
+        """Start the background sync loop lazily, on the running event loop."""
+        if self._is_remote and self._sync_task is None:
+            self._sync_task = asyncio.ensure_future(self._sync_loop())
+
+    async def _sync_loop(self) -> None:
+        while True:
+            await asyncio.sleep(self._sync_interval)
+            try:
+                await self.sync()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.warning("Turso background replica sync failed", exc_info=True)
+
+    @asynccontextmanager
+    async def get_async_session(self) -> AsyncGenerator[AsyncSession, None]:
+        # Kick off the background replica sync on first use (needs a running loop).
+        self._ensure_sync_loop()
+        async with SQLAlchemyAdapter.get_async_session(self) as session:
+            yield session
+
+    # ── Write serialization + retry (both modes) ───────────────────────────────
     async def _run_write(self, method, *args, **kwargs):
         """Run a base-class write method serialized by the write lock, retrying busy errors.
 
         The lock removes in-process contention entirely (the common case: two async
         tasks writing at once). The retry loop covers residual busy errors that can
-        still arrive from another process or the remote primary.
+        still arrive from another process or the remote primary. In remote mode the
+        write is flushed to the primary right after it succeeds.
         """
         attempt = 0
         while True:
             try:
                 async with self._write_lock:
-                    return await method(self, *args, **kwargs)
+                    result = await method(self, *args, **kwargs)
+                if self._is_remote:
+                    await self.sync()
+                return result
             except (DBAPIError, OperationalError) as error:
                 attempt += 1
                 if attempt > self._write_max_retries or not _is_busy_error(error):

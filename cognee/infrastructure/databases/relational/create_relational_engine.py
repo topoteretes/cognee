@@ -82,11 +82,22 @@ def create_relational_engine(
 
         from .sqlalchemy.TursoAdapter import TursoAdapter
 
+        if db_turso_url:
+            # Remote Turso: a local embedded replica bound to the remote primary.
+            # Reads/writes hit the fast local replica; a background task syncs it
+            # with the cloud. The replica file lives under db_path like the local DB.
+            return TursoAdapter(
+                turso_url=db_turso_url,
+                auth_token=db_turso_auth_token,
+                replica_path=f"{db_path}/{db_name}",
+                connect_args=database_connect_args,
+                pool_args=pool_args,
+            )
+
         # Local / embedded libSQL, driven by the aioturso (Rust) async engine.
         # A libSQL file is a SQLite file, so the adapter's existing sqlite-dialect
         # behavior (PRAGMA foreign_keys, schema-less DROP, reflection) and the
-        # sqlite-dialect Alembic migrations apply unchanged. Remote Turso is
-        # wired in the following step.
+        # sqlite-dialect Alembic migrations apply unchanged.
         connection_string = f"sqlite+aioturso:///{db_path}/{db_name}"
 
         return TursoAdapter(

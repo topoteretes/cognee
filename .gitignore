@@ -211,3 +211,4 @@ deployment/helm/values-local.yml
 
 # Performance test results
 cognee/tests/performance/results
+.env.turso
