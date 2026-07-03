@@ -10,6 +10,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from cognee.tasks.web_scraper.utils import fetch_page_content
 from cognee.tasks.ingestion.data_item import DataItem
+from cognee.tasks.ingestion.url_safety import assert_url_allowed
 
 
 logger = get_logger()
@@ -59,6 +60,7 @@ async def save_data_item_to_storage(data_item: Union[BinaryIO, str, Any]) -> str
         if parsed_url.scheme == "s3":
             return data_item
         elif parsed_url.scheme == "http" or parsed_url.scheme == "https":
+            assert_url_allowed(data_item)
             urls_to_page_contents = await fetch_page_content(data_item)
             return await save_data_to_file(urls_to_page_contents[data_item], file_extension="html")
         # data is local file path
