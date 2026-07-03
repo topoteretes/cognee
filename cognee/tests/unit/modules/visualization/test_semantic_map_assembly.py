@@ -45,9 +45,14 @@ def test_semantic_tab_and_view_are_wired(tmp_path, monkeypatch):
     assert 'id="semantic-view"' in html
     assert "window._renderSemanticView" in html
     assert "window._semanticPositions" in html
+    # Core seam: the pure decision layer is injected and the shell consumes it.
+    # (Behavior of the core is covered by the Node suite, not by string presence.)
+    assert "root.SemanticCore = api" in html
+    assert "const Core = window.SemanticCore" in html
+    assert "Core.styleFor" in html
     # Type-filter wiring: the legend follows the color mode and isolates a type.
-    assert "isolatedType" in html
-    assert "colorBy === 'type'" in html
+    assert "state.isolatedType" in html
+    assert "state.colorBy === 'type'" in html
     # Layout-toggle wiring: Semantic/Structural buttons + the force sim path.
     assert 'class="sem-layout-btn' in html
     assert 'data-layout="structural"' in html
@@ -56,7 +61,7 @@ def test_semantic_tab_and_view_are_wired(tmp_path, monkeypatch):
     # Recall-overlay wiring: the query dropdown + the search-events consumer.
     assert 'id="semantic-recall"' in html
     assert "SEARCH_EVENTS" in html
-    assert "recallSet" in html
+    assert "state.recall" in html
 
 
 def test_no_token_leaks_with_embeddings(tmp_path, monkeypatch):

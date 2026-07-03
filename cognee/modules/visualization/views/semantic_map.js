@@ -1,15 +1,21 @@
-// Semantic-map view.
+// Semantic-map view — the d3/DOM shell.
 //
 // A meaning-space scatter of the graph: each node is pinned at the 2-D
 // projection of its embedding (window._semanticPositions, from the layout's
 // __SEMANTIC_POSITIONS__ token), shaded by cluster (__SEMANTIC_CLUSTERS__).
 // Positions are computed once in Python and never simulated here (layout-once
-// rule). Hovering a node lights up its precomputed nearest neighbors and lists
-// its graph relations. Node/cluster payloads carry structure only; node detail
-// is read from window._vizNodeById / window._vizLinks (exposed by story_view.js).
+// rule) except under the explicit Structural toggle. Hovering a node lights up
+// its precomputed nearest neighbors and lists its graph relations.
+//
+// All view *decisions* (styling, isolation, recall overlay, legend model, screen
+// mapping) live in the pure, d3-free SemanticCore (semantic_core.js, concatenated
+// ahead of this file). This shell owns only d3/DOM mechanics: the force sim, the
+// turbo palette, painting, zoom, and event binding. Node detail is read from
+// window._vizNodeById / window._vizLinks (exposed by story_view.js).
 (function () {
   'use strict';
 
+  const Core = window.SemanticCore;
   const CLUSTERS = __SEMANTIC_CLUSTERS__;
   // Recall events from the session layer (same token the Memory tab uses). Each
   // 'search' event carries the node_ids a recall query retrieved — the overlay
@@ -24,13 +30,20 @@
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 
-  let colorBy = 'cluster';
-  let layoutMode = 'semantic';
+  // Single mutable view state; the core reads it, never mutates it.
+  const state = {
+    colorBy: 'cluster',
+    layoutMode: 'semantic',
+    isolatedCluster: null,
+    isolatedType: null,
+    recall: null, // Set of node_ids from the active recall overlay, or null
+  };
+
   let zoomBehavior = null;
-  let isolatedCluster = null;
-  let isolatedType = null;
-  let recallSet = null;       // Set of node_ids from the active recall overlay, or null
-  let refreshStyles = null;   // set by render() so overlay changes restyle without a re-render
+  // Retained render artifacts so overlay/isolation changes restyle in place
+  // (no full re-render, no force-sim re-run) instead of via a back-pointer.
+  let currentCircles = null;
+  let currentCtx = null;
 
   // Structural layout: relax the same nodes over graph topology (window._vizLinks)
   // with a bounded, synchronous force sim. This is the one place a sim is allowed —
@@ -62,15 +75,6 @@
       map[c.id] = d3.interpolateTurbo((i + 0.5) / n);
     });
     return map;
-  }
-
-  function colorForNode(id, clusterColors, nodeCluster) {
-    if (colorBy === 'type') {
-      const nd = nodeById(id);
-      return (nd && nd.color) || '#8a8a8a';
-    }
-    const cid = nodeCluster[id];
-    return cid == null ? '#8a8a8a' : clusterColors[cid];
   }
 
   function relationsFor(id) {
@@ -122,6 +126,21 @@
     panel.style.display = 'block';
   }
 
+  // Restyle the retained circles from current state + the core's decisions.
+  // A no-op before the first render (currentCircles is null); render() calls it
+  // at the end, so a state change made while hidden still lands on next render.
+  function repaint() {
+    if (!currentCircles) return;
+    currentCircles.each(function (id) {
+      const s = Core.styleFor(id, state, currentCtx);
+      d3.select(this)
+        .attr('opacity', s.opacity)
+        .attr('stroke', s.stroke)
+        .attr('stroke-width', s.strokeWidth)
+        .attr('r', s.r);
+    });
+  }
+
   function render(preserve) {
     const svgEl = document.getElementById('semantic-svg');
     const empty = document.getElementById('semantic-empty');
@@ -144,19 +163,19 @@
     const nodeCluster = CLUSTERS.node_cluster || {};
     const clusterColors = clusterColor(clusters);
 
-    const sx = d3.scaleLinear().domain([-1.2, 1.2]).range([pad, width - pad]);
-    const sy = d3.scaleLinear().domain([-1.2, 1.2]).range([height - pad, pad]);
-
-    // Screen positions: pinned embedding projection (semantic) or a bounded
-    // force relaxation over the graph topology (structural). Structural seeds
-    // from the semantic screen positions so the toggle reads as a relax, not a
-    // jump; Semantic snaps straight back to the pinned coordinates.
-    const semanticScreen = {};
+    // Precomputed maps handed to the pure core — it never reads window._viz*.
+    const typeById = {};
+    const colorById = {};
     ids.forEach((id) => {
-      semanticScreen[id] = { x: sx(positions[id].x), y: sy(positions[id].y) };
+      const nd = nodeById(id) || {};
+      typeById[id] = nd.type;
+      colorById[id] = nd.color;
     });
+    const ctx = { nodeCluster, typeById, colorById, clusterColors };
+
+    const semanticScreen = Core.screenPositions(positions, width, height, pad);
     const screenPos =
-      layoutMode === 'structural'
+      state.layoutMode === 'structural'
         ? structuralPositions(ids, semanticScreen, width, height)
         : semanticScreen;
 
@@ -165,46 +184,26 @@
     const g = svg.append('g');
 
     // Cluster labels at the on-screen centroid of each cluster's members.
-    clusters.forEach((c) => {
-      const pts = (c.node_ids || []).map((id) => screenPos[id]).filter(Boolean);
-      if (!pts.length) return;
+    Core.clusterCentroids(clusters, screenPos).forEach((c) => {
       g.append('text')
-        .attr('x', d3.mean(pts, (p) => p.x)).attr('y', d3.mean(pts, (p) => p.y))
+        .attr('x', c.x).attr('y', c.y)
         .attr('text-anchor', 'middle')
         .attr('fill', clusterColors[c.id])
         .attr('font-size', 13).attr('font-weight', 700)
         .attr('opacity', 0.85)
         .attr('pointer-events', 'none')
-        .text(c.label.length > 34 ? c.label.slice(0, 33) + '…' : c.label);
+        .text(c.label);
     });
 
     const circles = g.selectAll('circle').data(ids, (d) => d).enter().append('circle')
       .attr('cx', (id) => screenPos[id].x)
       .attr('cy', (id) => screenPos[id].y)
       .attr('r', 5)
-      .attr('fill', (id) => colorForNode(id, clusterColors, nodeCluster))
+      .attr('fill', (id) => Core.fillFor(id, state, ctx))
       .attr('stroke', 'rgba(0,0,0,0.25)').attr('stroke-width', 0.5)
       .style('cursor', 'pointer');
-
-    function isolationOpacity(id) {
-      if (colorBy === 'type') {
-        if (isolatedType == null) return 1;
-        const nd = nodeById(id);
-        return nd && nd.type === isolatedType ? 1 : 0.12;
-      }
-      return isolatedCluster == null || nodeCluster[id] === isolatedCluster ? 1 : 0.12;
-    }
-
-    // Base styling: the recall overlay (when active) dims everything except the
-    // retrieved nodes and rings them; otherwise the legend isolation applies.
-    function refresh() {
-      circles
-        .attr('opacity', (id) => (recallSet ? (recallSet.has(id) ? 1 : 0.06) : isolationOpacity(id)))
-        .attr('stroke', (id) => (recallSet && recallSet.has(id) ? '#ff3b3b' : 'rgba(0,0,0,0.25)'))
-        .attr('stroke-width', (id) => (recallSet && recallSet.has(id) ? 2.5 : 0.5))
-        .attr('r', (id) => (recallSet && recallSet.has(id) ? 7 : 5));
-    }
-    refreshStyles = refresh;
+    currentCircles = circles;
+    currentCtx = ctx;
 
     circles.on('mouseover', function (event, id) {
       const nbrs = new Set([(id), ...((CLUSTERS.neighbors && CLUSTERS.neighbors[id]) || [])]);
@@ -212,7 +211,7 @@
       d3.select(this).attr('r', 8);
       showPanel(id, clusterColors, nodeCluster);
     }).on('mouseout', function () {
-      refresh();
+      repaint();
       const panel = document.getElementById('semantic-panel');
       if (panel) panel.style.display = 'none';
     });
@@ -223,8 +222,8 @@
     svg.call(zoomBehavior);
     svg.call(zoomBehavior.transform, prevTransform);
 
-    refresh();
-    renderLegend(clusters, clusterColors, refresh, ids);
+    repaint();
+    renderLegend(clusters, ids, ctx);
 
     const status = document.getElementById('semantic-status');
     if (status) {
@@ -242,29 +241,19 @@
     return row;
   }
 
-  function renderLegend(clusters, clusterColors, refresh, ids) {
+  function renderLegend(clusters, ids, ctx) {
     const legend = document.getElementById('semantic-legend');
     if (!legend) return;
     legend.innerHTML = '';
-    if (colorBy === 'type') {
-      // Legend follows the color mode: list ontology types, click isolates one.
-      const typeColor = {};
-      ids.forEach((id) => {
-        const nd = nodeById(id);
-        if (nd && nd.type && !(nd.type in typeColor)) typeColor[nd.type] = nd.color || '#8a8a8a';
-      });
-      Object.keys(typeColor).sort().forEach((t) => {
-        legend.appendChild(legendRow(typeColor[t], t, () => {
-          isolatedType = isolatedType === t ? null : t;
-          refresh();
-        }));
-      });
-      return;
-    }
-    clusters.forEach((c) => {
-      legend.appendChild(legendRow(clusterColors[c.id], c.label, () => {
-        isolatedCluster = isolatedCluster === c.id ? null : c.id;
-        refresh();
+    // Rows follow the color mode (cluster vs type); clicking one isolates it.
+    Core.legendModel(state, clusters, ids, ctx).forEach((rowModel) => {
+      legend.appendChild(legendRow(rowModel.color, rowModel.text, () => {
+        if (rowModel.kind === 'type') {
+          state.isolatedType = state.isolatedType === rowModel.value ? null : rowModel.value;
+        } else {
+          state.isolatedCluster = state.isolatedCluster === rowModel.value ? null : rowModel.value;
+        }
+        repaint();
       }));
     });
   }
@@ -286,8 +275,8 @@
   document.querySelectorAll('.sem-color-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
       setActive('.sem-color-btn', btn);
-      colorBy = btn.dataset.colorby;
-      isolatedCluster = null; isolatedType = null;  // isolation is per-mode
+      state.colorBy = btn.dataset.colorby;
+      state.isolatedCluster = null; state.isolatedType = null;  // isolation is per-mode
       render(true);
     });
   });
@@ -296,7 +285,7 @@
   document.querySelectorAll('.sem-layout-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
       setActive('.sem-layout-btn', btn);
-      layoutMode = btn.dataset.layout;
+      state.layoutMode = btn.dataset.layout;
       render(true);
     });
   });
@@ -322,9 +311,7 @@
     const select = document.getElementById('semantic-recall');
     const note = document.getElementById('semantic-recall-note');
     if (!select) return;
-    const queries = (SEARCH_EVENTS || []).filter(
-      (e) => e && e.kind === 'search' && (e.node_ids || []).length,
-    );
+    const queries = Core.recallQueries(SEARCH_EVENTS);
     if (!queries.length) {
       if (wrap) wrap.style.display = 'none';  // nothing to overlay
       return;
@@ -339,16 +326,15 @@
     select.addEventListener('change', () => {
       const idx = select.value;
       if (idx === '') {
-        recallSet = null;
+        state.recall = null;
         if (note) note.textContent = '';
       } else {
         const evt = queries[+idx];
-        recallSet = new Set((evt.node_ids || []).map(String));
+        state.recall = new Set((evt.node_ids || []).map(String));
         const positions = window._semanticPositions || {};
-        const onMap = (evt.node_ids || []).filter((id) => positions[String(id)]).length;
-        if (note) note.textContent = onMap + ' of ' + (evt.node_ids || []).length + ' on map';
+        if (note) note.textContent = Core.recallOnMap(evt, positions) + ' of ' + (evt.node_ids || []).length + ' on map';
       }
-      if (refreshStyles) refreshStyles();
+      repaint();
     });
   })();
 
