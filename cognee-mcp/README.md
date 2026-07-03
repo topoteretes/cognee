@@ -48,7 +48,7 @@ Build memory for Agents and query from any client that speaks MCP – in your t
 
 Please refer to our documentation [here](https://docs.cognee.ai/how-to-guides/deployment/mcp) for further information.
 
-## 🚀 Quick Start
+## 🚀 Quick Start
 
 1. Clone cognee repo
     ```
@@ -253,7 +253,7 @@ docker run \
 
 **Note:** When running in API mode:
 - Database migrations are automatically skipped (API server handles its own DB)
-- Some features are limited (see [API Mode Limitations](#-api-mode))
+- Some features are limited (see [API Mode Limitations](#api-mode))
 
 
 ## 🔗 MCP Client Configuration

@@ -54,7 +54,7 @@ Dê os primeiros passos com facilidade usando um Google Colab  <a href="https://
 
 ## Contribuindo
 
-Suas contribuições estão no centro de tornar este um verdadeiro projeto open source. Qualquer contribuição que você fizer será **muito bem-vinda**. Veja o [`CONTRIBUTING.md`](/CONTRIBUTING.md) para mais informações.
+Suas contribuições estão no centro de tornar este um verdadeiro projeto open source. Qualquer contribuição que você fizer será **muito bem-vinda**. Veja o [`CONTRIBUTING.md`](../../CONTRIBUTING.md) para mais informações.
 ## 📦 Instalação
 
 Você pode instalar o Cognee usando **pip**, **poetry**, **uv** ou qualquer outro gerenciador de pacotes Python.
@@ -140,7 +140,7 @@ Para um uso mais avançado, confira nossa <a href="https://docs.cognee.ai">docum
 
 ## Código de Conduta
 
-Estamos comprometidos em tornar o open source uma experiência agradável e respeitosa para nossa comunidade. Veja o <a href="/CODE_OF_CONDUCT.md"><code>CODE_OF_CONDUCT</code></a> para mais informações.
+Estamos comprometidos em tornar o open source uma experiência agradável e respeitosa para nossa comunidade. Veja o <a href="../../CODE_OF_CONDUCT.md"><code>CODE_OF_CONDUCT</code></a> para mais informações.
 
 ## 💫 Contribuidores
 
