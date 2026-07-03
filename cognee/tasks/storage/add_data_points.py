@@ -1,7 +1,15 @@
 import asyncio
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Dict, List, Optional
 
 from cognee.modules.pipelines.tasks.task import task_summary
+from cognee.modules.graph.utils.structural_resolution import (
+    resolve_structural_duplicates,
+    apply_structural_merges,
+)
+from cognee.modules.graph.utils.structural_resolution.config import (
+    get_structural_dedup_config,
+)
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.infrastructure.databases.unified.capabilities import EngineCapability
@@ -93,6 +101,34 @@ async def add_data_points(
         edges.extend(result_edges)
 
     nodes, edges = deduplicate_nodes_and_edges(nodes, edges)
+
+    # Approach D — graph-topology structural dedup (issue #3630).
+    # Runs after identity-based dedup, config-gated, off by default.
+    # Catches duplicates that look different textually but are
+    # structurally identical (e.g. "Apple" vs "Apple Inc.").
+    structural_config = get_structural_dedup_config()
+    if structural_config.dedup_structural_enabled:
+        node_types = {
+            str(n.id): getattr(n, "type", n.__class__.__name__) for n in nodes
+        }
+        simple_edges = [(str(e[0]), str(e[1]), str(e[2]), e[3] if len(e) > 3 else {}) for e in edges]
+        merge_candidates = await resolve_structural_duplicates(
+            node_ids=[str(n.id) for n in nodes],
+            node_types=node_types,
+            edges=simple_edges,
+            similarity_threshold=structural_config.dedup_structural_threshold,
+            min_shared_neighbors=structural_config.dedup_structural_min_shared_neighbors,
+        )
+        if merge_candidates:
+            now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+            nodes, edges, merge_records = await apply_structural_merges(
+                nodes, simple_edges, merge_candidates, now_ms=now_ms
+            )
+            logger.info(
+                "Structural dedup: %d merge(s) applied (threshold=%.2f)",
+                len(merge_records),
+                structural_config.dedup_structural_threshold,
+            )
 
     edges = ensure_default_edge_properties(edges, nodes=nodes)
     custom_edges = (
