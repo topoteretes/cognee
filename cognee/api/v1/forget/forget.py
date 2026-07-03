@@ -20,6 +20,7 @@ async def forget(
     dataset_id: Optional[UUID] = None,
     everything: bool = False,
     memory_only: bool = False,
+    reversible: bool = False,
     user: Any = None,
 ) -> dict:
     """Remove data from the knowledge graph.
@@ -57,6 +58,14 @@ async def forget(
             (graph nodes/edges and vector embeddings) and reset pipeline status.
             Raw files and data records are preserved so the dataset can
             be re-cognified with different settings.
+        reversible: If True (requires ``memory_only=True``), commit a
+            write-ahead inverse to the version ledger before deleting, so the
+            forget can be undone exactly (graph rows, provenance, and vector
+            embeddings) with ``cognee.undo(operation_id)`` within the retention
+            window (``VERSION_RETENTION_DAYS``, default 30 days). Requires a
+            graph-provenance backend (default Ladybug + LanceDB stack); other
+            backends raise ``UnsupportedProvenanceCapability`` before any data
+            is deleted. The returned dict gains an ``operation_id`` key.
         user: User context. Resolved to default user when None.
 
     Returns:
@@ -69,6 +78,13 @@ async def forget(
 
     if dataset and dataset_id:
         raise ValueError("Provide either dataset or dataset_id, not both.")
+
+    if reversible and not memory_only:
+        raise ValueError(
+            "reversible=True requires memory_only=True: only graph/vector memory can be "
+            "restored exactly. Raw files and data records removed by a full forget are "
+            "not covered by the version ledger."
+        )
 
     if everything:
         target = "everything"
@@ -104,6 +120,11 @@ async def forget(
 
         client = get_remote_client()
         if client is not None:
+            if reversible:
+                raise ValueError(
+                    "reversible=True is not supported through the remote client; "
+                    "run reversible forget against a local deployment."
+                )
             result = await client.forget(
                 data_id=data_id,
                 dataset=dataset,
@@ -147,8 +168,10 @@ async def forget(
         async with set_database_global_context_variables(dataset_ref, user.id):
             if memory_only:
                 if data_id is not None:
-                    return await _forget_data_memory(data_id, dataset_ref, user)
-                return await _forget_dataset_memory(dataset_ref, user)
+                    return await _forget_data_memory(
+                        data_id, dataset_ref, user, reversible=reversible
+                    )
+                return await _forget_dataset_memory(dataset_ref, user, reversible=reversible)
 
             if data_id is not None:
                 return await _forget_data_item(data_id, dataset_ref, user)
@@ -232,7 +255,9 @@ async def _forget_data_item(data_id: UUID, dataset_ref: Union[str, UUID], user: 
     return {"data_id": str(data_id), "dataset_id": str(dataset_id), "status": "success"}
 
 
-async def _forget_dataset_memory(dataset_ref: Union[str, UUID], user: Any) -> dict:
+async def _forget_dataset_memory(
+    dataset_ref: Union[str, UUID], user: Any, reversible: bool = False
+) -> dict:
     """Delete only memory (graph + vector) for a dataset, preserving raw files.
 
     This allows re-cognifying the dataset with different settings
@@ -244,6 +269,10 @@ async def _forget_dataset_memory(dataset_ref: Union[str, UUID], user: Any) -> di
     - Pipeline status: reset (so cognify re-processes all data)
     - Relational DB (dataset, data records): preserved
     - Raw files: preserved
+
+    With ``reversible=True`` the exact inverse is committed to the version
+    ledger *before* deletion (write-ahead); ``cognee.undo(operation_id)``
+    restores it within the retention window.
     """
     from sqlalchemy import select
     from sqlalchemy.orm import attributes as orm_attributes
@@ -259,6 +288,14 @@ async def _forget_dataset_memory(dataset_ref: Union[str, UUID], user: Any) -> di
     )
 
     dataset_id = await _resolve_dataset_id(dataset_ref, user)
+
+    # 0. Reversible mode: commit the write-ahead inverse before any deletion.
+    #    Unsupported backends raise here, before data is touched.
+    operation_id = None
+    if reversible:
+        from cognee.modules.versioning import capture_forget_inverse
+
+        operation_id = await capture_forget_inverse(dataset_id)
 
     # 1. Delete graph nodes/edges and vector embeddings
     await delete_dataset_nodes_and_edges(dataset_id, user.id)
@@ -298,14 +335,22 @@ async def _forget_dataset_memory(dataset_ref: Union[str, UUID], user: Any) -> di
         user.id,
         len(data_records),
     )
-    return {
+    result = {
         "dataset_id": str(dataset_id),
         "data_records_reset": len(data_records),
         "status": "success",
     }
+    if operation_id is not None:
+        from cognee.modules.versioning import mark_forget_applied
+
+        await mark_forget_applied(operation_id)
+        result["operation_id"] = str(operation_id)
+    return result
 
 
-async def _forget_data_memory(data_id: UUID, dataset_ref: Union[str, UUID], user: Any) -> dict:
+async def _forget_data_memory(
+    data_id: UUID, dataset_ref: Union[str, UUID], user: Any, reversible: bool = False
+) -> dict:
     """Delete only memory (graph + vector) for a single data item, preserving the raw file.
 
     This allows re-cognifying a specific file with different settings
@@ -317,6 +362,10 @@ async def _forget_data_memory(data_id: UUID, dataset_ref: Union[str, UUID], user
     - Pipeline status (for this data item): reset for cognify only
     - Relational DB (data record): preserved
     - Raw file: preserved
+
+    With ``reversible=True`` the exact inverse is committed to the version
+    ledger *before* deletion (write-ahead); ``cognee.undo(operation_id)``
+    restores it within the retention window.
     """
     from sqlalchemy import select
     from sqlalchemy.orm import attributes as orm_attributes
@@ -328,6 +377,14 @@ async def _forget_data_memory(data_id: UUID, dataset_ref: Union[str, UUID], user
     )
 
     dataset_id = await _resolve_dataset_id(dataset_ref, user)
+
+    # 0. Reversible mode: commit the write-ahead inverse before any deletion.
+    #    Unsupported backends raise here, before data is touched.
+    operation_id = None
+    if reversible:
+        from cognee.modules.versioning import capture_forget_inverse
+
+        operation_id = await capture_forget_inverse(dataset_id, data_id)
 
     # 1. Delete graph nodes/edges and vector embeddings for this data item
     await delete_data_nodes_and_edges(dataset_id, data_id, user.id)
@@ -360,11 +417,17 @@ async def _forget_data_memory(data_id: UUID, dataset_ref: Union[str, UUID], user
         dataset_id,
         user.id,
     )
-    return {
+    result = {
         "data_id": str(data_id),
         "dataset_id": str(dataset_id),
         "status": "success",
     }
+    if operation_id is not None:
+        from cognee.modules.versioning import mark_forget_applied
+
+        await mark_forget_applied(operation_id)
+        result["operation_id"] = str(operation_id)
+    return result
 
 
 async def _resolve_dataset_id(dataset_ref: Union[str, UUID], user: Any) -> UUID:

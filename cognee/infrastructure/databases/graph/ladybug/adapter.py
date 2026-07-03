@@ -1614,6 +1614,39 @@ class LadybugAdapter(GraphDBInterface):
                 result[edge] = contributed
         return result
 
+    async def find_all_node_source_run_refs(self) -> dict[str, list[str]]:
+        rows = await self.query(
+            """
+            MATCH (n:Node)
+            WHERE n.source_run_refs IS NOT NULL
+            RETURN n.id, n.source_run_refs
+            """,
+            {},
+        )
+        result: dict[str, list[str]] = {}
+        for row in rows:
+            run_refs = _decode_refs(row[1])
+            if run_refs:
+                result[row[0]] = run_refs
+        return result
+
+    async def find_all_edge_source_run_refs(self) -> dict[EdgeIdentity, list[str]]:
+        rows = await self.query(
+            """
+            MATCH (a:Node)-[r:EDGE]->(b:Node)
+            WHERE r.source_run_refs IS NOT NULL
+            RETURN a.id, b.id, r.relationship_name, r.source_run_refs
+            """,
+            {},
+        )
+        result: dict[EdgeIdentity, list[str]] = {}
+        for row in rows:
+            run_refs = _decode_refs(row[3])
+            if run_refs:
+                edge = EdgeIdentity(source_id=row[0], target_id=row[1], relationship_name=row[2])
+                result[edge] = run_refs
+        return result
+
     async def get_edges_created_since(
         self,
         since: Optional[datetime],

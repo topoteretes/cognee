@@ -336,7 +336,7 @@ async def test_forget_routes_to_dataset_memory(monkeypatch):
         result = await forget_module.forget(dataset="my-dataset", memory_only=True)
 
     assert result["status"] == "success"
-    mock_forget_dataset_memory.assert_awaited_once_with("my-dataset", USER)
+    mock_forget_dataset_memory.assert_awaited_once_with("my-dataset", USER, reversible=False)
 
 
 @pytest.mark.asyncio
@@ -365,7 +365,9 @@ async def test_forget_routes_to_data_memory(monkeypatch):
         )
 
     assert result["status"] == "success"
-    mock_forget_data_memory.assert_awaited_once_with(DATA_ID_A, "my-dataset", USER)
+    mock_forget_data_memory.assert_awaited_once_with(
+        DATA_ID_A, "my-dataset", USER, reversible=False
+    )
 
 
 # ---------------------------------------------------------------------------
