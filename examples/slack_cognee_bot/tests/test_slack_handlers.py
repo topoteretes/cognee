@@ -17,9 +17,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from src.memory_adapter import Answer, Citation
+from src.memory_adapter import Answer
 from src.slack_app import (
-    format_reply,
     handle_app_mention,
     handle_message_event,
     handle_recall_command,
@@ -174,7 +173,9 @@ def test_app_mention_answers_extracted_question_and_replies():
     assert call.args[0].channel_id == "C1"
     assert call.kwargs["query"] == "what did we decide about the launch?"
     say.assert_awaited_once()
-    assert "We shipped Friday." in say.await_args.args[0]
+    # Reply is Block Kit blocks + a plain notification fallback.
+    assert isinstance(say.await_args.kwargs["blocks"], list)
+    assert "We shipped Friday." in say.await_args.kwargs["text"]
 
 
 # --------------------------------------------------------------------------- #
@@ -199,51 +200,25 @@ def test_recall_command_acks_answers_and_replies():
 
 
 # --------------------------------------------------------------------------- #
-# reply rendering (minimal; commit 5 replaces with Block Kit)                 #
+# reply wiring — the handler posts Block Kit blocks via render_answer          #
 # --------------------------------------------------------------------------- #
 
 
-def test_format_reply_includes_answer_and_ok_citation_link():
-    answer = Answer(
-        text="We shipped Friday.",
-        citations=[
-            Citation(
-                channel_id="C1",
-                ts="1.0",
-                permalink="https://slack.example/x",
-                author="alice",
-                snippet="ship friday",
-                ok=True,
-            )
-        ],
-    )
-    reply = format_reply(answer)
-    assert "We shipped Friday." in reply
-    assert "<https://slack.example/x|alice>" in reply
+def test_answer_reply_is_rendered_via_render_answer(monkeypatch):
+    # Prove the commit-5 renderer is wired into the handler's reply path.
+    import src.slack_app as slack_app
 
+    sentinel_blocks = [{"type": "section", "text": {"type": "mrkdwn", "text": "SENTINEL"}}]
+    monkeypatch.setattr(slack_app, "render_answer", lambda answer: sentinel_blocks)
 
-def test_format_reply_falls_back_for_stale_citation():
-    answer = Answer(
-        text="Answer.",
-        citations=[
-            Citation(
-                channel_id="C1",
-                ts="1.0",
-                permalink="",
-                author="",
-                snippet="fallback text",
-                ok=False,
-            )
-        ],
-    )
-    reply = format_reply(answer)
-    assert "fallback text" in reply
-    assert "<|" not in reply  # no broken link
+    buffer = _fake_buffer()
+    say = AsyncMock()
+    event = {"channel": "C1", "team": "T1", "ts": "5.0", "text": "<@U0BOT123> q?"}
 
+    asyncio.run(slack_app.handle_app_mention(event, say, buffer, default_team_id="T0"))
 
-def test_format_reply_handles_empty_answer():
-    reply = format_reply(Answer(text="", citations=[]))
-    assert reply  # non-empty placeholder, no crash
+    say.assert_awaited_once()
+    assert say.await_args.kwargs["blocks"] is sentinel_blocks
 
 
 # --------------------------------------------------------------------------- #
@@ -261,6 +236,7 @@ def test_non_slack_modules_import_without_slack_bolt():
         "src.cognee_memory",
         "src.ingestion_buffer",
         "src.config",
+        "src.citations",
         "src.slack_app",  # imports without slack_bolt because the import is deferred
     ):
         assert importlib.import_module(mod) is not None

@@ -18,9 +18,9 @@ message). The event-handling *logic* lives in plain async functions
 :func:`handle_recall_command`) that take a mockable Slack client/say — no
 slack_bolt needed to import or unit-test them.
 
-Out of scope here (later commits): rich Block Kit citation rendering (commit 5 —
-see the seam in :func:`format_reply`); the ``/forget`` command and opt-in/opt-out
-management (commit 6). This commit wires ingestion, @mention, and /recall only.
+Out of scope here (later commits): the ``/forget`` command and opt-in/opt-out
+management (commit 6). This commit wires ingestion, @mention, and /recall; the
+reply is rendered by the Block Kit citation renderer (:mod:`src.citations`).
 """
 
 from __future__ import annotations
@@ -28,15 +28,14 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from src.citations import notification_text, render_answer
 from src.config import SlackSettings
 from src.ingestion_buffer import IngestionBuffer
-from src.memory_adapter import Answer, ConversationRef
+from src.memory_adapter import ConversationRef
 
 # Matches a leading Slack user mention token like "<@U12345>" so we can strip
 # the "@cognee" prefix off an app_mention to get the bare question.
 _MENTION_TOKEN = re.compile(r"<@[A-Z0-9]+>")
-
-_NO_ANSWER_TEXT = "I couldn't find anything about that in this channel's memory yet."
 
 
 def _load_bolt():
@@ -125,26 +124,6 @@ async def handle_message_event(
     return True
 
 
-def format_reply(answer: Answer) -> str:
-    """Render an :class:`Answer` to a Slack message string.
-
-    NOTE (commit 5 seam): this is the minimal plain/mrkdwn renderer. Commit 5
-    replaces it with the rich Block Kit citations renderer (deduped Sources
-    context block, stale-permalink fallback). The answer handlers already carry
-    ``answer.citations``, so the swap is renderer-only.
-    """
-    lines = [answer.text or _NO_ANSWER_TEXT]
-    if answer.citations:
-        lines.append("")
-        lines.append("Sources:")
-        for cite in answer.citations:
-            if cite.ok and cite.permalink:
-                lines.append(f"• <{cite.permalink}|{cite.author or 'message'}>")
-            else:
-                lines.append(f"• {cite.snippet or 'source'}")
-    return "\n".join(lines)
-
-
 async def _answer_and_reply(
     ref: ConversationRef,
     question: str,
@@ -152,7 +131,9 @@ async def _answer_and_reply(
     say: Any,
 ) -> None:
     answer = await buffer.answer(ref, query=question)
-    await say(format_reply(answer))
+    # Rich Block Kit citations reply; text= is the notification/accessibility
+    # fallback Slack shows when blocks can't be rendered.
+    await say(blocks=render_answer(answer), text=notification_text(answer))
 
 
 async def handle_app_mention(
