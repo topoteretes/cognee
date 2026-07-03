@@ -1,7 +1,6 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import Link from "next/link";
 import { useNavbar } from "../NavbarContext";
 import NavbarIconLink from "./NavbarIconLink";
 import { ReactNode } from "react";
@@ -226,25 +225,6 @@ export default function CustomAppShellNavbar() {
           ))}
         </nav>
 
-        {/* Billing / Pricing button pinned to the bottom-left of the sidebar */}
-        <div style={{ padding: 12, borderTop: "1px solid rgba(255,255,255,0.08)" }}>
-          <Link
-            href="/billing"
-            className="flex items-center justify-center rounded-[8px] w-full"
-            style={{
-              padding: "10px 12px",
-              background: "#BC9BFF",
-              color: "#1e1e1c",
-              fontSize: 14,
-              fontWeight: 500,
-              textDecoration: "none",
-            }}
-            onMouseEnter={e => ((e.currentTarget as HTMLElement).style.background = "#A988F0")}
-            onMouseLeave={e => ((e.currentTarget as HTMLElement).style.background = "#BC9BFF")}
-          >
-            Billing / Pricing
-          </Link>
-        </div>
       </aside>
     </>
   );
