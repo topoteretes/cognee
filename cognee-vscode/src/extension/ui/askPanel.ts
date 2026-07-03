@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 
 import type { Citation } from "../../core";
 import { runRecall } from "../commands/recall";
+import type { PathIndex } from "../pathIndex";
 import type { Runtime } from "../runtime";
 import { openCitation } from "./citations";
 
@@ -27,6 +28,7 @@ export class AskPanel {
 
   private readonly disposables: vscode.Disposable[] = [];
   private citations: Citation[] = [];
+  private pathIndex: PathIndex | undefined;
 
   static show(resolveRuntime: RuntimeResolver): void {
     const column = vscode.window.activeTextEditor?.viewColumn ?? vscode.ViewColumn.One;
@@ -62,7 +64,7 @@ export class AskPanel {
     } else if (message.type === "openCitation") {
       const citation = this.citations[message.index];
       if (citation) {
-        await openCitation(citation);
+        await openCitation(citation, this.pathIndex);
       }
     }
   }
@@ -79,6 +81,7 @@ export class AskPanel {
       this.post({ type: "status", state: "error", message: "Configure Cognee first (Cognee: Set Up)." });
       return;
     }
+    this.pathIndex = runtime.pathIndex;
 
     const rendered = await runRecall(runtime, query);
     if (!rendered) {

@@ -8,6 +8,7 @@ import {
   type CogneeConfig,
 } from "../core";
 import type { Logger } from "./logger";
+import { PathIndex } from "./pathIndex";
 import { readConfig } from "./settings";
 import { getGitRemote, getWorkspaceRoot } from "./workspace";
 
@@ -20,6 +21,8 @@ export interface Runtime {
   client: CogneeClient;
   datasetName: string;
   workspaceRoot: string;
+  /** Per-workspace map of ingested basenames → relative paths, for direct citation redirect. */
+  pathIndex: PathIndex;
   logger: Logger;
 }
 
@@ -65,6 +68,8 @@ export async function resolveRuntime(
     timeoutMs: config.requestTimeoutMs,
   });
 
+  const pathIndex = new PathIndex(context.workspaceState);
+
   logger.info(`Resolved dataset "${datasetName}" for endpoint ${config.endpoint}.`);
-  return { config, client, datasetName, workspaceRoot, logger };
+  return { config, client, datasetName, workspaceRoot, pathIndex, logger };
 }

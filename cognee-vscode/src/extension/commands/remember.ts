@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 
 import { describeError } from "../../core";
+import { basenameOf } from "../paths";
 import type { Runtime } from "../runtime";
 
 /** Remember the current selection (or the whole file when nothing is selected). */
@@ -18,12 +19,12 @@ export async function rememberSelection(runtime: Runtime): Promise<void> {
     return;
   }
 
-  const label = vscode.workspace.asRelativePath(document.uri, false);
+  const relativePath = vscode.workspace.asRelativePath(document.uri, false);
   const lineRange = selection.isEmpty
     ? undefined
     : `lines ${selection.start.line + 1}-${selection.end.line + 1}`;
 
-  await ingest(runtime, decorate(text, label, lineRange), basename(document.uri), `Remembering from ${label}…`);
+  await ingest(runtime, decorate(text, relativePath, lineRange), relativePath, `Remembering from ${relativePath}…`);
 }
 
 /** Remember an entire file, invoked from the explorer context menu or palette. */
@@ -49,14 +50,18 @@ export async function rememberFile(runtime: Runtime, resource?: vscode.Uri): Pro
     return;
   }
 
-  const label = vscode.workspace.asRelativePath(uri, false);
-  await ingest(runtime, decorate(text, label), basename(uri), `Remembering ${label}…`);
+  const relativePath = vscode.workspace.asRelativePath(uri, false);
+  await ingest(runtime, decorate(text, relativePath), relativePath, `Remembering ${relativePath}…`);
 }
 
+/**
+ * Ingest text into project memory, then record the source path so future
+ * citations for this document resolve straight to the exact file.
+ */
 async function ingest(
   runtime: Runtime,
   data: string,
-  filename: string,
+  relativePath: string,
   title: string,
 ): Promise<void> {
   await vscode.window.withProgress(
@@ -67,9 +72,10 @@ async function ingest(
       try {
         const result = await runtime.client.remember(data, {
           datasetName: runtime.datasetName,
-          filename,
+          filename: basenameOf(relativePath),
           signal: controller.signal,
         });
+        await runtime.pathIndex.record(relativePath);
         runtime.logger.info(`remember → status=${result.status ?? "ok"} dataset=${runtime.datasetName}`);
         void vscode.window.showInformationMessage(
           `Cognee: remembered into project memory (${runtime.datasetName}).`,
@@ -83,11 +89,7 @@ async function ingest(
 }
 
 /** Prepend a provenance header so the source is preserved in memory. */
-function decorate(text: string, label: string, lineRange?: string): string {
-  const source = lineRange ? `${label} (${lineRange})` : label;
+function decorate(text: string, relativePath: string, lineRange?: string): string {
+  const source = lineRange ? `${relativePath} (${lineRange})` : relativePath;
   return `Source: ${source}\n\n${text}`;
-}
-
-function basename(uri: vscode.Uri): string {
-  return uri.path.split("/").pop() || "memory.txt";
 }
