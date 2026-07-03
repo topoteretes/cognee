@@ -48,9 +48,9 @@ image = (
     secrets=[modal.Secret.from_name("cognee-secrets")],
     volumes={"/data": volume},
     timeout=3600,
-    container_idle_timeout=300,
-    allow_concurrent_inputs=10,
+    scaledown_window=300,
 )
+@modal.concurrent(max_inputs=10)
 @modal.asgi_app()
 def serve():
     from cognee.api.client import app as fastapi_app
