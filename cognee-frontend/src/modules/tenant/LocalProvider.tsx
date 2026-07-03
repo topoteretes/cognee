@@ -81,6 +81,7 @@ export function LocalProvider({ children }: { children: React.ReactNode }) {
       apiKey: "",
       isInitializing,
       tenantReady: true,
+      isOwner: true,
       error,
       statusMessage: null,
       availableTenants: [],

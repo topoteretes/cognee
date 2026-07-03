@@ -15,6 +15,7 @@ import { listSessions, SEARCH_SESSION_PREFIX } from "@/modules/sessions/getSessi
 import getDatasetGraph from "@/modules/datasets/getDatasetGraph";
 import { notifications } from "@mantine/notifications";
 import { trackEvent, TrackPageView } from "@/modules/analytics";
+import { markOnboardingCompleteLocally } from "@/utils/onboardingFlag";
 import { CLAUDE_MARKETPLACE_ADD, CLAUDE_PLUGIN_INSTALL, CODEX_HOOKS_ENABLE, CODEX_MARKETPLACE_ADD, CODEX_PLUGIN_INSTALL, OPENCLAW_SKILL_INSTALL, GENERIC_SKILL_INSTALL, UPLOAD_MEMORY_PROMPT, UPLOAD_SAMPLE_PROMPT, RECALL_SAMPLE_PROMPT } from "@/data/prompts";
 import { AgentActivityTerminal, PipelineRun, Range, ownerDisplayName } from "@/ui/elements/AgentActivityTerminal";
 import SkeletonBar from "@/ui/elements/SkeletonBar";
@@ -42,6 +43,7 @@ export default function OverviewPage() {
   const [runs, setRuns] = useState<PipelineRun[]>([]);
   const [loading, setLoading] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
+  const isHandlingUploadRef = useRef(false);
   const [showDatasetPicker, setShowDatasetPicker] = useState(false);
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [range] = useState<Range>("24h");
@@ -72,6 +74,11 @@ export default function OverviewPage() {
   const [awaitingDataset, setAwaitingDataset] = useState<boolean>(() => {
     try { return !!sessionStorage.getItem(AWAITING_DATASET_KEY); } catch { return false; }
   });
+  // Gates the dashboard render until the onboarding-redirect check below has
+  // actually resolved. Without this, workspaceReady flips true (fast) before
+  // that async check finishes, so the full dashboard flashes on screen for a
+  // moment right before router.replace("/onboarding") kicks in.
+  const [onboardingDecided, setOnboardingDecided] = useState(false);
   const router = useRouter();
   // Workspace is functionally ready only when the pod is up AND any in-flight
   // default-dataset processing has finished.
@@ -113,27 +120,39 @@ export default function OverviewPage() {
   }
 
   async function handleDashboardUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    if (!cogniInstance || !e.target.files?.length) return;
+    // Ref (not state) so the re-entrancy check is synchronous — guards against
+    // a stray double-fired change event racing two dataset-creation calls for
+    // the same deterministic dataset id, which would hit a UNIQUE constraint
+    // on the backend (create_new_dataset's existence check + insert isn't atomic).
+    if (isHandlingUploadRef.current || !cogniInstance || !e.target.files?.length) return;
+    isHandlingUploadRef.current = true;
     const files = Array.from(e.target.files);
     e.target.value = "";
 
-    // If only one dataset exists, upload to it
-    if (datasets.length === 1) {
-      await uploadToDataset(datasets[0], files);
-      return;
-    }
+    try {
+      // If only one dataset exists, upload to it
+      if (datasets.length === 1) {
+        await uploadToDataset(datasets[0], files);
+        return;
+      }
 
-    // If no datasets exist, create default and upload
-    if (datasets.length === 0) {
-      const ds = await createDataset({ name: "default_dataset" }, cogniInstance);
-      refreshDatasets();
-      await uploadToDataset(ds, files);
-      return;
-    }
+      // If no datasets exist, create default and upload
+      if (datasets.length === 0) {
+        const ds = await createDataset({ name: "default_dataset" }, cogniInstance);
+        refreshDatasets();
+        await uploadToDataset(ds, files);
+        return;
+      }
 
-    // Multiple datasets, none selected — show picker
-    setPendingFiles(files);
-    setShowDatasetPicker(true);
+      // Multiple datasets, none selected — show picker
+      setPendingFiles(files);
+      setShowDatasetPicker(true);
+    } catch (err) {
+      console.error("Dashboard upload failed:", err);
+      notifications.show({ title: "Upload failed", message: err instanceof Error ? err.message : String(err), color: "red" });
+    } finally {
+      isHandlingUploadRef.current = false;
+    }
   }
 
   async function handlePickDataset(ds: { id: string; name: string }) {
@@ -322,11 +341,15 @@ export default function OverviewPage() {
     let cancelled = false;
     (async () => {
       const localSkipped = sessionStorage.getItem("cognee-onboarding-skipped");
-      if (localSkipped) return;
+      if (localSkipped) {
+        setOnboardingDecided(true);
+        return;
+      }
 
       // Fast path: if user has runs OR datasets they've genuinely onboarded.
       if (runs.length > 0 || datasets.length > 0) {
-        localStorage.setItem("cognee-onboarding-complete", "1");
+        markOnboardingCompleteLocally();
+        setOnboardingDecided(true);
         return;
       }
 
@@ -346,21 +369,52 @@ export default function OverviewPage() {
           // that hasn't finished provisioning, or a genuinely empty account.
           // Re-check localStorage to see if this session already saw activity.
           const localComplete = localStorage.getItem("cognee-onboarding-complete");
-          if (localComplete) return; // already validated this session
+          if (localComplete) {
+            setOnboardingDecided(true);
+            return; // already validated this session
+          }
           // Otherwise redirect — the onboarding flow will handle re-entry gracefully.
         }
       } catch { /* fallback to redirect below */ }
 
       if (cancelled) return;
+      // Deliberately leave onboardingDecided false here — we're navigating
+      // away, so the skeleton should stay up through the route change
+      // instead of flashing the dashboard for a frame first.
       router.replace("/onboarding");
     })();
     return () => { cancelled = true; };
   }, [cogniInstance, tenantReady, isInitializing, loading, filterLoading, runs, datasets, router, tenant]);
 
-  // Show skeleton until pod is up (cogniInstance + tenantReady) AND any
-  // freshly-provisioned default dataset has finished processing.
+  // Show skeleton until pod is up (cogniInstance + tenantReady), any
+  // freshly-provisioned default dataset has finished processing, AND the
+  // onboarding-redirect check above has resolved (see onboardingDecided).
+  // Workspace still provisioning: we already know this user is staying on
+  // the dashboard, so the dashboard-shaped skeleton communicates progress.
   if (!workspaceReady) {
     return <DashboardSkeleton />;
+  }
+  // Onboarding decision still pending: this user might get redirected to
+  // /onboarding in a moment, so deliberately show a neutral, non-dashboard
+  // loading state here instead of DashboardSkeleton — otherwise the
+  // dashboard-shaped skeleton itself reads as "the dashboard flashed" even
+  // though no real data was ever rendered.
+  if (!onboardingDecided) {
+    return (
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100%" }}>
+        <div
+          style={{
+            width: 28,
+            height: 28,
+            borderRadius: "50%",
+            border: "2px solid rgba(255,255,255,0.15)",
+            borderTopColor: "#BC9BFF",
+            animation: "cognee-spin 0.8s linear infinite",
+          }}
+        />
+        <style>{"@keyframes cognee-spin { to { transform: rotate(360deg); } }"}</style>
+      </div>
+    );
   }
 
   const dataLoading = loading || isInitializing || filterLoading;
