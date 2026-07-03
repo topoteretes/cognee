@@ -4,6 +4,9 @@ import logging
 from typing import Any
 
 import instructor
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.instructor_modes import (
+    get_instructor_mode,
+)
 import litellm
 from openai import AsyncOpenAI
 from pydantic import BaseModel
@@ -56,7 +59,7 @@ class OllamaAPIAdapter(LLMInterface):
     - aclient
     """
 
-    default_instructor_mode = "json_mode"
+    default_instructor_mode = get_instructor_mode("ollama")
 
     def __init__(
         self,
