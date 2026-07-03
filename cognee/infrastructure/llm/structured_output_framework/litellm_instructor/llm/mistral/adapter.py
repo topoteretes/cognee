@@ -3,6 +3,9 @@ import logging
 from typing import Any
 
 import instructor
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.instructor_modes import (
+    get_instructor_mode,
+)
 import litellm
 from litellm import JSONSchemaValidationError
 from mistralai import Mistral  # ty:ignore[unresolved-import]
@@ -43,7 +46,7 @@ class MistralAdapter(GenericAPIAdapter):
     - show_prompt
     """
 
-    default_instructor_mode = "mistral_tools"
+    default_instructor_mode = get_instructor_mode("mistral")
 
     def __init__(
         self,
