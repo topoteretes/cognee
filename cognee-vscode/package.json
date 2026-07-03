@@ -1,0 +1,169 @@
+{
+  "name": "cognee-vscode",
+  "displayName": "Cognee — Project Memory",
+  "description": "Give your editor a persistent, citable memory of the project. Remember and recall knowledge without leaving VS Code, and ask your project memory with answers linked back to source files — powered by Cognee.",
+  "version": "0.1.0",
+  "publisher": "cognee",
+  "license": "Apache-2.0",
+  "author": {
+    "name": "Anjali Garhwal"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/topoteretes/cognee.git",
+    "directory": "cognee-vscode"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Machine Learning",
+    "Other"
+  ],
+  "keywords": [
+    "cognee",
+    "memory",
+    "knowledge graph",
+    "rag",
+    "ai",
+    "context"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [],
+  "contributes": {
+    "commands": [
+      {
+        "command": "cognee.askProjectMemory",
+        "title": "Ask My Project Memory",
+        "category": "Cognee"
+      },
+      {
+        "command": "cognee.recall",
+        "title": "Recall",
+        "category": "Cognee"
+      },
+      {
+        "command": "cognee.rememberSelection",
+        "title": "Remember Selection",
+        "category": "Cognee"
+      },
+      {
+        "command": "cognee.rememberFile",
+        "title": "Remember File",
+        "category": "Cognee"
+      },
+      {
+        "command": "cognee.indexWorkspace",
+        "title": "Index Workspace",
+        "category": "Cognee"
+      },
+      {
+        "command": "cognee.forgetProject",
+        "title": "Forget Project Memory",
+        "category": "Cognee"
+      },
+      {
+        "command": "cognee.setup",
+        "title": "Set Up",
+        "category": "Cognee"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "cognee.rememberSelection",
+          "when": "editorHasSelection",
+          "group": "cognee@1"
+        },
+        {
+          "command": "cognee.askProjectMemory",
+          "group": "cognee@2"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "cognee.rememberFile",
+          "when": "!explorerResourceIsFolder",
+          "group": "cognee@1"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Cognee",
+      "properties": {
+        "cognee.endpoint": {
+          "type": "string",
+          "default": "http://localhost:8011",
+          "markdownDescription": "Base URL of the Cognee backend. Use the local server (`http://localhost:8011`) or a Cognee Cloud tenant URL (`https://<tenant>.cognee.ai`)."
+        },
+        "cognee.apiKey": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "API key sent as the `X-Api-Key` header. Required for Cognee Cloud; usually empty for a local single-user server. Prefer storing this in your OS keychain via `Cognee: Set Up` rather than in synced settings."
+        },
+        "cognee.datasetOverride": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Optional fixed dataset name for this workspace. When empty, the dataset is derived deterministically from the git remote (or workspace path) as `vscode_<hash>`, isolating each repository's memory."
+        },
+        "cognee.searchType": {
+          "type": "string",
+          "default": "auto",
+          "enum": [
+            "auto",
+            "GRAPH_COMPLETION",
+            "GRAPH_COMPLETION_COT",
+            "RAG_COMPLETION",
+            "CHUNKS",
+            "SUMMARIES"
+          ],
+          "markdownDescription": "Recall strategy. `auto` lets Cognee route the query to the best strategy; the others force a specific `search_type`."
+        },
+        "cognee.topK": {
+          "type": "number",
+          "default": 15,
+          "minimum": 1,
+          "maximum": 100,
+          "description": "Maximum number of results returned by a recall."
+        },
+        "cognee.includeReferences": {
+          "type": "boolean",
+          "default": true,
+          "description": "Ask Cognee to attach source citations (the Evidence block) to answers so results can link back to files."
+        },
+        "cognee.ingestion.respectGitignore": {
+          "type": "boolean",
+          "default": true,
+          "description": "When indexing the workspace, skip files ignored by .gitignore and .cogneeignore."
+        },
+        "cognee.ingestion.maxFileSizeKb": {
+          "type": "number",
+          "default": 512,
+          "description": "Skip files larger than this size (in KB) during workspace indexing."
+        },
+        "cognee.requestTimeoutMs": {
+          "type": "number",
+          "default": 300000,
+          "description": "HTTP request timeout in milliseconds for Cognee calls."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run build",
+    "build": "node esbuild.js --production",
+    "watch": "node esbuild.js --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "package": "vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^2.29.0",
+    "esbuild": "^0.21.5",
+    "typescript": "^5.4.5",
+    "vitest": "^1.6.0"
+  }
+}
