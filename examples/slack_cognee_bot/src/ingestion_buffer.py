@@ -116,3 +116,10 @@ class IngestionBuffer:
         """Flush pending messages for the channel, then answer the query."""
         await self.flush(ref)
         return await self._memory.answer(ref, query=query)
+
+    async def forget(self, ref: ConversationRef) -> None:
+        """Drop the channel's buffered state and delete its memory via the adapter."""
+        async with self._lock:
+            self._pending.pop(ref.channel_id, None)
+            self._opened_at.pop(ref.channel_id, None)
+        await self._memory.forget(ref)

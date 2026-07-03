@@ -167,6 +167,77 @@ async def handle_recall_command(
 
 
 # --------------------------------------------------------------------------- #
+# forget + opt-in / opt-out commands                                          #
+# --------------------------------------------------------------------------- #
+
+# Deletion is dataset-level (whole channel). cognee has no per-user delete
+# (recon: forget() deletes by dataset / data_id / everything — there is no
+# per-author scope), so a per-user "forget me" is intentionally NOT offered and
+# is left as a follow-up. Do not imply per-user deletion in these replies.
+_FORGET_REPLY = (
+    ":wastebasket: Deleted this channel's memory — the entire `{dataset}` dataset "
+    "(messages, graph, and citations).\n"
+    "_Note: cognee forgets at the channel level. Removing just one person's messages "
+    "(\"forget me\") isn't supported yet — that's a follow-up._"
+)
+_OPTIN_DISCLOSURE = (
+    ":wave: I'll now remember messages in this channel — I ingest them into cognee "
+    "memory so anyone here can ask *@cognee …* or */recall …* and get cited answers.\n"
+    "Run */cognee-optout* to stop, or */cognee-forget* to erase what I've stored."
+)
+_OPTIN_ALREADY = "This channel is already opted in — I'm already remembering it."
+_OPTOUT_REPLY = (
+    ":mute: Opted out — I'll stop ingesting new messages in this channel.\n"
+    "_Existing memory is kept. Run */cognee-forget* to delete it too._"
+)
+
+
+async def handle_forget_command(
+    command: dict,
+    ack: Any,
+    say: Any,
+    buffer: IngestionBuffer,
+    *,
+    default_team_id: str = "",
+) -> None:
+    """Delete the current channel's memory (dataset-level forget)."""
+    await ack()
+    channel_id = command["channel_id"]
+    ref = ConversationRef(
+        team_id=command.get("team_id") or default_team_id,
+        channel_id=channel_id,
+    )
+    await buffer.forget(ref)
+    await say(_FORGET_REPLY.format(dataset=ref.dataset_name))
+
+
+async def handle_optin_command(
+    command: dict,
+    ack: Any,
+    say: Any,
+    opted_in: set[str],
+) -> None:
+    """Opt a channel in to ingestion; post the disclosure on first opt-in."""
+    await ack()
+    channel_id = command["channel_id"]
+    first_time = channel_id not in opted_in
+    opted_in.add(channel_id)
+    await say(_OPTIN_DISCLOSURE if first_time else _OPTIN_ALREADY)
+
+
+async def handle_optout_command(
+    command: dict,
+    ack: Any,
+    say: Any,
+    opted_in: set[str],
+) -> None:
+    """Opt a channel out of ingestion (stops future ingest; keeps existing data)."""
+    await ack()
+    opted_in.discard(command["channel_id"])
+    await say(_OPTOUT_REPLY)
+
+
+# --------------------------------------------------------------------------- #
 # Bolt wiring (imports slack_bolt lazily)                                      #
 # --------------------------------------------------------------------------- #
 
@@ -204,6 +275,20 @@ def build_app(
     @app.command("/recall")
     async def _on_recall(ack, command, say):
         await handle_recall_command(command, ack, say, buffer, default_team_id=default_team_id)
+
+    # forget + opt-in/opt-out all close over the SAME `opted_in` set the message
+    # handler reads — a single source of truth, no divergent store.
+    @app.command("/cognee-forget")
+    async def _on_forget(ack, command, say):
+        await handle_forget_command(command, ack, say, buffer, default_team_id=default_team_id)
+
+    @app.command("/cognee-optin")
+    async def _on_optin(ack, command, say):
+        await handle_optin_command(command, ack, say, opted_in)
+
+    @app.command("/cognee-optout")
+    async def _on_optout(ack, command, say):
+        await handle_optout_command(command, ack, say, opted_in)
 
     return app
 
