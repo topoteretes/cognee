@@ -47,6 +47,14 @@ def create_relational_engine(
     pool_args = dict(pool_args) if pool_args else {}
 
     if db_provider == "sqlite":
+        # SQLite can create the database file but not its parent directory —
+        # without this, a custom SYSTEM_ROOT_DIRECTORY fails on first use with
+        # an opaque "unable to open database file". (s3:// paths are handled
+        # by the adapter's own S3 branch, which syncs to a local temp file.)
+        if not str(db_path).startswith("s3://"):
+            import os
+
+            os.makedirs(db_path, exist_ok=True)
         connection_string = f"sqlite+aiosqlite:///{db_path}/{db_name}"
 
     elif db_provider == "postgres":
