@@ -165,3 +165,66 @@ def test_sampling_cap_deterministic():
 def test_default_index_fields_cover_core_types():
     for t in ("Entity", "EntityType", "TextSummary", "DocumentChunk", "TextDocument"):
         assert t in DEFAULT_INDEX_FIELDS
+
+
+class _RecordingLogger:
+    """Captures formatted log messages regardless of the logging backend."""
+
+    def __init__(self):
+        self.records = []
+
+    def _rec(self, level, msg, args):
+        self.records.append((level, msg % args if args else msg))
+
+    def info(self, msg, *args):
+        self._rec("info", msg, args)
+
+    def warning(self, msg, *args):
+        self._rec("warning", msg, args)
+
+    def debug(self, *args, **kwargs):
+        pass
+
+    def messages(self, level):
+        return [m for lvl, m in self.records if lvl == level]
+
+
+def test_join_logs_hit_rate(monkeypatch):
+    # One of two Entity nodes resolves -> a hit-rate INFO line reports 1/2.
+    from cognee.modules.visualization import embedding_join
+
+    rec = _RecordingLogger()
+    monkeypatch.setattr(embedding_join, "logger", rec)
+
+    engine = FakeVectorEngine({"Entity_name": {E1: [1.0, 0.0, 0.0]}})
+    nodes = [_node(E1, "Entity"), _node(E2, "Entity")]
+    result = asyncio.run(fetch_node_embeddings(nodes, vector_engine=engine))
+
+    assert result == {E1: [1.0, 0.0, 0.0]}
+    assert any(
+        "resolved 1/2 node embeddings across 1 collection(s)" in m for m in rec.messages("info")
+    )
+    assert rec.messages("warning") == []  # partial success is not a warning
+
+
+def test_join_warns_with_diagnostics_when_nothing_resolves(monkeypatch):
+    # Zero resolution over non-empty input -> a WARNING naming the missing
+    # collection and the unmapped type, so a blank map is diagnosable.
+    from cognee.modules.visualization import embedding_join
+
+    rec = _RecordingLogger()
+    monkeypatch.setattr(embedding_join, "logger", rec)
+
+    engine = FakeVectorEngine({})  # no collections at all
+    nodes = [
+        _node(S1, "TextSummary"),  # known type, collection TextSummary_text missing
+        _node(G1, "GraphNodeType"),  # unmapped type
+    ]
+    result = asyncio.run(fetch_node_embeddings(nodes, vector_engine=engine))
+
+    assert result == {}
+    warnings = rec.messages("warning")
+    assert any("no embeddings resolved" in m for m in warnings)
+    joined = " ".join(warnings)
+    assert "TextSummary_text" in joined  # missing collection surfaced
+    assert "GraphNodeType" in joined  # unmapped type surfaced

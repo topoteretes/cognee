@@ -133,22 +133,49 @@ async def fetch_node_embeddings(
         by_type[node.get("type")].append(node)
 
     embeddings: Dict[str, List[float]] = {}
+    hit_collections = 0
+    missing_collections: List[str] = []
+    unmapped_types: List[str] = []
     for type_name, type_nodes in by_type.items():
         field = fields.get(type_name)
         if not field:
+            if type_name is not None:
+                unmapped_types.append(type_name)
             continue
         collection = f"{type_name}_{field}"
         try:
             if not await vector_engine.has_collection(collection):
+                missing_collections.append(collection)
                 continue
             found = await _fetch_for_collection(vector_engine, collection, type_nodes, field)
         except Exception as exc:  # never let a vector-store failure break the render
             logger.warning("fetch_node_embeddings: fetch failed for %s: %s", collection, exc)
             continue
+        if found:
+            hit_collections += 1
         for nid, vector in found.items():
             if nid not in embeddings:
                 embeddings[nid] = vector  # first hit wins across collections
             else:
                 logger.debug("node %s matched multiple collections; keeping first", nid)
+
+    # Join hit-rate: turn a silent empty map into a diagnosable one. A zero
+    # resolution over non-empty input almost always means an id/collection-name
+    # mismatch — surface which collections were missing and which types were
+    # unmapped instead of rendering blank with no signal.
+    total = len(selected)
+    logger.info(
+        "fetch_node_embeddings: resolved %d/%d node embeddings across %d collection(s)",
+        len(embeddings),
+        total,
+        hit_collections,
+    )
+    if total and not embeddings:
+        logger.warning(
+            "fetch_node_embeddings: no embeddings resolved — the semantic map will be empty. "
+            "Missing collections: %s. Unmapped node types: %s.",
+            missing_collections or "none",
+            unmapped_types or "none",
+        )
 
     return embeddings
