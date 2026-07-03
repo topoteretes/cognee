@@ -118,6 +118,11 @@ async def add_data_points(
         # graph write below (atomic — no window where an artifact exists without
         # its provenance). Hybrid backends still attach in a second pass and keep
         # that window; if the attach raises, the run is marked failed.
+        #
+        # Under COGNEE_DISTRIBUTED the graph write is diverted to a queue; the
+        # provenance stamp (source_ref_key / pipeline_run_id) rides along in the
+        # queue payload and is folded per data item by the graph_saving_worker,
+        # so graph-native provenance works in distributed mode too.
         stores_provenance = await mark_graph_provenance_if_empty(graph_engine)
 
         if not stores_provenance:
