@@ -15,15 +15,15 @@ from cognee.modules.users.models import User
 async def create_dataset(dataset_name: str, user: User, session: AsyncSession) -> Dataset:
     owner_id = user.id
 
-    dataset = (
-        await session.scalars(
-            select(Dataset)
-            .options(joinedload(Dataset.data))
-            .filter(Dataset.name == dataset_name)
-            .filter(Dataset.owner_id == owner_id)
-            .filter(Dataset.tenant_id == user.tenant_id)
-        )
-    ).first()
+    dataset_query = (
+        select(Dataset)
+        .options(joinedload(Dataset.data))
+        .filter(Dataset.name == dataset_name)
+        .filter(Dataset.owner_id == owner_id)
+        .filter(Dataset.tenant_id == user.tenant_id)
+    )
+
+    dataset = (await session.scalars(dataset_query)).first()
 
     if dataset is None:
         # Dataset id should be generated based on dataset_name and owner_id/user so multiple users can use the same dataset_name
@@ -40,17 +40,12 @@ async def create_dataset(dataset_name: str, user: User, session: AsyncSession) -
             # Concurrent calls race between the SELECT above and this INSERT
             # and, because the dataset id is deterministic, collide on the
             # primary key: another coroutine, worker, or process committed
-            # this dataset first. Return its row.
+            # this dataset first. Re-run the same owner/tenant-scoped query,
+            # so the only row this can return is one the caller could have
+            # read above — an id collision with anything else stays an error.
             await session.rollback()
-            dataset = (
-                await session.scalars(
-                    select(Dataset)
-                    .options(joinedload(Dataset.data))
-                    .filter(Dataset.id == dataset_id)
-                )
-            ).first()
+            dataset = (await session.scalars(dataset_query)).first()
             if dataset is None:
-                # Winner's row vanished (concurrent delete) — surface the original error.
                 raise
 
     return dataset

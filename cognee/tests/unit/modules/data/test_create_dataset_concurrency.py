@@ -2,9 +2,11 @@
 
 Concurrent calls for the same dataset name race between the existence SELECT
 and the INSERT and, because the dataset id is deterministic, collide on the
-primary key. ``create_dataset`` must tolerate losing that race (it catches the
-IntegrityError and returns the winner's committed row) so no caller errors and
-every caller gets the same dataset.
+primary key. ``create_dataset`` must tolerate losing that race (catch the
+IntegrityError and return the winner's committed row) without weakening
+isolation: the recovered row must satisfy the same name/owner/tenant-scoped
+query as the original lookup, so an id collision with any other row —
+another owner's or tenant's dataset — stays an error.
 """
 
 import asyncio
@@ -13,7 +15,6 @@ from types import SimpleNamespace
 from uuid import NAMESPACE_OID, uuid4, uuid5
 
 import pytest
-from sqlalchemy.dialects import sqlite
 from sqlalchemy.exc import IntegrityError
 
 from cognee.modules.data.methods import create_dataset
@@ -31,63 +32,56 @@ class _FakeScalarResult:
         return self._value
 
 
+def _matches(row, statement):
+    """Evaluate a select statement's WHERE criteria against a row."""
+    whereclause = statement.whereclause
+    for clause in getattr(whereclause, "clauses", [whereclause]):
+        column_name = clause.left.name
+        expected = getattr(clause.right, "value", None)  # IS NULL has no value
+        if getattr(row, column_name) != expected:
+            return False
+    return True
+
+
 class _FakeSession:
-    """Emulates the SELECT -> INSERT window against a shared row store.
+    """Emulates the SELECT -> INSERT window against a shared rows-by-id store.
 
     Every await yields control so concurrent tasks interleave exactly like
-    real DB round-trips. Commit enforces the primary-key unique constraint the
-    way the real database does: a duplicate insert raises IntegrityError
-    unless the statement carries ON CONFLICT DO NOTHING.
+    real DB round-trips. SELECTs honor the statement's WHERE criteria, and
+    commit enforces the primary-key unique constraint the way the real
+    database does: inserting a duplicate id raises IntegrityError.
     """
 
-    bind = SimpleNamespace(dialect=SimpleNamespace(name="sqlite"))
-
-    def __init__(self, store):
-        self._store = store
-        self._pending_insert = None
+    def __init__(self, rows_by_id):
+        self._rows_by_id = rows_by_id
         self._pending_add = None
 
-    async def scalars(self, _query):
+    async def scalars(self, statement):
         await asyncio.sleep(0)
-        return _FakeScalarResult(self._store.get("row"))
-
-    async def execute(self, statement):
-        await asyncio.sleep(0)
-        compiled = statement.compile(dialect=sqlite.dialect())
-        self._pending_insert = (dict(compiled.params), "ON CONFLICT" in str(compiled))
+        return _FakeScalarResult(
+            next((row for row in self._rows_by_id.values() if _matches(row, statement)), None)
+        )
 
     def add(self, dataset):
         self._pending_add = dataset
 
     async def commit(self):
         await asyncio.sleep(0)
-
         if self._pending_add is not None:
             row, self._pending_add = self._pending_add, None
-            self._apply_insert(row, handles_conflict=False)
-
-        if self._pending_insert is not None:
-            (values, handles_conflict), self._pending_insert = self._pending_insert, None
-            self._apply_insert(SimpleNamespace(**values), handles_conflict)
+            if row.id in self._rows_by_id:
+                raise IntegrityError("duplicate key value", None, Exception())
+            self._rows_by_id[row.id] = row
 
     async def rollback(self):
         await asyncio.sleep(0)
-        self._pending_insert = None
         self._pending_add = None
-
-    def _apply_insert(self, row, handles_conflict):
-        if self._store.get("row") is not None:
-            if handles_conflict:
-                return
-            raise IntegrityError("duplicate key value", None, Exception())
-        self._store["row"] = row
-        self._store["insert_count"] = self._store.get("insert_count", 0) + 1
 
 
 class _CollideAndVanishSession(_FakeSession):
     """Insert collides, but the winner's row is gone by the re-select."""
 
-    async def scalars(self, _query):
+    async def scalars(self, _statement):
         await asyncio.sleep(0)
         return _FakeScalarResult(None)
 
@@ -96,32 +90,49 @@ class _CollideAndVanishSession(_FakeSession):
         raise IntegrityError("duplicate key value", None, Exception())
 
 
-@pytest.mark.asyncio
-async def test_concurrent_same_dataset_creation_does_not_raise(monkeypatch):
-    user = SimpleNamespace(id=uuid4(), tenant_id=None)
-
+def _install_deterministic_dataset_id(monkeypatch):
     async def fake_get_unique_dataset_id(dataset_name, user):
         return uuid5(NAMESPACE_OID, f"{dataset_name}{user.id}")
 
     monkeypatch.setattr(create_dataset_module, "get_unique_dataset_id", fake_get_unique_dataset_id)
 
-    store = {}
+
+@pytest.mark.asyncio
+async def test_concurrent_same_dataset_creation_does_not_raise(monkeypatch):
+    user = SimpleNamespace(id=uuid4(), tenant_id=None)
+    _install_deterministic_dataset_id(monkeypatch)
+
+    rows_by_id = {}
     datasets = await asyncio.gather(
-        *[create_dataset("race_dataset", user, session=_FakeSession(store)) for _ in range(10)]
+        *[create_dataset("race_dataset", user, session=_FakeSession(rows_by_id)) for _ in range(10)]
     )
 
-    assert store["insert_count"] == 1
+    assert len(rows_by_id) == 1
     assert len({dataset.id for dataset in datasets}) == 1
+
+
+@pytest.mark.asyncio
+async def test_colliding_foreign_dataset_is_not_returned(monkeypatch):
+    """An id collision with another owner's dataset must error, never leak the row."""
+    user = SimpleNamespace(id=uuid4(), tenant_id=None)
+    _install_deterministic_dataset_id(monkeypatch)
+
+    dataset_id = uuid5(NAMESPACE_OID, f"race_dataset{user.id}")
+    foreign_dataset = SimpleNamespace(
+        id=dataset_id, name="foreign_dataset", owner_id=uuid4(), tenant_id=uuid4()
+    )
+    rows_by_id = {dataset_id: foreign_dataset}
+
+    with pytest.raises(IntegrityError):
+        await create_dataset("race_dataset", user, session=_FakeSession(rows_by_id))
+
+    assert rows_by_id == {dataset_id: foreign_dataset}
 
 
 @pytest.mark.asyncio
 async def test_vanished_winner_row_reraises_integrity_error(monkeypatch):
     user = SimpleNamespace(id=uuid4(), tenant_id=None)
-
-    async def fake_get_unique_dataset_id(dataset_name, user):
-        return uuid5(NAMESPACE_OID, f"{dataset_name}{user.id}")
-
-    monkeypatch.setattr(create_dataset_module, "get_unique_dataset_id", fake_get_unique_dataset_id)
+    _install_deterministic_dataset_id(monkeypatch)
 
     with pytest.raises(IntegrityError):
         await create_dataset("race_dataset", user, session=_CollideAndVanishSession({}))
