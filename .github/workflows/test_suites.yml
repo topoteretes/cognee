@@ -326,7 +326,7 @@ jobs:
           if ((${#failed[@]} == 0)); then
             echo "All test suites completed successfully!"
           else
-            echo "One or more test suites failed: ${failed[*]}"
+            echo "One or more test suites did not succeed: ${failed[*]}"
             exit 1
           fi
 
