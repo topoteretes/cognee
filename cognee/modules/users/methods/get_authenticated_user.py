@@ -68,7 +68,9 @@ def _resolve_auth_posture() -> tuple[bool, bool, str]:
 
 REQUIRE_AUTHENTICATION, ENABLE_BACKEND_ACCESS_CONTROL, _AUTH_REASON = _resolve_auth_posture()
 
-logger.info(
+# debug, not info: this fires at import time on every CLI invocation and is
+# server-operator diagnostics, not something an end user needs on the console.
+logger.debug(
     "auth posture: authentication=%s, multi_tenant=%s (%s)",
     "required" if REQUIRE_AUTHENTICATION else "disabled",
     "enabled" if ENABLE_BACKEND_ACCESS_CONTROL else "disabled",

@@ -76,8 +76,11 @@ def configure_external_library_logging() -> None:
             litellm.suppress_debug_info = True  # ty:ignore[unresolved-attribute]
         if hasattr(litellm, "turn_off_message"):
             litellm.turn_off_message = True  # ty:ignore[unresolved-attribute]
-        if hasattr(litellm, "_turn_on_debug"):
-            litellm._turn_on_debug = False  # ty:ignore[unresolved-attribute]
+        # NOTE: never touch litellm._turn_on_debug — it is a FUNCTION, and the
+        # old `litellm._turn_on_debug = False` clobbered it so that following
+        # litellm's own advice ("use `litellm._turn_on_debug()`") raised
+        # TypeError. It only looked harmless because this branch never ran
+        # before litellm was imported.
 
 
 # Export common log levels
@@ -245,6 +248,19 @@ def get_logger(name=None, level=None) -> logging.Logger:
         if level is not None:
             logger.setLevel(level)
         return logger
+
+
+def set_console_log_level(level: int) -> bool:
+    """Change the console handler's level at runtime (used by cognee-cli --verbose).
+
+    The file handler is untouched — this only decides what may interrupt the
+    terminal. Returns True if a console handler was found.
+    """
+    for handler in logging.getLogger().handlers:
+        if getattr(handler, "_cognee_console_handler", False):
+            handler.setLevel(level)
+            return True
+    return False
 
 
 def log_database_configuration(logger) -> None:
@@ -462,11 +478,20 @@ def setup_logging(log_level=None, name=None) -> bool:
     # through structlog before the default hook prints and exits.
     sys.excepthook = handle_exception
 
+    # Color only when stderr is a real terminal that wants it (no-color.org):
+    # piping stderr to a file must never capture raw ANSI escapes.
+    console_colors = (
+        hasattr(sys.stderr, "isatty")
+        and sys.stderr.isatty()
+        and not os.environ.get("NO_COLOR")
+        and os.environ.get("TERM") != "dumb"
+    )
+
     # Create console formatter for standard library logging
     console_formatter = structlog.stdlib.ProcessorFormatter(
         processor=structlog.dev.ConsoleRenderer(
-            colors=True,
-            force_colors=True,
+            colors=console_colors,
+            force_colors=console_colors,
             # show_locals=False: the default RichTracebackFormatter renders every
             # frame's locals, which in the retrieval path include graph objects
             # carrying embedding vectors and deep node/edge references. Rendering
@@ -499,10 +524,21 @@ def setup_logging(log_level=None, name=None) -> bool:
             except Exception:
                 self.handleError(record)
 
-    # Use our custom handler for console output
+    # Use our custom handler for console output.
+    # In CLI mode the console belongs to the command's own output: logs keep
+    # flowing to the log file at LOG_LEVEL, but only warnings and errors may
+    # interrupt the terminal. `cognee-cli --verbose` lowers this at runtime
+    # via set_console_log_level().
     stream_handler = NewlineStreamHandler(sys.stderr)
     stream_handler.setFormatter(console_formatter)
-    stream_handler.setLevel(log_level)
+    stream_handler._cognee_console_handler = True
+    if os.getenv("COGNEE_CLI_MODE") == "true":
+        # ERROR, not WARNING: the CLI renders every failure itself as a calm
+        # error block, and code that logs-then-raises would double-report on
+        # the console. Warnings stay in the log file (file handler below).
+        stream_handler.setLevel(max(log_level, logging.ERROR))
+    else:
+        stream_handler.setLevel(log_level)
 
     root_logger = logging.getLogger()
     if root_logger.hasHandlers():
@@ -585,7 +621,9 @@ def setup_logging(log_level=None, name=None) -> bool:
 
 def _log_deferred_info(logger) -> None:
     """Log lightweight startup info. Heavy DB config is logged on first pipeline call."""
-    logger.warning(
+    # info, not warning: this is a release note, not a problem the user must
+    # act on — warnings are reserved for things that can interrupt the CLI.
+    logger.info(
         "Cognee 1.0 changes: "
         "New API — remember/recall/forget/improve (V1 add/cognify/search still work). "
         "Session memory enabled by default (CACHING=false to disable). "

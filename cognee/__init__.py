@@ -87,3 +87,11 @@ from cognee.modules.agent_memory import agent_memory
 # Relational DB models
 from cognee.modules.session_lifecycle.models import SessionModelUsage, SessionRecord
 import cognee.modules.migrations.models  # noqa: F401  (registers global_database_version)
+
+# litellm was imported by the API imports above — re-run the external-library
+# quieting so its module-level flags (suppress_debug_info etc.) actually get
+# set; the first run during setup_logging() happened before litellm existed.
+from cognee.shared.logging_utils import configure_external_library_logging as _quiet_externals
+
+_quiet_externals()
+del _quiet_externals

@@ -17,7 +17,10 @@ class DatabaseNotCreatedError(CogneeSystemError):
         name: str = "DatabaseNotCreatedError",
         status_code: int = status.HTTP_422_UNPROCESSABLE_CONTENT,
     ):
-        super().__init__(message, name, status_code)
+        # log at DEBUG: on a fresh install this is raised once and recovered
+        # (migrations run automatically) — an ERROR line for expected control
+        # flow just frightens first-time users.
+        super().__init__(message, name, status_code, log_level="DEBUG")
 
 
 class EntityNotFoundError(CogneeValidationError):
