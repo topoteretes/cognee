@@ -238,6 +238,7 @@ def test_non_slack_modules_import_without_slack_bolt():
         "src.config",
         "src.citations",
         "src.slack_app",  # imports without slack_bolt because the import is deferred
+        "src.__main__",  # entry point also imports without slack_bolt
     ):
         assert importlib.import_module(mod) is not None
 
