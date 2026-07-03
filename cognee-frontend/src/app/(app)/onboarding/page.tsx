@@ -1,8 +1,10 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 import { useState, useRef, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { isCloudEnvironment } from "@/utils";
 import { useCogniInstance, useTenant } from "@/modules/tenant/TenantProvider";
 import markOnboardingComplete from "@/modules/users/markOnboardingComplete";
 import { markOnboardingCompleteLocally } from "@/utils/onboardingFlag";
@@ -796,15 +798,18 @@ function ConnectStatus({ verified }: { verified: boolean }) {
 function AgentOnboarding({ agent, serviceUrl, apiKey, cogniInstance, onRestart }: {
   agent: "claude-code" | "codex";
   serviceUrl: string | null;
-  apiKey: string;
+  apiKey: string | null;
   cogniInstance: ReturnType<typeof useCogniInstance>["cogniInstance"];
   onRestart: () => void;
 }) {
   const router = useRouter();
   const name = agent === "claude-code" ? "Claude Code" : "Codex";
-  const credsReady = Boolean(serviceUrl && apiKey);
-  const baseUrl = serviceUrl || "https://your-tenant.aws.cognee.ai";
-  const resolvedKey = apiKey || "your-api-key";
+  // Cloud provisions a tenant API key; local/OSS has no pre-provisioned key —
+  // the user creates one on the API Keys page, so the card is ready immediately.
+  const isCloud = isCloudEnvironment();
+  const credsReady = isCloud ? Boolean(serviceUrl && apiKey) : true;
+  const baseUrl = serviceUrl || (isCloud ? "https://your-tenant.aws.cognee.ai" : "http://localhost:8000");
+  const resolvedKey = apiKey || "<your-api-key>";
   // API key + base url are all the plugin/skill needs.
   const credsCode = `export COGNEE_BASE_URL="${baseUrl}"\nexport COGNEE_API_KEY="${resolvedKey}"`;
 
@@ -881,8 +886,24 @@ function AgentOnboarding({ agent, serviceUrl, apiKey, cogniInstance, onRestart }
 
   const credsCard = {
     title: "Copy your API credentials",
-    description: "Open a terminal and run these to point your agent at your Cognee memory.",
-    node: <OnboardingInlineCode code={`export COGNEE_BASE_URL="${baseUrl}"`} toCopy={credsCode} loading={!credsReady} placeholder="Preparing your credentials…" />,
+    description: isCloud
+      ? "Open a terminal and run these to point your agent at your Cognee memory."
+      : "Create an API key on the API Keys page, then run these in a terminal to point your agent at your local Cognee instance.",
+    node: (
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, width: "100%" }}>
+        <OnboardingInlineCode code={`export COGNEE_BASE_URL="${baseUrl}"`} toCopy={credsCode} loading={!credsReady} placeholder="Preparing your credentials…" />
+        {!isCloud && (
+          <Link
+            href="/api-keys"
+            target="_blank"
+            onClick={() => trackEvent({ pageName: "Onboarding", eventName: "onboarding_go_to_api_keys", additionalProperties: { path: agent } })}
+            style={{ fontSize: 13, color: "#BC9BFF", textDecoration: "underline", textUnderlineOffset: 3, alignSelf: "flex-start" }}
+          >
+            Go to API Keys →
+          </Link>
+        )}
+      </div>
+    ),
   };
   const allSetCard = {
     title: "You're all set",
