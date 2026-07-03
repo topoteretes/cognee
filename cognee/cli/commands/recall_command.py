@@ -4,7 +4,7 @@ import json
 
 from cognee.cli.reference import SupportsCliCommand
 from cognee.cli import DEFAULT_DOCS_URL
-from cognee.cli.config import SEARCH_TYPE_CHOICES, OUTPUT_FORMAT_CHOICES
+from cognee.cli.config import OUTPUT_FORMAT_CHOICES
 import cognee.cli.echo as fmt
 from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
 
@@ -22,13 +22,19 @@ Otherwise, this is a memory-oriented alias for `cognee search`.
     """
 
     def configure_parser(self, parser: argparse.ArgumentParser) -> None:
+        from cognee.cli.config import get_search_type_choices
+
         parser.add_argument("query_text", help="Your question or search query")
         parser.add_argument(
             "--query-type",
             "-t",
-            choices=SEARCH_TYPE_CHOICES,
+            choices=get_search_type_choices(),
             default="GRAPH_COMPLETION",
-            help="Search mode (default: GRAPH_COMPLETION)",
+            metavar="TYPE",
+            help=(
+                "Search mode (default: GRAPH_COMPLETION). Common: GRAPH_COMPLETION, "
+                "RAG_COMPLETION, CHUNKS, SUMMARIES, TEMPORAL, FEELING_LUCKY."
+            ),
         )
         parser.add_argument(
             "--datasets",
@@ -66,6 +72,11 @@ Otherwise, this is a memory-oriented alias for `cognee search`.
         )
 
     def execute(self, args: argparse.Namespace) -> None:
+        from cognee.cli import ui
+        from cognee.cli.hints import record_event
+        from cognee.cli.preflight import PreflightError, needs_for_search_type, run_preflight
+        from cognee.cli.render import render_results, render_session_entries
+
         try:
             import cognee
             from cognee.modules.search.types import SearchType
@@ -77,13 +88,36 @@ Otherwise, this is a memory-oriented alias for `cognee search`.
                 and args.query_type == "GRAPH_COMPLETION"  # i.e., the user didn't pass -t
             )
 
-            if session_only:
-                fmt.echo(f"Searching session '{args.session_id}': '{args.query_text}'")
-            else:
-                datasets_msg = (
-                    f" in datasets {args.datasets}" if args.datasets else " across all datasets"
-                )
-                fmt.echo(f"Recalling: '{args.query_text}' (type: {args.query_type}){datasets_msg}")
+            caps = ui.detect_caps()
+
+            if not session_only:
+                need_llm, need_embeddings = needs_for_search_type(args.query_type)
+                run_preflight(need_llm=need_llm, need_embeddings=need_embeddings)
+
+                state, dataset_name, doc_count = asyncio.run(self._memory_state(args))
+                if state == "empty":
+                    ui.guide_block(
+                        "Your memory is empty — nothing has been added yet.",
+                        [
+                            "cognee-cli add <file, folder, or text>",
+                            "cognee-cli cognify",
+                            f'cognee-cli recall "{args.query_text}"',
+                        ],
+                        caps=caps,
+                    )
+                    return
+                if state == "not_cognified":
+                    described = (
+                        f"{dataset_name} has {doc_count} document(s)"
+                        if dataset_name
+                        else "Your data is added"
+                    )
+                    ui.guide_block(
+                        f"{described} but no knowledge graph yet.",
+                        ["cognee-cli cognify", f'cognee-cli recall "{args.query_text}"'],
+                        caps=caps,
+                    )
+                    return
 
             async def run_recall():
                 try:
@@ -119,54 +153,51 @@ Otherwise, this is a memory-oriented alias for `cognee search`.
                 except Exception as e:
                     raise CliCommandInnerException(f"Failed to recall: {str(e)}") from e
 
-            results = asyncio.run(run_recall())
+            spinner_text = f"Searching session '{args.session_id}'" if session_only else "Recalling"
+            with ui.spinner_line(spinner_text, caps=caps) as spinner:
+                results = asyncio.run(run_recall())
+                elapsed = spinner.elapsed
+
+            if results:
+                record_event("recall_success")
 
             if args.output_format == "json":
                 fmt.echo(json.dumps(results, indent=2, default=str))
-            elif args.output_format == "simple":
+                return
+            if args.output_format == "simple":
                 for i, result in enumerate(results, 1):
                     fmt.echo(f"{i}. {result}")
+                return
+
+            is_session = bool(
+                results and isinstance(results[0], dict) and results[0].get("_source") == "session"
+            )
+            if is_session:
+                render_session_entries(results, caps=caps)
             else:
-                if not results:
-                    fmt.warning("No results found for your query.")
-                    return
-
-                # Detect session results by _source tag
-                is_session = isinstance(results[0], dict) and results[0].get("_source") == "session"
-
-                if is_session:
-                    fmt.echo(f"\nFound {len(results)} session entry(ies):")
-                    fmt.echo("=" * 60)
-                    for i, entry in enumerate(results, 1):
-                        q = entry.get("question", "")
-                        a = entry.get("answer", "")
-                        t = entry.get("time", "")
-                        header = f"[{t}] " if t else ""
-                        if q:
-                            fmt.echo(f"{fmt.bold(f'{header}Q:')} {q}")
-                        if a:
-                            fmt.echo(f"{fmt.bold('A:')} {a}")
-                        if i < len(results):
-                            fmt.echo("-" * 40)
-                else:
-                    fmt.echo(f"\nFound {len(results)} result(s) using {args.query_type}:")
-                    fmt.echo("=" * 60)
-
-                    if args.query_type in ["GRAPH_COMPLETION", "RAG_COMPLETION"]:
-                        for i, result in enumerate(results, 1):
-                            fmt.echo(f"{fmt.bold('Response:')} {result}")
-                            if i < len(results):
-                                fmt.echo("-" * 40)
-                    elif args.query_type == "CHUNKS":
-                        for i, result in enumerate(results, 1):
-                            fmt.echo(f"{fmt.bold(f'Chunk {i}:')} {result}")
-                            fmt.echo()
-                    else:
-                        for i, result in enumerate(results, 1):
-                            fmt.echo(f"{fmt.bold(f'Result {i}:')} {result}")
-                            fmt.echo()
+                render_results(
+                    results,
+                    query_type=args.query_type,
+                    output_format=args.output_format,
+                    elapsed=elapsed,
+                    caps=caps,
+                )
 
         except Exception as e:
+            # PreflightError must reach the central handler intact so it
+            # renders as the calm what/why/fix block, not a generic error.
+            if isinstance(e, (CliCommandException, PreflightError)):
+                raise
             if isinstance(e, CliCommandInnerException):
                 raise CliCommandException(str(e), error_code=1) from e
             raise CliCommandException(f"Error recalling: {str(e)}", error_code=1) from e
+
+    async def _memory_state(self, args: argparse.Namespace):
+        try:
+            from cognee.cli.empty_state import check_memory_state
+            from cognee.cli.user_resolution import resolve_cli_user
+
+            user = await resolve_cli_user(getattr(args, "user_id", None))
+            return await check_memory_state(user)
+        except Exception:
+            return "ready", None, 0

@@ -69,26 +69,45 @@ After successful cognify processing, use `cognee search` to query the knowledge 
         )
 
     def execute(self, args: argparse.Namespace) -> None:
+        import time as time_module
+
+        from cognee.cli import ui
+        from cognee.cli.hints import record_event
+        from cognee.cli.preflight import run_preflight
+
+        if getattr(args, "verbose", False):
+            import logging
+
+            from cognee.shared.logging_utils import set_console_log_level
+
+            set_console_log_level(logging.INFO)
+
+        run_preflight(need_llm=True, need_embeddings=True)
+
         try:
             # Import cognee here to avoid circular imports
             import cognee
 
             # Prepare datasets parameter
             datasets = args.datasets if args.datasets else None
-            dataset_msg = f" for datasets {datasets}" if datasets else " for all available data"
-            fmt.echo(f"Starting cognification{dataset_msg}...")
+            dataset_label = ", ".join(datasets) if datasets else "all datasets"
 
-            if args.verbose:
-                fmt.note("This process will analyze your data and build knowledge graphs.")
-                fmt.note("Depending on data size, this may take several minutes.")
-                if args.background:
-                    fmt.note(
-                        "Running in background mode - the process will continue after this command exits."
+            # Teach the empty state instead of failing on "no datasets".
+            caps = ui.detect_caps()
+            if datasets is None:
+                state = asyncio.run(self._memory_state(args))
+                if state == "empty":
+                    ui.guide_block(
+                        "Your memory is empty — nothing has been added yet.",
+                        [
+                            "cognee-cli add <file, folder, or text>",
+                            "cognee-cli cognify",
+                            'cognee-cli search "your question"',
+                        ],
+                        caps=caps,
                     )
+                    return
 
-            # Prepare chunker parameter - will be handled in the async function
-
-            # Run the async cognify function
             async def run_cognify():
                 try:
                     from cognee.cli.user_resolution import resolve_cli_user
@@ -127,20 +146,51 @@ After successful cognify processing, use `cognee search` to query the knowledge 
                 except Exception as e:
                     raise CliCommandInnerException(f"Failed to cognify: {str(e)}") from e
 
-            result = asyncio.run(run_cognify())
-
             if args.background:
-                fmt.success("Cognification started in background!")
-                if args.verbose and result:
-                    fmt.echo(
-                        "Background processing initiated. Use pipeline monitoring to track progress."
-                    )
-            else:
-                fmt.success("Cognification completed successfully!")
-                if args.verbose and result:
-                    fmt.echo(f"Processing results: {result}")
+                asyncio.run(run_cognify())
+                ui.success_line("Cognify started in the background.", caps=caps)
+                ui.next_step("cognee-cli datasets status", label="Track it:", caps=caps)
+                return
+
+            started = time_module.monotonic()
+            with ui.pipeline_progress(
+                f"Cognifying {dataset_label}", known_stages=ui.COGNIFY_STAGES, caps=caps
+            ) as board:
+                result = asyncio.run(run_cognify())
+                self._raise_on_errored_runs(result)
+
+            elapsed = ui.format_duration(time_module.monotonic() - started)
+            record_event("cognify_success")
+            board.finish(
+                f"Cognified {dataset_label} in {elapsed}",
+                next_command='cognee-cli search "What connects the ideas in my data?"',
+            )
 
         except Exception as e:
             if isinstance(e, CliCommandInnerException):
                 raise CliCommandException(str(e), error_code=1) from e
             raise CliCommandException(f"Error during cognification: {str(e)}", error_code=1) from e
+
+    async def _memory_state(self, args: argparse.Namespace) -> str:
+        try:
+            from cognee.cli.empty_state import check_memory_state
+            from cognee.cli.user_resolution import resolve_cli_user
+
+            user = await resolve_cli_user(getattr(args, "user_id", None))
+            state, _, _ = await check_memory_state(user)
+            return state
+        except Exception:
+            return "ready"
+
+    @staticmethod
+    def _raise_on_errored_runs(result) -> None:
+        """Blocking cognify returns per-dataset run info — a run that errored
+        must fail the command instead of printing a green success line."""
+        if not isinstance(result, dict):
+            return
+        for run_info in result.values():
+            status = getattr(run_info, "status", "")
+            if "Errored" in str(status):
+                payload = getattr(run_info, "payload", None)
+                detail = str(payload) if payload else "pipeline run errored"
+                raise CliCommandInnerException(f"Failed to cognify: {detail}")

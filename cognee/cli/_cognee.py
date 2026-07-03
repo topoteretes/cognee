@@ -1,6 +1,8 @@
 import sys
 import os
 import argparse
+import difflib
+import logging
 import signal
 import subprocess
 from typing import Any, Sequence, Dict, Type, cast, List
@@ -22,6 +24,28 @@ from cognee.cli.exceptions import CliCommandException
 
 
 ACTION_EXECUTED = False
+
+
+class SuggestingArgumentParser(argparse.ArgumentParser):
+    """argparse, but an unknown command suggests the nearest real one
+    instead of dumping the full 20-command wall."""
+
+    def error(self, message: str) -> None:  # noqa: A003 - argparse API
+        # Only the subcommand argument gets the "did you mean" treatment;
+        # option-level choice errors (e.g. --query-type) keep argparse's
+        # message, which usefully lists every valid value.
+        if "argument command: invalid choice:" in message and "(choose from" in message:
+            bad = message.split("invalid choice:", 1)[1].split("(choose from", 1)[0]
+            bad = bad.strip().strip("'\" ")
+            choices_blob = message.split("(choose from", 1)[1]
+            choices = [c.strip().strip(")'\" ") for c in choices_blob.split(",")]
+            close = difflib.get_close_matches(bad, [c for c in choices if c], n=1)
+            fmt.error(f"unknown command: '{bad}'")
+            if close:
+                sys.stderr.write(f"Did you mean:  cognee-cli {close[0]}\n")
+            sys.stderr.write("All commands:  cognee-cli --help\n")
+            sys.exit(2)
+        super().error(message)
 
 
 def print_help(parser: argparse.ArgumentParser) -> None:
@@ -51,6 +75,34 @@ class DebugAction(argparse.Action):
         # Enable debug mode for stack traces
         debug.enable_debug()
         fmt.note("Debug mode enabled. Full stack traces will be shown.")
+
+
+class VerboseAction(argparse.Action):
+    """--verbose lets detailed logs back onto the console (file logs always
+    have them); the CLI-mode default keeps the console at warnings only."""
+
+    def __init__(
+        self,
+        option_strings: Sequence[str],
+        dest: Any = argparse.SUPPRESS,
+        default: Any = argparse.SUPPRESS,
+        help: str = None,
+    ) -> None:
+        super(VerboseAction, self).__init__(
+            option_strings=option_strings, dest=dest, default=default, nargs=0, help=help
+        )
+
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: Any,
+        option_string: str = None,
+    ) -> None:
+        from cognee.shared.logging_utils import set_console_log_level
+
+        set_console_log_level(logging.INFO)
+        namespace.global_verbose = True
 
 
 class UiAction(argparse.Action):
@@ -90,6 +142,7 @@ def _discover_commands() -> List[Type[SupportsCliCommand]]:
         ("cognee.cli.commands.add_command", "AddCommand"),
         ("cognee.cli.commands.search_command", "SearchCommand"),
         ("cognee.cli.commands.cognify_command", "CognifyCommand"),
+        ("cognee.cli.commands.doctor_command", "DoctorCommand"),
         ("cognee.cli.commands.delete_command", "DeleteCommand"),
         ("cognee.cli.commands.config_command", "ConfigCommand"),
         ("cognee.cli.commands.datasets_command", "DatasetsCommand"),
@@ -122,8 +175,9 @@ def _discover_commands() -> List[Type[SupportsCliCommand]]:
 
 
 def _create_parser() -> tuple[argparse.ArgumentParser, Dict[str, SupportsCliCommand]]:
-    parser = argparse.ArgumentParser(
-        description=f"{CLI_DESCRIPTION} Further help is available at {DEFAULT_DOCS_URL}."
+    parser = SuggestingArgumentParser(
+        prog="cognee-cli",
+        description=f"{CLI_DESCRIPTION} Further help is available at {DEFAULT_DOCS_URL}.",
     )
 
     # Get version dynamically
@@ -139,6 +193,11 @@ def _create_parser() -> tuple[argparse.ArgumentParser, Dict[str, SupportsCliComm
         "--debug",
         action=DebugAction,
         help="Enable debug mode to show full stack traces on exceptions",
+    )
+    parser.add_argument(
+        "--verbose",
+        action=VerboseAction,
+        help="Show detailed logs on the console (they always go to the log file)",
     )
     parser.add_argument(
         "-ui",
@@ -367,32 +426,91 @@ def main() -> int:
     if cmd := installed_commands.get(args.command):
         try:
             cmd.execute(args)
+        except KeyboardInterrupt:
+            sys.stderr.write("\n")
+            return 130
         except Exception as ex:
-            docs_url = cmd.docs_url if hasattr(cmd, "docs_url") else DEFAULT_DOCS_URL
-            error_code = -1
-            raiseable_exception = ex
-
-            # Handle CLI-specific exceptions
-            if isinstance(ex, CliCommandException):
-                error_code = ex.error_code
-                docs_url = ex.docs_url or docs_url
-                raiseable_exception = ex.raiseable_exception
-
-            # Print exception
-            if raiseable_exception:
-                fmt.error(str(ex))
-
-            fmt.note(f"Please refer to our docs at '{docs_url}' for further assistance.")
-
-            if debug.is_debug_enabled() and raiseable_exception:
-                raise raiseable_exception
-
-            return error_code
+            return _render_command_failure(cmd, ex)
     else:
-        print_help(parser)
-        return -1
+        # Bare `cognee-cli`: greet, don't dump. (Normally the cognee_cli shim
+        # answers this without importing cognee at all; this covers direct
+        # invocations of the full parser.)
+        try:
+            from cognee_cli import _print_welcome
+
+            _print_welcome()
+            return 0
+        except ImportError:
+            print_help(parser)
+            return 0
 
     return 0
+
+
+def _dedup_prefix(message: str) -> str:
+    """Collapse 'Failed to search: Failed to search: X' into one prefix."""
+    for _ in range(3):
+        head, sep, tail = message.partition(": ")
+        if sep and tail.startswith(head + ":"):
+            message = tail
+        else:
+            break
+    return message
+
+
+def _render_command_failure(cmd: SupportsCliCommand, ex: Exception) -> int:
+    """One choke point turns any command failure into a calm, actionable block."""
+    from cognee.cli import diagnostics, ui
+    from cognee.cli.preflight import PreflightError
+
+    # A closed downstream pipe (`search ... | head`) is not an error worth a
+    # block — re-raise so the shim exits 141 quietly, like any Unix tool.
+    probe, seen = ex, set()
+    while probe is not None and id(probe) not in seen:
+        if isinstance(probe, BrokenPipeError):
+            raise probe
+        seen.add(id(probe))
+        probe = probe.__cause__ or probe.__context__
+
+    docs_url = getattr(cmd, "docs_url", None) or DEFAULT_DOCS_URL
+    error_code = 1
+    if isinstance(ex, CliCommandException):
+        error_code = ex.error_code if ex.error_code > 0 else 1
+        docs_url = ex.docs_url or docs_url
+
+    if debug.is_debug_enabled():
+        raise ex
+
+    if isinstance(ex, PreflightError):
+        calm = ex.calm
+        ui.error_block(calm.title, why=calm.why, fixes=calm.fixes, footer=calm.footer)
+        return calm.exit_code
+
+    # Usage errors already say exactly what to do — no debug/logs footer.
+    if isinstance(ex, CliCommandException) and ex.error_code == 2:
+        ui.error_block(_dedup_prefix(str(ex)))
+        return 2
+
+    calm = diagnostics.describe_exception(ex)
+    if calm is not None:
+        ui.error_block(calm.title, why=calm.why, fixes=calm.fixes, footer=calm.footer)
+        return calm.exit_code
+
+    # Unrecognized failure: honest fallback — the message, the log file, the
+    # escape hatch. Never a bare "see the docs".
+    from cognee.shared.logging_utils import get_log_file_location
+
+    fixes = [("Retry", "re-run with --debug for the full stack trace")]
+    log_file = None
+    try:
+        log_file = get_log_file_location()
+    except Exception:
+        pass
+    if log_file:
+        fixes.append(("Logs", log_file))
+    fixes.append(("Docs", docs_url))
+    ui.error_block(_dedup_prefix(str(ex)), fixes=fixes)
+    return error_code
 
 
 def _main() -> None:
