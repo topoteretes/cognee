@@ -5,6 +5,7 @@ import { useState, useRef, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCogniInstance, useTenant } from "@/modules/tenant/TenantProvider";
 import markOnboardingComplete from "@/modules/users/markOnboardingComplete";
+import { markOnboardingCompleteLocally } from "@/utils/onboardingFlag";
 import ServeOnboarding from "./ServeOnboarding";
 import rememberData from "@/modules/ingestion/rememberData";
 import createDataset from "@/modules/datasets/createDataset";
@@ -40,7 +41,7 @@ function StepDots({ current, total = 4 }: { current: number; total?: number }) {
 function SkipLink({ label = "Skip onboarding and go to dashboard", compact = false }: { label?: string; compact?: boolean } = {}) {
   const router = useRouter();
   return (
-    <button onClick={() => { trackEvent({ pageName: "Onboarding", eventName: "onboarding_skipped" }); sessionStorage.setItem("cognee-onboarding-skipped", "1"); localStorage.setItem("cognee-onboarding-complete", "1"); markOnboardingComplete().catch(() => {}); router.push("/dashboard"); }} className="cursor-pointer" style={{ background: "none", border: "none", color: "rgba(237,236,234,0.65)", fontSize: 13, paddingTop: compact ? 12 : 32, paddingBottom: compact ? 0 : 24 }}>
+    <button onClick={() => { trackEvent({ pageName: "Onboarding", eventName: "onboarding_skipped" }); sessionStorage.setItem("cognee-onboarding-skipped", "1"); markOnboardingCompleteLocally(); markOnboardingComplete().catch(() => {}); router.push("/dashboard"); }} className="cursor-pointer" style={{ background: "none", border: "none", color: "rgba(237,236,234,0.65)", fontSize: 13, paddingTop: compact ? 12 : 32, paddingBottom: compact ? 0 : 24 }}>
       {label}
     </button>
   );
@@ -209,6 +210,10 @@ function Step2({ files, datasetId, onNext, cogniInstance }: {
   const [dsId, setDsId] = useState<string | null>(datasetId);
   const cancelledRef = useRef(false);
   const tickerIds = useRef<ReturnType<typeof setInterval>[]>([]);
+  // Survives the StrictMode mount→cleanup→remount cycle (refs aren't reset by
+  // it), so only the first real runPipeline() call executes — see the guard
+  // at the top of runPipeline for why the remount can't just "start fresh".
+  const pipelineRanRef = useRef(false);
 
   const allDone = steps.every((s) => s.status === "done");
 
@@ -284,8 +289,19 @@ function Step2({ files, datasetId, onNext, cogniInstance }: {
   }
 
   async function runPipeline() {
+    // StrictMode's mount→cleanup→remount cycle sets cancelledRef but can't
+    // actually abort in-flight createDataset/rememberData requests (no
+    // AbortController wiring, and they have side effects on the backend).
+    // "Cancel and restart fresh" is unsafe for those — it produces two
+    // concurrent cognify pipeline runs for the same dataset, whose statuses
+    // interleave and can leave the poller waiting on a COMPLETED signal that
+    // never arrives cleanly (bar parks at 90%). So the second invocation is a
+    // hard no-op instead: only the first real call ever executes the body.
+    if (pipelineRanRef.current) return;
+
     const cancelled = () => cancelledRef.current;
     if (!cogniInstance) return; // only runs once the tenant is ready (see effect guard)
+    pipelineRanRef.current = true;
 
     try {
       // The tenant is provisioned by the time we get here — complete the
@@ -537,7 +553,7 @@ function Step3({ datasetId, cogniInstance, demoEntries }: {
       <button
         onClick={() => {
           trackEvent({ pageName: "Onboarding", eventName: "onboarding_completed", additionalProperties: { destination: "dashboard" } });
-          localStorage.setItem("cognee-onboarding-complete", "1");
+          markOnboardingCompleteLocally();
           router.push("/dashboard");
         }}
         className="cursor-pointer"
@@ -669,7 +685,7 @@ function OnboardingInlineCode({ code, toCopy, loading, placeholder = "Preparing�
 
 // Live connection indicator for the "connect & recall" step: a pulsing dim dot
 // while we wait for the agent's first session, flipping to a solid green dot +
-// "Connected" once a new session is detected in Cognee Cloud.
+// "Connected" once a new session is detected in Cognee Local.
 function ConnectStatus({ verified }: { verified: boolean }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5 }}>
@@ -682,7 +698,7 @@ function ConnectStatus({ verified }: { verified: boolean }) {
         }}
       />
       <span style={{ color: verified ? "#22C55E" : "rgba(237,236,234,0.5)" }}>
-        {verified ? "Connected — activity detected in Cognee Cloud" : "Waiting for a connection…"}
+        {verified ? "Connected — activity detected in Cognee Local" : "Waiting for a connection…"}
       </span>
     </div>
   );
@@ -770,7 +786,7 @@ function AgentOnboarding({ agent, serviceUrl, apiKey, cogniInstance, onRestart }
 
   function goToDashboard() {
     trackEvent({ pageName: "Onboarding", eventName: "onboarding_completed", additionalProperties: { destination: "dashboard", path: agent } });
-    localStorage.setItem("cognee-onboarding-complete", "1");
+    markOnboardingCompleteLocally();
     router.push("/dashboard");
   }
 
@@ -788,7 +804,7 @@ function AgentOnboarding({ agent, serviceUrl, apiKey, cogniInstance, onRestart }
           <div style={{ fontSize: 13, fontWeight: 600, color: "#EDECEA" }}>What just happened</div>
           <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, lineHeight: "19px", color: "rgba(237,236,234,0.6)" }}>
             <li>The Cognee plugin hooks into your agent&apos;s lifecycle — no curl or manual API calls — and captures your session as you work.</li>
-            <li>When a session ends (e.g. you <strong style={{ color: "#EDECEA" }}>exit</strong>), it consolidates that session into your Cognee Cloud knowledge graph.</li>
+            <li>When a session ends (e.g. you <strong style={{ color: "#EDECEA" }}>exit</strong>), it consolidates that session into your Cognee Local knowledge graph.</li>
             <li>On every new session, it automatically recalls your memory back from the cloud.</li>
           </ul>
           <div style={{ fontSize: 13, lineHeight: "19px", color: "rgba(237,236,234,0.6)" }}>
@@ -836,8 +852,8 @@ function AgentOnboarding({ agent, serviceUrl, apiKey, cogniInstance, onRestart }
           {
             title: connectVerified ? "Connected — activity detected" : "Recall it from Cognee",
             description: connectVerified
-              ? "We detected your new session in Cognee Cloud — you're connected. You're all set."
-              : "Now ask Claude a question about what you just uploaded — it should answer from Cognee Cloud. (For the sample, use the question below.) This step completes on its own once your session shows up.",
+              ? "We detected your new session in Cognee Local — you're connected. You're all set."
+              : "Now ask Claude a question about what you just uploaded — it should answer from Cognee Local. (For the sample, use the question below.) This step completes on its own once your session shows up.",
             node: (
               <div style={{ display: "flex", flexDirection: "column", gap: 10, width: "100%" }}>
                 <div>
@@ -887,8 +903,8 @@ function AgentOnboarding({ agent, serviceUrl, apiKey, cogniInstance, onRestart }
           {
             title: connectVerified ? "Connected — activity detected" : "Recall it from Cognee",
             description: connectVerified
-              ? "We detected your new session in Cognee Cloud — you're connected. You're all set."
-              : `Now ask ${name} a question about what you just uploaded — it should answer from Cognee Cloud. (For the sample, use the question below.) This step completes on its own once your session shows up.`,
+              ? "We detected your new session in Cognee Local — you're connected. You're all set."
+              : `Now ask ${name} a question about what you just uploaded — it should answer from Cognee Local. (For the sample, use the question below.) This step completes on its own once your session shows up.`,
             node: (
               <div style={{ display: "flex", flexDirection: "column", gap: 10, width: "100%" }}>
                 <div>
@@ -1030,7 +1046,7 @@ function AgentOnboarding({ agent, serviceUrl, apiKey, cogniInstance, onRestart }
 // "Skip to dashboard" escape so a slow pod/dataset never traps the user.
 function skipToDashboard(router: ReturnType<typeof useRouter>) {
   try {
-    localStorage.setItem("cognee-onboarding-complete", "1");
+    markOnboardingCompleteLocally();
     sessionStorage.setItem("cognee-onboarding-skipped", "1");
   } catch { /* ignore */ }
   markOnboardingComplete().catch(() => {});

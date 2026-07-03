@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import useBoolean from "@/utils/useBoolean";
 import useOutsideClick from "@/utils/useOutsideClick";
+import { clearOnboardingCompleteLocally } from "@/utils/onboardingFlag";
 import ExtractionSettingsModal from "./ExtractionSettingsModal";
 
 function DocsIcon() {
@@ -113,7 +114,7 @@ export default function HelpMenu() {
   function startOnboarding() {
     sessionStorage.removeItem("cognee-onboarding-skipped");
     sessionStorage.removeItem("cognee-welcome-banner-dismissed");
-    localStorage.removeItem("cognee-onboarding-complete");
+    clearOnboardingCompleteLocally();
     close();
     router.push("/onboarding");
   }
