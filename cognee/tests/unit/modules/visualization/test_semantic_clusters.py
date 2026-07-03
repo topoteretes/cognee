@@ -119,12 +119,20 @@ def test_label_falls_back_to_dominant_type_when_no_names():
     assert "cluster" not in labels  # generic fallback no longer reached
 
 
-def test_summarize_seam_is_used_when_provided():
+def test_label_fn_seam_overrides_and_receives_member_nodes():
+    # A custom label_fn (e.g. an LLM summarizer) fully replaces the default and is
+    # called once per cluster with that cluster's member nodes — no discarded
+    # default label is computed first.
     nodes = _nodes(["a", "b", "c", "d", "e", "f"])
-    summarize = Mock(return_value="SUMMARY")
-    result = compute_clusters(nodes, BLOB, k=2, seed=42, summarize=summarize)
+    label_fn = Mock(return_value="SUMMARY")
+    result = compute_clusters(nodes, BLOB, k=2, seed=42, label_fn=label_fn)
     assert all(c["label"] == "SUMMARY" for c in result["clusters"])
-    assert summarize.call_count == 2  # once per cluster
+    assert label_fn.call_count == 2  # once per cluster
+    # Each call gets a list of member-node dicts, not the default label string.
+    for call in label_fn.call_args_list:
+        (member_nodes,) = call.args
+        assert isinstance(member_nodes, list)
+        assert all(isinstance(nd, dict) and "id" in nd for nd in member_nodes)
 
 
 def test_nodes_without_vectors_are_absent():

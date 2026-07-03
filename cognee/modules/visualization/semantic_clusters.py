@@ -98,8 +98,8 @@ def _usable_name(nd: Dict[str, Any]) -> Optional[str]:
     return name
 
 
-def _cluster_label(member_nodes: List[Dict[str, Any]]) -> str:
-    """Label a cluster by its top-3 real ``Entity`` nodes (by degree, importance).
+def default_label(member_nodes: List[Dict[str, Any]]) -> str:
+    """Default cluster ``label_fn``: top-3 real ``Entity`` nodes (by degree, importance).
 
     Entities win over DocumentChunk/TextSummary/EntityType so labels read as
     concepts, not chunk text or type names. Identifier-shaped or over-long names
@@ -125,7 +125,7 @@ def compute_clusters(
     *,
     k: Optional[int] = None,
     seed: int = CLUSTER_SEED,
-    summarize: Optional[Callable[[str, List[str]], str]] = None,
+    label_fn: Optional[Callable[[List[Dict[str, Any]]], str]] = None,
 ) -> Dict[str, Any]:
     """Cluster embedded nodes and precompute neighbors.
 
@@ -133,10 +133,12 @@ def compute_clusters(
     "neighbors": {id: [neighbor_id, ...]}}``. Nodes without a vector are absent
     from all three (the view leaves them uncolored).
 
-    ``summarize`` is an optional seam for a one-line LLM cluster summary; when
-    None (default and in CI) the deterministic top-entity label is used. Tests
-    inject a plain mock here — this does not depend on the #3601 LLM harness.
+    ``label_fn(member_nodes) -> str`` names each cluster; it is the sole labeling
+    seam. Defaults to :func:`default_label` (deterministic, offline). A one-line
+    LLM summarizer is just another ``label_fn`` — clustering never computes a
+    label the seam then discards, and no dependency on the #3601 harness.
     """
+    label_fn = label_fn or default_label
     node_by_id = {str(n["id"]): n for n in nodes}
     ids = sorted(nid for nid in node_by_id if nid in embeddings)
     if not ids:
@@ -156,10 +158,7 @@ def compute_clusters(
         if not members:
             continue
         member_nodes = [node_by_id[m] for m in members]
-        label = _cluster_label(member_nodes)
-        if summarize is not None:
-            top_names = [nd.get("name") for nd in member_nodes[:3] if nd.get("name")]
-            label = summarize(label, top_names)
+        label = label_fn(member_nodes)
         for m in members:
             node_cluster[m] = c
         clusters.append({"id": c, "label": label, "node_ids": members, "size": len(members)})
