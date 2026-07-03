@@ -20,6 +20,7 @@ import { CLAUDE_MARKETPLACE_ADD, CLAUDE_PLUGIN_INSTALL, CODEX_HOOKS_ENABLE, CODE
 import { AgentActivityTerminal, PipelineRun, Range, ownerDisplayName } from "@/ui/elements/AgentActivityTerminal";
 import SkeletonBar from "@/ui/elements/SkeletonBar";
 import DashboardSkeleton from "./DashboardSkeleton";
+import isCloudEnvironment from "@/utils/isCloudEnvironment";
 
 const AWAITING_DATASET_KEY = "cognee-awaiting-dataset";
 
@@ -449,7 +450,11 @@ export default function OverviewPage() {
     !creditsBannerDismissed && creditsSpentPct !== null && creditsSpentPct >= 90;
   const showLowBalanceBanner =
     !showCreditPctBanner && creditsRemainingUsd !== null && creditsRemainingUsd < 1;
-  const showVoucherBanner = !showCreditPctBanner && !showLowBalanceBanner;
+  // Redeeming a voucher for cloud credits is meaningless in a self-hosted
+  // install (there's no billing backend to redeem against), so this banner
+  // — which would otherwise be the default fallback whenever the other two
+  // credit banners are inactive (i.e. always, in OSS mode) — is cloud-only.
+  const showVoucherBanner = isCloudEnvironment() && !showCreditPctBanner && !showLowBalanceBanner;
 
   return (
     <div style={{ minHeight: "100%", flexShrink: 0 }}>

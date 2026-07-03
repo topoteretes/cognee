@@ -1,6 +1,4 @@
-/**
- * Open-source stub — API keys are managed via the local backend directly.
- */
+import { CogneeInstance } from "../instances/types";
 
 export interface ApiKey {
   id: string;
@@ -9,6 +7,9 @@ export interface ApiKey {
   name: string;
 }
 
-export default async function getApiKeys(_instance?: unknown): Promise<ApiKey[]> {
-  return [];
+export default async function getApiKeys(instance: CogneeInstance): Promise<ApiKey[]> {
+  const response = await instance.fetch("/auth/api-keys");
+  if (!response.ok) return [];
+  const data = await response.json();
+  return Array.isArray(data) ? data : [];
 }
