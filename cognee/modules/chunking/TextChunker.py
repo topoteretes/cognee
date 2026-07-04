@@ -13,6 +13,7 @@ class TextChunker(Chunker):
     async def read(self):
         document_id = str(self.document.id)
         document_name = self.document.name or basename(self.document.raw_data_location)
+        document_path = self.document.raw_data_location
         paragraph_chunks = []
         async for content_text in self.get_text():
             for chunk_data in chunk_by_paragraph(
@@ -36,6 +37,7 @@ class TextChunker(Chunker):
                             importance_weight=self.document.importance_weight,
                             document_id=document_id,
                             document_name=document_name,
+                            document_path=document_path,
                             metadata={
                                 "index_fields": ["text"],
                             },
@@ -58,6 +60,7 @@ class TextChunker(Chunker):
                                 importance_weight=self.document.importance_weight,
                                 document_id=document_id,
                                 document_name=document_name,
+                                document_path=document_path,
                                 metadata={
                                     "index_fields": ["text"],
                                 },
@@ -83,6 +86,7 @@ class TextChunker(Chunker):
                     importance_weight=self.document.importance_weight,
                     document_id=document_id,
                     document_name=document_name,
+                    document_path=document_path,
                     metadata={"index_fields": ["text"]},
                 )
             except Exception as e:

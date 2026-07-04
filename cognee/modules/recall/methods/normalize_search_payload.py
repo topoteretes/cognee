@@ -79,7 +79,9 @@ def _provenance_metadata(raw: dict) -> dict:
     Lets callers map a result back to the data they ingested and inspect the
     cited chunk. ``document_id`` is the ingested Data item's id (cognify sets
     ``Document.id = data.id``), exposed here as ``data_id``; ``id`` is the
-    chunk's own node id. Only keys actually present are included.
+    chunk's own node id. ``document_path`` is the source ``raw_data_location``,
+    letting a client resolve the result to the exact file even when several
+    documents share a basename. Only keys actually present are included.
     """
     metadata: dict[str, Any] = {}
     data_id = raw.get("document_id")
@@ -94,6 +96,9 @@ def _provenance_metadata(raw: dict) -> dict:
     document_name = raw.get("document_name")
     if document_name is not None:
         metadata["document_name"] = str(document_name)
+    document_path = raw.get("document_path")
+    if document_path is not None:
+        metadata["document_path"] = str(document_path)
     return metadata
 
 

@@ -133,14 +133,21 @@ def _get_payload(obj: Any) -> Optional[dict]:
     return None
 
 
-def _provenance_suffix(data_id: Optional[str], chunk_id: Optional[str]) -> str:
-    """Render a '(data_id: …, chunk_id: …)' annotation for whichever ids exist.
+def _provenance_suffix(path: Optional[str], data_id: Optional[str], chunk_id: Optional[str]) -> str:
+    """Render a '(path: …, data_id: …, chunk_id: …)' annotation for whichever fields exist.
 
-    Lets a reader map the citation back to the ingested data item and the exact
-    cited chunk, instead of only a (possibly auto-generated) document name and a
-    positional chunk number.
+    Lets a reader map the citation back to the source file, the ingested data
+    item, and the exact cited chunk, instead of only a (possibly auto-generated)
+    document name and a positional chunk number.
+
+    ``path`` is the source document location (``raw_data_location``). It
+    disambiguates identically-named files in different directories, which a
+    basename-only ``document name`` cannot. It is omitted when absent so chunks
+    indexed before the field existed render exactly as before.
     """
     parts = []
+    if path:
+        parts.append(f"path: {path}")
     if data_id:
         parts.append(f"data_id: {data_id}")
     if chunk_id:
@@ -175,8 +182,12 @@ def format_chunk_references(
     Reads ``payload["document_name"]``, ``payload["chunk_number"]`` (falling back
     to ``payload["chunk_index"] + 1``), and ``payload["text"]`` from each
     retrieved object. Entries missing usable document name or chunk-number
-    metadata are skipped. Results are deduplicated by chunk id and capped at
-    3-5 bullets.
+    metadata are skipped. When present, ``payload["document_id"]`` and
+    ``payload["document_path"]`` (the source ``raw_data_location``) are appended
+    to the citation so a reader can resolve it to the exact file even when
+    several documents share a basename; both are omitted when absent, so older
+    indexed data renders unchanged. Results are deduplicated by chunk id and
+    capped at 3-5 bullets.
 
     When ``answer`` is provided, candidates that share no significant terms
     with the answer are dropped and the remainder is ranked by term overlap,
@@ -216,8 +227,8 @@ def format_chunk_references(
             # rather than presenting unverifiable retrieval order as provenance.
             return ""
 
-    # (overlap_score, document_name, number, text, data_id, chunk_id) per candidate.
-    candidates: List[Tuple[int, str, int, str, Optional[str], Optional[str]]] = []
+    # (overlap_score, document_name, number, text, path, data_id, chunk_id) per candidate.
+    candidates: List[Tuple[int, str, int, str, Optional[str], Optional[str], Optional[str]]] = []
     seen: set = set()
 
     for obj in iterator:
@@ -239,6 +250,10 @@ def format_chunk_references(
         # Document.id = data.id), i.e. the dataId a caller needs to map a
         # citation back to the document they ingested.
         data_id = _clean_str(payload.get("document_id"))
+        # document_path == the source document's raw_data_location, so a caller
+        # can resolve a citation to the exact file even when several documents
+        # share a basename. None for chunks indexed before the field existed.
+        document_path = _clean_str(payload.get("document_path"))
 
         dedup_key = chunk_id or f"{document_name}#{number}"
         if dedup_key in seen:
@@ -254,7 +269,7 @@ def format_chunk_references(
                 # certainly not a source of the answer.
                 continue
 
-        candidates.append((score, document_name, number, text, data_id, chunk_id))
+        candidates.append((score, document_name, number, text, document_path, data_id, chunk_id))
 
     if not candidates:
         return ""
@@ -266,8 +281,8 @@ def format_chunk_references(
     max_bullets = _clamp_limit(limit)
     bullets = [
         f"- chunk {number} of document {document_name}"
-        f'{_provenance_suffix(data_id, chunk_id)}: "{_snippet(text)}"'
-        for _, document_name, number, text, data_id, chunk_id in candidates[:max_bullets]
+        f'{_provenance_suffix(path, data_id, chunk_id)}: "{_snippet(text)}"'
+        for _, document_name, number, text, path, data_id, chunk_id in candidates[:max_bullets]
     ]
 
     return EVIDENCE_HEADER + "\n" + "\n".join(bullets)
