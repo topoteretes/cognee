@@ -1,14 +1,19 @@
-"""Unit tests for the Critical + High security fixes.
+"""Unit tests for the Critical + High + Medium/Low security fixes.
 
 Covers:
   * C-2 get_auth_secret fail-hard behavior
   * C-1 graph schema identifier validation
   * H-2 SSRF URL guard
   * H-3 local-file allowlist
+  * M-1 SQL column-type allowlist (DDL injection guard)
+  * M-2 Cypher / natural-language search secure-by-default gate
+  * L-1 Zip Slip guard for the downloaded UI bundle
 """
 
+import io
 import os
 import tempfile
+import zipfile
 
 import pytest
 
@@ -155,3 +160,105 @@ class TestAssertLocalPathAllowed:
         monkeypatch.setenv("LOCAL_FILE_ALLOWED_ROOTS", tempfile.gettempdir())
         with pytest.raises(IngestionError):
             assert_local_path_allowed("/etc/passwd")
+
+
+# --------------------------------------------------------------------------- #
+# M-1 — SQL column-type allowlist (DDL injection guard)
+# --------------------------------------------------------------------------- #
+class TestValidateSqlType:
+    @pytest.mark.parametrize(
+        "sql_type",
+        ["TEXT", "VARCHAR(255)", "NUMERIC(10, 2)", "integer", "double precision", "INT[]"],
+    )
+    def test_valid_types_pass(self, sql_type):
+        from cognee.infrastructure.databases.relational.sqlalchemy.SqlAlchemyAdapter import (
+            _validate_sql_type,
+        )
+
+        assert _validate_sql_type(sql_type) == sql_type.strip()
+
+    @pytest.mark.parametrize(
+        "sql_type",
+        [
+            "TEXT); DROP TABLE users;--",
+            "TEXT DEFAULT (SELECT password FROM users)",
+            "'; --",
+            "",
+            "INT) --",
+        ],
+    )
+    def test_injection_types_rejected(self, sql_type):
+        from cognee.infrastructure.databases.relational.sqlalchemy.SqlAlchemyAdapter import (
+            _validate_sql_type,
+        )
+
+        with pytest.raises(ValueError):
+            _validate_sql_type(sql_type)
+
+
+# --------------------------------------------------------------------------- #
+# M-2 — Cypher / natural-language search secure-by-default gate
+# --------------------------------------------------------------------------- #
+class TestCypherQueriesAllowed:
+    def _fn(self):
+        from cognee.modules.search.methods.get_search_type_retriever_instance import (
+            _cypher_queries_allowed,
+        )
+
+        return _cypher_queries_allowed
+
+    def test_disabled_by_default_in_production(self, monkeypatch):
+        monkeypatch.setenv("ENV", "prod")
+        monkeypatch.delenv("ALLOW_CYPHER_QUERY", raising=False)
+        assert self._fn()() is False
+
+    def test_enabled_by_default_outside_production(self, monkeypatch):
+        monkeypatch.setenv("ENV", "dev")
+        monkeypatch.delenv("ALLOW_CYPHER_QUERY", raising=False)
+        assert self._fn()() is True
+
+    def test_explicit_true_enables_even_in_production(self, monkeypatch):
+        monkeypatch.setenv("ENV", "prod")
+        monkeypatch.setenv("ALLOW_CYPHER_QUERY", "true")
+        assert self._fn()() is True
+
+    @pytest.mark.parametrize("value", ["false", "no", "0", "off", "maybe", ""])
+    def test_non_truthy_values_fail_safe(self, monkeypatch, value):
+        monkeypatch.setenv("ENV", "dev")
+        monkeypatch.setenv("ALLOW_CYPHER_QUERY", value)
+        assert self._fn()() is False
+
+
+# --------------------------------------------------------------------------- #
+# L-1 — Zip Slip guard (downloaded UI bundle extraction)
+# --------------------------------------------------------------------------- #
+class TestZipSlipGuard:
+    def _extract_with_guard(self, names, dest):
+        """Replicates the guard applied in cognee/api/v1/ui/ui.py before extractall."""
+        import os as _os
+        from pathlib import Path
+
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            for n in names:
+                zf.writestr(n, "x")
+        buf.seek(0)
+
+        extract_dir = Path(dest)
+        extract_root = extract_dir.resolve()
+        with zipfile.ZipFile(buf, "r") as zip_file:
+            for member in zip_file.namelist():
+                target = (extract_dir / member).resolve()
+                if target != extract_root and extract_root not in target.parents:
+                    raise ValueError(f"Unsafe path in downloaded UI archive: {member!r}")
+            zip_file.extractall(extract_dir)
+
+    def test_safe_archive_extracts(self):
+        with tempfile.TemporaryDirectory() as d:
+            self._extract_with_guard(["cognee-1.0/cognee-frontend/index.html"], d)
+
+    @pytest.mark.parametrize("evil", ["../evil.txt", "../../etc/passwd", "a/../../evil"])
+    def test_zip_slip_member_rejected(self, evil):
+        with tempfile.TemporaryDirectory() as d:
+            with pytest.raises(ValueError):
+                self._extract_with_guard([evil], d)
