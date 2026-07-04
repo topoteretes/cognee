@@ -12,7 +12,7 @@ class WrongDataDocumentInputError(CogneeValidationError):
         self,
         field: str,
         name: str = "WrongDataDocumentInputError",
-        status_code: int = status.HTTP_422_UNPROCESSABLE_CONTENT,
+        status_code: int = status.HTTP_422_UNPROCESSABLE_ENTITY,
     ):
         message = f"Missing of invalid parameter: '{field}'."
         super().__init__(message, name, status_code)

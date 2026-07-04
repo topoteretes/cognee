@@ -47,6 +47,6 @@ class QueryValidationError(CogneeValidationError):
         self,
         message: str = "Queries not supplied in the correct format.",
         name: str = "QueryValidationError",
-        status_code: int = status.HTTP_422_UNPROCESSABLE_CONTENT,
+        status_code: int = status.HTTP_422_UNPROCESSABLE_ENTITY,
     ):
         super().__init__(message, name, status_code)

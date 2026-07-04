@@ -251,7 +251,7 @@ def get_search_router() -> APIRouter:
                 ).model_dump(),
             )
         except (DatabaseNotCreatedError, UserNotFoundError, CogneeValidationError) as e:
-            status_code = getattr(e, "status_code", status.HTTP_422_UNPROCESSABLE_CONTENT)
+            status_code = getattr(e, "status_code", status.HTTP_422_UNPROCESSABLE_ENTITY)
             return JSONResponse(
                 status_code=status_code,
                 content=ErrorResponse(

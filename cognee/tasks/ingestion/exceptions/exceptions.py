@@ -17,7 +17,7 @@ class InvalidDLTArgumentError(CogneeValidationError):
         self,
         name: str = "InvalidDLTArgumentError",
         message: str = "Invalid argument for dlt ingestion.",
-        status_code: int = status.HTTP_422_UNPROCESSABLE_CONTENT,
+        status_code: int = status.HTTP_422_UNPROCESSABLE_ENTITY,
     ):
         super().__init__(message, name, status_code)
 
@@ -27,7 +27,7 @@ class UnsupportedDBProviderError(CogneeConfigurationError):
         self,
         name: str = "UnsupportedDBProviderError",
         message: str = "Unsupported database provider.",
-        status_code: int = status.HTTP_422_UNPROCESSABLE_CONTENT,
+        status_code: int = status.HTTP_422_UNPROCESSABLE_ENTITY,
     ):
         super().__init__(message, name, status_code)
 

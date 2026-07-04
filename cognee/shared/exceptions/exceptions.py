@@ -8,7 +8,7 @@ class IngestionError(CogneeValidationError):
         self,
         message: str = "Failed to load data.",
         name: str = "IngestionError",
-        status_code: int = status.HTTP_422_UNPROCESSABLE_CONTENT,
+        status_code: int = status.HTTP_422_UNPROCESSABLE_ENTITY,
     ) -> None:
         super().__init__(message, name, status_code)
 

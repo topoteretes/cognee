@@ -15,7 +15,7 @@ class DatabaseNotCreatedError(CogneeSystemError):
         self,
         message: str = "The database has not been created yet. Please call `await setup()` first.",
         name: str = "DatabaseNotCreatedError",
-        status_code: int = status.HTTP_422_UNPROCESSABLE_CONTENT,
+        status_code: int = status.HTTP_422_UNPROCESSABLE_ENTITY,
     ):
         super().__init__(message, name, status_code)
 
@@ -99,7 +99,7 @@ class EmbeddingException(CogneeConfigurationError):
         self,
         message: str = "Embedding Exception.",
         name: str = "EmbeddingException",
-        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
     ):
         super().__init__(message, name, status_code)
 
@@ -162,7 +162,7 @@ class SessionQAEntryValidationError(CogneeValidationError):
         self,
         message: str = "Session QA entry validation failed. Wrong SessionQAEntry is used during session CRUD operations.",
         name: str = "SessionQAEntryValidationError",
-        status_code: int = status.HTTP_422_UNPROCESSABLE_CONTENT,
+        status_code: int = status.HTTP_422_UNPROCESSABLE_ENTITY,
     ):
         super().__init__(message, name, status_code)
 
@@ -215,6 +215,6 @@ class DatabaseCredentialsError(CogneeConfigurationError):
         self,
         message: str = "Database credentials are incomplete or invalid. Please check your configuration.",
         name: str = "DatabaseCredentialsError",
-        status_code: int = status.HTTP_422_UNPROCESSABLE_CONTENT,
+        status_code: int = status.HTTP_422_UNPROCESSABLE_ENTITY,
     ):
         super().__init__(message, name, status_code)
