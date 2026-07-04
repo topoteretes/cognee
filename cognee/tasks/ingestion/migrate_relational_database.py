@@ -154,6 +154,16 @@ async def schema_only_ingestion(schema):
 
 async def complete_database_ingestion(schema, migrate_column_data):
     engine = get_migration_relational_engine()
+
+    # Table/column names below come from the source database's introspected
+    # schema, i.e. from data outside Cognee's control. Interpolating them raw
+    # into SQL is an injection vector, so every identifier is passed through the
+    # dialect's identifier preparer, which quotes/escapes it for the target DB.
+    qi = engine.engine.dialect.identifier_preparer.quote
+
+    def qname(name: str) -> str:
+        return ".".join(qi(part) for part in str(name).split("."))
+
     # Create a mapping of node_id to node objects for referencing in edge creation
     node_mapping = {}
     edge_mapping = []
@@ -171,7 +181,9 @@ async def complete_database_ingestion(schema, migrate_column_data):
             node_mapping[table_name] = table_node
 
             # Fetch all rows for the current table
-            rows_result = await cursor.execute(text(f"SELECT * FROM {table_name};"))
+            rows_result = await cursor.execute(
+                text(f"SELECT * FROM {qname(table_name)};")  # noqa: S608 - identifier quoted
+            )
             rows = rows_result.fetchall()
 
             for row in rows:
@@ -271,13 +283,17 @@ async def complete_database_ingestion(schema, migrate_column_data):
                 else:
                     primary_key_col = details["primary_key"]
 
-                # Query to find relationships based on foreign keys
+                # Query to find relationships based on foreign keys. Every
+                # identifier (table names, aliases, column names) is quoted so a
+                # crafted source-schema name cannot inject SQL.
+                q_alias_1 = qi(alias_1)
+                q_alias_2 = qi(alias_2)
                 fk_query = text(
-                    f"SELECT {alias_1}.{primary_key_col} AS source_id, "
-                    f"{alias_2}.{fk['ref_column']} AS ref_value "
-                    f"FROM {table_name} AS {alias_1} "
-                    f"JOIN {fk['ref_table']} AS {alias_2} "
-                    f"ON {alias_1}.{fk['column']} = {alias_2}.{fk['ref_column']};"
+                    f"SELECT {q_alias_1}.{qi(primary_key_col)} AS source_id, "  # noqa: S608 - identifiers quoted
+                    f"{q_alias_2}.{qi(fk['ref_column'])} AS ref_value "
+                    f"FROM {qname(table_name)} AS {q_alias_1} "
+                    f"JOIN {qname(fk['ref_table'])} AS {q_alias_2} "
+                    f"ON {q_alias_1}.{qi(fk['column'])} = {q_alias_2}.{qi(fk['ref_column'])};"
                 )
 
                 fk_result = await cursor.execute(fk_query)

@@ -265,6 +265,17 @@ def download_frontend_assets(force: bool = False) -> bool:
             with zipfile.ZipFile(archive_path, "r") as zip_file:
                 # Extract to temp directory first
                 extract_dir = temp_path / "extracted"
+                # Guard against Zip Slip: a malicious/compromised archive could
+                # contain members with ``..`` or absolute paths that escape the
+                # extraction directory and overwrite arbitrary files. Reject any
+                # member that would resolve outside ``extract_dir`` before writing.
+                extract_root = extract_dir.resolve()
+                for member in zip_file.namelist():
+                    target = (extract_dir / member).resolve()
+                    if target != extract_root and extract_root not in target.parents:
+                        raise ValueError(
+                            f"Unsafe path in downloaded UI archive: {member!r}"
+                        )
                 zip_file.extractall(extract_dir)
 
                 # Find the cognee-frontend directory in the extracted content
