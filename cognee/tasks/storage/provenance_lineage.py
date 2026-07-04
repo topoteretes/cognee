@@ -1,38 +1,31 @@
-"""Provenance lineage layer: materialize source lineage as first-class graph edges.
+"""Provenance lineage layer.
 
-Provenance is already captured in three separate places today: ``source_*``
-fields stamped on every DataPoint (lossy — first write wins), the relational
-``nodes``/``edges`` ledger (``data_id``/``dataset_id`` on every row), and domain
-edges such as ``is_part_of`` / ``made_from`` (schema-specific, and the chain
-stops at the Document — a Dataset is not a graph node). None of these is a single,
-uniform, in-graph contract that answers "what produced this node" for *every*
-node type.
+This layer records where each graph node came from by adding explicit lineage
+edges during ingestion:
 
-This module adds that contract. For each ingested data item it emits, on top of
-what already exists:
+    <node> -derived_from-> Document -in_dataset-> Dataset
 
-* one ``<node> -derived_from-> Document`` edge for every extracted content node,
-  so every node type (including ones with no domain source edge, e.g.
-  ``EntityType``, or custom-model nodes) is uniformly traceable to its source
-  Document. Because an extracted node that recurs across data items is written
-  once per data item (its id is deterministic), a *merged* node accumulates one
-  ``derived_from`` edge per contributing Document — i.e. many-to-many provenance,
-  the case the lossy ``source_*`` fields get wrong.
-* one deduplicated ``DatasetNode`` plus a ``Document -in_dataset-> Dataset`` edge,
-  completing the chain up to the dataset.
+Cognee already stamps ``source_*`` fields on data points and stores
+``data_id``/``dataset_id`` on the relational node and edge rows, but those fields
+only keep the first source and a Dataset is not represented as a graph node. This
+module fills both gaps. Every extracted node gets a ``derived_from`` edge to its
+source Document, and each Document gets an ``in_dataset`` edge to a single shared
+Dataset node. Because a node that recurs across data items is written once per
+data item, a merged node ends up with one ``derived_from`` edge per contributing
+Document, which is the many-to-many case the ``source_*`` fields cannot express.
 
-The layer is on by default and configurable via ``PROVENANCE_LINEAGE`` /
-``PROVENANCE_LINEAGE_DEPTH``. Lineage edges carry a ``provenance=True`` property
-so they form a queryable, reserved contract that can be traversed/filtered
-generically, without relying on a namespaced relationship name (relationship
-names are used as native edge types by some backends, e.g. Neo4j, so a plain
-underscore name is the safe choice).
+The layer is on by default and is controlled by ``PROVENANCE_LINEAGE`` and
+``PROVENANCE_LINEAGE_DEPTH``. Every lineage edge carries a ``provenance=True``
+property so callers can traverse or filter the layer without knowing the domain
+schema. The relationship names use underscores rather than a namespaced form
+(for example ``prov:in``) because some backends, such as Neo4j, use the
+relationship name as a native edge type.
 
-Overhead is bounded: the only new node is the DatasetNode (one per dataset, not
-embedded — it declares no ``index_fields``), and every lineage edge shares a
-constant ``edge_text`` equal to its relationship name, so the N ``derived_from``
-edges collapse to a single embedded ``EdgeType`` in ``index_graph_edges`` rather
-than N distinct ones.
+The overhead is small. The only new node is the Dataset node (one per dataset,
+and it is not embedded because it declares no ``index_fields``). Every lineage
+edge shares a constant ``edge_text`` equal to its relationship name, so the
+``derived_from`` edges collapse to a single embedded ``EdgeType`` in
+``index_graph_edges`` instead of one per edge.
 """
 
 from datetime import datetime, timezone
@@ -48,36 +41,33 @@ from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("provenance_lineage")
 
-# Relationship name for a ``<node> -> Document`` provenance edge.
+# Relationship name for a <node> -> Document provenance edge.
 DERIVED_FROM_RELATIONSHIP = "derived_from"
 
-# Relationship name for the ``Document -> Dataset`` provenance edge. Kept
-# underscore style (not, e.g., "prov:in") so it is safe as a native relationship
-# type across all graph backends. The reserved-provenance contract is expressed
-# by the ``provenance`` edge property, not by the relationship name.
+# Relationship name for the Document -> Dataset provenance edge.
 IN_DATASET_RELATIONSHIP = "in_dataset"
 
-# Property flag marking an edge as part of the provenance lineage layer.
+# Edge property that marks an edge as part of the provenance lineage layer.
 PROVENANCE_EDGE_FLAG = "provenance"
 
-# Graph node ``type`` values that are structural (not extracted content) and so
-# must not be given a ``derived_from`` edge to a Document. ``DatasetNode`` is the
-# dataset tier itself; ``NodeSet`` is a cross-document tag, so anchoring it to a
-# single Document would be misleading.
+# Graph node types that are structural rather than extracted content. They do not
+# get a derived_from edge to a Document. DatasetNode is the dataset tier itself,
+# and NodeSet is a tag that spans documents, so anchoring it to one document would
+# be misleading.
 _STRUCTURAL_TYPES = frozenset({"DatasetNode", "NodeSet"})
 
-# Depth controls how far up the synthetic lineage is materialized:
-#   "document" — only ``<node> -derived_from-> Document`` edges.
-#   "dataset"  — also ``Document -in_dataset-> Dataset`` (the default, full chain).
+# Depth controls how far up the lineage is built. "document" adds only the
+# <node> -> Document edges. "dataset" also adds the Document -> Dataset edge and
+# is the default.
 VALID_DEPTHS = ("document", "dataset")
 DEFAULT_DEPTH = "dataset"
 
 
 class ProvenanceConfig(BaseSettings):
-    # PROVENANCE_LINEAGE — when True (default) the base pipeline materializes the
-    # source lineage subgraph. False reproduces the pre-lineage behavior exactly.
+    # When True (the default) the base pipeline builds the lineage layer. Set to
+    # False to reproduce the pre-lineage graph exactly.
     provenance_lineage: bool = True
-    # PROVENANCE_LINEAGE_DEPTH — "document" or "dataset" (default). See VALID_DEPTHS.
+    # How far up the lineage is built: "document" or "dataset" (the default).
     provenance_lineage_depth: str = DEFAULT_DEPTH
 
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
@@ -99,11 +89,11 @@ def _normalize_depth(depth: Optional[str]) -> str:
 def _provenance_edge(
     source_id: Any, target_id: Any, relationship_name: str
 ) -> Tuple[Any, Any, str, dict]:
-    """Build a provenance edge tuple in ``(source, target, name, properties)`` shape.
+    """Build a provenance edge tuple of (source, target, name, properties).
 
-    ``edge_text`` is set to the relationship name (a small constant set) so that
-    ``index_graph_edges`` collapses all edges of one relationship into a single
-    embedded ``EdgeType`` instead of one per edge.
+    edge_text is set to the relationship name so that index_graph_edges, which
+    embeds distinct edge_text values, collapses all edges of one relationship
+    into a single EdgeType instead of one per edge.
     """
     properties = {
         "source_node_id": source_id,
@@ -117,10 +107,10 @@ def _provenance_edge(
 
 
 def dataset_lineage_node_id(dataset_id: Any):
-    """Deterministic id for a dataset's lineage node.
+    """Return the deterministic id for a dataset's lineage node.
 
-    Derived from the dataset id so a single DatasetNode is shared across every
-    data item in the dataset (one Dataset node, not one per document).
+    The id is derived from the dataset id so a single Dataset node is shared
+    across every data item in the dataset.
     """
     return generate_node_id(f"DatasetNode:{dataset_id}")
 
@@ -133,15 +123,15 @@ def build_source_lineage(
     nodes: List[DataPoint],
     data_item: Any,
 ) -> List[Tuple[Any, Any, str, dict]]:
-    """Build ``<node> -derived_from-> Document`` edges for every content node.
+    """Build a derived_from edge from every content node to its source Document.
 
-    The Document graph node id equals ``data_item.id`` (cognify constructs
-    ``Document(id=data_item.id)``). Every node in this batch belongs to that
-    Document, so each content node gets one ``derived_from`` edge to it. The
-    Document node itself and structural nodes (Dataset/NodeSet) are skipped.
+    The Document node id equals ``data_item.id`` because cognify constructs the
+    Document with ``id=data_item.id``. Every node in this batch belongs to that
+    Document, so each content node gets one derived_from edge to it. The Document
+    node itself and structural nodes such as Dataset and NodeSet are skipped.
 
-    Returns an empty list when the Document node is not present in ``nodes``
-    (nothing to anchor to).
+    Returns an empty list when the Document node is not present in ``nodes``,
+    which avoids creating an edge with a missing endpoint.
     """
     if data_item is None:
         return []
@@ -167,12 +157,12 @@ def build_dataset_lineage(
     dataset: Any,
     data_item: Any,
 ) -> Tuple[List[DataPoint], List[Tuple[Any, Any, str, dict]]]:
-    """Build the Dataset tier of the provenance lineage subgraph.
+    """Build the dataset tier: a Dataset node and a Document -> Dataset edge.
 
-    Returns ``(extra_nodes, extra_edges)``: one deduplicated ``DatasetNode`` plus
-    a ``Document -in_dataset-> Dataset`` edge. Emitted only when the Document node
-    (id ``== data_item.id``) is present in ``nodes``, to avoid a dangling
-    endpoint (e.g. custom pipelines that do not materialize a Document node).
+    Returns ``(extra_nodes, extra_edges)`` with one shared Dataset node and one
+    ``in_dataset`` edge. The edge is produced only when the Document node
+    (id ``== data_item.id``) is present in ``nodes``, which avoids creating an
+    edge with a missing endpoint for pipelines that do not materialize a Document.
     """
     if dataset is None or data_item is None:
         return [], []
@@ -200,11 +190,11 @@ def build_provenance_lineage(
     data_item: Any,
     config: Optional[ProvenanceConfig] = None,
 ) -> Tuple[List[DataPoint], List[Tuple[Any, Any, str, dict]]]:
-    """Assemble the full provenance lineage layer for one ``add_data_points`` batch.
+    """Build the full lineage layer for one add_data_points batch.
 
-    Returns ``(extra_nodes, extra_edges)`` to append to the graph write before the
-    upsert, so the layer is written and forget-tracked through the existing ledger
-    path. Honors ``PROVENANCE_LINEAGE_DEPTH``.
+    Returns ``(extra_nodes, extra_edges)`` to append before the upsert, so the
+    edges are written and tracked for deletion through the existing ledger path.
+    The result respects ``PROVENANCE_LINEAGE_DEPTH``.
     """
     config = config or get_provenance_config()
     if not config.provenance_lineage:
@@ -215,10 +205,8 @@ def build_provenance_lineage(
     extra_nodes: List[DataPoint] = []
     extra_edges: List[Tuple[Any, Any, str, dict]] = []
 
-    # <node> -derived_from-> Document (both depths).
     extra_edges.extend(build_source_lineage(nodes, data_item))
 
-    # Document -in_dataset-> Dataset (dataset depth only).
     if depth == "dataset":
         dataset_nodes, dataset_edges = build_dataset_lineage(nodes, dataset, data_item)
         extra_nodes.extend(dataset_nodes)

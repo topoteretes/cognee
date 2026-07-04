@@ -2,16 +2,15 @@ from cognee.infrastructure.engine import DataPoint
 
 
 class DatasetNode(DataPoint):
-    """Provenance lineage node representing a dataset in the knowledge graph.
+    """Graph node that represents a dataset.
 
-    Emitted by the provenance lineage layer (see
-    ``cognee.tasks.storage.provenance_lineage``) so every extracted node has an
-    in-graph path up to the dataset it originated from. Its id is derived
-    deterministically from the dataset id, so a single DatasetNode is shared and
-    deduplicated across every data item in the same dataset.
+    The provenance lineage layer (see ``cognee.tasks.storage.provenance_lineage``)
+    creates one of these per dataset so every extracted node has a path in the
+    graph up to its dataset. The id is derived from the dataset id, so a single
+    node is shared across every data item in the same dataset.
 
-    Like ``NodeSet`` it declares no ``index_fields``, so it is a structural
-    graph-only node and is not embedded into the vector store.
+    It declares no ``index_fields``, so like ``NodeSet`` it is a structural node
+    that lives only in the graph and is not embedded into the vector store.
     """
 
     name: str

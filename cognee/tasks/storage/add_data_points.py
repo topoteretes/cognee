@@ -80,12 +80,10 @@ async def add_data_points(
 
     nodes, edges = deduplicate_nodes_and_edges(nodes, edges)
 
-    # Provenance lineage (on by default): make every node traceable to its source
-    # Document (<node> -derived_from-> Document) and up to its Dataset
-    # (Document -in_dataset-> Dataset). Added before ensure_default_edge_properties
-    # so the lineage edges pick up the same default properties, and before the
-    # upsert block so they are written and forget-tracked through the existing
-    # ledger path.
+    # Add provenance lineage edges so every node is traceable to its source
+    # Document and up to its Dataset. This runs before ensure_default_edge_properties
+    # so the new edges get the same default properties, and before the upsert block
+    # so they are written and tracked for deletion through the existing ledger path.
     lineage_nodes, lineage_edges = build_provenance_lineage(nodes, dataset, data_item)
     nodes.extend(lineage_nodes)
     edges.extend(lineage_edges)
