@@ -1,12 +1,11 @@
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
-from fastapi import Depends
 from pydantic import Field
 from typing import List, Optional, Union, Literal
 
-from cognee.api.DTO import InDTO
+from cognee.api.DTO import InDTO, ErrorResponse
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.shared.utils import send_telemetry
@@ -37,7 +36,16 @@ class ImprovePayloadDTO(InDTO):
 def get_improve_router() -> APIRouter:
     router = APIRouter()
 
-    @router.post("", response_model=dict)
+    @router.post(
+        "",
+        response_model=dict,
+        responses={
+            400: {"model": ErrorResponse},
+            409: {"model": ErrorResponse},
+            422: {"model": ErrorResponse},
+            500: {"model": ErrorResponse},
+        },
+    )
     @log_usage(function_name="POST /v1/improve", log_type="api_endpoint")
     async def improve(payload: ImprovePayloadDTO, user: User = Depends(get_authenticated_user)):
         """
@@ -60,7 +68,7 @@ def get_improve_router() -> APIRouter:
 
         ## Error Codes
         - **400 Bad Request**: Neither dataset_id nor dataset_name provided
-        - **409 Conflict**: Error during processing
+        - **500 Internal Server Error**: Error during processing
         """
         send_telemetry(
             "Improve API Endpoint Invoked",
@@ -72,9 +80,11 @@ def get_improve_router() -> APIRouter:
         )
 
         if not payload.dataset_id and not payload.dataset_name:
-            raise HTTPException(
+            return JSONResponse(
                 status_code=400,
-                detail="Either datasetId or datasetName must be provided.",
+                content=ErrorResponse(
+                    error="Either datasetId or datasetName must be provided.",
+                ).model_dump(),
             )
 
         try:
@@ -93,13 +103,23 @@ def get_improve_router() -> APIRouter:
             )
 
             if isinstance(improve_run, PipelineRunErrored):
-                return JSONResponse(status_code=420, content=improve_run)
+                detail = getattr(improve_run, "error", None) or str(improve_run)
+                return JSONResponse(
+                    status_code=500,
+                    content=ErrorResponse(
+                        error="Pipeline run errored",
+                        detail=detail,
+                    ).model_dump(),
+                )
             return improve_run
         except Exception as error:
             logger.error("Improve endpoint error: %s", error, exc_info=True)
             return JSONResponse(
-                status_code=409,
-                content={"error": "An error occurred during graph improvement."},
+                status_code=500,
+                content=ErrorResponse(
+                    error="An error occurred during graph improvement.",
+                    detail=str(error),
+                ).model_dump(),
             )
 
     return router
