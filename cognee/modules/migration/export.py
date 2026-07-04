@@ -30,9 +30,9 @@ from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("migration.export")
 
-EXPORT_FORMATS = ("pydantic", "cogx", "json", "graphml", "cypher")
+EXPORT_FORMATS = ("pydantic", "cogx", "json", "graphml", "cypher", "governance")
 
-_FORMAT_SUFFIX = {"json": ".json", "graphml": ".graphml", "cypher": ".cypher"}
+_FORMAT_SUFFIX = {"json": ".json", "graphml": ".graphml", "cypher": ".cypher", "governance": ".governance.json"}
 
 
 @dataclass
@@ -180,12 +180,45 @@ async def export_dataset(
         except Exception as error:  # noqa: BLE001 — manifest metadata is best effort
             logger.debug("Could not determine embedding model for manifest: %s", error)
         _write_cogx(nodes, edges, destination, dataset_obj.name, embedding_model=embedding_model)
+        
+        try:
+            from datetime import datetime, timezone
+            from cognee.modules.governance.serializers import serialize_permission_model
+            from cognee.modules.governance.models import GovernanceBundle
+            
+            policies = await serialize_permission_model(dataset_obj.id)
+            
+            bundle = GovernanceBundle(
+                exported_at=datetime.now(timezone.utc).isoformat(),
+                dataset_id=str(dataset_obj.id),
+                permission_model=policies,
+                decision_history=[],
+                rejection_trail=[],
+                bundle_hash="pending"
+            )
+            
+            governance_path = destination / "governance.jsonld"
+            with open(governance_path, "w", encoding="utf-8") as f:
+                f.write(bundle.model_dump_json(indent=2))
+                
+        except Exception as e:
+            logger.warning("Failed to export governance bundle to cogx archive: %s", e)
     elif format == "json":
         write_json(nodes, edges, destination)
     elif format == "graphml":
         write_graphml(nodes, edges, destination)
     elif format == "cypher":
         write_cypher(nodes, edges, destination)
+    elif format == "governance":
+        from cognee.modules.governance.export_governance import export_governance_bundle
+
+        bundle = await export_governance_bundle(
+            dataset_id=str(dataset_obj.id),
+            dataset_name=dataset_obj.name,
+            user=user,
+        )
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        bundle.save(destination)
 
     logger.info(
         "Exported dataset %s: %d nodes, %d edges -> %s (%s)",

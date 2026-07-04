@@ -8,7 +8,7 @@ from cognee.modules.migration.export import ExportResult, export_dataset
 from cognee.modules.migration.snapshot import GraphSnapshot
 from cognee.modules.observability import new_span, COGNEE_DATASET_NAME
 
-_FileFormat = Literal["cogx", "json", "graphml", "cypher"]
+_FileFormat = Literal["cogx", "json", "graphml", "cypher", "governance"]
 
 
 @overload
@@ -98,3 +98,4 @@ async def export(
             user=user,
             link_relations=link_relations,
         )
+
