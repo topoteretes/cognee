@@ -1,7 +1,8 @@
 import os
 import json
-
+import shlex
 import subprocess
+
 import modal
 import streamlit as st
 
@@ -38,7 +39,7 @@ def run():
         "--server.enableCORS=false "
         "--server.enableXsrfProtection=false"
     )
-    subprocess.Popen(cmd, shell=True)
+    subprocess.Popen(shlex.split(cmd), shell=False)
 
 
 # ----------------------------------------------------------------------------
