@@ -3,6 +3,7 @@ from .EntityType import EntityType
 from .TableRow import TableRow
 from .TableType import TableType
 from .node_set import NodeSet
+from .DatasetNode import DatasetNode
 from .ColumnValue import ColumnValue
 from .Timestamp import Timestamp
 from .Interval import Interval
