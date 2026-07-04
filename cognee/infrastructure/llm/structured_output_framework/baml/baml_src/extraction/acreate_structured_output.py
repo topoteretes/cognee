@@ -74,7 +74,7 @@ async def acreate_structured_output(
     if response_model is str:
         # Note: when a response model is set to string in python, result is stored in text property in the BAML response model
         return str(result.text)  # ty:ignore[invalid-return-type, unresolved-attribute]
-    return response_model.model_validate(result.dict())  # ty:ignore[invalid-argument-type, deprecated]
+    return response_model.model_validate(result.model_dump())  # ty:ignore[invalid-argument-type, deprecated]
 
 
 if __name__ == "__main__":

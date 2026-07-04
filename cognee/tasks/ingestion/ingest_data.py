@@ -37,7 +37,9 @@ async def ingest_data(
         user = await get_default_user()
 
     def get_external_metadata_dict(data_item: Union[BinaryIO, str, Any]) -> dict[str, Any]:
-        if hasattr(data_item, "dict") and inspect.ismethod(getattr(data_item, "dict")):
+        if hasattr(data_item, "model_dump") and inspect.ismethod(getattr(data_item, "model_dump")):
+            return {"metadata": data_item.model_dump(), "origin": str(type(data_item))}
+        elif hasattr(data_item, "dict") and inspect.ismethod(getattr(data_item, "dict")):
             return {"metadata": data_item.dict(), "origin": str(type(data_item))}
         else:
             return {}
