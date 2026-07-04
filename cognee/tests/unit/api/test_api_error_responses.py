@@ -21,6 +21,7 @@ from cognee.modules.pipelines.models import PipelineRunErrored, PipelineRunCompl
 from cognee.modules.users.exceptions.exceptions import PermissionDeniedError
 from cognee.api.v1.add.routers.get_add_router import get_add_router
 from cognee.api.v1.cognify.routers.get_cognify_router import get_cognify_router
+from cognee.api.v1.datasets.routers.get_datasets_router import get_datasets_router
 from cognee.api.v1.memify.routers.get_memify_router import get_memify_router
 from cognee.api.v1.remember.routers.get_remember_router import get_remember_router
 from cognee.api.v1.search.routers.get_search_router import get_search_router
@@ -60,6 +61,7 @@ def app():
     app = FastAPI()
     app.include_router(get_add_router(), prefix="/add")
     app.include_router(get_cognify_router(), prefix="/cognify")
+    app.include_router(get_datasets_router(), prefix="/datasets")
     app.include_router(get_memify_router(), prefix="/memify")
     app.include_router(get_remember_router(), prefix="/remember")
     app.include_router(get_search_router(), prefix="/search")
@@ -387,3 +389,45 @@ class TestUpdateEndpoint:
         )
         assert resp.status_code == 500
         assert resp.json()["error"] == "Internal server error"
+
+
+# ---------------------------------------------------------------------------
+# Datasets endpoint – regression: server errors must return 500, not 418
+# ---------------------------------------------------------------------------
+
+
+class TestDatasetsEndpoint:
+    def test_get_datasets_internal_error_returns_500(self, client):
+        import cognee.modules.users.permissions.methods as perms
+
+        perms.get_all_user_permission_datasets = AsyncMock(
+            side_effect=RuntimeError("unexpected")
+        )
+
+        resp = client.get("/datasets")
+        assert resp.status_code == 500
+        assert "Error retrieving datasets" in resp.json()["detail"]
+
+    def test_create_dataset_internal_error_returns_500(self, client):
+        import cognee.modules.data.methods as data_methods
+
+        data_methods.get_datasets_by_name = AsyncMock(
+            side_effect=RuntimeError("unexpected")
+        )
+
+        resp = client.post("/datasets", json={"name": "test_dataset"})
+        assert resp.status_code == 500
+        assert "Error creating dataset" in resp.json()["detail"]
+
+
+# ---------------------------------------------------------------------------
+# Exception base class – regression: default status code must be 500, not 418
+# ---------------------------------------------------------------------------
+
+
+class TestCogneeApiErrorDefaults:
+    def test_base_exception_defaults_to_500(self):
+        from cognee.exceptions.exceptions import CogneeApiError
+
+        exc = CogneeApiError(message="test error", log=False)
+        assert exc.status_code == 500
