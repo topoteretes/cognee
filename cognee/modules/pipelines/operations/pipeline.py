@@ -25,6 +25,9 @@ from cognee.modules.pipelines.layers.check_pipeline_run_qualification import (
 from cognee.modules.pipelines.models.PipelineRunInfo import (
     PipelineRunStarted,
 )
+from cognee.modules.pipelines.models import PipelineRunStatus
+from cognee.modules.pipelines.operations.get_pipeline_status import get_pipeline_status
+from cognee.modules.pipelines.methods import reset_pipeline_run_status
 from typing import Any
 
 logger = get_logger("cognee.pipeline")
@@ -86,6 +89,29 @@ async def run_pipeline_per_dataset(
 ):
     if not data:
         data = await get_dataset_data(dataset_id=dataset.id)
+
+    # Auto-recover datasets stuck in DATASET_PROCESSING_ERRORED state.
+    #
+    # When a previous cognify run fails (e.g. due to a transient DB error or
+    # network issue), the pipeline_runs table retains a row with status
+    # DATASET_PROCESSING_ERRORED. A subsequent cognify call on the same dataset
+    # then raises RetryError[ProgrammingError] inside run_tasks because the
+    # relational DB still holds stale state from the failed run.
+    #
+    # Calling reset_pipeline_run_status inserts a fresh DATASET_PROCESSING_INITIATED
+    # row which clears the stale state and allows run_tasks to proceed normally.
+    #
+    # See: https://github.com/topoteretes/cognee/issues/3853
+    task_status = await get_pipeline_status([dataset.id], pipeline_name)
+    if task_status.get(str(dataset.id)) == PipelineRunStatus.DATASET_PROCESSING_ERRORED:
+        logger.warning(
+            "Dataset %s has a previous errored run for pipeline '%s'. "
+            "Auto-resetting status to allow re-run. "
+            "(See https://github.com/topoteretes/cognee/issues/3853)",
+            dataset.id,
+            pipeline_name,
+        )
+        await reset_pipeline_run_status(user.id, dataset.id, pipeline_name)
 
     process_pipeline_status = await check_pipeline_run_qualification(dataset, data, pipeline_name)
     if process_pipeline_status:
