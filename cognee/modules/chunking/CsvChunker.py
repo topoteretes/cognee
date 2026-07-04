@@ -13,6 +13,7 @@ class CsvChunker(Chunker):
     async def read(self):
         document_id = str(self.document.id)
         document_name = self.document.name or basename(self.document.raw_data_location)
+        document_path = self.document.raw_data_location
         async for content_text in self.get_text():
             if content_text is None:
                 continue
@@ -29,6 +30,7 @@ class CsvChunker(Chunker):
                         contains=[],
                         document_id=document_id,
                         document_name=document_name,
+                        document_path=document_path,
                         metadata={
                             "index_fields": ["text"],
                         },

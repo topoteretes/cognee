@@ -80,6 +80,7 @@ class TextChunkerWithOverlap(Chunker):
                 contains=[],
                 document_id=str(self.document.id),
                 document_name=self.document_name,
+                document_path=self.document.raw_data_location,
                 metadata={"index_fields": ["text"]},
             )
         except Exception as e:
