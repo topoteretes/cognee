@@ -65,7 +65,7 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
         dimensions: Optional[int] = 1024,
         max_completion_tokens: int = 512,
         endpoint: Optional[str] = "http://localhost:11434/api/embed",
-        huggingface_tokenizer: str = "Salesforce/SFR-Embedding-Mistral",
+        huggingface_tokenizer: Optional[str] = None,
         batch_size: int = 100,
     ):
         self.model = model
@@ -224,17 +224,13 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
         return self.batch_size
 
     def get_tokenizer(self):
-        """
-        Load and return a HuggingFace tokenizer for the embedding engine.
-
-        Returns:
-        --------
-
-            The instantiated HuggingFace tokenizer used by the embedding engine.
-        """
-        logger.debug("Loading HuggingfaceTokenizer for OllamaEmbeddingEngine...")
-        tokenizer = HuggingFaceTokenizer(
-            model=self.huggingface_tokenizer_name, max_completion_tokens=self.max_completion_tokens
-        )
-        logger.debug("Tokenizer loaded for OllamaEmbeddingEngine")
-        return tokenizer
+    if not self.huggingface_tokenizer_name:
+        logger.debug("No HuggingFace tokenizer specified, skipping tokenizer loading.")
+        return None
+    logger.debug("Loading HuggingfaceTokenizer for OllamaEmbeddingEngine...")
+    tokenizer = HuggingFaceTokenizer(
+        model=self.huggingface_tokenizer_name,
+        max_completion_tokens=self.max_completion_tokens
+    )
+    logger.debug("Tokenizer loaded for OllamaEmbeddingEngine")
+    return tokenizer
