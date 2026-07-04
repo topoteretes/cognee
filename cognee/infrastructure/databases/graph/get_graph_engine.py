@@ -131,6 +131,7 @@ def create_graph_engine(
     kuzu_num_threads=0,
     kuzu_buffer_pool_size=DEFAULT_KUZU_BUFFER_POOL_SIZE,
     kuzu_max_db_size=DEFAULT_KUZU_MAX_DB_SIZE,
+    graph_database_sync_interval=5.0,
 ):
     """
     Wrapper function to call create graph engine with caching.
@@ -157,6 +158,7 @@ def create_graph_engine(
     kuzu_num_threads = normalized_optional_params["kuzu_num_threads"]
     kuzu_buffer_pool_size = normalized_optional_params["kuzu_buffer_pool_size"]
     kuzu_max_db_size = normalized_optional_params["kuzu_max_db_size"]
+    graph_database_sync_interval = normalized_optional_params["graph_database_sync_interval"]
 
     # Check USE_UNIFIED_PROVIDER outside the cache so it's always re-read
     unified_provider = os.environ.get("USE_UNIFIED_PROVIDER", "")
@@ -184,6 +186,7 @@ def create_graph_engine(
         kuzu_num_threads,
         kuzu_buffer_pool_size,
         kuzu_max_db_size,
+        graph_database_sync_interval,
     )
 
 
@@ -215,6 +218,7 @@ def evict_graph_engine(**kwargs) -> bool:
         normalized["kuzu_num_threads"],
         normalized["kuzu_buffer_pool_size"],
         normalized["kuzu_max_db_size"],
+        normalized["graph_database_sync_interval"],
     )
 
 
@@ -238,6 +242,7 @@ def is_graph_engine_cached(**kwargs) -> bool:
         normalized["kuzu_num_threads"],
         normalized["kuzu_buffer_pool_size"],
         normalized["kuzu_max_db_size"],
+        normalized["graph_database_sync_interval"],
     )
 
 
@@ -258,6 +263,7 @@ def _create_graph_engine(
     kuzu_num_threads=0,
     kuzu_buffer_pool_size=DEFAULT_KUZU_BUFFER_POOL_SIZE,
     kuzu_max_db_size=DEFAULT_KUZU_MAX_DB_SIZE,
+    graph_database_sync_interval=5.0,
 ):
     """
     Create a graph engine based on the specified provider type.
@@ -459,25 +465,36 @@ def _create_graph_engine(
             graph_id=graph_identifier,
         )
     elif graph_database_provider == "turso":
-        if not graph_database_url:
-            raise EnvironmentError("Missing required Turso database URL.")
-
         auth_token = graph_database_key if graph_database_key else ""
 
+        from .turso.adapter import TursoAdapter
+
         if auth_token:
-            raise NotImplementedError(
-                "Remote Turso support is not yet implemented. "
-                "Set GRAPH_DATABASE_KEY to an empty string to use local SQLite mode."
+            # Remote sync (embedded replica) mode.
+            # graph_database_url = remote libSQL URL (e.g. libsql://<db>.turso.io).
+            # graph_file_path    = local replica file (absolute path).
+            if not graph_database_url:
+                raise EnvironmentError("Missing required Turso remote database URL.")
+            if not graph_file_path:
+                raise EnvironmentError(
+                    "Turso remote sync mode requires a local replica file path "
+                    "(GRAPH_FILE_PATH), to store the embedded replica."
+                )
+            connection_string: str = f"sqlite+aioturso:///{graph_file_path}"
+            return TursoAdapter(
+                connection_string=connection_string,
+                remote_url=graph_database_url,
+                auth_token=auth_token,
+                sync_interval_seconds=graph_database_sync_interval,
             )
         else:
             # Local mode — graph_database_url must be an absolute path.
             # sqlite+aioturso:/// + /abs/path => sqlite+aioturso:////abs/path (4 slashes = absolute)
             # pyturso provides Rust-backed async via turso.aio worker thread (same model as aiosqlite).
+            if not graph_database_url:
+                raise EnvironmentError("Missing required Turso database URL.")
             connection_string: str = f"sqlite+aioturso:///{graph_database_url}"
-
-        from .turso.adapter import TursoAdapter
-
-        return TursoAdapter(connection_string=connection_string)
+            return TursoAdapter(connection_string=connection_string)
 
     all_providers = list(supported_databases.keys()) + [
         "neo4j",

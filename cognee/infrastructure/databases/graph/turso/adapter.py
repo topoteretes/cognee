@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import time
 from uuid import UUID
 from datetime import datetime, timezone
 from contextlib import asynccontextmanager
@@ -9,6 +10,7 @@ from typing import AsyncIterator, Dict, Any, List, Union, Optional, Tuple, Type
 
 from sqlalchemy import text, insert
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.engine import DataPoint
@@ -34,8 +36,20 @@ class TursoAdapter(GraphDBInterface):
 
     _ALLOWED_FILTER_ATTRS = {"id", "name", "type"}
 
-    def __init__(self, connection_string: str) -> None:
-        """Create engine and sessionmaker from a Turso connection string."""
+    def __init__(
+        self,
+        connection_string: str,
+        remote_url: Optional[str] = None,
+        auth_token: Optional[str] = None,
+        client_name: str = "cognee",
+        sync_interval_seconds: float = 5.0,
+    ) -> None:
+        """Create engine and sessionmaker from a Turso connection string.
+
+        If ``remote_url`` is set, the local file at ``connection_string`` is
+        treated as an embedded replica kept in sync with the remote libSQL/Turso
+        database via ``turso.aio.sync.connect()``.
+        """
         # pyturso 0.6.1 omits has_stop on AsyncAdapt_turso_dbapi.
         # SQLAlchemy 2.0.51+ reads this flag in SQLiteDialect_aiosqlite.__init__
         # to decide whether force-close via stop() is available.
@@ -43,25 +57,97 @@ class TursoAdapter(GraphDBInterface):
         # close only — correct since turso.aio has no stop() method.
         try:
             import turso.sqlalchemy.dialect as _turso_dialect
+
             if not hasattr(_turso_dialect.AsyncAdapt_turso_dbapi, "has_stop"):
                 _turso_dialect.AsyncAdapt_turso_dbapi.has_stop = False
         except ImportError:
             pass
 
         self.db_uri = connection_string
-        self.engine = create_async_engine(
-            self.db_uri,
-            json_serializer=lambda obj: json.dumps(obj, cls=JSONEncoder),
-        )
+        self.remote_url = remote_url or None
+        self.auth_token = auth_token or None
+        self.client_name = client_name
+        self.sync_interval_seconds = sync_interval_seconds
+        self._last_pull_monotonic: Optional[float] = None
+
+        if self.remote_url:
+            if "aioturso" not in connection_string:
+                raise ValueError(
+                    "Turso remote sync mode requires the aioturso driver "
+                    "(sqlite+aioturso:///<local replica path>)."
+                )
+
+            def _async_creator_fn(database, **kw):
+                import turso.aio.sync as turso_sync
+
+                return turso_sync.connect(
+                    database,
+                    remote_url=self.remote_url,
+                    auth_token=self.auth_token,
+                    client_name=self.client_name,
+                    bootstrap_if_empty=True,
+                )
+
+            self.engine = create_async_engine(
+                self.db_uri,
+                json_serializer=lambda obj: json.dumps(obj, cls=JSONEncoder),
+                poolclass=StaticPool,
+                connect_args={"async_creator_fn": _async_creator_fn},
+            )
+        else:
+            self.engine = create_async_engine(
+                self.db_uri,
+                json_serializer=lambda obj: json.dumps(obj, cls=JSONEncoder),
+            )
         self.sessionmaker = async_sessionmaker(bind=self.engine, expire_on_commit=False)
         self._write_lock = asyncio.Lock()
 
+    async def _get_sync_connection(self):
+        """Reach the live turso.aio.sync ConnectionSync backing this engine."""
+        async with self.engine.connect() as conn:
+            raw = await conn.get_raw_connection()
+            return raw.driver_connection
+
+    async def _sync_pull(self) -> None:
+        """Pull remote changes into the local replica."""
+        if not self.remote_url:
+            return
+        conn = await self._get_sync_connection()
+        await conn.pull()
+        self._last_pull_monotonic = time.monotonic()
+
+    async def _sync_push(self) -> None:
+        """Push local writes to the remote database."""
+        if not self.remote_url:
+            return
+        conn = await self._get_sync_connection()
+        await conn.push()
+
+    async def _maybe_pull(self) -> None:
+        """Pull remote changes, throttled to at most once per sync_interval_seconds."""
+        if not self.remote_url:
+            return
+        now = time.monotonic()
+        if (
+            self._last_pull_monotonic is not None
+            and (now - self._last_pull_monotonic) < self.sync_interval_seconds
+        ):
+            return
+        await self._sync_pull()
+
     async def close(self) -> None:
         """Dispose connection pool. Called by closing_lru_cache on eviction."""
+        if self.remote_url:
+            try:
+                await self._sync_push()
+            except Exception:
+                logger.warning("Best-effort push before Turso adapter close failed", exc_info=True)
         await self.engine.dispose(close=True)
 
     async def initialize(self) -> None:
         """Create tables and indexes if they do not exist."""
+        if self.remote_url:
+            await self._maybe_pull()
         async with self.engine.begin() as conn:
             # SQLite disables FK enforcement by default; cascade deletes need this
             await conn.execute(text("PRAGMA foreign_keys = ON"))
@@ -70,6 +156,8 @@ class TursoAdapter(GraphDBInterface):
     @asynccontextmanager
     async def _session(self) -> AsyncIterator[Any]:
         """Yield an async session from the underlying engine."""
+        if self.remote_url:
+            await self._maybe_pull()
         async with self.sessionmaker() as session:
             await session.execute(text("PRAGMA foreign_keys = ON"))
             yield session
@@ -160,6 +248,8 @@ class TursoAdapter(GraphDBInterface):
                         stmt = insert(_node_table).prefix_with("OR REPLACE").values(row)
                         await session.execute(stmt)
                 await session.commit()
+            if self.remote_url:
+                await self._sync_push()
 
     async def delete_node(self, node_id: str) -> None:
         """Delete a single node. Delegates to delete_nodes."""
@@ -176,6 +266,8 @@ class TursoAdapter(GraphDBInterface):
                     text(f"DELETE FROM graph_node WHERE id IN ({placeholders})"), params
                 )
                 await session.commit()
+            if self.remote_url:
+                await self._sync_push()
 
     async def get_node(self, node_id: str) -> Optional[Dict[str, Any]]:
         """Retrieve a single node by ID."""
@@ -244,6 +336,8 @@ class TursoAdapter(GraphDBInterface):
                         stmt = insert(_edge_table).prefix_with("OR REPLACE").values(row)
                         await session.execute(stmt)
                 await session.commit()
+            if self.remote_url:
+                await self._sync_push()
 
     async def has_edge(self, source_id: str, target_id: str, relationship_name: str) -> bool:
         """Check whether a single edge exists."""
@@ -417,9 +511,7 @@ class TursoAdapter(GraphDBInterface):
 
             ep_ph, ep_params = _in_params("ep", list(endpoint_ids))
             node_result = await session.execute(
-                text(
-                    f"SELECT id, name, type, properties FROM graph_node WHERE id IN ({ep_ph})"
-                ),
+                text(f"SELECT id, name, type, properties FROM graph_node WHERE id IN ({ep_ph})"),
                 ep_params,
             )
             nodes = []
@@ -731,6 +823,8 @@ class TursoAdapter(GraphDBInterface):
                 await session.execute(text("DELETE FROM graph_edge"))
                 await session.execute(text("DELETE FROM graph_node"))
                 await session.commit()
+            if self.remote_url:
+                await self._sync_push()
 
     async def get_triplets_batch(self, offset: int, limit: int) -> List[Dict[str, Any]]:
         """Retrieve a batch of (source, relationship, target) triplets."""

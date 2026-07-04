@@ -1,6 +1,7 @@
 """Unit tests for TursoAdapter using an in-memory SQLite database."""
 
 import json
+import time
 import pytest
 import pytest_asyncio
 
@@ -73,10 +74,12 @@ async def test_has_edges_returns_found_tuples(adapter):
     await adapter.add_node("n2", {"name": "Bob", "type": "Person"})
     await adapter.add_edge("n1", "n2", "KNOWS")
 
-    found = await adapter.has_edges([
-        ("n1", "n2", "KNOWS"),
-        ("n2", "n1", "KNOWS"),   # does not exist
-    ])
+    found = await adapter.has_edges(
+        [
+            ("n1", "n2", "KNOWS"),
+            ("n2", "n1", "KNOWS"),  # does not exist
+        ]
+    )
     assert len(found) == 1
     assert found[0] == ("n1", "n2", "KNOWS")
 
@@ -208,3 +211,39 @@ async def test_cascade_delete_edges_on_node_delete(adapter):
 async def test_query_raises_not_implemented(adapter):
     with pytest.raises(NotImplementedError):
         await adapter.query("MATCH (n) RETURN n")
+
+
+@pytest.mark.asyncio
+async def test_maybe_pull_throttles_repeated_calls(monkeypatch):
+    """_maybe_pull should skip pulling again within sync_interval_seconds.
+
+    No real network/engine connection is exercised: _sync_pull is monkeypatched
+    and the underlying sqlite+aioturso engine is never opened (SQLAlchemy async
+    engines connect lazily), so this needs no live Turso credentials.
+    """
+    remote_adapter = TursoAdapter(
+        connection_string="sqlite+aioturso:///:memory:",
+        remote_url="https://fake-remote.example",
+        auth_token="fake-token",
+        sync_interval_seconds=1000,
+    )
+
+    call_count = 0
+
+    async def fake_sync_pull():
+        nonlocal call_count
+        call_count += 1
+        remote_adapter._last_pull_monotonic = time.monotonic()
+
+    monkeypatch.setattr(remote_adapter, "_sync_pull", fake_sync_pull)
+
+    await remote_adapter._maybe_pull()
+    await remote_adapter._maybe_pull()
+    await remote_adapter._maybe_pull()
+    assert call_count == 1, "repeated calls within sync_interval_seconds should not re-pull"
+
+    remote_adapter.sync_interval_seconds = 0
+    await remote_adapter._maybe_pull()
+    assert call_count == 2, "a call after the interval elapses should pull again"
+
+    await remote_adapter.engine.dispose()

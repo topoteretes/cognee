@@ -229,6 +229,7 @@ class DatabaseContextManager:
             "kuzu_num_threads": get_graph_config().kuzu_num_threads,
             "kuzu_buffer_pool_size": get_graph_config().kuzu_buffer_pool_size,
             "kuzu_max_db_size": get_graph_config().kuzu_max_db_size,
+            "graph_database_sync_interval": get_graph_config().graph_database_sync_interval,
         }
 
         storage_config = {

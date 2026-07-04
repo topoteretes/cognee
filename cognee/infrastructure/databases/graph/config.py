@@ -58,6 +58,7 @@ class GraphConfig(BaseSettings):
     graph_topology: object = KnowledgeGraph
     graph_dataset_database_handler: str = "ladybug"
     graph_database_subprocess_enabled: bool = True
+    graph_database_sync_interval: float = Field(5.0, env="GRAPH_DATABASE_SYNC_INTERVAL")
 
     # Kuzu tuning. 0 means "use Kuzu's default" (one thread per CPU).
     kuzu_num_threads: int = Field(0, env="KUZU_NUM_THREADS")
@@ -139,6 +140,7 @@ class GraphConfig(BaseSettings):
             "kuzu_num_threads": self.kuzu_num_threads,
             "kuzu_buffer_pool_size": self.kuzu_buffer_pool_size,
             "kuzu_max_db_size": self.kuzu_max_db_size,
+            "graph_database_sync_interval": self.graph_database_sync_interval,
         }
 
     def to_hashable_dict(self) -> dict:
@@ -170,6 +172,7 @@ class GraphConfig(BaseSettings):
             "kuzu_num_threads": self.kuzu_num_threads,
             "kuzu_buffer_pool_size": self.kuzu_buffer_pool_size,
             "kuzu_max_db_size": self.kuzu_max_db_size,
+            "graph_database_sync_interval": self.graph_database_sync_interval,
         }
 
 
