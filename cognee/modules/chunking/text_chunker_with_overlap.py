@@ -20,6 +20,7 @@ class TextChunkerWithOverlap(Chunker):
     ):
         super().__init__(document, get_text, max_chunk_size)
         self.document_name = document.name or basename(document.raw_data_location)
+        self.document_path = document.raw_data_location
         self._accumulated_chunk_data = []
         self._accumulated_size = 0
         self.chunk_overlap_ratio = chunk_overlap_ratio
@@ -80,6 +81,7 @@ class TextChunkerWithOverlap(Chunker):
                 contains=[],
                 document_id=str(self.document.id),
                 document_name=self.document_name,
+                document_path=self.document_path,
                 metadata={"index_fields": ["text"]},
             )
         except Exception as e:

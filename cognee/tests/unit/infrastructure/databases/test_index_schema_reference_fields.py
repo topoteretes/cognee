@@ -8,7 +8,13 @@ from its payload — which would make chunk Evidence render empty on that backen
 
 import pytest
 
-REFERENCE_FIELDS = ("document_id", "document_name", "chunk_index", "source_chunk_id")
+REFERENCE_FIELDS = (
+    "document_id",
+    "document_name",
+    "document_path",
+    "chunk_index",
+    "source_chunk_id",
+)
 
 
 def _index_schema_classes():
@@ -62,6 +68,7 @@ def test_index_schema_round_trips_reference_fields(name, schema_cls):
         text="some chunk text",
         document_id="22222222-2222-2222-2222-222222222222",
         document_name="annual_report.pdf",
+        document_path="/abs/path/to/annual_report.pdf",
         chunk_index=4,
         source_chunk_id="33333333-3333-3333-3333-333333333333",
         importance_weight=0.8,
@@ -69,6 +76,7 @@ def test_index_schema_round_trips_reference_fields(name, schema_cls):
     dumped = instance.model_dump()
     assert dumped["document_id"] == "22222222-2222-2222-2222-222222222222"
     assert dumped["document_name"] == "annual_report.pdf"
+    assert dumped["document_path"] == "/abs/path/to/annual_report.pdf"
     assert dumped["chunk_index"] == 4
     assert dumped["source_chunk_id"] == "33333333-3333-3333-3333-333333333333"
     assert dumped["importance_weight"] == 0.8

@@ -1,10 +1,11 @@
 """Unit tests asserting chunkers populate the reference scalar fields.
 
 The References (Evidence) feature relies on every produced ``DocumentChunk``
-carrying flat ``document_id`` / ``document_name`` scalars (basename only, never
-an absolute path). These tests run the real chunkers over an in-memory text
-generator (no LLM, no network) and assert the fields are set, and that the
-format helper renders the 1-based number from ``chunk_index + 1``.
+carrying flat ``document_id`` / ``document_name`` (basename only) scalars plus
+``document_path`` (the full source location, for disambiguating same-named
+files). These tests run the real chunkers over an in-memory text generator (no
+LLM, no network) and assert the fields are set, and that the format helper
+renders the 1-based number from ``chunk_index + 1``.
 """
 
 from uuid import uuid4
@@ -55,6 +56,9 @@ async def test_chunk_sets_document_id_and_name_from_document_name(chunker_class)
     for chunk in chunks:
         assert chunk.document_id == str(doc_id)
         assert chunk.document_name == "annual_report.pdf"
+        # document_path carries the full source location, unlike the
+        # basename-only document_name, so citations can disambiguate files.
+        assert chunk.document_path == "/abs/path/to/annual_report.pdf"
 
 
 @pytest.mark.asyncio

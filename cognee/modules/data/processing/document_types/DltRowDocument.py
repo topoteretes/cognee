@@ -37,4 +37,5 @@ class DltRowDocument(Document):
             contains=[],
             document_id=str(self.id),
             document_name=self.name or basename(self.raw_data_location),
+            document_path=self.raw_data_location,
         )

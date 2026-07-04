@@ -71,6 +71,50 @@ def test_format_chunk_references_includes_data_id_and_chunk_id():
     )
 
 
+def test_format_chunk_references_includes_document_path():
+    """document_path (the source raw_data_location) is surfaced in the bullet so a
+    reader can resolve the citation to the exact file, not just a basename."""
+    result = format_chunk_references([_payload(document_path="/repo/api/README.md")])
+
+    assert "- chunk 5 of document annual_report.pdf (path: /repo/api/README.md):" in result
+
+
+def test_format_chunk_references_orders_path_before_ids():
+    """When path and ids are all present, path is rendered first, then data_id, chunk_id."""
+    result = format_chunk_references(
+        [_payload(document_path="/repo/api/README.md", document_id="data-123", id="chunk-9")]
+    )
+
+    assert (
+        "- chunk 5 of document annual_report.pdf "
+        "(path: /repo/api/README.md, data_id: data-123, chunk_id: chunk-9):" in result
+    )
+
+
+def test_format_chunk_references_omits_path_when_absent():
+    """Backward compatibility: a payload without document_path renders exactly as
+    before (no empty 'path:' fragment), so pre-existing indexed data is unchanged."""
+    result = format_chunk_references([_payload(document_id="data-123", id="chunk-9")])
+
+    assert (
+        "- chunk 5 of document annual_report.pdf (data_id: data-123, chunk_id: chunk-9):" in result
+    )
+    assert "path:" not in result
+
+
+def test_format_chunk_references_disambiguates_same_basename_by_path():
+    """Two chunks sharing a basename are told apart by their distinct paths."""
+    result = format_chunk_references(
+        [
+            _payload(document_name="README.md", document_path="/repo/api/README.md", id="a"),
+            _payload(document_name="README.md", document_path="/repo/web/README.md", id="b"),
+        ]
+    )
+
+    assert "path: /repo/api/README.md" in result
+    assert "path: /repo/web/README.md" in result
+
+
 def test_format_chunk_references_empty_when_document_name_missing():
     """Old-data case: missing document_name -> entry skipped -> empty string."""
     payload = _payload()

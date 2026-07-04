@@ -23,6 +23,7 @@ def test_chunk_result_exposes_provenance_metadata():
         "id": "chunk-9",
         "document_id": "data-123",  # == ingested Data item id
         "document_name": "report.pdf",
+        "document_path": "/repo/api/report.pdf",
         "chunk_index": 4,
         "text": "Revenue grew 12 percent.",
     }
@@ -39,8 +40,30 @@ def test_chunk_result_exposes_provenance_metadata():
     assert metadata["chunk_id"] == "chunk-9"
     assert metadata["chunk_index"] == 4
     assert metadata["document_name"] == "report.pdf"
+    # document_path lets a client resolve the result to the exact file.
+    assert metadata["document_path"] == "/repo/api/report.pdf"
     # raw still preserves the full original payload.
     assert items[0].raw["document_id"] == "data-123"
+
+
+def test_chunk_metadata_omits_document_path_when_absent():
+    """Backward compatibility: chunks indexed before document_path existed carry
+    no path key rather than a null one."""
+    chunk = {
+        "id": "chunk-9",
+        "document_id": "data-123",
+        "document_name": "report.pdf",
+        "chunk_index": 4,
+        "text": "Revenue grew 12 percent.",
+    }
+    payload = SearchResultPayload(
+        result_object=[chunk],
+        search_type=SearchType.CHUNKS,
+    )
+
+    items = normalize_search_payload(payload)
+
+    assert "document_path" not in items[0].metadata
 
 
 def test_completion_result_has_no_provenance_metadata():

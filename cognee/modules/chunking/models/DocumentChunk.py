@@ -25,6 +25,9 @@ class DocumentChunk(DataPoint):
     - contains: A list of entities or events contained within the chunk (default is None).
     - document_id: Flat string id of the source document, for reference rendering.
     - document_name: Display name (basename) of the source document, for reference rendering.
+    - document_path: Full source location of the document (``raw_data_location``), for
+    reference rendering. Lets citations disambiguate identically-named files in different
+    directories; ``None`` for chunks indexed before this field existed.
     - metadata: A dictionary to hold meta information related to the chunk, including index
     fields.
     """
@@ -38,6 +41,7 @@ class DocumentChunk(DataPoint):
     importance_weight: Optional[float] = 0.5
     document_id: Optional[str] = None
     document_name: Optional[str] = None
+    document_path: Optional[str] = None
     # Optional truth-alignment fields; never embedded (kept out of index_fields)
     # and not part of id/dedup.
     truth_alignment: Optional[list[float]] = None
