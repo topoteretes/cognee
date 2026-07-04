@@ -133,18 +133,24 @@ def _get_payload(obj: Any) -> Optional[dict]:
     return None
 
 
-def _provenance_suffix(data_id: Optional[str], chunk_id: Optional[str]) -> str:
-    """Render a '(data_id: …, chunk_id: …)' annotation for whichever ids exist.
+def _provenance_suffix(
+    data_id: Optional[str], chunk_id: Optional[str], document_path: Optional[str] = None
+) -> str:
+    """Render a '(data_id: …, chunk_id: …, path: …)' annotation for whichever fields exist.
 
-    Lets a reader map the citation back to the ingested data item and the exact
-    cited chunk, instead of only a (possibly auto-generated) document name and a
-    positional chunk number.
+    Lets a reader map the citation back to the ingested data item, the exact
+    cited chunk, and the source file's full path — instead of only a (possibly
+    auto-generated) document name and a positional chunk number. The path
+    disambiguates same-basename files (README.md, __init__.py, …) that the
+    display name alone cannot tell apart.
     """
     parts = []
     if data_id:
         parts.append(f"data_id: {data_id}")
     if chunk_id:
         parts.append(f"chunk_id: {chunk_id}")
+    if document_path:
+        parts.append(f"path: {document_path}")
     return f" ({', '.join(parts)})" if parts else ""
 
 
@@ -216,8 +222,8 @@ def format_chunk_references(
             # rather than presenting unverifiable retrieval order as provenance.
             return ""
 
-    # (overlap_score, document_name, number, text, data_id, chunk_id) per candidate.
-    candidates: List[Tuple[int, str, int, str, Optional[str], Optional[str]]] = []
+    # (overlap_score, document_name, number, text, data_id, chunk_id, document_path) per candidate.
+    candidates: List[Tuple[int, str, int, str, Optional[str], Optional[str], Optional[str]]] = []
     seen: set = set()
 
     for obj in iterator:
@@ -239,6 +245,10 @@ def format_chunk_references(
         # Document.id = data.id), i.e. the dataId a caller needs to map a
         # citation back to the document they ingested.
         data_id = _clean_str(payload.get("document_id"))
+        # Full source location (e.g. "src/api/routes.py"), so a citing client can
+        # resolve the exact file even when several share a basename. Additive:
+        # absent for data indexed before this field existed.
+        document_path = _clean_str(payload.get("document_path"))
 
         dedup_key = chunk_id or f"{document_name}#{number}"
         if dedup_key in seen:
@@ -254,7 +264,7 @@ def format_chunk_references(
                 # certainly not a source of the answer.
                 continue
 
-        candidates.append((score, document_name, number, text, data_id, chunk_id))
+        candidates.append((score, document_name, number, text, data_id, chunk_id, document_path))
 
     if not candidates:
         return ""
@@ -266,8 +276,10 @@ def format_chunk_references(
     max_bullets = _clamp_limit(limit)
     bullets = [
         f"- chunk {number} of document {document_name}"
-        f'{_provenance_suffix(data_id, chunk_id)}: "{_snippet(text)}"'
-        for _, document_name, number, text, data_id, chunk_id in candidates[:max_bullets]
+        f'{_provenance_suffix(data_id, chunk_id, document_path)}: "{_snippet(text)}"'
+        for _, document_name, number, text, data_id, chunk_id, document_path in candidates[
+            :max_bullets
+        ]
     ]
 
     return EVIDENCE_HEADER + "\n" + "\n".join(bullets)

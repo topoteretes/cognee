@@ -54,6 +54,7 @@ class IndexSchema(DataPoint):
     # compatible with every indexed DataPoint type.
     document_id: Optional[str] = None
     document_name: Optional[str] = None
+    document_path: Optional[str] = None
     chunk_index: Optional[int] = None
     source_chunk_id: Optional[str] = None
     importance_weight: Optional[float] = 0.5
@@ -397,6 +398,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                     # fall back to None instead of raising.
                     document_id=getattr(data_point, "document_id", None),
                     document_name=getattr(data_point, "document_name", None),
+                    document_path=getattr(data_point, "document_path", None),
                     chunk_index=getattr(data_point, "chunk_index", None),
                     source_chunk_id=getattr(data_point, "source_chunk_id", None),
                     importance_weight=getattr(data_point, "importance_weight", None),

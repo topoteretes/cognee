@@ -338,6 +338,7 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
                     # Reference scalars for search "Evidence"; None for non-chunks.
                     document_id=getattr(dp, "document_id", None),
                     document_name=getattr(dp, "document_name", None),
+                    document_path=getattr(dp, "document_path", None),
                     chunk_index=getattr(dp, "chunk_index", None),
                     source_chunk_id=getattr(dp, "source_chunk_id", None),
                     importance_weight=getattr(dp, "importance_weight", None),

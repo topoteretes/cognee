@@ -38,6 +38,9 @@ class DocumentChunk(DataPoint):
     importance_weight: Optional[float] = 0.5
     document_id: Optional[str] = None
     document_name: Optional[str] = None
+    # Full source location of the document (e.g. "src/api/routes.py"), so a
+    # citation can be resolved to the exact file even when basenames collide.
+    document_path: Optional[str] = None
     # Optional truth-alignment fields; never embedded (kept out of index_fields)
     # and not part of id/dedup.
     truth_alignment: Optional[list[float]] = None

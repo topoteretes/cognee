@@ -183,6 +183,36 @@ async def test_completion_references_skipped_for_non_str_response_model():
     assert completion == [model_obj]
 
 
+def test_completion_references_include_source_path_when_present():
+    """A chunk carrying document_path surfaces it in the provenance suffix (#3844)."""
+    from cognee.modules.retrieval.utils.references import format_chunk_references
+
+    obj = MagicMock()
+    obj.id = "chunk-1"
+    obj.payload = {
+        "document_name": "composer.json",
+        "document_path": "packages/api/composer.json",
+        "chunk_index": 2,
+        "text": "Revenue grew 12 percent year over year.",
+    }
+
+    evidence = format_chunk_references([obj], answer=MOCK_ANSWER)
+
+    # Basename prose is unchanged; the full path is added to the annotation.
+    assert "- chunk 3 of document composer.json (" in evidence
+    assert "path: packages/api/composer.json" in evidence
+
+
+def test_completion_references_omit_path_for_old_payloads():
+    """Payloads without document_path render exactly as before (backward compatible)."""
+    from cognee.modules.retrieval.utils.references import format_chunk_references
+
+    evidence = format_chunk_references([_chunk_scored()], answer=MOCK_ANSWER)
+
+    assert "- chunk 1 of document report.pdf (chunk_id: chunk-1):" in evidence
+    assert "path:" not in evidence
+
+
 # ---------------------------------------------------------------------------
 # GraphCompletionRetriever (answer-grounded chunk evidence)
 # ---------------------------------------------------------------------------

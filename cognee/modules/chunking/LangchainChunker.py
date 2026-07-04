@@ -37,6 +37,7 @@ class LangchainChunker(Chunker):
     async def read(self):
         document_id = str(self.document.id)
         document_name = self.document.name or basename(self.document.raw_data_location)
+        document_path = self.document.raw_data_location
         async for content_text in self.get_text():
             for chunk in self.splitter.split_text(content_text):
                 embedding_engine = get_vector_engine().embedding_engine
@@ -53,6 +54,7 @@ class LangchainChunker(Chunker):
                         contains=[],
                         document_id=document_id,
                         document_name=document_name,
+                        document_path=document_path,
                         metadata={
                             "index_fields": ["text"],
                         },
