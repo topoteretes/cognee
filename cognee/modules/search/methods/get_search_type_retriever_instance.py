@@ -9,6 +9,7 @@ from cognee.modules.retrieval.triplet_retriever import TripletRetriever
 from cognee.modules.search.types import SearchType
 from cognee.modules.search.operations import select_search_type
 from cognee.modules.search.exceptions import UnsupportedSearchTypeError
+from cognee.modules.retrieval.exceptions.exceptions import QueryValidationError
 
 # Retrievers
 from cognee.modules.retrieval.chunks_retriever import ChunksRetriever
@@ -59,6 +60,8 @@ async def get_search_type_retriever_instance(
 
     # Extract common defaults with fallback values from kwargs
     top_k = kwargs.get("top_k", 15)
+    if top_k is not None and top_k <= 0:
+        raise QueryValidationError(message="top_k must be a positive integer.")
     system_prompt_path = kwargs.get("system_prompt_path", "answer_simple_question.txt")
     system_prompt = kwargs.get("system_prompt")
     node_type = kwargs.get("node_type", NodeSet)
