@@ -117,10 +117,22 @@ else:
         os.getenv("UI_APP_URL", "http://localhost:3000"),
     ]  # Block all except explicitly set origins
 
+# Credentialed CORS (cookies / Authorization) must never be combined with a
+# wildcard origin: it would let any website make authenticated requests on a
+# logged-in user's behalf. Browsers reject ``*`` + credentials outright, so if a
+# deployment sets ``CORS_ALLOWED_ORIGINS="*"`` we drop credentials rather than
+# silently ship a broken (or, on non-compliant clients, dangerous) config.
+allow_credentials = "*" not in allowed_origins
+if not allow_credentials:
+    logger.warning(
+        "CORS_ALLOWED_ORIGINS includes '*'; disabling credentialed CORS. "
+        "Set an explicit list of trusted origins to allow cookie/Authorization requests."
+    )
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,  # Now controlled by env var
-    allow_credentials=True,
+    allow_credentials=allow_credentials,
     allow_methods=["OPTIONS", "GET", "PUT", "POST", "DELETE"],
     allow_headers=["*"],
 )

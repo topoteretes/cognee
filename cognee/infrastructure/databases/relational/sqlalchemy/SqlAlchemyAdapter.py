@@ -1,4 +1,5 @@
 import os
+import re
 import gc
 import asyncio
 from os import path
@@ -23,6 +24,27 @@ from ..ModelBase import Base
 
 
 logger = get_logger()
+
+# Column type tokens permitted in dynamically generated ``CREATE TABLE`` DDL.
+# Unlike identifiers (which we quote), a column type is structural SQL and
+# cannot be quoted, so it is validated against this allowlist to keep the DDL
+# free of injected SQL. Covers the common SQL/SQLAlchemy type spellings plus an
+# optional ``(precision[, scale])`` suffix and array/unsigned modifiers.
+_SQL_TYPE_RE = re.compile(
+    r"^[A-Za-z][A-Za-z0-9 ]*(\(\s*\d+\s*(,\s*\d+\s*)?\))?(\s*\[\s*\])?$"
+)
+
+
+def _validate_sql_type(sql_type: str) -> str:
+    """Return ``sql_type`` if it is a syntactically plausible column type.
+
+    Raises ``ValueError`` on anything containing characters that could break
+    out of the type context (quotes, semicolons, comments, etc.).
+    """
+    candidate = str(sql_type).strip()
+    if not candidate or not _SQL_TYPE_RE.match(candidate):
+        raise ValueError(f"Invalid or unsafe SQL column type: {sql_type!r}")
+    return candidate
 
 
 class SQLAlchemyAdapter:
@@ -171,12 +193,22 @@ class SQLAlchemyAdapter:
             - table_config (list[dict]): A list of dictionaries representing the table's fields
               and their types.
         """
-        fields_query_parts = [f"{item['name']} {item['type']}" for item in table_config]
+        # Quote all identifiers (schema, table, column names) through the
+        # dialect's identifier preparer so they cannot break out of the
+        # identifier context and inject SQL. Column *types* are structural DDL
+        # and are validated against a conservative allowlist rather than quoted.
+        quote = self.engine.dialect.identifier_preparer.quote
+        q_schema = quote(schema_name)
+        q_table = quote(table_name)
+        fields_query_parts = [
+            f"{quote(item['name'])} {_validate_sql_type(item['type'])}" for item in table_config
+        ]
         async with self.engine.begin() as connection:
-            await connection.execute(text(f"CREATE SCHEMA IF NOT EXISTS {schema_name};"))
+            await connection.execute(text(f"CREATE SCHEMA IF NOT EXISTS {q_schema};"))
             await connection.execute(
                 text(
-                    f'CREATE TABLE IF NOT EXISTS {schema_name}."{table_name}" ({", ".join(fields_query_parts)});'
+                    f"CREATE TABLE IF NOT EXISTS {q_schema}.{q_table} "  # noqa: S608 - identifiers quoted, types validated
+                    f"({', '.join(fields_query_parts)});"
                 )
             )
             await connection.close()
@@ -192,14 +224,20 @@ class SQLAlchemyAdapter:
             - schema_name (Optional[str]): The name of the schema containing the table to
               delete, defaults to 'public'. (default 'public')
         """
+        quote = self.engine.dialect.identifier_preparer.quote
+        q_table = quote(table_name)
         async with self.engine.begin() as connection:
             if self.engine.dialect.name == "sqlite":
                 # SQLite doesn't support schema namespaces and the CASCADE keyword.
                 # However, foreign key constraint can be defined with ON DELETE CASCADE during table creation.
-                await connection.execute(text(f'DROP TABLE IF EXISTS "{table_name}";'))
+                await connection.execute(
+                    text(f"DROP TABLE IF EXISTS {q_table};")  # noqa: S608 - identifier quoted
+                )
             else:
                 await connection.execute(
-                    text(f'DROP TABLE IF EXISTS {schema_name}."{table_name}" CASCADE;')
+                    text(
+                        f"DROP TABLE IF EXISTS {quote(schema_name)}.{q_table} CASCADE;"  # noqa: S608 - identifier quoted
+                    )
                 )
 
     async def insert_data(

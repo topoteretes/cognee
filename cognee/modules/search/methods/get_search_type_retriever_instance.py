@@ -34,6 +34,29 @@ from cognee.modules.retrieval.natural_language_retriever import NaturalLanguageR
 from cognee.modules.retrieval.agentic_retriever import AgenticRetriever
 from cognee.context_global_variables import session_user
 
+_TRUTHY = {"1", "true", "yes", "on"}
+
+
+def _cypher_queries_allowed() -> bool:
+    """Whether raw-Cypher / natural-language graph search may run.
+
+    ``CYPHER`` and ``NATURAL_LANGUAGE`` execute database-native queries against
+    the graph backend, so they are a powerful primitive that should not be
+    exposed by accident. To be secure-by-default:
+
+    - If ``ALLOW_CYPHER_QUERY`` is set, its value decides (robust truthy parse,
+      so a typo like ``"no"`` fails safe to disabled rather than enabled).
+    - If it is unset, these search types are enabled outside production but
+      **disabled in production** (``ENV=prod``), which must opt in explicitly.
+
+    This mirrors the production-hardening posture used for auth secrets
+    (``ENV`` defaults to ``prod``; see ``users.authentication.secret_utils``).
+    """
+    raw = os.getenv("ALLOW_CYPHER_QUERY")
+    if raw is not None:
+        return raw.strip().lower() in _TRUTHY
+    return os.getenv("ENV", "prod").lower() != "prod"
+
 
 async def get_search_type_retriever_instance(
     query_type: SearchType,
@@ -360,7 +383,7 @@ async def get_search_type_retriever_instance(
 
     if (
         query_type in [SearchType.CYPHER, SearchType.NATURAL_LANGUAGE]
-        and os.getenv("ALLOW_CYPHER_QUERY", "true").lower() == "false"
+        and not _cypher_queries_allowed()
     ):
         raise UnsupportedSearchTypeError("Cypher query search types are disabled.")
 

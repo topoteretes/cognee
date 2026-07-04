@@ -482,11 +482,18 @@ All functions are async - use `await` or `asyncio.run()`.
 Several security environment variables in `.env`:
 - `ACCEPT_LOCAL_FILE_PATH` - Allow local file paths (default: True)
 - `ALLOW_HTTP_REQUESTS` - Allow HTTP requests from Cognee (default: True)
-- `ALLOW_CYPHER_QUERY` - Allow raw Cypher queries (default: True)
+- `ALLOW_CYPHER_QUERY` - Allow the `CYPHER`/`NATURAL_LANGUAGE` search types, which run database-native queries against the graph backend. **Secure-by-default:** when unset these are enabled outside production but **disabled in production (`ENV=prod`)** and must be opted into explicitly. Any non-truthy value (e.g. `false`, `0`, or a typo) fails safe to disabled.
 - `ENABLE_BACKEND_ACCESS_CONTROL` - Multi-tenant isolation (default: True). When `true`, API auth is required and per-user/dataset DB isolation is enabled. When `false`, single-user mode: shared DBs and auth off unless overridden.
 - `REQUIRE_AUTHENTICATION` - Explicit auth override. Unset (default): follows `ENABLE_BACKEND_ACCESS_CONTROL`. `false` is ignored when `ENABLE_BACKEND_ACCESS_CONTROL=true`. For a single-user deployment with auth off, set `ENABLE_BACKEND_ACCESS_CONTROL=false` (and optionally `REQUIRE_AUTHENTICATION=false`).
+- `CORS_ALLOWED_ORIGINS` - Comma-separated CORS allow-list for the API (default: `UI_APP_URL`, i.e. `http://localhost:3000`). The API sends credentials, so a wildcard `*` is unsafe: if set to `*` the app drops credentialed CORS and logs a warning. List explicit trusted origins in production.
 
 For production deployments, review and tighten these settings.
+
+### Additional hardening (defense-in-depth)
+
+These are enforced in code and need no configuration:
+- **SQL identifier injection** - Table/schema/column names taken from an external source database (relational migration, dynamic `CREATE`/`DROP TABLE`) are quoted via the SQLAlchemy dialect identifier preparer; column *types* are validated against an allowlist. See `cognee/tasks/ingestion/migrate_relational_database.py` and `infrastructure/databases/relational/sqlalchemy/SqlAlchemyAdapter.py`.
+- **Zip Slip** - The downloaded UI bundle is validated member-by-member (rejecting `..`/absolute paths) before extraction (`cognee/api/v1/ui/ui.py`); the COGX migration archive is similarly hardened (`cognee/modules/migration/archive.py`).
 
 ## Common Patterns
 
