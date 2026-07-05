@@ -26,10 +26,7 @@ from cognee.modules.observability import (
 from cognee.modules.search.methods.get_retriever_output import get_retriever_output
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
 from cognee.modules.search.operations import log_query, log_result
-from cognee.modules.search.types import (
-    SearchResult,
-    SearchType,
-)
+from cognee.modules.search.types import SearchResult, SearchType
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.utils import send_telemetry
@@ -62,7 +59,6 @@ async def search(
     embedding_config: Optional[EmbeddingConfig] = None,
 ) -> List[SearchResult]:
     """
-
     Args:
         query_text:
         query_type:
@@ -82,7 +78,7 @@ async def search(
         user.id,
         additional_properties={
             "cognee_version": cognee_version,
-            "tenant_id": str(user.tenant_id) if user.tenant_id else "Single User Tenant",
+            "tenant_id": (str(user.tenant_id) if user.tenant_id else "Single User Tenant"),
             "include_references": include_references,
         },
     )
@@ -127,13 +123,10 @@ async def search(
         user.id,
         additional_properties={
             "cognee_version": cognee_version,
-            "tenant_id": str(user.tenant_id) if user.tenant_id else "Single User Tenant",
+            "tenant_id": (str(user.tenant_id) if user.tenant_id else "Single User Tenant"),
         },
     )
 
-    # Log only the completion text (what the user sees), not the full
-    # serialized graph payload. The raw result_objects can be 50-100 KB
-    # each and cause unbounded DB growth in long-running deployments.
     completions = []
     for item in search_results:
         payload = item[0] if isinstance(item, tuple) else item
@@ -177,12 +170,10 @@ async def authorized_search(
     Verifies access for provided datasets or uses all datasets user has read access for and performs search per dataset.
     Not to be used outside of active access control mode.
     """
-    # Find datasets user has read access for (if datasets are provided only return them. Provided user has read access)
     search_datasets = await get_authorized_existing_datasets(
         datasets=dataset_ids, permission_type="read", user=user
     )
 
-    # Searches all provided datasets and handles setting up of appropriate database context based on permissions
     search_results = await search_in_datasets_context(
         search_datasets=search_datasets,
         query_type=query_type,
@@ -238,6 +229,40 @@ async def search_in_datasets_context(
     Not to be used outside of active access control mode.
     """
 
+    dataset_ids = [dataset.id for dataset in search_datasets if hasattr(dataset, "id")]
+    dataset_names = [dataset.name for dataset in search_datasets if hasattr(dataset, "name")]
+
+    config = retriever_specific_config or {}
+
+    if query_type == SearchType.CHUNKS:
+        from cognee.modules.retrieval.chunks_retriever import chunks_retriever
+
+        return await chunks_retriever(
+            query=query_text,
+            dataset_ids=dataset_ids,
+            top_k=top_k,
+            config=config,
+        )
+
+    elif query_type == SearchType.SUMMARIES:
+        from cognee.modules.retrieval.summaries_retriever import summaries_retriever
+
+        return await summaries_retriever(
+            query=query_text,
+            dataset_ids=dataset_ids,
+            top_k=top_k,
+            config=config,
+        )
+
+    elif query_type == SearchType.GRAPH_COMPLETION:
+        from cognee.modules.retrieval.graph_completion_retriever import (
+            graph_completion_retriever,
+        )
+
+        return await graph_completion_retriever(
+            query=query_text,
+            dataset_ids=dataset_ids,
+            dataset_names=dataset_names,
     async def _search_in_dataset_context(
         dataset: Dataset,
         query_type: SearchType,
@@ -350,20 +375,13 @@ async def search_in_datasets_context(
             system_prompt_path=system_prompt_path,
             system_prompt=system_prompt,
             top_k=top_k,
-            node_type=node_type,
-            node_name=node_name,
-            node_name_filter_operator=node_name_filter_operator,
-            only_context=only_context,
             session_id=session_id,
             wide_search_top_k=wide_search_top_k,
             triplet_distance_penalty=triplet_distance_penalty,
-            feedback_influence=feedback_influence,
-            retriever_specific_config=retriever_specific_config,
-            neighborhood_depth=neighborhood_depth,
-            neighborhood_seed_top_k=neighborhood_seed_top_k,
-            include_references=include_references,
         )
 
+    else:
+        raise ValueError(f"Unsupported query type: {query_type}")
         async def _search_without_context() -> SearchResultPayload:
             # No dataset DB context to set when access control is disabled, but
             # still forward any per-call LLM/embedding overrides onto the async
@@ -377,32 +395,99 @@ async def search_in_datasets_context(
             ):
                 return await get_retriever_output(**retriever_kwargs)
 
-        tasks.append(_search_without_context())
 
-    return await asyncio.gather(*tasks)
+async def _search_in_dataset_context(
+    dataset: Dataset,
+    query_type: SearchType,
+    query_text: str,
+    user: User,  # Added missing user reference argument
+    system_prompt_path: str = "answer_simple_question.txt",
+    system_prompt: Optional[str] = None,
+    top_k: int = 15,
+    node_type: Optional[Type] = NodeSet,
+    node_name: Optional[List[str]] = None,
+    node_name_filter_operator: str = "OR",
+    only_context: bool = False,
+    session_id: Optional[str] = None,
+    wide_search_top_k: Optional[int] = 100,
+    triplet_distance_penalty: Optional[float] = 6.5,
+    feedback_influence: float = 0.0,
+    retriever_specific_config: Optional[dict] = None,
+    neighborhood_depth: Optional[int] = None,
+    neighborhood_seed_top_k: Optional[int] = None,
+    include_references: bool = False,
+    llm_config: Optional[LLMConfig] = None,
+    embedding_config: Optional[EmbeddingConfig] = None,
+) -> SearchResultPayload:
+    with new_span("cognee.search.dataset") as span:
+        span.set_attribute("cognee.search.dataset_name", dataset.name or "")
+        span.set_attribute("cognee.search.dataset_id", str(dataset.id))
+
+        async with set_database_global_context_variables(
+            dataset.id,
+            dataset.owner_id,
+            llm_config=llm_config,
+            embedding_config=embedding_config,
+        ):
+            graph_engine = await get_graph_engine()
+            is_empty = await graph_engine.is_empty()
+            if is_empty:
+                from cognee.modules.data.methods import get_dataset_data
+
+                dataset_data = await get_dataset_data(dataset.id)
+
+                if len(dataset_data) > 0:
+                    logger.warning(
+                        f"Dataset '{dataset.name}' has {len(dataset_data)} data item(s) but the knowledge graph is empty. "
+                        "Please run cognify to process the data before searching."
+                    )
+                else:
+                    logger.warning(
+                        f"Search attempt on an empty knowledge graph - no data has been added to this dataset: {dataset.name}"
+                    )
+
+                span.set_attribute("cognee.search.graph_empty", True)
+
+            return await get_retriever_output(
+                query_type=query_type,
+                query_text=query_text,
+                user=user,
+                dataset=dataset,
+                system_prompt_path=system_prompt_path,
+                system_prompt=system_prompt,
+                top_k=top_k,
+                node_type=node_type,
+                node_name=node_name,
+                node_name_filter_operator=node_name_filter_operator,
+                only_context=only_context,
+                session_id=session_id,
+                wide_search_top_k=wide_search_top_k,
+                triplet_distance_penalty=triplet_distance_penalty,
+                feedback_influence=feedback_influence,
+                retriever_specific_config=retriever_specific_config,
+                neighborhood_depth=neighborhood_depth,
+                neighborhood_seed_top_k=neighborhood_seed_top_k,
+                include_references=include_references,
+            )
 
 
 def _backwards_compatible_search_results(search_results, verbose: bool):
     """
     Prepares search results in a format compatible with previous versions of the API.
     """
-    # This is for maintaining backwards compatibility
     if backend_access_control_enabled():
         return_value = []
         for search_result in search_results:
-            # Dataset info needs to be always included
             search_result_dict = {
                 "dataset_id": search_result.dataset_id,
                 "dataset_name": search_result.dataset_name,
                 "dataset_tenant_id": search_result.dataset_tenant_id,
             }
             if verbose:
-                # Include all different types of results only in verbose mode
                 search_result_dict["text_result"] = search_result.completion
                 search_result_dict["context_result"] = search_result.context
                 search_result_dict["objects_result"] = search_result.result_object
             else:
-                # Result attribute handles returning appropriate result based on set flags and outputs
                 search_result_dict["search_result"] = search_result.result
 
             return_value.append(search_result_dict)
@@ -411,7 +496,6 @@ def _backwards_compatible_search_results(search_results, verbose: bool):
         return_value = []
         if verbose:
             for search_result in search_results:
-                # Include all different types of results only in verbose mode
                 search_result_dict = {
                     "text_result": search_result.completion,
                     "context_result": search_result.context,
@@ -421,13 +505,9 @@ def _backwards_compatible_search_results(search_results, verbose: bool):
             return return_value
         else:
             for search_result in search_results:
-                # Result attribute handles returning appropriate result based on set flags and outputs
                 return_value.append(search_result.result)
 
-            # For maintaining backwards compatibility
             if len(return_value) == 1 and isinstance(return_value[0], list):
-                # If a single element list return the element directly
                 return return_value[0]
             else:
-                # Otherwise return the list of results
                 return return_value
