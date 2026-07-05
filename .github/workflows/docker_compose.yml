@@ -5,36 +5,113 @@ on:
 
 env:
   COGNEE_SKIP_CONNECTION_TEST: 'true'
+  # Profiles exercised by the full-stack e2e: the default `cognee` service plus
+  # postgres (persistence) and the MCP server.
+  COMPOSE_PROFILES: 'postgres,mcp'
 
 jobs:
   docker-compose-test:
+    name: Docker Compose full-stack e2e
     runs-on: ubuntu-22.04
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@master
+      uses: actions/checkout@v4
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
 
-    - name: Build Docker images
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v7
+      with:
+        enable-cache: true
+
+    - name: Write .env for the stack
+      # Point the relational store at the postgres service so the persistence
+      # test is genuinely Postgres-backed. LLM_API_KEY is a placeholder: the
+      # default run is fully mocked (no cognify/search), and the startup
+      # connection test is skipped via COGNEE_SKIP_CONNECTION_TEST.
+      run: |
+        cat > .env <<'EOF'
+        ENV=dev
+        LLM_API_KEY=sk-mock-key-not-used
+        COGNEE_SKIP_CONNECTION_TEST=true
+        DB_PROVIDER=postgres
+        DB_HOST=postgres
+        DB_PORT=5432
+        DB_NAME=cognee_db
+        DB_USERNAME=cognee
+        DB_PASSWORD=cognee
+        VECTOR_DB_PROVIDER=lancedb
+        GRAPH_DATABASE_PROVIDER=kuzu
+        EOF
+
+    - name: Build images
       env:
         ENV: dev
-      run: |
-        docker compose -f docker-compose.yml build
+      run: docker compose -f docker-compose.yml build
 
-    - name: Run Docker Compose
+    - name: Start Postgres and wait for it
+      run: |
+        docker compose -f docker-compose.yml up -d postgres
+        echo "Waiting for postgres to be healthy..."
+        for i in $(seq 1 30); do
+          if docker compose -f docker-compose.yml exec -T postgres pg_isready -U cognee -d cognee_db >/dev/null 2>&1; then
+            echo "postgres is ready"; break
+          fi
+          sleep 3
+          if [ "$i" = "30" ]; then echo "postgres never became ready" >&2; exit 1; fi
+        done
+
+    - name: Start the rest of the stack
       env:
         ENV: dev
-      run: |
-        docker compose -f docker-compose.yml up -d
+      run: docker compose -f docker-compose.yml up -d
 
-    - name: Wait for services to be ready
+    - name: Wait for service healthchecks
+      # Real health-gating that replaces the old `sleep 30`.
       run: |
-        # Add any necessary health checks or wait commands
-        sleep 30
+        wait_for() {
+          local url="$1"; local name="$2"; local tries="${3:-60}"
+          echo "Waiting for $name ($url)..."
+          for i in $(seq 1 "$tries"); do
+            if curl -fsS "$url" >/dev/null 2>&1; then echo "  $name is healthy"; return 0; fi
+            sleep 5
+          done
+          echo "::error::$name did not become healthy in time"
+          return 1
+        }
+        wait_for http://localhost:8000/health "cognee API"
+        wait_for http://localhost:8001/health "cognee-mcp"
+
+    - name: Run full-stack e2e suite
+      env:
+        # Allow the suite to drive docker compose (persistence + log scan).
+        COGNEE_E2E_MANAGE_COMPOSE: '1'
+        COGNEE_E2E_COMPOSE_PROFILES: 'postgres,mcp'
+      run: |
+        # This suite is decoupled from the `cognee` package so it can run on a
+        # minimal env: --confcutdir keeps pytest from loading the heavy ancestor
+        # conftests, and --no-project keeps uv from syncing the whole project.
+        uv run --no-project \
+          --with pytest \
+          --with pytest-timeout \
+          --with requests \
+          --with mcp \
+          python -m pytest cognee/tests/e2e/docker_compose \
+            -p no:cacheprovider \
+            --confcutdir=cognee/tests/e2e/docker_compose \
+            -v --timeout=900
+
+    - name: Dump service logs on failure
+      if: failure()
+      run: docker compose -f docker-compose.yml logs --no-color || true
 
     - name: Shut down Docker Compose
       if: always()
-      run: |
-        docker compose -f docker-compose.yml down
+      run: docker compose -f docker-compose.yml down -v
