@@ -90,6 +90,7 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
         endpoint: Optional[str] = "http://localhost:8080",
         api_key: Optional[str] = "no-key-required",
         batch_size: int = 36,
+        input_type: Optional[str] = None,
     ):
         self.model = model or "default"
         self.dimensions = dimensions
@@ -97,6 +98,11 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
         self.endpoint = endpoint or "http://localhost:8080"
         self.api_key = api_key or "no-key-required"
         self.batch_size = batch_size
+        # Some OpenAI-compatible servers (e.g. self-hosted NVIDIA NIM
+        # containers) require an "input_type" field ("query" / "passage")
+        # that isn't part of the OpenAI embeddings spec. Sent via extra_body
+        # so it has no effect on servers that ignore unknown fields.
+        self.input_type = input_type
         self.tokenizer = self.get_tokenizer()
 
         enable_mocking = os.getenv("MOCK_EMBEDDING", "false").lower()
@@ -143,13 +149,17 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
             return handle_embedding_response(original_texts, embeddings, self.dimensions)
 
         try:
+            create_kwargs = {
+                "model": self.model,
+                "input": sanitized_text,
+                "encoding_format": "float",
+            }
+            if self.input_type:
+                create_kwargs["extra_body"] = {"input_type": self.input_type}
+
             async with embedding_rate_limiter_context_manager():
                 response = await asyncio.wait_for(
-                    self._client.embeddings.create(
-                        model=self.model,
-                        input=sanitized_text,
-                        encoding_format="float",
-                    ),
+                    self._client.embeddings.create(**create_kwargs),
                     timeout=300.0,
                 )
             embeddings = [item.embedding for item in response.data]
