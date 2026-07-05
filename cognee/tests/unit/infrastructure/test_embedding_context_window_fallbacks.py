@@ -3,7 +3,7 @@ from unittest.mock import Mock, patch
 import numpy as np
 import pytest
 
-from cognee.infrastructure.databases.exceptions import EmbeddingException
+from cognee.infrastructure.databases.exceptions import EmbeddingException, TerminalEmbeddingException
 
 
 @pytest.mark.asyncio
@@ -132,5 +132,5 @@ async def test_fastembed_raises_when_short_text_still_exceeds_context_window():
 
         engine = FastembedEmbeddingEngine(model="test-model", dimensions=2)
 
-        with pytest.raises(EmbeddingException, match="too short to split further"):
+        with pytest.raises(TerminalEmbeddingException, match="too short to split further"):
             await engine.embed_text(["ab"])

@@ -53,6 +53,18 @@ class EmbeddingException(Exception):
         super().__init__(self.message)
 
 
+class TerminalEmbeddingException(EmbeddingException):
+    """Non-retryable embedding failure for deterministic error conditions.
+
+    Raised when the context-window recovery logic has exhausted all split
+    attempts.  Retry decorators exclude this subclass so the failure
+    propagates immediately.
+    """
+
+    def __init__(self, message: str, name: str = "TerminalEmbeddingException"):
+        super().__init__(message, name)
+
+
 class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
     """
     Embedding engine for any server that exposes the OpenAI ``/v1/embeddings`` API.
@@ -114,7 +126,7 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
     @retry(
         stop=stop_after_delay(128),
         wait=wait_exponential_jitter(2, 128),
-        retry=retry_if_not_exception_type((ValueError, asyncio.CancelledError)),
+        retry=retry_if_not_exception_type((ValueError, asyncio.CancelledError, TerminalEmbeddingException)),
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
@@ -180,7 +192,7 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
                     s = original_texts[0]
                     third = len(s) // 3
                     if third == 0:
-                        raise EmbeddingException(
+                        raise TerminalEmbeddingException(
                             "Text is too short to split further but exceeds context window."
                         ) from error
                     left_part, right_part = s[: third * 2], s[third:]

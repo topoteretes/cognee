@@ -9,6 +9,7 @@ from .exceptions import (
     EntityAlreadyExistsError,
     DatabaseNotCreatedError,
     EmbeddingException,
+    TerminalEmbeddingException,
     MissingQueryParameterError,
     MutuallyExclusiveQueryParametersError,
     CacheConnectionError,

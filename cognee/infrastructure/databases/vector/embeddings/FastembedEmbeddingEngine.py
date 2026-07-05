@@ -24,7 +24,7 @@ from tenacity import (
 
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
-from cognee.infrastructure.databases.exceptions import EmbeddingException
+from cognee.infrastructure.databases.exceptions import EmbeddingException, TerminalEmbeddingException
 from cognee.infrastructure.llm.tokenizer.TikToken import (
     TikTokenTokenizer,
 )
@@ -86,7 +86,7 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
         stop=stop_after_delay(128),
         wait=wait_exponential_jitter(8, 128),
         retry=retry_if_not_exception_type(
-            (litellm.exceptions.NotFoundError, asyncio.CancelledError)
+            (litellm.exceptions.NotFoundError, asyncio.CancelledError, TerminalEmbeddingException)
         ),
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
@@ -151,7 +151,7 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
                     s = original_texts[0]
                     third = len(s) // 3
                     if third == 0:
-                        raise EmbeddingException(
+                        raise TerminalEmbeddingException(
                             "Text is too short to split further but exceeds context window."
                         ) from error
                     left_part, right_part = s[: third * 2], s[third:]
