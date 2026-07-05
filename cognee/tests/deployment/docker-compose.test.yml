@@ -1,0 +1,43 @@
+# Deployment test compose file.
+# Two-container topology: backend + MCP on a shared bridge network.
+services:
+  cognee:
+    image: cognee-test-backend:latest
+    container_name: cognee-test-backend
+    restart: "no"
+    networks:
+      - cognee-test-network
+    environment:
+      - LLM_API_KEY=sk-deployment-test-dummy
+      - REQUIRE_AUTHENTICATION=false
+      - ENV=local
+      - LOG_LEVEL=INFO
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
+      interval: 5s
+      retries: 5
+      start_period: 45s
+      timeout: 10s
+    ports:
+      - "8000"
+
+  cognee-mcp:
+    image: cognee-test-mcp:latest
+    container_name: cognee-test-mcp
+    restart: "no"
+    networks:
+      - cognee-test-network
+    environment:
+      - API_URL=http://cognee:8000
+      - TRANSPORT_MODE=http
+      - LOG_LEVEL=INFO
+      - MCP_DISABLE_DNS_REBINDING_PROTECTION=true
+    ports:
+      - "8000"
+    depends_on:
+      cognee:
+        condition: service_healthy
+
+networks:
+  cognee-test-network:
+    name: cognee-test-network

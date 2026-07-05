@@ -10,6 +10,7 @@ code_pipeline_output*/
 test_outputs/
 
 *.lance/
+.commandcode/
 .DS_Store
 # Byte-compiled / optimized / DLL files
 __pycache__/
