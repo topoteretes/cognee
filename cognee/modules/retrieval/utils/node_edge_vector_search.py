@@ -59,7 +59,9 @@ class NodeEdgeVectorSearch:
             if query_batch is not None:
                 self.query_list_length = len(query_batch)
                 span.set_attribute("cognee.vector.batch_size", len(query_batch))
-                search_results = await self._run_batch_search(collections, query_batch)
+                search_results = await self._run_batch_search(
+                    collections, query_batch, wide_search_limit
+                )
             else:
                 self.query_list_length = None
                 search_results = await self._run_single_search(
@@ -138,21 +140,30 @@ class NodeEdgeVectorSearch:
                     self.node_distances[collection] = result
 
     async def _run_batch_search(
-        self, collections: List[str], query_batch: List[str]
+        self,
+        collections: List[str],
+        query_batch: List[str],
+        wide_search_limit: Optional[int] = None,
     ) -> List[List[Any]]:
         """Runs batch search across all collections and returns list-of-lists per collection."""
         search_tasks = [
-            self._search_batch_collection(collection, query_batch) for collection in collections
+            self._search_batch_collection(collection, query_batch, wide_search_limit)
+            for collection in collections
         ]
         return await asyncio.gather(*search_tasks)
 
     async def _search_batch_collection(
-        self, collection_name: str, query_batch: List[str]
+        self,
+        collection_name: str,
+        query_batch: List[str],
+        wide_search_limit: Optional[int] = None,
     ) -> List[List[Any]]:
         """Searches one collection with batch queries and returns list-of-lists."""
         try:
             return await self.vector_engine.batch_search(
-                collection_name=collection_name, query_texts=query_batch, limit=None
+                collection_name=collection_name,
+                query_texts=query_batch,
+                limit=wide_search_limit,
             )
         except CollectionNotFoundError:
             return [[]] * len(query_batch)

@@ -243,8 +243,15 @@ async def brute_force_triplet_search(
         memory_fragment (Optional[CogneeGraph]): Existing memory fragment to reuse.
         node_type: node type to filter
         node_name: node name to filter
-        wide_search_top_k (Optional[int]): Number of initial elements to retrieve from collections.
-            Ignored in batch mode (always None to project full graph).
+        wide_search_top_k (Optional[int]): Bounds the per-collection vector-search window in
+            every mode (batch and node_name-scoped included). This fixes an unbounded
+            limit=None that previously made batch and node_name-scoped searches scan the ENTIRE
+            vector collection (LanceDB count_rows() / PGVector full-table order). Defaults to
+            100, mirroring the single-query default. Pass None to restore the old unbounded
+            full-collection scan (escape hatch). Semantic note: for collections larger than this
+            cap the candidate set is now bounded rather than exhaustive. Out of scope here: batch
+            mode still projects the full graph (relevant_ids_to_filter=None); switching it to an
+            ID-filtered projection is a deliberate follow-up.
         triplet_distance_penalty (Optional[float]): Default distance penalty in graph projection
         feedback_influence (float): Weight of feedback influence in range [0, 1]
 
@@ -275,6 +282,15 @@ async def brute_force_triplet_search(
         )
 
         query_list_length = len(query_batch) if query_batch is not None else None
+        # Vector-search window: bounded so batch and node_name-scoped searches don't scan
+        # the whole collection (LanceDB/PGVector treat limit=None as "return everything",
+        # and batch mode additionally forces a full-graph projection). Latency/memory now
+        # scale with wide_search_top_k, not total DB size. Pass wide_search_top_k=None to
+        # explicitly opt back into an unbounded full-collection scan.
+        vector_search_limit = wide_search_top_k
+        # Graph-projection selector: None => full-graph projection (batch and node_name-scoped
+        # modes); an int => ID-filtered projection (default single-query mode). Behavior here
+        # is unchanged; ID-filtered projection for batch mode is a follow-up.
         wide_search_limit = (
             None if query_list_length else (wide_search_top_k if node_name is None else None)
         )
@@ -303,7 +319,7 @@ async def brute_force_triplet_search(
                 query=None if query_list_length else query,
                 query_batch=query_batch if query_list_length else None,
                 collections=collections,
-                wide_search_limit=wide_search_limit,
+                wide_search_limit=vector_search_limit,
                 node_name=node_name,
                 node_name_filter_operator=node_name_filter_operator,
             )

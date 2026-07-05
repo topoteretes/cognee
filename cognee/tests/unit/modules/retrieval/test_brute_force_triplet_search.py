@@ -74,7 +74,7 @@ async def test_brute_force_triplet_search_wide_search_limit_global_search():
 
 @pytest.mark.asyncio
 async def test_brute_force_triplet_search_wide_search_limit_filtered_search():
-    """Test that wide_search_limit is None for filtered search (node_name provided)."""
+    """Test that node_name-scoped search is capped by wide_search_top_k (not an unbounded None scan)."""
     mock_vector_engine = AsyncMock()
     mock_vector_engine.embedding_engine = AsyncMock()
     mock_vector_engine.embedding_engine.embed_text = AsyncMock(return_value=[[0.1, 0.2, 0.3]])
@@ -90,8 +90,9 @@ async def test_brute_force_triplet_search_wide_search_limit_filtered_search():
             wide_search_top_k=50,
         )
 
+        assert mock_vector_engine.search.call_args_list
         for call in mock_vector_engine.search.call_args_list:
-            assert call[1]["limit"] is None
+            assert call[1]["limit"] == 50
 
 
 @pytest.mark.asyncio
@@ -990,7 +991,7 @@ async def test_brute_force_triplet_search_shape_propagation_to_graph():
 
 @pytest.mark.asyncio
 async def test_brute_force_triplet_search_batch_path_comprehensive():
-    """Test batch mode: returns list-of-lists, skips ID filtering, passes None for wide_search_limit."""
+    """Test batch mode: returns list-of-lists, skips ID filtering, passes a bounded vector limit."""
     mock_vector_engine = AsyncMock()
     mock_vector_engine.embedding_engine = AsyncMock()
 
@@ -1027,7 +1028,9 @@ async def test_brute_force_triplet_search_batch_path_comprehensive():
         ) as mock_get_fragment,
     ):
         result = await brute_force_triplet_search(
-            query_batch=["q1", "q2"], collections=["Entity_name", "EdgeType_relationship_name"]
+            query_batch=["q1", "q2"],
+            collections=["Entity_name", "EdgeType_relationship_name"],
+            wide_search_top_k=25,
         )
 
         assert isinstance(result, list)
@@ -1042,7 +1045,7 @@ async def test_brute_force_triplet_search_batch_path_comprehensive():
         batch_search_calls = mock_vector_engine.batch_search.call_args_list
         assert len(batch_search_calls) > 0
         for call in batch_search_calls:
-            assert call[1]["limit"] is None
+            assert call[1]["limit"] == 25
 
 
 @pytest.mark.asyncio
@@ -1062,6 +1065,49 @@ async def test_brute_force_triplet_search_batch_error_fallback():
 
         assert result == [[], []]
         assert len(result) == 2
+
+
+@pytest.mark.asyncio
+async def test_brute_force_triplet_search_batch_passes_bounded_limit_by_default():
+    """Regression: batch mode must cap the vector search with a bounded int, never limit=None.
+
+    limit=None makes LanceDB/PGVector return the whole collection per query (and batch mode
+    also forces a full-graph projection), so latency/memory scale with total DB size instead
+    of top_k. The default wide_search_top_k (100) must be threaded into batch_search.
+    """
+    mock_vector_engine = AsyncMock()
+    mock_vector_engine.embedding_engine = AsyncMock()
+    mock_vector_engine.batch_search = AsyncMock(return_value=[[], []])
+
+    with patch(
+        "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine",
+        return_value=mock_vector_engine,
+    ):
+        await brute_force_triplet_search(query_batch=["q1", "q2"])
+
+        assert mock_vector_engine.batch_search.call_args_list
+        for call in mock_vector_engine.batch_search.call_args_list:
+            limit = call[1]["limit"]
+            assert isinstance(limit, int), f"batch_search got non-int limit: {limit!r}"
+            assert limit == 100  # default wide_search_top_k
+
+
+@pytest.mark.asyncio
+async def test_brute_force_triplet_search_batch_none_opts_into_unbounded():
+    """wide_search_top_k=None remains an explicit escape hatch for a full-collection scan."""
+    mock_vector_engine = AsyncMock()
+    mock_vector_engine.embedding_engine = AsyncMock()
+    mock_vector_engine.batch_search = AsyncMock(return_value=[[], []])
+
+    with patch(
+        "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine",
+        return_value=mock_vector_engine,
+    ):
+        await brute_force_triplet_search(query_batch=["q1", "q2"], wide_search_top_k=None)
+
+        assert mock_vector_engine.batch_search.call_args_list
+        for call in mock_vector_engine.batch_search.call_args_list:
+            assert call[1]["limit"] is None
 
 
 @pytest.mark.asyncio
