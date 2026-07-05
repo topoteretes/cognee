@@ -1,8 +1,7 @@
-import asyncio
+import keyword
 import re
 import sys
 import types
-from pprint import pprint
 from typing import Any, Union, cast, get_args, get_origin
 
 from datamodel_code_generator import DataModelType, GenerateConfig, InputFileType, generate
@@ -11,10 +10,12 @@ from pydantic._internal._core_utils import CoreSchemaOrField, is_core_schema
 from pydantic.json_schema import GenerateJsonSchema
 from pydantic_core import PydanticUndefined
 
-import cognee
-from cognee.api.v1.search import SearchType
+# Only DataPoint is needed by the converter functions below. The heavy `import
+# cognee` (and the search/logging helpers) are used solely by the __main__ demo,
+# so they are imported there — keeping this module importable with no DB/LLM/
+# network for pure-pydantic use and testing, and avoiding a circular import via
+# the top-level cognee package.
 from cognee.infrastructure.engine import DataPoint
-from cognee.shared.logging_utils import ERROR, setup_logging
 
 
 def datapoint_model_to_basemodel(
@@ -111,8 +112,37 @@ def datapoint_model_to_basemodel(
     return _to_base_model(model, {})
 
 
+def _safe_model_class_name(title: str | None) -> str:
+    """Turn a JSON-Schema ``title`` into a valid Python class name.
+
+    ``datamodel-code-generator`` sanitizes titles when it emits a class (e.g.
+    ``"Programming Language"`` becomes ``ProgrammingLanguage``), so looking the
+    generated class back up by the raw title fails. We sanitize the title the
+    same way up front and pass the result back as the title, guaranteeing the
+    emitted class name and our lookup key agree. A missing/blank title yields a
+    stable default instead of raising ``KeyError``.
+    """
+    parts = [part for part in re.split(r"[^0-9a-zA-Z]+", title or "") if part]
+    name = "".join(part[:1].upper() + part[1:] for part in parts)
+    if not name:
+        return "GraphModel"
+    if name[0].isdigit():
+        name = "Model" + name
+    if keyword.iskeyword(name):
+        # e.g. title "true"/"none" -> "True"/"None"; the generator rejects these.
+        name = name + "Model"
+    return name
+
+
 def graph_schema_to_graph_model(pydantic_json_schema: dict) -> BaseModel:
-    # If a custom graph model is provided, convert it from dict to a Pydantic model class
+    # If a custom graph model is provided, convert it from dict to a Pydantic model class.
+    # Derive a valid, deterministic class name from the title and pin it as the title we
+    # hand to the generator, so the emitted class name matches the key we look it up by
+    # below. Schemas with a missing or non-identifier title (e.g. "Programming Language")
+    # otherwise raised a bare KeyError. Copy the schema so the caller's dict is untouched.
+    class_name = _safe_model_class_name(pydantic_json_schema.get("title"))
+    schema_for_generation = {**pydantic_json_schema, "title": class_name}
+
     config = GenerateConfig(
         input_file_type=InputFileType.JsonSchema,
         input_filename="dynamic.json",
@@ -123,9 +153,8 @@ def graph_schema_to_graph_model(pydantic_json_schema: dict) -> BaseModel:
         base_class="cognee.infrastructure.engine.DataPoint",
         type_overrides={"DataPoint": "cognee.infrastructure.engine.DataPoint"},
     )
-    # Override title to ensure a valid and secure Python class name for the generated model
     # 'config' has 'output=None', 'generate' is supposed to return a string
-    result = cast(str, generate(pydantic_json_schema, config=config))
+    result = cast(str, generate(schema_for_generation, config=config))
 
     # Replace the generated DataPointModel class definition made by datamodel_code_generator with
     # the existing Cognee DataPoint class
@@ -146,7 +175,12 @@ def graph_schema_to_graph_model(pydantic_json_schema: dict) -> BaseModel:
     namespace = mod.__dict__
 
     # Extract the generated graph model class from the module's namespace
-    graph_model = namespace[pydantic_json_schema["title"]]
+    if class_name not in namespace:
+        raise ValueError(
+            f"Generated code did not define the expected model class {class_name!r}; "
+            f"defined names: {sorted(namespace)}"
+        )
+    graph_model = namespace[class_name]
     # Rebuild the DataPoint class first
     namespace["DataPoint"].model_rebuild()
     # Then rebuild the graph model to ensure it properly inherits from the updated DataPoint class
@@ -171,6 +205,12 @@ def graph_model_to_graph_schema(graph_model: type[BaseModel]) -> dict:
 
 
 if __name__ == "__main__":
+    import asyncio
+    from pprint import pprint
+
+    import cognee
+    from cognee.api.v1.search import SearchType
+    from cognee.shared.logging_utils import ERROR, setup_logging
 
     async def main():
         # Create a clean slate for cognee -- reset data and system state
