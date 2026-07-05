@@ -8,6 +8,7 @@ from cognee.cli import DEFAULT_DOCS_URL
 from cognee.cli.config import SEARCH_TYPE_CHOICES, OUTPUT_FORMAT_CHOICES
 import cognee.cli.echo as fmt
 from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
+from cognee.exceptions import CogneeApiError
 
 
 class SearchCommand(SupportsCliCommand):
@@ -109,6 +110,8 @@ Search Types & Use Cases:
                         session_id=scoped_session_id(user.id),
                     )
                     return results
+                except CogneeApiError:
+                    raise
                 except Exception as e:
                     raise CliCommandInnerException(f"Failed to search: {str(e)}") from e
 
@@ -145,6 +148,8 @@ Search Types & Use Cases:
                         fmt.echo(f"{fmt.bold(f'Result {i}:')} {result}")
                         fmt.echo()
 
+        except CogneeApiError:
+            raise
         except Exception as e:
             if isinstance(e, CliCommandInnerException):
                 raise CliCommandException(str(e), error_code=1) from e

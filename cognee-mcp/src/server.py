@@ -70,6 +70,12 @@ except ModuleNotFoundError:
     )
 
 
+try:
+    from .error_envelope import mcp_handle_tool_error
+except ImportError:
+    from error_envelope import mcp_handle_tool_error
+
+
 mcp = FastMCP("Cognee")
 
 logger = get_logger()
@@ -329,24 +335,14 @@ async def cognify(
     try:
         parsed_data = parse_cognify_data(data)
     except ValueError as e:
-        return [
-            types.TextContent(
-                type="text",
-                text=f"Error: {str(e)}",
-            )
-        ]
+        return mcp_handle_tool_error(e)
 
     file_error = validate_cognify_file_paths(
         parsed_data.items,
         is_running_in_docker=_is_running_in_docker,
     )
     if file_error:
-        return [
-            types.TextContent(
-                type="text",
-                text=f"Error: {file_error}",
-            )
-        ]
+        return mcp_handle_tool_error(ValueError(file_error))
 
     async def cognify_task(
         data_items: list[str],
@@ -616,7 +612,7 @@ async def search(
         normalized_search_type = normalize_search_type(search_type)
         normalized_top_k = validate_top_k(top_k)
     except ValueError as e:
-        return [types.TextContent(type="text", text=f"Error: {str(e)}")]
+        return mcp_handle_tool_error(e)
 
     async def search_task(
         search_query: str, search_type: str, top_k: int, datasets_list: list = None
@@ -676,7 +672,7 @@ async def search(
     except Exception as e:
         error_msg = f"Search failed: {str(e)}"
         logger.error(error_msg)
-        return [types.TextContent(type="text", text=f"Error: {error_msg}")]
+        return mcp_handle_tool_error(e)
     return [types.TextContent(type="text", text=search_results)]
 
 
@@ -950,7 +946,7 @@ async def delete_dataset(dataset_name: str) -> list:
                 )
             ]
         except Exception as e:
-            return [types.TextContent(type="text", text=f"Error deleting dataset: {str(e)}")]
+            return mcp_handle_tool_error(e)
 
 
 @log_usage(function_name="MCP delete", log_type="mcp_tool")
@@ -1023,13 +1019,12 @@ async def delete(data_id: str, dataset_id: str, mode: str = "soft") -> list:
         except ValueError as e:
             error_msg = f"❌ Invalid delete request: {str(e)}"
             logger.error(error_msg)
-            return [types.TextContent(type="text", text=error_msg)]
+            return mcp_handle_tool_error(e)
 
         except Exception as e:
-            # Handle all other errors (DocumentNotFoundError, DatasetNotFoundError, etc.)
             error_msg = f"❌ Delete operation failed: {str(e)}"
             logger.error(f"Delete operation error: {str(e)}")
-            return [types.TextContent(type="text", text=error_msg)]
+            return mcp_handle_tool_error(e)
 
 
 @log_usage(function_name="MCP prune", log_type="mcp_tool")
@@ -1123,7 +1118,7 @@ async def remember(
         except Exception as e:
             error_msg = f"Remember failed: {str(e)}"
             logger.error(error_msg)
-            return [types.TextContent(type="text", text=f"Error: {error_msg}")]
+            return mcp_handle_tool_error(e)
 
 
 @mcp.tool()

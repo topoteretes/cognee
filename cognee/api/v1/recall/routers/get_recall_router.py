@@ -10,11 +10,10 @@ from pydantic import Field
 from cognee import __version__ as cognee_version
 from cognee.api.DTO import InDTO, OutDTO
 from cognee.api.v1.recall.recall import RecallResponse
-from cognee.exceptions import CogneeValidationError
-from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
+from cognee.exceptions import CogneeApiError
 from cognee.modules.search.operations import get_history
 from cognee.modules.search.types import SearchResult, SearchType
-from cognee.modules.users.exceptions.exceptions import PermissionDeniedError, UserNotFoundError
+from cognee.modules.users.exceptions.exceptions import PermissionDeniedError
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
@@ -192,20 +191,11 @@ def get_recall_router() -> APIRouter:
                 include_references=payload.include_references,
             )
             return jsonable_encoder(results)
-        except (DatabaseNotCreatedError, UserNotFoundError, CogneeValidationError) as e:
-            logger = get_logger()
-            logger.error("Recall prerequisites error: %s", e, exc_info=True)
-            status_code = getattr(e, "status_code", 422)
-            return JSONResponse(
-                status_code=status_code,
-                content={
-                    "error": "Recall prerequisites not met",
-                    "hint": "Run `await cognee.remember(...)` or `await cognee.add(...)` then `await cognee.cognify()` before recalling.",
-                },
-            )
         except PermissionDeniedError:
             return []
         except Exception as error:
+            if isinstance(error, CogneeApiError):
+                raise
             logger = get_logger()
             logger.error("Recall endpoint error: %s", error, exc_info=True)
             return JSONResponse(
