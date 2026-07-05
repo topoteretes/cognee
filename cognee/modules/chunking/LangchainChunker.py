@@ -22,11 +22,11 @@ class LangchainChunker(Chunker):
         self,
         document,
         get_text: callable,
-        max_chunk_tokens: int,
+        max_chunk_size: int,
         chunk_size: int = 1024,
         chunk_overlap=10,
     ):
-        super().__init__(document, get_text, max_chunk_tokens, chunk_size)
+        super().__init__(document, get_text, max_chunk_size)
 
         self.splitter = RecursiveCharacterTextSplitter(
             chunk_size=chunk_size,
@@ -41,16 +41,16 @@ class LangchainChunker(Chunker):
             for chunk in self.splitter.split_text(content_text):
                 embedding_engine = get_vector_engine().embedding_engine
                 token_count = embedding_engine.tokenizer.count_tokens(chunk)
-                if token_count <= self.max_chunk_tokens:
+                if token_count <= self.max_chunk_size:
                     yield DocumentChunk(
                         id=uuid5(NAMESPACE_OID, chunk),
                         text=chunk,
-                        word_count=len(chunk.split()),
-                        token_count=token_count,
+                        chunk_size=token_count,
                         is_part_of=self.document,
                         chunk_index=self.chunk_index,
                         cut_type="missing",
                         contains=[],
+                        importance_weight=self.document.importance_weight,
                         document_id=document_id,
                         document_name=document_name,
                         metadata={
@@ -60,5 +60,5 @@ class LangchainChunker(Chunker):
                     self.chunk_index += 1
                 else:
                     raise ValueError(
-                        f"Chunk of {token_count} tokens is larger than the maximum of {self.max_chunk_tokens} tokens. Please reduce chunk_size in RecursiveCharacterTextSplitter."
+                        f"Chunk of {token_count} tokens is larger than the maximum of {self.max_chunk_size} tokens. Please reduce chunk_size in RecursiveCharacterTextSplitter."
                     )
