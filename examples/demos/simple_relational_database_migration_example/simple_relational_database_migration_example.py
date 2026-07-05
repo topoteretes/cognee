@@ -1,9 +1,12 @@
+# ruff: noqa: E402
 import asyncio
 import os
 
 import sqlalchemy as sa
 
 # This example uses a local Postgres migration database and no backend ACL.
+# Set os.environ before importing Cognee: Cognee reads env-backed settings at import time, so values
+# assigned later may not override defaults or `.env`. See https://docs.cognee.ai/setup-configuration/overview#using-os-environ
 os.environ["ENABLE_BACKEND_ACCESS_CONTROL"] = "false"
 os.environ["MIGRATION_DB_PROVIDER"] = "postgres"
 os.environ.setdefault("MIGRATION_DB_HOST", "127.0.0.1")
@@ -26,6 +29,9 @@ from cognee.infrastructure.databases.vector.pgvector import (
 )
 from cognee.modules.ontology.ontology_config import Config
 from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
+from cognee.run_migrations import (
+    run_migrations,
+)  # Keep local SQLite schema current before forget().
 from cognee.tasks.ingestion import migrate_relational_database
 
 TEXT_1 = """
@@ -68,17 +74,17 @@ Each of these companies has significantly impacted the technology landscape, dri
 
 
 def _get_postgres_engine() -> sa.Engine:
-    db_host = os.environ.get("MIGRATION_DB_HOST", "127.0.0.1")
-    db_port = os.environ.get("MIGRATION_DB_PORT", "5432")
-    db_name = os.environ.get("MIGRATION_DB_NAME", "cognee_migration")
-    db_user = os.environ.get("MIGRATION_DB_USERNAME", "cognee")
-    db_password = os.environ.get("MIGRATION_DB_PASSWORD", "cognee")
-
     # Requires a running Postgres database and a pre-created database (db_name).
-    connection_string = (
-        f"postgresql+psycopg2://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
+    # URL.create safely encodes credentials that contain URL-reserved characters.
+    connection_url = sa.URL.create(
+        "postgresql+psycopg2",
+        username=os.environ["MIGRATION_DB_USERNAME"],  # Read the defaults set at module import.
+        password=os.environ["MIGRATION_DB_PASSWORD"],  # Keeps env overrides working.
+        host=os.environ["MIGRATION_DB_HOST"],
+        port=int(os.environ["MIGRATION_DB_PORT"]),
+        database=os.environ["MIGRATION_DB_NAME"],
     )
-    return sa.create_engine(connection_string)
+    return sa.create_engine(connection_url)
 
 
 def create_example_postgres_db() -> None:
@@ -117,9 +123,12 @@ async def main(ontology_path: str = None):
     # Create a small Postgres DB schema to migrate.
     create_example_postgres_db()
 
+    # Ensure the local Cognee DB exists.
+    await create_relational_db_and_tables()
+    # Update a reused local Cognee DB so its tables match the current models.
+    await run_migrations()
     await cognee.forget(everything=True)
 
-    await create_relational_db_and_tables()
     await create_vector_db_and_tables()
 
     engine = get_migration_relational_engine()
