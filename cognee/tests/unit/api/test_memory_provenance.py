@@ -116,3 +116,41 @@ def test_dangling_references_are_skipped():
         datasets=[{"id": "D1", "name": "Fleet", "owner_id": "U9", "tenant_id": "T"}],
     )
     assert not any(t == "dataset:D1" and rel == "owns" for _, t, rel in edges)
+
+
+def test_lineage_edges_render_in_memory_layer():
+    _, edges = _build(
+        memory={
+            "nodes": [
+                ("alice", {"type": "Entity", "name": "Alice"}),
+                ("doc1", {"type": "TextDocument", "name": "a.txt"}),
+                ("dsnode", {"type": "DatasetNode", "name": "Fleet Ops"}),
+            ],
+            "edges": [
+                ("alice", "doc1", "derived_from", {}),
+                ("doc1", "dsnode", "in_dataset", {}),
+            ],
+            "aliases": {"dsnode": "dataset:D1"},
+        }
+    )
+    assert ("alice", "doc1", "derived_from") in edges
+    # in_dataset is redirected onto the actor dataset node.
+    assert ("doc1", "dataset:D1", "in_dataset") in edges
+
+
+def test_lineage_dataset_node_collapses_onto_actor_dataset():
+    node_types, edges = _build(
+        memory={
+            "nodes": [
+                ("doc1", {"type": "TextDocument", "name": "a.txt"}),
+                ("dsnode", {"type": "DatasetNode", "name": "Fleet Ops"}),
+            ],
+            "edges": [("doc1", "dsnode", "in_dataset", {})],
+            "aliases": {"dsnode": "dataset:D1"},
+        }
+    )
+    # The memory DatasetNode is not added as its own node.
+    assert "dsnode" not in node_types
+    # The actor dataset node stays and receives the in_dataset edge.
+    assert node_types["dataset:D1"] == "Dataset"
+    assert ("doc1", "dataset:D1", "in_dataset") in edges
