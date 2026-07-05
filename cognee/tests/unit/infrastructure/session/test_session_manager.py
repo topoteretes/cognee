@@ -1201,3 +1201,75 @@ class TestSessionManager:
         qa_kw = mock_cache.create_qa_entry.call_args.kwargs
         assert qa_kw["feedback_text"] is None
         assert qa_kw["feedback_score"] is None
+
+    # ------------------------------------------------------------------
+    # Session-context methods: parameter validation must surface (not be
+    # swallowed as empty results), while cache-availability and operational
+    # errors stay fail-open. Regression test for the inconsistency where a
+    # malformed user_id/session_id silently returned [] / False, making a
+    # typo indistinguishable from "no data exists".
+    # ------------------------------------------------------------------
+
+    @pytest.mark.asyncio
+    async def test_create_session_context_entry_invalid_params_raise(self, sm):
+        """create_session_context_entry raises on empty/whitespace user_id or session_id."""
+        with pytest.raises(SessionParameterValidationError):
+            await sm.create_session_context_entry(
+                user_id="", entry_dump={"kind": "context"}, session_id="s1"
+            )
+        with pytest.raises(SessionParameterValidationError):
+            await sm.create_session_context_entry(
+                user_id="u1", entry_dump={"kind": "context"}, session_id="   "
+            )
+
+    @pytest.mark.asyncio
+    async def test_get_session_context_entries_invalid_params_raise(self, sm):
+        """get_session_context_entries raises on invalid user_id instead of returning []."""
+        with pytest.raises(SessionParameterValidationError):
+            await sm.get_session_context_entries(user_id="", session_id="s1")
+
+    @pytest.mark.asyncio
+    async def test_update_session_context_entry_invalid_params_raise(self, sm):
+        """update_session_context_entry raises on invalid session_id."""
+        with pytest.raises(SessionParameterValidationError):
+            await sm.update_session_context_entry(
+                user_id="u1", entry_id="e1", merge={"x": 1}, session_id=""
+            )
+
+    @pytest.mark.asyncio
+    async def test_delete_session_context_invalid_params_raise(self, sm):
+        """delete_session_context raises on invalid user_id."""
+        with pytest.raises(SessionParameterValidationError):
+            await sm.delete_session_context(user_id="  ", session_id="s1")
+
+    @pytest.mark.asyncio
+    async def test_session_context_methods_unavailable_fail_open(self, sm_unavailable):
+        """With cache unavailable, valid calls still fail-open (no raise)."""
+        assert (
+            await sm_unavailable.create_session_context_entry(
+                user_id="u1", entry_dump={"kind": "context"}, session_id="s1"
+            )
+            is False
+        )
+        assert await sm_unavailable.get_session_context_entries(user_id="u1", session_id="s1") == []
+        assert (
+            await sm_unavailable.update_session_context_entry(
+                user_id="u1", entry_id="e1", merge={"x": 1}, session_id="s1"
+            )
+            is False
+        )
+        assert await sm_unavailable.delete_session_context(user_id="u1", session_id="s1") is False
+
+    @pytest.mark.asyncio
+    async def test_get_session_context_entries_cache_error_fails_open(self, sm, mock_cache):
+        """Operational cache errors stay fail-open (return []), unlike invalid params."""
+        mock_cache.get_session_context_entries = AsyncMock(side_effect=Exception("boom"))
+        assert await sm.get_session_context_entries(user_id="u1", session_id="s1") == []
+
+    @pytest.mark.asyncio
+    async def test_get_session_context_entries_valid_delegates_to_cache(self, sm, mock_cache):
+        """Valid params delegate to the cache and return its result."""
+        mock_cache.get_session_context_entries.return_value = [{"kind": "context", "id": "c1"}]
+        result = await sm.get_session_context_entries(user_id="u1", session_id="s1")
+        assert result == [{"kind": "context", "id": "c1"}]
+        mock_cache.get_session_context_entries.assert_awaited_once_with("u1", "s1")
