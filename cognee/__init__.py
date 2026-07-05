@@ -36,6 +36,7 @@ from .api.v1.visualize import (
     get_memory_provenance_graph,
     visualize_memory_provenance,
 )
+from .modules.graph.methods import get_source_lineage, get_derived_nodes
 from cognee.modules.visualization.cognee_network_visualization import (
     cognee_network_visualization,
 )

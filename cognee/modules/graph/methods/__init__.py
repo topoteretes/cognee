@@ -1,4 +1,5 @@
 from .get_formatted_graph_data import get_formatted_graph_data
+from .get_node_lineage import get_source_lineage, get_derived_nodes
 
 from .upsert_edges import upsert_edges
 from .upsert_nodes import upsert_nodes
