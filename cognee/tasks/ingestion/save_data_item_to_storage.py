@@ -69,10 +69,15 @@ async def save_data_item_to_storage(data_item: Union[BinaryIO, str, Any]) -> str
                 raise IngestionError(message="Local files are not accepted.")
 
         # data is an absolute file path
-        elif data_item.startswith("/") or (
-            os.name == "nt" and len(data_item) > 1 and data_item[1] == ":"
-        ):
-            # Handle both Unix absolute paths (/path) and Windows absolute paths (C:\path)
+        elif (
+            data_item.startswith("/")
+            or (os.name == "nt" and len(data_item) > 1 and data_item[1] == ":")
+        ) and Path(os.path.normpath(data_item)).is_absolute():
+            # Handle both Unix absolute paths (/path) and Windows absolute paths (C:\path).
+            # The is_absolute() guard matters on Windows: a POSIX-style "/path" (or a
+            # drive-relative "C:path") normalizes to a *drive-relative* WindowsPath, and
+            # Path.as_uri() raises ValueError for it. Such strings are not usable file
+            # paths on this platform and continue to the relative-path/text handling below.
             if settings.accept_local_file_path:
                 # Normalize path separators before creating file URL
                 normalized_path = os.path.normpath(data_item)
