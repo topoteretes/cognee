@@ -1102,3 +1102,72 @@ async def test_cognee_graph_mapping_batch_shapes():
     assert node1.attributes.get("vector_distance") == [0.95, 6.5]
     assert node2.attributes.get("vector_distance") == [6.5, 0.87]
     assert edge.attributes.get("vector_distance") == [0.92, 0.88]
+
+
+@pytest.mark.asyncio
+async def test_neighborhood_expansion_rescored_by_id_not_belongs_to_set():
+    """Regression: neighborhood expansion nodes must be re-scored with a real vector
+    search and filtered to their own ids.
+
+    The old code passed the expansion ids as node_name, which filters on
+    belongs_to_set (never a node's own id), so the search matched nothing and the
+    expansion nodes stayed at the default penalty. The fix runs an unfiltered search
+    and keeps only the expansion ids client-side.
+    """
+    SEED_ID = "seed-1"
+    EXP_ID = "expansion-1"
+    OTHER_ID = "unrelated-1"
+
+    def search_side_effect(*args, **kwargs):
+        # Re-score pass: unfiltered search (limit=None, no node_name). Returns the
+        # expansion node plus an unrelated node, to prove only expansion ids are kept.
+        if kwargs.get("limit") is None:
+            return [MockScoredResult(EXP_ID, 0.05), MockScoredResult(OTHER_ID, 0.01)]
+        # Initial wide search: the seed node lives in Entity_name.
+        if kwargs.get("collection_name") == "Entity_name":
+            return [MockScoredResult(SEED_ID, 0.20)]
+        return []
+
+    mock_vector_engine = AsyncMock()
+    mock_vector_engine.embedding_engine = AsyncMock()
+    mock_vector_engine.embedding_engine.embed_text = AsyncMock(return_value=[[0.1, 0.2, 0.3]])
+    mock_vector_engine.search = AsyncMock(side_effect=search_side_effect)
+
+    mock_fragment = AsyncMock(
+        nodes={SEED_ID: object(), EXP_ID: object()},
+        map_vector_distances_to_graph_nodes=AsyncMock(),
+        map_vector_distances_to_graph_edges=AsyncMock(),
+        calculate_top_triplet_importances=AsyncMock(return_value=[]),
+    )
+
+    with (
+        patch(
+            "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine",
+            return_value=mock_vector_engine,
+        ),
+        patch(
+            "cognee.modules.retrieval.utils.brute_force_triplet_search.get_memory_fragment",
+            return_value=mock_fragment,
+        ),
+    ):
+        await brute_force_triplet_search(
+            query="test", node_name=None, neighborhood_depth=1, wide_search_top_k=10
+        )
+
+    # The re-score pass must use an unfiltered search (limit=None) with no node_name,
+    # never node_name=expansion_ids (the belongs_to_set filter that matched nothing).
+    rescore_calls = [
+        call for call in mock_vector_engine.search.call_args_list if call[1].get("limit") is None
+    ]
+    assert rescore_calls, "expected an unfiltered re-score search for expansion nodes"
+    for call in rescore_calls:
+        assert call[1].get("node_name") is None
+
+    # The expansion node's real score must reach the graph mapping; the unrelated node must not.
+    node_distances = mock_fragment.map_vector_distances_to_graph_nodes.call_args[1][
+        "node_distances"
+    ]
+    scored_ids = {str(result.id) for results in node_distances.values() for result in results}
+    assert EXP_ID in scored_ids
+    assert OTHER_ID not in scored_ids
+    assert SEED_ID in scored_ids
