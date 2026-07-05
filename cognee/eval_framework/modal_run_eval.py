@@ -3,6 +3,8 @@ import os
 import asyncio
 import datetime
 import json
+# timezone ko explicit import kar rahe hain taaki naya global standard bina error ke chale
+from datetime import timezone 
 from cognee.shared.logging_utils import get_logger
 from cognee.eval_framework.eval_config import EvalConfig
 from cognee.eval_framework.corpus_builder.run_corpus_builder import run_corpus_builder
@@ -60,7 +62,10 @@ async def modal_run_eval(eval_params=None):
 
     version_name = "baseline"
     benchmark_name = os.environ.get("BENCHMARK", eval_params.get("benchmark", "benchmark"))
-    timestamp = datetime.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    
+    # [FIX]: datetime.now(datetime.timezone.utc) ko badal kar naye standard par update kiya hai
+    timestamp = datetime.datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
 
     answers_filename = (
         f"{version_name}_{benchmark_name}_{timestamp}_{eval_params.get('answers_path')}"

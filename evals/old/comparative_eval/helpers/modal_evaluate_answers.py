@@ -37,7 +37,7 @@ async def modal_evaluate_answers(
     if eval_config is None:
         eval_config = EvalConfig().to_dict()
 
-    timestamp = datetime.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    timestamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
     # Create temporary file path for the JSON content
     base_name = os.path.splitext(answers_filename)[0]

@@ -113,7 +113,7 @@ class RedisAdapter(CacheDBInterface):
     ) -> dict:
         """Serialize one QA entry into the normalized Redis payload shape."""
         entry = SessionQAEntry(
-            time=datetime.utcnow().isoformat(),
+            time=datetime.now(datetime.timezone.utc).isoformat(),
             question=question,
             context=context,
             answer=answer,
