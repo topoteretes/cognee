@@ -343,7 +343,7 @@ async def main():
 
     from cognee.infrastructure.databases.vector.get_vector_engine import get_vector_engine
 
-    vector_engine = get_vector_engine()
+    vector_engine = await get_vector_engine()
     collection_size = await vector_engine.search(
         collection_name="DocumentChunk_text",
         query_text="test",
