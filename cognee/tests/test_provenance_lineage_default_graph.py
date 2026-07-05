@@ -26,6 +26,7 @@ import pytest
 import cognee
 from cognee.api.v1.datasets import datasets
 from cognee.context_global_variables import set_database_global_context_variables
+from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.infrastructure.llm import LLMGateway
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.modules.data.processing.document_types.TextDocument import TextDocument
@@ -35,6 +36,7 @@ from cognee.modules.engine.operations.setup import setup
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.data_models import KnowledgeGraph, Node, Edge, SummarizedContent
 from cognee.shared.logging_utils import get_logger
+from cognee.modules.retrieval.utils.references import build_answer_grounded_chunk_references
 from cognee.tasks.storage.provenance_lineage import (
     DERIVED_FROM_RELATIONSHIP,
     IN_DATASET_RELATIONSHIP,
@@ -214,6 +216,13 @@ async def main(mock_create_structured_output: AsyncMock):
     # Many-to-many: the shared entity derives from BOTH documents.
     await assert_graph_edges_present(_derived_from(shared_entities, johns_document.id))
     await assert_graph_edges_present(_derived_from(shared_entities, maries_document.id))
+
+    # Provenance survives recall: an answer-grounded reference follows the lineage
+    # edges back to the source dataset.
+    evidence = await build_answer_grounded_chunk_references(
+        "John works for Apple", get_vector_engine()
+    )
+    assert "in dataset main_dataset" in evidence
 
     # ── Delete John's data: John's lineage gone, shared + Marie survive ───────
 

@@ -71,6 +71,26 @@ def test_format_chunk_references_includes_data_id_and_chunk_id():
     )
 
 
+def test_format_chunk_references_includes_dataset_when_provided():
+    """A chunk's source dataset is rendered when its name is supplied."""
+    result = format_chunk_references(
+        [_payload(id="chunk-9")], dataset_names={"chunk-9": "Fleet Ops"}
+    )
+
+    assert (
+        "- chunk 5 of document annual_report.pdf in dataset Fleet Ops (chunk_id: chunk-9):"
+        in result
+    )
+
+
+def test_format_chunk_references_omits_dataset_when_absent():
+    """Without a dataset mapping the bullet is unchanged (backward compatible)."""
+    result = format_chunk_references([_payload(id="chunk-9")])
+
+    assert "in dataset" not in result
+    assert "- chunk 5 of document annual_report.pdf (chunk_id: chunk-9):" in result
+
+
 def test_format_chunk_references_empty_when_document_name_missing():
     """Old-data case: missing document_name -> entry skipped -> empty string."""
     payload = _payload()

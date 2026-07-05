@@ -168,7 +168,10 @@ def _significant_terms(text: str) -> Set[str]:
 
 
 def format_chunk_references(
-    retrieved_objects: Any, answer: Optional[str] = None, limit: int = 5
+    retrieved_objects: Any,
+    answer: Optional[str] = None,
+    limit: int = 5,
+    dataset_names: Optional[dict] = None,
 ) -> str:
     """Build an Evidence block from retrieved vector payloads, grounded in the answer.
 
@@ -193,6 +196,10 @@ def format_chunk_references(
         None, candidates keep their retrieval order unfiltered.
     limit:
         Desired maximum number of bullets, clamped into the 3-5 range.
+    dataset_names:
+        Optional map of chunk id to source dataset name. When a chunk's dataset
+        is present, the bullet reads "in dataset <name>". When omitted the bullet
+        is rendered exactly as before.
 
     Returns
     -------
@@ -264,13 +271,46 @@ def format_chunk_references(
         candidates.sort(key=lambda candidate: -candidate[0])
 
     max_bullets = _clamp_limit(limit)
-    bullets = [
-        f"- chunk {number} of document {document_name}"
-        f'{_provenance_suffix(data_id, chunk_id)}: "{_snippet(text)}"'
-        for _, document_name, number, text, data_id, chunk_id in candidates[:max_bullets]
-    ]
+    dataset_names = dataset_names or {}
+    bullets = []
+    for _, document_name, number, text, data_id, chunk_id in candidates[:max_bullets]:
+        location = f"chunk {number} of document {document_name}"
+        dataset_name = dataset_names.get(chunk_id)
+        if dataset_name:
+            location += f" in dataset {dataset_name}"
+        bullets.append(f'- {location}{_provenance_suffix(data_id, chunk_id)}: "{_snippet(text)}"')
 
     return EVIDENCE_HEADER + "\n" + "\n".join(bullets)
+
+
+async def _resolve_chunk_datasets(chunks: List[Any]) -> dict:
+    """Map each chunk id to its source dataset name via the lineage edges.
+
+    Uses the provenance lineage query API to follow a chunk up to its dataset.
+    Best-effort: any failure degrades to no dataset, so Evidence still renders.
+    """
+    try:
+        from cognee.modules.graph.methods import get_source_lineage
+    except Exception as error:
+        logger.debug(f"Lineage lookup unavailable for references: {error}")
+        return {}
+
+    dataset_names: dict = {}
+    for chunk in chunks:
+        payload = _get_payload(chunk) or {}
+        chunk_id = _chunk_id(chunk, payload)
+        if not chunk_id or chunk_id in dataset_names:
+            continue
+        try:
+            lineage = await get_source_lineage(chunk_id)
+        except Exception as error:
+            logger.debug(f"Lineage lookup failed for chunk {chunk_id}: {error}")
+            continue
+        datasets = lineage.get("datasets") or []
+        name = _clean_str(datasets[0].get("name")) if datasets else None
+        if name:
+            dataset_names[chunk_id] = name
+    return dataset_names
 
 
 async def build_answer_grounded_chunk_references(
@@ -315,7 +355,10 @@ async def build_answer_grounded_chunk_references(
         logger.debug(f"Answer-grounded chunk search failed: {error}")
         return ""
 
-    return format_chunk_references(found_chunks, answer=cleaned_answer, limit=limit)
+    dataset_names = await _resolve_chunk_datasets(found_chunks)
+    return format_chunk_references(
+        found_chunks, answer=cleaned_answer, limit=limit, dataset_names=dataset_names
+    )
 
 
 def append_chunk_evidence(
