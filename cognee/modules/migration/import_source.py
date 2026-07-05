@@ -79,6 +79,18 @@ async def import_memory_source(
     """
     node_set = node_set or [f"import:{source.source_system}"]
 
+    if getattr(source, "source_system", None) == "cogx" and hasattr(source, "directory"):
+        gov_path = source.directory / "governance.jsonld"
+        if gov_path.exists():
+            import json
+            from cognee.modules.governance.models import GovernanceBundle
+            from cognee.modules.governance.importer import import_governance_bundle
+            
+            with open(gov_path, "r", encoding="utf-8") as f:
+                governance_data = json.load(f)
+                bundle = GovernanceBundle.model_validate(governance_data)
+                await import_governance_bundle(bundle, conflict_strategy="skip")
+
     if source.mode == "preserve" and getattr(source, "replayable", False):
         return await _import_streaming(source, dataset_name, user, run_in_background, node_set)
     return await _import_buffered(source, dataset_name, user, run_in_background, node_set, **kwargs)
