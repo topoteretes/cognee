@@ -221,23 +221,7 @@ async def cognify(
         await run_migrations_and_block(datasets, user)
 
         if config is None:
-            ontology_config = get_ontology_env_config()
-            if (
-                ontology_config.ontology_file_path
-                and ontology_config.ontology_resolver
-                and ontology_config.matching_strategy
-            ):
-                config: Config = {
-                    "ontology_config": {
-                        "ontology_resolver": get_ontology_resolver_from_env(
-                            **ontology_config.to_dict()
-                        )
-                    }
-                }
-            else:
-                config: Config = {
-                    "ontology_config": {"ontology_resolver": get_default_ontology_resolver()}
-                }
+            config = _resolve_ontology_config()
 
         if temporal_cognify:
             tasks = await get_temporal_tasks(
@@ -287,7 +271,43 @@ async def cognify(
         return result
 
 
-async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's comment)
+def _resolve_ontology_config() -> Config:
+    """Build the ontology config dict from environment settings."""
+    ontology_config = get_ontology_env_config()
+    if (
+        ontology_config.ontology_file_path
+        and ontology_config.ontology_resolver
+        and ontology_config.matching_strategy
+    ):
+        return {
+            "ontology_config": {
+                "ontology_resolver": get_ontology_resolver_from_env(**ontology_config.to_dict())
+            }
+        }
+    return {"ontology_config": {"ontology_resolver": get_default_ontology_resolver()}}
+
+
+def _resolve_chunks_per_batch(chunks_per_batch: int = None, default: int = 100) -> int:
+    """Return an explicit batch size, or fall back to CognifyConfig, then *default*."""
+    if chunks_per_batch is not None:
+        return chunks_per_batch
+    configured = get_cognify_config().chunks_per_batch
+    return configured if configured is not None else default
+
+
+def _build_extract_tasks(chunker=TextChunker, chunk_size: int = None) -> list[Task]:
+    """Return the shared classify + chunk extraction tasks used by every pipeline variant."""
+    return [
+        Task(classify_documents),
+        Task(
+            extract_chunks_from_documents,
+            max_chunk_size=chunk_size or get_max_chunk_tokens(),
+            chunker=chunker,
+        ),
+    ]
+
+
+async def get_default_tasks(
     user: User = None,
     graph_model: BaseModel = KnowledgeGraph,
     chunker=TextChunker,
@@ -297,42 +317,32 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
     chunks_per_batch: int = None,
     **kwargs,
 ) -> list[Task]:
+    """Build the default cognify pipeline task list.
+
+    The pipeline performs: classify documents -> extract chunks ->
+    extract graph & summarize -> persist data points -> extract DLT FK edges.
+
+    Args:
+        user: User context (reserved for future per-user pipeline customisation).
+        graph_model: Pydantic model defining the knowledge graph structure.
+        chunker: Text chunking strategy class.
+        chunk_size: Maximum tokens per chunk. Uses system default when None.
+        config: Ontology configuration dict. Resolved from environment when None.
+        custom_prompt: Optional prompt override for entity extraction.
+        chunks_per_batch: Batch size for LLM extraction tasks.
+
+    Returns:
+        Ordered list of Task objects ready for pipeline execution.
+    """
     if config is None:
-        ontology_config = get_ontology_env_config()
-        if (
-            ontology_config.ontology_file_path
-            and ontology_config.ontology_resolver
-            and ontology_config.matching_strategy
-        ):
-            config: Config = {
-                "ontology_config": {
-                    "ontology_resolver": get_ontology_resolver_from_env(**ontology_config.to_dict())
-                }
-            }
-        else:
-            config: Config = {
-                "ontology_config": {"ontology_resolver": get_default_ontology_resolver()}
-            }
+        config = _resolve_ontology_config()
 
-    cognify_config = get_cognify_config()
-    embed_triplets = cognify_config.triplet_embedding
+    chunks_per_batch = _resolve_chunks_per_batch(chunks_per_batch, default=100)
+    embed_triplets = get_cognify_config().triplet_embedding
 
-    if chunks_per_batch is None:
-        chunks_per_batch = (
-            cognify_config.chunks_per_batch if cognify_config.chunks_per_batch is not None else 100
-        )
-
-    default_tasks = [
-        # EXTRACT: classify raw Data items into typed Document objects
-        Task(classify_documents),
-        # EXTRACT: split Documents into semantic text chunks
-        Task(
-            extract_chunks_from_documents,
-            max_chunk_size=chunk_size or get_max_chunk_tokens(),
-            chunker=chunker,
-        ),
-        # COGNIFY: LLM-extract entities and relationships into a knowledge graph
-        # COGNIFY: LLM-summarize each chunk for retrieval
+    return [
+        *_build_extract_tasks(chunker, chunk_size),
+        # COGNIFY: LLM-extract entities/relationships and summarize each chunk
         Task(
             extract_graph_and_summarize,
             graph_model=graph_model,
@@ -350,46 +360,29 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
         Task(extract_dlt_fk_edges),
     ]
 
-    return default_tasks
-
 
 async def get_temporal_tasks(
     user: User = None, chunker=TextChunker, chunk_size: int = None, chunks_per_batch: int = None
 ) -> list[Task]:
-    """
-    Builds and returns a list of temporal processing tasks to be executed in sequence.
+    """Build the temporal cognify pipeline task list.
 
-    The pipeline includes:
-    1. Document classification.
-    2. Document chunking with a specified or default chunk size.
-    3. Event and timestamp extraction from chunks.
-    4. Knowledge graph extraction from events.
-    5. Batched insertion of data points.
+    The pipeline performs: classify documents -> extract chunks ->
+    extract events & timestamps -> build knowledge graph from events ->
+    persist data points.
 
     Args:
-        user (User, optional): The user requesting task execution.
-        chunker (Callable, optional): A text chunking function/class to split documents. Defaults to TextChunker.
-        chunk_size (int, optional): Maximum token size per chunk. If not provided, uses system default.
-        chunks_per_batch (int, optional): Number of chunks to process in a single batch in Cognify
+        user: User context (reserved for future per-user pipeline customisation).
+        chunker: Text chunking strategy class.
+        chunk_size: Maximum tokens per chunk. Uses system default when None.
+        chunks_per_batch: Batch size for extraction tasks.
 
     Returns:
-        list[Task]: A list of Task objects representing the temporal processing pipeline.
+        Ordered list of Task objects representing the temporal processing pipeline.
     """
-    if chunks_per_batch is None:
-        from cognee.modules.cognify.config import get_cognify_config
+    chunks_per_batch = _resolve_chunks_per_batch(chunks_per_batch, default=10)
 
-        configured = get_cognify_config().chunks_per_batch
-        chunks_per_batch = configured if configured is not None else 10
-
-    temporal_tasks = [
-        # EXTRACT: classify raw Data items into typed Document objects
-        Task(classify_documents),
-        # EXTRACT: split Documents into semantic text chunks
-        Task(
-            extract_chunks_from_documents,
-            max_chunk_size=chunk_size or get_max_chunk_tokens(),
-            chunker=chunker,
-        ),
+    return [
+        *_build_extract_tasks(chunker, chunk_size),
         # COGNIFY: extract temporal events and timestamps from chunks
         Task(extract_events_and_timestamps, task_config={"batch_size": chunks_per_batch}),
         # COGNIFY: build knowledge graph from extracted events
@@ -397,5 +390,3 @@ async def get_temporal_tasks(
         # LOAD: persist nodes, edges, and embeddings to graph/vector DBs
         Task(add_data_points, task_config={"batch_size": chunks_per_batch}),
     ]
-
-    return temporal_tasks
