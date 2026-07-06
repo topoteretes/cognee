@@ -31,6 +31,7 @@ os.environ["EMBEDDING_PROVIDER"] = "ollama"
 os.environ["EMBEDDING_MODEL"] = "nomic-embed-text"
 os.environ["EMBEDDING_ENDPOINT"] = "http://localhost:11434/api/embed"
 os.environ["EMBEDDING_DIMENSIONS"] = "768"
+os.environ["HUGGINGFACE_TOKENIZER"] = "nomic-ai/nomic-embed-text-v1.5"
 
 import cognee  # noqa: E402
 from cognee.modules.search.types import SearchType  # noqa: E402
