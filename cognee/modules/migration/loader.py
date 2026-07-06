@@ -11,6 +11,7 @@ Two targets, selected by the source's import mode:
   the source (``valid_at``/``invalid_at``) is preserved as edge properties.
 """
 
+import dataclasses
 from dataclasses import dataclass, field
 from datetime import datetime
 from types import SimpleNamespace
@@ -427,6 +428,12 @@ def _provenance_ctx(ctx):
     add_data_points stamps ledger provenance from ``ctx.data_item.id``, which
     exists on Data ORM records but not on raw ingestion DataItems. Substitute
     the DataItem's deterministic ``data_id`` so provenance still lands.
+
+    Only ``data_item`` is replaced; every other PipelineContext field is
+    carried over via ``dataclasses.replace`` so consumers that read ctx
+    attributes (e.g. ``add_data_points`` reads ``ctx.pipeline_run_id``) never
+    see a field-stripped context — a hand-copied field list here silently
+    drops any parameter later added to PipelineContext.
     """
     if ctx is None:
         return None
@@ -434,12 +441,7 @@ def _provenance_ctx(ctx):
     if data_item is None or hasattr(data_item, "id"):
         return ctx
     data_id = getattr(data_item, "data_id", None)
-    return SimpleNamespace(
-        user=getattr(ctx, "user", None),
-        dataset=getattr(ctx, "dataset", None),
-        data_item=SimpleNamespace(id=data_id) if data_id else None,
-        extras=getattr(ctx, "extras", None),
-    )
+    return dataclasses.replace(ctx, data_item=SimpleNamespace(id=data_id) if data_id else None)
 
 
 # Edge batches can run larger than node batches: edges are small tuples and
