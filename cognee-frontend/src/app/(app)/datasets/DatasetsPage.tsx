@@ -421,7 +421,7 @@ export default function DatasetsPage() {
   const selectedDataset = datasets.find((d) => d.id === selectedId) ?? null;
 
   const visibleDocs = [...(docSearch
-    ? selectedDocs.filter((d) => d.name.toLowerCase().includes(docSearch.toLowerCase()))
+    ? selectedDocs.filter((d) => decodeFilename(d.name).toLowerCase().includes(docSearch.toLowerCase()))
     : selectedDocs)].sort((a, b) => {
     let cmp = 0;
     if (docSortKey === "name") {
