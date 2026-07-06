@@ -14,8 +14,10 @@ from cognee.infrastructure.databases.provenance.markers import (
     mark_graph_provenance_if_empty,
 )
 from cognee.infrastructure.databases.relational import get_async_session
+from cognee.modules.cognify.config import get_cognify_config
 from cognee.modules.graph.methods import upsert_edges, upsert_nodes
 from cognee.modules.graph.utils import (
+    cluster_fuzzy_duplicate_entities,
     deduplicate_nodes_and_edges,
     ensure_default_edge_properties,
     get_graph_from_model,
@@ -85,6 +87,22 @@ async def add_data_points(
         nodes.extend(result_nodes)
         edges.extend(result_edges)
 
+    unified = await get_unified_engine()
+    graph_engine = unified.graph
+    vector_engine = unified.vector
+    use_hybrid = unified.has_capability(EngineCapability.HYBRID_WRITE)
+
+    cognify_config = get_cognify_config()
+    if cognify_config.fuzzy_entity_dedup:
+        # Must run before deduplicate_nodes_and_edges: it rewrites duplicate ids
+        # onto a canonical id so the exact-id dedup below collapses them for free.
+        nodes, edges, _fuzzy_merge_records = await cluster_fuzzy_duplicate_entities(
+            nodes,
+            edges,
+            vector_engine,
+            similarity_threshold=cognify_config.fuzzy_entity_dedup_threshold,
+        )
+
     nodes, edges = deduplicate_nodes_and_edges(nodes, edges)
 
     edges = ensure_default_edge_properties(edges, nodes=nodes)
@@ -93,11 +111,6 @@ async def add_data_points(
         if isinstance(custom_edges, list) and custom_edges
         else None
     )
-
-    unified = await get_unified_engine()
-    graph_engine = unified.graph
-    vector_engine = unified.vector
-    use_hybrid = unified.has_capability(EngineCapability.HYBRID_WRITE)
 
     # Provenance needs a concrete (dataset, data) pair. data_item_id resolves
     # the id whether data_item is a relational Data (.id) or an ingestion

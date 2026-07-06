@@ -895,3 +895,82 @@ async def test_add_data_points_relational_upserts_happen_before_graph_and_vector
     )
     assert call_order[:3] == ["upsert_nodes", "upsert_edges", "upsert_edges"]
     assert first_graph_index >= 3
+
+
+@pytest.mark.asyncio
+@patch.object(adp_module, "index_graph_edges")
+@patch.object(adp_module, "index_data_points")
+@patch.object(adp_module, "get_cognify_config")
+@patch.object(adp_module, "cluster_fuzzy_duplicate_entities")
+@patch.object(adp_module, "get_unified_engine")
+@patch.object(adp_module, "deduplicate_nodes_and_edges")
+@patch.object(adp_module, "get_graph_from_model")
+async def test_add_data_points_runs_fuzzy_dedup_before_exact_dedup(
+    mock_get_graph,
+    mock_dedup,
+    mock_get_unified,
+    mock_fuzzy_dedup,
+    mock_get_config,
+    mock_index_nodes,
+    mock_index_edges,
+):
+    """Wiring check: fuzzy dedup runs (enabled by default), feeding its output
+    into the existing exact-id dedup, with the unified engine's vector_engine."""
+    dp1 = SimplePoint(text="first")
+    dp2 = SimplePoint(text="second")
+    edge1 = (str(dp1.id), str(dp2.id), "related_to", {"edge_text": "connects"})
+
+    mock_get_graph.side_effect = [([dp1], [edge1]), ([dp2], [])]
+    unified, graph_engine, vector_engine = _make_unified_mock()
+    mock_get_unified.return_value = unified
+    mock_get_config.return_value = SimpleNamespace(
+        fuzzy_entity_dedup=True, fuzzy_entity_dedup_threshold=0.95
+    )
+
+    fuzzy_nodes = [dp1]  # simulate dp2 being merged away
+    fuzzy_edges = [edge1]
+    mock_fuzzy_dedup.return_value = (fuzzy_nodes, fuzzy_edges, [{"duplicate_id": str(dp2.id)}])
+    mock_dedup.side_effect = lambda n, e: (n, e)
+
+    await add_data_points([dp1, dp2])
+
+    mock_fuzzy_dedup.assert_awaited_once()
+    call_args = mock_fuzzy_dedup.await_args
+    assert call_args.args[0] == [dp1, dp2]  # nodes, pre-fuzzy-merge
+    assert call_args.args[2] is vector_engine
+    assert call_args.kwargs["similarity_threshold"] == 0.95
+
+    # Exact dedup receives the fuzzy-merged output, not the raw pre-merge lists.
+    mock_dedup.assert_called_once_with(fuzzy_nodes, fuzzy_edges)
+
+
+@pytest.mark.asyncio
+@patch.object(adp_module, "index_graph_edges")
+@patch.object(adp_module, "index_data_points")
+@patch.object(adp_module, "get_cognify_config")
+@patch.object(adp_module, "cluster_fuzzy_duplicate_entities")
+@patch.object(adp_module, "get_unified_engine")
+@patch.object(adp_module, "deduplicate_nodes_and_edges")
+@patch.object(adp_module, "get_graph_from_model")
+async def test_add_data_points_skips_fuzzy_dedup_when_disabled(
+    mock_get_graph,
+    mock_dedup,
+    mock_get_unified,
+    mock_fuzzy_dedup,
+    mock_get_config,
+    mock_index_nodes,
+    mock_index_edges,
+):
+    dp = SimplePoint(text="only")
+    mock_get_graph.side_effect = [([dp], [])]
+    unified, graph_engine, vector_engine = _make_unified_mock()
+    mock_get_unified.return_value = unified
+    mock_get_config.return_value = SimpleNamespace(
+        fuzzy_entity_dedup=False, fuzzy_entity_dedup_threshold=0.95
+    )
+    mock_dedup.side_effect = lambda n, e: (n, e)
+
+    await add_data_points([dp])
+
+    mock_fuzzy_dedup.assert_not_called()
+    mock_dedup.assert_called_once_with([dp], [])
