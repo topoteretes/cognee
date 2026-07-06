@@ -184,7 +184,7 @@ class LanceDBAdapter(VectorDBInterface):
         # in-flight ``get_connection()`` resuming after its ``await``.
         # ``threading.Lock`` (not ``asyncio.Lock``) for cross-loop safety:
         # ``close()`` can be invoked from a foreign event loop via
-        # ``closing_lru_cache._close_value`` running ``asyncio.run``, and
+        # ``closing_lru_cache._start_close`` running ``asyncio.run``, and
         # awaiting an asyncio.Lock there raises "got Future attached to a
         # different loop". The lock is held for microseconds at a time and
         # never wraps an ``await``, so it can't deadlock the event loop.

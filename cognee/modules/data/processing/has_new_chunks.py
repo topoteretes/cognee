@@ -5,7 +5,7 @@ from cognee.modules.chunking import DocumentChunk
 async def has_new_chunks(
     data_chunks: list[DocumentChunk], collection_name: str
 ) -> list[DocumentChunk]:
-    vector_engine = get_vector_engine()
+    vector_engine = await get_vector_engine()
 
     if not await vector_engine.has_collection(collection_name):
         # There is no collection created,
