@@ -22,6 +22,7 @@ from cognee.modules.migration.sources.base import MemorySource
 # fails here because package __init__ files rebind submodule names to
 # same-named functions (e.g. ``cognee.api.v1.remember.remember``).
 add_module = importlib.import_module("cognee.api.v1.add")
+migrations_startup_module = importlib.import_module("cognee.modules.migrations.startup")
 pipeline_module = importlib.import_module("cognee.modules.run_custom_pipeline")
 remember_module = importlib.import_module("cognee.api.v1.remember.remember")
 serve_state = importlib.import_module("cognee.api.v1.serve.state")
@@ -75,7 +76,13 @@ def install_sinks(monkeypatch):
     ``add_data_points`` sink. It returns a run-info dict so pipeline_run_id
     propagation can be asserted.
     """
-    sinks = SimpleNamespace(pipeline_calls=[], add_calls=[], remember_calls=[], graph_flushes=[])
+    sinks = SimpleNamespace(
+        pipeline_calls=[],
+        add_calls=[],
+        remember_calls=[],
+        graph_flushes=[],
+        migration_gate_calls=[],
+    )
 
     async def fake_run_custom_pipeline(**kwargs):
         sinks.pipeline_calls.append(kwargs)
@@ -98,10 +105,24 @@ def install_sinks(monkeypatch):
         result.items_processed = len(data)
         return result
 
+    async def fake_run_migrations_and_block(datasets, user):
+        # writes_before_gate lets tests assert the gate fired before any
+        # imported data was stored (stamping must precede the rows).
+        sinks.migration_gate_calls.append(
+            {
+                "datasets": datasets,
+                "user": user,
+                "writes_before_gate": len(sinks.add_calls) + len(sinks.graph_flushes),
+            }
+        )
+
     monkeypatch.setattr(pipeline_module, "run_custom_pipeline", fake_run_custom_pipeline)
     monkeypatch.setattr(storage_module, "add_data_points", fake_add_data_points)
     monkeypatch.setattr(add_module, "add", fake_add)
     monkeypatch.setattr(remember_module, "remember", fake_remember)
+    monkeypatch.setattr(
+        migrations_startup_module, "run_migrations_and_block", fake_run_migrations_and_block
+    )
     return sinks
 
 
@@ -318,6 +339,27 @@ class TestSkippedFacts:
         # The skipped fact must never fabricate a UUID-named entity.
         assert [node.name for node in _flushed_nodes(sinks)] == ["Alice"]
         assert _flushed_edges(sinks) == []
+
+
+class TestMigrationGate:
+    """import_memory_source must take the run_migrations_and_block gate.
+
+    The gate stamps a fresh store's migration revision at head BEFORE the
+    imported rows arrive; skipping it leaves the populated store with no
+    recorded revision, so the first migration-aware startup replays the whole
+    data-migration chain over the freshly imported data.
+    """
+
+    @pytest.mark.parametrize("mode", ["preserve", "re-derive", "hybrid"])
+    def test_gate_fires_once_before_any_write(self, monkeypatch, mode):
+        sinks = install_sinks(monkeypatch)
+        source = FakeSource(_sample_records(), mode=mode)
+
+        asyncio.run(import_memory_source(source, dataset_name="ds"))
+
+        (gate_call,) = sinks.migration_gate_calls
+        assert gate_call["datasets"] == "ds"
+        assert gate_call["writes_before_gate"] == 0
 
 
 class TestRememberDispatch:
