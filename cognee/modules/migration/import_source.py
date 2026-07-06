@@ -77,6 +77,16 @@ async def import_memory_source(
     external_id, node ids from entity names) make re-running an interrupted
     or repeated import safe.
     """
+    from cognee.modules.migrations.startup import run_migrations_and_block
+
+    # Imports are writes, so they take the same migration gate as
+    # remember()/cognify() (the remember() MemorySource dispatch happens
+    # before its own gate). This also records the data-migration revision —
+    # stamping a fresh store at head — BEFORE the imported rows arrive;
+    # without it the populated store has no recorded revision and the first
+    # migration-aware startup replays the entire data chain over it.
+    await run_migrations_and_block(dataset_name, user)
+
     node_set = node_set or [f"import:{source.source_system}"]
 
     if source.mode == "preserve" and getattr(source, "replayable", False):
