@@ -107,7 +107,7 @@ async def test_index_graph_edges_initialization_error():
         index_graph_edges.__globals__,
         {
             "get_graph_engine": AsyncMock(side_effect=Exception("Graph engine failed")),
-            "get_vector_engine": lambda: AsyncMock(),
+            "get_vector_engine": AsyncMock(return_value=AsyncMock()),
         },
     ):
         with pytest.raises(RuntimeError, match="Graph edge indexing error"):
