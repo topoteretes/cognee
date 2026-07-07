@@ -108,7 +108,7 @@ async def test_delete_dataset_ladybug(mock_create_structured_output: AsyncMock):
 
     mock_create_structured_output.side_effect = mock_llm_output
 
-    vector_engine = get_vector_engine()
+    vector_engine = await get_vector_engine()
 
     assert not await vector_engine.has_collection("EdgeType_relationship_name")
     assert not await vector_engine.has_collection("Entity_name")
@@ -182,7 +182,7 @@ async def test_delete_dataset_ladybug(mock_create_structured_output: AsyncMock):
     nodes, edges = await graph_engine.get_graph_data()
     assert len(nodes) == 0 and len(edges) == 0, "Nodes and edges are not deleted."
 
-    vector_engine = get_vector_engine()
+    vector_engine = await get_vector_engine()
 
     for collection_name, initial_nodes in johns_initial_nodes_by_collection.items():
         query_node_ids = [

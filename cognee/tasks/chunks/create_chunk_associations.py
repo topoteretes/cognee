@@ -150,7 +150,7 @@ async def create_chunk_associations(
         f"Creating associations for {len(valid_chunks)} chunks with threshold {similarity_threshold}"
     )
 
-    vector_engine = get_vector_engine()
+    vector_engine = await get_vector_engine()
 
     id_to_text = {}
     for chunk_text in valid_chunks:

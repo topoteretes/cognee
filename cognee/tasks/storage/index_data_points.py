@@ -25,7 +25,7 @@ async def index_data_points(data_points: list[DataPoint], vector_engine=None):
     """
     data_points_by_type = {}
 
-    vector_engine = vector_engine or get_vector_engine()
+    vector_engine = vector_engine or await get_vector_engine()
 
     for data_point in data_points:
         # Skip non-DataPoint objects (e.g. CogneeGraph) that may be
