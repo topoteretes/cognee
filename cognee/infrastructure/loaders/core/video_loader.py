@@ -193,9 +193,9 @@ class VideoLoader(LoaderInterface):
 
         raise RuntimeError(
             f"Cannot process a '.{extension}' video without ffmpeg, which is needed to "
-            "extract the audio track for transcription. Install a system ffmpeg or "
-            "`pip install cognee[video]`, or provide the video as .mp4 or .webm, which "
-            "can be transcribed directly."
+            "extract the audio track for transcription. Install ffmpeg and make sure it "
+            "is on your PATH (or `pip install imageio-ffmpeg`), or provide the video as "
+            ".mp4 or .webm, which can be transcribed directly."
         )
 
     async def _extract_audio(self, ffmpeg: str, file_path: str) -> str:
