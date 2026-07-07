@@ -225,6 +225,18 @@ class TestManifest:
         assert read_manifest(destination).migration_revision == "some_migration_slug"
         assert COGXArchiveSource(destination).migration_revision == "some_migration_slug"
 
+    def test_default_export_writes_no_social_layer(self, tmp_path):
+        """Without include_permissions, the archive must be knowledge-only:
+        no permissions.json (and a stale one from a previous export session
+        is removed by the writer's clean-slate init)."""
+        nodes, edges = sample_graph()
+        destination = tmp_path / "archive_cogx"
+        destination.mkdir()
+        (destination / "permissions.json").write_text("{}")
+        _write_cogx(nodes, edges, destination, "main_dataset")
+        assert not (destination / "permissions.json").exists()
+        assert COGXArchiveSource(destination).social_layer is None
+
     def test_migration_revision_defaults_to_none(self, tmp_path):
         """Archives without a revision (external systems, older exporters)
         must leave the source attribute None so the import keeps its stamp."""

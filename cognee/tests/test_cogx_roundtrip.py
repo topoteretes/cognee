@@ -155,6 +155,14 @@ async def main():
             "include_permissions=True did not write the social layer."
         )
 
+        # A second, DEFAULT export (no social layer) for phase 4: the
+        # knowledge-only contract must keep working exactly as before.
+        plain_archive_dir = pathlib.Path(temporary_directory) / "hotel_cogx_plain"
+        await cognee.export(dataset_name, format="cogx", destination=plain_archive_dir)
+        assert not (plain_archive_dir / "permissions.json").exists(), (
+            "Default export must not write the social layer."
+        )
+
         # The manifest must carry the source store's migration revision (this
         # store is freshly migrated, so: head) — the import uses it to avoid
         # claiming a newer revision than the exported data actually has.
@@ -254,6 +262,33 @@ async def main():
             "Chunk search on the restored instance returned nothing — imported "
             "DocumentChunk text was not vector-indexed."
         )
+
+        # --- Phase 4: DEFAULT (knowledge-only) archive keeps the old contract.
+        # No social layer: the importing user owns everything, no accounts are
+        # created, and the knowledge still round-trips exactly.
+        await _wipe_store()
+        migrations_startup._startup_migrations_done = False
+
+        plain_result = await cognee.remember(
+            COGXArchiveSource(plain_archive_dir), dataset_name=dataset_name
+        )
+        assert plain_result.status == "completed"
+
+        assert await get_user_by_email("reviewer@example.com") is None, (
+            "Knowledge-only import must not create archived users."
+        )
+        importing_user = await get_default_user()
+        plain_dataset = (
+            await get_authorized_existing_datasets([dataset_name], "read", importing_user)
+        )[0]
+        assert plain_dataset.owner_id == importing_user.id, (
+            "Knowledge-only import must tie the dataset to the importing user."
+        )
+        plain_node_ids, plain_edge_count = await _graph_snapshot(dataset_name, importing_user)
+        assert plain_node_ids == source_node_ids, (
+            "Knowledge-only import no longer round-trips the exact graph."
+        )
+        assert plain_edge_count == source_edge_count
 
         print("COGX roundtrip e2e passed: export -> fresh store -> import -> search.")
 
