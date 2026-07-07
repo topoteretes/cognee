@@ -19,7 +19,10 @@ export interface TenantContextValue {
   cogniInstance: CogneeInstance | null;
   localInstance: CogneeInstance;
   serviceUrl: string | null;
+  apiKey: string;
   isInitializing: boolean;
+  tenantReady: boolean;
+  isOwner: boolean;
   error: string | null;
   statusMessage: { title: string; subtitle: string } | null;
   availableTenants: AvailableTenant[];
@@ -27,6 +30,8 @@ export interface TenantContextValue {
   planType: PlanType;
   hasAccess: boolean;
   requestCreateWorkspace: () => void;
+  nameModalOpen: boolean;
+  releaseLoader: () => void;
 }
 
 export const localInstance: CogneeInstance = {
@@ -39,7 +44,10 @@ export const TenantContext = createContext<TenantContextValue>({
   cogniInstance: null,
   localInstance,
   serviceUrl: null,
+  apiKey: "",
   isInitializing: true,
+  tenantReady: true,
+  isOwner: true,
   error: null,
   statusMessage: null,
   availableTenants: [],
@@ -47,6 +55,8 @@ export const TenantContext = createContext<TenantContextValue>({
   planType: null,
   hasAccess: true,
   requestCreateWorkspace: () => {},
+  nameModalOpen: false,
+  releaseLoader: () => {},
 });
 
 export function useTenant() {
@@ -54,6 +64,8 @@ export function useTenant() {
   return {
     tenant: context.tenant,
     isInitializing: context.isInitializing,
+    tenantReady: context.tenantReady,
+    isOwner: context.isOwner,
     error: context.error,
     availableTenants: context.availableTenants,
     switchTenant: context.switchTenant,
@@ -69,6 +81,7 @@ export function useCogniInstance() {
     cogniInstance: context.cogniInstance,
     localInstance: context.localInstance,
     serviceUrl: context.serviceUrl,
+    apiKey: context.apiKey,
     isInitializing: context.isInitializing,
     error: context.error,
     statusMessage: context.statusMessage,
