@@ -1,6 +1,7 @@
 // import getDatasetGraph from "./getDatasetGraph";
 import { Dataset } from "../ingestion/useDatasets";
 import { CogneeInstance } from "../instances/types";
+import { getPipelineSettingsFromStorage } from "../configuration/pipelineSettings";
 
 // interface GraphData {
 //   nodes: { id: string; label: string; properties?: object }[];
@@ -12,6 +13,8 @@ interface CognifyOptions {
   customPrompt?: string;
   ontologyKey?: string[];
   llmModel?: string;
+  chunkSize?: number;
+  chunksPerBatch?: number;
 }
 
 export default async function cognifyDataset(
@@ -19,6 +22,7 @@ export default async function cognifyDataset(
   instance: CogneeInstance,
   options?: CognifyOptions,
 ) {
+  const pipelineSettings = getPipelineSettingsFromStorage();
   // const data = await (
   return instance.fetch("/v1/cognify", {
     method: "POST",
@@ -32,7 +36,8 @@ export default async function cognifyDataset(
       ...(options?.graphModel ? { graphModel: options.graphModel } : {}),
       customPrompt: options?.customPrompt ?? "",
       ontologyKey: options?.ontologyKey ?? [],
-      chunksPerBatch: 10,
+      chunksPerBatch: options?.chunksPerBatch ?? pipelineSettings.chunksPerBatch,
+      chunkSize: options?.chunkSize ?? pipelineSettings.chunkSize,
       ...(options?.llmModel && { llmModel: options.llmModel }),
     }),
   })
