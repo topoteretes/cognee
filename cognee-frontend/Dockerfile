@@ -14,9 +14,12 @@ RUN npm rebuild lightningcss
 # Copy the rest of the application code to the working directory
 COPY src ./src
 COPY public ./public
-COPY next.config.mjs .
+COPY next.config.ts .
 COPY postcss.config.mjs .
 COPY tsconfig.json .
+# Local mode is opt-in (NEXT_PUBLIC_IS_CLOUD_ENVIRONMENT=false); without this
+# the app boots in cloud mode and expects Auth0.
+COPY .env.local .
 
 # Build the app and run it
 CMD ["npm", "run", "dev"]
