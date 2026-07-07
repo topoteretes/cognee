@@ -1,9 +1,11 @@
 import pytest
 from cognee.infrastructure.loaders.core.image_loader import ImageLoader
 
+
 @pytest.fixture
 def loader():
     return ImageLoader()
+
 
 def test_image_loader_supported_extensions(loader):
     """Test that supported extensions are lowercase and have no leading dots."""
@@ -12,10 +14,11 @@ def test_image_loader_supported_extensions(loader):
     assert "jpe" in extensions
     assert "png" in extensions
     assert "jpg" in extensions
-    
+
     for ext in extensions:
         assert not ext.startswith(".")
         assert ext == ext.lower()
+
 
 @pytest.mark.parametrize(
     "extension, mime_type, expected",
