@@ -30,6 +30,8 @@ interface FileEntry {
   size?: number;
 }
 
+type PreviewTab = "CHUNKS" | "SUMMARIES";
+
 type DisplayStatus = "pending" | "running" | "completed" | "failed" | "empty" | "loading";
 
 interface Dataset extends DatasetRaw {
@@ -144,6 +146,9 @@ export default function DatasetsPage() {
   const [selectedId, setSelectedId]       = useState<string | null>(null);
   const [selectedDocs, setSelectedDocs]   = useState<FileEntry[]>([]);
   const [docsLoading, setDocsLoading]     = useState(false);
+  const [docSearch, setDocSearch]         = useState("");
+  const [docSortKey, setDocSortKey]       = useState<"name" | "type" | "added">("added");
+  const [docSortDir, setDocSortDir]       = useState<"asc" | "desc">("desc");
 
   // Upload
   const [isDragOver, setIsDragOver]       = useState(false);
@@ -163,8 +168,50 @@ export default function DatasetsPage() {
   const [showPasteModal, setShowPasteModal] = useState(false);
   const [pasteText, setPasteText]           = useState("");
   const [pasting, setPasting]               = useState(false);
+
+  // Content preview
+  const [previewDoc, setPreviewDoc]         = useState<FileEntry | null>(null);
+  const [previewTab, setPreviewTab]         = useState<PreviewTab>("CHUNKS");
+  const [previewContent, setPreviewContent] = useState<string>("");
+  const [previewLoading, setPreviewLoading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const pollRef  = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const fetchPreview = useCallback(async (doc: FileEntry, tab: PreviewTab) => {
+    if (!cogniInstance || !selectedId) return;
+    setPreviewLoading(true);
+    setPreviewContent("");
+    try {
+      const graphResp = await cogniInstance.fetch(`/v1/datasets/${selectedId}/graph`);
+      if (graphResp.ok) {
+        const graph = await graphResp.json();
+        const nodes = graph.nodes || [];
+
+        const docNode = nodes.find((n: any) =>
+          n.type === "TextDocument" && (n.label?.includes(doc.name) || n.id === doc.id)
+        );
+        const contentHash = docNode?.properties?.source_content_hash;
+
+        if (contentHash) {
+          if (tab === "CHUNKS") {
+            const chunks = nodes.filter((n: any) => n.type === "DocumentChunk" && n.properties?.source_content_hash === contentHash);
+            setPreviewContent(chunks.map((c: any) => c.properties?.text || "").join("\n\n---\n\n") || "No chunks found");
+          } else {
+            const summaries = nodes.filter((n: any) => n.type === "TextSummary" && n.properties?.source_content_hash === contentHash);
+            setPreviewContent(summaries.map((s: any) => s.properties?.text || "").join("\n\n---\n\n") || "No summaries found");
+          }
+        } else {
+          setPreviewContent("File not yet processed (run cognify first)");
+        }
+      } else {
+        setPreviewContent("Failed to load graph");
+      }
+    } catch {
+      setPreviewContent("Error loading content");
+    } finally {
+      setPreviewLoading(false);
+    }
+  }, [cogniInstance, selectedId]);
 
   const fetchStatuses = useCallback(async (ids: string[]) => {
     if (!cogniInstance || !ids.length) return;
@@ -249,10 +296,22 @@ export default function DatasetsPage() {
     }
   }
 
+  function handleDocSort(key: "name" | "type" | "added") {
+    if (key === docSortKey) {
+      setDocSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setDocSortKey(key);
+      setDocSortDir(key === "added" ? "desc" : "asc");
+    }
+  }
+
   async function handleSelectDataset(id: string) {
     if (selectedId === id) return;
     setSelectedId(id);
     setSelectedDocs([]);
+    setDocSearch("");
+    setDocSortKey("added");
+    setDocSortDir("desc");
     setDocsLoading(true);
     try {
       const data = await getDatasetData(id, cogniInstance!);
@@ -361,6 +420,25 @@ export default function DatasetsPage() {
 
   const selectedDataset = datasets.find((d) => d.id === selectedId) ?? null;
 
+  const visibleDocs = [...(docSearch
+    ? selectedDocs.filter((d) => decodeFilename(d.name).toLowerCase().includes(docSearch.toLowerCase()))
+    : selectedDocs)].sort((a, b) => {
+    let cmp = 0;
+    if (docSortKey === "name") {
+      cmp = (a.name || "").localeCompare(b.name || "");
+    } else if (docSortKey === "type") {
+      const extA = (a.extension || a.name?.split(".").pop() || "").toLowerCase();
+      const extB = (b.extension || b.name?.split(".").pop() || "").toLowerCase();
+      cmp = extA.localeCompare(extB);
+    } else {
+      if (!a.createdAt && !b.createdAt) cmp = 0;
+      else if (!a.createdAt) return 1;
+      else if (!b.createdAt) return -1;
+      else cmp = a.createdAt.localeCompare(b.createdAt);
+    }
+    return docSortDir === "asc" ? cmp : -cmp;
+  });
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", fontFamily: '"Inter", system-ui, sans-serif', overflow: "hidden" }}>
       <TrackPageView page="Brains" />
@@ -459,6 +537,47 @@ export default function DatasetsPage() {
                 style={{ background: "#EF4444", border: "none", borderRadius: 8, padding: "8px 16px", fontSize: 13, fontWeight: 500, color: "#fff", fontFamily: "inherit" }}>
                 {deletingId === deleteTarget.id ? "Deleting…" : "Delete"}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Content Preview Modal */}
+      {previewDoc && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.3)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center" }}
+          onClick={() => setPreviewDoc(null)}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, padding: 24, width: 600, maxHeight: "80vh", display: "flex", flexDirection: "column", gap: 16, boxShadow: "0 16px 48px rgba(0,0,0,0.12)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <h2 style={{ fontSize: 16, fontWeight: 600, color: "#18181B", margin: 0 }}>{decodeFilename(previewDoc.name)}</h2>
+              <button onClick={() => setPreviewDoc(null)} style={{ background: "none", border: "none", fontSize: 18, color: "#A1A1AA", cursor: "pointer" }}>✕</button>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <div style={{ display: "flex", gap: 4 }}>
+                {([
+                  { key: "CHUNKS", label: "Chunks", hint: "Text chunks extracted from this file" },
+                  { key: "SUMMARIES", label: "Summaries", hint: "AI-generated summaries of this file's content" },
+                ] as { key: PreviewTab; label: string; hint: string }[]).map(({ key, label, hint }) => (
+                  <button
+                    key={key}
+                    onClick={() => { setPreviewTab(key); fetchPreview(previewDoc, key); }}
+                    style={{
+                      padding: "6px 12px", fontSize: 11, fontWeight: 500, fontFamily: "inherit",
+                      border: "1px solid #E4E4E7", borderRadius: 6, cursor: "pointer",
+                      background: previewTab === key ? "#6510F4" : "#fff",
+                      color: previewTab === key ? "#fff" : "#52525B",
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <span style={{ fontSize: 11, color: "#A1A1AA" }}>
+                {previewTab === "CHUNKS" && "Text chunks extracted from this file"}
+                {previewTab === "SUMMARIES" && "AI-generated summaries of this file's content"}
+              </span>
+            </div>
+            <div style={{ flex: 1, overflowY: "auto", background: "#FAFAFA", borderRadius: 8, padding: 16, fontSize: 13, color: "#18181B", whiteSpace: "pre-wrap", lineHeight: 1.6, minHeight: 200 }}>
+              {previewLoading ? "Loading…" : previewContent || "No content"}
             </div>
           </div>
         </div>
@@ -586,6 +705,23 @@ export default function DatasetsPage() {
               )}
             </div>
 
+            {/* Doc search */}
+            {selectedId && !docsLoading && selectedDocs.length > 0 && (
+              <div style={{ display: "flex", alignItems: "center", gap: 8, height: 36, paddingInline: 12, borderBottom: "1px solid #F4F4F5", flexShrink: 0 }}>
+                <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><circle cx="7" cy="7" r="4.5" stroke="#A1A1AA" strokeWidth="1.5"/><path d="M10.5 10.5L14 14" stroke="#A1A1AA" strokeWidth="1.5" strokeLinecap="round"/></svg>
+                <input
+                  type="text"
+                  value={docSearch}
+                  onChange={(e) => setDocSearch(e.target.value)}
+                  placeholder="Filter by name…"
+                  style={{ flex: 1, border: "none", outline: "none", fontSize: 12, color: "#18181B", background: "transparent", fontFamily: "inherit" }}
+                />
+                {docSearch && (
+                  <button onClick={() => setDocSearch("")} style={{ background: "none", border: "none", color: "#A1A1AA", fontSize: 13, cursor: "pointer", padding: 0 }}>✕</button>
+                )}
+              </div>
+            )}
+
             {/* Upload progress */}
             {isUploading && (
               <div style={{ padding: "8px 16px", borderBottom: "1px solid #F4F4F5", background: "#FAFAF9", display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
@@ -612,7 +748,43 @@ export default function DatasetsPage() {
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#A1A1AA" strokeWidth="2" strokeLinecap="round" style={{ animation: "spin 1s linear infinite" }}><path d="M21 12a9 9 0 11-6.219-8.56" /></svg>
                   <span style={{ fontSize: 13, color: "#A1A1AA" }}>Loading…</span>
                 </div>
-              ) : selectedDocs.length === 0 ? (
+              ) : selectedDocs.length > 0 && (
+                <div style={{ display: "flex", alignItems: "center", background: "#FAFAF9", borderBottom: "1px solid #F4F4F5", padding: "6px 16px", flexShrink: 0 }}>
+                  <button
+                    onClick={() => handleDocSort("name")}
+                    className="cursor-pointer"
+                    style={{ flex: 1, fontSize: 11, fontWeight: 600, color: "#71717A", background: "none", border: "none", padding: 0, textAlign: "left", fontFamily: "inherit", display: "flex", alignItems: "center", gap: 3 }}
+                  >
+                    Name
+                    <span style={{ fontSize: 9, opacity: docSortKey === "name" ? 1 : 0.3 }}>
+                      {docSortKey === "name" ? (docSortDir === "asc" ? "▲" : "▼") : "⇅"}
+                    </span>
+                  </button>
+                  <button
+                    onClick={() => handleDocSort("type")}
+                    className="cursor-pointer"
+                    style={{ width: 52, fontSize: 11, fontWeight: 600, color: "#71717A", background: "none", border: "none", padding: 0, textAlign: "left", fontFamily: "inherit", flexShrink: 0, display: "flex", alignItems: "center", gap: 3 }}
+                  >
+                    Type
+                    <span style={{ fontSize: 9, opacity: docSortKey === "type" ? 1 : 0.3 }}>
+                      {docSortKey === "type" ? (docSortDir === "asc" ? "▲" : "▼") : "⇅"}
+                    </span>
+                  </button>
+                  <span style={{ width: 52, fontSize: 11, fontWeight: 600, color: "#71717A", flexShrink: 0 }}>Size</span>
+                  <button
+                    onClick={() => handleDocSort("added")}
+                    className="cursor-pointer"
+                    style={{ width: 80, fontSize: 11, fontWeight: 600, color: "#71717A", background: "none", border: "none", padding: 0, textAlign: "left", fontFamily: "inherit", flexShrink: 0, display: "flex", alignItems: "center", gap: 3 }}
+                  >
+                    Added
+                    <span style={{ fontSize: 9, opacity: docSortKey === "added" ? 1 : 0.3 }}>
+                      {docSortKey === "added" ? (docSortDir === "asc" ? "▲" : "▼") : "⇅"}
+                    </span>
+                  </button>
+                  <div style={{ width: 60, flexShrink: 0 }} />
+                </div>
+              )}
+              {selectedDocs.length === 0 ? (
                 <div
                   style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", gap: 10, cursor: "pointer" }}
                   onClick={() => fileInputRef.current?.click()}
@@ -627,13 +799,20 @@ export default function DatasetsPage() {
                 </div>
               ) : (
                 <>
-                  {selectedDocs.map((doc, i) => {
+                  {visibleDocs.length === 0 ? (
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", padding: "32px 16px" }}>
+                      <span style={{ fontSize: 13, color: "#A1A1AA" }}>No files match &ldquo;{docSearch}&rdquo;</span>
+                    </div>
+                  ) : visibleDocs.map((doc, i) => {
                     const displayName = decodeFilename(doc.name);
                     const meta = getExtMeta(displayName, doc.extension);
                     return (
-                      <div key={doc.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 16px", borderBottom: i < selectedDocs.length - 1 ? "1px solid #F4F4F5" : "none" }}>
+                      <div key={doc.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 16px", borderBottom: i < visibleDocs.length - 1 ? "1px solid #F4F4F5" : "none" }}>
                         <FileIcon {...meta} />
-                        <span style={{ flex: 1, fontSize: 13, color: "#18181B", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{displayName}</span>
+                        <span
+                          onClick={() => { setPreviewDoc(doc); setPreviewTab("CHUNKS"); fetchPreview(doc, "CHUNKS"); }}
+                          style={{ flex: 1, fontSize: 13, color: "#6510F4", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", cursor: "pointer", textDecoration: "underline" }}
+                        >{displayName}</span>
                         <div style={{ display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
                           <span style={{ fontSize: 11, color: "#71717A", fontWeight: 500, minWidth: 32, textAlign: "right" }}>{meta.label}</span>
                           <span style={{ fontSize: 11, color: "#A1A1AA", minWidth: 52, textAlign: "right" }}>{formatSize(doc.size)}</span>

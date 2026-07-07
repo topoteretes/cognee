@@ -140,6 +140,7 @@ export default function SearchPage() {
   const [input, setInput] = useState("");
   const [isSearching, setIsSearching] = useState(false);
   const [scope, setScope] = useState<SearchScope>("documents");
+  const [searchType, setSearchType] = useState<string>("GRAPH_COMPLETION");
   const [sessions, setSessions] = useState<SessionRow[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -248,6 +249,7 @@ export default function SearchPage() {
         scope: sendScope as never,
         sessionId: sendSessionId,
         datasetIds: searchDatasetIds,
+        searchType: scope === "documents" ? searchType : undefined,
       });
       const resultData = (Array.isArray(data) ? data : []) as SearchResultItem[];
       const content = normalizeResults(resultData);
@@ -440,8 +442,8 @@ export default function SearchPage() {
         {/* Input area */}
         <div style={{ background: "#fff", padding: "12px 32px 16px" }}>
           <div style={{ maxWidth: 800, marginInline: "auto", display: "flex", flexDirection: "column", gap: 8 }}>
-            {/* Controls: scope pills — dataset selected via breadcrumb */}
-            <div style={{ display: "flex", alignItems: "center" }}>
+            {/* Controls: scope pills + search type pills */}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 {(["documents", "agent"] as const).map((s) => {
                   const active = scope === s;
@@ -466,6 +468,38 @@ export default function SearchPage() {
                   );
                 })}
               </div>
+
+              {scope === "documents" && (
+                <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                  {([
+                    { value: "GRAPH_COMPLETION", label: "Graph" },
+                    { value: "CHUNKS", label: "Chunks" },
+                    { value: "SUMMARIES", label: "Summaries" },
+                    { value: "RAG_COMPLETION", label: "RAG" },
+                    { value: "FEELING_LUCKY", label: "Auto" },
+                  ] as const).map(({ value, label }) => {
+                    const active = searchType === value;
+                    return (
+                      <button
+                        key={value}
+                        type="button"
+                        onClick={() => setSearchType(value)}
+                        className="cursor-pointer"
+                        style={{
+                          background: active ? "#6510F4" : "#FFFFFF",
+                          color: active ? "#FFFFFF" : "#71717A",
+                          border: active ? "none" : "1px solid #E4E4E7",
+                          borderRadius: 100, paddingBlock: 4, paddingInline: 10,
+                          fontSize: 11, lineHeight: "16px", fontFamily: "inherit",
+                          cursor: "pointer",
+                        }}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
             {/* Input bar */}
