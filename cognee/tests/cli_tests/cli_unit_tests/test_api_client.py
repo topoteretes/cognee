@@ -139,3 +139,26 @@ class TestAddFileDetection:
                 assert files_arg[0][1][0] == os.path.basename(path)
         finally:
             os.unlink(path)
+
+
+class TestSearch:
+    def test_only_context_is_sent_in_search_payload(self):
+        with patch("cognee.cli.api_client._import_httpx"):
+            client = CogneeApiClient("http://x")
+            mock_resp = MagicMock(status_code=200)
+            mock_resp.json.return_value = ["# Graph Insight Report"]
+            mock_http_client = MagicMock()
+            mock_http_client.post.return_value = mock_resp
+            client._client = mock_http_client
+
+            result = client.search(
+                query="Create a graph insight report",
+                search_type="GRAPH_REPORT",
+                datasets=["demo"],
+                only_context=True,
+            )
+
+            payload = mock_http_client.post.call_args.kwargs["json"]
+            assert payload["search_type"] == "GRAPH_REPORT"
+            assert payload["only_context"] is True
+            assert result == ["# Graph Insight Report"]

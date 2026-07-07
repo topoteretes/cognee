@@ -16,6 +16,7 @@ DEFAULT_TOOLS = [
                     "enum": [
                         "CODE",
                         "GRAPH_COMPLETION",
+                        "GRAPH_REPORT",
                         "NATURAL_LANGUAGE",
                     ],
                 },

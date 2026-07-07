@@ -27,8 +27,8 @@ class SearchPayloadDTO(InDTO):
         default=SearchType.GRAPH_COMPLETION,
         description=(
             "Retrieval strategy. Common values: GRAPH_COMPLETION (default, graph context + LLM"
-            " answer), RAG_COMPLETION, CHUNKS, SUMMARIES, TEMPORAL, FEELING_LUCKY (auto-select),"
-            " AGENTIC_COMPLETION (enables skills/tools/max_iter)."
+            " answer), GRAPH_REPORT, RAG_COMPLETION, CHUNKS, SUMMARIES, TEMPORAL,"
+            " FEELING_LUCKY (auto-select), AGENTIC_COMPLETION (enables skills/tools/max_iter)."
         ),
     )
     datasets: Optional[list[str]] = Field(
@@ -170,7 +170,7 @@ def get_search_router() -> APIRouter:
         types and can be scoped to specific datasets.
 
         ## Request Parameters
-        - **search_type** (SearchType): Type of search to perform (default: GRAPH_COMPLETION). Use AGENTIC_COMPLETION to enable skills, tools and max_iter.
+        - **search_type** (SearchType): Type of search to perform (default: GRAPH_COMPLETION). Use GRAPH_REPORT for a structured graph insight report. Use AGENTIC_COMPLETION to enable skills, tools and max_iter.
         - **datasets** (Optional[List[str]]): List of dataset names to search within
         - **dataset_ids** (Optional[List[UUID]]): List of dataset UUIDs to search within
         - **query** (str): The search query string

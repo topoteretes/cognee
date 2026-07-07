@@ -96,6 +96,12 @@ async def search(
             Best for: Complex questions, analysis, summaries, insights.
             Returns: Conversational AI responses with graph-backed context.
 
+        **GRAPH_REPORT**:
+            Structured graph analysis with hubs, surprising links, confidence tags,
+            and suggested follow-up questions.
+            Best for: Auditing and exploring the shape of a knowledge graph.
+            Returns: A graph insight report dictionary.
+
         **RAG_COMPLETION**:
             Traditional RAG using document chunks without graph structure.
             Best for: Direct document retrieval, specific fact-finding.
@@ -178,6 +184,9 @@ async def search(
             **GRAPH_COMPLETION/RAG_COMPLETION**:
                 [List of conversational AI response strings]
 
+            **GRAPH_REPORT**:
+                [Structured graph insight report dictionaries]
+
             **CHUNKS**:
                 [List of relevant text passages with source metadata]
 
@@ -196,6 +205,7 @@ async def search(
 
     Performance & Optimization:
         - **GRAPH_COMPLETION**: Slower but most intelligent, uses LLM + graph context
+        - **GRAPH_REPORT**: Fast graph analysis plus one best-effort LLM question-generation call
         - **RAG_COMPLETION**: Medium speed, uses LLM + document chunks (no graph traversal)
         - **CHUNKS**: Fastest, pure vector similarity search without LLM
         - **SUMMARIES**: Fast, returns pre-computed summaries
