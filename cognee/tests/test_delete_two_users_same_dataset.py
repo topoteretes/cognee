@@ -83,7 +83,7 @@ async def main(mock_create_structured_output: AsyncMock):
 
     assert len(nodes) == 0 and len(edges) == 0, "Graph is not empty."
 
-    vector_engine = get_vector_engine()
+    vector_engine = await get_vector_engine()
 
     assert not await vector_engine.has_collection("EdgeType_relationship_name")
     assert not await vector_engine.has_collection("Entity_name")

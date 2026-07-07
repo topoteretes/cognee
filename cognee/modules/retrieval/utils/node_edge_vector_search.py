@@ -15,18 +15,23 @@ class NodeEdgeVectorSearch:
 
     def __init__(self, edge_collection: str = "EdgeType_relationship_name", vector_engine=None):
         self.edge_collection = edge_collection
-        self.vector_engine = vector_engine or self._init_vector_engine()
+        # ``get_vector_engine()`` is async, so this sync ``__init__`` can't
+        # eagerly resolve it. Keep the (possibly-None) injected engine and
+        # resolve lazily in the first async method via ``_get_vector_engine()``.
+        self.vector_engine = vector_engine
         self.query_vector: Optional[Any] = None
         self.node_distances: dict[str, list[Any]] = {}
         self.edge_distances: list[Any] = []
         self.query_list_length: Optional[int] = None
 
-    def _init_vector_engine(self):
-        try:
-            return get_vector_engine()
-        except Exception as e:
-            logger.error("Failed to initialize vector engine: %s", e)
-            raise RuntimeError("Initialization error") from e
+    async def _get_vector_engine(self):
+        if self.vector_engine is None:
+            try:
+                self.vector_engine = await get_vector_engine()
+            except Exception as e:
+                logger.error("Failed to initialize vector engine: %s", e)
+                raise RuntimeError("Initialization error") from e
+        return self.vector_engine
 
     async def embed_and_retrieve_distances(
         self,
@@ -151,7 +156,8 @@ class NodeEdgeVectorSearch:
     ) -> List[List[Any]]:
         """Searches one collection with batch queries and returns list-of-lists."""
         try:
-            return await self.vector_engine.batch_search(
+            vector_engine = await self._get_vector_engine()
+            return await vector_engine.batch_search(
                 collection_name=collection_name, query_texts=query_batch, limit=None
             )
         except CollectionNotFoundError:
@@ -171,9 +177,10 @@ class NodeEdgeVectorSearch:
         These are stored as flat lists in node_distances/edge_distances for single-query mode.
         """
         await self._embed_query(query)
+        vector_engine = await self._get_vector_engine()
         search_tasks = [
             self._search_single_collection(
-                self.vector_engine,
+                vector_engine,
                 wide_search_limit,
                 collection,
                 node_name,
@@ -188,7 +195,8 @@ class NodeEdgeVectorSearch:
         """Embeds the query and stores the resulting vector."""
         with new_span("cognee.retrieval.embed_query") as span:
             span.set_attribute("cognee.vector.query_length", len(query))
-            query_embeddings = await self.vector_engine.embedding_engine.embed_text([query])
+            vector_engine = await self._get_vector_engine()
+            query_embeddings = await vector_engine.embedding_engine.embed_text([query])
             self.query_vector = query_embeddings[0]
             span.set_attribute("cognee.vector.embedding_dimensions", len(self.query_vector))
 

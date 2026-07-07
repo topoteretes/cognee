@@ -129,7 +129,7 @@ async def search_session_qa_ids(
     try:
         from cognee.infrastructure.databases.vector import get_vector_engine
 
-        vector_engine = get_vector_engine()
+        vector_engine = await get_vector_engine()
         results = await vector_engine.search(
             SESSION_QA_VECTOR_COLLECTION,
             query_text=query_text,
@@ -152,7 +152,7 @@ async def delete_session_qa_vector(*, qa_id: str) -> None:
     try:
         from cognee.infrastructure.databases.vector import get_vector_engine
 
-        vector_engine = get_vector_engine()
+        vector_engine = await get_vector_engine()
         await vector_engine.delete_data_points(SESSION_QA_VECTOR_COLLECTION, [UUID(qa_id)])
     except Exception as error:
         logger.warning("Session QA vector delete failed open: %s", error)
@@ -163,7 +163,7 @@ async def delete_session_qa_vectors(*, user_id: str, session_id: str) -> None:
     try:
         from cognee.infrastructure.databases.vector import get_vector_engine
 
-        vector_engine = get_vector_engine()
+        vector_engine = await get_vector_engine()
         await vector_engine.remove_belongs_to_set_tags(
             [session_scope_tag(user_id, session_id)],
         )
