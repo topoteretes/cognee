@@ -26,7 +26,7 @@ warning. Resolution is advisory only and never raises: a wrong count is a
 degraded estimate, not a fatal error.
 """
 
-from typing import Optional
+from typing import Callable, Optional
 
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.llm.tokenizer.HuggingFace import HuggingFaceTokenizer
@@ -83,6 +83,35 @@ def _fastembed_hf_repo(model: Optional[str]) -> Optional[str]:
     return None
 
 
+def _load_or_tiktoken_fallback(
+    build: Callable[[], TokenizerInterface],
+    max_completion_tokens: int,
+    *,
+    context: str,
+) -> TokenizerInterface:
+    """Build a tokenizer via ``build``; on any failure warn and fall back to the
+    default TikToken tokenizer.
+
+    This is where the module's "never raises" guarantee is enforced: every
+    tokenizer constructor that can throw is routed through here. That includes
+    ``tiktoken.encoding_for_model`` raising ``KeyError`` on a model it does not
+    know, a HuggingFace repo failing to load, and ``MistralTokenizer`` raising
+    when ``mistral-common`` is not installed. A failure degrades to an
+    approximate count rather than aborting chunk sizing.
+    """
+    try:
+        return build()
+    except Exception as error:
+        logger.warning(
+            "Could not load a matching tokenizer for %s (%s). Falling back to "
+            "TikToken, so token counts are approximate. %s",
+            context,
+            error,
+            _MISMATCH_HINT,
+        )
+        return TikTokenTokenizer(model=None, max_completion_tokens=max_completion_tokens)
+
+
 def _huggingface_or_fallback(
     repo: str,
     max_completion_tokens: int,
@@ -90,17 +119,11 @@ def _huggingface_or_fallback(
     context: str,
 ) -> TokenizerInterface:
     """Load a HuggingFace tokenizer for ``repo``; fall back to TikToken with a warning."""
-    try:
-        return HuggingFaceTokenizer(model=repo, max_completion_tokens=max_completion_tokens)
-    except Exception as error:
-        logger.warning(
-            "Could not load a matching HuggingFace tokenizer for %s (%s). Falling back "
-            "to TikToken, so token counts are approximate. %s",
-            context,
-            error,
-            _MISMATCH_HINT,
-        )
-        return TikTokenTokenizer(model=None, max_completion_tokens=max_completion_tokens)
+    return _load_or_tiktoken_fallback(
+        lambda: HuggingFaceTokenizer(model=repo, max_completion_tokens=max_completion_tokens),
+        max_completion_tokens,
+        context=context,
+    )
 
 
 def resolve_embedding_tokenizer(
@@ -127,14 +150,27 @@ def resolve_embedding_tokenizer(
     bare = _bare_model(model)
 
     if "openai" in provider_lower and "compatible" not in provider_lower:
-        return TikTokenTokenizer(model=bare, max_completion_tokens=max_completion_tokens)
+        # tiktoken.encoding_for_model raises KeyError on a model it does not know
+        # (e.g. a newly released embedding model), so guard the "never raises"
+        # contract with the shared warn-and-fall-back-to-default-TikToken path.
+        return _load_or_tiktoken_fallback(
+            lambda: TikTokenTokenizer(model=bare, max_completion_tokens=max_completion_tokens),
+            max_completion_tokens,
+            context=f"openai embedding model {model!r}",
+        )
 
     if "gemini" in provider_lower:
         # Gemini tokenization needs a network call; approximate locally with TikToken.
         return TikTokenTokenizer(model=None, max_completion_tokens=max_completion_tokens)
 
     if "mistral" in provider_lower:
-        return MistralTokenizer(model=bare, max_completion_tokens=max_completion_tokens)
+        # MistralTokenizer raises if mistral-common is not installed (optional
+        # dependency), so route it through the same safe fallback.
+        return _load_or_tiktoken_fallback(
+            lambda: MistralTokenizer(model=bare, max_completion_tokens=max_completion_tokens),
+            max_completion_tokens,
+            context=f"mistral embedding model {model!r}",
+        )
 
     if "fastembed" in provider_lower:
         repo = _fastembed_hf_repo(model)
@@ -164,9 +200,10 @@ def resolve_embedding_tokenizer(
 
     if huggingface_tokenizer and model and _bare_model(huggingface_tokenizer) != bare:
         # An override that plausibly differs from the model is legitimate (an
-        # Ollama model id is not an HF repo), but flag it so a genuine mismatch
-        # is not silent.
-        logger.info(
+        # Ollama model id is not an HF repo), but flag it at warning level so a
+        # genuine mismatch is not silent (the fallback paths also warn, and
+        # logger.info is invisible under the default log config).
+        logger.warning(
             "Counting tokens for embedding model %r with HUGGINGFACE_TOKENIZER=%r. "
             "Make sure they share a tokenizer, otherwise chunk sizing may be off.",
             model,

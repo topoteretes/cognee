@@ -97,14 +97,18 @@ def test_ollama_prefers_huggingface_override():
     assert tok.kwargs["model"] == "Salesforce/SFR-Embedding-Mistral"
 
 
-def test_override_differing_from_model_logs_advisory(caplog):
-    with caplog.at_level(logging.INFO):
+def test_override_differing_from_model_logs_advisory_at_warning(caplog):
+    # The advisory must be a warning: logger.info is invisible under the default
+    # log config, while every fallback path warns.
+    with caplog.at_level(logging.WARNING):
         _resolve(
             provider="ollama",
             model="avr/sfr-embedding-mistral:latest",
             huggingface_tokenizer="Salesforce/SFR-Embedding-Mistral",
         )
-    assert any("HUGGINGFACE_TOKENIZER" in r.message for r in caplog.records)
+    matches = [r for r in caplog.records if "HUGGINGFACE_TOKENIZER" in r.message]
+    assert matches, "expected the override-mismatch advisory"
+    assert all(r.levelno == logging.WARNING for r in matches)
 
 
 def test_huggingface_load_failure_falls_back_with_warning(caplog):
@@ -131,6 +135,48 @@ def test_never_raises_and_returns_tokenizer():
     # Even a fully unknown provider must yield a usable tokenizer, never an error.
     tok = _resolve(provider="something-new", model="some/repo")
     assert tok is not None
+
+
+def test_openai_unknown_model_falls_back_without_raising(caplog):
+    # tiktoken.encoding_for_model raises KeyError for a model it does not know;
+    # a *known* provider with an unknown model must still degrade, not raise.
+    def tik(**kwargs):
+        if kwargs.get("model"):
+            raise KeyError("Could not automatically map some-future-model to a tokeniser")
+        return _FakeTokenizer("tiktoken", **kwargs)
+
+    tik_patch = patch(f"{_MODULE}.TikTokenTokenizer", side_effect=tik)
+    hf = patch(
+        f"{_MODULE}.HuggingFaceTokenizer", side_effect=lambda **kw: _FakeTokenizer("hf", **kw)
+    )
+    mis = patch(
+        f"{_MODULE}.MistralTokenizer", side_effect=lambda **kw: _FakeTokenizer("mistral", **kw)
+    )
+    with caplog.at_level(logging.WARNING), tik_patch, hf, mis:
+        tok = resolve_embedding_tokenizer(provider="openai", model="openai/some-future-model")
+    assert tok.kind == "tiktoken"
+    assert tok.kwargs["model"] is None  # fell back to the default encoding
+    assert any("Falling back" in r.message for r in caplog.records)
+
+
+def test_mistral_missing_dependency_falls_back_without_raising(caplog):
+    # MistralTokenizer raises when mistral-common is not installed; that must
+    # fall back to TikToken with a warning, not propagate.
+    tik = patch(
+        f"{_MODULE}.TikTokenTokenizer", side_effect=lambda **kw: _FakeTokenizer("tiktoken", **kw)
+    )
+    hf = patch(
+        f"{_MODULE}.HuggingFaceTokenizer", side_effect=lambda **kw: _FakeTokenizer("hf", **kw)
+    )
+    mis = patch(
+        f"{_MODULE}.MistralTokenizer",
+        side_effect=ImportError("No module named 'mistral_common'"),
+    )
+    with caplog.at_level(logging.WARNING), tik, hf, mis:
+        tok = resolve_embedding_tokenizer(provider="mistral", model="mistral/mistral-embed")
+    assert tok.kind == "tiktoken"
+    assert tok.kwargs["model"] is None
+    assert any("Falling back" in r.message for r in caplog.records)
 
 
 def test_bare_model_strips_one_provider_tag():
