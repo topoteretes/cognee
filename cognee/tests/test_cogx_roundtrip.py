@@ -155,6 +155,18 @@ async def main():
         assert len(restored_results) != 0, "Search on the restored instance returned nothing."
         logger.info("Restored search results: %s", restored_results)
 
+        # Chunk-level retrieval needs the imported DocumentChunk text to be
+        # vector-indexed (regression: rehydrated raw nodes lost their
+        # index_fields, so restored archives had no DocumentChunk_text
+        # collection and chunk/hybrid retrieval failed with NoDataError).
+        chunk_results = await cognee.search(
+            query_type=SearchType.CHUNKS, query_text="rooftop observatory", datasets=[dataset_name]
+        )
+        assert len(chunk_results) != 0, (
+            "Chunk search on the restored instance returned nothing — imported "
+            "DocumentChunk text was not vector-indexed."
+        )
+
         print("COGX roundtrip e2e passed: export -> fresh store -> import -> search.")
 
 
