@@ -18,7 +18,6 @@ from types import SimpleNamespace
 from typing import Any, AsyncIterable, Dict, Iterable, List, Optional, Set, Tuple
 from uuid import NAMESPACE_OID, UUID, uuid5
 
-from cognee.infrastructure.engine.utils.generate_node_id import generate_node_id
 from cognee.modules.engine.models import Entity, EntityType
 from cognee.modules.migration.cogx import (
     COGXEntity,
@@ -161,16 +160,32 @@ def _register_entity(
     by_node_id: Dict[UUID, Any],
     by_external_id: Dict[str, Any],
     first_external_id: Dict[UUID, str],
+    preserve_source_ids: bool = False,
 ) -> Any:
-    """Register an entity record, merging same-named records into one node."""
+    """Register an entity record.
+
+    ``preserve_source_ids`` (cognee-origin archives): the record's external_id
+    IS the source node's UUID — keep it, so the imported graph is an exact
+    copy (same-named-but-distinct source entities stay distinct, and edge keys
+    survive verbatim). Source UUIDs are themselves deterministic
+    ``Entity.id_for(<llm identity>)`` values, so re-cognifying the same
+    content on the target still converges on the same nodes.
+
+    Otherwise (cross-provider archives): derive class-namespaced ids exactly
+    as cognee's own extraction does (``Entity.id_for`` via identity_fields),
+    merging same-named records into one node.
+    """
 
     def _entity_type_for(name: str) -> EntityType:
         key = name.lower()
         if key not in entity_types:
-            entity_types[key] = EntityType(id=generate_node_id(name), name=name, description=name)
+            entity_types[key] = EntityType(id=EntityType.id_for(name), name=name, description=name)
         return entity_types[key]
 
-    node_id = generate_node_id(record.name)
+    if preserve_source_ids and _looks_like_uuid(record.external_id):
+        node_id = UUID(record.external_id)
+    else:
+        node_id = Entity.id_for(record.name)
     description = record.description or record.name
     if record.aliases:
         description = f"{description} Also known as: {', '.join(record.aliases)}."
@@ -204,16 +219,19 @@ def _register_entity(
 
 
 def _build_graph_batches(
-    entities: List[COGXEntity], facts: List[COGXFact], raw_nodes: List[COGXRawNode]
+    entities: List[COGXEntity],
+    facts: List[COGXFact],
+    raw_nodes: List[COGXRawNode],
+    preserve_source_ids: bool = False,
 ) -> Tuple[List[Dict[str, Any]], int]:
     """Map entity/fact/raw-node records onto bounded graph batches.
 
-    Entity ids come from ``generate_node_id(name)`` — the same scheme cognify
-    uses — so preserved facts merge into the existing graph vocabulary instead
-    of forming a disconnected parallel graph. Raw nodes are rehydrated back
-    into DataPoint instances (keeping their original ids) so facts referencing
-    them stay resolvable. Facts whose subject/object UUID reference cannot be
-    resolved are skipped — never fabricated as UUID-named entities.
+    Entity ids come from ``Entity.id_for(name)`` — the class-namespaced scheme
+    cognify uses — so preserved facts merge into the existing graph vocabulary
+    instead of forming a disconnected parallel graph. Raw nodes are rehydrated
+    back into DataPoint instances (keeping their original ids) so facts
+    referencing them stay resolvable. Facts whose subject/object UUID reference
+    cannot be resolved are skipped — never fabricated as UUID-named entities.
 
     Nodes are split into batches of ~``BATCH_NODE_TARGET``; each fact lands in
     a batch containing one of its endpoints, with the other endpoint included
@@ -244,6 +262,7 @@ def _build_graph_batches(
             by_node_id=by_node_id,
             by_external_id=by_external_id,
             first_external_id=first_external_id,
+            preserve_source_ids=preserve_source_ids,
         )
 
     batches: List[Dict[str, Any]] = []
@@ -259,7 +278,7 @@ def _build_graph_batches(
         node = by_external_id.get(ref)
         if node is not None:
             return node
-        node = by_node_id.get(generate_node_id(ref))
+        node = by_node_id.get(Entity.id_for(ref))
         if node is not None:
             return node
         if _looks_like_uuid(ref):
@@ -268,12 +287,17 @@ def _build_graph_batches(
             return None
         # Plain-name reference (cross-provider archives): treat it as an
         # entity name and create the entity.
-        entity = Entity(id=generate_node_id(ref), name=ref, description=ref)
+        entity = Entity(id=Entity.id_for(ref), name=ref, description=ref)
         by_node_id[entity.id] = entity
         return entity
 
     duplicated_in_batch: Dict[int, Set[UUID]] = {}
     skipped_facts = 0
+    # Same resolved-key dedup as the streaming path (first fact wins): distinct
+    # refs can resolve to one edge key, and re-MERGEing duplicates crashes
+    # Ladybug's rel-update row lookup during fresh bulk imports.
+    seen_edge_keys: Set[Tuple[UUID, UUID, str]] = set()
+    deduped_edges = 0
 
     for fact in facts:
         subject = _resolve_ref(fact.subject_ref)
@@ -292,6 +316,12 @@ def _build_graph_batches(
                 ", ".join(unresolved),
             )
             continue
+
+        edge_key = (subject.id, target.id, fact.predicate)
+        if edge_key in seen_edge_keys:
+            deduped_edges += 1
+            continue
+        seen_edge_keys.add(edge_key)
 
         index = batch_index_of.get(subject.id)
         if index is None:
@@ -317,6 +347,8 @@ def _build_graph_batches(
             (subject.id, target.id, fact.predicate, _fact_edge_properties(fact))
         )
 
+    if deduped_edges:
+        logger.info("Deduplicated %d facts that resolved to already-seen edge keys.", deduped_edges)
     batches = [batch for batch in batches if batch["nodes"] or batch["edges"]]
     return batches, skipped_facts
 
@@ -324,8 +356,9 @@ def _build_graph_batches(
 class _RecordTranslator:
     """Incremental record translator shared by the sync and async entry points."""
 
-    def __init__(self, mode: str):
+    def __init__(self, mode: str, preserve_source_ids: bool = False):
         self.mode = mode
+        self.preserve_source_ids = preserve_source_ids
         self.result = TranslationResult(cognify_data_items=mode != "preserve")
         self.entities: List[COGXEntity] = []
         self.facts: List[COGXFact] = []
@@ -380,25 +413,29 @@ class _RecordTranslator:
                     )
                 )
         else:
-            batches, skipped_facts = _build_graph_batches(entities, facts, self.raw_nodes)
+            batches, skipped_facts = _build_graph_batches(
+                entities, facts, self.raw_nodes, preserve_source_ids=self.preserve_source_ids
+            )
             result.graph_batches.extend(batches)
             result.skipped_facts = skipped_facts
         return result
 
 
-def translate_records(records: Iterable[COGXRecord], mode: str) -> TranslationResult:
+def translate_records(
+    records: Iterable[COGXRecord], mode: str, preserve_source_ids: bool = False
+) -> TranslationResult:
     """Translate COGX records according to the import fidelity mode."""
-    translator = _RecordTranslator(mode)
+    translator = _RecordTranslator(mode, preserve_source_ids=preserve_source_ids)
     for record in records:
         translator.add(record)
     return translator.finish()
 
 
 async def translate_record_stream(
-    records: AsyncIterable[COGXRecord], mode: str
+    records: AsyncIterable[COGXRecord], mode: str, preserve_source_ids: bool = False
 ) -> TranslationResult:
     """Translate an async record stream without first materializing it as a list."""
-    translator = _RecordTranslator(mode)
+    translator = _RecordTranslator(mode, preserve_source_ids=preserve_source_ids)
     async for record in records:
         translator.add(record)
     return translator.finish()
@@ -469,6 +506,10 @@ async def stream_graph_from_source(source, stats: Dict[str, int], ctx=None) -> D
 
     ctx = _provenance_ctx(ctx)
 
+    # Cognee-origin archives keep the source node UUIDs verbatim (exact graph
+    # copy); other systems get class-namespaced ids (see _register_entity).
+    preserve_source_ids = source.source_system == "cognee"
+
     entity_types: Dict[str, EntityType] = {}
     by_external_id: Dict[str, Any] = {}
     by_node_id: Dict[UUID, Any] = {}
@@ -507,6 +548,7 @@ async def stream_graph_from_source(source, stats: Dict[str, int], ctx=None) -> D
                 by_node_id=by_node_id,
                 by_external_id=by_external_id,
                 first_external_id=first_external_id,
+                preserve_source_ids=preserve_source_ids,
             )
     await flush(batch)
 
@@ -523,13 +565,19 @@ async def stream_graph_from_source(source, stats: Dict[str, int], ctx=None) -> D
     stub_batch: List[Any] = []
     edge_batch: List[Tuple] = []
     stubbed: Set[UUID] = set()
+    # Distinct fact refs can RESOLVE to the same (source, target, relationship)
+    # edge key (entities merge by name), so dedupe at the resolved level —
+    # first fact wins. Re-MERGEing a duplicate is not only wasteful: the
+    # resulting ON MATCH SET rel update crashes Ladybug's committed-in-memory
+    # row lookup (csr_node_group.cpp KU_UNREACHABLE) during fresh bulk imports.
+    seen_edge_keys: Set[Tuple[UUID, UUID, str]] = set()
 
     def resolve(ref: str) -> Tuple[Optional[UUID], Optional[Any]]:
         """Resolve a fact ref to a node id; returns (id, new_stub_entity_or_None)."""
         node_id = external_to_node_id.get(ref)
         if node_id is not None:
             return node_id, None
-        candidate = generate_node_id(ref)
+        candidate = Entity.id_for(ref)
         if candidate in known_node_ids or candidate in stubbed:
             return candidate, None
         if _looks_like_uuid(ref):
@@ -559,6 +607,11 @@ async def stream_graph_from_source(source, stats: Dict[str, int], ctx=None) -> D
                 ", ".join(unresolved),
             )
             continue
+        edge_key = (subject_id, object_id, record.predicate)
+        if edge_key in seen_edge_keys:
+            stats["deduped_edges"] += 1
+            continue
+        seen_edge_keys.add(edge_key)
         for stub in (subject_stub, object_stub):
             if stub is not None and stub.id not in stubbed:
                 stub_batch.append(stub)

@@ -9,6 +9,7 @@ import asyncio
 import importlib
 from types import SimpleNamespace
 from typing import AsyncIterator
+from uuid import uuid4
 
 import pytest
 
@@ -360,6 +361,256 @@ class TestMigrationGate:
         (gate_call,) = sinks.migration_gate_calls
         assert gate_call["datasets"] == "ds"
         assert gate_call["writes_before_gate"] == 0
+
+
+class TestNodeIdScheme:
+    """Imported entities must carry cognee's CURRENT class-namespaced ids
+    (Entity.id_for / EntityType.id_for — the identity_fields scheme cognify
+    uses), not the legacy bare generate_node_id hash. Stale-scheme ids form a
+    disconnected parallel vocabulary and are invisible to the namespace
+    migrations, which the import stamps as already applied."""
+
+    def test_imported_entity_ids_use_cognee_identity_scheme(self, monkeypatch):
+        from cognee.modules.engine.models import Entity
+
+        sinks = install_sinks(monkeypatch)
+        source = FakeSource(_sample_records(), mode="preserve")
+
+        asyncio.run(import_memory_source(source, dataset_name="ds"))
+
+        alice = next(n for n in _flushed_nodes(sinks) if getattr(n, "name", None) == "Alice")
+        assert alice.id == Entity.id_for("Alice")
+
+    def _cognee_archive_records(self):
+        a1, a2, b = str(uuid4()), str(uuid4()), str(uuid4())
+        records = [
+            COGXEntity(external_system="cognee", external_id=a1, name="Alice"),
+            COGXEntity(external_system="cognee", external_id=a2, name="Alice"),
+            COGXEntity(external_system="cognee", external_id=b, name="Bob"),
+            COGXFact(
+                external_system="cognee",
+                external_id="f1",
+                subject_ref=a1,
+                predicate="knows",
+                object_ref=b,
+            ),
+            COGXFact(
+                external_system="cognee",
+                external_id="f2",
+                subject_ref=a2,
+                predicate="knows",
+                object_ref=b,
+            ),
+        ]
+        return records, {a1, a2}
+
+    @pytest.mark.parametrize("replayable", [True, False])
+    def test_cognee_archives_preserve_source_uuids(self, monkeypatch, replayable):
+        """Cognee-to-cognee transfers are exact copies: entity nodes keep the
+        source UUIDs verbatim, so same-named-but-distinct source entities stay
+        distinct and their edges never collide (no merge, nothing to dedupe)."""
+        sinks = install_sinks(monkeypatch)
+        records, alice_ids = self._cognee_archive_records()
+        source = FakeSource(records, mode="preserve")
+        source.source_system = "cognee"
+        source.replayable = replayable
+
+        asyncio.run(import_memory_source(source, dataset_name="ds"))
+
+        alices = [n for n in _flushed_nodes(sinks) if getattr(n, "name", None) == "Alice"]
+        assert {str(node.id) for node in alices} == alice_ids
+        assert len(_flushed_edges(sinks)) == 2
+
+
+class TestResolvedEdgeDeduplication:
+    """Facts with distinct external refs can RESOLVE to the same
+    (source, target, relationship) edge key — entities merge by name. Such
+    duplicates must be dropped at translation (first fact wins): re-MERGEing
+    an existing edge fires a rel-property update, which crashes Ladybug's
+    committed-in-memory row lookup during fresh bulk imports."""
+
+    def _records_with_resolved_duplicate(self):
+        # a1 and a2 are distinct records but merge into ONE node (same name),
+        # so both facts resolve to the same edge key (Alice -knows-> Bob).
+        return [
+            COGXEntity(external_system="fake", external_id="a1", name="Alice"),
+            COGXEntity(external_system="fake", external_id="a2", name="Alice"),
+            COGXEntity(external_system="fake", external_id="b1", name="Bob"),
+            COGXFact(
+                external_system="fake",
+                external_id="f1",
+                subject_ref="a1",
+                predicate="knows",
+                object_ref="b1",
+            ),
+            COGXFact(
+                external_system="fake",
+                external_id="f2",
+                subject_ref="a2",
+                predicate="knows",
+                object_ref="b1",
+            ),
+        ]
+
+    def test_streaming_import_dedupes_resolved_edges(self, monkeypatch):
+        sinks = install_sinks(monkeypatch)
+        source = FakeSource(self._records_with_resolved_duplicate(), mode="preserve")
+
+        result = asyncio.run(import_memory_source(source, dataset_name="ds"))
+
+        assert len(_flushed_edges(sinks)) == 1
+        (summary,) = _summary_items(result)
+        assert summary["graph_edges"] == 1
+        assert summary["deduped_edges"] == 1
+
+    def test_buffered_import_dedupes_resolved_edges(self, monkeypatch):
+        sinks = install_sinks(monkeypatch)
+        source = FakeSource(self._records_with_resolved_duplicate(), mode="preserve")
+        source.replayable = False  # force the buffered path
+
+        asyncio.run(import_memory_source(source, dataset_name="ds"))
+
+        assert len(_flushed_edges(sinks)) == 1
+
+
+class TestSocialLayerRestore:
+    """Archives exported with include_permissions carry the social layer:
+    the import must run AS the archived owner (per-dataset databases derive
+    their physical location from the owner id, so ownership cannot be
+    reassigned after the rows land) and re-apply the grants afterwards.
+    Sources without a social layer keep today's behavior untouched."""
+
+    def _social_source(self):
+        source = FakeSource(_sample_records(), mode="preserve")
+        source.source_system = "cognee"
+        source.social_layer = {
+            "owner": {"email": "owner@example.com", "hashed_password": "h", "is_active": True},
+            "grants": [
+                {
+                    "user": {"email": "reviewer@example.com", "hashed_password": "h2"},
+                    "permissions": ["read"],
+                }
+            ],
+        }
+        return source
+
+    def test_import_runs_as_archived_owner_and_applies_grants(self, monkeypatch):
+        import cognee.modules.migration.import_source as import_source_module
+
+        sinks = install_sinks(monkeypatch)
+        owner_stub = SimpleNamespace(id=uuid4(), email="owner@example.com")
+        superuser = SimpleNamespace(id=uuid4(), email="admin@example.com", is_superuser=True)
+        ensured, grant_calls = [], []
+
+        async def fake_ensure_user(payload):
+            ensured.append(payload["email"])
+            return owner_stub
+
+        async def fake_apply_grants(source, dataset_name, owner, importer):
+            grant_calls.append({"dataset_name": dataset_name, "owner": owner})
+
+        monkeypatch.setattr(import_source_module, "_ensure_user", fake_ensure_user)
+        monkeypatch.setattr(import_source_module, "_apply_social_grants", fake_apply_grants)
+        source = self._social_source()
+
+        asyncio.run(import_memory_source(source, dataset_name="ds", user=superuser))
+
+        assert ensured == ["owner@example.com"]
+        # Every write ran AS the owner, not the calling user.
+        assert all(call.get("user") is owner_stub for call in sinks.add_calls)
+        assert all(call.get("user") is owner_stub for call in sinks.pipeline_calls)
+        (grant_call,) = grant_calls
+        assert grant_call["owner"] is owner_stub
+        assert grant_call["dataset_name"] == "ds"
+
+    def test_social_layer_requires_superuser_importer(self, monkeypatch):
+        """A crafted archive could otherwise mint arbitrary accounts —
+        including superusers — with attacker-chosen credentials, via the SDK
+        or the /v1/remember archive-upload endpoint."""
+        from cognee.modules.users.exceptions.exceptions import PermissionDeniedError
+
+        install_sinks(monkeypatch)
+        regular = SimpleNamespace(id=uuid4(), email="user@example.com", is_superuser=False)
+        source = self._social_source()
+
+        with pytest.raises(PermissionDeniedError, match="superuser"):
+            asyncio.run(import_memory_source(source, dataset_name="ds", user=regular))
+
+    def test_source_without_social_layer_keeps_calling_user(self, monkeypatch):
+        sinks = install_sinks(monkeypatch)
+        caller = SimpleNamespace(id=uuid4(), email="caller@example.com")
+        source = FakeSource(_sample_records(), mode="preserve")
+        assert source.social_layer is None
+
+        asyncio.run(import_memory_source(source, dataset_name="ds", user=caller))
+
+        assert all(call.get("user") is caller for call in sinks.add_calls)
+        assert all(call.get("user") is caller for call in sinks.pipeline_calls)
+
+
+class TestSourceRevisionRestamp:
+    """The import aligns the target's migration stamp with a cognee-origin
+    archive's source revision (see _restamp_to_source_revision): backward
+    only, known revisions only, so the next migration run replays exactly
+    archive -> head over the imported rows."""
+
+    CHAIN = ["rev_a", "rev_b", "rev_c"]
+
+    def test_stamps_backward_when_archive_is_behind(self):
+        from cognee.modules.migration.import_source import _revision_to_stamp
+
+        assert _revision_to_stamp("rev_a", "rev_c", self.CHAIN) == "rev_a"
+
+    def test_never_stamps_forward_or_same(self):
+        from cognee.modules.migration.import_source import _revision_to_stamp
+
+        assert _revision_to_stamp("rev_c", "rev_a", self.CHAIN) is None
+        assert _revision_to_stamp("rev_b", "rev_b", self.CHAIN) is None
+
+    def test_unknown_or_missing_revisions_leave_stamp_untouched(self):
+        from cognee.modules.migration.import_source import _revision_to_stamp
+
+        assert _revision_to_stamp(None, "rev_c", self.CHAIN) is None
+        assert _revision_to_stamp("newer_rev", "rev_c", self.CHAIN) is None
+        assert _revision_to_stamp("rev_a", "newer_rev", self.CHAIN) is None
+        # Unstamped store (base) is already minimal — nothing to lower.
+        assert _revision_to_stamp("rev_a", None, self.CHAIN) is None
+
+    def test_import_runs_restamp_after_the_rows_land(self, monkeypatch):
+        import cognee.modules.migration.import_source as import_source_module
+
+        sinks = install_sinks(monkeypatch)
+        restamp_calls = []
+
+        async def fake_restamp(source, dataset_name, user):
+            restamp_calls.append(
+                {
+                    "source": source,
+                    "dataset_name": dataset_name,
+                    "flushes_before_restamp": len(sinks.graph_flushes),
+                }
+            )
+
+        monkeypatch.setattr(import_source_module, "_restamp_to_source_revision", fake_restamp)
+        source = FakeSource(_sample_records(), mode="preserve")
+
+        asyncio.run(import_memory_source(source, dataset_name="ds"))
+
+        (call,) = restamp_calls
+        assert call["source"] is source
+        assert call["dataset_name"] == "ds"
+        # The restamp must run AFTER the import wrote its rows.
+        assert call["flushes_before_restamp"] > 0
+
+    def test_source_without_revision_skips_restamp_without_db_access(self):
+        """External sources (Mem0/Zep/Letta) carry no revision: the helper
+        must return before touching migrations or the database."""
+        from cognee.modules.migration.import_source import _restamp_to_source_revision
+
+        source = FakeSource(_sample_records(), mode="preserve")
+        assert source.migration_revision is None
+        # Would raise on any DB/engine access — pure short-circuit expected.
+        asyncio.run(_restamp_to_source_revision(source, "ds", None))
 
 
 class TestRememberDispatch:
