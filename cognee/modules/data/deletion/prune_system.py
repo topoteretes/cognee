@@ -67,7 +67,7 @@ async def prune_system(graph=True, vector=True, metadata=True, cache=True):
         await prune_graph_databases()
 
     if vector and not backend_access_control_enabled():
-        vector_engine = get_vector_engine()
+        vector_engine = await get_vector_engine()
         await vector_engine.prune()
     elif vector and backend_access_control_enabled():
         await prune_vector_databases()

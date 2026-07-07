@@ -320,7 +320,7 @@ async def test_chunks_retriever_on_empty_graph(setup_test_environment_empty):
     retriever = ChunksRetriever()
     query = "Christina Mayer"
 
-    vector_engine = get_vector_engine()
+    vector_engine = await get_vector_engine()
     await vector_engine.create_collection(
         "DocumentChunk_text", payload_schema=DocumentChunkWithEntities
     )
@@ -341,7 +341,7 @@ async def test_chunks_retriever_context_on_empty_graph(setup_test_environment_em
     retriever = ChunksRetriever()
     query = "Christina Mayer"
 
-    vector_engine = get_vector_engine()
+    vector_engine = await get_vector_engine()
     await vector_engine.create_collection(
         "DocumentChunk_text", payload_schema=DocumentChunkWithEntities
     )

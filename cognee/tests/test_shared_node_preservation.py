@@ -261,7 +261,7 @@ async def test_shared_entity_preserved_across_documents(mock_create_structured_o
     logger.info("✅ Germany→Netherlands edge deleted")
 
     # Verify vector indices match graph state
-    vector_engine = get_vector_engine()
+    vector_engine = await get_vector_engine()
 
     # Check if Germany is still in vector index
     if await vector_engine.has_collection("Entity_name"):
