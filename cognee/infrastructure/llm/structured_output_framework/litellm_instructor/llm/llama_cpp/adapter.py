@@ -179,6 +179,8 @@ class LlamaCppAPIAdapter(LLMInterface):
         --------
             - BaseModel: A structured output that conforms to the specified response model.
         """
+        from cognee.modules.session_lifecycle.usage_tracking import capture_llm_usage
+
         async with llm_rate_limiter_context_manager():
             # Prepare messages (system first, then user is more standard)
             messages = [
@@ -213,6 +215,7 @@ class LlamaCppAPIAdapter(LLMInterface):
                 # Run sync function in thread pool to avoid blocking
                 response = await asyncio.to_thread(_call_sync)
 
+        capture_llm_usage(response)
         return response
 
     async def create_transcript(self, input: str, **kwargs: Any) -> TranscriptionReturnType:

@@ -123,10 +123,12 @@ class GeminiAdapter(GenericAPIAdapter):
               output from the language model.
         """
 
+        from cognee.modules.session_lifecycle.usage_tracking import capture_llm_usage
+
         merged_kwargs = {**self.llm_args, **kwargs}
         try:
             async with llm_rate_limiter_context_manager():
-                return await self.aclient.chat.completions.create(
+                result = await self.aclient.chat.completions.create(
                     model=self.model,
                     messages=[
                         {
@@ -145,6 +147,8 @@ class GeminiAdapter(GenericAPIAdapter):
                     response_model=response_model,
                     **merged_kwargs,
                 )
+                capture_llm_usage(result)
+                return result
         except (
             ContentFilterFinishReasonError,
             ContentPolicyViolationError,
@@ -163,7 +167,7 @@ class GeminiAdapter(GenericAPIAdapter):
 
             try:
                 async with llm_rate_limiter_context_manager():
-                    return await self.aclient.chat.completions.create(
+                    fallback_result = await self.aclient.chat.completions.create(
                         model=self.fallback_model,
                         messages=[
                             {
@@ -181,6 +185,8 @@ class GeminiAdapter(GenericAPIAdapter):
                         response_model=response_model,
                         **merged_kwargs,
                     )
+                    capture_llm_usage(fallback_result)
+                    return fallback_result
             except (
                 ContentFilterFinishReasonError,
                 ContentPolicyViolationError,

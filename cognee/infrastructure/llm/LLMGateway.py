@@ -30,10 +30,21 @@ async def _record_session_usage_after(
     any active session tracker. Failures never propagate — usage
     accounting is strictly auxiliary.
     """
-    result = await coro
-    try:
-        from cognee.modules.session_lifecycle.usage_tracking import record_llm_call
+    from cognee.modules.session_lifecycle.usage_tracking import (
+        pop_last_llm_usage,
+        record_llm_call,
+    )
 
+    try:
+        result = await coro
+    except Exception:
+        # Discard any usage an adapter captured before raising, so it can't
+        # be misattributed to the next unrelated call in this context.
+        pop_last_llm_usage()
+        raise
+
+    try:
+        usage = pop_last_llm_usage()
         if isinstance(result, BaseModel):
             output_repr = result.model_dump_json()
         else:
@@ -43,6 +54,8 @@ async def _record_session_usage_after(
             input_text=text_input,
             output_text=output_repr,
             model=model,
+            tokens_in_override=usage[0] if usage is not None else None,
+            tokens_out_override=usage[1] if usage is not None else None,
         )
     except Exception:
         pass

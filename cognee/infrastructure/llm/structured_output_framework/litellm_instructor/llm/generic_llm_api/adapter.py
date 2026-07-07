@@ -175,6 +175,8 @@ class GenericAPIAdapter(LLMInterface):
               output from the language model.
         """
 
+        from cognee.modules.session_lifecycle.usage_tracking import capture_llm_usage
+
         merged_kwargs = {**self.llm_args, **kwargs}
 
         # A plain string needs no schema — skip instructor (see acreate_str_output).
@@ -202,6 +204,7 @@ class GenericAPIAdapter(LLMInterface):
                     **merged_kwargs,
                 )
                 _enrich_llm_span(self.model, self.name)
+                capture_llm_usage(result)
                 return result
         except (
             ContentFilterFinishReasonError,
@@ -224,7 +227,7 @@ class GenericAPIAdapter(LLMInterface):
 
             try:
                 async with llm_rate_limiter_context_manager():
-                    return await self.aclient.chat.completions.create(
+                    fallback_result = await self.aclient.chat.completions.create(
                         model=fallback_model,
                         messages=[
                             {
@@ -242,6 +245,8 @@ class GenericAPIAdapter(LLMInterface):
                         response_model=response_model,
                         **fallback_llm_args,
                     )
+                    capture_llm_usage(fallback_result)
+                    return fallback_result
             except (
                 ContentFilterFinishReasonError,
                 ContentPolicyViolationError,

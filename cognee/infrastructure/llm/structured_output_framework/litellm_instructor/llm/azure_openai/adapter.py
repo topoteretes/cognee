@@ -203,6 +203,8 @@ class AzureOpenAIAdapter(OpenAIAdapter):
                 text_input, system_prompt, response_model, **kwargs
             )
 
+        from cognee.modules.session_lifecycle.usage_tracking import capture_llm_usage
+
         # Managed identity path: use native OpenAI client (not litellm)
         merged_kwargs = {**self.llm_args, **kwargs}
         # Remove litellm-specific kwargs that OpenAI client doesn't understand
@@ -215,7 +217,7 @@ class AzureOpenAIAdapter(OpenAIAdapter):
 
         try:
             async with llm_rate_limiter_context_manager():
-                return await self.aclient.chat.completions.create(
+                result = await self.aclient.chat.completions.create(
                     model=self._extract_deployment(self.model),
                     messages=[
                         {
@@ -231,6 +233,8 @@ class AzureOpenAIAdapter(OpenAIAdapter):
                     max_retries=self.MAX_RETRIES,
                     **merged_kwargs,  # ty: ignore[invalid-argument-type]
                 )
+                capture_llm_usage(result)
+                return result
         except (
             ContentFilterFinishReasonError,
             ContentPolicyViolationError,
@@ -242,7 +246,7 @@ class AzureOpenAIAdapter(OpenAIAdapter):
             try:
                 fallback_aclient = instructor.from_litellm(litellm.acompletion)
                 async with llm_rate_limiter_context_manager():
-                    return await fallback_aclient.chat.completions.create(
+                    fallback_result = await fallback_aclient.chat.completions.create(
                         model=self.fallback_model,
                         messages=[
                             {
@@ -259,6 +263,8 @@ class AzureOpenAIAdapter(OpenAIAdapter):
                         max_retries=self.MAX_RETRIES,
                         **merged_kwargs,
                     )
+                    capture_llm_usage(fallback_result)
+                    return fallback_result
             except (
                 ContentFilterFinishReasonError,
                 ContentPolicyViolationError,

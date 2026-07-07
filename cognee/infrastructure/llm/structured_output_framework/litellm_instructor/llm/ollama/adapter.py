@@ -121,6 +121,8 @@ class OllamaAPIAdapter(LLMInterface):
 
             - BaseModel: A structured output that conforms to the specified response model.
         """
+        from cognee.modules.session_lifecycle.usage_tracking import capture_llm_usage
+
         merged_kwargs = {**self.llm_args, **kwargs}
 
         # A plain string needs no schema — skip instructor and hit the OpenAI-
@@ -156,6 +158,7 @@ class OllamaAPIAdapter(LLMInterface):
                 **merged_kwargs,
             )
 
+        capture_llm_usage(response)
         return response
 
     @observe(as_type="transcription")

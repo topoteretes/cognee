@@ -124,3 +124,102 @@ class SessionModelUsage(Base):
             "cost_usd": self.cost_usd,
             "updated_at": updated.isoformat() if updated is not None else None,
         }
+
+
+class OperationRecord(Base):
+    """One row per API operation that uses LLMs (cognify, search, memify, etc.).
+
+    Separate from ``SessionRecord`` — operations are fire-and-forget pipeline
+    or single-call invocations with no interactive turn history. Their lifecycle
+    is simpler: created when the request arrives, completed/failed when it returns,
+    or inferred abandoned (same threshold as sessions) when run in background.
+    """
+
+    __tablename__ = "operation_usage_records"
+
+    operation_id = Column(String, primary_key=True)
+    user_id = Column(UUID, primary_key=True, index=True)
+
+    # Discriminator: "cognify", "search", "memify", "improve", "remember",
+    # "llm_custom_prompt", "llm_infer_schema"
+    operation_type = Column(String, nullable=False, index=True)
+
+    dataset_id = Column(UUID, nullable=True, index=True)
+
+    status = Column(String, nullable=False, default="running", index=True)
+
+    started_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+    last_activity_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        index=True,
+    )
+    ended_at = Column(DateTime(timezone=True), nullable=True)
+
+    tokens_in = Column(Integer, nullable=False, default=0)
+    tokens_out = Column(Integer, nullable=False, default=0)
+    cost_usd = Column(Float, nullable=False, default=0.0)
+
+    last_model = Column(Text, nullable=True)
+
+    def to_dict(self) -> dict:
+        started = getattr(self, "started_at", None)
+        last_act = getattr(self, "last_activity_at", None)
+        ended = getattr(self, "ended_at", None)
+        dataset = getattr(self, "dataset_id", None)
+        return {
+            "operation_id": self.operation_id,
+            "user_id": str(self.user_id),
+            "operation_type": self.operation_type,
+            "dataset_id": str(dataset) if dataset is not None else None,
+            "status": self.status,
+            "started_at": started.isoformat() if started is not None else None,
+            "last_activity_at": last_act.isoformat() if last_act is not None else None,
+            "ended_at": ended.isoformat() if ended is not None else None,
+            "tokens_in": self.tokens_in,
+            "tokens_out": self.tokens_out,
+            "cost_usd": self.cost_usd,
+            "last_model": self.last_model,
+        }
+
+
+class OperationModelUsage(Base):
+    """Per-(operation, user, model) token + cost aggregate.
+
+    Same purpose as ``SessionModelUsage`` but scoped to pipeline operations
+    rather than interactive sessions.
+    """
+
+    __tablename__ = "operation_model_usage"
+
+    operation_id = Column(String, primary_key=True)
+    user_id = Column(UUID, primary_key=True, index=True)
+    model = Column(Text, primary_key=True)
+
+    tokens_in = Column(Integer, nullable=False, default=0)
+    tokens_out = Column(Integer, nullable=False, default=0)
+    cost_usd = Column(Float, nullable=False, default=0.0)
+
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    def to_dict(self) -> dict:
+        updated = getattr(self, "updated_at", None)
+        return {
+            "operation_id": self.operation_id,
+            "user_id": str(self.user_id),
+            "model": self.model,
+            "tokens_in": self.tokens_in,
+            "tokens_out": self.tokens_out,
+            "cost_usd": self.cost_usd,
+            "updated_at": updated.isoformat() if updated is not None else None,
+        }

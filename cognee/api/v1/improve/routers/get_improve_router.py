@@ -1,4 +1,4 @@
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
@@ -79,18 +79,29 @@ def get_improve_router() -> APIRouter:
 
         try:
             from cognee.api.v1.improve import improve as cognee_improve
+            from cognee.modules.session_lifecycle.usage_tracking import track_operation_usage
 
-            improve_run = await cognee_improve(
-                extraction_tasks=payload.extraction_tasks,
-                enrichment_tasks=payload.enrichment_tasks,
-                data=payload.data,
-                dataset=payload.dataset_id if payload.dataset_id else payload.dataset_name,
-                node_name=payload.node_name,
-                session_ids=payload.session_ids,
-                build_global_context_index=payload.build_global_context_index,
-                user=user,
-                run_in_background=payload.run_in_background,
-            )
+            dataset_id = payload.dataset_id if payload.dataset_id else None
+            async with track_operation_usage(
+                str(uuid4()),
+                user.id,
+                "improve",
+                dataset_id=dataset_id,
+                background=payload.run_in_background,
+            ) as operation_outcome:
+                improve_run = await cognee_improve(
+                    extraction_tasks=payload.extraction_tasks,
+                    enrichment_tasks=payload.enrichment_tasks,
+                    data=payload.data,
+                    dataset=payload.dataset_id if payload.dataset_id else payload.dataset_name,
+                    node_name=payload.node_name,
+                    session_ids=payload.session_ids,
+                    build_global_context_index=payload.build_global_context_index,
+                    user=user,
+                    run_in_background=payload.run_in_background,
+                )
+                if isinstance(improve_run, PipelineRunErrored):
+                    operation_outcome.mark_failed()
 
             if isinstance(improve_run, PipelineRunErrored):
                 return JSONResponse(status_code=420, content=improve_run)

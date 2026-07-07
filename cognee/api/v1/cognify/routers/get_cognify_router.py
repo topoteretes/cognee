@@ -1,6 +1,6 @@
 import os
 import asyncio
-from uuid import UUID
+from uuid import UUID, uuid4
 from pydantic import Field
 from typing import List, Optional
 from fastapi.encoders import jsonable_encoder
@@ -236,17 +236,27 @@ def get_cognify_router() -> APIRouter:
             else:
                 graph_model = graph_schema_to_graph_model(graph_model_schema)
 
-            cognify_run = await cognee_cognify(
-                datasets,
-                user,
-                graph_model=graph_model,
-                config=config_to_use,
-                run_in_background=payload.run_in_background,
-                custom_prompt=custom_prompt,
-                chunk_size=payload.chunk_size,
-                chunks_per_batch=payload.chunks_per_batch,
-                data_per_batch=payload.data_per_batch,
-            )
+            from cognee.modules.session_lifecycle.usage_tracking import track_operation_usage
+
+            async with track_operation_usage(
+                str(uuid4()),
+                user.id,
+                "cognify",
+                background=payload.run_in_background,
+            ) as operation_outcome:
+                cognify_run = await cognee_cognify(
+                    datasets,
+                    user,
+                    graph_model=graph_model,
+                    config=config_to_use,
+                    run_in_background=payload.run_in_background,
+                    custom_prompt=custom_prompt,
+                    chunk_size=payload.chunk_size,
+                    chunks_per_batch=payload.chunks_per_batch,
+                    data_per_batch=payload.data_per_batch,
+                )
+                if any(isinstance(v, PipelineRunErrored) for v in cognify_run.values()):
+                    operation_outcome.mark_failed()
 
             # If any cognify run errored return JSONResponse with proper error status code
             if any(isinstance(v, PipelineRunErrored) for v in cognify_run.values()):

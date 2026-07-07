@@ -103,9 +103,11 @@ class AnthropicAdapter(GenericAPIAdapter):
 
             - BaseModel: An instance of BaseModel containing the structured response.
         """
+        from cognee.modules.session_lifecycle.usage_tracking import capture_llm_usage
+
         merged_kwargs = {**self.llm_args, **kwargs}
         async with llm_rate_limiter_context_manager():
-            return await self.aclient(
+            result = await self.aclient(
                 model=self.model,
                 max_retries=2,
                 messages=[
@@ -118,3 +120,5 @@ class AnthropicAdapter(GenericAPIAdapter):
                 response_model=response_model,
                 **merged_kwargs,
             )
+            capture_llm_usage(result)
+            return result

@@ -224,6 +224,10 @@ def get_llm_router() -> APIRouter:
         )
 
         try:
+            from uuid import uuid4
+
+            from cognee.modules.session_lifecycle.usage_tracking import track_operation_usage
+
             graph_model_schema_json = json.dumps(payload.graph_model)
 
             user_prompt = render_prompt(
@@ -236,12 +240,13 @@ def get_llm_router() -> APIRouter:
                 {},
             )
 
-            llm_output = await LLMGateway.acreate_structured_output(
-                text_input=user_prompt,
-                system_prompt=system_prompt,
-                response_model=str,  # type: ignore[arg-type]
-                **_safe_params(payload.parameters),
-            )
+            async with track_operation_usage(str(uuid4()), user.id, "llm_custom_prompt"):
+                llm_output = await LLMGateway.acreate_structured_output(
+                    text_input=user_prompt,
+                    system_prompt=system_prompt,
+                    response_model=str,  # type: ignore[arg-type]
+                    **_safe_params(payload.parameters),
+                )
 
             return CustomPromptGenerationResponseDTO(custom_prompt=llm_output)
         except ValueError as error:
@@ -328,12 +333,17 @@ def get_llm_router() -> APIRouter:
                 {"SAMPLE_TEXT": sample},
             )
 
-            llm_output = await LLMGateway.acreate_structured_output(
-                text_input=user_prompt,
-                system_prompt=system_prompt,
-                response_model=InferredGraphSchemaDTO,
-                **_safe_params(parameters_dict),
-            )
+            from uuid import uuid4
+
+            from cognee.modules.session_lifecycle.usage_tracking import track_operation_usage
+
+            async with track_operation_usage(str(uuid4()), user.id, "llm_infer_schema"):
+                llm_output = await LLMGateway.acreate_structured_output(
+                    text_input=user_prompt,
+                    system_prompt=system_prompt,
+                    response_model=InferredGraphSchemaDTO,
+                    **_safe_params(parameters_dict),
+                )
 
             schema_dict = llm_output.model_dump(by_alias=True, exclude_none=True)
 
