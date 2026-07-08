@@ -1,55 +1,62 @@
-"""Ingest a Slack workspace export via the dlt connector.
+"""Ingest a Slack workspace export into cognee memory via the dlt connector.
 
-Slack exports can contain thousands of messages. Cognee caps DLT table reads
-at 50 rows by default (``dlt_max_rows_per_table`` / ``DLT_MAX_ROWS_PER_TABLE``).
-Pass ``max_rows_per_table=0`` to ingest the full export.
+A Slack *export* is a local archive of JSON files — no API credentials are
+needed; a workspace admin downloads it from Slack. This demo ingests one export
+snapshot, then re-syncs a later snapshot to show cognee's two guarantees for
+this source:
 
-Use a dedicated ``dataset_name`` per workspace so orphan cleanup only touches
-tables from the current ingest run.
+* incremental re-sync — unchanged messages keep a stable ``channel_id:ts`` id,
+  so re-ingesting only re-processes new/changed messages (the default
+  ``incremental_loading=True``);
+* forget-on-delete — a message removed from the newer export is deleted from
+  memory by dlt orphan cleanup (``write_disposition="replace"``, the default
+  for dlt sources).
+
+Real exports hold thousands of messages, but cognee caps dlt table reads at 50
+rows by default (``DLT_MAX_ROWS_PER_TABLE``). Pass ``max_rows_per_table=0`` to
+ingest the whole export. Use a dedicated ``dataset_name`` per workspace so
+orphan cleanup only ever touches this export's messages.
+
+Requires ``dlt`` (``pip install cognee[dlt]``) and an ``LLM_API_KEY``.
 """
 
 import asyncio
 import os
 
 import cognee
-
-try:
-    import dlt
-except ImportError:
-    dlt = None
-
 from cognee.tasks.ingestion.connectors.slack_export import slack_export_source
 
-SLACK_REMEMBER_KWARGS = {
-    "primary_key": "id",
-    "write_disposition": "replace",
-    "max_rows_per_table": 0,
-    "incremental_loading": False,
-    "self_improvement": False,
-}
+DATASET = "team-slack-export"
+EXPORTS = os.path.join(os.path.dirname(__file__), "test_data", "slack_export")
+QUESTION = "What was said about the connector demo?"
 
 
-async def main():
-    export_path = os.path.join(
-        os.path.dirname(__file__),
-        "test_data",
-        "slack_export",
-        "v1",
-    )
-
-    await cognee.forget(everything=True)
-
+async def sync(snapshot: str) -> None:
+    """Ingest one Slack export snapshot into the dataset."""
     await cognee.remember(
-        slack_export_source(export_path),
-        dataset_name="team-slack-export",
-        **SLACK_REMEMBER_KWARGS,
+        slack_export_source(os.path.join(EXPORTS, snapshot)),
+        dataset_name=DATASET,
+        max_rows_per_table=0,  # ingest the whole export, not just the first 50 rows
     )
 
-    result = await cognee.recall("What did Bob say about the connector demo?")
-    print("Recall results:", result)
+
+async def main() -> None:
+    # Best-effort clean slate so the demo is repeatable. Scoped to this dataset
+    # only — never use forget(everything=True) in real code; it wipes all memory.
+    try:
+        await cognee.forget(dataset=DATASET)
+    except Exception:
+        pass  # dataset does not exist yet on the first run
+
+    # First snapshot: the full history.
+    await sync("v1")
+    print("after v1:", await cognee.recall(QUESTION))
+
+    # Same workspace, one snapshot later, with one message deleted upstream.
+    # Re-syncing skips the unchanged messages and forgets the removed one.
+    await sync("v2")
+    print("after v2:", await cognee.recall(QUESTION))
 
 
 if __name__ == "__main__":
-    if dlt is None:
-        raise SystemExit("Install dlt to run this example: pip install dlt")
     asyncio.run(main())
