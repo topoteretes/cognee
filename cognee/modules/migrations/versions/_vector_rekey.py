@@ -164,9 +164,9 @@ async def rekey_native(vector_engine, collection: str, id_map: dict) -> bool:
     if not id_map:
         return True
 
-    # NOT type(vector_engine): the engine arrives wrapped (_VectorEngineHandle /
-    # the cache's _LeasedValueProxy), and both spoof ``__class__`` to the real
-    # adapter class precisely so checks like this resolve through the wrapper.
+    # NOT type(vector_engine): the engine arrives wrapped in the cache's
+    # ``_LeasedValueProxy``, which spoofs ``__class__`` to the real adapter class
+    # precisely so checks like this resolve through the wrapper.
     adapter = vector_engine.__class__.__name__
     if adapter == "LanceDBAdapter":
         await rekey_lancedb(vector_engine, collection, id_map)
