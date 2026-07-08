@@ -221,9 +221,13 @@ class TestSessionQaVectorHelpers:
             return [SimpleNamespace(id=result_id)]
 
         vector_engine.search = fake_search
+
+        async def _get_vector_engine():
+            return vector_engine
+
         monkeypatch.setattr(
             "cognee.infrastructure.databases.vector.get_vector_engine",
-            lambda: vector_engine,
+            _get_vector_engine,
         )
 
         qa_ids = await search_session_qa_ids(
@@ -249,9 +253,13 @@ class TestSessionQaVectorHelpers:
             raise CollectionNotFoundError("Collection not found")
 
         vector_engine.search = fake_search
+
+        async def _get_vector_engine():
+            return vector_engine
+
         monkeypatch.setattr(
             "cognee.infrastructure.databases.vector.get_vector_engine",
-            lambda: vector_engine,
+            _get_vector_engine,
         )
 
         qa_ids = await search_session_qa_ids(
@@ -272,9 +280,13 @@ class TestSessionQaVectorHelpers:
             vector_engine.delete_call = (collection_name, data_point_ids)
 
         vector_engine.delete_data_points = fake_delete_data_points
+
+        async def _get_vector_engine():
+            return vector_engine
+
         monkeypatch.setattr(
             "cognee.infrastructure.databases.vector.get_vector_engine",
-            lambda: vector_engine,
+            _get_vector_engine,
         )
 
         await delete_session_qa_vector(qa_id=str(qa_id))
@@ -291,9 +303,13 @@ class TestSessionQaVectorHelpers:
             vector_engine.remove_tags_call = tags
 
         vector_engine.remove_belongs_to_set_tags = fake_remove_belongs_to_set_tags
+
+        async def _get_vector_engine():
+            return vector_engine
+
         monkeypatch.setattr(
             "cognee.infrastructure.databases.vector.get_vector_engine",
-            lambda: vector_engine,
+            _get_vector_engine,
         )
 
         await delete_session_qa_vectors(user_id="u1", session_id="s1")

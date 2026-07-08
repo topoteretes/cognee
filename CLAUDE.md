@@ -434,6 +434,12 @@ git pull origin dev
 git checkout -b feature/your-feature-name
 ```
 
+**Core-team PRs must reference a Linear issue.** Put the issue key (e.g. `COG-123`)
+in the PR title or the branch name so Linear links the PR to its ticket. This is
+enforced by the `Require Linear issue` workflow (`linear-issue-check`), a required
+status check. Fork / external-contributor PRs are exempt (the check skips them), so
+this rule applies only to internal PRs.
+
 ## Code Style
 
 - **Formatter**: Ruff (configured in `pyproject.toml`)

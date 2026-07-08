@@ -324,7 +324,7 @@ async def accept_proposed_lessons(
 ) -> List[WrittenLesson]:
     entries_by_id = {entry.id: entry for entry in context_entries}
     async with set_database_global_context_variables(scope.dataset.id, scope.dataset.owner_id):
-        vector_engine = get_vector_engine()
+        vector_engine = await get_vector_engine()
 
         def write_lesson(lesson: ProposedLesson):
             return lambda: evaluate_proposed_lesson(

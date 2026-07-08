@@ -40,7 +40,7 @@ class CompletionRetriever(BaseRetriever):
         self.include_references = include_references
 
     async def get_retrieved_objects(self, query: str) -> Any:
-        vector_engine = get_vector_engine()
+        vector_engine = await get_vector_engine()
 
         try:
             found_chunks = await vector_engine.search(
