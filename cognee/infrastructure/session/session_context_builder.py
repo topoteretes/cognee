@@ -10,30 +10,55 @@ Public orchestration coroutines are fail-open so they can never block answer gen
 helpers are deliberately strict so tests catch malformed stored data and scoring mistakes.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Protocol, Tuple
 from uuid import uuid4
+
+from pydantic import TypeAdapter
 
 from cognee.infrastructure.session.session_context_models import (
     MAX_CONTEXT_CONTENT_CHARS,
     MIN_CANDIDATE_CONFIDENCE,
-    VALID_SECTIONS,
+    AgentCandidateContextUpdateVariant,
     CandidateContextUpdate,
+    ContextProfile,
     SessionContextEntry,
     normalize_content,
+    valid_sections_for,
 )
+
+_AGENT_CANDIDATE_ADAPTER = TypeAdapter(AgentCandidateContextUpdateVariant)
 
 # Default budgets. Kept conservative so the rendered block never bloats the prompt.
 DEFAULT_PER_SECTION_CHAR_BUDGET = 400
 DEFAULT_TOTAL_CHAR_BUDGET = 1200
 
-# Rendered in this fixed order; (section_key, heading_label).
+# Rendered in this fixed order per profile; (section_key, heading_label).
 SECTION_HEADINGS: List[Tuple[str, str]] = [
     ("goals", "Goals"),
     ("rules", "Rules"),
     ("preferences", "Preferences"),
     ("lessons_learned", "Lessons learned"),
 ]
+
+AGENT_SECTION_HEADINGS: List[Tuple[str, str]] = [
+    ("tool_rules", "Tool rules"),
+    ("workflow_state", "Workflow state"),
+    ("success_patterns", "Success patterns"),
+    ("failure_lessons", "Failure lessons"),
+    ("environment_facts", "Environment facts"),
+]
+
+HEADINGS_BY_PROFILE = {
+    ContextProfile.QA.value: SECTION_HEADINGS,
+    ContextProfile.AGENT.value: AGENT_SECTION_HEADINGS,
+}
+
+
+def headings_for_profile(context_profile: str) -> List[Tuple[str, str]]:
+    """Ordered (section_key, heading_label) pairs for a profile; falls back to QA."""
+    return HEADINGS_BY_PROFILE.get(context_profile, SECTION_HEADINGS)
+
 
 BLOCK_TITLE = "## Active session guidance"
 CONFLICT_INSTRUCTION = (
@@ -63,6 +88,17 @@ class DeterministicRanker:
     """
 
     SECTION_PRIORITY = {"rules": 3, "goals": 2, "preferences": 1, "lessons_learned": 1}
+    AGENT_SECTION_PRIORITY = {
+        "failure_lessons": 3,
+        "tool_rules": 3,
+        "environment_facts": 2,
+        "workflow_state": 2,
+        "success_patterns": 1,
+    }
+    PRIORITY_BY_PROFILE = {
+        ContextProfile.QA.value: SECTION_PRIORITY,
+        ContextProfile.AGENT.value: AGENT_SECTION_PRIORITY,
+    }
 
     # Weights chosen so section priority dominates, then confidence/relevance, then signals.
     W_SECTION = 10.0
@@ -95,7 +131,8 @@ class DeterministicRanker:
         return parsed.timestamp() / 1.0e12
 
     def score(self, entry: SessionContextEntry, query: str) -> float:
-        section_priority = self.SECTION_PRIORITY.get(entry.section, 0)
+        priority_map = self.PRIORITY_BY_PROFILE.get(entry.context_profile, self.SECTION_PRIORITY)
+        section_priority = priority_map.get(entry.section, 0)
         net_help = max(-3, min(3, entry.helpful_count - entry.harmful_count))
         relevance = self._query_overlap(entry.content, query)
         return (
@@ -131,13 +168,16 @@ def select_context_entries(
     ranker: ContextRanker,
     per_section_char_budget: int,
     total_char_budget: int,
+    context_profile: str = ContextProfile.QA.value,
 ) -> List[SessionContextEntry]:
-    """Select highest-scoring entries globally while respecting total and per-section budgets."""
+    """Select highest-scoring entries for one profile within total and per-section budgets."""
     selected: List[SessionContextEntry] = []
-    section_usage = {key: 0 for key, _ in SECTION_HEADINGS}
+    section_usage = {key: 0 for key, _ in headings_for_profile(context_profile)}
     total_used = 0
 
     for entry in sorted(entries, key=lambda e: ranker.score(e, query), reverse=True):
+        if entry.context_profile != context_profile:
+            continue
         if entry.section not in section_usage:
             continue
         content = entry.content.strip()
@@ -185,7 +225,7 @@ async def _stamp_served_entries(*, session_manager, user_id, session_id, entry_i
     if not entry_ids:
         return
 
-    served_at = datetime.utcnow().isoformat()
+    served_at = datetime.now(timezone.utc).isoformat()
     for entry_id in entry_ids:
         try:
             await session_manager.update_session_context_entry(
@@ -207,11 +247,15 @@ async def build_active_context_block(
     ranker: ContextRanker | None = None,
     per_section_char_budget: int = DEFAULT_PER_SECTION_CHAR_BUDGET,
     total_char_budget: int = DEFAULT_TOTAL_CHAR_BUDGET,
+    context_profile: str = ContextProfile.QA.value,
+    stamp_served: bool = True,
 ) -> Tuple[str, List[str]]:
     """Load active context entries, rank them, budget-cap, and render a compact block.
 
-    Returns ``(block_str, served_ids)`` where ``served_ids`` lists the entry ids actually
-    rendered into the block. Returns ``("", [])`` on any exception (fail-open).
+    Renders only ``context_profile`` entries. With ``stamp_served=False`` the call performs
+    no writes (used by read-only recall); the mutating default stamps ``last_served_at`` on
+    the rendered entries. Returns ``(block_str, served_ids)`` — the entry ids rendered into the
+    block — or ``("", [])`` on any exception (fail-open).
     """
     try:
         if ranker is None:
@@ -234,31 +278,34 @@ async def build_active_context_block(
             ranker=ranker,
             per_section_char_budget=per_section_char_budget,
             total_char_budget=total_char_budget,
+            context_profile=context_profile,
         )
         if not selected:
             return "", []
 
-        by_section = {key: [] for key, _ in SECTION_HEADINGS}
+        headings = headings_for_profile(context_profile)
+        by_section = {key: [] for key, _ in headings}
         for entry in selected:
             by_section[entry.section].append(entry)
 
         grouped_rendered: List[Tuple[str, List[str]]] = []
-        for section_key, heading_label in SECTION_HEADINGS:
-            entries = sorted(
+        for section_key, heading_label in headings:
+            section_entries = sorted(
                 by_section.get(section_key, []),
                 key=lambda entry: entry.created_at or "",
             )
-            bullets = [_render_entry(entry) for entry in entries]
+            bullets = [_render_entry(entry) for entry in section_entries]
             grouped_rendered.append((heading_label, bullets))
 
         served_ids = [entry.id for entry in selected]
         block = _render_block(grouped_rendered)
-        await _stamp_served_entries(
-            session_manager=session_manager,
-            user_id=user_id,
-            session_id=session_id,
-            entry_ids=served_ids,
-        )
+        if stamp_served:
+            await _stamp_served_entries(
+                session_manager=session_manager,
+                user_id=user_id,
+                session_id=session_id,
+                entry_ids=served_ids,
+            )
         return block, served_ids
     except Exception:
         # Fail-open: never block answer generation.
@@ -270,17 +317,19 @@ async def _apply_single_candidate(
     session_manager,
     user_id,
     session_id,
-    feedback_entry_id,
+    source_id,
     candidate: CandidateContextUpdate,
 ) -> str | None:
     """Apply one validated candidate. Returns the touched/created entry id, or None to skip.
 
     Implements validate -> confidence>=0.75 -> normalize -> dup-link-or-create, where a dup is
-    an exact same-section normalized-content match.
+    an exact normalized-content match within the same (profile, section). ``source_id`` is the
+    evidence id linked on the entry — a feedback id for qa, a trace id for agent.
     Raises on store errors; the caller wraps this so one failure never aborts the batch.
     """
+    context_profile = getattr(candidate, "context_profile", ContextProfile.QA.value)
     section = candidate.section
-    if section not in VALID_SECTIONS:
+    if section not in valid_sections_for(context_profile):
         return None
 
     content = candidate.content.strip()
@@ -292,9 +341,13 @@ async def _apply_single_candidate(
         return None
 
     normalized = normalize_content(content)
+    source_field = (
+        "source_trace_ids"
+        if context_profile == ContextProfile.AGENT.value
+        else "source_feedback_ids"
+    )
 
-    # Look for an existing same-section entry that duplicates the candidate by exact
-    # normalized content.
+    # Look for an existing entry in the same (profile, section) with identical normalized content.
     existing = await session_manager.get_session_context_entries(
         user_id=user_id,
         session_id=session_id,
@@ -307,7 +360,11 @@ async def _apply_single_candidate(
             row = raw
         else:
             continue
-        if row.get("kind", "context") != "context" or row.get("section") != section:
+        if row.get("kind", "context") != "context":
+            continue
+        if row.get("context_profile", ContextProfile.QA.value) != context_profile:
+            continue
+        if row.get("section") != section:
             continue
         if row.get("normalized_content") == normalized:
             duplicate_row = row
@@ -315,26 +372,29 @@ async def _apply_single_candidate(
 
     if duplicate_row is not None:
         entry_id = duplicate_row.get("id")
-        source_ids = list(duplicate_row.get("source_feedback_ids") or [])
-        if feedback_entry_id and feedback_entry_id not in source_ids:
-            source_ids.append(feedback_entry_id)
+        source_ids = list(duplicate_row.get(source_field) or [])
+        if source_id and source_id not in source_ids:
+            source_ids.append(source_id)
             await session_manager.update_session_context_entry(
                 user_id=user_id,
                 session_id=session_id,
                 entry_id=entry_id,
-                merge={"source_feedback_ids": source_ids},
+                merge={source_field: source_ids},
             )
         return entry_id
 
-    # Novel content: create a new active entry.
+    # Novel content: create a new active entry under this profile/section.
+    linked_ids = [source_id] if source_id else []
     new_entry = SessionContextEntry(
         id=str(uuid4()),
         section=section,
+        context_profile=context_profile,
         content=content,
         normalized_content=normalized,
         confidence=float(candidate.confidence),
-        created_at=datetime.utcnow().isoformat(),
-        source_feedback_ids=[feedback_entry_id] if feedback_entry_id else [],
+        created_at=datetime.now(timezone.utc).isoformat(),
+        source_feedback_ids=linked_ids if source_field == "source_feedback_ids" else [],
+        source_trace_ids=linked_ids if source_field == "source_trace_ids" else [],
         kind="context",
     )
     await session_manager.create_session_context_entry(
@@ -345,20 +405,34 @@ async def _apply_single_candidate(
     return new_entry.id
 
 
+def _coerce_candidate_model(candidate) -> CandidateContextUpdate:
+    """Validate a raw candidate (dict or model) into the right profile's candidate model."""
+    if isinstance(candidate, CandidateContextUpdate):
+        return candidate
+    if (
+        isinstance(candidate, dict)
+        and candidate.get("context_profile") == ContextProfile.AGENT.value
+    ):
+        return _AGENT_CANDIDATE_ADAPTER.validate_python(candidate)
+    return CandidateContextUpdate.model_validate(candidate)
+
+
 async def apply_candidate_updates(
     *,
     session_manager,
     user_id,
     session_id,
-    feedback_entry_id,
+    source_id,
     candidates: list,
 ) -> List[str]:
-    """Deterministically apply candidate context updates.
+    """Deterministically apply candidate context updates (qa or agent).
 
-    For each candidate: validate section/content/length, require confidence >= 0.75, normalize,
-    then either link to an exact duplicate (append the feedback id to its source list) or create
-    a new entry. No LLM, no fuzzy matching, no auto-delete. Each candidate is wrapped so one
-    failure never raises; the whole call is fail-open and returns ``[]`` on outer failure.
+    For each candidate: validate section/content/length for its profile, require
+    confidence >= 0.75, normalize, then either link to an exact duplicate (append ``source_id``
+    to its source list) or create a new entry. ``source_id`` is a feedback id for qa candidates
+    and a trace id for agent candidates. No LLM, no fuzzy matching, no auto-delete. Each
+    candidate is wrapped so one failure never raises; the whole call is fail-open and returns
+    ``[]`` on outer failure.
 
     Returns the list of touched/created entry ids.
     """
@@ -366,16 +440,12 @@ async def apply_candidate_updates(
     try:
         for candidate in candidates or []:
             try:
-                model = (
-                    candidate
-                    if isinstance(candidate, CandidateContextUpdate)
-                    else CandidateContextUpdate.model_validate(candidate)
-                )
+                model = _coerce_candidate_model(candidate)
                 entry_id = await _apply_single_candidate(
                     session_manager=session_manager,
                     user_id=user_id,
                     session_id=session_id,
-                    feedback_entry_id=feedback_entry_id,
+                    source_id=source_id,
                     candidate=model,
                 )
                 if entry_id:

@@ -101,7 +101,7 @@ ty check .
 ### Running Cognee
 ```bash
 # Using Python SDK
-python examples/python/simple_example.py
+uv run python examples/demos/simple_cognee_example.py
 
 # Using CLI
 cognee-cli add "Your text here"
@@ -434,6 +434,12 @@ git pull origin dev
 git checkout -b feature/your-feature-name
 ```
 
+**Core-team PRs must reference a Linear issue.** Put the issue key (e.g. `COG-123`)
+in the PR title or the branch name so Linear links the PR to its ticket. This is
+enforced by the `Require Linear issue` workflow (`linear-issue-check`), a required
+status check. Fork / external-contributor PRs are exempt (the check skips them), so
+this rule applies only to internal PRs.
+
 ## Code Style
 
 - **Formatter**: Ruff (configured in `pyproject.toml`)
@@ -506,10 +512,10 @@ task = Task(my_custom_task)
 ### Accessing Databases Directly
 ```python
 from cognee.infrastructure.databases.graph import get_graph_engine
-from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.infrastructure.databases.vector import get_vector_engine_async
 
 graph_engine = await get_graph_engine()
-vector_engine = await get_vector_engine()
+vector_engine = await get_vector_engine_async()
 ```
 
 ### Using LLM Gateway

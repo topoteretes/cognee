@@ -7,7 +7,12 @@ Cognee-to-Cognee instance migration.
 from pathlib import Path
 from typing import AsyncIterator, Union
 
-from cognee.modules.migration.cogx import COGXRecord, read_archive, read_manifest
+from cognee.modules.migration.cogx import (
+    COGXRecord,
+    read_archive,
+    read_manifest,
+    read_social_layer,
+)
 from cognee.modules.migration.sources.base import MemorySource
 
 
@@ -34,6 +39,13 @@ class COGXArchiveSource(MemorySource):
         manifest = read_manifest(self.directory)
         if manifest is not None:
             self.source_system = manifest.source_system
+            # Cognee-origin archives carry the source store's stamped
+            # data-migration revision; the import re-stamps to it (see
+            # MemorySource.migration_revision). Absent on older archives
+            # and external-system exports -> None.
+            self.migration_revision = manifest.migration_revision
+        # Present only when exported with include_permissions=True.
+        self.social_layer = read_social_layer(self.directory)
 
     async def records(self) -> AsyncIterator[COGXRecord]:
         for record in read_archive(self.directory):
