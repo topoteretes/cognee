@@ -112,23 +112,21 @@ export function FilterProvider({ children }: { children: ReactNode }) {
     if (!cogniInstance) return;
     getDatasets(cogniInstance).then((d: Dataset[]) => {
       setDatasets(Array.isArray(d) ? d : []);
-    }).catch(() => {});
+    }).catch((err) => {
+      console.error("Failed to refresh datasets:", err);
+      setDatasets([]);
+    });
   }, [cogniInstance]);
 
-  // Refresh all data (datasets + agents)
+  // Refresh all data (datasets)
   const refreshAll = useCallback(() => {
     if (!cogniInstance) return;
-    Promise.all([
-      cogniInstance.fetch("/v1/activity/agents")
-        .then((r) => r.ok ? r.json() : [])
-        .catch(() => []),
-      getDatasets(cogniInstance)
-        .then((d: Dataset[]) => (Array.isArray(d) ? d : []))
-        .catch(() => []),
-    ]).then(([agentData, datasetData]) => {
-      setAgents(Array.isArray(agentData) ? agentData : []);
-      setDatasets(datasetData);
-    }).catch(() => {});
+    getDatasets(cogniInstance)
+      .then((d: Dataset[]) => { setDatasets(Array.isArray(d) ? d : []); })
+      .catch((err) => {
+        console.error("Failed to refresh all datasets:", err);
+        setDatasets([]);
+      });
   }, [cogniInstance]);
 
   // Initial fetch
@@ -138,18 +136,14 @@ export function FilterProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
 
     function fetchAll() {
-      return Promise.all([
-        cogniInstance!.fetch("/v1/activity/agents")
-          .then((r) => r.ok ? r.json() : [])
-          .catch(() => []),
-        getDatasets(cogniInstance!)
-          .then((d: Dataset[]) => (Array.isArray(d) ? d : []))
-          .catch(() => []),
-      ]).then(async ([agentData, datasetData]) => {
-        if (cancelled) return;
-        setAgents(Array.isArray(agentData) ? agentData : []);
-        if (!cancelled) setDatasets(datasetData);
-      }).catch(() => {});
+      return getDatasets(cogniInstance!)
+        .then((d: Dataset[]) => {
+          if (!cancelled) setDatasets(Array.isArray(d) ? d : []);
+        })
+        .catch((err) => {
+          console.error("Failed to fetch datasets:", err);
+          if (!cancelled) setDatasets([]);
+        });
     }
 
     fetchAll().finally(() => {
