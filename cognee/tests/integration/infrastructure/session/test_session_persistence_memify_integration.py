@@ -33,9 +33,9 @@ def _reset_cache_backend_caches():
 
 async def _reset_engines_and_prune() -> None:
     try:
-        from cognee.infrastructure.databases.vector import get_vector_engine
+        from cognee.infrastructure.databases.vector import get_vector_engine_async
 
-        vector_engine = get_vector_engine()
+        vector_engine = await get_vector_engine_async()
         if hasattr(vector_engine, "engine") and hasattr(vector_engine.engine, "dispose"):
             await vector_engine.engine.dispose(close=True)
     except Exception:
@@ -155,11 +155,11 @@ async def session_persistence_env(event_loop):
             _reset_cache_backend_caches()
 
 
-@pytest.fixture(params=["fs", "redis"])
+@pytest.fixture(params=["fs", "redis", "sqlite"])
 def session_manager_with_qa(request):
     """
-    SessionManager backed by either FsCache or in-memory Redis.
-    Tests run twice (once per backend).
+    SessionManager backed by FsCache, in-memory Redis, or SQL (aiosqlite).
+    Tests run once per backend.
     """
     backend = request.param
     if backend == "fs":
@@ -176,7 +176,7 @@ def session_manager_with_qa(request):
                 sm = SessionManager(cache_engine=adapter)
                 yield sm, adapter
                 adapter.cache.close()
-    else:
+    elif backend == "redis":
         store = _InMemoryRedisList()
         patch_mod = "cognee.infrastructure.databases.cache.redis.RedisAdapter"
         with (
@@ -190,6 +190,16 @@ def session_manager_with_qa(request):
             adapter = RedisAdapter(host="localhost", port=6379)
             sm = SessionManager(cache_engine=adapter)
             yield sm, adapter
+    else:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            from cognee.infrastructure.databases.cache.sql.SqlCacheAdapter import (
+                SqlCacheAdapter,
+            )
+
+            adapter = SqlCacheAdapter(f"sqlite+aiosqlite:///{tmpdir}/cache.db")
+            sm = SessionManager(cache_engine=adapter)
+            yield sm, adapter
+            asyncio.run(adapter.close())
 
 
 @pytest.mark.asyncio

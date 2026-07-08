@@ -63,6 +63,21 @@ class VectorDBInterface(Protocol):
         """
         raise NotImplementedError
 
+    async def upsert_raw_vectors(
+        self,
+        collection_name: str,
+        points: list[dict],
+        payload_schema: Optional[Any] = None,
+    ) -> None:
+        """
+        Upsert already-computed vectors into the specified collection.
+
+        This is for small system-owned vector state where re-embedding from text would be
+        incorrect. Adapters that do not support raw vector writes should raise
+        NotImplementedError.
+        """
+        raise NotImplementedError("upsert_raw_vectors is not implemented for this adapter")
+
     @abstractmethod
     async def retrieve(self, collection_name: str, data_point_ids: list[str]):
         """

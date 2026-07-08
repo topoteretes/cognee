@@ -22,7 +22,9 @@ SKILL_SOURCE_ROOTS_ENV = "COGNEE_SKILL_SOURCE_ROOTS"
 
 
 def _configured_skill_source_roots() -> Tuple[Path, ...]:
-    roots = [Path.cwd()]
+    import tempfile
+
+    roots = [Path.cwd(), Path(tempfile.gettempdir())]
     for raw_root in os.environ.get(SKILL_SOURCE_ROOTS_ENV, "").split(os.pathsep):
         raw_root = raw_root.strip()
         if raw_root:

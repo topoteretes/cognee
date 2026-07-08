@@ -93,6 +93,7 @@ def _discover_commands() -> List[Type[SupportsCliCommand]]:
         ("cognee.cli.commands.delete_command", "DeleteCommand"),
         ("cognee.cli.commands.config_command", "ConfigCommand"),
         ("cognee.cli.commands.datasets_command", "DatasetsCommand"),
+        ("cognee.cli.commands.agents_command", "AgentsCommand"),
         ("cognee.cli.commands.sessions_command", "SessionsCommand"),
         ("cognee.cli.commands.feedback_command", "FeedbackCommand"),
         ("cognee.cli.commands.memify_command", "MemifyCommand"),
@@ -101,6 +102,12 @@ def _discover_commands() -> List[Type[SupportsCliCommand]]:
         ("cognee.cli.commands.improve_command", "ImproveCommand"),
         ("cognee.cli.commands.forget_command", "ForgetCommand"),
         ("cognee.cli.commands.serve_command", "ServeCommand"),
+        ("cognee.cli.commands.migrate_command", "UpgradeCommand"),
+        ("cognee.cli.commands.migrate_command", "DowngradeCommand"),
+        ("cognee.cli.commands.migrate_command", "HistoryCommand"),
+        ("cognee.cli.commands.migrate_command", "CurrentCommand"),
+        ("cognee.cli.commands.migrate_command", "StampCommand"),
+        ("cognee.cli.commands.push_command", "PushCommand"),
     ]
 
     for module_path, class_name in command_modules:

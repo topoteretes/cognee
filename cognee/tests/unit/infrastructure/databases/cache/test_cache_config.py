@@ -8,6 +8,8 @@ def test_cache_config_defaults(monkeypatch):
     """Test that CacheConfig has the correct default values."""
     for env_var in (
         "CACHE_BACKEND",
+        "CACHE_DB_URL",
+        "CACHE_PURGE_INTERVAL_SECONDS",
         "CACHING",
         "AUTO_FEEDBACK",
         "SHARED_LADYBUG_LOCK",
@@ -26,8 +28,11 @@ def test_cache_config_defaults(monkeypatch):
 
     config = CacheConfig(_env_file=None)
 
-    assert config.cache_backend == "fs"
+    assert config.cache_backend == "sqlite"
+    assert config.cache_db_url is None
+    assert config.cache_purge_interval_seconds == 900
     assert config.caching is True
+    assert config.auto_feedback is True
     assert config.shared_ladybug_lock is False
     assert config.shared_kuzu_lock is False
     assert config.cache_host == "localhost"
@@ -77,8 +82,10 @@ def test_cache_config_to_dict():
 
     assert config_dict == {
         "cache_backend": "fs",
+        "cache_db_url": None,
+        "cache_purge_interval_seconds": 900,
         "caching": True,
-        "auto_feedback": False,
+        "auto_feedback": True,
         "shared_ladybug_lock": True,
         "shared_kuzu_lock": False,
         "cache_host": "test-host",

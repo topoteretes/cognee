@@ -154,10 +154,20 @@ If you'd rather run cognee-mcp in a container, you have two options:
       - `ollama` / `huggingface` - Local model support
       - `docs` - Document processing
       - `codegraph` - Code analysis
-      - `monitoring` - Sentry & Langfuse monitoring
+      - `tracing` - OpenTelemetry tracing
       - `redis` - Redis support
       - And more (see [pyproject.toml](https://github.com/topoteretes/cognee/blob/main/pyproject.toml) for full list)
 2. **Pull from Docker Hub** (no build required):
+
+   The image is published to Docker Hub on every push to `main`. If you have **not** cloned the
+   repo, create the `.env` file the run commands expect first — it needs at least your LLM key:
+   ```bash
+   # Pull the prebuilt image
+   docker pull cognee/cognee-mcp:main
+
+   # Create a minimal .env in the current directory (no repo checkout required)
+   echo 'LLM_API_KEY="YOUR_OPENAI_API_KEY"' > .env
+   ```
    ```bash
    # With HTTP transport (recommended for web deployments)
    docker run -e TRANSPORT_MODE=http --env-file ./.env -p 8000:8000 --rm -it cognee/cognee-mcp:main
@@ -512,8 +522,8 @@ When disabled, the workspace UI header shows `(agent scoping off)` and no per-cl
 
 Agent scoping decides which dataset *name* a tool defaults to. Whether two datasets are actually isolated at the storage layer is governed by cognee's `ENABLE_BACKEND_ACCESS_CONTROL` flag:
 
-- **`false` (default)** — all datasets share one Kuzu graph DB and one LanceDB. The dataset filter is honored for top-level data points, but `GRAPH_COMPLETION` traversal can pull connected nodes from any dataset, and `visualize_graph_ui` reflects the full shared graph. Fastest path; fine for single-user local dev.
-- **`true`** — each `(user, dataset)` pair gets its own per-dataset Kuzu + LanceDB under `.cognee_system/databases/<dataset_uuid>/`. `visualize_graph_ui` and search become strictly per-dataset because the workspace passes `dataset_name` and the server routes the visualization through cognee's `visualize_multi_user_graph` to set the right DB context.
+- **`true` (default)** — each `(user, dataset)` pair gets its own per-dataset Kuzu + LanceDB under `.cognee_system/databases/<dataset_uuid>/`. `visualize_graph_ui` and search become strictly per-dataset because the workspace passes `dataset_name` and the server routes the visualization through cognee's `visualize_multi_user_graph` to set the right DB context.
+- **`false`** — all datasets share one Kuzu graph DB and one LanceDB. The dataset filter is honored for top-level data points, but `GRAPH_COMPLETION` traversal can pull connected nodes from any dataset, and `visualize_graph_ui` reflects the full shared graph. Use for single-user local dev; also disables the API auth requirement unless `REQUIRE_AUTHENTICATION=true` is set explicitly.
 
 **Switching modes wipes nothing automatically — but data does not migrate.** Data ingested in one mode lives at a different on-disk path than the other and won't be visible after the flip. Clean-slate when changing the flag:
 

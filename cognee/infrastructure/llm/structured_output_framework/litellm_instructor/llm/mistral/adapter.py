@@ -11,8 +11,12 @@ from tenacity import (
     before_sleep_log,
     retry,
     retry_if_not_exception_type,
-    stop_after_delay,
+    stop_after_attempt,
     wait_exponential_jitter,
+)
+
+from cognee.infrastructure.llm.retry_config import (
+    llm_retry_stop_condition,
 )
 
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
@@ -75,7 +79,7 @@ class MistralAdapter(GenericAPIAdapter):
 
     @observe(as_type="generation")
     @retry(
-        stop=stop_after_delay(128),
+        stop=llm_retry_stop_condition,
         wait=wait_exponential_jitter(8, 128),
         retry=retry_if_not_exception_type(
             (
@@ -146,7 +150,7 @@ class MistralAdapter(GenericAPIAdapter):
 
     @observe(as_type="transcription")
     @retry(
-        stop=stop_after_delay(128),
+        stop=stop_after_attempt(3),
         wait=wait_exponential_jitter(2, 128),
         retry=retry_if_not_exception_type(
             (

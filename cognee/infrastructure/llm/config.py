@@ -208,14 +208,13 @@ class LLMConfig(BaseSettings):
             "EMBEDDING_PROVIDER": is_env_set("EMBEDDING_PROVIDER"),
             "EMBEDDING_MODEL": is_env_set("EMBEDDING_MODEL"),
             "EMBEDDING_DIMENSIONS": is_env_set("EMBEDDING_DIMENSIONS"),
-            "HUGGINGFACE_TOKENIZER": is_env_set("HUGGINGFACE_TOKENIZER"),
         }
         if any(embedding_env_vars.values()) and not all(embedding_env_vars.values()):
             missing_embed = [key for key, is_set in embedding_env_vars.items() if not is_set]
             raise ValueError(
                 "You have set some but not all of the required environment variables "
                 "for embeddings (EMBEDDING_PROVIDER, EMBEDDING_MODEL, "
-                "EMBEDDING_DIMENSIONS, HUGGINGFACE_TOKENIZER). Missing: "
+                "EMBEDDING_DIMENSIONS). Missing: "
                 f"{missing_embed}"
             )
 
@@ -276,3 +275,17 @@ def get_llm_config() -> LLMConfig:
           LLM.
     """
     return LLMConfig()
+
+
+def get_llm_context_config() -> LLMConfig:
+    """Get the appropriate LLM config based on the current async context.
+
+    Mirrors the graph/vector context-config pattern: if an ``LLMConfig`` has been
+    set on the ``llm_config`` ContextVar (via
+    ``set_database_global_context_variables``), return it so that different async
+    tasks, threads and processes can use different LLM configurations. Otherwise
+    fall back to the cached global config.
+    """
+    from cognee.context_global_variables import llm_config
+
+    return llm_config.get() or get_llm_config()

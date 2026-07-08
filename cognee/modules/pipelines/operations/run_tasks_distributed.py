@@ -3,7 +3,7 @@ try:
 except ModuleNotFoundError:
     modal = None
 
-from typing import Any, List, Optional
+from typing import Any, Awaitable, Callable, List, Optional
 from uuid import UUID
 
 from cognee.infrastructure.databases.relational import get_relational_engine
@@ -26,6 +26,8 @@ from cognee.modules.users.models import User
 from cognee.modules.pipelines.exceptions import PipelineRunFailedError
 from cognee.tasks.ingestion import resolve_data_directories
 from cognee.context_global_variables import set_database_global_context_variables
+from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
+from cognee.infrastructure.llm.config import LLMConfig
 from .run_tasks_data_item import run_tasks_data_item
 
 logger = get_logger("run_tasks_distributed()")
@@ -72,6 +74,7 @@ if modal:
                 user=user,
                 data_item=data_item,
                 dataset=dataset,
+                pipeline_run_id=pipeline_run_id,
                 pipeline_name=pipeline_name,
             ),
             user=user,
@@ -89,6 +92,9 @@ async def run_tasks_distributed(
     pipeline_name: str = "unknown_pipeline",
     incremental_loading: bool = False,
     data_per_batch: int = 20,
+    rollback_handler: Optional[Callable[..., Awaitable[None]]] = None,
+    llm_config: Optional[LLMConfig] = None,
+    embedding_config: Optional[EmbeddingConfig] = None,
 ):
     if not user:
         user = await get_default_user()
@@ -109,7 +115,12 @@ async def run_tasks_distributed(
         payload=data,
     )
 
-    async with set_database_global_context_variables(dataset.id, dataset.owner_id):
+    async with set_database_global_context_variables(
+        dataset.id,
+        dataset.owner_id,
+        llm_config=llm_config,
+        embedding_config=embedding_config,
+    ):
         try:
             if not isinstance(data, list):
                 data = [data]
@@ -162,6 +173,21 @@ async def run_tasks_distributed(
             )
 
         except Exception as error:
+            if callable(rollback_handler):
+                try:
+                    await rollback_handler(
+                        pipeline_run_id=pipeline_run_id,
+                        pipeline_id=pipeline_id,
+                        pipeline_name=pipeline_name,
+                        dataset=dataset,
+                        user=user,
+                        data=data,
+                        data_ingestion_info=locals().get("results"),
+                        error=error,
+                    )
+                except Exception as rollback_error:
+                    logger.error("Rollback errored: %s", rollback_error, exc_info=True)
+
             await log_pipeline_run_error(
                 pipeline_run_id, pipeline_id, pipeline_name, dataset.id, data, error
             )

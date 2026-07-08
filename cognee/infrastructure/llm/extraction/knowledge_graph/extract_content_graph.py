@@ -3,11 +3,13 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.llm.config import (
     get_llm_config,
 )
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import render_prompt
+from cognee.shared.graph_model_utils import datapoint_model_to_basemodel
 
 
 async def extract_content_graph(
@@ -30,8 +32,16 @@ async def extract_content_graph(
 
         system_prompt = render_prompt(prompt_path, {}, base_directory=base_directory)
 
+    simplified_response_model = response_model
+    if isinstance(response_model, type) and issubclass(response_model, DataPoint):
+        simplified_response_model = datapoint_model_to_basemodel(
+            response_model, strip_metadata=True
+        )
+
     content_graph = await LLMGateway.acreate_structured_output(
-        content, system_prompt, response_model, **kwargs
+        content, system_prompt, simplified_response_model, **kwargs
     )
 
+    if simplified_response_model is not response_model:
+        return response_model.model_validate(content_graph.model_dump())
     return content_graph

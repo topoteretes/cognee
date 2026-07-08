@@ -495,7 +495,7 @@ async def save_interaction(data: str) -> list:
 
 @log_usage(function_name="MCP search", log_type="mcp_tool")
 async def search(
-    search_query: str, search_type: str, top_k: int = 10, datasets: str = None
+    search_query: str, search_type: str, top_k: int = 15, datasets: str = None
 ) -> list:
     """
     Search and query the knowledge graph for insights, information, and connections.
@@ -1133,7 +1133,7 @@ async def recall(
     search_type: str = None,
     datasets: str = None,
     session_id: str = None,
-    top_k: int = 10,
+    top_k: int = 15,
 ) -> list:
     """Search memory with auto-routing and session awareness.
 
@@ -1300,24 +1300,33 @@ async def cognify_status(
     - Use `pipelines` to restrict to specific pipeline names
     - Status information includes job progress, execution time, and completion status
     - The status is returned in string format for easy reading
-    - This operation is not available in API mode
+    - In API mode the dataset id is resolved over HTTP and status is read
+      from the server's `GET /api/v1/datasets/status` endpoint
     """
     dataset_name = dataset_name or _agent_scoped_default_dataset()
     with redirect_stdout(sys.stderr):
         try:
             if cognee_client.use_api:
-                return [
-                    types.TextContent(
-                        type="text",
-                        text="❌ Pipeline status is not available in API mode",
-                    )
-                ]
+                # API mode: resolve the dataset id over HTTP (no local cognee
+                # instance exists in this process) before querying status.
+                datasets = await cognee_client.list_datasets()
+                dataset_id = next(
+                    (d["id"] for d in datasets if d.get("name") == dataset_name), None
+                )
+                if dataset_id is None:
+                    return [
+                        types.TextContent(
+                            type="text",
+                            text=f"❌ Dataset '{dataset_name}' not found via API",
+                        )
+                    ]
+            else:
+                from cognee.modules.data.methods.get_unique_dataset_id import get_unique_dataset_id
+                from cognee.modules.users.methods import get_default_user
 
-            from cognee.modules.data.methods.get_unique_dataset_id import get_unique_dataset_id
-            from cognee.modules.users.methods import get_default_user
+                user = await get_default_user()
+                dataset_id = await get_unique_dataset_id(dataset_name, user)
 
-            user = await get_default_user()
-            dataset_id = await get_unique_dataset_id(dataset_name, user)
             requested_pipelines = list(dict.fromkeys(pipelines or ["cognify_pipeline"]))
 
             if len(requested_pipelines) == 1:
@@ -1959,6 +1968,8 @@ async def main():
         logger.info("Running database migrations...")
 
         await setup()
+        # Full startup migrations (relational schema + graph/vector revision
+        # chains) — MCP writes new-scheme data, so it must migrate like the API.
         await run_migrations()
 
         logger.info("Database migrations done.")

@@ -573,3 +573,14 @@ async def test_get_latest_qa_backward_compat(adapter):
     via_new = await adapter.get_latest_qa_entries("u1", "s1", last_n=2)
     assert via_legacy == via_new
     assert len(via_legacy) == 2
+
+
+@pytest.mark.asyncio
+async def test_get_qa_entries_by_ids_returns_matching_rows_in_chronological_order(adapter):
+    await adapter.create_qa_entry("u1", "s1", "Q1", "C1", "A1", qa_id="id1")
+    await adapter.create_qa_entry("u1", "s1", "Q2", "C2", "A2", qa_id="id2")
+    await adapter.create_qa_entry("u1", "s1", "Q3", "C3", "A3", qa_id="id3")
+
+    entries = await adapter.get_qa_entries_by_ids("u1", "s1", ["id3", "missing", "id1"])
+
+    assert [entry.qa_id for entry in entries] == ["id1", "id3"]

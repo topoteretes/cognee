@@ -4,8 +4,7 @@ cognee:
   image: "cognee/cognee:main"
   port: 8000
   env:
-    HOST: "0.0.0.0"
-    ENVIRONMENT: "local"
+    ENV: "local"
     PYTHONPATH: "."
     LLM_MODEL: "openai/gpt-4o-mini"
     LLM_PROVIDER: "openai"

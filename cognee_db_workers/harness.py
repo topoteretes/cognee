@@ -7,6 +7,7 @@ Stdlib only. Never import cognee from this module.
 from __future__ import annotations
 
 import asyncio
+import atexit
 import concurrent.futures
 import ctypes
 import ctypes.util
@@ -75,6 +76,20 @@ _PROCESS_CHECK_INTERVAL = 1.0
 # session stays open so sibling calls keep working); two in a row almost
 # always means the worker is wedged.
 _TIMEOUT_BEFORE_RESPAWN = 2
+
+# Number of times the worker retries opening a database that is currently
+# lock-held by another (still-shutting-down) worker for the same file, and the
+# initial backoff between attempts (seconds, exponential). These exist as a
+# backstop for the brief window where one worker is releasing a file lock while
+# another opens the same path; see ``kuzu_worker._open_database``. Override with
+# ``SUBPROCESS_OPEN_LOCK_RETRIES`` / ``SUBPROCESS_OPEN_LOCK_BACKOFF``.
+OPEN_LOCK_RETRIES = _env_int("SUBPROCESS_OPEN_LOCK_RETRIES", 10)
+# ``_env_float`` returns the default (0.1) when unset/invalid and ``None`` for an
+# explicit ``<= 0``. Treat that explicit ``<= 0`` as ``0.0`` (immediate retries,
+# no delay) rather than resetting to the default, so ``SUBPROCESS_OPEN_LOCK_BACKOFF=0``
+# is honored.
+_OPEN_LOCK_BACKOFF_RAW = _env_float("SUBPROCESS_OPEN_LOCK_BACKOFF", 0.1)
+OPEN_LOCK_BACKOFF = 0.0 if _OPEN_LOCK_BACKOFF_RAW is None else _OPEN_LOCK_BACKOFF_RAW
 _READY_SENTINEL = "__SUBPROCESS_HARNESS_READY__"
 
 # Universal op code — every worker's DISPATCH includes an entry for it so
@@ -198,6 +213,12 @@ def _describe_exitcode(exitcode: Optional[int]) -> str:
     with a short hint about the typical cause in production. POSIX exit
     semantics: ``multiprocessing.Process.exitcode`` is the negated signal
     number when the child died from an uncaught signal.
+
+    Note: positive exitcodes are NOT decoded as signals. On Windows a process
+    "killed" via ``os.kill(pid, sig)`` (``TerminateProcess``) exits with a
+    positive code, but positive codes are overwhelmingly ordinary exit codes
+    (e.g. ``1`` = generic error), so decoding them as signals would mislabel
+    normal exits.
     """
     if exitcode is None or exitcode >= 0:
         return str(exitcode)
@@ -561,6 +582,31 @@ def collect_garbage_in_all_workers(timeout: float = 5.0) -> int:
         except Exception:
             continue
     return collected
+
+
+def _reap_all_sessions_atexit() -> None:
+    """Force-reap any still-live subprocess workers at interpreter exit.
+
+    Workers are normally reaped via ``SubprocessSession.__del__ -> shutdown
+    -> _terminate`` during garbage collection. At interpreter shutdown,
+    however, GC and ``__del__`` ordering is not guaranteed to run — notably
+    on Windows with ``spawn`` daemon processes — which can leave a worker
+    alive and block the parent from exiting until an external timeout (e.g.
+    the 60-minute CI job timeout on ``Custom Graph Delete``). Registering an
+    ``atexit`` reaper makes teardown deterministic: every live session's
+    worker is force-terminated (bounded ``_terminate`` kill chain) before the
+    interpreter exits, regardless of GC timing. Best-effort and idempotent —
+    ``_terminate`` is serialized by ``_terminate_lock`` and safe to call on an
+    already-closed session.
+    """
+    for session in list(_all_sessions):
+        try:
+            session._terminate(timeout=2.0)
+        except Exception:
+            pass
+
+
+atexit.register(_reap_all_sessions_atexit)
 
 
 class SubprocessSession:
@@ -1394,9 +1440,21 @@ class SubprocessSession:
         self._handle_remap.clear()
 
     def _terminate(self, timeout: float = 2.0) -> None:
-        """Force-terminate the worker process. Idempotent and serialized by
-        ``self._terminate_lock`` so concurrent ``shutdown`` / ``__del__`` /
-        ``clean`` paths can't race each other.
+        """Force-terminate the worker process and wait until it has actually
+        exited. Idempotent and serialized by ``self._terminate_lock`` so
+        concurrent ``shutdown`` / ``__del__`` / ``clean`` paths can't race each
+        other.
+
+        The escalating join/terminate/kill chain is followed by a bounded poll
+        that does not return while ``is_alive()`` is still True. This matters
+        for the on-disk file lock held by DB workers (Ladybug/LanceDB): the OS
+        releases a process's file locks only once the process is truly gone, so
+        a caller that re-opens the same DB path right after ``shutdown()``
+        returns would hit "Could not set lock on file" if we returned while the
+        child were still alive. ``join(timeout)`` alone can return early (e.g.
+        right after ``kill()`` the SIGKILL may not have been delivered yet), so
+        we poll ``is_alive()`` until the process is reaped, capped so a wedged
+        kernel state can't hang teardown forever.
         """
         with self._terminate_lock:
             try:
@@ -1407,6 +1465,13 @@ class SubprocessSession:
                 if self._proc.is_alive():
                     self._proc.kill()
                     self._proc.join(timeout=timeout)
+                # Final wait for true exit: after SIGKILL the process should die
+                # promptly, but ``join`` above may have timed out before the
+                # kernel reaped it. Poll up to a generous cap so we don't return
+                # while the child still holds its file lock.
+                deadline = time.monotonic() + max(timeout, 5.0)
+                while self._proc.is_alive() and time.monotonic() < deadline:
+                    self._proc.join(timeout=0.05)
             except Exception:
                 pass
 

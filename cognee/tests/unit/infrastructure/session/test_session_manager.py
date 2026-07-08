@@ -7,10 +7,40 @@ from cognee.infrastructure.session.feedback_models import (
     AgentTraceFeedbackSummary,
     FeedbackDetectionResult,
 )
-from cognee.infrastructure.session.session_manager import (
-    SessionManager,
-    _validate_session_params,
-)
+from cognee.infrastructure.session.session_manager import SessionManager
+from cognee.infrastructure.session.session_turn import compose_session_prompt
+
+
+class TestComposeSessionPrompt:
+    """Characterization tests pinning the exact prompt assembly extracted from the
+    inner completion method. These must stay byte-identical to the pre-extraction
+    behavior, so changing them means deliberately changing every session prompt."""
+
+    GRAPH_PREFIX = "Background knowledge from the knowledge graph:\n"
+
+    def test_all_three_layers_order_and_joiners(self):
+        result = compose_session_prompt("BLOCK", "GRAPH", "HISTORY")
+        assert result == "BLOCK\n\n" + self.GRAPH_PREFIX + "GRAPH\n\nHISTORY"
+
+    def test_history_only(self):
+        assert compose_session_prompt("", "", "HISTORY") == "HISTORY"
+
+    def test_graph_and_history(self):
+        assert compose_session_prompt("", "GRAPH", "HISTORY") == (
+            self.GRAPH_PREFIX + "GRAPH\n\nHISTORY"
+        )
+
+    def test_block_and_history(self):
+        assert compose_session_prompt("BLOCK", "", "HISTORY") == "BLOCK\n\nHISTORY"
+
+    def test_empty_history_keeps_trailing_separators(self):
+        # Pre-extraction behavior prepended onto a possibly-empty history, leaving a
+        # trailing "\n\n" when history is empty. Preserved exactly.
+        assert compose_session_prompt("BLOCK", "", "") == "BLOCK\n\n"
+        assert compose_session_prompt("", "GRAPH", "") == self.GRAPH_PREFIX + "GRAPH\n\n"
+
+    def test_all_empty(self):
+        assert compose_session_prompt("", "", "") == ""
 
 
 class TestValidateSessionParams:
@@ -18,58 +48,85 @@ class TestValidateSessionParams:
 
     def test_valid_params(self):
         """Valid user_id and session_id do not raise."""
-        _validate_session_params(user_id="u1", session_id="s1")
-        _validate_session_params(user_id="u1", session_id="s1", qa_id="q1")
+        SessionManager._validate_session_params(user_id="u1", session_id="s1")
+        SessionManager._validate_session_params(user_id="u1", session_id="s1", qa_id="q1")
 
     def test_empty_user_id_raises(self):
         """Empty user_id raises SessionParameterValidationError."""
         with pytest.raises(SessionParameterValidationError) as exc_info:
-            _validate_session_params(user_id="", session_id="s1")
+            SessionManager._validate_session_params(user_id="", session_id="s1")
         assert "user_id" in exc_info.value.message
 
     def test_empty_session_id_raises(self):
         """Empty session_id raises SessionParameterValidationError."""
         with pytest.raises(SessionParameterValidationError) as exc_info:
-            _validate_session_params(user_id="u1", session_id="")
+            SessionManager._validate_session_params(user_id="u1", session_id="")
         assert "session_id" in exc_info.value.message
 
     def test_whitespace_user_id_raises(self):
         """Whitespace-only user_id raises."""
         with pytest.raises(SessionParameterValidationError):
-            _validate_session_params(user_id="  ", session_id="s1")
+            SessionManager._validate_session_params(user_id="  ", session_id="s1")
 
     def test_empty_qa_id_raises(self):
         """Empty qa_id raises when provided."""
         with pytest.raises(SessionParameterValidationError) as exc_info:
-            _validate_session_params(user_id="u1", session_id="s1", qa_id="")
+            SessionManager._validate_session_params(user_id="u1", session_id="s1", qa_id="")
         assert "qa_id" in exc_info.value.message
 
     def test_valid_last_n(self):
         """Valid last_n (positive int or None) does not raise."""
-        _validate_session_params(user_id="u1", session_id="s1", last_n=5)
-        _validate_session_params(user_id="u1", session_id="s1", last_n=1)
+        SessionManager._validate_session_params(user_id="u1", session_id="s1", last_n=5)
+        SessionManager._validate_session_params(user_id="u1", session_id="s1", last_n=1)
 
     def test_invalid_last_n_zero_raises(self):
         """last_n=0 raises SessionParameterValidationError."""
         with pytest.raises(SessionParameterValidationError) as exc_info:
-            _validate_session_params(user_id="u1", session_id="s1", last_n=0)
+            SessionManager._validate_session_params(user_id="u1", session_id="s1", last_n=0)
         assert "last_n" in exc_info.value.message
 
     def test_invalid_last_n_negative_raises(self):
         """last_n negative raises."""
         with pytest.raises(SessionParameterValidationError) as exc_info:
-            _validate_session_params(user_id="u1", session_id="s1", last_n=-1)
+            SessionManager._validate_session_params(user_id="u1", session_id="s1", last_n=-1)
         assert "last_n" in exc_info.value.message
 
     def test_invalid_last_n_not_int_raises(self):
         """last_n not an int raises."""
         with pytest.raises(SessionParameterValidationError) as exc_info:
-            _validate_session_params(user_id="u1", session_id="s1", last_n="5")
+            SessionManager._validate_session_params(user_id="u1", session_id="s1", last_n="5")
         assert "last_n" in exc_info.value.message
 
 
 class TestSessionManager:
     """Unit tests for SessionManager with mocked cache."""
+
+    @pytest.fixture(autouse=True)
+    def session_vector_mocks(self, monkeypatch):
+        index_mock = AsyncMock()
+        delete_qa_mock = AsyncMock()
+        delete_session_mock = AsyncMock()
+        monkeypatch.setattr(
+            "cognee.infrastructure.session.session_manager.index_session_qa",
+            index_mock,
+        )
+        monkeypatch.setattr(
+            "cognee.infrastructure.session.session_manager.delete_session_qa_vector",
+            delete_qa_mock,
+        )
+        monkeypatch.setattr(
+            "cognee.infrastructure.session.session_manager.delete_session_qa_vectors",
+            delete_session_mock,
+        )
+        monkeypatch.setattr(
+            "cognee.infrastructure.session.session_turn.search_session_qa_ids",
+            AsyncMock(return_value=[]),
+        )
+        return {
+            "index": index_mock,
+            "delete_qa": delete_qa_mock,
+            "delete_session": delete_session_mock,
+        }
 
     @pytest.fixture
     def mock_cache(self):
@@ -82,10 +139,15 @@ class TestSessionManager:
         cache.get_agent_trace_session = AsyncMock(return_value=[])
         cache.get_agent_trace_feedback = AsyncMock(return_value=[])
         cache.get_agent_trace_count = AsyncMock(return_value=0)
+        cache.get_qa_entries_by_ids = AsyncMock(return_value=[])
         cache.update_qa_entry = AsyncMock(return_value=True)
         cache.delete_feedback = AsyncMock(return_value=True)
         cache.delete_qa_entry = AsyncMock(return_value=True)
         cache.delete_session = AsyncMock(return_value=True)
+        cache.create_session_context_entry = AsyncMock(return_value=True)
+        cache.get_session_context_entries = AsyncMock(return_value=[])
+        cache.update_session_context_entry = AsyncMock(return_value=True)
+        cache.delete_session_context = AsyncMock(return_value=True)
         return cache
 
     @pytest.fixture
@@ -112,7 +174,7 @@ class TestSessionManager:
         assert call_kw["session_id"] == "default_session"
 
     @pytest.mark.asyncio
-    async def test_add_qa_returns_qa_id(self, sm, mock_cache):
+    async def test_add_qa_returns_qa_id(self, sm, mock_cache, session_vector_mocks):
         """add_qa returns generated qa_id and calls cache."""
         used_ids = {"node_ids": ["n1"], "edge_ids": ["e1"]}
         qa_id = await sm.add_qa(
@@ -132,6 +194,14 @@ class TestSessionManager:
         assert call_kw["answer"] == "A"
         assert call_kw["qa_id"] == qa_id
         assert call_kw["used_graph_element_ids"] == used_ids
+        assert "embedding" not in call_kw
+        session_vector_mocks["index"].assert_awaited_once_with(
+            user_id="u1",
+            session_id="s1",
+            qa_id=qa_id,
+            question="Q",
+            answer="A",
+        )
 
     @pytest.mark.asyncio
     async def test_add_qa_unavailable_returns_none(self, sm_unavailable):
@@ -164,15 +234,74 @@ class TestSessionManager:
         assert call_kw["session_id"] == "default_session"
 
     @pytest.mark.asyncio
+    async def test_add_agent_trace_step_runs_extraction_when_enabled(
+        self, sm, mock_cache, monkeypatch
+    ):
+        """The live agent-context extraction hook fires after the trace row is stored."""
+        import cognee.infrastructure.session.agent_context_extraction as ace
+
+        live_spy = AsyncMock(return_value=[])
+        pending_spy = AsyncMock(return_value=[])
+        monkeypatch.setattr(ace, "extract_live_agent_context", live_spy)
+        monkeypatch.setattr(ace, "extract_pending_agent_context", pending_spy)
+        monkeypatch.setattr(sm, "is_auto_feedback_enabled", lambda: True)
+
+        trace_id = await sm.add_agent_trace_step(
+            user_id="u1",
+            origin_function="run_tests",
+            status="error",
+            session_id="s1",
+            error_message="exit 1",
+            generate_feedback_with_llm=False,
+        )
+
+        live_spy.assert_awaited_once()
+        call_kw = live_spy.await_args.kwargs
+        assert call_kw["trace_id"] == trace_id
+        assert call_kw["status"] == "error"
+        assert call_kw["error_message"] == "exit 1"
+        assert call_kw["session_id"] == "s1"
+        pending_spy.assert_awaited_once_with(
+            session_manager=sm,
+            user_id="u1",
+            session_id="s1",
+        )
+
+    @pytest.mark.asyncio
+    async def test_add_agent_trace_step_skips_extraction_when_disabled(
+        self, sm, mock_cache, monkeypatch
+    ):
+        """With automatic session context off, no extraction runs."""
+        import cognee.infrastructure.session.agent_context_extraction as ace
+
+        live_spy = AsyncMock(return_value=[])
+        pending_spy = AsyncMock(return_value=[])
+        monkeypatch.setattr(ace, "extract_live_agent_context", live_spy)
+        monkeypatch.setattr(ace, "extract_pending_agent_context", pending_spy)
+        monkeypatch.setattr(sm, "is_auto_feedback_enabled", lambda: False)
+
+        await sm.add_agent_trace_step(
+            user_id="u1",
+            origin_function="run_tests",
+            status="error",
+            session_id="s1",
+            error_message="exit 1",
+            generate_feedback_with_llm=False,
+        )
+
+        live_spy.assert_not_awaited()
+        pending_spy.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_add_agent_trace_step_returns_trace_id_and_feedback(self, sm, mock_cache):
         """add_agent_trace_step returns generated trace_id and persists generated feedback."""
         with (
             patch(
-                "cognee.infrastructure.session.session_manager.read_query_prompt",
+                "cognee.infrastructure.session.session_agent_trace.read_query_prompt",
                 return_value="summarize this",
             ),
             patch(
-                "cognee.infrastructure.session.session_manager.LLMGateway.acreate_structured_output",
+                "cognee.infrastructure.session.session_agent_trace.LLMGateway.acreate_structured_output",
                 new_callable=AsyncMock,
                 return_value=AgentTraceFeedbackSummary(
                     session_feedback="Trip plan created successfully."
@@ -206,11 +335,11 @@ class TestSessionManager:
         """Empty LLM summaries fall back to the deterministic feedback string."""
         with (
             patch(
-                "cognee.infrastructure.session.session_manager.read_query_prompt",
+                "cognee.infrastructure.session.session_agent_trace.read_query_prompt",
                 return_value="summarize this",
             ),
             patch(
-                "cognee.infrastructure.session.session_manager.LLMGateway.acreate_structured_output",
+                "cognee.infrastructure.session.session_agent_trace.LLMGateway.acreate_structured_output",
                 new_callable=AsyncMock,
                 return_value=AgentTraceFeedbackSummary(session_feedback="   "),
             ),
@@ -232,11 +361,11 @@ class TestSessionManager:
         """LLM failures do not block trace writes and use deterministic fallback feedback."""
         with (
             patch(
-                "cognee.infrastructure.session.session_manager.read_query_prompt",
+                "cognee.infrastructure.session.session_agent_trace.read_query_prompt",
                 return_value="summarize this",
             ),
             patch(
-                "cognee.infrastructure.session.session_manager.LLMGateway.acreate_structured_output",
+                "cognee.infrastructure.session.session_agent_trace.LLMGateway.acreate_structured_output",
                 new_callable=AsyncMock,
                 side_effect=RuntimeError("llm unavailable"),
             ),
@@ -258,11 +387,11 @@ class TestSessionManager:
         """Missing trace feedback prompt uses deterministic fallback feedback."""
         with (
             patch(
-                "cognee.infrastructure.session.session_manager.read_query_prompt",
+                "cognee.infrastructure.session.session_agent_trace.read_query_prompt",
                 return_value=None,
             ),
             patch(
-                "cognee.infrastructure.session.session_manager.LLMGateway.acreate_structured_output",
+                "cognee.infrastructure.session.session_agent_trace.LLMGateway.acreate_structured_output",
                 new_callable=AsyncMock,
             ) as mock_llm,
         ):
@@ -286,11 +415,11 @@ class TestSessionManager:
         """Unexpected LLM result types use deterministic fallback feedback."""
         with (
             patch(
-                "cognee.infrastructure.session.session_manager.read_query_prompt",
+                "cognee.infrastructure.session.session_agent_trace.read_query_prompt",
                 return_value="summarize this",
             ),
             patch(
-                "cognee.infrastructure.session.session_manager.LLMGateway.acreate_structured_output",
+                "cognee.infrastructure.session.session_agent_trace.LLMGateway.acreate_structured_output",
                 new_callable=AsyncMock,
                 return_value="not-a-model",
             ),
@@ -313,7 +442,7 @@ class TestSessionManager:
     ):
         """None return values skip LLM generation and use deterministic fallback feedback."""
         with patch(
-            "cognee.infrastructure.session.session_manager.LLMGateway.acreate_structured_output",
+            "cognee.infrastructure.session.session_agent_trace.LLMGateway.acreate_structured_output",
             new_callable=AsyncMock,
         ) as mock_llm:
             trace_id = await sm.add_agent_trace_step(
@@ -333,7 +462,7 @@ class TestSessionManager:
     async def test_add_agent_trace_step_can_disable_llm_feedback_generation(self, sm, mock_cache):
         """When disabled explicitly, trace feedback uses fallback without touching the LLM."""
         with patch(
-            "cognee.infrastructure.session.session_manager.LLMGateway.acreate_structured_output",
+            "cognee.infrastructure.session.session_agent_trace.LLMGateway.acreate_structured_output",
             new_callable=AsyncMock,
         ) as mock_llm:
             trace_id = await sm.add_agent_trace_step(
@@ -475,9 +604,16 @@ class TestSessionManager:
         assert await sm_unavailable.get_agent_trace_count(user_id="u1", session_id="s1") == 0
 
     @pytest.mark.asyncio
-    async def test_update_qa_calls_cache(self, sm, mock_cache):
-        """update_qa delegates to cache."""
+    async def test_update_qa_calls_cache_and_reindexes_when_text_changes(
+        self, sm, mock_cache, session_vector_mocks
+    ):
+        """update_qa delegates to cache and refreshes the searchable vector text."""
+        mock_cache.get_qa_entries_by_ids.return_value = [
+            SessionQAEntry(qa_id="q1", question="Q2", context="C", answer="A", time="t")
+        ]
+
         ok = await sm.update_qa(user_id="u1", qa_id="q1", question="Q2", session_id="s1")
+
         assert ok is True
         mock_cache.update_qa_entry.assert_called_once_with(
             user_id="u1",
@@ -490,7 +626,35 @@ class TestSessionManager:
             feedback_score=None,
             used_graph_element_ids=None,
             memify_metadata=None,
+            used_session_context_ids=None,
         )
+        mock_cache.get_qa_entries_by_ids.assert_awaited_once_with("u1", "s1", ["q1"])
+        session_vector_mocks["delete_qa"].assert_awaited_once_with(qa_id="q1")
+        session_vector_mocks["index"].assert_awaited_once_with(
+            user_id="u1",
+            session_id="s1",
+            qa_id="q1",
+            question="Q2",
+            answer="A",
+        )
+
+    @pytest.mark.asyncio
+    async def test_update_qa_feedback_only_does_not_touch_vectors(
+        self, sm, mock_cache, session_vector_mocks
+    ):
+        """Feedback-only updates leave QA vector rows unchanged."""
+        ok = await sm.update_qa(
+            user_id="u1",
+            qa_id="q1",
+            feedback_text="useful",
+            feedback_score=5,
+            session_id="s1",
+        )
+
+        assert ok is True
+        mock_cache.get_qa_entries_by_ids.assert_not_awaited()
+        session_vector_mocks["delete_qa"].assert_not_awaited()
+        session_vector_mocks["index"].assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_delete_feedback_calls_cache(self, sm, mock_cache):
@@ -502,20 +666,53 @@ class TestSessionManager:
         )
 
     @pytest.mark.asyncio
-    async def test_delete_qa_calls_cache(self, sm, mock_cache):
-        """delete_qa delegates to cache."""
+    async def test_delete_qa_calls_cache_and_deletes_vector(
+        self, sm, mock_cache, session_vector_mocks
+    ):
+        """delete_qa delegates to cache and removes its vector row."""
         ok = await sm.delete_qa(user_id="u1", qa_id="q1", session_id="s1")
         assert ok is True
         mock_cache.delete_qa_entry.assert_called_once_with(
             user_id="u1", session_id="s1", qa_id="q1"
         )
+        session_vector_mocks["delete_qa"].assert_awaited_once_with(qa_id="q1")
 
     @pytest.mark.asyncio
-    async def test_delete_session_calls_cache(self, sm, mock_cache):
-        """delete_session delegates to cache."""
+    async def test_delete_qa_skips_vector_delete_when_cache_delete_misses(
+        self, sm, mock_cache, session_vector_mocks
+    ):
+        """delete_qa leaves vectors alone when the cache row was not deleted."""
+        mock_cache.delete_qa_entry.return_value = False
+
+        ok = await sm.delete_qa(user_id="u1", qa_id="q1", session_id="s1")
+
+        assert ok is False
+        session_vector_mocks["delete_qa"].assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_delete_session_calls_cache_and_deletes_vectors(
+        self, sm, mock_cache, session_vector_mocks
+    ):
+        """delete_session delegates to cache and removes its scoped vector rows."""
         ok = await sm.delete_session(user_id="u1", session_id="s1")
         assert ok is True
         mock_cache.delete_session.assert_called_once_with(user_id="u1", session_id="s1")
+        session_vector_mocks["delete_session"].assert_awaited_once_with(
+            user_id="u1",
+            session_id="s1",
+        )
+
+    @pytest.mark.asyncio
+    async def test_delete_session_skips_vector_cleanup_when_cache_delete_misses(
+        self, sm, mock_cache, session_vector_mocks
+    ):
+        """delete_session leaves vectors alone when the cache session was not deleted."""
+        mock_cache.delete_session.return_value = False
+
+        ok = await sm.delete_session(user_id="u1", session_id="s1")
+
+        assert ok is False
+        session_vector_mocks["delete_session"].assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_generate_completion_with_session_no_user_id_calls_generate_completion_only(
@@ -588,7 +785,7 @@ class TestSessionManager:
             ) as mock_session_user,
             patch("cognee.infrastructure.session.session_manager.CacheConfig") as mock_config_cls,
             patch(
-                "cognee.infrastructure.session.session_manager.generate_session_completion_with_optional_summary",
+                "cognee.infrastructure.session.session_turn.generate_session_completion_with_optional_summary",
                 new_callable=AsyncMock,
                 return_value=("Generated answer", "", None),
             ) as mock_generate,
@@ -598,6 +795,7 @@ class TestSessionManager:
             mock_session_user.get.return_value = mock_user
             mock_config = MagicMock()
             mock_config.caching = True
+            mock_config.auto_feedback = False
             mock_config_cls.return_value = mock_config
 
             used_ids = {"node_ids": ["n1"]}
@@ -651,28 +849,19 @@ class TestSessionManager:
         mock_generate.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_generate_completion_with_session_feedback_only_returns_thanks_skips_add_qa(
-        self, sm, mock_cache
-    ):
-        """When feedback detected and no follow-up question: persist feedback, return thanks, skip add_qa."""
+    async def test_generate_completion_with_session_feedback_only_records_qa(self, sm, mock_cache):
+        """When no query_to_answer is present: return the acknowledgement and record it
+        as a QA entry (question + acknowledgement, no served context)."""
         with (
             patch(
                 "cognee.infrastructure.session.session_manager.session_user"
             ) as mock_session_user,
             patch("cognee.infrastructure.session.session_manager.CacheConfig") as mock_config_cls,
             patch(
-                "cognee.infrastructure.session.session_manager.generate_session_completion_with_optional_summary",
+                "cognee.infrastructure.session.session_turn.analyze_turn_for_session_context",
                 new_callable=AsyncMock,
-                return_value=(
-                    "Generated answer",
-                    "",
-                    FeedbackDetectionResult(
-                        feedback_detected=True,
-                        feedback_text="User said thanks.",
-                        feedback_score=5.0,
-                        response_to_user="Thanks for your feedback!",
-                        contains_followup_question=False,
-                    ),
+                return_value=FeedbackDetectionResult(
+                    response_to_user="Thanks for your feedback!",
                 ),
             ),
         ):
@@ -696,37 +885,35 @@ class TestSessionManager:
             )
 
         assert result == "Thanks for your feedback!"
-        mock_cache.update_qa_entry.assert_called_once()
-        call_kw = mock_cache.update_qa_entry.call_args.kwargs
-        assert call_kw["qa_id"] == "last-qa-123"
-        assert call_kw["feedback_text"] == "User said thanks."
-        assert call_kw["feedback_score"] == 5
-        mock_cache.create_qa_entry.assert_not_called()
+        mock_cache.update_qa_entry.assert_not_called()
+        mock_cache.create_qa_entry.assert_called_once()
+        qa_kw = mock_cache.create_qa_entry.call_args.kwargs
+        assert qa_kw["question"] == "thanks, that was helpful!"
+        assert qa_kw["answer"] == "Thanks for your feedback!"
+        assert qa_kw["used_session_context_ids"] is None
 
     @pytest.mark.asyncio
     async def test_generate_completion_with_session_feedback_and_followup_persists_and_adds_qa(
         self, sm, mock_cache
     ):
-        """When feedback and follow-up question: persist feedback, add_qa, return thanks + completion."""
+        """When query_to_answer is present: answer it and add QA for the original message."""
         with (
             patch(
                 "cognee.infrastructure.session.session_manager.session_user"
             ) as mock_session_user,
             patch("cognee.infrastructure.session.session_manager.CacheConfig") as mock_config_cls,
             patch(
-                "cognee.infrastructure.session.session_manager.generate_session_completion_with_optional_summary",
+                "cognee.infrastructure.session.session_turn.analyze_turn_for_session_context",
                 new_callable=AsyncMock,
-                return_value=(
-                    "Paris is the capital of France.",
-                    "",
-                    FeedbackDetectionResult(
-                        feedback_detected=True,
-                        feedback_text="User gave thanks and asked a follow-up.",
-                        feedback_score=5.0,
-                        response_to_user="Thanks for your feedback!",
-                        contains_followup_question=True,
-                    ),
+                return_value=FeedbackDetectionResult(
+                    response_to_user="Thanks for your feedback!",
+                    query_to_answer="What is the capital of France?",
                 ),
+            ),
+            patch(
+                "cognee.infrastructure.session.session_turn.generate_session_completion_with_optional_summary",
+                new_callable=AsyncMock,
+                return_value=("Paris is the capital of France.", "", None),
             ),
         ):
             mock_user = MagicMock()
@@ -748,11 +935,8 @@ class TestSessionManager:
                 system_prompt_path="sys.txt",
             )
 
-        assert "Thanks for your feedback!" in result
-        assert "Paris is the capital of France." in result
-        mock_cache.update_qa_entry.assert_called_once()
-        call_kw = mock_cache.update_qa_entry.call_args.kwargs
-        assert call_kw["qa_id"] == "last-qa-456"
+        assert result == "Paris is the capital of France."
+        mock_cache.update_qa_entry.assert_not_called()
         mock_cache.create_qa_entry.assert_called_once()
         qa_kw = mock_cache.create_qa_entry.call_args.kwargs
         assert qa_kw["question"] == "thanks! What is the capital of France?"
@@ -769,7 +953,7 @@ class TestSessionManager:
             ) as mock_session_user,
             patch("cognee.infrastructure.session.session_manager.CacheConfig") as mock_config_cls,
             patch(
-                "cognee.infrastructure.session.session_manager.generate_session_completion_with_optional_summary",
+                "cognee.infrastructure.session.session_turn.generate_session_completion_with_optional_summary",
                 new_callable=AsyncMock,
                 return_value=("Generated answer", "", None),
             ),
@@ -795,10 +979,10 @@ class TestSessionManager:
         mock_cache.update_qa_entry.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_generate_completion_with_session_feedback_detected_no_last_qa_id_adds_qa(
+    async def test_generate_completion_with_session_query_to_answer_no_last_qa_id_adds_qa(
         self, sm, mock_cache
     ):
-        """When feedback detected but no previous QA (empty session): add_qa called, no add_feedback."""
+        """When query_to_answer is present with empty session: add QA and no feedback write."""
         mock_cache.get_latest_qa_entries.return_value = []
         with (
             patch(
@@ -806,19 +990,16 @@ class TestSessionManager:
             ) as mock_session_user,
             patch("cognee.infrastructure.session.session_manager.CacheConfig") as mock_config_cls,
             patch(
-                "cognee.infrastructure.session.session_manager.generate_session_completion_with_optional_summary",
+                "cognee.infrastructure.session.session_turn.analyze_turn_for_session_context",
                 new_callable=AsyncMock,
-                return_value=(
-                    "Generated answer",
-                    "",
-                    FeedbackDetectionResult(
-                        feedback_detected=True,
-                        feedback_text="User said thanks.",
-                        feedback_score=5.0,
-                        response_to_user="Thanks!",
-                        contains_followup_question=False,
-                    ),
+                return_value=FeedbackDetectionResult(
+                    query_to_answer="What is X?",
                 ),
+            ),
+            patch(
+                "cognee.infrastructure.session.session_turn.generate_session_completion_with_optional_summary",
+                new_callable=AsyncMock,
+                return_value=("Generated answer", "", None),
             ),
         ):
             mock_user = MagicMock()
@@ -831,7 +1012,7 @@ class TestSessionManager:
 
             result = await sm.generate_completion_with_session(
                 session_id="s1",
-                query="thanks!",
+                query="What is X?",
                 context="ctx",
                 user_prompt_path="user.txt",
                 system_prompt_path="sys.txt",
@@ -842,10 +1023,55 @@ class TestSessionManager:
         mock_cache.update_qa_entry.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_generate_completion_with_session_feedback_persistence_failure_returns_response(
+    async def test_generate_completion_with_session_feedback_like_empty_session_answers_and_adds_qa(
         self, sm, mock_cache
     ):
-        """When feedback detected but add_feedback raises: still return response_to_user."""
+        """Without previous QA, acknowledgement-only analysis still answers the original query."""
+        mock_cache.get_latest_qa_entries.return_value = []
+        with (
+            patch(
+                "cognee.infrastructure.session.session_manager.session_user"
+            ) as mock_session_user,
+            patch("cognee.infrastructure.session.session_manager.CacheConfig") as mock_config_cls,
+            patch(
+                "cognee.infrastructure.session.session_turn.analyze_turn_for_session_context",
+                new_callable=AsyncMock,
+                return_value=FeedbackDetectionResult(response_to_user="Got it."),
+            ),
+            patch(
+                "cognee.infrastructure.session.session_turn.generate_session_completion_with_optional_summary",
+                new_callable=AsyncMock,
+                return_value=("Generated answer", "", None),
+            ),
+        ):
+            mock_user = MagicMock()
+            mock_user.id = "u1"
+            mock_session_user.get.return_value = mock_user
+            mock_config = MagicMock()
+            mock_config.caching = True
+            mock_config.auto_feedback = True
+            mock_config_cls.return_value = mock_config
+
+            result = await sm.generate_completion_with_session(
+                session_id="s1",
+                query="Test default session",
+                context="ctx",
+                user_prompt_path="user.txt",
+                system_prompt_path="sys.txt",
+            )
+
+        assert result == "Generated answer"
+        mock_cache.create_qa_entry.assert_called_once()
+        qa_kw = mock_cache.create_qa_entry.call_args.kwargs
+        assert qa_kw["question"] == "Test default session"
+        mock_cache.update_qa_entry.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_generate_completion_with_session_feedback_records_despite_rating_failure(
+        self, sm, mock_cache
+    ):
+        """A no-answer turn still records its QA entry even if rating persistence
+        (update_qa_entry) fails — that failure is swallowed fail-open."""
         mock_cache.update_qa_entry = AsyncMock(side_effect=Exception("Cache write failed"))
         mock_cache.get_latest_qa_entries.return_value = [
             SessionQAEntry(qa_id="last-qa-789", question="Q", context="", answer="A", time="t")
@@ -856,18 +1082,10 @@ class TestSessionManager:
             ) as mock_session_user,
             patch("cognee.infrastructure.session.session_manager.CacheConfig") as mock_config_cls,
             patch(
-                "cognee.infrastructure.session.session_manager.generate_session_completion_with_optional_summary",
+                "cognee.infrastructure.session.session_turn.analyze_turn_for_session_context",
                 new_callable=AsyncMock,
-                return_value=(
-                    "Generated answer",
-                    "",
-                    FeedbackDetectionResult(
-                        feedback_detected=True,
-                        feedback_text="User said thanks.",
-                        feedback_score=5.0,
-                        response_to_user="Thanks for your feedback!",
-                        contains_followup_question=False,
-                    ),
+                return_value=FeedbackDetectionResult(
+                    response_to_user="Thanks for your feedback!",
                 ),
             ),
         ):
@@ -888,13 +1106,13 @@ class TestSessionManager:
             )
 
         assert result == "Thanks for your feedback!"
-        mock_cache.create_qa_entry.assert_not_called()
+        mock_cache.create_qa_entry.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_generate_completion_with_session_feedback_only_empty_response_to_user_fallback(
+    async def test_generate_completion_with_session_empty_analysis_answers_original_query(
         self, sm, mock_cache
     ):
-        """When feedback only and response_to_user empty: return fallback thanks message."""
+        """When analysis has no signals, fail open by answering the original query."""
         mock_cache.get_latest_qa_entries.return_value = [
             SessionQAEntry(qa_id="last-qa-999", question="Q", context="", answer="A", time="t")
         ]
@@ -904,18 +1122,60 @@ class TestSessionManager:
             ) as mock_session_user,
             patch("cognee.infrastructure.session.session_manager.CacheConfig") as mock_config_cls,
             patch(
-                "cognee.infrastructure.session.session_manager.generate_session_completion_with_optional_summary",
+                "cognee.infrastructure.session.session_turn.analyze_turn_for_session_context",
                 new_callable=AsyncMock,
-                return_value=(
-                    "Generated answer",
-                    "",
-                    FeedbackDetectionResult(
-                        feedback_detected=True,
-                        feedback_text="User said thanks.",
-                        feedback_score=5.0,
-                        response_to_user="",
-                        contains_followup_question=False,
-                    ),
+                return_value=FeedbackDetectionResult(),
+            ),
+            patch(
+                "cognee.infrastructure.session.session_turn.generate_session_completion_with_optional_summary",
+                new_callable=AsyncMock,
+                return_value=("Generated answer", "", None),
+            ) as mock_generate,
+            patch.object(sm, "add_qa", new_callable=AsyncMock) as mock_add_qa,
+            patch(
+                "cognee.infrastructure.session.session_turn.build_active_context_block_safe",
+                new_callable=AsyncMock,
+                return_value=("", []),
+            ),
+        ):
+            mock_user = MagicMock()
+            mock_user.id = "u1"
+            mock_session_user.get.return_value = mock_user
+            mock_config = MagicMock()
+            mock_config.caching = True
+            mock_config.auto_feedback = True
+            mock_config_cls.return_value = mock_config
+
+            result = await sm.generate_completion_with_session(
+                session_id="s1",
+                query="What should I audit?",
+                context="ctx",
+                user_prompt_path="user.txt",
+                system_prompt_path="sys.txt",
+            )
+
+        assert result == "Generated answer"
+        assert mock_generate.await_args.kwargs["query"] == "What should I audit?"
+        mock_add_qa.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_generate_completion_with_session_does_not_auto_write_qa_feedback(
+        self, sm, mock_cache
+    ):
+        """The recorded feedback turn does not auto-populate QA feedback text/score."""
+        mock_cache.get_latest_qa_entries.return_value = [
+            SessionQAEntry(qa_id="last-qa-norm", question="Q", context="", answer="A", time="t")
+        ]
+        with (
+            patch(
+                "cognee.infrastructure.session.session_manager.session_user"
+            ) as mock_session_user,
+            patch("cognee.infrastructure.session.session_manager.CacheConfig") as mock_config_cls,
+            patch(
+                "cognee.infrastructure.session.session_turn.analyze_turn_for_session_context",
+                new_callable=AsyncMock,
+                return_value=FeedbackDetectionResult(
+                    response_to_user="Thanks!",
                 ),
             ),
         ):
@@ -929,60 +1189,15 @@ class TestSessionManager:
 
             result = await sm.generate_completion_with_session(
                 session_id="s1",
-                query="thanks!",
+                query="2 stars",
                 context="ctx",
                 user_prompt_path="user.txt",
                 system_prompt_path="sys.txt",
             )
 
-        assert result == "Thanks for your feedback."
-        mock_cache.create_qa_entry.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_generate_completion_with_session_feedback_score_normalization(
-        self, sm, mock_cache
-    ):
-        """Feedback score is normalized to int 1-5 when persisting."""
-        mock_cache.get_latest_qa_entries.return_value = [
-            SessionQAEntry(qa_id="last-qa-norm", question="Q", context="", answer="A", time="t")
-        ]
-        with (
-            patch(
-                "cognee.infrastructure.session.session_manager.session_user"
-            ) as mock_session_user,
-            patch("cognee.infrastructure.session.session_manager.CacheConfig") as mock_config_cls,
-            patch(
-                "cognee.infrastructure.session.session_manager.generate_session_completion_with_optional_summary",
-                new_callable=AsyncMock,
-                return_value=(
-                    "Generated answer",
-                    "",
-                    FeedbackDetectionResult(
-                        feedback_detected=True,
-                        feedback_text="User gave 2.7 stars.",
-                        feedback_score=2.7,
-                        response_to_user="Thanks!",
-                        contains_followup_question=False,
-                    ),
-                ),
-            ),
-        ):
-            mock_user = MagicMock()
-            mock_user.id = "u1"
-            mock_session_user.get.return_value = mock_user
-            mock_config = MagicMock()
-            mock_config.caching = True
-            mock_config.auto_feedback = True
-            mock_config_cls.return_value = mock_config
-
-            await sm.generate_completion_with_session(
-                session_id="s1",
-                query="2.5 stars",
-                context="ctx",
-                user_prompt_path="user.txt",
-                system_prompt_path="sys.txt",
-            )
-
-        call_kw = mock_cache.update_qa_entry.call_args.kwargs
-        assert call_kw["feedback_score"] == 3
-        assert call_kw["feedback_text"] == "User gave 2.7 stars."
+        assert result == "Thanks!"
+        mock_cache.update_qa_entry.assert_not_called()
+        mock_cache.create_qa_entry.assert_called_once()
+        qa_kw = mock_cache.create_qa_entry.call_args.kwargs
+        assert qa_kw["feedback_text"] is None
+        assert qa_kw["feedback_score"] is None

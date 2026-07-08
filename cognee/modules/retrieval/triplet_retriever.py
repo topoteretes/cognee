@@ -1,7 +1,7 @@
 from typing import Any, Dict, List, Optional, Type, Union
 
 from cognee.shared.logging_utils import get_logger
-from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.modules.retrieval.utils.completion import generate_completion
 from cognee.infrastructure.session.get_session_manager import get_session_manager
 from cognee.modules.retrieval.base_retriever import BaseRetriever
@@ -9,6 +9,7 @@ from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 from cognee.context_global_variables import session_user
 from cognee.infrastructure.databases.cache.config import CacheConfig
+from cognee.modules.retrieval.utils.references import append_chunk_evidence
 
 logger = get_logger("TripletRetriever")
 
@@ -30,6 +31,7 @@ class TripletRetriever(BaseRetriever):
         top_k: Optional[int] = 5,
         session_id: Optional[str] = None,
         response_model: Type = str,
+        include_references: bool = False,
     ):
         """Initialize retriever with optional custom prompt paths."""
         self.user_prompt_path = user_prompt_path
@@ -38,6 +40,7 @@ class TripletRetriever(BaseRetriever):
         self.system_prompt = system_prompt
         self.session_id = session_id
         self.response_model = response_model
+        self.include_references = include_references
 
     async def get_retrieved_objects(self, query: str) -> Any:
         """
@@ -57,7 +60,7 @@ class TripletRetriever(BaseRetriever):
 
             - Any: A list containing the retrieved triplets, or an empty list if none are found.
         """
-        vector_engine = get_vector_engine()
+        vector_engine = await get_vector_engine_async()
 
         try:
             if not await vector_engine.has_collection(collection_name="Triplet_text"):
@@ -108,7 +111,12 @@ class TripletRetriever(BaseRetriever):
         return [completion]
 
     async def get_completion_from_context(
-        self, query: str, retrieved_objects: Any, context: Any
+        self,
+        query: str,
+        retrieved_objects: Any,
+        context: Any,
+        effective_query: Optional[str] = None,
+        turn_preparation=None,
     ) -> Union[List[str], List[dict]]:
         """
         Generates an LLM completion using the context.
@@ -150,6 +158,16 @@ class TripletRetriever(BaseRetriever):
                 summarize_context=False,
                 used_graph_element_ids=used_graph_element_ids,
                 max_context_chars=getattr(self, "max_context_chars", None),
+                effective_query=effective_query,
+                turn_preparation=turn_preparation,
             )
-            return [completion]
-        return await self._generate_completion_without_session(query, context)
+            completions = [completion]
+        else:
+            completions = await self._generate_completion_without_session(query, context)
+
+        # Both the session/cache branch and the non-session branch rejoin here.
+        return append_chunk_evidence(
+            completions,
+            retrieved_objects,
+            enabled=self.include_references and self.response_model is str,
+        )
