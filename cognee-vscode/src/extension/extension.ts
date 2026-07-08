@@ -3,7 +3,7 @@ import * as vscode from "vscode";
 import { forgetProject } from "./commands/forget";
 import { indexWorkspace } from "./commands/indexWorkspace";
 import { recallCommand } from "./commands/recall";
-import { rememberFile, rememberSelection } from "./commands/remember";
+import { rememberFile, rememberNote, rememberSelection } from "./commands/remember";
 import { setup } from "./commands/setup";
 import { Logger } from "./logger";
 import { resolveRuntime } from "./runtime";
@@ -24,6 +24,12 @@ export function activate(context: vscode.ExtensionContext): void {
       const runtime = await resolveRuntime(context, logger);
       if (runtime) {
         await rememberFile(runtime, resource);
+      }
+    }),
+    vscode.commands.registerCommand("cognee.rememberNote", async () => {
+      const runtime = await resolveRuntime(context, logger);
+      if (runtime) {
+        await rememberNote(runtime);
       }
     }),
     vscode.commands.registerCommand("cognee.recall", async () => {

@@ -24,7 +24,13 @@ export async function rememberSelection(runtime: Runtime): Promise<void> {
     ? undefined
     : `lines ${selection.start.line + 1}-${selection.end.line + 1}`;
 
-  await ingest(runtime, decorate(text, relativePath, lineRange), relativePath, `Remembering from ${relativePath}…`);
+  await ingest(
+    runtime,
+    decorate(text, relativePath, lineRange),
+    basenameOf(relativePath),
+    `Remembering from ${relativePath}…`,
+    relativePath,
+  );
 }
 
 /** Remember an entire file, invoked from the explorer context menu or palette. */
@@ -51,18 +57,41 @@ export async function rememberFile(runtime: Runtime, resource?: vscode.Uri): Pro
   }
 
   const relativePath = vscode.workspace.asRelativePath(uri, false);
-  await ingest(runtime, decorate(text, relativePath), relativePath, `Remembering ${relativePath}…`);
+  await ingest(
+    runtime,
+    decorate(text, relativePath),
+    basenameOf(relativePath),
+    `Remembering ${relativePath}…`,
+    relativePath,
+  );
+}
+
+/** Remember a free-form note typed by the user (no file backing). */
+export async function rememberNote(runtime: Runtime): Promise<void> {
+  const note = await vscode.window.showInputBox({
+    prompt: "Remember a note in project memory",
+    placeHolder: "e.g. API fields use snake_case; auth tokens live in the session cache.",
+    ignoreFocusOut: true,
+  });
+  // `undefined` = dismissed; an empty/whitespace note is nothing to store.
+  if (note === undefined || !note.trim()) {
+    return;
+  }
+
+  await ingest(runtime, note.trim(), "note.md", "Remembering note…");
 }
 
 /**
- * Ingest text into project memory, then record the source path so future
- * citations for this document resolve straight to the exact file.
+ * Ingest text into project memory. When the content comes from a file, pass its
+ * workspace-relative path so the source is recorded and future citations resolve
+ * straight to the exact file; free-form notes omit it.
  */
 async function ingest(
   runtime: Runtime,
   data: string,
-  relativePath: string,
+  filename: string,
   title: string,
+  relativePath?: string,
 ): Promise<void> {
   await vscode.window.withProgress(
     { location: vscode.ProgressLocation.Notification, title, cancellable: true },
@@ -72,10 +101,12 @@ async function ingest(
       try {
         const result = await runtime.client.remember(data, {
           datasetName: runtime.datasetName,
-          filename: basenameOf(relativePath),
+          filename,
           signal: controller.signal,
         });
-        await runtime.pathIndex.record(relativePath);
+        if (relativePath) {
+          await runtime.pathIndex.record(relativePath);
+        }
         runtime.logger.info(`remember → status=${result.status ?? "ok"} dataset=${runtime.datasetName}`);
         void vscode.window.showInformationMessage(
           `Cognee: remembered into project memory (${runtime.datasetName}).`,
