@@ -102,3 +102,6 @@ RUN python -c "from cognee_db_workers._kuzu_helpers import install_json_extensio
 # Use the application name from pyproject.toml for normal operation
 # For testing, we'll override this with a direct command
 ENTRYPOINT ["/app/entrypoint.sh"]
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=5)" || exit 1

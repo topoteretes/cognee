@@ -1,0 +1,54 @@
+name: test | Published Docker image validation (scheduled)
+
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-validation-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-published-images:
+    name: "${{ matrix.image }}:${{ matrix.tag }}"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: cognee/cognee
+            tag: main
+            max_bytes: "2147483648"
+          - image: cognee/cognee
+            tag: latest
+            max_bytes: "2147483648"
+          - image: cognee/cognee-mcp
+            tag: main
+            max_bytes: "8589934592"
+          - image: cognee/cognee-mcp
+            tag: latest
+            max_bytes: "8589934592"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Trivy scan (fail on CRITICAL)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ matrix.image }}:${{ matrix.tag }}
+          severity: CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+
+      - name: Boot, metadata checks, and health
+        run: |
+          chmod +x scripts/docker_validation.sh
+          scripts/docker_validation.sh \
+            "${{ matrix.image }}" \
+            "${{ matrix.tag }}" \
+            "${{ matrix.max_bytes }}"
