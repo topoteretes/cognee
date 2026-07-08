@@ -9,7 +9,10 @@ Node identifiers are chosen open-world-first: a node that carries an
 ``ontology_uri`` (preserved end-to-end from ontology matching or RDF ingestion,
 see ``DataPoint.ontology_uri``) is emitted under that stable external IRI;
 un-grounded nodes get a minted cognee IRI under ``DEFAULT_BASE_IRI`` so the RDF
-stays well-formed. Nothing is collapsed into a closed local vocabulary.
+stays well-formed. RDF-ingested object-property edges that carry
+``predicate_uri`` are emitted with that original RDF predicate IRI. Cognee-native
+edges without ``predicate_uri`` keep minted cognee predicate IRIs. Nothing is
+collapsed into a closed local vocabulary.
 """
 
 from typing import Any, Dict, List, Optional, Tuple
@@ -48,6 +51,13 @@ def _node_iri(node_id: str, props: NodeData, base_iri: str) -> URIRef:
 
 def _predicate_iri(relationship_name: str, base_iri: str) -> URIRef:
     return URIRef(f"{base_iri}prop/{quote(str(relationship_name), safe='')}")
+
+
+def _edge_predicate_iri(relationship_name: str, props: NodeData, base_iri: str) -> URIRef:
+    predicate_uri = props.get("predicate_uri") if props else None
+    if predicate_uri:
+        return URIRef(str(predicate_uri))
+    return _predicate_iri(relationship_name, base_iri)
 
 
 def _is_entity_type(props: NodeData) -> bool:
@@ -90,7 +100,7 @@ def graph_data_to_rdf(
         if name:
             g.add((subject, RDFS.label, Literal(name)))
 
-    for source_id, target_id, relationship_name, _props in edges:
+    for source_id, target_id, relationship_name, props in edges:
         source_props = node_props.get(str(source_id), {})
         target_props = node_props.get(str(target_id), {})
 
@@ -101,7 +111,7 @@ def graph_data_to_rdf(
             # class -> superclass is subClassOf; individual -> class is rdf:type.
             predicate = RDFS.subClassOf if _is_entity_type(source_props) else RDF.type
         else:
-            predicate = _predicate_iri(relationship_name, base_iri)
+            predicate = _edge_predicate_iri(relationship_name, props or {}, base_iri)
 
         g.add((subject, predicate, obj))
 

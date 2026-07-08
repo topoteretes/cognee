@@ -12,24 +12,48 @@ Design choices, aligned with an open-world setup:
 - The full external IRI is preserved verbatim on ``DataPoint.ontology_uri`` so
   it can be linked out to other domains and round-tripped back to RDF (see
   ``cognee.modules.graph.rdf.export``).
+- RDF object-property predicate IRIs are preserved on explicit custom edge
+  properties as ``predicate_uri``. The internal relationship name stays a
+  graph-safe storage label; ``predicate_uri`` is the source of truth for RDF
+  export.
+- ``is_a`` relationships map to ``rdf:type`` / ``rdfs:subClassOf`` during RDF
+  export.
 - Nothing is fuzzy-matched or renamed into a local vocabulary here.
 
-The pure builder ``build_datapoints_from_rdf`` takes a parsed ``rdflib.Graph``
-and returns cognee ``DataPoint``s; ``load_rdf_graph`` handles file/format
-parsing; ``ingest_rdf`` is a thin convenience that persists via the standard
-storage task.
+Scope:
+- RDF ingest preserves object-property assertions only when both endpoints are
+  ingested individuals.
+- Class declarations, blank nodes, reasoning, and arbitrary literal/data
+  property round-trip are out of scope for this bridge.
+
+The pure builder ``build_graph_from_rdf`` takes a parsed ``rdflib.Graph`` and
+returns cognee ``DataPoint``s plus explicit RDF custom edges.
+``build_datapoints_from_rdf`` is a compatibility wrapper for callers that only
+need nodes. ``load_rdf_graph`` handles file/format parsing; ``ingest_rdf`` is a
+thin convenience that persists via the standard storage task.
 """
 
+from dataclasses import dataclass
+from hashlib import sha256
 from typing import IO, Any, Dict, List, Optional, Union
 
 from rdflib import Graph, OWL, RDF, RDFS, URIRef
 from rdflib.term import Node as RDFNode
 
 from cognee.infrastructure.engine import DataPoint
+from cognee.modules.engine.utils import generate_edge_name
 from cognee.modules.engine.models import Entity, EntityType
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("RDFIngest")
+
+CustomEdge = tuple[str, str, str, dict[str, Any]]
+
+
+@dataclass
+class RDFIngestGraph:
+    data_points: list[DataPoint]
+    custom_edges: list[CustomEdge]
 
 
 def _local_name(uri: RDFNode) -> str:
@@ -46,6 +70,19 @@ def _label_or_local_name(graph: Graph, subject: RDFNode) -> str:
         if text:
             return text
     return _local_name(subject)
+
+
+def _relationship_name_for_predicate(predicate: URIRef) -> str:
+    local_name = generate_edge_name(_local_name(predicate) or "predicate")
+    digest = sha256(str(predicate).encode("utf-8")).hexdigest()[:12]
+    return f"rdf_{local_name}_{digest}"
+
+
+def _predicate_edge_properties(predicate: URIRef) -> dict[str, Any]:
+    return {
+        "predicate_uri": str(predicate),
+        "edge_text": _local_name(predicate),
+    }
 
 
 def load_rdf_graph(source: Union[str, List[str], IO, List[IO], Graph]) -> Graph:
@@ -67,27 +104,16 @@ def load_rdf_graph(source: Union[str, List[str], IO, List[IO], Graph]) -> Graph:
     return resolver.graph
 
 
-def build_datapoints_from_rdf(rdf_graph: Graph) -> List[DataPoint]:
-    """Turn a parsed RDF graph (T-Box + A-Box) into cognee ``DataPoint``s.
-
-    Classes (``owl:Class`` and anything used as an ``rdfs:subClassOf`` target)
-    become ``EntityType`` nodes; individuals (subjects typed by a known class)
-    become ``Entity`` nodes linked to their class via ``is_a``. ``rdfs:subClassOf``
-    becomes ``is_a`` between classes, and object-property assertions between
-    individuals become relations named by the property's local name. Every node
-    keeps its source IRI on ``ontology_uri``.
-
-    Returns the ``EntityType`` and ``Entity`` nodes with ``is_a``/``relations``
-    populated — ready to hand to ``add_data_points``.
-    """
-    # --- collect classes (T-Box) ---
+def _collect_class_uris(rdf_graph: Graph) -> set[URIRef]:
     class_uris: set = set(rdf_graph.subjects(RDF.type, OWL.Class))
     class_uris.update(rdf_graph.objects(None, RDFS.subClassOf))
     class_uris.update(rdf_graph.subjects(RDFS.subClassOf, None))
-    # Only keep IRIs (skip blank nodes / literals).
-    class_uris = {uri for uri in class_uris if isinstance(uri, URIRef)}
+    return {uri for uri in class_uris if isinstance(uri, URIRef)}
 
+
+def _build_class_nodes(rdf_graph: Graph) -> Dict[RDFNode, EntityType]:
     type_nodes: Dict[RDFNode, EntityType] = {}
+    class_uris = _collect_class_uris(rdf_graph)
     for class_uri in class_uris:
         name = _label_or_local_name(rdf_graph, class_uri)
         type_nodes[class_uri] = EntityType(
@@ -97,19 +123,31 @@ def build_datapoints_from_rdf(rdf_graph: Graph) -> List[DataPoint]:
             ontology_valid=True,
             ontology_uri=str(class_uri),
         )
+    return type_nodes
 
-    # class -> superclass (is_a between EntityTypes)
+
+def _attach_subclass_relations(rdf_graph: Graph, type_nodes: Dict[RDFNode, EntityType]) -> None:
     for sub_uri, super_uri in rdf_graph.subject_objects(RDFS.subClassOf):
         if sub_uri in type_nodes and super_uri in type_nodes:
             type_nodes[sub_uri].relations.append((_is_a_edge(), type_nodes[super_uri]))
 
-    # --- collect individuals (A-Box): subjects typed by a known class ---
-    entity_nodes: Dict[RDFNode, Entity] = {}
+
+def _collect_individual_types(
+    rdf_graph: Graph, type_nodes: Dict[RDFNode, EntityType]
+) -> Dict[RDFNode, List[RDFNode]]:
     individual_types: Dict[RDFNode, List[RDFNode]] = {}
     for subj, obj in rdf_graph.subject_objects(RDF.type):
         if isinstance(subj, URIRef) and obj in type_nodes:
             individual_types.setdefault(subj, []).append(obj)
+    return individual_types
 
+
+def _build_individual_nodes(
+    rdf_graph: Graph,
+    individual_types: Dict[RDFNode, List[RDFNode]],
+    type_nodes: Dict[RDFNode, EntityType],
+) -> Dict[RDFNode, Entity]:
+    entity_nodes: Dict[RDFNode, Entity] = {}
     for ind_uri, types in individual_types.items():
         name = _label_or_local_name(rdf_graph, ind_uri)
         primary_type = type_nodes[types[0]]
@@ -121,40 +159,88 @@ def build_datapoints_from_rdf(rdf_graph: Graph) -> List[DataPoint]:
             ontology_valid=True,
             ontology_uri=str(ind_uri),
         )
-        # Additional class memberships beyond the primary become is_a relations.
+    return entity_nodes
+
+
+def _attach_extra_type_relations(
+    entity_nodes: Dict[RDFNode, Entity],
+    individual_types: Dict[RDFNode, List[RDFNode]],
+    type_nodes: Dict[RDFNode, EntityType],
+) -> None:
+    for ind_uri, types in individual_types.items():
         for extra_type in types[1:]:
             entity_nodes[ind_uri].relations.append((_is_a_edge(), type_nodes[extra_type]))
 
-    # --- object-property assertions between individuals ---
+
+def _build_object_property_edge(
+    source_node: Entity,
+    target_node: Entity,
+    predicate: URIRef,
+) -> CustomEdge:
+    relationship_name = _relationship_name_for_predicate(predicate)
+    return (
+        str(source_node.id),
+        str(target_node.id),
+        relationship_name,
+        _predicate_edge_properties(predicate),
+    )
+
+
+def _build_object_property_edges(
+    rdf_graph: Graph, entity_nodes: Dict[RDFNode, Entity]
+) -> list[CustomEdge]:
+    custom_edges: list[CustomEdge] = []
     for subj, pred, obj in rdf_graph:
         if pred in (RDF.type, RDFS.subClassOf) or pred == RDFS.label:
             continue
-        if subj in entity_nodes and obj in entity_nodes:
-            relationship_name = _local_name(pred)
-            entity_nodes[subj].relations.append((_edge(relationship_name), entity_nodes[obj]))
+        if not isinstance(pred, URIRef):
+            continue
+        if subj not in entity_nodes or obj not in entity_nodes:
+            continue
+        custom_edges.append(
+            _build_object_property_edge(entity_nodes[subj], entity_nodes[obj], pred)
+        )
+    return custom_edges
 
-    data_points: List[DataPoint] = []
-    data_points.extend(type_nodes.values())
-    data_points.extend(entity_nodes.values())
+
+def build_graph_from_rdf(rdf_graph: Graph) -> RDFIngestGraph:
+    """Turn a parsed RDF graph into cognee nodes plus RDF object-property edges.
+
+    Classes become ``EntityType`` nodes. Individuals typed by known classes
+    become ``Entity`` nodes. ``rdf:type`` and ``rdfs:subClassOf`` stay in the
+    ``DataPoint`` structure as ``is_a`` relationships. RDF object-property
+    assertions between ingested individuals become explicit custom graph edges
+    with ``predicate_uri`` properties.
+    """
+    type_nodes = _build_class_nodes(rdf_graph)
+    _attach_subclass_relations(rdf_graph, type_nodes)
+
+    individual_types = _collect_individual_types(rdf_graph, type_nodes)
+    entity_nodes = _build_individual_nodes(rdf_graph, individual_types, type_nodes)
+    _attach_extra_type_relations(entity_nodes, individual_types, type_nodes)
+
+    custom_edges = _build_object_property_edges(rdf_graph, entity_nodes)
+    data_points: list[DataPoint] = [*type_nodes.values(), *entity_nodes.values()]
+
     logger.info(
-        "Built %d datapoints from RDF (%d classes, %d individuals)",
+        "Built %d datapoints and %d custom edges from RDF (%d classes, %d individuals)",
         len(data_points),
+        len(custom_edges),
         len(type_nodes),
         len(entity_nodes),
     )
-    return data_points
+    return RDFIngestGraph(data_points=data_points, custom_edges=custom_edges)
+
+
+def build_datapoints_from_rdf(rdf_graph: Graph) -> List[DataPoint]:
+    """Compatibility wrapper returning only RDF-ingested ``DataPoint`` nodes."""
+    return build_graph_from_rdf(rdf_graph).data_points
 
 
 def _is_a_edge():
     from cognee.infrastructure.engine.models.Edge import Edge
 
     return Edge(relationship_type="is_a")
-
-
-def _edge(relationship_name: str):
-    from cognee.infrastructure.engine.models.Edge import Edge
-
-    return Edge(relationship_type=relationship_name)
 
 
 async def ingest_rdf(
@@ -169,8 +255,12 @@ async def ingest_rdf(
     from cognee.tasks.storage.add_data_points import add_data_points
 
     rdf_graph = load_rdf_graph(source)
-    data_points = build_datapoints_from_rdf(rdf_graph)
-    if not data_points:
+    ingest_graph = build_graph_from_rdf(rdf_graph)
+    if not ingest_graph.data_points:
         logger.warning("No datapoints produced from RDF source; nothing to ingest.")
         return []
-    return await add_data_points(data_points, ctx=ctx)
+    return await add_data_points(
+        ingest_graph.data_points,
+        custom_edges=ingest_graph.custom_edges,
+        ctx=ctx,
+    )
