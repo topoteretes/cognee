@@ -1,7 +1,7 @@
 from cognee.infrastructure.databases.graph.config import get_graph_context_config
 from cognee.infrastructure.databases.vector.config import get_vectordb_context_config
 from cognee.infrastructure.databases.graph import get_graph_engine
-from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.infrastructure.databases.vector import get_vector_engine_async
 
 from .capabilities import EngineCapability
 from .unified_store_engine import UnifiedStoreEngine
@@ -27,7 +27,7 @@ def _is_hybrid_provider(graph_config: dict, vector_config: dict) -> bool:
 async def _create_hybrid_adapter(graph_config: dict, vector_config: dict):
     """Create a single adapter instance for a hybrid backend.
 
-    For pghybrid, reuses the cached PGVectorAdapter from get_vector_engine()
+    For pghybrid, reuses the cached PGVectorAdapter from get_vector_engine_async()
     (requires VECTOR_DB_PROVIDER=pgvector) so that metadata caches persist
     across calls.
     """
@@ -75,7 +75,7 @@ async def _create_hybrid_adapter(graph_config: dict, vector_config: dict):
 
         # Vector adapter: reuse the cached PGVectorAdapter from the
         # vector engine factory. This requires VECTOR_DB_PROVIDER=pgvector.
-        vector_adapter = await get_vector_engine()
+        vector_adapter = await get_vector_engine_async()
 
         return PostgresHybridAdapter(
             graph_adapter=graph_adapter,
@@ -88,7 +88,7 @@ async def _create_hybrid_adapter(graph_config: dict, vector_config: dict):
 async def get_unified_engine() -> UnifiedStoreEngine:
     """Build a UnifiedStoreEngine for the current async context.
 
-    - Reads the same context variables as get_graph_engine / get_vector_engine
+    - Reads the same context variables as get_graph_engine / get_vector_engine_async
       so multi-tenant routing works identically.
     - Detects hybrid providers (where graph and vector share a backend) and
       creates a single adapter instance with HYBRID_* capabilities.
@@ -96,7 +96,7 @@ async def get_unified_engine() -> UnifiedStoreEngine:
 
     This function is NOT cached itself because it must respect per-request
     ContextVar values.  The underlying engine factories (get_graph_engine,
-    get_vector_engine) do their own caching.
+    get_vector_engine_async) do their own caching.
     """
     graph_config = get_graph_context_config()
     vector_config = get_vectordb_context_config()
@@ -117,7 +117,7 @@ async def get_unified_engine() -> UnifiedStoreEngine:
         )
 
     graph_engine = await get_graph_engine()
-    vector_engine = await get_vector_engine()
+    vector_engine = await get_vector_engine_async()
 
     return UnifiedStoreEngine(
         graph_engine=graph_engine,

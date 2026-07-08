@@ -10,7 +10,7 @@ from distributed.modal_image import image
 from distributed.queues import add_data_points_queue
 
 from cognee.shared.logging_utils import get_logger
-from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.infrastructure.databases.vector import get_vector_engine_async
 
 logger = get_logger("data_point_saving_worker")
 
@@ -52,7 +52,7 @@ secret_name = os.environ.get("MODAL_SECRET_NAME", "distributed_cognee")
 )
 async def data_point_saving_worker():
     print("Started processing of data points; starting vector engine queue.")
-    vector_engine = await get_vector_engine()
+    vector_engine = await get_vector_engine_async()
     # Defines how many data packets do we glue together from the modal queue before embedding call and ingestion
     BATCH_SIZE = 25
     stop_seen = False
