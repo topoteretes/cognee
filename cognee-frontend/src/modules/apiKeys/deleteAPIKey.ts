@@ -1,6 +1,8 @@
-/**
- * Open-source stub — API key deletion not available in local mode.
- */
-export default async function deleteApiKey(_keyId: string): Promise<void> {
-  console.warn("API key management requires Cognee Cloud.");
+import { CogneeInstance } from "../instances/types";
+
+export default async function deleteApiKey(instance: CogneeInstance, keyId: string): Promise<void> {
+  const response = await instance.fetch(`/auth/api-keys/${keyId}`, { method: "DELETE" });
+  if (!response.ok) {
+    throw new Error(`Failed to delete API key (${response.status})`);
+  }
 }

@@ -19,7 +19,7 @@ export interface TenantContextValue {
   cogniInstance: CogneeInstance | null;
   localInstance: CogneeInstance;
   serviceUrl: string | null;
-  apiKey: string;
+  apiKey: string | null;
   isInitializing: boolean;
   tenantReady: boolean;
   isOwner: boolean;
@@ -44,10 +44,10 @@ export const TenantContext = createContext<TenantContextValue>({
   cogniInstance: null,
   localInstance,
   serviceUrl: null,
-  apiKey: "",
+  apiKey: null,
   isInitializing: true,
-  tenantReady: true,
-  isOwner: true,
+  tenantReady: false,
+  isOwner: false,
   error: null,
   statusMessage: null,
   availableTenants: [],

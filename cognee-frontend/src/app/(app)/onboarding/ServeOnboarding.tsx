@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useCogniInstance } from "@/modules/tenant/TenantProvider";
 import searchDataset from "@/modules/datasets/searchDataset";
 import markOnboardingComplete from "@/modules/users/markOnboardingComplete";
+import { markOnboardingCompleteLocally } from "@/utils/onboardingFlag";
 import { trackEvent, TrackPageView } from "@/modules/analytics";
 
 const darkPage: React.CSSProperties = {
@@ -206,7 +207,7 @@ function ServeStep4() {
   const router = useRouter();
 
   const finish = (destination: string) => {
-    localStorage.setItem("cognee-onboarding-complete", "1");
+    markOnboardingCompleteLocally();
     sessionStorage.setItem("cognee-onboarding-skipped", "1");
     markOnboardingComplete().catch(() => {}); // persist to Auth0 — fire-and-forget
     trackEvent({ pageName: "Onboarding Serve", eventName: "serve_onboarding_completed", additionalProperties: { destination } });
@@ -239,7 +240,7 @@ export default function ServeOnboarding() {
 
   function skipToDashboard() {
     try {
-      localStorage.setItem("cognee-onboarding-complete", "1");
+      markOnboardingCompleteLocally();
       sessionStorage.setItem("cognee-onboarding-skipped", "1");
     } catch { /* ignore */ }
     markOnboardingComplete().catch(() => {});

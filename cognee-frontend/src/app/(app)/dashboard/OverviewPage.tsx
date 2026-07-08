@@ -15,10 +15,13 @@ import { listSessions, SEARCH_SESSION_PREFIX } from "@/modules/sessions/getSessi
 import getDatasetGraph from "@/modules/datasets/getDatasetGraph";
 import { notifications } from "@mantine/notifications";
 import { trackEvent, TrackPageView } from "@/modules/analytics";
+import { markOnboardingCompleteLocally } from "@/utils/onboardingFlag";
 import { CLAUDE_MARKETPLACE_ADD, CLAUDE_PLUGIN_INSTALL, CODEX_HOOKS_ENABLE, CODEX_MARKETPLACE_ADD, CODEX_PLUGIN_INSTALL, OPENCLAW_SKILL_INSTALL, GENERIC_SKILL_INSTALL, UPLOAD_MEMORY_PROMPT, UPLOAD_SAMPLE_PROMPT, RECALL_SAMPLE_PROMPT } from "@/data/prompts";
 import { AgentActivityTerminal, PipelineRun, Range, ownerDisplayName } from "@/ui/elements/AgentActivityTerminal";
 import SkeletonBar from "@/ui/elements/SkeletonBar";
 import DashboardSkeleton from "./DashboardSkeleton";
+import isCloudEnvironment from "@/utils/isCloudEnvironment";
+import { getLLMSettings, saveLLMApiKey, type LLMSettings } from "@/modules/settings/llmSettings";
 
 const AWAITING_DATASET_KEY = "cognee-awaiting-dataset";
 
@@ -42,6 +45,7 @@ export default function OverviewPage() {
   const [runs, setRuns] = useState<PipelineRun[]>([]);
   const [loading, setLoading] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
+  const isHandlingUploadRef = useRef(false);
   const [showDatasetPicker, setShowDatasetPicker] = useState(false);
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [range] = useState<Range>("24h");
@@ -66,17 +70,63 @@ export default function OverviewPage() {
   });
   const [creditsSpentPct, setCreditsSpentPct] = useState<number | null>(null);
   const [creditsRemainingUsd, setCreditsRemainingUsd] = useState<number | null>(null);
+  // Local/OSS only: whether the backend has an LLM API key configured. Without
+  // one, cognify fails on every upload, so the dashboard surfaces a banner
+  // with a paste-your-key modal that applies the key to the running backend.
+  const [llmSettings, setLlmSettings] = useState<LLMSettings | null>(null);
+  const [llmKeyMissing, setLlmKeyMissing] = useState(false);
+  const [showLlmKeyModal, setShowLlmKeyModal] = useState(false);
+  const [llmKeyInput, setLlmKeyInput] = useState("");
+  const [llmKeySaving, setLlmKeySaving] = useState(false);
+  const [llmKeyError, setLlmKeyError] = useState<string | null>(null);
   // True while a freshly-provisioned default dataset (handed off from onboarding
   // via sessionStorage) is still processing. Init from the flag so the skeleton
   // shows on first paint without waiting for the effect below.
   const [awaitingDataset, setAwaitingDataset] = useState<boolean>(() => {
     try { return !!sessionStorage.getItem(AWAITING_DATASET_KEY); } catch { return false; }
   });
+  // Gates the dashboard render until the onboarding-redirect check below has
+  // actually resolved. Without this, workspaceReady flips true (fast) before
+  // that async check finishes, so the full dashboard flashes on screen for a
+  // moment right before router.replace("/onboarding") kicks in.
+  const [onboardingDecided, setOnboardingDecided] = useState(false);
   const router = useRouter();
   // Workspace is functionally ready only when the pod is up AND any in-flight
   // default-dataset processing has finished.
   const workspaceReady = !!cogniInstance && tenantReady && !awaitingDataset;
   const prevWorkspaceReady = useRef(workspaceReady);
+
+  useEffect(() => {
+    if (isCloudEnvironment() || !cogniInstance) return;
+    let cancelled = false;
+    getLLMSettings(cogniInstance)
+      .then((llm) => {
+        if (cancelled) return;
+        setLlmSettings(llm);
+        setLlmKeyMissing(!llm.apiKey);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [cogniInstance]);
+
+  async function handleSaveLlmKey() {
+    if (!cogniInstance || !llmKeyInput.trim() || llmKeySaving) return;
+    setLlmKeySaving(true);
+    setLlmKeyError(null);
+    try {
+      await saveLLMApiKey(cogniInstance, {
+        provider: llmSettings?.provider || "openai",
+        model: llmSettings?.model || "gpt-5-mini",
+        apiKey: llmKeyInput.trim(),
+      });
+      trackEvent({ pageName: "Dashboard", eventName: "llm_api_key_saved" });
+      // Reload so every widget starts from the now-working backend state.
+      window.location.reload();
+    } catch (err) {
+      setLlmKeyError(err instanceof Error && err.message ? err.message : "Failed to save the API key. Is the backend running?");
+      setLlmKeySaving(false);
+    }
+  }
 
   async function uploadToDataset(ds: { id: string; name: string }, files: File[]) {
     if (!cogniInstance) return;
@@ -113,27 +163,39 @@ export default function OverviewPage() {
   }
 
   async function handleDashboardUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    if (!cogniInstance || !e.target.files?.length) return;
+    // Ref (not state) so the re-entrancy check is synchronous — guards against
+    // a stray double-fired change event racing two dataset-creation calls for
+    // the same deterministic dataset id, which would hit a UNIQUE constraint
+    // on the backend (create_new_dataset's existence check + insert isn't atomic).
+    if (isHandlingUploadRef.current || !cogniInstance || !e.target.files?.length) return;
+    isHandlingUploadRef.current = true;
     const files = Array.from(e.target.files);
     e.target.value = "";
 
-    // If only one dataset exists, upload to it
-    if (datasets.length === 1) {
-      await uploadToDataset(datasets[0], files);
-      return;
-    }
+    try {
+      // If only one dataset exists, upload to it
+      if (datasets.length === 1) {
+        await uploadToDataset(datasets[0], files);
+        return;
+      }
 
-    // If no datasets exist, create default and upload
-    if (datasets.length === 0) {
-      const ds = await createDataset({ name: "default_dataset" }, cogniInstance);
-      refreshDatasets();
-      await uploadToDataset(ds, files);
-      return;
-    }
+      // If no datasets exist, create default and upload
+      if (datasets.length === 0) {
+        const ds = await createDataset({ name: "default_dataset" }, cogniInstance);
+        refreshDatasets();
+        await uploadToDataset(ds, files);
+        return;
+      }
 
-    // Multiple datasets, none selected — show picker
-    setPendingFiles(files);
-    setShowDatasetPicker(true);
+      // Multiple datasets, none selected — show picker
+      setPendingFiles(files);
+      setShowDatasetPicker(true);
+    } catch (err) {
+      console.error("Dashboard upload failed:", err);
+      notifications.show({ title: "Upload failed", message: err instanceof Error ? err.message : String(err), color: "red" });
+    } finally {
+      isHandlingUploadRef.current = false;
+    }
   }
 
   async function handlePickDataset(ds: { id: string; name: string }) {
@@ -322,11 +384,15 @@ export default function OverviewPage() {
     let cancelled = false;
     (async () => {
       const localSkipped = sessionStorage.getItem("cognee-onboarding-skipped");
-      if (localSkipped) return;
+      if (localSkipped) {
+        setOnboardingDecided(true);
+        return;
+      }
 
       // Fast path: if user has runs OR datasets they've genuinely onboarded.
       if (runs.length > 0 || datasets.length > 0) {
-        localStorage.setItem("cognee-onboarding-complete", "1");
+        markOnboardingCompleteLocally();
+        setOnboardingDecided(true);
         return;
       }
 
@@ -346,21 +412,52 @@ export default function OverviewPage() {
           // that hasn't finished provisioning, or a genuinely empty account.
           // Re-check localStorage to see if this session already saw activity.
           const localComplete = localStorage.getItem("cognee-onboarding-complete");
-          if (localComplete) return; // already validated this session
+          if (localComplete) {
+            setOnboardingDecided(true);
+            return; // already validated this session
+          }
           // Otherwise redirect — the onboarding flow will handle re-entry gracefully.
         }
       } catch { /* fallback to redirect below */ }
 
       if (cancelled) return;
+      // Deliberately leave onboardingDecided false here — we're navigating
+      // away, so the skeleton should stay up through the route change
+      // instead of flashing the dashboard for a frame first.
       router.replace("/onboarding");
     })();
     return () => { cancelled = true; };
   }, [cogniInstance, tenantReady, isInitializing, loading, filterLoading, runs, datasets, router, tenant]);
 
-  // Show skeleton until pod is up (cogniInstance + tenantReady) AND any
-  // freshly-provisioned default dataset has finished processing.
+  // Show skeleton until pod is up (cogniInstance + tenantReady), any
+  // freshly-provisioned default dataset has finished processing, AND the
+  // onboarding-redirect check above has resolved (see onboardingDecided).
+  // Workspace still provisioning: we already know this user is staying on
+  // the dashboard, so the dashboard-shaped skeleton communicates progress.
   if (!workspaceReady) {
     return <DashboardSkeleton />;
+  }
+  // Onboarding decision still pending: this user might get redirected to
+  // /onboarding in a moment, so deliberately show a neutral, non-dashboard
+  // loading state here instead of DashboardSkeleton — otherwise the
+  // dashboard-shaped skeleton itself reads as "the dashboard flashed" even
+  // though no real data was ever rendered.
+  if (!onboardingDecided) {
+    return (
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100%" }}>
+        <div
+          style={{
+            width: 28,
+            height: 28,
+            borderRadius: "50%",
+            border: "2px solid rgba(255,255,255,0.15)",
+            borderTopColor: "#BC9BFF",
+            animation: "cognee-spin 0.8s linear infinite",
+          }}
+        />
+        <style>{"@keyframes cognee-spin { to { transform: rotate(360deg); } }"}</style>
+      </div>
+    );
   }
 
   const dataLoading = loading || isInitializing || filterLoading;
@@ -395,7 +492,11 @@ export default function OverviewPage() {
     !creditsBannerDismissed && creditsSpentPct !== null && creditsSpentPct >= 90;
   const showLowBalanceBanner =
     !showCreditPctBanner && creditsRemainingUsd !== null && creditsRemainingUsd < 1;
-  const showVoucherBanner = !showCreditPctBanner && !showLowBalanceBanner;
+  // Redeeming a voucher for cloud credits is meaningless in a self-hosted
+  // install (there's no billing backend to redeem against), so this banner
+  // — which would otherwise be the default fallback whenever the other two
+  // credit banners are inactive (i.e. always, in OSS mode) — is cloud-only.
+  const showVoucherBanner = isCloudEnvironment() && !showCreditPctBanner && !showLowBalanceBanner;
 
   return (
     <div style={{ minHeight: "100%", flexShrink: 0 }}>
@@ -429,6 +530,37 @@ export default function OverviewPage() {
 
       <div style={{ padding: "clamp(16px, 3vw, 32px)", display: "flex", flexDirection: "column", gap: 40 }}>
 
+      {/* LLM API key modal (local mode only) */}
+      {showLlmKeyModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", backdropFilter: "blur(4px)", WebkitBackdropFilter: "blur(4px)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={() => { if (!llmKeySaving) setShowLlmKeyModal(false); }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "rgba(15,15,15,0.92)", backdropFilter: "blur(16px)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: 24, width: 420, maxWidth: "calc(100vw - 32px)", display: "flex", flexDirection: "column", gap: 16, boxShadow: "0 20px 60px rgba(0,0,0,0.6)" }}>
+            <h2 style={{ fontSize: 18, fontWeight: 700, color: "#EDECEA", margin: 0 }}>Add your LLM API key</h2>
+            <p style={{ fontSize: 13, color: "rgba(237,236,234,0.65)", margin: 0 }}>
+              Cognee uses <strong style={{ color: "#EDECEA" }}>{llmSettings?.provider || "openai"}</strong> ({llmSettings?.model || "gpt-5-mini"}) to build your knowledge graph. Paste your API key — it&apos;s applied to the running backend right away.
+            </p>
+            <input
+              type="password"
+              value={llmKeyInput}
+              onChange={(e) => { setLlmKeyInput(e.target.value); setLlmKeyError(null); }}
+              onKeyDown={(e) => { if (e.key === "Enter") handleSaveLlmKey(); }}
+              placeholder="sk-…"
+              autoFocus
+              disabled={llmKeySaving}
+              style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 8, padding: "10px 12px", fontSize: 13, color: "#EDECEA", fontFamily: "inherit", outline: "none", width: "100%", boxSizing: "border-box" }}
+            />
+            {llmKeyError && (
+              <p style={{ fontSize: 12, color: "#FCA5A5", margin: 0 }}>{llmKeyError}</p>
+            )}
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              <button onClick={() => setShowLlmKeyModal(false)} disabled={llmKeySaving} className="cursor-pointer hover:bg-white/10" style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.2)", borderRadius: 8, padding: "8px 16px", fontSize: 13, fontWeight: 500, color: "rgba(237,236,234,0.65)", fontFamily: "inherit" }}>Cancel</button>
+              <button onClick={handleSaveLlmKey} disabled={llmKeySaving || !llmKeyInput.trim()} className="cursor-pointer" style={{ background: "#BC9BFF", border: "none", borderRadius: 8, padding: "8px 16px", fontSize: 13, fontWeight: 500, color: "#1e1e1c", fontFamily: "inherit", opacity: llmKeySaving || !llmKeyInput.trim() ? 0.6 : 1 }}>
+                {llmKeySaving ? "Saving…" : "Save key"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Compact greeting */}
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
         <h1 style={{ margin: 0, fontSize: 26, fontWeight: 700, color: "#EDECEA", letterSpacing: "-0.02em", lineHeight: "32px" }}>
@@ -438,6 +570,33 @@ export default function OverviewPage() {
           <span style={{ background: "#F0EDFF", borderRadius: 4, padding: "2px 8px", fontSize: 12, fontWeight: 500, color: "#6510F4" }}>{selectedAgent.agent_type}</span>
         )}
       </div>
+
+      {/* ── Missing LLM API key banner (local mode only) ─────────────────── */}
+      {llmKeyMissing && (
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap",
+          background: "rgba(234,179,8,0.10)", border: "1px solid rgba(234,179,8,0.30)",
+          borderRadius: 10, padding: "12px 16px",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+              stroke="#EAB308" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+              <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+            </svg>
+            <span style={{ fontSize: 13, color: "#FDE047" }}>
+              No LLM API key configured — Cognee can&apos;t process uploads until you add one.
+            </span>
+          </div>
+          <button
+            onClick={() => { trackEvent({ pageName: "Dashboard", eventName: "llm_api_key_banner_clicked" }); setShowLlmKeyModal(true); }}
+            className="cursor-pointer"
+            style={{ background: "none", border: "none", padding: 0, fontSize: 13, fontWeight: 500, color: "#FDE047", textDecoration: "underline", textUnderlineOffset: 3, fontFamily: "inherit", flexShrink: 0 }}
+          >
+            Add your API key now →
+          </button>
+        </div>
+      )}
 
       {/* ── Low-credit warning banner ────────────────────────────────────── */}
       {showCreditPctBanner && (
