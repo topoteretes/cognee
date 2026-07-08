@@ -1,6 +1,49 @@
 import { describe, expect, it } from "vitest";
 
-import { contentMatchesSnippet, normalizeWhitespace, snippetSearchNeedles } from "./resolve";
+import {
+  contentMatchesSnippet,
+  extractSourcePath,
+  normalizeWhitespace,
+  snippetSearchNeedles,
+  stripProvenanceHeader,
+} from "./resolve";
+
+describe("extractSourcePath", () => {
+  it("reads the path from a multi-line provenance header with a line range", () => {
+    const snippet = "Source: themes/aurora/README.md (lines 1-5)\n\n# Aurora theme for Mautic";
+    expect(extractSourcePath(snippet)).toBe("themes/aurora/README.md");
+  });
+
+  it("reads the path when the header is collapsed onto one line", () => {
+    const snippet = "Source: themes/_welcome/README.md (lines 1-5) # Welcome theme for Mautic";
+    expect(extractSourcePath(snippet)).toBe("themes/_welcome/README.md");
+  });
+
+  it("reads a whole-file header without a line range", () => {
+    expect(extractSourcePath("Source: README.md\n\n# Root")).toBe("README.md");
+  });
+
+  it("returns undefined when there is no provenance header", () => {
+    expect(extractSourcePath("# Aurora theme for Mautic")).toBeUndefined();
+    expect(extractSourcePath(undefined)).toBeUndefined();
+  });
+});
+
+describe("stripProvenanceHeader", () => {
+  it("removes a multi-line header, leaving the file's real text", () => {
+    const snippet = "Source: themes/aurora/README.md (lines 1-5)\n\n# Aurora theme for Mautic";
+    expect(stripProvenanceHeader(snippet)).toBe("# Aurora theme for Mautic");
+  });
+
+  it("removes a collapsed single-line header", () => {
+    const snippet = "Source: themes/aurora/README.md (lines 1-5) # Aurora theme for Mautic";
+    expect(stripProvenanceHeader(snippet)).toBe("# Aurora theme for Mautic");
+  });
+
+  it("leaves a snippet without a header untouched", () => {
+    expect(stripProvenanceHeader("Project note: rotate weekly.")).toBe("Project note: rotate weekly.");
+  });
+});
 
 describe("normalizeWhitespace", () => {
   it("collapses runs of whitespace and trims", () => {

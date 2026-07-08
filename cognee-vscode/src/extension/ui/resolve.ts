@@ -3,12 +3,42 @@
  *
  * Citations carry only a document *basename* (Cognee's `document_name`), so when
  * a workspace has several files with that name (e.g. multiple `README.md`), we
- * disambiguate by checking which candidate actually contains the cited snippet.
+ * disambiguate three ways, most reliable first:
+ *   1. the `Source: <path>` provenance header the extension prepends at ingest,
+ *      which names the exact file (see `extractSourcePath`);
+ *   2. the file the user actually remembered (path index);
+ *   3. the file whose content contains the cited snippet.
  * The matching is whitespace-tolerant because chunking can normalize whitespace.
  *
  * These functions are `vscode`-free so they can be unit-tested and reused by the
  * planned JetBrains sidecar.
  */
+
+/**
+ * The extension prepends a `Source: <relative/path>` header (optionally with a
+ * `(lines a-b)` suffix) to everything it ingests. Matches that header at the
+ * start of a snippet so callers can recover the exact source path and the file's
+ * real leading text.
+ */
+const PROVENANCE_RE = /^\s*Source:\s*(\S+)(?:\s+\(lines\s+[^)]*\))?\s*/i;
+
+/**
+ * The exact source path recorded in the snippet's provenance header, if present.
+ * Deterministic — no guessing among same-named files.
+ */
+export function extractSourcePath(snippet: string | undefined): string | undefined {
+  const match = PROVENANCE_RE.exec(snippet ?? "");
+  const path = match?.[1]?.trim();
+  return path ? path : undefined;
+}
+
+/**
+ * The snippet with the `Source: …` provenance header removed, so content matching
+ * and in-file reveal run against the document's real text rather than the header.
+ */
+export function stripProvenanceHeader(snippet: string | undefined): string {
+  return (snippet ?? "").replace(PROVENANCE_RE, "").trim();
+}
 
 /** Collapse runs of whitespace to single spaces and trim. */
 export function normalizeWhitespace(text: string): string {
