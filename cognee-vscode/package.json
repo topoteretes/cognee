@@ -53,6 +53,11 @@
         "category": "Cognee"
       },
       {
+        "command": "cognee.rememberNote",
+        "title": "Remember Note",
+        "category": "Cognee"
+      },
+      {
         "command": "cognee.indexWorkspace",
         "title": "Index Workspace",
         "category": "Cognee"

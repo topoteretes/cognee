@@ -9,7 +9,7 @@ what Cognee knows about the current repository, with links back to the source fi
 
 ## Features
 
-- **Remember Selection / Remember File** — store code or notes into per-repository memory.
+- **Remember Selection / Remember File / Remember Note** — store code, files, or a free-form note into per-repository memory.
 - **Ask My Project Memory** — a panel that answers questions about the repo, with clickable citations.
 - **Recall** — a quick query from the command palette.
 - **Index Workspace** — opt-in bulk ingest, respecting `.gitignore`/`.cogneeignore`, with a preflight summary.
@@ -44,6 +44,7 @@ settings and secret storage.
 | `Cognee: Recall` | One-off query from the palette. |
 | `Cognee: Remember Selection` | Store the current selection (or the whole file). |
 | `Cognee: Remember File` | Store a file (also on the explorer context menu). |
+| `Cognee: Remember Note` | Store a free-form note typed into an input box. |
 | `Cognee: Index Workspace` | Bulk-ingest eligible files after a preflight confirmation. |
 | `Cognee: Forget Project Memory` | Clear memory (keep files) or delete the dataset. |
 | `Cognee: Set Up` | Configure endpoint + key and run a health check. |
