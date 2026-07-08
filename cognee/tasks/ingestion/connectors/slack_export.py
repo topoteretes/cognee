@@ -20,6 +20,30 @@ try:
 except ImportError:
     dlt = None
 
+# Slack membership/config notices arrive as ``type == "message"`` events
+# distinguished only by their ``subtype`` (e.g. "<@U> has joined the channel").
+# They are not conversation content, so they are skipped during parsing.
+_SYSTEM_MESSAGE_SUBTYPES = frozenset(
+    {
+        "channel_join",
+        "channel_leave",
+        "channel_topic",
+        "channel_purpose",
+        "channel_name",
+        "channel_archive",
+        "channel_unarchive",
+        "group_join",
+        "group_leave",
+        "group_topic",
+        "group_purpose",
+        "group_name",
+        "group_archive",
+        "group_unarchive",
+        "pinned_item",
+        "unpinned_item",
+    }
+)
+
 
 def _load_json(path: Path) -> Any:
     with path.open(encoding="utf-8") as handle:
@@ -71,8 +95,9 @@ def _message_text(message: dict, user_name: Optional[str], channel_name: str) ->
 def iter_slack_export_messages(export_path: str | os.PathLike) -> Iterator[dict]:
     """Yield flat Slack message dicts from a workspace export directory.
 
-    Skips non-message events (joins, topic changes, etc.) and messages
-    without a ``ts`` timestamp.
+    Skips non-message events, system/membership notices (joins, topic
+    changes, etc. — see ``_SYSTEM_MESSAGE_SUBTYPES``), and messages without
+    a ``ts`` timestamp.
     """
     root = Path(export_path)
     if not root.is_dir():
@@ -84,7 +109,11 @@ def iter_slack_export_messages(export_path: str | os.PathLike) -> Iterator[dict]
         raise FileNotFoundError(f"Missing channels.json in Slack export: {root}")
 
     channels = _load_json(channels_path)
+    if not isinstance(channels, list):
+        raise ValueError(f"channels.json must be a JSON array of channels: {channels_path}")
     users = _load_json(users_path) if users_path.is_file() else []
+    if not isinstance(users, list):
+        users = []
     channel_lookup = _build_channel_lookup(channels)
     user_lookup = _build_user_lookup(users)
 
@@ -109,6 +138,8 @@ def iter_slack_export_messages(export_path: str | os.PathLike) -> Iterator[dict]
                     continue
                 if message.get("type") != "message":
                     continue
+                if message.get("subtype") in _SYSTEM_MESSAGE_SUBTYPES:
+                    continue
 
                 ts = message.get("ts")
                 if not ts:
@@ -117,7 +148,6 @@ def iter_slack_export_messages(export_path: str | os.PathLike) -> Iterator[dict]
                 user_id = message.get("user") or message.get("bot_id")
                 user_name = user_lookup.get(user_id) if user_id else None
                 text = _message_text(message, user_name, channel_name)
-                ts_no_dot = ts.replace(".", "")
 
                 yield {
                     "id": f"{channel_id}:{ts}",
@@ -128,9 +158,6 @@ def iter_slack_export_messages(export_path: str | os.PathLike) -> Iterator[dict]
                     "user_id": user_id,
                     "user_name": user_name,
                     "text": text,
-                    "subtype": message.get("subtype"),
-                    # Reconstructable permalink for citable recall (#3604).
-                    "slack_permalink": f"https://slack.com/archives/{channel_id}/p{ts_no_dot}",
                 }
 
 
