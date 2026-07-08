@@ -35,7 +35,7 @@ from cognee.context_global_variables import (
 )
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.engine.utils.generate_node_id import generate_node_id
 from cognee.modules.data.methods.get_dataset_databases import get_dataset_databases
 from cognee.modules.data.models import Data, Dataset
@@ -65,7 +65,7 @@ def _triplet_id(source: str, rel: str, target: str) -> str:
 async def verify(stage: str):
     async with _store_context():
         graph_engine = await get_graph_engine()
-        vector_engine = get_vector_engine()
+        vector_engine = await get_vector_engine_async()
         nodes, edges = await graph_engine.get_graph_data()
 
         node_ids = {nid for nid, _ in nodes}
