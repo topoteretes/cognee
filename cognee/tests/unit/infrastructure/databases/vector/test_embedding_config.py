@@ -2,9 +2,16 @@
 
 from unittest.mock import patch
 
+import pytest
+
+from cognee.exceptions import CogneeConfigurationError
 from cognee.infrastructure.databases.vector.embeddings.config import (
     EmbeddingConfig,
     _resolve_embedding_dimensions,
+)
+from cognee.infrastructure.databases.vector.embeddings.get_embedding_engine import (
+    _get_embedding_api_key,
+    _validate_embedding_engine_config,
 )
 
 
@@ -57,7 +64,13 @@ def _clear_embedding_env(monkeypatch):
     # CI workflows set EMBEDDING_* env vars (see .github/workflows/basic_tests.yml),
     # and pydantic-settings reads them at construction time — bypassing the
     # class defaults and the auto-resolve path we want to test here.
-    for var in ("EMBEDDING_PROVIDER", "EMBEDDING_MODEL", "EMBEDDING_DIMENSIONS"):
+    for var in (
+        "EMBEDDING_PROVIDER",
+        "EMBEDDING_MODEL",
+        "EMBEDDING_DIMENSIONS",
+        "EMBEDDING_MAX_COMPLETION_TOKENS",
+        "EMBEDDING_MAX_TOKENS",
+    ):
         monkeypatch.delenv(var, raising=False)
 
 
@@ -80,14 +93,95 @@ def test_config_honors_explicit_dimensions(monkeypatch):
     assert cfg.embedding_dimensions == 384
 
 
-def test_config_falls_back_when_unresolvable(monkeypatch):
-    # Unknown model + unset dimensions falls back to 3072 with a warning,
-    # so existing setups don't crash at import time.
+def test_config_fails_when_unresolvable_dimensions_are_unset(monkeypatch):
+    _clear_embedding_env(monkeypatch)
+
+    with pytest.raises(CogneeConfigurationError, match="Set EMBEDDING_DIMENSIONS"):
+        EmbeddingConfig(
+            _env_file=None,
+            embedding_provider="openai",
+            embedding_model="totally-fake-embedder-zzz",
+            embedding_dimensions=None,
+        )
+
+
+def test_config_allows_unknown_model_with_explicit_dimensions(monkeypatch):
     _clear_embedding_env(monkeypatch)
     cfg = EmbeddingConfig(
         _env_file=None,
-        embedding_provider="openai",
-        embedding_model="totally-fake-embedder-zzz",
-        embedding_dimensions=None,
+        embedding_provider="custom",
+        embedding_model="my-private-embedding-model",
+        embedding_dimensions=1536,
     )
-    assert cfg.embedding_dimensions == 3072
+
+    assert cfg.embedding_dimensions == 1536
+
+
+def test_config_accepts_embedding_max_tokens_alias(monkeypatch):
+    _clear_embedding_env(monkeypatch)
+    monkeypatch.setenv("EMBEDDING_MAX_TOKENS", "4096")
+
+    cfg = EmbeddingConfig(_env_file=None)
+
+    assert cfg.embedding_max_completion_tokens == 4096
+
+
+def test_config_defaults_embedding_batch_size(monkeypatch):
+    _clear_embedding_env(monkeypatch)
+
+    cfg = EmbeddingConfig(_env_file=None)
+
+    assert cfg.embedding_batch_size == 36
+
+
+def test_engine_validation_rejects_silent_openai_embedding_default_for_non_openai_llm(
+    monkeypatch,
+):
+    _clear_embedding_env(monkeypatch)
+    cfg = EmbeddingConfig(_env_file=None)
+
+    with pytest.raises(CogneeConfigurationError, match="default OpenAI embeddings"):
+        _validate_embedding_engine_config(
+            cfg.embedding_provider,
+            cfg.embedding_model,
+            cfg.embedding_dimensions,
+            "anthropic",
+            cfg.model_fields_set,
+        )
+
+
+def test_engine_validation_allows_explicit_openai_embeddings_with_non_openai_llm(
+    monkeypatch,
+):
+    _clear_embedding_env(monkeypatch)
+    cfg = EmbeddingConfig(
+        _env_file=None,
+        embedding_model="openai/text-embedding-3-large",
+        embedding_dimensions=3072,
+    )
+
+    _validate_embedding_engine_config(
+        cfg.embedding_provider,
+        cfg.embedding_model,
+        cfg.embedding_dimensions,
+        "anthropic",
+        cfg.model_fields_set,
+    )
+
+
+def test_engine_key_fallback_reuses_key_for_same_provider():
+    assert (
+        _get_embedding_api_key(None, "same-provider-key", "openai", "openai")
+        == "same-provider-key"
+    )
+
+
+def test_engine_key_fallback_does_not_reuse_mismatched_llm_key():
+    assert _get_embedding_api_key(None, "anthropic-key", "openai", "anthropic") is None
+
+
+def test_engine_key_fallback_prefers_explicit_embedding_key():
+    assert (
+        _get_embedding_api_key("embedding-key", "llm-key", "openai", "anthropic")
+        == "embedding-key"
+    )
