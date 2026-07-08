@@ -3,7 +3,7 @@ import * as vscode from "vscode";
 import { describeError, resolveSearchType } from "../../core";
 import type { Runtime } from "../runtime";
 import { openCitation } from "../ui/citations";
-import { renderRecall, type RenderedRecall } from "../ui/render";
+import { dedupeByFile, rankCitations, renderRecall, type RenderedRecall } from "../ui/render";
 
 /** Prompt for a query, recall project memory, and present the answer + sources. */
 export async function recallCommand(runtime: Runtime): Promise<void> {
@@ -51,7 +51,13 @@ export async function runRecall(
           includeReferences: runtime.config.includeReferences,
           signal: controller.signal,
         });
-        return renderRecall(items);
+        const rendered = renderRecall(items);
+        // Present sources the professional way: rank by relevance to the query
+        // (Cognee returns the Evidence list unranked), then collapse repeated
+        // chunks of the same file so each cited file appears once. Only the
+        // source list is reordered/de-duplicated — never the answer.
+        const citations = dedupeByFile(rankCitations(rendered.citations, query));
+        return { ...rendered, citations };
       } catch (error) {
         runtime.logger.error("recall failed", error);
         void vscode.window.showErrorMessage(`Cognee: ${describeError(error)}`);
