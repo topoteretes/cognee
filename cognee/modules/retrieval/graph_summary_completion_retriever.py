@@ -1,5 +1,6 @@
 from typing import Optional, Type, List
 
+from cognee.base_config import get_base_config
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.utils.completion import summarize_text
 
@@ -28,8 +29,9 @@ class GraphSummaryCompletionRetriever(GraphCompletionRetriever):
         node_name_filter_operator: str = "OR",
         wide_search_top_k: Optional[int] = 100,
         triplet_distance_penalty: Optional[float] = 6.5,
-        feedback_influence: float = 0.0,
+        feedback_influence: float = get_base_config().default_feedback_influence,
         session_id: Optional[str] = None,
+        include_references: bool = False,
     ):
         """Initialize retriever with default prompt paths and search parameters."""
         super().__init__(
@@ -44,6 +46,7 @@ class GraphSummaryCompletionRetriever(GraphCompletionRetriever):
             triplet_distance_penalty=triplet_distance_penalty,
             feedback_influence=feedback_influence,
             session_id=session_id,
+            include_references=include_references,
         )
         self.summarize_prompt_path = summarize_prompt_path
 

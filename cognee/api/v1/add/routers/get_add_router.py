@@ -38,9 +38,22 @@ def get_add_router() -> APIRouter:
     @log_usage(function_name="POST /v1/add", log_type="api_endpoint")
     async def add(
         data: List[UploadFile] = File(default=None),
-        datasetName: Optional[str] = Form(default=None),
+        datasetName: Optional[str] = Form(
+            default=None,
+            examples=["default_dataset"],
+            description=(
+                "Name of the target dataset (created if it does not exist). "
+                "Required unless datasetId is provided."
+            ),
+        ),
         # Note: Literal is needed for Swagger use
-        datasetId: Union[UUID, Literal[""], None] = Form(default=None, examples=[""]),
+        datasetId: Union[UUID, Literal[""], None] = Form(
+            default=None,
+            examples=[""],
+            description=(
+                "Providing dataset ID is mandatory for sharing a dataset between users. Datasets provided by name will only be resolvable by dataset owner."
+            ),
+        ),
         node_set: Optional[List[str]] = Form(default=[""], example=[""]),
         run_in_background: Optional[bool] = Form(default=False),
         user: User = Depends(get_authenticated_user),
@@ -113,11 +126,16 @@ def get_add_router() -> APIRouter:
             )
 
             if isinstance(add_run, PipelineRunErrored):
+                # The failing task's error is carried on ``payload`` (set to
+                # ``repr(error)`` by the pipeline runner). Surface it directly so
+                # the client gets an actionable message instead of an empty body
+                # or the model's repr.
+                detail = add_run.payload if isinstance(add_run.payload, str) else None
                 return JSONResponse(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     content=ErrorResponse(
                         error="Pipeline run errored",
-                        detail=getattr(add_run, "error", None) or str(add_run),
+                        detail=detail or str(add_run),
                     ).model_dump(),
                 )
             return add_run.model_dump()

@@ -417,7 +417,7 @@ async def test_graph_context_prepended_to_completion():
         patch("cognee.infrastructure.session.session_manager.session_user") as mock_session_user,
         patch("cognee.infrastructure.session.session_manager.CacheConfig") as MockCacheConfig,
         patch(
-            "cognee.infrastructure.session.session_manager."
+            "cognee.infrastructure.session.session_turn."
             "generate_session_completion_with_optional_summary",
             side_effect=mock_generate,
         ),

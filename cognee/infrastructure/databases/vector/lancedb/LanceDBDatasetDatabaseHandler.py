@@ -8,6 +8,7 @@ from cognee.modules.users.models import DatasetDatabase
 from cognee.base_config import get_base_config
 from cognee.infrastructure.databases.vector import get_vectordb_config
 from cognee.infrastructure.databases.dataset_database_handler import DatasetDatabaseHandlerInterface
+from cognee.infrastructure.files.storage.get_file_storage import get_file_storage
 
 
 class LanceDBDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
@@ -17,6 +18,7 @@ class LanceDBDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
 
     @classmethod
     async def create_dataset(cls, dataset_id: Optional[UUID], user: Optional[User]) -> dict:
+        """Create local LanceDB dataset connection details for a user's dataset."""
         vector_config = get_vectordb_config()
         base_config = get_base_config()
 
@@ -28,6 +30,7 @@ class LanceDBDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
         databases_directory_path = os.path.join(
             base_config.system_root_directory, "databases", str(user.id)
         )
+        await get_file_storage(databases_directory_path).ensure_directory_exists()
 
         vector_db_name = f"{dataset_id}.lance.db"
 

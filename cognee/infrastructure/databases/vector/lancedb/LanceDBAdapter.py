@@ -66,6 +66,15 @@ class IndexSchema(DataPoint):
     id: str
     text: str
 
+    # Optional reference scalars carried for the search "Evidence" feature.
+    # They stay None for non-chunk data points, so this schema remains
+    # compatible with every indexed DataPoint type.
+    document_id: Optional[str] = None
+    document_name: Optional[str] = None
+    chunk_index: Optional[int] = None
+    source_chunk_id: Optional[str] = None
+    importance_weight: Optional[float] = 0.5
+
     metadata: dict = {"index_fields": ["text"]}
     belongs_to_set: List[str] = []
 
@@ -175,7 +184,7 @@ class LanceDBAdapter(VectorDBInterface):
         # in-flight ``get_connection()`` resuming after its ``await``.
         # ``threading.Lock`` (not ``asyncio.Lock``) for cross-loop safety:
         # ``close()`` can be invoked from a foreign event loop via
-        # ``closing_lru_cache._close_value`` running ``asyncio.run``, and
+        # ``closing_lru_cache._start_close`` running ``asyncio.run``, and
         # awaiting an asyncio.Lock there raises "got Future attached to a
         # different loop". The lock is held for microseconds at a time and
         # never wraps an ``await``, so it can't deadlock the event loop.
@@ -537,6 +546,62 @@ class LanceDBAdapter(VectorDBInterface):
                 collection_name, collection, payload_schema, lance_data_points
             )
 
+    async def upsert_raw_vectors(
+        self,
+        collection_name: str,
+        points: list[dict],
+        payload_schema: Optional[type[BaseModel]] = None,
+    ) -> None:
+        """Upsert caller-provided vectors without invoking the embedding engine."""
+        if not points:
+            return
+        if payload_schema is None:
+            raise ValueError("payload_schema is required for LanceDB raw vector upserts")
+
+        vector_size = self.embedding_engine.get_vector_size()
+        LanceDataPoint = self._make_lance_datapoint_cls(payload_schema, vector_size)
+
+        if not await self.has_collection(collection_name):
+            async with self.VECTOR_DB_LOCK:
+                if not await self.has_collection(collection_name):
+                    connection = await self.get_connection()
+                    await connection.create_table(
+                        name=collection_name,
+                        schema=self._schema_for_create_table(LanceDataPoint),
+                        exist_ok=True,
+                    )
+
+        collection = await self.get_collection(collection_name)
+
+        raw_points = []
+        for point in points:
+            point_id = point.get("id")
+            vector = point.get("vector")
+            payload_value = point.get("payload")
+            if point_id is None:
+                raise ValueError("Raw vector point is missing id")
+            if not isinstance(vector, list):
+                raise ValueError("Raw vector point vector must be a list")
+            if len(vector) != vector_size:
+                raise ValueError(
+                    f"Raw vector size {len(vector)} does not match expected size {vector_size}"
+                )
+            raw_points.append(
+                LanceDataPoint(
+                    id=str(point_id),
+                    vector=vector,
+                    payload=payload_schema.model_validate(payload_value).model_dump(),
+                )
+            )
+
+        async with self.VECTOR_DB_LOCK:
+            await (
+                collection.merge_insert("id")
+                .when_matched_update_all()
+                .when_not_matched_insert_all()
+                .execute(self._records_for_write(raw_points))
+            )
+
     async def _migrate_collection_schema(
         self,
         collection_name: str,
@@ -873,6 +938,15 @@ class LanceDBAdapter(VectorDBInterface):
                 continue
             try:
                 validated = schema_model.model_validate(raw_payload).model_dump()
+                # Re-typing must NOT introduce columns the stored row lacks. The
+                # schema model may have grown optional fields since this
+                # collection was created (e.g. reference scalars added to a text
+                # IndexSchema); model_dump() would emit them as None, and adding
+                # a field absent from the table's Arrow struct makes
+                # `collection.add` reject the row ("field '...' does not exist in
+                # table schema"). Keep exactly the stored key set, coercing the
+                # value where the model provided one.
+                validated = {key: validated.get(key, raw_payload[key]) for key in raw_payload}
             except Exception as e:
                 logger.debug(
                     "_coerce_rows_to_typed_payload: validation fell back for id=%s: %s",
@@ -888,6 +962,10 @@ class LanceDBAdapter(VectorDBInterface):
 
     async def retrieve(self, collection_name: str, data_point_ids: list[str]):
         """Return rows from `collection_name` whose id is in `data_point_ids`."""
+        if not data_point_ids:
+            # No ids requested. Avoid building an "id IN ()" filter, which lance
+            # rejects as a parse error; pgvector/chromadb return [] here too.
+            return []
         try:
             collection = await self.get_collection(collection_name)
         except CollectionNotFoundError:
@@ -1203,6 +1281,14 @@ class LanceDBAdapter(VectorDBInterface):
                 IndexSchema(
                     id=str(data_point.id),
                     text=getattr(data_point, data_point.metadata["index_fields"][0]),
+                    # Reference scalars for search "Evidence". Pulled via getattr
+                    # so non-chunk data points (which lack these fields) simply
+                    # fall back to None instead of raising.
+                    document_id=getattr(data_point, "document_id", None),
+                    document_name=getattr(data_point, "document_name", None),
+                    chunk_index=getattr(data_point, "chunk_index", None),
+                    source_chunk_id=getattr(data_point, "source_chunk_id", None),
+                    importance_weight=getattr(data_point, "importance_weight", None),
                     belongs_to_set=(data_point.belongs_to_set or []),
                 )
                 for data_point in data_points
@@ -1218,7 +1304,9 @@ class LanceDBAdapter(VectorDBInterface):
             await collection.delete("id IS NOT NULL")
             await connection.drop_table(collection_name)
 
-        if self.url.startswith("/"):
+        if self.url and not self.url.startswith(
+            ("db://", "http://", "https://", "s3://", "gs://", "az://")
+        ):
             db_dir_path = path.dirname(self.url)
             db_file_name = path.basename(self.url)
             await get_file_storage(db_dir_path).remove_all(db_file_name)

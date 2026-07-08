@@ -12,6 +12,7 @@ Covers the scenarios that used to silently hang or leak:
 from __future__ import annotations
 
 import multiprocessing as mp
+import sys
 import time
 
 import pytest
@@ -257,7 +258,7 @@ def test_worker_killed_mid_request_flips_closed():
             session.call(Request(op=OP_ECHO, args=("hi",)))
         # Session should now be flipped to closed; next call gets the faster,
         # explicit "session is closed" message.
-        assert session._closed is True
+        assert session._closed_event.is_set()
         with pytest.raises(SubprocessTransportError, match="session is closed"):
             session.call(Request(op=OP_ECHO, args=("hi",)))
     finally:
@@ -275,7 +276,7 @@ def test_init_timeout_raises():
     session = SubprocessSession(proc, req_q, resp_q, init_timeout=1.0)
     with pytest.raises(RuntimeError, match="init timed out"):
         session.wait_for_ready()
-    assert session._closed is True
+    assert session._closed_event.is_set()
 
 
 def test_init_failure_propagates():
@@ -289,7 +290,7 @@ def test_init_failure_propagates():
     session = SubprocessSession(proc, req_q, resp_q, init_timeout=5.0)
     with pytest.raises(RuntimeError, match="init failed"):
         session.wait_for_ready()
-    assert session._closed is True
+    assert session._closed_event.is_set()
 
 
 def test_init_clean_exit_before_ready_surfaces_diagnostics():
@@ -406,6 +407,16 @@ def test_describe_exitcode_decodes_signals():
     assert _describe_exitcode(-999) == "-999"
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "POSIX signal-exitcode semantics: os.kill(pid, SIGTERM) maps to "
+        "TerminateProcess on Windows with a positive exitcode (no negative "
+        "signal number), so signal-name surfacing cannot be guaranteed. "
+        "_describe_exitcode's POSIX decoding is covered by "
+        "test_describe_exitcode_decodes_signals."
+    ),
+)
 def test_init_signal_killed_worker_surfaces_signal_name():
     """End-to-end: a worker that dies to SIGTERM before READY surfaces
     ``exitcode=-15 (SIGTERM …)`` in the error message. Regression guard
@@ -430,14 +441,19 @@ def test_init_signal_killed_worker_surfaces_signal_name():
 
 
 def test_call_timeout_on_hung_worker():
-    """A request that doesn't return within the deadline raises TimeoutError
-    and marks the session closed so callers don't wait forever.
+    """A request that doesn't return within the deadline raises TimeoutError.
+
+    Under the concurrent-RPC design a per-call timeout no longer marks the
+    whole session closed — sibling in-flight calls can still complete and
+    callers can issue fresh requests against the same session. The hung
+    op stays pending on the worker until ``shutdown()`` reaps it.
     """
     session = _start_session(call_timeout=1.0)
     try:
         with pytest.raises(TimeoutError):
             session.call(Request(op=OP_SLEEP, args=()))
-        assert session._closed is True
+        # Session remains operational despite the per-call timeout.
+        assert not session._closed_event.is_set()
     finally:
         session.shutdown()
 

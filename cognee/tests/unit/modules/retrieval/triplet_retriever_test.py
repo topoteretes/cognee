@@ -1,6 +1,7 @@
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 
+from cognee.infrastructure.session.session_manager import SessionTurnPreparation
 from cognee.modules.retrieval.triplet_retriever import TripletRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
@@ -28,7 +29,7 @@ async def test_get_context_success(mock_vector_engine):
     retriever = TripletRetriever(top_k=5)
 
     with patch(
-        "cognee.modules.retrieval.triplet_retriever.get_vector_engine",
+        "cognee.modules.retrieval.triplet_retriever.get_vector_engine_async",
         return_value=mock_vector_engine,
     ):
         objects = await retriever.get_retrieved_objects("test query")
@@ -49,7 +50,7 @@ async def test_get_objects_no_collection(mock_vector_engine):
     retriever = TripletRetriever()
 
     with patch(
-        "cognee.modules.retrieval.triplet_retriever.get_vector_engine",
+        "cognee.modules.retrieval.triplet_retriever.get_vector_engine_async",
         return_value=mock_vector_engine,
     ):
         with pytest.raises(NoDataError, match="create_triplet_embeddings"):
@@ -64,7 +65,7 @@ async def test_get_context_empty_results(mock_vector_engine):
     retriever = TripletRetriever()
 
     with patch(
-        "cognee.modules.retrieval.triplet_retriever.get_vector_engine",
+        "cognee.modules.retrieval.triplet_retriever.get_vector_engine_async",
         return_value=mock_vector_engine,
     ):
         context = await retriever.get_context_from_objects("test query", [])
@@ -80,7 +81,7 @@ async def test_get_objects_collection_not_found_error(mock_vector_engine):
     retriever = TripletRetriever()
 
     with patch(
-        "cognee.modules.retrieval.triplet_retriever.get_vector_engine",
+        "cognee.modules.retrieval.triplet_retriever.get_vector_engine_async",
         return_value=mock_vector_engine,
     ):
         with pytest.raises(NoDataError, match="No data found"):
@@ -98,7 +99,7 @@ async def test_get_context_empty_payload_text(mock_vector_engine):
     retriever = TripletRetriever()
 
     with patch(
-        "cognee.modules.retrieval.triplet_retriever.get_vector_engine",
+        "cognee.modules.retrieval.triplet_retriever.get_vector_engine_async",
         return_value=mock_vector_engine,
     ):
         with pytest.raises(KeyError):
@@ -117,7 +118,7 @@ async def test_get_context_single_triplet(mock_vector_engine):
     retriever = TripletRetriever()
 
     with patch(
-        "cognee.modules.retrieval.triplet_retriever.get_vector_engine",
+        "cognee.modules.retrieval.triplet_retriever.get_vector_engine_async",
         return_value=mock_vector_engine,
     ):
         objects = await retriever.get_retrieved_objects("test query")
@@ -165,7 +166,7 @@ async def test_get_completion_without_context(mock_vector_engine):
 
     with (
         patch(
-            "cognee.modules.retrieval.triplet_retriever.get_vector_engine",
+            "cognee.modules.retrieval.triplet_retriever.get_vector_engine_async",
             return_value=mock_vector_engine,
         ),
         patch(
@@ -225,7 +226,7 @@ async def test_get_completion_with_session(mock_vector_engine):
 
     with (
         patch(
-            "cognee.modules.retrieval.triplet_retriever.get_vector_engine",
+            "cognee.modules.retrieval.triplet_retriever.get_vector_engine_async",
             return_value=mock_vector_engine,
         ),
         patch(
@@ -244,7 +245,14 @@ async def test_get_completion_with_session(mock_vector_engine):
 
         objects = await retriever.get_retrieved_objects("test query")
         context = await retriever.get_context_from_objects("test query", retrieved_objects=objects)
-        completion = await retriever.get_completion_from_context("test query", objects, context)
+        turn_preparation = SessionTurnPreparation(effective_query="prepared query")
+        completion = await retriever.get_completion_from_context(
+            "test query",
+            objects,
+            context,
+            effective_query="prepared query",
+            turn_preparation=turn_preparation,
+        )
 
     assert isinstance(completion, list)
     assert len(completion) == 1
@@ -252,6 +260,8 @@ async def test_get_completion_with_session(mock_vector_engine):
     mock_sm.generate_completion_with_session.assert_awaited_once()
     call_kw = mock_sm.generate_completion_with_session.call_args.kwargs
     assert call_kw.get("used_graph_element_ids") is None
+    assert call_kw["effective_query"] == "prepared query"
+    assert call_kw["turn_preparation"] is turn_preparation
 
 
 @pytest.mark.asyncio
@@ -266,7 +276,7 @@ async def test_get_completion_with_session_no_user_id(mock_vector_engine):
 
     with (
         patch(
-            "cognee.modules.retrieval.triplet_retriever.get_vector_engine",
+            "cognee.modules.retrieval.triplet_retriever.get_vector_engine_async",
             return_value=mock_vector_engine,
         ),
         patch(
@@ -306,7 +316,7 @@ async def test_get_completion_with_response_model(mock_vector_engine):
 
     with (
         patch(
-            "cognee.modules.retrieval.triplet_retriever.get_vector_engine",
+            "cognee.modules.retrieval.triplet_retriever.get_vector_engine_async",
             return_value=mock_vector_engine,
         ),
         patch(

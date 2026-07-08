@@ -24,6 +24,7 @@ from cognee_db_workers.lancedb_protocol import (
     OP_DROP_TABLE,
     OP_OPEN_TABLE,
     OP_TABLE_ADD,
+    OP_TABLE_OPTIMIZE,
     OP_TABLE_COUNT_ROWS,
     OP_TABLE_DELETE,
     OP_TABLE_MERGE_INSERT_EXECUTE,
@@ -238,7 +239,7 @@ class RemoteLanceDBTable:
         # Best-effort; async release is preferred. Only try sync release if the
         # session still looks alive — otherwise the handle is already gone.
         try:
-            if self._handle_id is not None and not self._session._closed:
+            if self._handle_id is not None and not self._session._closed_event.is_set():
                 self.release_sync()
         except Exception:
             pass
@@ -269,6 +270,16 @@ class RemoteLanceDBTable:
     async def delete(self, where_expr: str) -> None:
         await self._session.call_async(
             Request(op=OP_TABLE_DELETE, handle_id=self.handle_id, args=(where_expr,))
+        )
+
+    async def optimize(self) -> None:
+        """Compact the table (mirrors ``lancedb.AsyncTable.optimize``).
+
+        Materializes deletion vectors into clean fragments — lance 0.32 reads
+        and merge_inserts can panic on tables carrying fresh deletion vectors,
+        so callers that bulk-delete (e.g. id migrations) compact afterwards."""
+        await self._session.call_async(
+            Request(op=OP_TABLE_OPTIMIZE, handle_id=self.handle_id, args=())
         )
 
     def query(self) -> RemoteQuery:

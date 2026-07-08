@@ -158,3 +158,17 @@ def get_embedding_config():
           configuration settings.
     """
     return EmbeddingConfig()
+
+
+def get_embedding_context_config() -> EmbeddingConfig:
+    """Get the appropriate embedding config based on the current async context.
+
+    Mirrors the graph/vector context-config pattern: if an ``EmbeddingConfig`` has
+    been set on the ``embedding_config`` ContextVar (via
+    ``set_database_global_context_variables``), return it so that different async
+    tasks, threads and processes can use different embedding configurations.
+    Otherwise fall back to the cached global config.
+    """
+    from cognee.context_global_variables import embedding_config
+
+    return embedding_config.get() or get_embedding_config()

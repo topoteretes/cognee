@@ -29,7 +29,7 @@ pre-commit install
 ```
 
 ### Available Installation Extras
-- **postgres** / **postgres-binary** - PostgreSQL + PGVector support
+- **postgres** / **postgres-binary** - PostgreSQL + PGVector support (also enables the Postgres session-cache backend, `CACHE_BACKEND=postgres`)
 - **neo4j** - Neo4j graph database support
 - **neptune** - AWS Neptune support
 - **chromadb** - ChromaDB vector database
@@ -54,7 +54,7 @@ pre-commit install
 - **evals** - Evaluation tools
 - **deepeval** - DeepEval testing framework
 - **posthog** - PostHog analytics
-- **monitoring** - Sentry + Langfuse observability
+- **tracing** - OpenTelemetry tracing
 - **distributed** - Modal distributed execution
 - **dev** - All development tools (pytest, ty, ruff, etc.)
 - **debug** - Debugpy for debugging
@@ -101,7 +101,7 @@ ty check .
 ### Running Cognee
 ```bash
 # Using Python SDK
-python examples/python/simple_example.py
+uv run python examples/demos/simple_cognee_example.py
 
 # Using CLI
 cognee-cli add "Your text here"
@@ -228,7 +228,7 @@ Copy `.env.template` to `.env` and configure:
 ```bash
 # Minimal setup (defaults to OpenAI + local file-based databases)
 LLM_API_KEY="your_openai_api_key"
-LLM_MODEL="openai/gpt-4o-mini"  # Default model
+LLM_MODEL="openai/gpt-5-mini"  # Default model
 ```
 
 **Important**: If you configure only LLM or only embeddings, the other defaults to OpenAI. Ensure you have a working OpenAI API key, or configure both to avoid unexpected defaults.
@@ -286,6 +286,14 @@ GRAPH_DATABASE_PROVIDER=postgres
 GRAPH_DATABASE_URL=postgresql+asyncpg://cognee:cognee@localhost:5432/cognee_db
 ```
 
+#### Session Cache
+```bash
+# Session/conversation cache backend: sqlite (default), postgres, redis, fs, tapes
+CACHE_BACKEND=sqlite
+# Optional explicit SQLAlchemy URL for sqlite/postgres cache backends (overrides defaults)
+CACHE_DB_URL=postgresql+asyncpg://cognee:cognee@localhost:5432/cognee_db
+```
+
 ### LLM Provider Configuration
 
 Supported providers: OpenAI (default), Azure OpenAI, Google Gemini, Anthropic, AWS Bedrock, Ollama, LM Studio, Custom (OpenAI-compatible APIs)
@@ -293,7 +301,7 @@ Supported providers: OpenAI (default), Azure OpenAI, Google Gemini, Anthropic, A
 #### OpenAI (Recommended - Minimal Setup)
 ```bash
 LLM_API_KEY="your_openai_api_key"
-LLM_MODEL="openai/gpt-4o-mini"  # or gpt-4o, gpt-4-turbo, etc.
+LLM_MODEL="openai/gpt-5-mini"  # default; or gpt-5, gpt-4o, gpt-4o-mini, etc.
 LLM_PROVIDER="openai"
 ```
 
@@ -426,6 +434,12 @@ git pull origin dev
 git checkout -b feature/your-feature-name
 ```
 
+**Core-team PRs must reference a Linear issue.** Put the issue key (e.g. `COG-123`)
+in the PR title or the branch name so Linear links the PR to its ticket. This is
+enforced by the `Require Linear issue` workflow (`linear-issue-check`), a required
+status check. Fork / external-contributor PRs are exempt (the check skips them), so
+this rule applies only to internal PRs.
+
 ## Code Style
 
 - **Formatter**: Ruff (configured in `pyproject.toml`)
@@ -453,7 +467,7 @@ FastAPI application with versioned routes under `cognee/api/v1/`:
 - `/search` - Query interface
 - `/memify` - Graph enrichment
 - `/datasets` - Dataset management
-- `/users` - Authentication (if `REQUIRE_AUTHENTICATION=True`)
+- `/users` - Authentication (when `REQUIRE_AUTHENTICATION` is effectively true; see auth posture below)
 - `/visualize` - Graph visualization server
 
 ## Python SDK Entry Points
@@ -475,8 +489,8 @@ Several security environment variables in `.env`:
 - `ACCEPT_LOCAL_FILE_PATH` - Allow local file paths (default: True)
 - `ALLOW_HTTP_REQUESTS` - Allow HTTP requests from Cognee (default: True)
 - `ALLOW_CYPHER_QUERY` - Allow raw Cypher queries (default: True)
-- `REQUIRE_AUTHENTICATION` - Enable API authentication (default: False)
-- `ENABLE_BACKEND_ACCESS_CONTROL` - Multi-tenant isolation (default: True)
+- `ENABLE_BACKEND_ACCESS_CONTROL` - Multi-tenant isolation (default: True). When `true`, API auth is required and per-user/dataset DB isolation is enabled. When `false`, single-user mode: shared DBs and auth off unless overridden.
+- `REQUIRE_AUTHENTICATION` - Explicit auth override. Unset (default): follows `ENABLE_BACKEND_ACCESS_CONTROL`. `false` is ignored when `ENABLE_BACKEND_ACCESS_CONTROL=true`. For a single-user deployment with auth off, set `ENABLE_BACKEND_ACCESS_CONTROL=false` (and optionally `REQUIRE_AUTHENTICATION=false`).
 
 For production deployments, review and tighten these settings.
 
@@ -498,10 +512,10 @@ task = Task(my_custom_task)
 ### Accessing Databases Directly
 ```python
 from cognee.infrastructure.databases.graph import get_graph_engine
-from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.infrastructure.databases.vector import get_vector_engine_async
 
 graph_engine = await get_graph_engine()
-vector_engine = await get_vector_engine()
+vector_engine = await get_vector_engine_async()
 ```
 
 ### Using LLM Gateway

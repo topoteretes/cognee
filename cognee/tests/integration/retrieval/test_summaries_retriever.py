@@ -6,7 +6,7 @@ import cognee
 
 from cognee.low_level import setup
 from cognee.tasks.storage import add_data_points
-from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.modules.chunking.models import DocumentChunk
 from cognee.tasks.summarization.models import TextSummary
 from cognee.modules.data.processing.document_types import TextDocument
@@ -53,6 +53,8 @@ async def setup_test_environment_with_summaries():
     chunk1_summary = TextSummary(
         text="S.R.",
         made_from=chunk1,
+        source_chunk_id=str(chunk1.id),
+        belongs_to_set=chunk1.belongs_to_set,
     )
     chunk2 = DocumentChunk(
         text="Mike Broski",
@@ -65,6 +67,8 @@ async def setup_test_environment_with_summaries():
     chunk2_summary = TextSummary(
         text="M.B.",
         made_from=chunk2,
+        source_chunk_id=str(chunk2.id),
+        belongs_to_set=chunk2.belongs_to_set,
     )
     chunk3 = DocumentChunk(
         text="Christina Mayer",
@@ -77,6 +81,8 @@ async def setup_test_environment_with_summaries():
     chunk3_summary = TextSummary(
         text="C.M.",
         made_from=chunk3,
+        source_chunk_id=str(chunk3.id),
+        belongs_to_set=chunk3.belongs_to_set,
     )
     chunk4 = DocumentChunk(
         text="Range Rover",
@@ -89,6 +95,8 @@ async def setup_test_environment_with_summaries():
     chunk4_summary = TextSummary(
         text="R.R.",
         made_from=chunk4,
+        source_chunk_id=str(chunk4.id),
+        belongs_to_set=chunk4.belongs_to_set,
     )
     chunk5 = DocumentChunk(
         text="Hyundai",
@@ -101,6 +109,8 @@ async def setup_test_environment_with_summaries():
     chunk5_summary = TextSummary(
         text="H.Y.",
         made_from=chunk5,
+        source_chunk_id=str(chunk5.id),
+        belongs_to_set=chunk5.belongs_to_set,
     )
     chunk6 = DocumentChunk(
         text="Chrysler",
@@ -113,6 +123,8 @@ async def setup_test_environment_with_summaries():
     chunk6_summary = TextSummary(
         text="C.H.",
         made_from=chunk6,
+        source_chunk_id=str(chunk6.id),
+        belongs_to_set=chunk6.belongs_to_set,
     )
 
     entities = [
@@ -183,8 +195,8 @@ async def test_summaries_retriever_on_empty_graph(setup_test_environment_empty):
     with pytest.raises(NoDataError):
         await retriever.get_retrieved_objects(query)
 
-    vector_engine = get_vector_engine()
-    await vector_engine.create_collection("TextSummary_text", payload_schema=TextSummary)
+    vector_engine = await get_vector_engine_async()
+    await vector_engine.create_vector_index("TextSummary", "text")
 
     summaries = await retriever.get_retrieved_objects(query)
     context = await retriever.get_context_from_objects(query=query, retrieved_objects=summaries)
