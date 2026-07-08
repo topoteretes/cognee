@@ -512,10 +512,10 @@ task = Task(my_custom_task)
 ### Accessing Databases Directly
 ```python
 from cognee.infrastructure.databases.graph import get_graph_engine
-from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.infrastructure.databases.vector import get_vector_engine_async
 
 graph_engine = await get_graph_engine()
-vector_engine = await get_vector_engine()
+vector_engine = await get_vector_engine_async()
 ```
 
 ### Using LLM Gateway

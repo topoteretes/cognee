@@ -226,7 +226,7 @@ class TestSessionQaVectorHelpers:
             return vector_engine
 
         monkeypatch.setattr(
-            "cognee.infrastructure.databases.vector.get_vector_engine",
+            "cognee.infrastructure.databases.vector.get_vector_engine_async",
             _get_vector_engine,
         )
 
@@ -258,7 +258,7 @@ class TestSessionQaVectorHelpers:
             return vector_engine
 
         monkeypatch.setattr(
-            "cognee.infrastructure.databases.vector.get_vector_engine",
+            "cognee.infrastructure.databases.vector.get_vector_engine_async",
             _get_vector_engine,
         )
 
@@ -285,7 +285,7 @@ class TestSessionQaVectorHelpers:
             return vector_engine
 
         monkeypatch.setattr(
-            "cognee.infrastructure.databases.vector.get_vector_engine",
+            "cognee.infrastructure.databases.vector.get_vector_engine_async",
             _get_vector_engine,
         )
 
@@ -308,7 +308,7 @@ class TestSessionQaVectorHelpers:
             return vector_engine
 
         monkeypatch.setattr(
-            "cognee.infrastructure.databases.vector.get_vector_engine",
+            "cognee.infrastructure.databases.vector.get_vector_engine_async",
             _get_vector_engine,
         )
 

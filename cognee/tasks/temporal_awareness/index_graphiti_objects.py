@@ -2,7 +2,7 @@ from cognee.shared.logging_utils import get_logger, ERROR
 from collections import Counter
 
 from cognee.tasks.temporal_awareness.graphiti_model import GraphitiNode
-from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.graph.models.EdgeType import EdgeType
 
@@ -14,7 +14,7 @@ async def index_and_transform_graphiti_nodes_and_edges():
         created_indexes = {}
         index_points = {}
 
-        vector_engine = await get_vector_engine()
+        vector_engine = await get_vector_engine_async()
         graph_engine = await get_graph_engine()
     except Exception as e:
         logger.error("Failed to initialize engines: %s", e)

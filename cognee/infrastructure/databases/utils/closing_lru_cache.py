@@ -286,7 +286,7 @@ class _LeasedValueProxy:
                 async def await_with_lease(_self=self):
                     # The closure keeps ``self`` alive until the awaitable
                     # completes, which matters for one-liners like
-                    # ``await get_vector_engine().search(...)``.
+                    # ``await get_vector_engine_async().search(...)``.
                     return await result
 
                 return await_with_lease()

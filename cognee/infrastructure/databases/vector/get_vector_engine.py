@@ -1,3 +1,5 @@
+import warnings
+
 from .config import get_vectordb_context_config
 from .create_vector_engine import create_vector_engine
 
@@ -81,7 +83,50 @@ class _VectorEngineHandle:
         return f"<VectorEngineHandle config={self._config!r}>"
 
 
-async def get_vector_engine():
-    # ``async`` so every call site ``await``s it (matching the async resolution
-    # surface); resolution itself stays synchronous inside the handle.
+def _new_vector_engine_handle() -> _VectorEngineHandle:
     return _VectorEngineHandle(get_vectordb_context_config())
+
+
+async def get_vector_engine_async() -> _VectorEngineHandle:
+    """Return the vector engine adapter. **This is the canonical way to obtain the
+    adapter** — use it (and ``await`` it) everywhere inside cognee and in async
+    application code, alongside ``await get_graph_engine()``.
+
+    The ``async`` signature exists to keep a uniform "await the engine getter"
+    contract with ``get_graph_engine()`` (which genuinely awaits — Kuzu/Ladybug
+    take an exclusive on-disk file lock, so it must wait for an in-flight close
+    before reopening). Vector resolution itself is synchronous: LanceDB connects
+    via ``connect_async`` without taking that lock, so there is no in-flight-close
+    race to await here. Do not "restore symmetry" by adding an ``acreate`` path —
+    it was tried and deliberately walked back (see #3708) because it is a no-op
+    for LanceDB.
+    """
+    return _new_vector_engine_handle()
+
+
+def get_vector_engine() -> _VectorEngineHandle:
+    """Deprecated synchronous accessor kept for backward compatibility.
+
+    .. deprecated::
+        Use ``await get_vector_engine_async()`` instead. This shim exists so
+        existing downstream code that calls ``get_vector_engine()`` without
+        ``await`` (e.g. cognee-community adapters pinned to older releases) keeps
+        working after vector resolution was moved to the async surface.
+
+    Safe to call synchronously from any context — no running event loop is
+    required — because constructing the handle does no async work (see
+    ``get_vector_engine_async`` for why vector needs no async resolution).
+
+    Note, however, that the *returned adapter* only works inside a running
+    asyncio event loop: its operations (``embed_text``, ``get_connection``,
+    ``search``, ...) are coroutines that must be awaited. So this getter is only
+    useful to code that will ``await`` the adapter's methods within an event loop.
+    """
+    warnings.warn(
+        "get_vector_engine() is deprecated; use `await get_vector_engine_async()` "
+        "instead. The returned adapter's methods are async and must be awaited "
+        "inside a running event loop.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return _new_vector_engine_handle()
