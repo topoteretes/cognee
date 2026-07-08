@@ -1,4 +1,4 @@
-import localFetch from "@/modules/instances/localFetch";
+import { CogneeInstance } from "../instances/types";
 
 export interface ApiKey {
   id: string;
@@ -7,19 +7,9 @@ export interface ApiKey {
   name: string;
 }
 
-export default async function getApiKeys(): Promise<ApiKey[]> {
-  try {
-    const response = await localFetch("/v1/auth/api-keys");
-    if (!response.ok) return [];
-    const data = await response.json();
-    if (!Array.isArray(data)) return [];
-    return data.map((item: Record<string, unknown>) => ({
-      id: String(item.id ?? ""),
-      key: String(item.key ?? ""),
-      label: String(item.label ?? ""),
-      name: String(item.name ?? ""),
-    }));
-  } catch {
-    return [];
-  }
+export default async function getApiKeys(instance: CogneeInstance): Promise<ApiKey[]> {
+  const response = await instance.fetch("/auth/api-keys");
+  if (!response.ok) return [];
+  const data = await response.json();
+  return Array.isArray(data) ? data : [];
 }

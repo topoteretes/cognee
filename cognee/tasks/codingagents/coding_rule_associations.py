@@ -1,7 +1,7 @@
 from uuid import NAMESPACE_OID, uuid5
 
 from cognee.infrastructure.databases.graph import get_graph_engine
-from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.infrastructure.databases.vector import get_vector_engine_async
 
 from cognee.low_level import DataPoint
 from cognee.infrastructure.llm.prompts import render_prompt
@@ -52,7 +52,7 @@ async def get_existing_rules(rules_nodeset_name: str) -> List[str]:
 
 
 async def get_origin_edges(data: str, rules: List[Rule]) -> list[Any]:
-    vector_engine = await get_vector_engine()
+    vector_engine = await get_vector_engine_async()
 
     origin_chunk = await vector_engine.search("DocumentChunk_text", data, limit=1)
 

@@ -1,32 +1,5 @@
 import { redirect } from "next/navigation";
 
-// Build a real Error (not a bare object) from a server error response.
-//
-// Rejecting with a plain object is why callers logged "ERROR: {}" — a plain
-// object has no useful default serialization in console.error. An Error
-// serializes with its message (and stack). The server's parsed JSON fields
-// (detail/error/message/...) are copied onto the Error so existing callers that
-// read `error.detail`/`error.error`/`error.message` keep working.
-function buildServerError(body: string, status: number, statusText: string): Error {
-  let parsed: Record<string, unknown> = {};
-  if (body) {
-    try {
-      parsed = JSON.parse(body);
-    } catch {
-      parsed = { message: body };
-    }
-  }
-  const detail = parsed.detail ?? parsed.error ?? parsed.message;
-  const message =
-    typeof detail === "string" && detail.trim()
-      ? detail
-      : (body && body.trim()) || statusText || `Request failed with status ${status}`;
-  const error = Object.assign(new Error(message), parsed, { status, statusText });
-  // Ensure the resolved message wins even if `parsed` carried its own `message`.
-  error.message = message;
-  return error;
-}
-
 export default function handleServerErrors(
   response: Response,
   retry: ((response: Response) => Promise<Response>) | null = null,
@@ -49,7 +22,8 @@ export default function handleServerErrors(
           if (text.toLowerCase().includes("verify your email")) {
             return redirect("/verify-email");
           }
-          reject(buildServerError(text || "Forbidden", 403, "Forbidden"));
+          const error: Record<string, unknown> = { message: text || "Forbidden", status: 403, statusText: "Forbidden" };
+          reject(error);
         });
       }
       // 401 = not authenticated — redirect to sign-in
@@ -64,7 +38,15 @@ export default function handleServerErrors(
     }
     if (!response.ok) {
       return response.text().then(text => {
-        reject(buildServerError(text, response.status, response.statusText));
+        let error: Record<string, unknown> = {};
+        try {
+          error = JSON.parse(text);
+        } catch {
+          error = { message: text || response.statusText };
+        }
+        error.status = response.status;
+        error.statusText = response.statusText;
+        reject(error);
       });
     }
 
@@ -72,6 +54,6 @@ export default function handleServerErrors(
       return resolve(response);
     }
 
-    return reject(buildServerError("", response.status, response.statusText));
+    return reject(response);
   });
 }

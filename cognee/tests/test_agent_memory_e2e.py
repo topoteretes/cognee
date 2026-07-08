@@ -20,9 +20,9 @@ from cognee.modules.users.permissions.methods import authorized_give_permission_
 async def _reset_engines_and_prune() -> None:
     """Reset cached engines and clear persisted test state."""
     try:
-        from cognee.infrastructure.databases.vector import get_vector_engine
+        from cognee.infrastructure.databases.vector import get_vector_engine_async
 
-        vector_engine = await get_vector_engine()
+        vector_engine = await get_vector_engine_async()
         if hasattr(vector_engine, "engine") and hasattr(vector_engine.engine, "dispose"):
             await vector_engine.engine.dispose(close=True)
     except Exception:

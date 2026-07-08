@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import List, Optional, Union
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from pydantic import Field
@@ -12,6 +12,7 @@ from cognee.api.DTO import InDTO, OutDTO
 from cognee.api.v1.recall.recall import RecallResponse
 from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
+from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError
 from cognee.modules.search.operations import get_history
 from cognee.modules.search.types import SearchResult, SearchType
 from cognee.modules.users.exceptions.exceptions import PermissionDeniedError, UserNotFoundError
@@ -192,6 +193,14 @@ def get_recall_router() -> APIRouter:
                 include_references=payload.include_references,
             )
             return jsonable_encoder(results)
+        except LLMPaymentRequiredError as error:
+            return JSONResponse(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                content={
+                    "error": "Token budget exhausted",
+                    "detail": str(error),
+                },
+            )
         except (DatabaseNotCreatedError, UserNotFoundError, CogneeValidationError) as e:
             logger = get_logger()
             logger.error("Recall prerequisites error: %s", e, exc_info=True)

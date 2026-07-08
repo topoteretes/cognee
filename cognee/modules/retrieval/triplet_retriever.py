@@ -1,7 +1,7 @@
 from typing import Any, Dict, List, Optional, Type, Union
 
 from cognee.shared.logging_utils import get_logger
-from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.modules.retrieval.utils.completion import generate_completion
 from cognee.infrastructure.session.get_session_manager import get_session_manager
 from cognee.modules.retrieval.base_retriever import BaseRetriever
@@ -60,7 +60,7 @@ class TripletRetriever(BaseRetriever):
 
             - Any: A list containing the retrieved triplets, or an empty list if none are found.
         """
-        vector_engine = await get_vector_engine()
+        vector_engine = await get_vector_engine_async()
 
         try:
             if not await vector_engine.has_collection(collection_name="Triplet_text"):
