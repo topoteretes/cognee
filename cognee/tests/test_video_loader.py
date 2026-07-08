@@ -36,6 +36,24 @@ class _FakeTranscript:
         self.payload = _FakePayload(segments) if segments is not None else object()
 
 
+class _spy_on_remove:
+    """Record paths passed to os.remove while still deleting the real file."""
+
+    def __init__(self):
+        self.paths = []
+
+    def patch(self):
+        real_remove = os.remove
+
+        def _record(path):
+            self.paths.append(path)
+            real_remove(path)
+
+        return patch(
+            "cognee.infrastructure.loaders.core.video_loader.os.remove", side_effect=_record
+        )
+
+
 @pytest.fixture
 def loader():
     return VideoLoader()
@@ -195,14 +213,17 @@ async def test_load_without_ffmpeg_transcribes_mp4_directly(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("extension", ["mov", "mkv", "avi", "m4v"])
 @patch("cognee.infrastructure.loaders.core.video_loader._resolve_ffmpeg")
 @patch(
     "cognee.infrastructure.loaders.core.video_loader.get_file_metadata",
     new_callable=AsyncMock,
 )
-async def test_load_without_ffmpeg_rejects_mov(mock_metadata, mock_ffmpeg, loader):
-    """No ffmpeg: a container that needs extraction raises an actionable error."""
-    mock_metadata.return_value = {"content_hash": "hash123", "extension": "mov"}
+async def test_load_without_ffmpeg_rejects_non_direct_containers(
+    mock_metadata, mock_ffmpeg, loader, extension
+):
+    """No ffmpeg: every container outside {mp4, webm} raises an actionable error."""
+    mock_metadata.return_value = {"content_hash": "hash123", "extension": extension}
     mock_ffmpeg.return_value = None
 
     with pytest.raises(RuntimeError, match="ffmpeg"):
@@ -244,3 +265,87 @@ async def test_load_falls_back_to_plain_transcript(
 async def test_load_missing_file_raises(loader):
     with pytest.raises(FileNotFoundError):
         await loader.load("/nonexistent/video.mp4")
+
+
+# ---------------------------------------------------------------------------
+# _transcribe fall-through
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@patch(
+    "cognee.infrastructure.loaders.core.video_loader.LLMGateway.create_transcript",
+    new_callable=AsyncMock,
+)
+async def test_transcribe_returns_plain_text_when_no_segments(mock_transcript, loader):
+    """Verbose succeeds but yields no segments -> return the plain transcript text."""
+    mock_transcript.return_value = _FakeTranscript("plain text only", segments=None)
+
+    result = await loader._transcribe("/tmp/audio.wav")
+
+    assert result == "plain text only"
+    # No redundant second call when the verbose attempt itself succeeded.
+    assert mock_transcript.await_count == 1
+
+
+@pytest.mark.asyncio
+@patch(
+    "cognee.infrastructure.loaders.core.video_loader.LLMGateway.create_transcript",
+    new_callable=AsyncMock,
+)
+async def test_transcribe_returns_plain_text_when_segments_blank(mock_transcript, loader):
+    """All-blank segments must not clobber an otherwise-usable plain transcript."""
+    blank_segments = [{"start": 0.0, "text": "   "}, {"start": 1.0, "text": ""}]
+    mock_transcript.return_value = _FakeTranscript("full plain transcript", segments=blank_segments)
+
+    result = await loader._transcribe("/tmp/audio.wav")
+
+    assert result == "full plain transcript"
+
+
+@pytest.mark.asyncio
+@patch(
+    "cognee.infrastructure.loaders.core.video_loader.LLMGateway.create_transcript",
+    new_callable=AsyncMock,
+)
+async def test_transcribe_empty_when_nothing_transcribed(mock_transcript, loader):
+    """No segments and no text -> empty string, not an error."""
+    mock_transcript.return_value = _FakeTranscript("", segments=None)
+
+    assert await loader._transcribe("/tmp/audio.wav") == ""
+
+
+# ---------------------------------------------------------------------------
+# _extract_audio failure handling (real method, mocked subprocess)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@patch("cognee.infrastructure.loaders.core.video_loader.subprocess.run")
+async def test_extract_audio_nonzero_exit_raises_and_cleans_up(mock_run, loader):
+    """A non-zero ffmpeg exit raises with stderr and removes the temp WAV."""
+    mock_run.return_value = MagicMock(returncode=1, stderr=b"Invalid data found")
+    removed = _spy_on_remove()
+
+    with removed.patch():
+        with pytest.raises(RuntimeError, match="ffmpeg failed to extract audio"):
+            await loader._extract_audio("/usr/bin/ffmpeg", "/videos/clip.mkv")
+
+    assert removed.paths and removed.paths[0].endswith(".wav")
+    assert not os.path.exists(removed.paths[0])
+
+
+@pytest.mark.asyncio
+@patch(
+    "cognee.infrastructure.loaders.core.video_loader.subprocess.run",
+    side_effect=OSError("ffmpeg is not executable"),
+)
+async def test_extract_audio_invocation_error_cleans_up(mock_run, loader):
+    """If the ffmpeg invocation itself raises, the temp WAV is still removed."""
+    removed = _spy_on_remove()
+
+    with removed.patch():
+        with pytest.raises(OSError):
+            await loader._extract_audio("/usr/bin/ffmpeg", "/videos/clip.mkv")
+
+    assert removed.paths and not os.path.exists(removed.paths[0])
