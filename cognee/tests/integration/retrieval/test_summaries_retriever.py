@@ -195,7 +195,7 @@ async def test_summaries_retriever_on_empty_graph(setup_test_environment_empty):
     with pytest.raises(NoDataError):
         await retriever.get_retrieved_objects(query)
 
-    vector_engine = get_vector_engine()
+    vector_engine = await get_vector_engine()
     await vector_engine.create_vector_index("TextSummary", "text")
 
     summaries = await retriever.get_retrieved_objects(query)

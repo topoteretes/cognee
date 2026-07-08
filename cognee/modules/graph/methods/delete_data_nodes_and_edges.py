@@ -100,7 +100,7 @@ async def delete_data_nodes_and_edges(dataset_id: UUID, data_id: UUID, user_id: 
                 e,
             )
         try:
-            vector_engine = get_vector_engine()
+            vector_engine = await get_vector_engine()
             await vector_engine.remove_belongs_to_set_tags(
                 orphaned_nodeset_labels, node_ids=slug_ids
             )

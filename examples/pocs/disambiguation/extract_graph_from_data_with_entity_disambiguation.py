@@ -120,7 +120,7 @@ async def integrate_chunk_graphs(
 
 
 async def build_prompt(chunk, vector_search_limit, custom_prompt) -> Optional[str]:
-    vector_engine = get_vector_engine()
+    vector_engine = await get_vector_engine()
     exists = await vector_engine.has_collection(collection_name="Entity_name")
 
     if not (exists and custom_prompt):
