@@ -27,6 +27,7 @@ from cognee.infrastructure.session.session_context_builder import coerce_active_
 from cognee.infrastructure.session.session_context_models import SessionContextEntry
 from cognee.modules.data.models import Dataset
 from cognee.modules.data.methods import get_authorized_existing_datasets
+from cognee.modules.truth_subspace.constants import truth_session_node_set
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
 from cognee.shared.async_utils import gather_with_concurrency_limit
@@ -160,7 +161,7 @@ def build_curator_batches(
 
     for entry in context_entries:
         content = " ".join(entry.content.split())[:MAX_CANDIDATE_CHARS]
-        block = f"Candidate {entry.id} ({entry.section}): {content}"
+        block = f"Candidate {entry.id} [{entry.context_profile}/{entry.section}]: {content}"
         timeline.append((entry.created_at or "", block))
 
     timeline.sort(key=lambda item: item[0])
@@ -323,7 +324,7 @@ async def accept_proposed_lessons(
 ) -> List[WrittenLesson]:
     entries_by_id = {entry.id: entry for entry in context_entries}
     async with set_database_global_context_variables(scope.dataset.id, scope.dataset.owner_id):
-        vector_engine = get_vector_engine()
+        vector_engine = await get_vector_engine()
 
         def write_lesson(lesson: ProposedLesson):
             return lambda: evaluate_proposed_lesson(
@@ -374,7 +375,8 @@ async def publish_distilled_lessons(
     from cognee.api.v1.add import add
     from cognee.api.v1.cognify import cognify
 
-    await add(documents, dataset_id=scope.dataset.id, user=scope.user, node_set=DISTILLATE_NODE_SET)
+    node_set = [*DISTILLATE_NODE_SET, truth_session_node_set(scope.session_id)]
+    await add(documents, dataset_id=scope.dataset.id, user=scope.user, node_set=node_set)
     await cognify(datasets=[scope.dataset.id], user=scope.user)
     return documents
 

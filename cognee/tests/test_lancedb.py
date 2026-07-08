@@ -50,12 +50,12 @@ async def test_local_file_deletion(data_text, file_location):
         )
 
 
-async def test_getting_of_documents(dataset_name_1):
+async def test_getting_of_documents(dataset_id_1):
     # Test getting of documents for search per dataset
     from cognee.modules.users.permissions.methods import get_document_ids_for_user
 
     user = await get_default_user()
-    document_ids = await get_document_ids_for_user(user.id, [dataset_name_1])
+    document_ids = await get_document_ids_for_user(user.id, [dataset_id_1])
     assert len(document_ids) == 1, (
         f"Number of expected documents doesn't match {len(document_ids)} != 1"
     )
@@ -73,7 +73,7 @@ async def test_vector_engine_search_none_limit():
 
     from cognee.infrastructure.databases.vector import get_vector_engine
 
-    vector_engine = get_vector_engine()
+    vector_engine = await get_vector_engine()
     collection_name = "Entity_name"
 
     query_vector = (await vector_engine.embedding_engine.embed_text([query_text]))[0]
@@ -112,7 +112,7 @@ async def test_vector_engine_search_with_nodeset_filtering():
 
     from cognee.infrastructure.databases.vector import get_vector_engine
 
-    vector_engine = get_vector_engine()
+    vector_engine = await get_vector_engine()
     query_vector = (await vector_engine.embedding_engine.embed_text([query_text]))[0]
 
     # Search with "OR" operator
@@ -251,10 +251,13 @@ async def main():
     await cognee.cognify([dataset_name_2, dataset_name_1])
 
     from cognee.infrastructure.databases.vector import get_vector_engine
+    from cognee.modules.data.methods import get_datasets_by_name
 
-    await test_getting_of_documents(dataset_name_1)
+    user = await get_default_user()
+    dataset_1 = (await get_datasets_by_name([dataset_name_1], user.id))[0]
+    await test_getting_of_documents(dataset_1.id)
 
-    vector_engine = get_vector_engine()
+    vector_engine = await get_vector_engine()
     random_node = (
         await vector_engine.search("Entity_name", "Quantum computer", include_payload=True)
     )[0]

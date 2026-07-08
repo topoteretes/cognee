@@ -1,6 +1,7 @@
 import os
 from typing import Callable, List, Optional, Type, Tuple
 
+from cognee.base_config import get_base_config
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 
 from cognee.modules.engine.models.node_set import NodeSet
@@ -66,7 +67,9 @@ async def get_search_type_retriever_instance(
     node_name_filter_operator = kwargs.get("node_name_filter_operator", "OR")
     wide_search_top_k = kwargs.get("wide_search_top_k", 100)
     triplet_distance_penalty = kwargs.get("triplet_distance_penalty", 6.5)
-    feedback_influence = kwargs.get("feedback_influence", 0.0)
+    feedback_influence = kwargs.get(
+        "feedback_influence", get_base_config().default_feedback_influence
+    )
     session_id = kwargs.get("session_id")
     neighborhood_depth = kwargs.get("neighborhood_depth")
     neighborhood_seed_top_k = kwargs.get("neighborhood_seed_top_k")
@@ -116,6 +119,7 @@ async def get_search_type_retriever_instance(
                 "use_importance_weight": retriever_specific_config.get(
                     "use_importance_weight", True
                 ),
+                "use_truth_weight": retriever_specific_config.get("use_truth_weight", False),
                 "facts_top_k": retriever_specific_config.get("facts_top_k", top_k),
             },
         ),

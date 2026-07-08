@@ -127,7 +127,7 @@ async def _build_chunk_graphs_and_prompts(
     }
 
     chunk_texts = [chunk.text for chunk in data_chunks]
-    vector_engine = get_vector_engine()
+    vector_engine = await get_vector_engine()
     chunk_embeddings = await vector_engine.embedding_engine.embed_text(chunk_texts)
     chunk_prompts = [
         _build_disambiguation_prompt(chunk_embedding, df, vector_search_limit, custom_prompt)
@@ -201,7 +201,7 @@ async def cache_entity_embeddings(graphs, **kwargs) -> None:
     df = kwargs.get("df", None)
     if df is None:
         return
-    vector_engine = get_vector_engine()
+    vector_engine = await get_vector_engine()
     df_new = pd.DataFrame()
     for graph in graphs:
         entity_names = [node.name for node in graph.nodes]

@@ -65,7 +65,7 @@ def _triplet_id(source: str, rel: str, target: str) -> str:
 async def verify(stage: str):
     async with _store_context():
         graph_engine = await get_graph_engine()
-        vector_engine = get_vector_engine()
+        vector_engine = await get_vector_engine()
         nodes, edges = await graph_engine.get_graph_data()
 
         node_ids = {nid for nid, _ in nodes}

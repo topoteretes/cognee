@@ -57,21 +57,6 @@ from cognee.modules.users.methods.get_authenticated_user import REQUIRE_AUTHENTI
 setup_logging()
 logger = get_logger()
 
-if os.getenv("ENV", "prod") == "prod":
-    try:
-        import sentry_sdk
-
-        sentry_sdk.init(
-            dsn=os.getenv("SENTRY_REPORTING_URL"),
-            traces_sample_rate=1.0,
-            profiles_sample_rate=1.0,
-        )
-    except ImportError:
-        logger.info(
-            "Sentry SDK not available. Install with 'pip install cognee\"[monitoring]\"' to enable error monitoring."
-        )
-
-
 app_environment = os.getenv("ENV", "prod")
 
 

@@ -30,7 +30,7 @@ async def legacy_delete(data: Data, mode: str = "soft"):
     deleted_node_ids = await delete_document_subgraph(data.id, mode)
 
     # Delete from vector database
-    vector_engine = get_vector_engine()
+    vector_engine = await get_vector_engine()
 
     # Determine vector collections dynamically
     subclasses = get_all_subclasses(DataPoint)

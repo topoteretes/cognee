@@ -54,7 +54,7 @@ pre-commit install
 - **evals** - Evaluation tools
 - **deepeval** - DeepEval testing framework
 - **posthog** - PostHog analytics
-- **monitoring** - Sentry + Langfuse observability
+- **tracing** - OpenTelemetry tracing
 - **distributed** - Modal distributed execution
 - **dev** - All development tools (pytest, ty, ruff, etc.)
 - **debug** - Debugpy for debugging
@@ -101,7 +101,7 @@ ty check .
 ### Running Cognee
 ```bash
 # Using Python SDK
-python examples/python/simple_example.py
+uv run python examples/demos/simple_cognee_example.py
 
 # Using CLI
 cognee-cli add "Your text here"
@@ -433,6 +433,12 @@ git checkout dev
 git pull origin dev
 git checkout -b feature/your-feature-name
 ```
+
+**Core-team PRs must reference a Linear issue.** Put the issue key (e.g. `COG-123`)
+in the PR title or the branch name so Linear links the PR to its ticket. This is
+enforced by the `Require Linear issue` workflow (`linear-issue-check`), a required
+status check. Fork / external-contributor PRs are exempt (the check skips them), so
+this rule applies only to internal PRs.
 
 ## Code Style
 

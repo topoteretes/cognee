@@ -84,7 +84,7 @@ class HealthChecker:
             from cognee.infrastructure.databases.vector.config import get_vectordb_config
 
             config = get_vectordb_config()
-            engine = get_vector_engine()
+            engine = await get_vector_engine()
 
             # Test basic operation - just check if engine is accessible
             if hasattr(engine, "health_check"):

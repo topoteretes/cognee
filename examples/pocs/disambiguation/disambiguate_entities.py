@@ -217,7 +217,7 @@ async def disambiguate_entities_pipeline(
         Task(classify_documents),
         Task(
             extract_chunks_from_documents,
-            max_chunk_size=chunk_size or get_max_chunk_tokens(),
+            max_chunk_size=chunk_size or await get_max_chunk_tokens(),
             chunker=chunker,
         ),  # Extract text chunks based on the document type.
         Task(
