@@ -12,11 +12,8 @@ except ImportError:
     ClientRegistry = None
 
 
-# Provider identifiers cognee can dispatch to. Kept in sync with the
-# ``LLMProvider`` enum in
-# ``.structured_output_framework.litellm_instructor.llm.get_llm_client``; a unit
-# test asserts the two stay aligned. Defined here rather than imported to avoid a
-# circular import, since that module imports from this one.
+# Providers cognee can dispatch to. Duplicated from the ``LLMProvider`` enum
+# (importing it here would be circular); a unit test keeps the two in sync.
 KNOWN_LLM_PROVIDERS = frozenset(
     {
         "openai",
@@ -103,13 +100,12 @@ class LLMConfig(BaseSettings):
     @model_validator(mode="after")
     def strip_quotes_from_strings(self) -> "LLMConfig":
         """
-        Strip surrounding quotes from string fields that often arrive from
-        environment variables with extra quotes (e.g., via Docker's --env-file).
+        Strip a matching pair of surrounding quotes from every string field.
 
-        Applies to every declared string field rather than a hand-maintained
-        allow-list, so newly added string fields are covered automatically.
-        Only a matching pair of surrounding quotes (both ``'`` or both ``"``) is
-        removed; mismatched or internal quotes are left untouched.
+        Such quotes commonly arrive from env vars passed via Docker's
+        ``--env-file``. Covering all declared string fields (not an allow-list)
+        means new fields are handled automatically; only a matching outer pair
+        of quotes is removed, so internal quotes are left untouched.
         """
         for field_name in self.__class__.model_fields:
             value = getattr(self, field_name, None)
@@ -122,26 +118,16 @@ class LLMConfig(BaseSettings):
     @model_validator(mode="after")
     def infer_provider_from_model(self) -> "LLMConfig":
         """
-        Infer ``llm_provider`` from the ``llm_model`` prefix when the provider was
-        not set explicitly.
+        Infer ``llm_provider`` from the ``llm_model`` prefix when it was not set
+        explicitly, so ``LLM_PROVIDER`` is optional for litellm-style model ids
+        (e.g. ``"anthropic/claude-3-5-sonnet"`` -> ``anthropic``).
 
-        LiteLLM-style model identifiers embed the provider as a prefix
-        (e.g. ``"anthropic/claude-3-5-sonnet"``). When only ``LLM_MODEL`` is
-        supplied, the provider is derived from that prefix so ``LLM_PROVIDER``
-        becomes optional.
-
-        Inference is intentionally conservative: it only applies when the prefix
-        is a provider cognee actually supports (see ``KNOWN_LLM_PROVIDERS``).
-        A prefixed model whose prefix is *not* a supported provider (e.g.
-        ``"openrouter/..."``, which is configured via ``LLM_PROVIDER="custom"``)
-        raises ``ProviderNotDeducibleError`` rather than silently falling back to
-        a default that would fail downstream, so the user is told to set
-        ``LLM_PROVIDER`` explicitly. An explicitly provided ``llm_provider``
-        (keyword argument or environment variable) always takes precedence, as
-        does a model without a ``"/"`` prefix.
-
-        Runs after ``strip_quotes_from_strings`` so the model prefix is compared
-        without surrounding quotes.
+        An explicit ``llm_provider`` (kwarg or env var) always wins, as does a
+        model with no ``"/"`` prefix. A prefix that is not a supported provider
+        (e.g. ``"openrouter/..."``, which needs ``LLM_PROVIDER="custom"``) raises
+        ``ProviderNotDeducibleError`` instead of silently defaulting to something
+        that would fail downstream. Runs after ``strip_quotes_from_strings`` so
+        the prefix is already unquoted.
         """
         if "llm_provider" in self.model_fields_set:
             return self
@@ -220,10 +206,8 @@ class LLMConfig(BaseSettings):
             val = os.environ.get(var_name)
             return val is not None and val.strip() != ""
 
-        # Check LLM environment variables. Embedding env vars are intentionally
-        # not validated here: that is EmbeddingConfig's responsibility, and
-        # reaching into embedding settings from LLMConfig via raw os.environ was
-        # an improper cross-config dependency.
+        # Only LLM env vars are validated here; embedding env vars are
+        # EmbeddingConfig's responsibility, not LLMConfig's.
         llm_env_vars = {
             "LLM_MODEL": is_env_set("LLM_MODEL"),
             "LLM_ENDPOINT": is_env_set("LLM_ENDPOINT"),

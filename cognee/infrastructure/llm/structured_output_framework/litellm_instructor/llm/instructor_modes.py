@@ -1,15 +1,13 @@
-"""Central table of default Instructor modes per LLM provider.
+"""Single source of truth for each provider's default Instructor mode.
 
-Single source of truth that replaces the per-adapter ``default_instructor_mode``
-class attributes previously scattered across the individual adapter modules.
+Replaces the ``default_instructor_mode`` class attributes that were previously
+duplicated across the individual adapter modules.
 """
 
 import instructor
 
-# Provider -> default instructor mode. Values match what each adapter used
-# historically. ``llama_cpp`` uses the enum member directly, as it did before.
-# (Azure is intentionally absent: AzureOpenAIAdapter subclasses OpenAIAdapter and
-# therefore inherits the "openai" default.)
+# Values match each adapter's historical default. Azure is absent on purpose:
+# AzureOpenAIAdapter subclasses OpenAIAdapter and inherits the "openai" mode.
 INSTRUCTOR_MODE_TABLE: dict[str, object] = {
     "openai": "json_schema_mode",
     "anthropic": "anthropic_tools",
@@ -21,14 +19,9 @@ INSTRUCTOR_MODE_TABLE: dict[str, object] = {
     "llama_cpp": instructor.Mode.JSON,
 }
 
-# Fallback used when a provider has no explicit entry above.
 DEFAULT_INSTRUCTOR_MODE = "json_mode"
 
 
 def get_instructor_mode(provider: str):
-    """Return the default instructor mode for ``provider``.
-
-    See ``INSTRUCTOR_MODE_TABLE``; unknown providers fall back to
-    ``DEFAULT_INSTRUCTOR_MODE``.
-    """
+    """Return ``provider``'s default instructor mode, or the fallback if unknown."""
     return INSTRUCTOR_MODE_TABLE.get(provider, DEFAULT_INSTRUCTOR_MODE)
