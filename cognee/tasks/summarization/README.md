@@ -99,4 +99,4 @@ Default summarization model is `SummarizedContent` from `cognee.modules.cognify.
 
 ## Related
 
-- [cognee docs](https://docs.cognee.ai) | [Chunking](../documents/) | [Storage](../storage/) | [Tests](../../../tests/tasks/summarization/)
+- [cognee docs](https://docs.cognee.ai) | [Chunking](../documents/) | [Storage](../storage/) | [Tests](../../tests/tasks/summarization/)

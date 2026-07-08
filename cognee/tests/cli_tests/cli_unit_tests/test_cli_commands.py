@@ -43,6 +43,23 @@ def _mock_user():
 _RESOLVE_USER_PATCH = "cognee.cli.user_resolution.resolve_cli_user"
 
 
+@pytest.fixture(autouse=True)
+def _calm_first_run_bypass(monkeypatch, tmp_path):
+    """Neutralize the first-run plumbing so command tests exercise only the
+    command logic: preflight passes, memory reads as ready, progress renders
+    nothing, and hint/counter state goes to a temp dir."""
+    from cognee.cli import empty_state, preflight
+
+    monkeypatch.setattr(preflight, "run_preflight", lambda **kwargs: 0.0)
+
+    async def _ready(user):
+        return ("ready", None, 0)
+
+    monkeypatch.setattr(empty_state, "check_memory_state", _ready)
+    monkeypatch.setenv("COGNEE_PROGRESS", "off")
+    monkeypatch.setenv("COGNEE_CLI_STATE", str(tmp_path))
+
+
 class TestAddCommand:
     """Test the AddCommand class"""
 
@@ -170,8 +187,9 @@ class TestSearchCommand:
             )
             command.execute(args)
 
-        mock_asyncio_run.assert_called_once()
-        assert asyncio.iscoroutine(mock_asyncio_run.call_args[0][0])
+        # two runs: the empty-memory pre-check, then the search itself
+        assert mock_asyncio_run.call_count == 2
+        assert all(asyncio.iscoroutine(call.args[0]) for call in mock_asyncio_run.call_args_list)
         mock_cognee.search.assert_awaited_once_with(
             query_text="test query",
             query_type=ANY,
@@ -253,8 +271,9 @@ class TestCognifyCommand:
             )
             command.execute(args)
 
-        mock_asyncio_run.assert_called_once()
-        assert asyncio.iscoroutine(mock_asyncio_run.call_args[0][0])
+        # two runs: the empty-memory pre-check (datasets=None), then cognify
+        assert mock_asyncio_run.call_count == 2
+        assert all(asyncio.iscoroutine(call.args[0]) for call in mock_asyncio_run.call_args_list)
         from cognee.modules.chunking.TextChunker import TextChunker
 
         mock_cognee.cognify.assert_awaited_once_with(
@@ -309,6 +328,7 @@ class TestDeleteCommand:
         assert "all" in actions
         assert "force" in actions
 
+    @patch("sys.stdin.isatty", return_value=True)
     @patch(_RESOLVE_USER_PATCH, new_callable=lambda: AsyncMock(return_value=_mock_user()))
     @patch("cognee.cli.commands.delete_command.cognee_datasets")
     @patch("cognee.cli.commands.delete_command.get_datasets_by_name")
@@ -323,6 +343,7 @@ class TestDeleteCommand:
         get_datasets_mock,
         datasets_mock,
         _mock_resolve,
+        _mock_isatty,
     ):
         """Test execute delete dataset with user confirmation"""
         data_directory_path = os.path.join(
@@ -364,9 +385,10 @@ class TestDeleteCommand:
         asyncio.run(cognee.prune.prune_data())
         asyncio.run(cognee.prune.prune_system(metadata=True))
 
+    @patch("sys.stdin.isatty", return_value=True)
     @patch("cognee.cli.commands.delete_command.get_deletion_counts")
     @patch("cognee.cli.commands.delete_command.fmt.confirm")
-    def test_execute_delete_cancelled(self, mock_confirm, mock_get_deletion_counts):
+    def test_execute_delete_cancelled(self, mock_confirm, mock_get_deletion_counts, _mock_isatty):
         """Test execute when user cancels deletion"""
         mock_get_deletion_counts = AsyncMock()
         mock_get_deletion_counts.return_value = DeletionCountsPreview()
@@ -400,12 +422,14 @@ class TestDeleteCommand:
         delete_all_mock.assert_awaited_once_with(user=ANY)
 
     def test_execute_no_delete_target(self):
-        """Test execute when no delete target is specified"""
+        """No target is a usage error now: it must fail loudly (exit 2), not
+        print-and-exit-0 where scripts can't detect it"""
         command = DeleteCommand()
         args = argparse.Namespace(force=True)
 
-        # Should not raise exception, just return with error message
-        command.execute(args)
+        with pytest.raises(CliCommandException) as excinfo:
+            command.execute(args)
+        assert excinfo.value.error_code == 2
 
     @patch("cognee.cli.commands.delete_command.asyncio.run")
     def test_execute_with_exception(self, mock_asyncio_run):

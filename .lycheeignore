@@ -1,0 +1,9 @@
+# URL patterns skipped by lychee (the markdown link check in .github/workflows/pre_test.yml).
+# CI runs lychee with --offline, which already skips every remote URL; the patterns
+# below are defensive so a local `lychee "**/*.md"` without --offline stays quiet on
+# loopback addresses and placeholder domains that are never expected to resolve.
+https?://localhost
+https?://127\.0\.0\.1
+https?://0\.0\.0\.0
+https?://host\.docker\.internal
+https?://([a-z0-9-]+\.)*example\.(com|org|net)

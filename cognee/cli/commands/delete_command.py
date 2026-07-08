@@ -32,6 +32,8 @@ Be careful with deletion operations as they are irreversible.
         parser.add_argument("--force", "-f", action="store_true", help="Skip confirmation prompts")
 
     def execute(self, args: argparse.Namespace) -> None:
+        import sys
+
         try:
             if not any(
                 [
@@ -39,8 +41,18 @@ Be careful with deletion operations as they are irreversible.
                     getattr(args, "all", False),
                 ]
             ):
-                fmt.error("Please specify what to delete: --dataset-name or --all")
-                return
+                raise CliCommandException(
+                    "specify what to delete: --dataset-name <name> or --all", error_code=2
+                )
+
+            # Never hang on a confirmation prompt that can't be answered:
+            # a pipe/CI run must either pass --force or fail naming the flag.
+            if not getattr(args, "force", False) and not sys.stdin.isatty():
+                raise CliCommandException(
+                    "deletion needs confirmation, and this session has no interactive "
+                    "terminal. Re-run with --force to confirm non-interactively.",
+                    error_code=2,
+                )
 
             # If --force is used, skip the preview and go straight to deletion
             if not getattr(args, "force", False):
@@ -106,6 +118,8 @@ Be careful with deletion operations as they are irreversible.
             fmt.success(f"Successfully deleted {operation}")
 
         except Exception as e:
+            if isinstance(e, CliCommandException):
+                raise
             if isinstance(e, CliCommandInnerException):
                 raise CliCommandException(str(e), error_code=1) from e
             raise CliCommandException(f"Error deleting data: {str(e)}", error_code=1) from e

@@ -7,9 +7,9 @@ from cognee.cli.config import (
     CLI_DESCRIPTION,
     DEFAULT_DOCS_URL,
     COMMAND_DESCRIPTIONS,
-    SEARCH_TYPE_CHOICES,
     CHUNKER_CHOICES,
     OUTPUT_FORMAT_CHOICES,
+    get_search_type_choices,
 )
 from cognee.cli._cognee import _discover_commands
 
@@ -45,22 +45,15 @@ class TestCliConfig:
             assert isinstance(COMMAND_DESCRIPTIONS[command], str)
             assert len(COMMAND_DESCRIPTIONS[command]) > 0
 
-    def test_search_type_choices_valid(self):
-        """Test that search type choices are valid"""
-        assert isinstance(SEARCH_TYPE_CHOICES, list)
-        assert len(SEARCH_TYPE_CHOICES) > 0
+    def test_search_type_choices_match_enum(self):
+        """The SearchType enum is the single source of truth for CLI choices —
+        the old hardcoded list once advertised a CODE type that crashed."""
+        from cognee.modules.search.types import SearchType
 
-        expected_types = [
-            "GRAPH_COMPLETION",
-            "RAG_COMPLETION",
-            "CHUNKS",
-            "SUMMARIES",
-            "CODE",
-            "CYPHER",
-        ]
-
-        for expected_type in expected_types:
-            assert expected_type in SEARCH_TYPE_CHOICES
+        choices = get_search_type_choices()
+        assert choices == [search_type.name for search_type in SearchType]
+        assert "CODE" not in choices
+        assert "GRAPH_COMPLETION" in choices
 
     def test_chunker_choices_valid(self):
         """Test that chunker choices are valid"""

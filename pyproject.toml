@@ -38,6 +38,7 @@ dependencies = [
     "filetype>=1.2.0,<2.0.0",
     "aiohttp>=3.13.5,<4.0.0",
     "aiofiles>=23.2.1",
+    "click>=8.0,<9",  # the CLI imports it directly; was only ever a transitive dep before
     "rdflib>=7.1.4,<7.2.0",
     "pypdf>=6.6.2,<7.0.0",
     "jinja2>=3.1.3,<4",
@@ -190,7 +191,9 @@ Homepage = "https://www.cognee.ai"
 Repository = "https://github.com/topoteretes/cognee"
 
 [project.scripts]
-cognee-cli = "cognee.cli._cognee:main"
+# The shim answers --help/--version/no-args in milliseconds without importing
+# the cognee package, and sets CLI mode (console log routing) for real commands.
+cognee-cli = "cognee_cli:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -216,7 +219,7 @@ exclude = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["cognee", "cognee_db_workers", "distributed", "kuzu"]
+packages = ["cognee", "cognee_cli", "cognee_db_workers", "distributed", "kuzu"]
 
 [tool.uv]
 # Note: exclude newer packages that are less than 2 days old

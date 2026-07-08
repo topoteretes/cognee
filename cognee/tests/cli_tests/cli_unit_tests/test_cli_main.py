@@ -46,16 +46,16 @@ class TestCliMain:
         assert "version" in actions
 
     @patch("cognee.cli._cognee._create_parser")
-    def test_main_no_command(self, mock_create_parser):
-        """Test main function when no command is provided"""
+    def test_main_no_command(self, mock_create_parser, capsys):
+        """No command = a welcome, not an error: exit 0 with the get-started rail"""
         mock_parser = MagicMock()
         mock_parser.parse_args.return_value = MagicMock(command=None, spec={})
         mock_create_parser.return_value = (mock_parser, {})
 
         result = main()
 
-        assert result == -1
-        mock_parser.print_help.assert_called_once()
+        assert result == 0
+        assert "Get started" in capsys.readouterr().out
 
     @patch("cognee.cli._cognee._create_parser")
     def test_main_with_valid_command(self, mock_create_parser):
@@ -95,8 +95,9 @@ class TestCliMain:
 
     @patch("cognee.cli._cognee._create_parser")
     @patch("cognee.cli.debug.is_debug_enabled")
-    def test_main_with_generic_exception(self, mock_debug, mock_create_parser):
-        """Test main function when command raises generic exception"""
+    def test_main_with_generic_exception(self, mock_debug, mock_create_parser, capsys):
+        """A generic exception is NEVER swallowed: the message must reach
+        stderr (the old handler printed only a docs note), exit code 1."""
         mock_debug.return_value = False
 
         mock_command = MagicMock()
@@ -110,17 +111,18 @@ class TestCliMain:
 
         result = main()
 
-        assert result == -1
+        assert result == 1
+        assert "Generic error" in capsys.readouterr().err
 
     @patch("cognee.cli._cognee._create_parser")
     @patch("cognee.cli.debug.is_debug_enabled")
     def test_main_debug_mode_reraises_exception(self, mock_debug, mock_create_parser):
-        """Test main function reraises exceptions in debug mode"""
+        """--debug re-raises the original exception for a full stack trace —
+        regardless of whether raiseable_exception was set (the old gate that
+        made --debug a dead end)."""
         mock_debug.return_value = True
 
-        test_exception = CliCommandException(
-            "Test error", error_code=2, raiseable_exception=ValueError("Inner error")
-        )
+        test_exception = CliCommandException("Test error", error_code=2)
 
         mock_command = MagicMock()
         mock_command.execute.side_effect = test_exception
@@ -131,7 +133,7 @@ class TestCliMain:
 
         mock_create_parser.return_value = (mock_parser, {"test": mock_command})
 
-        with pytest.raises(ValueError, match="Inner error"):
+        with pytest.raises(CliCommandException, match="Test error"):
             main()
 
     def test_version_argument(self):

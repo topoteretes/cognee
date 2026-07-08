@@ -29,17 +29,29 @@ COMMAND_DESCRIPTIONS = {
     "history": "List the data-migration chain, newest first",
     "current": "Show each database's stamped migration revision (and last failure, if any)",
     "push": "Upload a local dataset's knowledge graph to Cognee Cloud",
+    "doctor": "Check that your setup is ready (config, keys, databases, graph)",
 }
 
-# Search type choices
-SEARCH_TYPE_CHOICES = [
-    "GRAPH_COMPLETION",
-    "RAG_COMPLETION",
-    "CHUNKS",
-    "SUMMARIES",
-    "CODE",
-    "CYPHER",
-]
+
+# Search types: the SearchType enum is the single source of truth. The CLI
+# derives its choices from it at parser-build time (cognee is already imported
+# by then), so help text, validation, and the enum can never drift apart —
+# the old hardcoded list here once advertised a "CODE" type that crashed.
+def get_search_type_choices() -> list:
+    from cognee.modules.search.types import SearchType
+
+    return [search_type.name for search_type in SearchType]
+
+
+# The handful worth explaining to a first-time user, in recommendation order.
+COMMON_SEARCH_TYPES = {
+    "GRAPH_COMPLETION": "answers grounded in the knowledge graph (default)",
+    "RAG_COMPLETION": "traditional RAG over document chunks",
+    "CHUNKS": "raw matching text passages, no LLM",
+    "SUMMARIES": "pre-computed document summaries",
+    "TEMPORAL": "time-aware graph search",
+    "FEELING_LUCKY": "picks the best search type automatically",
+}
 
 # Chunker choices
 CHUNKER_CHOICES = ["TextChunker", "LangchainChunker", "CsvChunker"]

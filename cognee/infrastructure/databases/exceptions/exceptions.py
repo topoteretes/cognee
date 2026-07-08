@@ -17,7 +17,10 @@ class DatabaseNotCreatedError(CogneeSystemError):
         name: str = "DatabaseNotCreatedError",
         status_code: int = status.HTTP_422_UNPROCESSABLE_CONTENT,
     ):
-        super().__init__(message, name, status_code)
+        # log at DEBUG: on a fresh install this is raised once and recovered
+        # (migrations run automatically) — an ERROR line for expected control
+        # flow just frightens first-time users.
+        super().__init__(message, name, status_code, log_level="DEBUG")
 
 
 class EntityNotFoundError(CogneeValidationError):
@@ -99,6 +102,29 @@ class EmbeddingException(CogneeConfigurationError):
         self,
         message: str = "Embedding Exception.",
         name: str = "EmbeddingException",
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+    ):
+        super().__init__(message, name, status_code)
+
+
+class EmbeddingProviderMismatchError(CogneeConfigurationError):
+    """
+    Raised when embedding settings cannot be derived from the configured LLM provider.
+
+    Some LLM providers (e.g. Anthropic) expose no embedding API, and others
+    (e.g. Azure, Bedrock) need deployment-specific endpoints that cannot be
+    guessed. This error is raised before any pipeline work starts so the user
+    gets one clear fix instead of a mid-cognify connection failure.
+    """
+
+    def __init__(
+        self,
+        message: str = (
+            "The configured LLM provider has no usable embedding API. "
+            "Set EMBEDDING_PROVIDER=openai (plus EMBEDDING_API_KEY), or "
+            "EMBEDDING_PROVIDER=fastembed for a local, zero-key option."
+        ),
+        name: str = "EmbeddingProviderMismatchError",
         status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
     ):
         super().__init__(message, name, status_code)

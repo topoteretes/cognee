@@ -24,7 +24,10 @@ class TestCliIntegration:
 
         assert result.returncode == 0
         assert "cognee" in result.stdout.lower()
-        assert "available commands" in result.stdout.lower()
+        # The redesigned help groups commands under section headers; the
+        # contract is that the core commands are listed.
+        for command in ("add", "cognify", "search", "doctor"):
+            assert command in result.stdout.lower()
 
     def test_cli_version(self):
         """Test that CLI version works"""
@@ -277,8 +280,6 @@ class TestCliErrorHandling:
         result = subprocess.run(
             [
                 "cognee-cli",
-                "-m",
-                "cognee.cli._cognee",
                 "search",
                 "test query",
                 "--query-type",
@@ -291,6 +292,8 @@ class TestCliErrorHandling:
 
         assert result.returncode != 0
         assert "invalid choice" in result.stderr.lower()
+        # choices are derived from the SearchType enum, so the error lists them
+        assert "graph_completion" in result.stderr.lower()
 
     def test_invalid_chunker(self):
         """Test invalid chunker handling"""

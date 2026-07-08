@@ -51,32 +51,44 @@ After adding data, use `cognee cognify` to process it into knowledge graphs.
         )
 
     def execute(self, args: argparse.Namespace) -> None:
+        from cognee.cli import ui
+        from cognee.cli.hints import record_event
+        from cognee.cli.preflight import run_preflight
+
+        run_preflight(need_llm=True, need_embeddings=True)
+
         try:
             # Import cognee here to avoid circular imports
             import cognee
 
-            fmt.echo(f"Adding {len(args.data)} item(s) to dataset '{args.dataset_name}'...")
+            item_count = len(args.data)
+            item_word = "item" if item_count == 1 else "items"
 
-            # Run the async add function
             async def run_add():
                 try:
                     from cognee.cli.user_resolution import resolve_cli_user
 
                     user = await resolve_cli_user(getattr(args, "user_id", None))
 
-                    # Pass all data items as a list to cognee.add if multiple items
-                    if len(args.data) == 1:
-                        data_to_add = args.data[0]
-                    else:
-                        data_to_add = args.data
-
-                    fmt.echo("Processing data...")
+                    data_to_add = args.data[0] if item_count == 1 else args.data
                     await cognee.add(data=data_to_add, dataset_name=args.dataset_name, user=user)
-                    fmt.success(f"Successfully added data to dataset '{args.dataset_name}'")
                 except Exception as e:
                     raise CliCommandInnerException(f"Failed to add data: {str(e)}") from e
 
-            asyncio.run(run_add())
+            caps = ui.detect_caps()
+            with ui.spinner_line(
+                f"Adding {item_count} {item_word} to {args.dataset_name}", caps=caps
+            ) as spinner:
+                asyncio.run(run_add())
+                elapsed = spinner.elapsed
+
+            record_event("add_success")
+            ui.success_line(
+                f"Added {item_count} {item_word} to {args.dataset_name} "
+                f"in {ui.format_duration(elapsed)}",
+                caps=caps,
+            )
+            ui.next_step("cognee-cli cognify", caps=caps)
 
         except Exception as e:
             if isinstance(e, CliCommandInnerException):

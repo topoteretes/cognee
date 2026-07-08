@@ -40,6 +40,23 @@ def _mock_user():
 _RESOLVE_USER_PATCH = "cognee.cli.user_resolution.resolve_cli_user"
 
 
+@pytest.fixture(autouse=True)
+def _calm_first_run_bypass(monkeypatch, tmp_path):
+    """Neutralize the first-run plumbing so edge-case tests exercise only the
+    command logic: preflight passes, memory reads as ready, progress renders
+    nothing, and hint/counter state goes to a temp dir."""
+    from cognee.cli import empty_state, preflight
+
+    monkeypatch.setattr(preflight, "run_preflight", lambda **kwargs: 0.0)
+
+    async def _ready(user):
+        return ("ready", None, 0)
+
+    monkeypatch.setattr(empty_state, "check_memory_state", _ready)
+    monkeypatch.setenv("COGNEE_PROGRESS", "off")
+    monkeypatch.setenv("COGNEE_CLI_STATE", str(tmp_path))
+
+
 class TestAddCommandEdgeCases:
     """Test edge cases for AddCommand"""
 
@@ -117,9 +134,9 @@ class TestSearchCommandEdgeCases:
             # Should handle empty results gracefully
             command.execute(args)
 
-        mock_asyncio_run.return_value = []
-        mock_asyncio_run.assert_called_once()
-        assert asyncio.iscoroutine(mock_asyncio_run.call_args[0][0])
+        # two runs: the empty-memory pre-check, then the search itself
+        assert mock_asyncio_run.call_count == 2
+        assert all(asyncio.iscoroutine(call.args[0]) for call in mock_asyncio_run.call_args_list)
         mock_cognee.search.assert_awaited_once_with(
             query_text="nonexistent query",
             query_type=ANY,
@@ -158,8 +175,8 @@ class TestSearchCommandEdgeCases:
 
             command.execute(args)
 
-        mock_asyncio_run.assert_called_once()
-        assert asyncio.iscoroutine(mock_asyncio_run.call_args[0][0])
+        assert mock_asyncio_run.call_count == 2
+        assert all(asyncio.iscoroutine(call.args[0]) for call in mock_asyncio_run.call_args_list)
         mock_cognee.search.assert_awaited_once_with(
             query_text="test query",
             query_type=ANY,
@@ -173,34 +190,25 @@ class TestSearchCommandEdgeCases:
         called_enum = mock_cognee.search.await_args.kwargs["query_type"]
         assert called_enum.name == "CHUNKS"
 
-    @patch("builtins.__import__")
-    def test_search_invalid_search_type_enum(self, mock_import):
-        """Test search command with invalid SearchType enum conversion"""
-        # Mock SearchType to raise KeyError
-        mock_search_type = MagicMock()
-        mock_search_type.__getitem__.side_effect = KeyError("INVALID_TYPE")
-
-        def mock_import_func(name, fromlist=None, *args, **kwargs):
-            if name == "cognee.modules.search.types":
-                module = MagicMock()
-                module.SearchType = mock_search_type
-                return module
-            return MagicMock()
-
-        mock_import.side_effect = mock_import_func
-
+    def test_search_invalid_search_type_enum(self):
+        """A search type that isn't in the SearchType enum must surface as a
+        calm usage error (exit 2) listing the valid types, never a KeyError.
+        (The parser derives choices from the enum, so this guards stale
+        programmatic callers.)"""
         command = SearchCommand()
         args = argparse.Namespace(
             query_text="test query",
-            query_type="INVALID_TYPE",  # This would fail enum conversion
+            query_type="INVALID_TYPE",  # not a SearchType member
             datasets=None,
             top_k=10,
             system_prompt=None,
             output_format="pretty",
         )
 
-        with pytest.raises(CliCommandException):
+        with pytest.raises(CliCommandException) as excinfo:
             command.execute(args)
+        assert excinfo.value.error_code == 2
+        assert "GRAPH_COMPLETION" in str(excinfo.value)
 
     def test_search_unicode_query(self):
         """Test search command with unicode characters in query"""
@@ -236,8 +244,8 @@ class TestSearchCommandEdgeCases:
             # Should handle None values gracefully
             command.execute(args)
 
-        mock_asyncio_run.assert_called_once()
-        assert asyncio.iscoroutine(mock_asyncio_run.call_args[0][0])
+        assert mock_asyncio_run.call_count == 2
+        assert all(asyncio.iscoroutine(call.args[0]) for call in mock_asyncio_run.call_args_list)
         mock_cognee.search.assert_awaited_once_with(
             query_text="test query",
             query_type=ANY,
@@ -277,8 +285,8 @@ class TestCognifyCommandEdgeCases:
             # Should pass the invalid value to cognify and let it handle the validation
             command.execute(args)
 
-        mock_asyncio_run.assert_called_once()
-        assert asyncio.iscoroutine(mock_asyncio_run.call_args[0][0])
+        assert mock_asyncio_run.call_count == 2
+        assert all(asyncio.iscoroutine(call.args[0]) for call in mock_asyncio_run.call_args_list)
         from cognee.modules.chunking.TextChunker import TextChunker
 
         mock_cognee.cognify.assert_awaited_once_with(
@@ -313,8 +321,8 @@ class TestCognifyCommandEdgeCases:
             # Should pass the path to cognify and let it handle file validation
             command.execute(args)
 
-        mock_asyncio_run.assert_called_once()
-        assert asyncio.iscoroutine(mock_asyncio_run.call_args[0][0])
+        assert mock_asyncio_run.call_count == 2
+        assert all(asyncio.iscoroutine(call.args[0]) for call in mock_asyncio_run.call_args_list)
         from cognee.modules.chunking.TextChunker import TextChunker
 
         mock_cognee.cognify.assert_awaited_once_with(
@@ -370,8 +378,8 @@ class TestCognifyCommandEdgeCases:
             # Should fall back to TextChunker and show warning
             command.execute(args)
 
-        mock_asyncio_run.assert_called_once()
-        assert asyncio.iscoroutine(mock_asyncio_run.call_args[0][0])
+        assert mock_asyncio_run.call_count == 2
+        assert all(asyncio.iscoroutine(call.args[0]) for call in mock_asyncio_run.call_args_list)
 
     @patch(_RESOLVE_USER_PATCH, new_callable=lambda: AsyncMock(return_value=_mock_user()))
     @patch("cognee.cli.commands.cognify_command.asyncio.run", side_effect=_mock_run)
@@ -394,8 +402,8 @@ class TestCognifyCommandEdgeCases:
 
             command.execute(args)
 
-        mock_asyncio_run.assert_called_once()
-        assert asyncio.iscoroutine(mock_asyncio_run.call_args[0][0])
+        assert mock_asyncio_run.call_count == 2
+        assert all(asyncio.iscoroutine(call.args[0]) for call in mock_asyncio_run.call_args_list)
         from cognee.modules.chunking.TextChunker import TextChunker
 
         mock_cognee.cognify.assert_awaited_once_with(
@@ -449,9 +457,12 @@ class TestDeleteCommandEdgeCases:
         asyncio.run(cognee.prune.prune_data())
         asyncio.run(cognee.prune.prune_system(metadata=True))
 
+    @patch("sys.stdin.isatty", return_value=True)
     @patch("cognee.cli.commands.delete_command.get_deletion_counts")
     @patch("cognee.cli.commands.delete_command.fmt.confirm")
-    def test_delete_confirmation_keyboard_interrupt(self, mock_confirm, mock_get_deletion_counts):
+    def test_delete_confirmation_keyboard_interrupt(
+        self, mock_confirm, mock_get_deletion_counts, _mock_isatty
+    ):
         """Test delete command when user interrupts confirmation"""
         mock_get_deletion_counts = AsyncMock()
         mock_get_deletion_counts.return_value = DeletionCountsPreview()

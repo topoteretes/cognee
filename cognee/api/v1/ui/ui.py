@@ -587,6 +587,12 @@ def start_ui(
         try:
             import sys
 
+            # Scrub COGNEE_CLI_MODE: it silences console logging for one-shot
+            # CLI commands, and a server inheriting it would lose its INFO log
+            # stream (the [BACKEND] lines below would go quiet).
+            backend_env = {
+                key: value for key, value in os.environ.items() if key != "COGNEE_CLI_MODE"
+            }
             backend_process = subprocess.Popen(
                 [
                     sys.executable,
@@ -600,6 +606,7 @@ def start_ui(
                 ],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
+                env=backend_env,
                 preexec_fn=os.setsid if hasattr(os, "setsid") else None,
             )
 

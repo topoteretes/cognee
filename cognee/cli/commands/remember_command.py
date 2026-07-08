@@ -57,10 +57,16 @@ After completion, use `cognee recall` (or `cognee search`) to query the graph.
         )
 
     def execute(self, args: argparse.Namespace) -> None:
+        from cognee.cli import ui
+        from cognee.cli.hints import record_event
+        from cognee.cli.preflight import run_preflight
+
+        run_preflight(need_llm=True, need_embeddings=True)
+
         try:
             import cognee
 
-            fmt.echo(f"Remembering {len(args.data)} item(s) in dataset '{args.dataset_name}'...")
+            caps = ui.detect_caps()
 
             async def run_remember():
                 try:
@@ -96,22 +102,36 @@ After completion, use `cognee recall` (or `cognee search`) to query the graph.
                 except Exception as e:
                     raise CliCommandInnerException(f"Failed to remember: {str(e)}") from e
 
-            result = asyncio.run(run_remember())
+            item_count = len(args.data)
+            item_word = "item" if item_count == 1 else "items"
+            with ui.pipeline_progress(
+                f"Remembering {item_count} {item_word} in {args.dataset_name}",
+                known_stages=ui.COGNIFY_STAGES,
+                caps=caps,
+            ) as board:
+                result = asyncio.run(run_remember())
+                # remember() reports pipeline failures in the result instead
+                # of raising — an errored run must not print a green success.
+                if result is not None and getattr(result, "status", "") == "errored":
+                    error_detail = getattr(result, "error", None) or "remember run errored"
+                    raise CliCommandInnerException(f"Failed to remember: {error_detail}")
 
             if args.background:
-                fmt.success("Data ingested and cognification started in background!")
-            else:
-                fmt.success("Data ingested and knowledge graph built successfully!")
+                board.stop()
+                ui.success_line("Ingestion started in the background.", caps=caps)
+                return
 
-            if result:
-                if result.dataset_id:
-                    fmt.echo(f"  Dataset ID: {result.dataset_id}")
-                if result.items_processed:
-                    fmt.echo(f"  Items processed: {result.items_processed}")
-                if result.content_hash:
-                    fmt.echo(f"  Content hash: {result.content_hash}")
-                if result.elapsed_seconds is not None:
-                    fmt.echo(f"  Elapsed: {result.elapsed_seconds:.1f}s")
+            record_event("remember_success")
+            elapsed = ""
+            if result is not None and getattr(result, "elapsed_seconds", None) is not None:
+                elapsed = f" in {ui.format_duration(result.elapsed_seconds)}"
+            processed = ""
+            if result is not None and getattr(result, "items_processed", None):
+                processed = f" — {result.items_processed} item(s) processed"
+            board.finish(
+                f"Remembered into {args.dataset_name}{elapsed}{processed}",
+                next_command='cognee-cli recall "What do you know about this?"',
+            )
 
         except Exception as e:
             if isinstance(e, CliCommandInnerException):
