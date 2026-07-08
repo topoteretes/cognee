@@ -35,8 +35,7 @@ video becomes queryable memory with no special handling downstream.
 - Other containers (`mov`, `mkv`, `avi`, `m4v`) need ffmpeg to extract the audio
   track first. When ffmpeg is available it is also used for `mp4`/`webm`, which
   keeps the upload small.
-- Install ffmpeg and make sure it is on your `PATH`. If you prefer a bundled
-  binary, `pip install imageio-ffmpeg` also works. If a container needs ffmpeg
+- Install ffmpeg and make sure it is on your `PATH`. If a container needs ffmpeg
   and none is found, cognee raises a clear error explaining how to enable it.
 
 ### Run the example

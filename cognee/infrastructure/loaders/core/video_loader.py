@@ -19,20 +19,8 @@ DIRECT_TRANSCRIBE_EXTENSIONS = {"mp4", "webm"}
 
 
 def _resolve_ffmpeg() -> str | None:
-    """Return a usable ffmpeg executable path, or None if unavailable.
-
-    Prefers a system ffmpeg on PATH, then falls back to the static binary
-    bundled with ``imageio-ffmpeg`` when that optional package is installed.
-    """
-    system_ffmpeg = shutil.which("ffmpeg")
-    if system_ffmpeg:
-        return system_ffmpeg
-    try:
-        import imageio_ffmpeg
-
-        return imageio_ffmpeg.get_ffmpeg_exe()
-    except Exception:
-        return None
+    """Return the path to a system ffmpeg executable, or None if not on PATH."""
+    return shutil.which("ffmpeg")
 
 
 def _format_timestamp(seconds: float) -> str:
@@ -80,8 +68,7 @@ class VideoLoader(LoaderInterface):
     pipeline. The audio track is transcribed with
     ``LLMGateway.create_transcript`` and the transcript is written out with
     per-segment ``[HH:MM:SS]`` timestamps inlined, so the timing survives
-    chunking and stays searchable (Solution 1). Keyframe captioning via
-    ``LLMGateway.transcribe_image`` layers on in a follow-up.
+    chunking and stays searchable.
 
     When ffmpeg is available the audio track is extracted locally first,
     which works for every container and keeps the upload small. When ffmpeg
@@ -194,8 +181,8 @@ class VideoLoader(LoaderInterface):
         raise RuntimeError(
             f"Cannot process a '.{extension}' video without ffmpeg, which is needed to "
             "extract the audio track for transcription. Install ffmpeg and make sure it "
-            "is on your PATH (or `pip install imageio-ffmpeg`), or provide the video as "
-            ".mp4 or .webm, which can be transcribed directly."
+            "is on your PATH, or provide the video as .mp4 or .webm, which can be "
+            "transcribed directly."
         )
 
     async def _extract_audio(self, ffmpeg: str, file_path: str) -> str:

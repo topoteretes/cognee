@@ -17,8 +17,7 @@ from cognee.shared.logging_utils import ERROR, setup_logging
 # ffmpeg is optional:
 #   - `.mp4` and `.webm` are transcribed directly, no ffmpeg needed.
 #   - Other containers (`.mov`, `.mkv`, `.avi`, `.m4v`) need ffmpeg to extract
-#     the audio track. Install a system ffmpeg, or `pip install cognee[video]`
-#     to get a bundled one.
+#     the audio track. Install a system ffmpeg and make sure it is on your PATH.
 
 
 def resolve_video_path() -> str:
