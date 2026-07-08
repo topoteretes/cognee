@@ -1,7 +1,7 @@
 import asyncio
 
 from cognee.shared.logging_utils import get_logger
-from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.engine import DataPoint
 
 logger = get_logger("index_data_points")
@@ -18,14 +18,14 @@ async def index_data_points(data_points: list[DataPoint], vector_engine=None):
         data_points: List of DataPoint objects to index. Each DataPoint's metadata must
                      contain an 'index_fields' list specifying which fields to embed.
         vector_engine: Optional pre-created vector engine. Falls back to
-                       ``get_vector_engine()`` when not supplied.
+                       ``get_vector_engine_async()`` when not supplied.
 
     Returns:
         The original data_points list.
     """
     data_points_by_type = {}
 
-    vector_engine = vector_engine or await get_vector_engine()
+    vector_engine = vector_engine or await get_vector_engine_async()
 
     for data_point in data_points:
         # Skip non-DataPoint objects (e.g. CogneeGraph) that may be

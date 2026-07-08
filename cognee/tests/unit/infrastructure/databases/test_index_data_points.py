@@ -22,7 +22,7 @@ async def test_index_data_points_calls_vector_engine():
 
     with patch.dict(
         index_data_points.__globals__,
-        {"get_vector_engine": _get_vector_engine},
+        {"get_vector_engine_async": _get_vector_engine},
     ):
         await index_data_points(data_points)
 
