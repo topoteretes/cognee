@@ -48,6 +48,7 @@ async def test_persist_agent_trace_feedbacks_pipeline_wires_memify_tasks():
 
     memify_kwargs = memify_mock.call_args.kwargs
     assert memify_kwargs["dataset"] == "dataset-1"
+    assert memify_kwargs["user"] == user
     assert memify_kwargs["data"] == [{}]
     assert len(memify_kwargs["extraction_tasks"]) == 1
     assert len(memify_kwargs["enrichment_tasks"]) == 1
