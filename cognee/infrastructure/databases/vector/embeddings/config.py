@@ -1,19 +1,13 @@
 from typing import Optional
 from functools import lru_cache
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from cognee.exceptions import CogneeConfigurationError
 from cognee.shared.logging_utils import get_logger
 
 
 logger = get_logger("embedding_config")
-
-
-# Hard fallback when neither litellm nor fastembed knows the model. This used
-# to be the unconditional default and was the source of the silent
-# "Vector(3072)" mismatch on every non-OpenAI-text-embedding-3-large embedder.
-# Keep it for back-compat (the OpenAI default model still resolves to this via
-# litellm), but log a warning when we hit it without a real lookup.
-_FALLBACK_DIMENSIONS = 3072
 
 
 def _resolve_embedding_dimensions(provider: Optional[str], model: Optional[str]) -> Optional[int]:
@@ -78,7 +72,15 @@ class EmbeddingConfig(BaseSettings):
     embedding_endpoint: Optional[str] = None
     embedding_api_key: Optional[str] = None
     embedding_api_version: Optional[str] = None
-    embedding_max_completion_tokens: Optional[int] = 8191
+    embedding_max_completion_tokens: Optional[int] = Field(
+        default=8191,
+        validation_alias=AliasChoices(
+            "EMBEDDING_MAX_COMPLETION_TOKENS",
+            "embedding_max_completion_tokens",
+            "EMBEDDING_MAX_TOKENS",
+            "embedding_max_tokens",
+        ),
+    )
     embedding_batch_size: Optional[int] = None
     huggingface_tokenizer: Optional[str] = None
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
@@ -89,21 +91,13 @@ class EmbeddingConfig(BaseSettings):
             if derived is not None:
                 self.embedding_dimensions = derived
             else:
-                logger.warning(
+                raise CogneeConfigurationError(
                     "Could not auto-derive embedding_dimensions for "
-                    "provider=%r model=%r. Falling back to %d. If your embedder "
-                    "produces vectors of a different size, set EMBEDDING_DIMENSIONS "
-                    "explicitly — otherwise the first write into the vector store "
-                    "will fail with a shape mismatch.",
-                    self.embedding_provider,
-                    self.embedding_model,
-                    _FALLBACK_DIMENSIONS,
+                    f"provider={self.embedding_provider!r} model={self.embedding_model!r}. "
+                    "Set EMBEDDING_DIMENSIONS explicitly for this embedding model."
                 )
-                self.embedding_dimensions = _FALLBACK_DIMENSIONS
 
-        if not self.embedding_batch_size and self.embedding_provider.lower() == "openai":
-            self.embedding_batch_size = 36
-        elif not self.embedding_batch_size:
+        if not self.embedding_batch_size:
             self.embedding_batch_size = 36
 
     def to_dict(self) -> dict:
