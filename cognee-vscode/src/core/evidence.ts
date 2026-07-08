@@ -2,14 +2,19 @@
  * Parsing of Cognee's answer-grounded "Evidence" block into structured citations.
  *
  * When recall is called with `include_references=true`, completion strategies
- * append a block to the answer text in this exact shape (see the server's
- * `include_references` wiring and its unit tests):
+ * append a block to the answer text in this shape:
  *
  *   <answer>
  *
  *   Evidence:
- *   - chunk 3 of document report.pdf (chunk_id: chunk-1): <snippet>
+ *   - chunk 1 of document report.pdf (data_id: <uuid>, chunk_id: <uuid>): "<snippet>"
  *   - chunk 5 of document notes.md (chunk_id: chunk-2): <snippet>
+ *
+ * The parenthetical carries one or more comma-separated `key: value` pairs. The
+ * current server emits `(data_id: …, chunk_id: …)`; older builds emitted just
+ * `(chunk_id: …)`, and the snippet may or may not be wrapped in quotes — so we
+ * capture the whole parenthetical, pull ids out of it by name, and unwrap the
+ * snippet. This keeps parsing resilient to key order and additive metadata.
  *
  * Citations are chunk/document-level today because `DocumentChunk` carries a
  * `chunk_index` and `document_name` but no line offsets. The VS Code layer
@@ -24,6 +29,8 @@ export interface Citation {
   documentName: string;
   /** The chunk id, when present. */
   chunkId?: string;
+  /** The source data id, when present. */
+  dataId?: string;
   /** A short snippet of the cited chunk, used to reveal the region in-file. */
   snippet?: string;
   /** The raw citation line, preserved verbatim. */
@@ -41,8 +48,16 @@ export interface ParsedAnswer {
 
 const EVIDENCE_MARKER = "\n\nEvidence:\n";
 
+/**
+ * A single citation line. The metadata parenthetical is optional and captured as
+ * a whole (`[^)]*`) so ids can be extracted by name regardless of order; the
+ * snippet is everything after the trailing colon.
+ */
 const CITATION_RE =
-  /^-\s+chunk\s+(\S+)\s+of\s+document\s+(.+?)\s+\(chunk_id:\s*(.*?)\):\s*([\s\S]*)$/i;
+  /^-\s+chunk\s+(\S+)\s+of\s+document\s+(.+?)(?:\s+\(([^)]*)\))?:\s*([\s\S]*)$/i;
+
+const CHUNK_ID_RE = /chunk_id:\s*([^,)\s]+)/i;
+const DATA_ID_RE = /data_id:\s*([^,)\s]+)/i;
 
 /** Split an answer string into its prose answer and structured citations. */
 export function parseAnswer(text: string): ParsedAnswer {
@@ -75,17 +90,21 @@ export function parseEvidenceBlock(block: string): Citation[] {
     if (!match) {
       return;
     }
-    const [, chunkLabel, documentName, chunkId, snippet] = match;
+    const [, chunkLabel, documentName, metadata, snippet] = match;
     const citation: Citation = {
       chunkLabel: chunkLabel.trim(),
       documentName: documentName.trim(),
       raw,
     };
-    const trimmedChunkId = chunkId.trim();
-    if (trimmedChunkId) {
-      citation.chunkId = trimmedChunkId;
+    const chunkId = extractId(metadata, CHUNK_ID_RE);
+    if (chunkId) {
+      citation.chunkId = chunkId;
     }
-    const trimmedSnippet = snippet.trim();
+    const dataId = extractId(metadata, DATA_ID_RE);
+    if (dataId) {
+      citation.dataId = dataId;
+    }
+    const trimmedSnippet = unwrapQuotes(snippet);
     if (trimmedSnippet) {
       citation.snippet = trimmedSnippet;
     }
@@ -101,4 +120,26 @@ export function parseEvidenceBlock(block: string): Citation[] {
   flush();
 
   return citations;
+}
+
+/** Pull a single id value out of the metadata parenthetical, if present. */
+function extractId(metadata: string | undefined, pattern: RegExp): string | undefined {
+  if (!metadata) {
+    return undefined;
+  }
+  const match = pattern.exec(metadata);
+  return match ? match[1].trim() : undefined;
+}
+
+/** Trim a snippet and remove a single pair of enclosing quotes, if any. */
+function unwrapQuotes(snippet: string | undefined): string {
+  const text = (snippet ?? "").trim();
+  if (text.length >= 2) {
+    const first = text[0];
+    const last = text[text.length - 1];
+    if ((first === '"' && last === '"') || (first === "'" && last === "'")) {
+      return text.slice(1, -1).trim();
+    }
+  }
+  return text;
 }
