@@ -10,7 +10,7 @@ what Cognee knows about the current repository, with links back to the source fi
 ## Features
 
 - **Remember Selection / Remember File / Remember Note** — store code, files, or a free-form note into per-repository memory.
-- **Ask My Project Memory** — a panel that answers questions about the repo, with clickable citations.
+- **Ask My Project Memory** — a panel that answers questions about the repo, with ranked, clickable citations that open the exact source file.
 - **Recall** — a quick query from the command palette.
 - **Index Workspace** — opt-in bulk ingest, respecting `.gitignore`/`.cogneeignore`, with a preflight summary.
 - **Forget Project Memory** — clear the graph (keep files) or delete the dataset.
@@ -68,10 +68,11 @@ settings and secret storage.
 The extension talks to Cognee over the HTTP API:
 
 - **Ask / Recall** → `POST /api/v1/recall` with `include_references: true`, scoped to the workspace dataset.
-  Citations are parsed from the answer's `Evidence` block (chunk/document level today). Because Cognee
-  returns only a document *basename*, the extension keeps a per-workspace path index (files you
-  remember are recorded with their exact relative path) so a citation opens the right file directly.
-  It falls back to snippet-content matching, then a user pick, only when genuinely ambiguous.
+  Citations are parsed from the answer's `Evidence` block (chunk/document level today), then ranked by
+  relevance to the query and de-duplicated so each source file appears once. Everything the extension
+  ingests carries a `Source: <path>` header, so a citation resolves straight to the exact file — even when
+  several files share a name. It falls back to a per-workspace path index (the exact path of each file you
+  remember), then snippet-content matching, then a user pick, only when genuinely ambiguous.
 - **Remember / Index** → `POST /api/v1/remember` (ingest + graph build in one call).
 - **Forget** → `POST /api/v1/forget`.
 
