@@ -16,7 +16,7 @@ async def _reset_engines_and_prune():
     try:
         from cognee.infrastructure.databases.vector import get_vector_engine
 
-        vector_engine = get_vector_engine()
+        vector_engine = await get_vector_engine()
         if hasattr(vector_engine, "engine") and hasattr(vector_engine.engine, "dispose"):
             await vector_engine.engine.dispose(close=True)
     except Exception:

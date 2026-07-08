@@ -73,7 +73,7 @@ async def test_vector_engine_search_none_limit():
 
     from cognee.infrastructure.databases.vector import get_vector_engine
 
-    vector_engine = get_vector_engine()
+    vector_engine = await get_vector_engine()
     collection_name = "Entity_name"
 
     query_vector = (await vector_engine.embedding_engine.embed_text([query_text]))[0]
@@ -112,7 +112,7 @@ async def test_vector_engine_search_with_nodeset_filtering():
 
     from cognee.infrastructure.databases.vector import get_vector_engine
 
-    vector_engine = get_vector_engine()
+    vector_engine = await get_vector_engine()
     query_vector = (await vector_engine.embedding_engine.embed_text([query_text]))[0]
 
     # Search with "OR" operator
@@ -257,7 +257,7 @@ async def main():
     dataset_1 = (await get_datasets_by_name([dataset_name_1], user.id))[0]
     await test_getting_of_documents(dataset_1.id)
 
-    vector_engine = get_vector_engine()
+    vector_engine = await get_vector_engine()
     random_node = (
         await vector_engine.search("Entity_name", "Quantum computer", include_payload=True)
     )[0]

@@ -4,7 +4,7 @@ from cognee.infrastructure.engine.models.DataPoint import DataPoint
 
 
 async def assert_nodes_vector_index_present(data_points: List[DataPoint]):
-    vector_engine = get_vector_engine()
+    vector_engine = await get_vector_engine()
 
     data_points_by_vector_collection = {}
 

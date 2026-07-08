@@ -42,7 +42,7 @@ async def _reset_engines_and_prune() -> None:
     try:
         from cognee.infrastructure.databases.vector import get_vector_engine
 
-        vector_engine = get_vector_engine()
+        vector_engine = await get_vector_engine()
         # Dispose SQLAlchemy engine connection pool if it exists
         if hasattr(vector_engine, "engine") and hasattr(vector_engine.engine, "dispose"):
             await vector_engine.engine.dispose(close=True)
@@ -139,7 +139,7 @@ async def setup_test_environment():
     await create_triplet_embeddings(user=user, dataset=dataset_name, triplets_batch_size=5)
 
     # Check if Triplet_text collection was created
-    vector_engine = get_vector_engine()
+    vector_engine = await get_vector_engine()
     has_collection = await vector_engine.has_collection(collection_name="Triplet_text")
     logger.info(f"Triplet_text collection exists after creation: {has_collection}")
 
@@ -171,7 +171,7 @@ async def e2e_state(_disable_session_turn_gating):
     graph_engine = await get_graph_engine()
     _nodes, edges = await graph_engine.get_graph_data()
 
-    vector_engine = get_vector_engine()
+    vector_engine = await get_vector_engine()
     collection = await vector_engine.search(
         collection_name="Triplet_text",
         query_text="Test",

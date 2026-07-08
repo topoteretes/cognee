@@ -137,7 +137,7 @@ async def main(mock_create_structured_output: AsyncMock):
     user = await get_default_user()
     await set_database_global_context_variables("main_dataset", user.id)
 
-    vector_engine = get_vector_engine()
+    vector_engine = await get_vector_engine()
 
     assert not await vector_engine.has_collection("EdgeType_relationship_name")
     assert not await vector_engine.has_collection("Entity_name")

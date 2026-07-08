@@ -60,7 +60,7 @@ class TripletRetriever(BaseRetriever):
 
             - Any: A list containing the retrieved triplets, or an empty list if none are found.
         """
-        vector_engine = get_vector_engine()
+        vector_engine = await get_vector_engine()
 
         try:
             if not await vector_engine.has_collection(collection_name="Triplet_text"):

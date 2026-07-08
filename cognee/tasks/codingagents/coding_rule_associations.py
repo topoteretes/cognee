@@ -52,7 +52,7 @@ async def get_existing_rules(rules_nodeset_name: str) -> List[str]:
 
 
 async def get_origin_edges(data: str, rules: List[Rule]) -> list[Any]:
-    vector_engine = get_vector_engine()
+    vector_engine = await get_vector_engine()
 
     origin_chunk = await vector_engine.search("DocumentChunk_text", data, limit=1)
 
