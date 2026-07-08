@@ -87,6 +87,23 @@ def test_explicit_provider_takes_precedence(monkeypatch):
     assert config.llm_provider == "custom"
 
 
+def test_env_provider_takes_precedence_over_inference(monkeypatch):
+    """
+    A provider set via LLM_PROVIDER (env) suppresses inference, just like a kwarg.
+
+    This is the real-world back-compat path: existing configs that pair
+    LLM_PROVIDER="custom" with an unsupported-prefix model (e.g. OpenRouter)
+    must keep working and must not raise ProviderNotDeducibleError. It exercises
+    the env source (not a kwarg), confirming env-set fields land in
+    model_fields_set so inference is skipped.
+    """
+    monkeypatch.setenv("LLM_PROVIDER", "custom")
+    monkeypatch.setenv("LLM_MODEL", "openrouter/google/gemini-2.0-flash-lite")
+
+    config = LLMConfig(_env_file=None)
+    assert config.llm_provider == "custom"
+
+
 def test_provider_unchanged_without_prefix(monkeypatch):
     """
     A model without a '/' prefix leaves the default provider untouched.
