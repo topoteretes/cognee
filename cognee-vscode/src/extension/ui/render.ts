@@ -1,4 +1,5 @@
 import { parseAnswer, type Citation, type RecallResponseItem } from "../../core";
+import { extractSourcePath } from "./resolve";
 
 export interface RenderedRecall {
   /** The combined prose answer, with Evidence blocks stripped. */
@@ -35,6 +36,80 @@ export function renderRecall(items: RecallResponseItem[]): RenderedRecall {
     citations: dedupeCitations(citations),
     isEmpty: answers.length === 0,
   };
+}
+
+/**
+ * Collapse citations that point at the same source file into one entry, keeping
+ * the first occurrence (so, applied after ranking, the best-matching chunk wins).
+ *
+ * Cognee emits one Evidence line per chunk, so a single file can appear several
+ * times (e.g. three chunks of the same README). Showing every unique *file* once
+ * is the useful, honest unit for provenance — all sources, no repeats. Files are
+ * keyed by their `Source: <path>` header when present, else the document name.
+ */
+export function dedupeByFile(citations: Citation[]): Citation[] {
+  const seen = new Set<string>();
+  const unique: Citation[] = [];
+  for (const citation of citations) {
+    const key = (extractSourcePath(citation.snippet) ?? citation.documentName).toLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    unique.push(citation);
+  }
+  return unique;
+}
+
+/**
+ * Order citations by lexical relevance to the query, most relevant first.
+ *
+ * Cognee lists Evidence chunks in retrieval order and does not populate a
+ * per-citation `score`, so a large, incidental document can appear above the one
+ * the query is actually about. We rank client-side by how many distinct query
+ * terms appear in each citation's document name and snippet (the snippet includes
+ * our `Source: <path>` header, so a path like `themes/aurora/…` counts too). The
+ * sort is stable: equal scores keep Cognee's original order, and this only
+ * reorders the source list — never the answer.
+ */
+export function rankCitations(citations: Citation[], query: string): Citation[] {
+  const terms = queryTerms(query);
+  if (terms.length === 0 || citations.length < 2) {
+    return citations;
+  }
+  return citations
+    .map((citation, index) => ({ citation, index, score: relevanceScore(citation, terms) }))
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .map((entry) => entry.citation);
+}
+
+const STOP_WORDS = new Set([
+  "how", "to", "the", "a", "an", "is", "are", "in", "of", "and", "or", "for", "on",
+  "what", "why", "do", "does", "did", "i", "my", "me", "we", "it", "this", "that",
+  "about", "with", "can", "should", "would", "please", "tell",
+]);
+
+/** Distinct, meaningful lower-cased query terms (stop words and stubs dropped). */
+function queryTerms(query: string): string[] {
+  const seen = new Set<string>();
+  for (const token of query.toLowerCase().split(/[^a-z0-9]+/)) {
+    if (token.length >= 3 && !STOP_WORDS.has(token)) {
+      seen.add(token);
+    }
+  }
+  return [...seen];
+}
+
+/** Count how many distinct query terms appear in the citation's name + snippet. */
+function relevanceScore(citation: Citation, terms: string[]): number {
+  const haystack = `${citation.documentName} ${citation.snippet ?? ""}`.toLowerCase();
+  let score = 0;
+  for (const term of terms) {
+    if (haystack.includes(term)) {
+      score += 1;
+    }
+  }
+  return score;
 }
 
 function extractText(item: RecallResponseItem): string {
