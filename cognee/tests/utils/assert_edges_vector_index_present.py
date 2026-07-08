@@ -2,7 +2,7 @@ from uuid import UUID
 from typing import Dict, List, Tuple
 
 from cognee.infrastructure.databases.graph import get_graph_engine
-from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.modules.engine.utils import generate_node_name
 from cognee.modules.graph.models.EdgeType import EdgeType
 from cognee.modules.graph.utils.prepare_edges_for_storage import get_edge_retrieval_text
@@ -36,7 +36,7 @@ def format_relationship(
 async def assert_edges_vector_index_present(
     relationships: List[Tuple[UUID, UUID, str, Dict]], convert_to_new_format: bool = True
 ):
-    vector_engine = get_vector_engine()
+    vector_engine = await get_vector_engine_async()
 
     graph_engine = await get_graph_engine()
     nodes, graph_edges = await graph_engine.get_graph_data()

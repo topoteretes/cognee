@@ -43,7 +43,7 @@ from cognee.context_global_variables import (
 )
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.databases.graph import get_graph_engine
-from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.modules.data.methods.get_dataset_databases import get_dataset_databases
 from cognee.modules.users.models import DatasetDatabase
 
@@ -354,9 +354,9 @@ async def _run_global_migrations(
             await _stamp_global(db_engine, revision)
 
         # No context override: without access control, get_graph_engine /
-        # get_vector_engine resolve the global databases directly.
+        # get_vector_engine_async resolve the global databases directly.
         graph_engine = await get_graph_engine()
-        vector_engine = get_vector_engine()
+        vector_engine = await get_vector_engine_async()
         migration_context = MigrationContext(
             graph_engine=graph_engine,
             vector_engine=vector_engine,
@@ -411,7 +411,7 @@ async def _migrate_dataset(
     # per-dataset context — the same way every other operation does.
     async with set_database_global_context_variables(row.dataset_id, row.owner_id):
         graph_engine = await get_graph_engine()
-        vector_engine = get_vector_engine()
+        vector_engine = await get_vector_engine_async()
         migration_context = MigrationContext(
             graph_engine=graph_engine,
             vector_engine=vector_engine,
@@ -552,7 +552,7 @@ async def _downgrade_dataset(db_engine, row, target: Optional[str]) -> Optional[
 
     async with set_database_global_context_variables(row.dataset_id, row.owner_id):
         graph_engine = await get_graph_engine()
-        vector_engine = get_vector_engine()
+        vector_engine = await get_vector_engine_async()
         migration_context = MigrationContext(
             graph_engine=graph_engine,
             vector_engine=vector_engine,
@@ -606,7 +606,7 @@ async def downgrade_database_migrations(
                 await _stamp_global(db_engine, revision)
 
             graph_engine = await get_graph_engine()
-            vector_engine = get_vector_engine()
+            vector_engine = await get_vector_engine_async()
             migration_context = MigrationContext(
                 graph_engine=graph_engine,
                 vector_engine=vector_engine,
