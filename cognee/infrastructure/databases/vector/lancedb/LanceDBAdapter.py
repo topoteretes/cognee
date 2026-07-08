@@ -960,8 +960,16 @@ class LanceDBAdapter(VectorDBInterface):
             coerced.append(new_row)
         return coerced
 
-    async def retrieve(self, collection_name: str, data_point_ids: list[str]):
-        """Return rows from `collection_name` whose id is in `data_point_ids`."""
+    async def retrieve(
+        self, collection_name: str, data_point_ids: list[str], *, include_vector: bool = False
+    ):
+        """Return rows from `collection_name` whose id is in `data_point_ids`.
+
+        ``include_vector`` is a LanceDB-only extension (the shared interface is
+        unchanged): when True, the stored embedding is attached to each result
+        under ``payload["vector"]``. The semantic memory map is the consumer;
+        it needs the raw vectors the plain retrieve path drops.
+        """
         if not data_point_ids:
             # No ids requested. Avoid building an "id IN ()" filter, which lance
             # rejects as a parse error; pgvector/chromadb return [] here too.
@@ -983,7 +991,11 @@ class LanceDBAdapter(VectorDBInterface):
         return [
             ScoredResult(
                 id=parse_id(result["id"]),
-                payload=result["payload"],
+                # The copy keeps the stored row untouched; the default path is
+                # byte-for-byte the previous behavior.
+                payload={**result["payload"], "vector": result["vector"]}
+                if include_vector
+                else result["payload"],
                 score=0,
             )
             for result in results_list
