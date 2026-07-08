@@ -33,12 +33,7 @@ def _format_timestamp(seconds: float) -> str:
 
 def _extract_segments(payload: Any) -> list:
     """Pull the timed segments out of a transcription payload, if present."""
-    if payload is None:
-        return []
-    segments = getattr(payload, "segments", None)
-    if segments is None and isinstance(payload, dict):
-        segments = payload.get("segments")
-    return segments or []
+    return getattr(payload, "segments", None) or []
 
 
 def _segment_field(segment: Any, field: str) -> Any:
@@ -205,22 +200,26 @@ class VideoLoader(LoaderInterface):
         def run_ffmpeg() -> subprocess.CompletedProcess:
             return subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
-        result = await asyncio.to_thread(run_ffmpeg)
-        if result.returncode != 0:
+        try:
+            result = await asyncio.to_thread(run_ffmpeg)
+            if result.returncode != 0:
+                stderr = result.stderr.decode("utf-8", errors="replace").strip()
+                raise RuntimeError(f"ffmpeg failed to extract audio from '{file_path}': {stderr}")
+        except BaseException:
+            # Never leave the empty temp file behind if extraction fails
+            # (ffmpeg missing/not executable, non-zero exit, or cancellation).
             if os.path.exists(out_path):
                 os.remove(out_path)
-            stderr = result.stderr.decode("utf-8", errors="replace").strip()
-            raise RuntimeError(f"ffmpeg failed to extract audio from '{file_path}': {stderr}")
+            raise
         return out_path
 
     async def _transcribe(self, audio_path: str) -> str:
-        """Transcribe audio, preferring segmented output for timestamps.
+        """Transcribe audio, preferring segmented output so timestamps can be inlined.
 
-        Requests verbose/segmented transcription so each segment can be
-        prefixed with an ``[HH:MM:SS]`` marker. Providers or models that do not
-        support segmented output fall back to a plain transcript.
+        Requests verbose/segmented transcription so each segment can be prefixed
+        with an ``[HH:MM:SS]`` marker. Providers or models that do not support
+        segmented output fall back to a plain transcript (without timestamps).
         """
-        result = None
         try:
             result = await LLMGateway.create_transcript(
                 audio_path,
@@ -228,16 +227,13 @@ class VideoLoader(LoaderInterface):
                 timestamp_granularities=["segment"],
             )
         except Exception as error:
-            logger.warning(
-                "Segmented transcription unavailable (%s); falling back to plain transcript.",
+            logger.debug(
+                "Segmented transcription unavailable (%s); using a plain transcript.",
                 error,
             )
+            result = await LLMGateway.create_transcript(audio_path)
 
         if result is None:
-            plain = await LLMGateway.create_transcript(audio_path)
-            return plain.text if plain is not None else ""
-
-        segments = _extract_segments(result.payload)
-        if segments:
-            return _build_timestamped_text(segments)
-        return result.text or ""
+            return ""
+        timestamped = _build_timestamped_text(_extract_segments(result.payload))
+        return timestamped or (result.text or "")
