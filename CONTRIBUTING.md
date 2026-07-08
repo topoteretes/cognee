@@ -115,6 +115,19 @@ Make sure to run ```shell uv sync ``` in the root cloned folder or set up a virt
 uv run python examples/demos/simple_cognee_example.py
 ```
 
+### Testing examples (mocked, no API key)
+
+Example scripts under `examples/` are covered by fast, deterministic tests that
+mock the LLM and embedding layers, so they run in CI with no API key or network:
+
+```shell
+uv run pytest cognee/tests/examples/ -v
+```
+
+If you add or change an example, add or update its mocked test. See
+[`examples/README.md`](examples/README.md#-testing-examples-mocked-no-api-key)
+for the harness overview and a copy-paste test template.
+
 ## 4. 📤 Submitting Changes
 
 1. Make sure that `pre-commit` and hooks are installed. See `Required tools` section for more information. Try executing `pre-commit run` if you are not sure.
