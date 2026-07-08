@@ -199,9 +199,7 @@ async def resolve_dlt_sources(
         fresh_table_names: Set[str] = {row.table_name for row in all_rows}
 
         async def _cleanup() -> None:
-            await _delete_dlt_orphans(
-                dataset_name, user, fresh_data_ids, fresh_table_names
-            )
+            await _delete_dlt_orphans(dataset_name, user, fresh_data_ids, fresh_table_names)
 
         orphan_cleanup = _cleanup
 
