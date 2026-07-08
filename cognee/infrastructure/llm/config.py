@@ -290,7 +290,7 @@ class LLMConfig(BaseSettings):
         """
         if stage not in _STAGE_NAMES:
             return self
-        update = {}
+        update: dict[str, Any] = {}
         for field in ("model", "provider", "endpoint", "api_key", "api_version"):
             value = getattr(self, f"llm_{stage}_{field}", None)
             if value:  # treats "" and None as unset

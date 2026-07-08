@@ -30,7 +30,7 @@ graph_db_config = ContextVar("graph_db_config", default=None)
 current_dataset_id = ContextVar("current_dataset_id", default=None)
 # Note: same mechanism for LLM and embedding configs so that the LiteLLM client
 #       and the embedding engine can use per-context (e.g. per-request) configs.
-llm_config = ContextVar("llm_config", default=None)
+llm_config: ContextVar[Optional[LLMConfig]] = ContextVar("llm_config", default=None)
 embedding_config = ContextVar("embedding_config", default=None)
 session_user = ContextVar("session_user", default=None)
 # Labels the pipeline stage (extraction | summarization | query) whose LLM
