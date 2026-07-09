@@ -80,6 +80,8 @@ class _Messages:
         return _Request({"messages": [{"id": mid} for mid in self._svc.message_ids]})
 
     def get(self, *, userId, id, format):  # noqa: A002 - mirror Gmail API kwarg name
+        if id in self._svc.get_errors:
+            return _Request(_HttpError(self._svc.get_errors[id]))
         if id not in self._svc.messages:
             return _Request(_HttpError(404))
         return _Request(self._svc.messages[id])
@@ -112,11 +114,16 @@ class _Users:
 class FakeGmailService:
     """Minimal stand-in for the googleapiclient Gmail service."""
 
-    def __init__(self, messages=None, profile_history_id="500", history_response=None):
+    def __init__(
+        self, messages=None, profile_history_id="500", history_response=None, get_errors=None
+    ):
         self.messages = {m["id"]: m for m in (messages or [])}
         self.message_ids = list(self.messages.keys())
         self.profile_history_id = profile_history_id
         self.history_response = history_response or {"history": [], "historyId": profile_history_id}
+        # Map of message id -> HTTP status to raise from messages().get(), used
+        # to simulate transient (non-404) fetch failures.
+        self.get_errors = get_errors or {}
 
     def users(self):
         return _Users(self)
@@ -271,6 +278,24 @@ def test_incremental_fetch_missing_message_on_fetch_is_treated_as_deleted():
     )
     rows = list(incremental_fetch(svc, {"last_history_id": "1000"}))
     assert rows == [{"id": "ghost", "_deleted": True}]
+
+
+def test_incremental_fetch_transient_error_does_not_delete_live_message():
+    # History reports a change, but get() hits a transient 500 (NOT a 404).
+    # The message is still live — it must not be turned into a hard-delete,
+    # and the cursor must not advance so the next run retries the same window.
+    svc = FakeGmailService(
+        messages=[_make_message("m")],
+        history_response={
+            "history": [{"id": "1010", "messagesAdded": [{"message": {"id": "m"}}]}],
+            "historyId": "1010",
+        },
+        get_errors={"m": 500},
+    )
+    state = {"last_history_id": "1000"}
+    with pytest.raises(_HttpError):
+        list(incremental_fetch(svc, state))
+    assert state["last_history_id"] == "1000"  # cursor NOT advanced
 
 
 # ---------------------------------------------------------------------------

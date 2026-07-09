@@ -240,12 +240,21 @@ def _list_message_ids(
 
 
 def _get_message(service: Any, message_id: str) -> Optional[dict]:
-    """Fetch a full message; return None if it has since vanished (404)."""
+    """Fetch a full message; return None only if it is genuinely gone (404/410).
+
+    A transient failure (5xx / rate-limit / network) is re-raised rather than
+    swallowed. On the incremental path a ``None`` result is interpreted as a
+    deletion, so masking a transient error here would hard-delete a live
+    message from memory. Re-raising instead aborts the sync before the cursor
+    advances, so the next run safely retries from the same point.
+    """
     try:
         return service.users().messages().get(userId="me", id=message_id, format="full").execute()
-    except Exception as exc:  # pragma: no cover - network/permission dependent
-        logger.warning("Gmail: failed to fetch message %s: %s", message_id, exc)
-        return None
+    except Exception as exc:
+        status = getattr(getattr(exc, "resp", None), "status", None)
+        if status in (404, 410) or "404" in str(exc) or "410" in str(exc):
+            return None
+        raise
 
 
 def _mailbox_history_id(service: Any) -> Optional[str]:
