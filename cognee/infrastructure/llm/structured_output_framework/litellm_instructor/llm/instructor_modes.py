@@ -8,7 +8,7 @@ import instructor
 
 # Values match each adapter's historical default. Azure is absent on purpose:
 # AzureOpenAIAdapter subclasses OpenAIAdapter and inherits the "openai" mode.
-INSTRUCTOR_MODE_TABLE: dict[str, object] = {
+INSTRUCTOR_MODE_TABLE: dict[str, str | instructor.Mode] = {
     "openai": "json_schema_mode",
     "anthropic": "anthropic_tools",
     "gemini": "json_mode",
@@ -19,9 +19,11 @@ INSTRUCTOR_MODE_TABLE: dict[str, object] = {
     "llama_cpp": instructor.Mode.JSON,
 }
 
-DEFAULT_INSTRUCTOR_MODE = "json_mode"
 
+def get_instructor_mode(provider: str) -> str | instructor.Mode:
+    """Return ``provider``'s default instructor mode.
 
-def get_instructor_mode(provider: str):
-    """Return ``provider``'s default instructor mode, or the fallback if unknown."""
-    return INSTRUCTOR_MODE_TABLE.get(provider, DEFAULT_INSTRUCTOR_MODE)
+    Raises ``KeyError`` for a provider not in ``INSTRUCTOR_MODE_TABLE`` so a
+    missing entry fails loudly at import rather than silently picking a default.
+    """
+    return INSTRUCTOR_MODE_TABLE[provider]
