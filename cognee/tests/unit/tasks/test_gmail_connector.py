@@ -357,6 +357,25 @@ def test_incremental_fetch_multi_label_keeps_in_scope_and_forgets_out_of_scope()
     assert by_id["drop"] == {"id": "drop", "_deleted": True}
 
 
+def test_incremental_fetch_keeps_explicitly_scoped_spam():
+    # When the caller explicitly scopes to SPAM, backfill ingests spam, so
+    # incremental must keep it too — the SPAM/TRASH exclusion only applies to
+    # the unscoped (label_ids=None) case that mirrors messages.list defaults.
+    spam = _make_message("s", labels=["SPAM"], history_id="1040")
+    svc = FakeGmailService(
+        messages=[spam],
+        history_response={
+            "history": [{"id": "1040", "messagesAdded": [{"message": {"id": "s"}}]}],
+            "historyId": "1040",
+        },
+    )
+    rows = list(incremental_fetch(svc, {"last_history_id": "1000"}, label_ids=["SPAM"]))
+
+    assert len(rows) == 1
+    assert rows[0]["id"] == "s"
+    assert rows[0]["_deleted"] is False
+
+
 # ---------------------------------------------------------------------------
 # gmail_source (dlt wiring) — requires dlt
 # ---------------------------------------------------------------------------

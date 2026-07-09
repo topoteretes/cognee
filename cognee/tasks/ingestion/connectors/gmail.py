@@ -399,15 +399,20 @@ def incremental_fetch(
             # Genuinely gone (404/410) — treat as a deletion.
             seen_deleted.add(msg_id)
             continue
-        # A message that was trashed or moved out of the configured label scope
-        # must be forgotten, not re-ingested as live. Trashing INBOX mail fires
-        # labelsRemoved(INBOX) (not messagesDeleted), so without this check the
-        # trashed message would be fetched and upserted. Re-checking the full
-        # label set here also matches full_backfill's AND-of-all-labels scope
-        # (history.list can pre-filter by a single labelId only).
+        # A message that moved out of scope (e.g. trashed) must be forgotten,
+        # not re-ingested as live: trashing INBOX mail fires labelsRemoved(INBOX)
+        # (not messagesDeleted), so without this check it would be fetched and
+        # upserted. Re-check the message against the SAME scope full_backfill
+        # applies — history.list can only pre-filter by a single labelId, so the
+        # authoritative decision is made here after the full label set is known.
         labels = set(message.get("labelIds", []) or [])
-        out_of_scope = bool(label_ids) and not set(label_ids).issubset(labels)
-        if "TRASH" in labels or "SPAM" in labels or out_of_scope:
+        if label_ids:
+            # full_backfill lists with labelIds=label_ids, which ANDs them.
+            in_scope = set(label_ids).issubset(labels)
+        else:
+            # Unscoped: mirror messages.list, which excludes SPAM/TRASH.
+            in_scope = "TRASH" not in labels and "SPAM" not in labels
+        if not in_scope:
             seen_deleted.add(msg_id)
             continue
         added_count += 1
