@@ -460,7 +460,9 @@ def gmail_source(
         import dlt
     except ImportError as exc:
         raise ImportError(
-            'The Gmail connector requires the dlt extra: pip install "cognee[dlt]".'
+            "The Gmail connector requires the 'gmail' extra. Install it with:\n"
+            '    pip install "cognee[gmail]"\n'
+            "(the gmail extra bundles dlt)."
         ) from exc
 
     @dlt.resource(

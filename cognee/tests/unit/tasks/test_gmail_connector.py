@@ -412,7 +412,7 @@ def test_gmail_source_requires_dlt(monkeypatch):
         return real_import(name, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "__import__", fake_import)
-    with pytest.raises(ImportError, match="cognee\\[dlt\\]"):
+    with pytest.raises(ImportError, match="cognee\\[gmail\\]"):
         gmail_source(service=object())
 
 
