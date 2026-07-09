@@ -23,6 +23,11 @@ on:
         required: false
         type: string
         default: '3'
+      mode:
+        description: "'mock_llm' (offline cassette) or 'llm' (real LLM + embeddings)."
+        required: false
+        type: string
+        default: 'mock_llm'
       cognee_rs_ref:
         description: "cognee-rs git ref to check out (blank = default branch)."
         required: false
@@ -62,7 +67,7 @@ env:
 
 jobs:
   rust_file_based:
-    name: rust file_based — ${{ inputs.label }} (mock_llm)
+    name: rust file_based — ${{ inputs.label }} (${{ inputs.mode }})
     # ubuntu-latest (not 22.04): lbug's bundled simsimd needs a C compiler with
     # avx512fp16 / _Float16 support (GCC >= 12). This matches cognee-rs's own CI.
     runs-on: ubuntu-latest
@@ -137,6 +142,8 @@ jobs:
       # LOG_LEVEL=info is pinned so the log-scraping check is deterministic
       # regardless of any RUST_LOG/LOG_LEVEL inherited by the runner.
       - name: Verify cassette freshness (warn on drift)
+        # Cassette only exists / matters in mock mode; real-LLM mode calls the API.
+        if: ${{ inputs.mode == 'mock_llm' }}
         working-directory: cognee-rs
         env:
           LOG_LEVEL: info
@@ -161,12 +168,12 @@ jobs:
             echo "✅ Cassette fresh — replay created ${entities} entity-type nodes." >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      # Drive the shared orchestrator against cognee-cli via the committed
-      # harness. run_mock_bench.sh forwards --mock-llm/--mock-memories to the
-      # orchestrator (which passes them through to the bench subcommand) and puts
-      # --memories in BENCH_CMD, so --memories is never duplicated.
-      - name: Run performance report
-        id: run
+      # ── Mock mode: offline, via the committed harness ────────────────────────
+      # run_mock_bench.sh forwards --mock-llm/--mock-memories to the orchestrator
+      # (which passes them through to the bench subcommand) and puts --memories in
+      # BENCH_CMD, so --memories is never duplicated.
+      - name: Run performance report (mock LLM)
+        if: ${{ inputs.mode == 'mock_llm' }}
         env:
           PYTHONFAULTHANDLER: 1
           COGNEE_SKIP_CONNECTION_TEST: 'true'
@@ -180,9 +187,39 @@ jobs:
           MEMORIES="$GITHUB_WORKSPACE/cognee-rs/${{ inputs.memories }}" \
             bash "$GITHUB_WORKSPACE/cognee-rs/scripts/perf/run_mock_bench.sh"
 
+      # ── Real-LLM mode: drive the orchestrator directly (no --mock-llm) ───────
+      # BENCH_CMD holds the bench invocation + corpus; the orchestrator adds
+      # --output and (real mode) sleeps 60s between runs. LLM + embeddings both go
+      # to OpenAI via the inherited OPENAI_API_KEY. gpt-4o-mini / text-embedding-3-
+      # small match the mock cassette's model, so mock vs real stay comparable.
+      - name: Run performance report (real LLM)
+        if: ${{ inputs.mode == 'llm' }}
+        env:
+          PYTHONFAULTHANDLER: 1
+          COGNEE_SKIP_CONNECTION_TEST: 'true'
+          LLM_PROVIDER: openai
+          LLM_ENDPOINT: https://api.openai.com/v1
+          LLM_MODEL: gpt-4o-mini
+          LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          EMBEDDING_PROVIDER: openai
+          EMBEDDING_MODEL: text-embedding-3-small
+          EMBEDDING_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/perf-out"
+          BENCH_CMD="$GITHUB_WORKSPACE/cognee-rs/target/release/cognee-cli bench --memories $GITHUB_WORKSPACE/cognee-rs/${{ inputs.memories }}" \
+            python3 "$GITHUB_WORKSPACE/cognee/tests/performance/statistics_percentile_report.py" \
+              --runs "${{ inputs.runs }}" \
+              --output "$GITHUB_WORKSPACE/perf-out/report.json" \
+              --html "$GITHUB_WORKSPACE/perf-out/report.html"
+
+      # ── Stage the report (common to both modes) for S3 upload ────────────────
+      - name: Stage report
+        run: |
+          set -euo pipefail
           TS="$(date -u '+%Y-%m-%d_%H-%M-%SZ')"
-          JSON_PATH="performance_results/rust_file_based/${{ inputs.label }}/mock_llm_${TS}.json"
-          HTML_PATH="performance_results/rust_file_based/${{ inputs.label }}/mock_llm_${TS}.html"
+          JSON_PATH="performance_results/rust_file_based/${{ inputs.label }}/${{ inputs.mode }}_${TS}.json"
+          HTML_PATH="performance_results/rust_file_based/${{ inputs.label }}/${{ inputs.mode }}_${TS}.html"
           mkdir -p "$(dirname "$JSON_PATH")"
           cp "$GITHUB_WORKSPACE/perf-out/report.json" "$JSON_PATH"
           cp "$GITHUB_WORKSPACE/perf-out/report.html" "$HTML_PATH"
