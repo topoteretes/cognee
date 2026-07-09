@@ -53,5 +53,5 @@ async def setup_and_check_environment(
 
                 await test_llm_connection()
                 detected_embedding_dimensions = await test_embedding_connection()
-                determine_embedding_dimensions(detected_embedding_dimensions)
+                await determine_embedding_dimensions(detected_embedding_dimensions)
             _first_run_done = True

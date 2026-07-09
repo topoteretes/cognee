@@ -81,6 +81,7 @@ Most runnable demos and backend examples use the v1.0 memory API (`remember`, `r
 | [`session_feedback_example.py`](demos/session_feedback_example.py) | Capturing thumbs-up/down feedback on retrieval |
 | [`session_feedback_lifecycle_demo/backend/app.py`](demos/session_feedback_lifecycle_demo/backend/app.py) | Full feedback-loop backend (FastAPI + cognee) |
 | [`feedback_score_shifting_example.py`](demos/feedback_score_shifting_example.py) | How feedback nudges retrieval scores |
+| [`references_example.py`](demos/references_example.py) | Search answers with lightweight evidence references |
 | [`custom_graph_model_entity_schema_definition.py`](demos/custom_graph_model_entity_schema_definition.py) | Define your own entity schema for graph extraction |
 | [`custom_pipeline_single_object_example.py`](demos/custom_pipeline_single_object_example.py) | Run a custom pipeline on a single object |
 | [`dynamic_multiple_weighted_edges_example.py`](demos/dynamic_multiple_weighted_edges_example.py) | Many-to-many edges with per-edge weights |
@@ -94,6 +95,9 @@ Most runnable demos and backend examples use the v1.0 memory API (`remember`, `r
 | [`simple_document_qa/simple_document_qa_demo.py`](demos/simple_document_qa/simple_document_qa_demo.py) | Q&A over a single document |
 | [`simple_relational_database_migration_example/simple_relational_database_migration_example.py`](demos/simple_relational_database_migration_example/simple_relational_database_migration_example.py) | SQL → graph (small schema) |
 | [`complex_relational_database_migration_example/complex_relational_database_migration_example.py`](demos/complex_relational_database_migration_example/complex_relational_database_migration_example.py) | SQL → graph (richer schema) |
+| [`schema_inventory_demo.py`](demos/schema_inventory_demo.py) | Schema and entity inventory visualization |
+| [`memory_provenance_demo.py`](demos/memory_provenance_demo.py) | Memory provenance projection and visualization |
+| [`sync_local_to_cloud_example.py`](demos/sync_local_to_cloud_example.py) | Sync a local dataset to Cognee Cloud |
 | [`pipeline_api_proposal.py`](demos/pipeline_api_proposal.py) | Proposal-style API exploration |
 | [`start_local_ui_frontend_example.py`](demos/start_local_ui_frontend_example.py) | Spin up cognee UI + backend |
 
@@ -191,7 +195,12 @@ Same scripts, indexed by what they demonstrate.
 
 ### Visualization & UI
 - [`guides/graph_visualization.py`](guides/graph_visualization.py)
+- [`demos/schema_inventory_demo.py`](demos/schema_inventory_demo.py)
+- [`demos/memory_provenance_demo.py`](demos/memory_provenance_demo.py)
 - [`demos/start_local_ui_frontend_example.py`](demos/start_local_ui_frontend_example.py)
+
+### References / evidence
+- [`demos/references_example.py`](demos/references_example.py)
 
 ### Storage backends
 - [`guides/s3_storage.py`](guides/s3_storage.py)
