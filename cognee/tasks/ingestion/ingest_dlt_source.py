@@ -142,6 +142,7 @@ async def ingest_dlt_source(
     default_max_rows = get_ingestion_config().dlt_max_rows_per_table
     effective_max_rows = max_rows_per_table if max_rows_per_table is not None else default_max_rows
     try:
+        dlt_source_name = getattr(dlt_source, "name", "dlt_source")
         row_data_list = await _read_rows_from_tables(
             dlt_db_name=dlt_db_name,
             dataset_name=dataset_name,
@@ -149,6 +150,7 @@ async def ingest_dlt_source(
             primary_key=primary_key,
             relational_config=relational_config,
             max_rows_per_table=effective_max_rows,
+            dlt_source_name=dlt_source_name,
         )
     except Exception as e:
         raise DLTIngestionError(
@@ -227,6 +229,7 @@ async def _read_rows_from_tables(
     primary_key: Optional[str],
     relational_config,
     max_rows_per_table: int = 50,
+    dlt_source_name: str = "dlt_source",
 ) -> List[DltRowData]:
     """Read rows from the dlt database tables and return DltRowData objects."""
     if relational_config.db_provider == "sqlite":
@@ -260,6 +263,7 @@ async def _read_rows_from_tables(
                         dlt_db_name=dlt_db_name,
                         relational_config=relational_config,
                         max_rows=max_rows_per_table,
+                        dlt_source_name=dlt_source_name,
                     )
                     row_data_list.extend(table_rows)
                 except Exception as e:
@@ -285,6 +289,7 @@ async def _read_single_table(
     dlt_db_name: str,
     relational_config,
     max_rows: int = 50,
+    dlt_source_name: str = "dlt_source",
 ) -> List[DltRowData]:
     """Read rows from a single table and return DltRowData objects.
 
@@ -367,6 +372,7 @@ async def _read_single_table(
                 foreign_keys=foreign_keys,
                 dlt_db_name=dlt_db_name,
                 dataset_name=dataset_name,
+                dlt_source_name=dlt_source_name,
             )
         )
 
