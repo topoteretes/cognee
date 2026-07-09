@@ -193,6 +193,22 @@ def test_malformed_channels_json_raises(tmp_path):
         list(iter_slack_export_messages(tmp_path))
 
 
+def test_slack_export_source_requires_dlt(monkeypatch, tmp_path):
+    # Simulate dlt being absent: the factory should raise a helpful ImportError.
+    import builtins
+
+    real_import = builtins.__import__
+
+    def fake_import(name, *args, **kwargs):
+        if name == "dlt":
+            raise ImportError("no dlt")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+    with pytest.raises(ImportError, match=r"cognee\[dlt\]"):
+        slack_export_source(_export_v1(tmp_path))
+
+
 pytest.importorskip("dlt")
 
 
@@ -201,3 +217,49 @@ def test_slack_export_source_materializes_rows(tmp_path):
 
     assert len(rows) == 4
     assert all("id" in row for row in rows)
+
+
+def test_slack_export_source_resource_is_configured_for_replace(tmp_path):
+    resource = slack_export_source(_export_v1(tmp_path))
+
+    assert resource.name == "slack_messages"
+    write_disposition = resource.compute_table_schema().get("write_disposition")
+    if isinstance(write_disposition, dict):  # dlt may normalize to a config dict
+        write_disposition = write_disposition.get("disposition")
+    assert write_disposition == "replace"
+
+
+def test_e2e_dlt_replace_removes_deleted_message(tmp_path):
+    """End-to-end, offline (no LLM): drive slack_export_source through a real dlt
+    ``replace`` load for two snapshots and prove a message removed from the newer
+    export is physically gone from the destination table — exactly what cognee's
+    ``orphan_cleanup`` reconciles against to forget it from the graph/vector/
+    relational stores (see test_orphan_cleanup_table_scope.py for that half).
+    """
+    dlt = pytest.importorskip("dlt")
+
+    pipelines_dir = str(tmp_path / "dlt_pipelines")
+    db_path = tmp_path / "slack.db"
+
+    def sync(export_path):
+        pipeline = dlt.pipeline(
+            pipeline_name="slack_e2e_test",
+            destination=dlt.destinations.sqlalchemy(f"sqlite:///{db_path}"),
+            dataset_name="slack_e2e",
+            pipelines_dir=pipelines_dir,
+        )
+        pipeline.run(slack_export_source(export_path))
+        with pipeline.sql_client() as client:
+            rows = client.execute_sql("SELECT id FROM slack_messages ORDER BY id")
+        return [row[0] for row in rows]
+
+    # Snapshot 1 — full history loads all four messages.
+    v1_ids = sync(_export_v1(tmp_path))
+    assert len(v1_ids) == 4
+    assert DELETED_ID in v1_ids
+
+    # Snapshot 2 — one message deleted upstream. replace drops + reloads, so the
+    # deleted message is physically absent from the destination afterwards.
+    v2_ids = sync(_export_v2(tmp_path))
+    assert len(v2_ids) == 3
+    assert DELETED_ID not in v2_ids
