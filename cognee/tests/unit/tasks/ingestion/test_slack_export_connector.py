@@ -93,6 +93,18 @@ def test_thread_reply_text_includes_thread_marker(tmp_path):
     assert "Bob" in reply["text"]
 
 
+def test_thread_parent_is_not_marked_as_reply(tmp_path):
+    # A thread parent carries thread_ts == its own ts and must NOT get the marker.
+    messages = [
+        {"type": "message", "user": "U001", "text": "parent", "ts": "5.0001", "thread_ts": "5.0001"}
+    ]
+    root = _write_export(tmp_path / "thread", {"general": messages})
+    (parent,) = list(iter_slack_export_messages(root))
+
+    assert parent["thread_ts"] == parent["ts"]
+    assert "[thread reply" not in parent["text"]
+
+
 def test_system_and_non_message_events_are_skipped(tmp_path):
     messages = [
         {"type": "message", "user": "U001", "text": "real message", "ts": "1.0001"},
@@ -209,10 +221,13 @@ def test_slack_export_source_requires_dlt(monkeypatch, tmp_path):
         slack_export_source(_export_v1(tmp_path))
 
 
-pytest.importorskip("dlt")
+# The tests below construct/run a real dlt resource, so they skip when the
+# optional dlt extra is absent. The parser + requires-dlt tests above do NOT
+# need dlt and must keep running in cognee's base (dlt-less) CI.
 
 
 def test_slack_export_source_materializes_rows(tmp_path):
+    pytest.importorskip("dlt")
     rows = list(slack_export_source(_export_v1(tmp_path)))
 
     assert len(rows) == 4
@@ -220,13 +235,16 @@ def test_slack_export_source_materializes_rows(tmp_path):
 
 
 def test_slack_export_source_resource_is_configured_for_replace(tmp_path):
+    pytest.importorskip("dlt")
     resource = slack_export_source(_export_v1(tmp_path))
 
     assert resource.name == "slack_messages"
-    write_disposition = resource.compute_table_schema().get("write_disposition")
+    schema = resource.compute_table_schema()
+    write_disposition = schema.get("write_disposition")
     if isinstance(write_disposition, dict):  # dlt may normalize to a config dict
         write_disposition = write_disposition.get("disposition")
     assert write_disposition == "replace"
+    assert schema["columns"]["id"].get("primary_key") is True
 
 
 def test_e2e_dlt_replace_removes_deleted_message(tmp_path):
