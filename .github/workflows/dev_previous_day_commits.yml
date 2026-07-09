@@ -368,3 +368,66 @@ jobs:
             echo
             cat "${{ steps.branch_paths.outputs.assessment_markdown }}"
           } >> "${GITHUB_STEP_SUMMARY}"
+
+  notify-failure:
+    name: Notify failure
+    needs:
+      - prepare-merged-branches
+      - create-docs-prs
+    #if: ${{ failure() }}
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Send failure email
+        env:
+          SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT || '587' }}
+          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          SMTP_USE_TLS: ${{ vars.SMTP_USE_TLS || 'true' }}
+          NOTIFICATION_EMAIL: ${{ vars.DEV_PREVIOUS_DAY_COMMITS_NOTIFICATION_EMAIL }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          PREPARE_RESULT: ${{ needs.prepare-merged-branches.result }}
+          CREATE_DOCS_PRS_RESULT: ${{ needs.create-docs-prs.result }}
+        run: |
+          if [ -z "${SMTP_SERVER}" ] || [ -z "${SMTP_USERNAME}" ] || [ -z "${SMTP_PASSWORD}" ] || [ -z "${NOTIFICATION_EMAIL}" ]; then
+            echo "SMTP secrets or DEV_PREVIOUS_DAY_COMMITS_NOTIFICATION_EMAIL variable are not configured; skipping failure email."
+            exit 0
+          fi
+
+          python3 <<'PY'
+          import os
+          import smtplib
+          import textwrap
+          from email.message import EmailMessage
+
+          subject = "dev_previous_day_commits.yml failed"
+          body = textwrap.dedent(f"""\
+          The previous-day dev commits documentation workflow failed.
+
+          Repository: {os.environ["GITHUB_REPOSITORY"]}
+          Run: {os.environ["GITHUB_RUN_NUMBER"]}
+          Branch: {os.environ["GITHUB_REF_NAME"]}
+          Actor: {os.environ["GITHUB_ACTOR"]}
+
+          prepare-merged-branches: {os.environ["PREPARE_RESULT"]}
+          create-docs-prs: {os.environ["CREATE_DOCS_PRS_RESULT"]}
+
+          View the run:
+          {os.environ["RUN_URL"]}
+          """)
+
+          message = EmailMessage()
+          message["Subject"] = subject
+          message["From"] = os.environ["NOTIFICATION_EMAIL"]
+          message["To"] = os.environ["NOTIFICATION_EMAIL"]
+          message.set_content(body)
+
+          smtp_port = int(os.environ["SMTP_PORT"])
+          use_tls = os.environ["SMTP_USE_TLS"].lower() in {"1", "true", "yes"}
+
+          with smtplib.SMTP(os.environ["SMTP_SERVER"], smtp_port, timeout=30) as smtp:
+              if use_tls:
+                  smtp.starttls()
+              smtp.login(os.environ["SMTP_USERNAME"], os.environ["SMTP_PASSWORD"])
+              smtp.send_message(message)
+          PY
