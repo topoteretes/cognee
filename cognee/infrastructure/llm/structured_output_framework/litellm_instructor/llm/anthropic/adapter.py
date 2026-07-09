@@ -4,9 +4,6 @@ from typing import Any
 
 import anthropic  # ty:ignore[unresolved-import]
 import instructor
-from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.instructor_modes import (
-    get_instructor_mode,
-)
 import litellm
 from instructor.core.patch import AsyncInstructorChatCompletionCreate
 from pydantic import BaseModel
@@ -22,6 +19,9 @@ from cognee.infrastructure.llm.retry_config import (
 )
 
 from cognee.infrastructure.llm.config import get_llm_config
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.instructor_modes import (
+    get_instructor_mode,
+)
 from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError, is_budget_exhausted_error
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.generic_llm_api.adapter import (
     GenericAPIAdapter,

@@ -5,9 +5,6 @@ import logging
 from typing import Any
 
 import instructor
-from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.instructor_modes import (
-    get_instructor_mode,
-)
 import litellm
 from instructor.core import InstructorRetryException
 from litellm.exceptions import ContentPolicyViolationError
@@ -20,6 +17,9 @@ from tenacity import (
     wait_exponential_jitter,
 )
 
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.instructor_modes import (
+    get_instructor_mode,
+)
 from cognee.infrastructure.llm.exceptions import (
     ContentPolicyFilterError,
     LLMPaymentRequiredError,

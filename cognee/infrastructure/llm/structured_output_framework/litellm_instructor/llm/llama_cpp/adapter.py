@@ -5,9 +5,6 @@ import threading
 from typing import Any, cast
 
 import instructor
-from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.instructor_modes import (
-    get_instructor_mode,
-)
 import litellm
 from instructor.core.patch import InstructorChatCompletionCreate
 from openai import AsyncOpenAI
@@ -17,6 +14,9 @@ from tenacity import (
     retry,
     retry_if_not_exception_type,
     wait_exponential_jitter,
+)
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.instructor_modes import (
+    get_instructor_mode,
 )
 from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError, is_budget_exhausted_error
 

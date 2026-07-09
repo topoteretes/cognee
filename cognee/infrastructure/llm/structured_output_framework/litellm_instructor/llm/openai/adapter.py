@@ -2,9 +2,6 @@ import logging
 from typing import Any
 
 import instructor
-from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.instructor_modes import (
-    get_instructor_mode,
-)
 import litellm
 from instructor.core import InstructorRetryException
 from litellm.exceptions import ContentPolicyViolationError
@@ -23,6 +20,9 @@ from cognee.infrastructure.llm.retry_config import (
 )
 
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.instructor_modes import (
+    get_instructor_mode,
+)
 from cognee.infrastructure.llm.exceptions import (
     ContentPolicyFilterError,
     LLMPaymentRequiredError,

@@ -1,15 +1,15 @@
 from typing import Any
 
 import instructor
-from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.instructor_modes import (
-    get_instructor_mode,
-)
 import litellm
 from instructor.exceptions import InstructorRetryException
 from litellm.exceptions import ContentPolicyViolationError
 from pydantic import BaseModel
 
 from cognee.infrastructure.files.storage.s3_config import get_s3_config
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.instructor_modes import (
+    get_instructor_mode,
+)
 from cognee.infrastructure.llm.exceptions import (
     ContentPolicyFilterError,
     LLMPaymentRequiredError,
