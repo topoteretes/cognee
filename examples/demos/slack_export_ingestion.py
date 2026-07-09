@@ -24,11 +24,13 @@ import asyncio
 import os
 
 import cognee
-from cognee.tasks.ingestion.connectors.slack_export import slack_export_source
+from cognee.tasks.ingestion.connectors import slack_export_source
 
 DATASET = "team-slack-export"
 EXPORTS = os.path.join(os.path.dirname(__file__), "test_data", "slack_export")
-QUESTION = "What was said about the connector demo?"
+# This question is answered by a message that v2 deletes ("Great, looking
+# forward to it"), so the recall visibly changes between the two syncs.
+QUESTION = "Who was looking forward to the connector demo?"
 
 
 async def sync(snapshot: str) -> None:
