@@ -28,6 +28,21 @@ on:
         required: false
         type: string
         default: ''
+      label:
+        description: "Dataset label — display name + S3 output path segment."
+        required: false
+        type: string
+        default: '50_small_documents'
+      memories:
+        description: "Corpus path inside the cognee-rs checkout."
+        required: false
+        type: string
+        default: 'scripts/perf/fixtures/memories.json'
+      cassette:
+        description: "Replay cassette path inside the cognee-rs checkout."
+        required: false
+        type: string
+        default: 'scripts/perf/fixtures/cassette.json'
     outputs:
       metrics:
         description: "success + add/cognify/search/total p50/p90/p99."
@@ -47,7 +62,7 @@ env:
 
 jobs:
   rust_file_based:
-    name: rust file_based — 50_small_documents (mock_llm)
+    name: rust file_based — ${{ inputs.label }} (mock_llm)
     # ubuntu-latest (not 22.04): lbug's bundled simsimd needs a C compiler with
     # avx512fp16 / _Float16 support (GCC >= 12). This matches cognee-rs's own CI.
     runs-on: ubuntu-latest
@@ -130,8 +145,8 @@ jobs:
           log="$(mktemp)"
           MOCK_EMBEDDING=deterministic ./target/release/cognee-cli bench \
             --mock-llm \
-            --mock-memories scripts/perf/fixtures/cassette.json \
-            --memories scripts/perf/fixtures/memories.json \
+            --mock-memories "${{ inputs.cassette }}" \
+            --memories "${{ inputs.memories }}" \
             --num-memories 8 \
             --output /tmp/freshness.json >"$log" 2>&1 || { cat "$log"; }
           entities="$(grep -oE 'Stored [0-9]+ entity types as graph nodes' "$log" \
@@ -161,11 +176,13 @@ jobs:
           BENCH_BIN="$GITHUB_WORKSPACE/cognee-rs/target/release/cognee-cli" \
           RUNS="${{ inputs.runs }}" \
           OUT_DIR="$GITHUB_WORKSPACE/perf-out" \
+          CASSETTE="$GITHUB_WORKSPACE/cognee-rs/${{ inputs.cassette }}" \
+          MEMORIES="$GITHUB_WORKSPACE/cognee-rs/${{ inputs.memories }}" \
             bash "$GITHUB_WORKSPACE/cognee-rs/scripts/perf/run_mock_bench.sh"
 
           TS="$(date -u '+%Y-%m-%d_%H-%M-%SZ')"
-          JSON_PATH="performance_results/rust_file_based/50_small_documents/mock_llm_${TS}.json"
-          HTML_PATH="performance_results/rust_file_based/50_small_documents/mock_llm_${TS}.html"
+          JSON_PATH="performance_results/rust_file_based/${{ inputs.label }}/mock_llm_${TS}.json"
+          HTML_PATH="performance_results/rust_file_based/${{ inputs.label }}/mock_llm_${TS}.html"
           mkdir -p "$(dirname "$JSON_PATH")"
           cp "$GITHUB_WORKSPACE/perf-out/report.json" "$JSON_PATH"
           cp "$GITHUB_WORKSPACE/perf-out/report.html" "$HTML_PATH"
