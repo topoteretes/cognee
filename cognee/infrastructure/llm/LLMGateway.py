@@ -5,6 +5,7 @@ from pydantic import BaseModel
 
 from cognee.infrastructure.llm import get_llm_config
 from cognee.infrastructure.llm.config import get_llm_context_config
+from cognee.infrastructure.llm.retry_config import raise_if_quota_error
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.types import (
     TranscriptionReturnType,
 )
@@ -50,6 +51,21 @@ async def _record_session_usage_after(
     return result
 
 
+async def _fail_fast_on_quota(coro: Coroutine) -> T:
+    """Surface provider quota/billing exhaustion as an actionable typed error.
+
+    The adapters' retry policies already refuse to retry these failures (see
+    ``retry_config``); this converts the raw provider error into
+    ``LLMQuotaExceededError`` at the one place every structured-output call
+    flows through, regardless of provider or framework.
+    """
+    try:
+        return await coro
+    except Exception as error:
+        raise_if_quota_error(error)
+        raise
+
+
 class LLMGateway:
     """
     Class handles selection of structured output frameworks and LLM functions.
@@ -90,7 +106,7 @@ class LLMGateway:
 
         # Wrap so usage is recorded against any active session tracker.
         # No-op when no tracker is installed.
-        return _record_session_usage_after(inner, text_input=text_input)
+        return _fail_fast_on_quota(_record_session_usage_after(inner, text_input=text_input))
 
     @staticmethod
     def create_transcript(input) -> Coroutine[Any, Any, TranscriptionReturnType | None]:

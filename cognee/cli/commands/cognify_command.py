@@ -73,7 +73,7 @@ After successful cognify processing, use `cognee search` to query the knowledge 
         parser.add_argument(
             "--dry-run",
             action="store_true",
-            help="Estimate token usage and cost without running LLM extraction",
+            help="Estimate LLM token usage and cost without running extraction",
         )
 
     def execute(self, args: argparse.Namespace) -> None:
@@ -93,10 +93,11 @@ After successful cognify processing, use `cognee search` to query the knowledge 
             # Prepare datasets parameter
             datasets = args.datasets if args.datasets else None
             dataset_msg = f" for datasets {datasets}" if datasets else " for all available data"
-            action = "Estimating cognification" if args.dry_run else "Starting cognification"
+            dry_run = getattr(args, "dry_run", False)
+            action = "Estimating cognification" if dry_run else "Starting cognification"
             fmt.echo(f"{action}{dataset_msg}...")
 
-            if args.verbose and not args.dry_run:
+            if args.verbose and not dry_run:
                 fmt.note("This process will analyze your data and build knowledge graphs.")
                 fmt.note("Depending on data size, this may take several minutes.")
                 if args.background:
@@ -159,7 +160,7 @@ After successful cognify processing, use `cognee search` to query the knowledge 
                         config=config,
                         run_in_background=args.background,
                         chunks_per_batch=getattr(args, "chunks_per_batch", None),
-                        dry_run=args.dry_run,
+                        dry_run=dry_run,
                     )
                     return result
                 except Exception as e:
@@ -167,10 +168,8 @@ After successful cognify processing, use `cognee search` to query the knowledge 
 
             result = asyncio.run(run_cognify())
 
-            if args.dry_run:
-                from cognee.modules.session_lifecycle.estimator import format_dry_run_estimate
-
-                fmt.echo(format_dry_run_estimate(result))
+            if dry_run:
+                fmt.echo(str(result))
                 return
 
             if args.background:

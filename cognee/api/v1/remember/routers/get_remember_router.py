@@ -149,13 +149,6 @@ def get_remember_router() -> APIRouter:
                 "for large files."
             ),
         ),
-        dry_run: Optional[bool] = Form(
-            default=False,
-            description=(
-                "If true, estimate stage-level LLM token usage and rough cost without "
-                "ingesting data, running LLM calls, or writing graph results."
-            ),
-        ),
         custom_prompt: Optional[str] = Form(
             default="",
             description=(
@@ -251,7 +244,6 @@ def get_remember_router() -> APIRouter:
           data is ingested directly via add + cognify.
         - **node_set** (Optional[List[str]]): Node identifiers for graph organisation.
         - **run_in_background** (Optional[bool]): Run the cognify step asynchronously (default: False).
-        - **dry_run** (Optional[bool]): Estimate token usage and rough cost without LLM calls or graph writes.
         - **custom_prompt** (Optional[str]): Custom prompt for entity extraction.
         - **chunk_size** (Optional[int]): Maximum tokens per chunk (default: 4096).
         - **chunks_per_batch** (Optional[int]): Chunks per cognify batch.
@@ -284,11 +276,6 @@ def get_remember_router() -> APIRouter:
             )
 
         if content_type == "cogx-archive":
-            if dry_run:
-                raise HTTPException(
-                    status_code=400,
-                    detail="dry_run is not supported for COGX archive imports.",
-                )
             if not data:
                 raise HTTPException(
                     status_code=400,
@@ -368,7 +355,6 @@ def get_remember_router() -> APIRouter:
                 dataset_id=datasetId if datasetId else None,
                 node_set=[tag for tag in (node_set or []) if tag] or None,
                 run_in_background=run_in_background or False,
-                dry_run=dry_run or False,
                 custom_prompt=custom_prompt or None,
                 chunk_size=chunk_size,
                 chunks_per_batch=chunks_per_batch,
@@ -383,7 +369,7 @@ def get_remember_router() -> APIRouter:
 
             # A blocking run that ended errored must not look like a success
             # to status-code-checking clients.
-            if getattr(result, "status", None) == "errored":
+            if result.status == "errored":
                 return JSONResponse(
                     status_code=409,
                     content=jsonable_encoder(result.to_dict()),

@@ -23,7 +23,6 @@ from tenacity import (
 from cognee.infrastructure.llm.retry_config import (
     llm_retry_condition,
     llm_retry_stop_condition,
-    raise_if_non_retryable_llm_error,
 )
 
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
@@ -192,11 +191,7 @@ class GenericAPIAdapter(LLMInterface):
 
         # A plain string needs no schema — skip instructor (see acreate_str_output).
         if response_model is str:
-            try:
-                return await self.acreate_str_output(text_input, system_prompt, **merged_kwargs)
-            except Exception as error:
-                raise_if_non_retryable_llm_error(error)
-                raise
+            return await self.acreate_str_output(text_input, system_prompt, **merged_kwargs)
 
         try:
             async with llm_rate_limiter_context_manager():
@@ -225,7 +220,6 @@ class GenericAPIAdapter(LLMInterface):
             ContentPolicyViolationError,
             InstructorRetryException,
         ) as error:
-            raise_if_non_retryable_llm_error(error)
             if (
                 isinstance(error, InstructorRetryException)
                 and "content management policy" not in str(error).lower()
@@ -265,7 +259,6 @@ class GenericAPIAdapter(LLMInterface):
                 ContentPolicyViolationError,
                 InstructorRetryException,
             ) as error:
-                raise_if_non_retryable_llm_error(error)
                 if (
                     isinstance(error, InstructorRetryException)
                     and "content management policy" not in str(error).lower()
@@ -275,11 +268,9 @@ class GenericAPIAdapter(LLMInterface):
                     raise ContentPolicyFilterError(
                         f"The provided input contains content that is not aligned with our content policy: {text_input}"
                     ) from error
-            except Exception as error:
-                raise_if_non_retryable_llm_error(error)
-                raise
-        except Exception as error:
-            raise_if_non_retryable_llm_error(error)
+        except Exception as e:
+            if is_budget_exhausted_error(e):
+                raise LLMPaymentRequiredError() from e
             raise
 
     @observe(as_type="transcription")

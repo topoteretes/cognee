@@ -1,1 +1,0 @@
-Northwind Retail is a retailer operating in US North. It handles intercontinental shipping, charges a handling fee of 2.5, takes about 0 processing days, and ships from post office po-1260.

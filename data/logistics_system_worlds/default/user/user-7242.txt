@@ -1,1 +1,0 @@
-Lucas Meyer is a enterprise customer in US East. Weekend delivery eligibility is False, and the default shipping range is domestic.

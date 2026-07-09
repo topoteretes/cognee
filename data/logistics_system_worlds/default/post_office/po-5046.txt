@@ -1,1 +1,0 @@
-US Central Regional Sorting Center is a sorting_center in US Central. It supports domestic shipping, cold chain support is True, and hazardous materials support is True.

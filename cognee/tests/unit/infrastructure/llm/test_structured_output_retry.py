@@ -18,7 +18,6 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from pydantic import BaseModel
-
 from cognee.infrastructure.llm.exceptions import LLMQuotaExceededError
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.openai.adapter import (
     OpenAIAdapter,
@@ -54,18 +53,48 @@ def _build_adapter() -> OpenAIAdapter:
     return OpenAIAdapter(api_key="test-key", model="gpt-4o-mini", max_completion_tokens=128)
 
 
-def test_quota_and_billing_errors_are_terminal():
-    error = RuntimeError({"error": {"code": "insufficient_quota", "type": "billing"}})
-
+# --------------------------------------------------------------------------- #
+# 0. Quota/billing classification: exhausted quota is terminal, transient
+#    provider failures (including per-minute rate limits) stay retryable.
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize(
+    "error",
+    [
+        RuntimeError("insufficient_quota: You exceeded your current quota."),
+        RuntimeError({"error": {"code": "quota_exceeded", "type": "billing"}}),
+        RuntimeError("Your credit balance is too low to access the API."),
+    ],
+)
+def test_quota_and_billing_errors_are_terminal(error):
     assert is_quota_or_billing_error(error) is True
     assert should_retry_llm_exception(error) is False
 
 
-def test_generic_billing_text_is_not_terminal_without_quota_signal():
-    error = RuntimeError("temporary billing service unavailable")
-
+@pytest.mark.parametrize(
+    "error",
+    [
+        RuntimeError("temporary billing service unavailable"),
+        RuntimeError("Rate limit exceeded, please try again in 20s."),
+        # Gemini free tier returns this exact wording for recoverable per-minute
+        # limits (status RESOURCE_EXHAUSTED); it must stay retryable.
+        RuntimeError(
+            "You exceeded your current quota, please check your plan and billing "
+            "details. status: RESOURCE_EXHAUSTED"
+        ),
+        RuntimeError("boom"),
+    ],
+)
+def test_transient_errors_stay_retryable(error):
     assert is_quota_or_billing_error(error) is False
     assert should_retry_llm_exception(error) is True
+
+
+def test_quota_error_is_found_on_the_cause_chain():
+    wrapper = RuntimeError("instructor retries exhausted")
+    wrapper.__cause__ = RuntimeError("insufficient_quota")
+
+    assert is_quota_or_billing_error(wrapper) is True
+    assert should_retry_llm_exception(wrapper) is False
 
 
 # --------------------------------------------------------------------------- #
@@ -88,9 +117,8 @@ def test_combined_stop_requires_both_conditions(attempts, elapsed, should_stop):
 
 
 # --------------------------------------------------------------------------- #
-# 2. End-to-end through the real adapter with the LLM call mocked: a transient
-#    failure that clears returns the mocked response. (tenacity consults `stop`
-#    only after a *failure*, so a success short-circuits both floors.)
+# 1b. A quota error through the real adapter is NOT retried: exactly one
+#     attempt, then the provider error propagates (issue #3643).
 # --------------------------------------------------------------------------- #
 @pytest.mark.asyncio
 async def test_structured_output_does_not_retry_quota_errors():
@@ -101,12 +129,46 @@ async def test_structured_output_does_not_retry_quota_errors():
     )
 
     with patch(f"{_MODULE}.llm_rate_limiter_context_manager", _null_rate_limiter):
-        with pytest.raises(LLMQuotaExceededError):
+        with pytest.raises(RuntimeError, match="insufficient_quota"):
             await adapter.acreate_structured_output("hi", "system", _Resp)
 
     assert adapter.aclient.chat.completions.create.await_count == 1
 
 
+# --------------------------------------------------------------------------- #
+# 1c. LLMGateway converts the raw provider error into the actionable
+#     LLMQuotaExceededError — for every provider and framework, since all
+#     structured-output calls flow through the gateway.
+# --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_llm_gateway_converts_quota_errors():
+    failing_client = Mock()
+    failing_client.acreate_structured_output = AsyncMock(
+        side_effect=RuntimeError("insufficient_quota: exceeded your current quota")
+    )
+    fake_config = SimpleNamespace(structured_output_framework="instructor", llm_model="gpt-4o-mini")
+
+    with (
+        patch("cognee.infrastructure.llm.LLMGateway.get_llm_config", return_value=fake_config),
+        patch(
+            "cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm"
+            ".get_llm_client.get_llm_client",
+            return_value=failing_client,
+        ),
+    ):
+        from cognee.infrastructure.llm.LLMGateway import LLMGateway
+
+        with pytest.raises(LLMQuotaExceededError, match="not retryable"):
+            await LLMGateway.acreate_structured_output("hi", "system", _Resp)
+
+    assert failing_client.acreate_structured_output.await_count == 1
+
+
+# --------------------------------------------------------------------------- #
+# 2. End-to-end through the real adapter with the LLM call mocked: a transient
+#    failure that clears returns the mocked response. (tenacity consults `stop`
+#    only after a *failure*, so a success short-circuits both floors.)
+# --------------------------------------------------------------------------- #
 @pytest.mark.asyncio
 async def test_structured_output_retries_then_returns_mocked_response():
     adapter = _build_adapter()

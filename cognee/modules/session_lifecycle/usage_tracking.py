@@ -53,14 +53,29 @@ def _estimate_tokens(text: str) -> int:
 # unrecognized models cost $0.
 # USD per 1M tokens: (input, output)
 _PRICING_PER_M_TOKENS = {
+    "gpt-5": (1.25, 10.00),
+    "gpt-5-mini": (0.25, 2.00),
+    "gpt-5-nano": (0.05, 0.40),
+    "gpt-4.1": (2.00, 8.00),
+    "gpt-4.1-mini": (0.40, 1.60),
+    "gpt-4.1-nano": (0.10, 0.40),
     "gpt-4o": (2.50, 10.00),
     "gpt-4o-mini": (0.15, 0.60),
     "gpt-4-turbo": (10.00, 30.00),
     "gpt-4": (30.00, 60.00),
     "gpt-3.5-turbo": (0.50, 1.50),
+    "o3": (2.00, 8.00),
+    "o4-mini": (1.10, 4.40),
+    "claude-opus-4-5": (5.00, 25.00),
+    "claude-opus-4": (15.00, 75.00),
+    "claude-sonnet-4": (3.00, 15.00),
+    "claude-haiku-4-5": (1.00, 5.00),
     "claude-3-5-sonnet": (3.00, 15.00),
     "claude-3-opus": (15.00, 75.00),
     "claude-3-haiku": (0.25, 1.25),
+    "gemini-2.5-pro": (1.25, 10.00),
+    "gemini-2.5-flash": (0.30, 2.50),
+    "gemini-2.0-flash": (0.10, 0.40),
     "gemini-1.5-pro": (1.25, 5.00),
     "gemini-1.5-flash": (0.075, 0.30),
 }
@@ -83,7 +98,10 @@ def _estimate_cost_usd(model: Optional[str], tokens_in: int, tokens_out: int) ->
 
 
 def estimate_cost_usd(model: Optional[str], tokens_in: int, tokens_out: int) -> float:
-    """Estimate USD cost for a model using Cognee's rough pricing table."""
+    """Estimate USD cost for a model using Cognee's rough pricing table.
+
+    Unrecognized models cost $0 — callers that surface the number should say so.
+    """
     return _estimate_cost_usd(model, tokens_in, tokens_out)
 
 

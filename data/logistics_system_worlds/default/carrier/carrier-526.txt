@@ -1,1 +1,0 @@
-Vistula Freight is a carrier in Poland. It supports flight, shipment, freight_rail, truck transport across domestic, regional shipping ranges. Temperature controlled support is True, hazardous certification is True, weekend operations is False, maximum weight is 3000.0 kg, reliability score is 4, and base delay is 2 day(s).

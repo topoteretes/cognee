@@ -1,1 +1,0 @@
-Pacific Horizon Logistics is a carrier in US West. It supports flight, shipment, freight_rail, truck transport across domestic, intercontinental, regional shipping ranges. Temperature controlled support is True, hazardous certification is True, weekend operations is True, maximum weight is 3000.0 kg, reliability score is 5, and base delay is 0 day(s).

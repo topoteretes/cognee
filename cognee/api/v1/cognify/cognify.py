@@ -121,10 +121,12 @@ async def cognify(
                           Background mode recommended for large datasets (>100MB).
                           Use pipeline_run_id from return value to monitor progress.
         custom_prompt: Optional custom prompt string to use for entity extraction and graph generation.
-                       If provided, this prompt will be used instead of the default prompts for
-                       knowledge graph extraction. The prompt should guide the LLM on how to
-                       extract entities and relationships from the text content.
-        dry_run: If True, estimate stage-level LLM token usage and rough cost without LLM calls.
+                      If provided, this prompt will be used instead of the default prompts for
+                      knowledge graph extraction. The prompt should guide the LLM on how to
+                      extract entities and relationships from the text content.
+        dry_run: If True, return a stage-level estimate of LLM token usage and rough cost
+                 without making LLM calls or writing graph results. The estimate covers all
+                 data in the selected dataset(s); an incremental run may process fewer items.
 
     Returns:
         Union[dict, list[PipelineRunInfo], DryRunEstimate]:
@@ -206,13 +208,17 @@ async def cognify(
 
     client = get_remote_client()
     if client is not None:
+        if dry_run:
+            raise ValueError(
+                "dry_run is not supported while connected to a remote Cognee instance. "
+                "Call cognee.disconnect() to estimate against local data."
+            )
         return await client.cognify(
             datasets,
             chunk_size=chunk_size,
             chunks_per_batch=chunks_per_batch,
             custom_prompt=custom_prompt,
             run_in_background=run_in_background,
-            dry_run=dry_run,
         )
 
     with new_span("cognee.api.cognify") as span:
@@ -246,14 +252,14 @@ async def cognify(
         if dry_run:
             if temporal_cognify:
                 raise ValueError("dry_run is supported for the default cognify pipeline only.")
-            from cognee.modules.session_lifecycle.estimator import estimate_cognify_dry_run
+            from cognee.modules.cognify.estimator import estimate_cognify_dry_run
 
             return await estimate_cognify_dry_run(
                 datasets,
                 user=user,
                 graph_model=graph_model,
                 chunker=chunker,
-                chunk_size=chunk_size or get_max_chunk_tokens(),
+                chunk_size=chunk_size or await get_max_chunk_tokens(),
                 custom_prompt=custom_prompt,
             )
 

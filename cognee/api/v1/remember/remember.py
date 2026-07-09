@@ -1,7 +1,7 @@
 import asyncio
 import time
 from uuid import UUID
-from typing import Union, BinaryIO, List, Optional, Any, Literal
+from typing import Union, BinaryIO, List, Optional, Any, Literal, TYPE_CHECKING
 
 try:
     from typing import Unpack
@@ -9,6 +9,9 @@ except ImportError:
     from typing_extensions import Unpack
 
 from typing_extensions import TypedDict
+
+if TYPE_CHECKING:
+    from cognee.modules.cognify.estimator import DryRunEstimate
 
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion.data_item import DataItem
@@ -644,7 +647,7 @@ async def remember(
     session_ids: Optional[List[str]] = None,
     dry_run: bool = False,
     **kwargs: Unpack[RememberKwargs],
-) -> "RememberResult":
+) -> Union["RememberResult", "DryRunEstimate"]:
     """Store data in memory.
 
     Two modes depending on whether ``session_id`` is provided:
@@ -674,8 +677,11 @@ async def remember(
             Only used when ``self_improvement=True``. When provided,
             ``improve()`` will also copy recent graph relationships
             into these sessions for fast retrieval.
-        dry_run: If *True*, estimate stage-level LLM token usage and rough cost without
-            ingesting data or making LLM calls.
+        dry_run: If *True*, return a stage-level estimate of LLM token usage
+            and rough cost without ingesting data or making LLM calls. Only
+            supported for permanent add+cognify inputs in local mode. The
+            estimate excludes the LLM calls ``improve()`` makes when
+            ``self_improvement=True``.
         content_type: Set to ``"skills"`` to explicitly ingest SKILL.md
             files as dataset-scoped Skill nodes. ``remember()`` does not
             auto-detect skill paths.
@@ -685,9 +691,9 @@ async def remember(
         **kwargs: Additional options -- see ``RememberKwargs``.
 
     Returns:
-        RememberResult or DryRunEstimate: A promise-like result for normal runs, or a
-        dry-run token/cost estimate when `dry_run=True`. Print it for a summary,
-        await it to block until background processing finishes, or
+        RememberResult or DryRunEstimate: A promise-like object for normal
+        runs, or a token/cost estimate when ``dry_run=True``. Print it for a
+        summary, await it to block until background processing finishes, or
         inspect ``.status``, ``.dataset_name``, ``.elapsed_seconds``, etc.
 
     Example::
@@ -779,29 +785,23 @@ async def remember(
             raise ValueError("dry_run is supported for standard add+cognify remember inputs only.")
 
         from cognee.api.v1.serve.state import get_remote_client
+
+        if get_remote_client() is not None:
+            raise ValueError(
+                "dry_run is not supported while connected to a remote Cognee instance. "
+                "Call cognee.disconnect() to estimate locally."
+            )
+
         from cognee.infrastructure.llm import get_max_chunk_tokens
         from cognee.modules.chunking.TextChunker import TextChunker
-        from cognee.modules.session_lifecycle.estimator import estimate_remember_dry_run
+        from cognee.modules.cognify.estimator import estimate_remember_dry_run
         from cognee.shared.data_models import KnowledgeGraph
-
-        client = get_remote_client()
-        if client is not None:
-            return await client.remember(
-                data,
-                dataset_name,
-                session_id=session_id,
-                chunk_size=chunk_size,
-                custom_prompt=custom_prompt,
-                run_in_background=run_in_background,
-                dry_run=True,
-                **kwargs,
-            )
 
         return await estimate_remember_dry_run(
             data,
             chunker=chunker or TextChunker,
-            chunk_size=chunk_size or get_max_chunk_tokens(),
-            graph_model=kwargs.get("graph_model", KnowledgeGraph),
+            chunk_size=chunk_size or await get_max_chunk_tokens(),
+            graph_model=kwargs.get("graph_model") or KnowledgeGraph,
             custom_prompt=custom_prompt,
         )
 

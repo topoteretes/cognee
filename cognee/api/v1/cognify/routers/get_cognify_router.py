@@ -110,13 +110,6 @@ class CognifyPayloadDTO(InDTO):
             "parallelism/throughput; leave null for the pipeline default. Higher the value higher the parallelism/throughput"
         ),
     )
-    dry_run: Optional[bool] = Field(
-        default=False,
-        description=(
-            "If true, estimate stage-level LLM token usage and rough cost without "
-            "running LLM extraction or writing graph results."
-        ),
-    )
     data_per_batch: Optional[int] = Field(
         default=20,
         examples=[20],
@@ -165,7 +158,6 @@ def get_cognify_router() -> APIRouter:
           a size from the configured LLM and embedding limits.
         - **ontology_key** (Optional[List[str]]): Reference to one or more previously uploaded ontology files to use for knowledge graph construction.
         - **chunks_per_batch** (Optional[int]): Number of chunks to process per task batch in Cognify. Uses the pipeline default when omitted.
-        - **dry_run** (Optional[bool]): Estimate token usage and rough cost without LLM calls or graph writes.
         - **data_per_batch** (Optional[int]): Maximum number of data items to process concurrently within a dataset. Defaults to 20.
 
         ## Response
@@ -254,14 +246,8 @@ def get_cognify_router() -> APIRouter:
                 custom_prompt=custom_prompt,
                 chunk_size=payload.chunk_size,
                 chunks_per_batch=payload.chunks_per_batch,
-                dry_run=payload.dry_run or False,
                 data_per_batch=payload.data_per_batch,
             )
-
-            if payload.dry_run:
-                return jsonable_encoder(
-                    cognify_run.to_dict() if hasattr(cognify_run, "to_dict") else cognify_run
-                )
 
             # If any cognify run errored return JSONResponse with proper error status code
             if any(isinstance(v, PipelineRunErrored) for v in cognify_run.values()):

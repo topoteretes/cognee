@@ -1,1 +1,0 @@
-Daniel Brooks is a business customer in US South. Weekend delivery eligibility is False, and the default shipping range is intercontinental.

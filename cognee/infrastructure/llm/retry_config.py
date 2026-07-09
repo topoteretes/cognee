@@ -1,132 +1,90 @@
 """Shared tenacity retry policy for LLM structured-output calls.
 
-Structured-output calls keep the existing stop policy: retry until both the
-minimum attempt count and minimum elapsed time are reached. Retry selection is
-separate: authentication, not-found, cancellation, and quota/billing exhaustion
-are terminal; transient provider failures remain retryable.
+Used by every structured-output framework — the litellm/instructor adapters and
+the BAML integration alike. Each ``acreate_structured_output`` retries until BOTH
+floors are satisfied: at least ``LLM_MIN_RETRY_ATTEMPTS`` attempts AND at least
+``LLM_MIN_RETRY_SECONDS`` of elapsed wall-clock time.
+
+``&`` builds tenacity's ``stop_all`` predicate, which stops only once *every*
+sub-condition holds (``|`` / ``stop_any`` would stop at whichever floor is hit
+first). The predicate is stateless — it reads everything off the per-call retry
+state — so this single instance is safe to share across every retry decorator.
+
+Which failures are retried at all is a separate concern (``llm_retry_condition``):
+authentication, not-found, cancellation, payment/budget exhaustion, and
+quota/billing exhaustion are terminal, while transient provider failures remain
+retryable.
 """
 
 import asyncio
-from collections.abc import Iterable
-from typing import Any
 
+import litellm
 from tenacity import retry_if_exception, stop_after_attempt, stop_after_delay
 
-from cognee.infrastructure.llm.exceptions import LLMQuotaExceededError
-
-try:
-    import litellm
-except Exception:  # pragma: no cover - litellm is an optional import in some test slices
-    litellm = None
-
+from cognee.infrastructure.llm.exceptions import (
+    LLMPaymentRequiredError,
+    LLMQuotaExceededError,
+)
 
 # Minimum number of attempts before the call is allowed to give up.
 LLM_MIN_RETRY_ATTEMPTS = 2
 # Minimum elapsed seconds before the call is allowed to give up.
 LLM_MIN_RETRY_SECONDS = 240
 
-_TERMINAL_QUOTA_PATTERNS = (
-    "insufficient_quota",
-    "quota_exceeded",
-    "quota exceeded",
-    "quota has been exceeded",
-    "exceeded your current quota",
-    "exceeded current quota",
-    "429-billing",
-    "billing limit",
-    "billing hard limit",
-    "billing quota",
-    "payment required",
-    "out of credits",
-    "credit balance",
-    "hard limit",
-)
-
-
 # Stop retrying only once BOTH the attempt floor AND the time floor are met.
 llm_retry_stop_condition = stop_after_attempt(LLM_MIN_RETRY_ATTEMPTS) & stop_after_delay(
     LLM_MIN_RETRY_SECONDS
 )
 
-
-def _non_retryable_exception_types() -> tuple[type[BaseException], ...]:
-    types: list[type[BaseException]] = [asyncio.CancelledError, LLMQuotaExceededError]
-    if litellm is not None:
-        types.extend(
-            [
-                litellm.exceptions.NotFoundError,
-                litellm.exceptions.AuthenticationError,
-            ]
-        )
-    return tuple(types)
-
-
-def _iter_error_values(value: Any, seen: set[int] | None = None) -> Iterable[str]:
-    if value is None:
-        return
-    if seen is None:
-        seen = set()
-    value_id = id(value)
-    if value_id in seen:
-        return
-    seen.add(value_id)
-
-    if isinstance(value, (str, int, float, bool)):
-        yield str(value)
-        return
-
-    if isinstance(value, dict):
-        for key, item in value.items():
-            yield from _iter_error_values(key, seen)
-            yield from _iter_error_values(item, seen)
-        return
-
-    if isinstance(value, (list, tuple, set)):
-        for item in value:
-            yield from _iter_error_values(item, seen)
-        return
-
-    yield str(value)
-
-    for attr in (
-        "code",
-        "type",
-        "message",
-        "body",
-        "response",
-        "json_body",
-        "status_code",
-        "llm_provider",
-    ):
-        try:
-            yield from _iter_error_values(getattr(value, attr), seen)
-        except Exception:
-            continue
-
-    if isinstance(value, BaseException):
-        for arg in value.args:
-            yield from _iter_error_values(arg, seen)
-        yield from _iter_error_values(value.__cause__, seen)
-        yield from _iter_error_values(value.__context__, seen)
+# Provider error codes/wordings that signal exhausted quota or billing limits —
+# failures no amount of retrying can fix. Deliberately narrow and specific:
+# transient per-minute rate limits must NOT match, or retryable 429s would fail
+# fast. In particular the bare phrase "exceeded your current quota" is avoided
+# because Google Gemini returns it for recoverable free-tier per-minute limits;
+# OpenAI's terminal case is still caught by its "insufficient_quota" code.
+_TERMINAL_QUOTA_PATTERNS = (
+    "insufficient_quota",  # OpenAI / Azure OpenAI: billing quota exhausted
+    "quota_exceeded",  # provider quota-exhaustion error code
+    "billing hard limit",  # OpenAI: monthly hard limit reached
+    "credit balance is too low",  # Anthropic: prepaid credits exhausted
+    "out of credits",
+)
 
 
 def is_quota_or_billing_error(error: BaseException) -> bool:
-    for value in _iter_error_values(error):
-        lowered = value.lower()
-        if any(pattern in lowered for pattern in _TERMINAL_QUOTA_PATTERNS):
+    """True when the error, or an error it was explicitly raised from, reports exhaustion.
+
+    Follows the explicit ``raise ... from`` (``__cause__``) chain — instructor and
+    the adapters wrap the raw provider error that way — but not the implicit
+    ``__context__`` chain, which would misclassify an unrelated transient error
+    merely raised while handling a quota error.
+    """
+    seen: set[int] = set()
+    current: BaseException | None = error
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        message = str(current).lower()
+        if any(pattern in message for pattern in _TERMINAL_QUOTA_PATTERNS):
             return True
+        current = current.__cause__
     return False
 
 
 def should_retry_llm_exception(error: BaseException) -> bool:
-    if isinstance(error, _non_retryable_exception_types()):
+    non_retryable: tuple[type[BaseException], ...] = (
+        asyncio.CancelledError,
+        LLMQuotaExceededError,
+        LLMPaymentRequiredError,
+        litellm.exceptions.NotFoundError,
+        litellm.exceptions.AuthenticationError,
+    )
+    if isinstance(error, non_retryable):
         return False
-    if is_quota_or_billing_error(error):
-        return False
-    return True
+    return not is_quota_or_billing_error(error)
 
 
-def raise_if_non_retryable_llm_error(error: BaseException) -> None:
+def raise_if_quota_error(error: BaseException) -> None:
+    """Re-raise quota/billing exhaustion as the actionable ``LLMQuotaExceededError``."""
     if isinstance(error, LLMQuotaExceededError):
         raise error
     if is_quota_or_billing_error(error):

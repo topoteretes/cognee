@@ -58,14 +58,15 @@ After completion, use `cognee recall` (or `cognee search`) to query the graph.
         parser.add_argument(
             "--dry-run",
             action="store_true",
-            help="Estimate token usage and cost without ingesting data or making LLM calls",
+            help="Estimate LLM token usage and cost without ingesting data or making LLM calls",
         )
 
     def execute(self, args: argparse.Namespace) -> None:
         try:
             import cognee
 
-            action = "Estimating" if args.dry_run else "Remembering"
+            dry_run = getattr(args, "dry_run", False)
+            action = "Estimating" if dry_run else "Remembering"
             fmt.echo(f"{action} {len(args.data)} item(s) in dataset '{args.dataset_name}'...")
 
             async def run_remember():
@@ -97,7 +98,7 @@ After completion, use `cognee recall` (or `cognee search`) to query the graph.
                         chunk_size=args.chunk_size,
                         chunks_per_batch=args.chunks_per_batch,
                         run_in_background=args.background,
-                        dry_run=args.dry_run,
+                        dry_run=dry_run,
                     )
                     return result
                 except Exception as e:
@@ -105,10 +106,8 @@ After completion, use `cognee recall` (or `cognee search`) to query the graph.
 
             result = asyncio.run(run_remember())
 
-            if args.dry_run:
-                from cognee.modules.session_lifecycle.estimator import format_dry_run_estimate
-
-                fmt.echo(format_dry_run_estimate(result))
+            if dry_run:
+                fmt.echo(str(result))
                 return
 
             if args.background:

@@ -1,1 +1,0 @@
-Sofia Novak is a standard customer in France. Weekend delivery eligibility is True, and the default shipping range is domestic.
