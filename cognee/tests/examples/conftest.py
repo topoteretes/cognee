@@ -104,6 +104,9 @@ async def isolated_example_env(tmp_path, monkeypatch, mock_llm, mock_embeddings)
     cognee.config.data_root_directory(str(data_dir))
     cognee.config.system_root_directory(str(system_dir))
 
+    original_cwd = os.getcwd()
+    os.chdir(tmp_path)
+
     _clear_engine_caches()
     await _prune_all()
 
@@ -111,3 +114,4 @@ async def isolated_example_env(tmp_path, monkeypatch, mock_llm, mock_embeddings)
 
     await _prune_all()
     _clear_engine_caches()
+    os.chdir(original_cwd)

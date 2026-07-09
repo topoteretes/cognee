@@ -16,21 +16,24 @@ from __future__ import annotations
 
 import pytest
 
-from cognee.tests.utils.example_runner import import_example
+from cognee.tests.utils.example_runner import import_example, invoke_example_main
 
 pytestmark = pytest.mark.asyncio
 
 
 async def test_recall_core(isolated_example_env):
-    module = import_example("examples/guides/recall_core.py")
-    await module.main()
+    rel_path = "examples/guides/recall_core.py"
+    module = import_example(rel_path)
+    await invoke_example_main(module, rel_path, work_dir=isolated_example_env)
 
 
 async def test_simple_cognee_example(isolated_example_env):
-    module = import_example("examples/demos/simple_cognee_example.py")
-    await module.main()
+    rel_path = "examples/demos/simple_cognee_example.py"
+    module = import_example(rel_path)
+    await invoke_example_main(module, rel_path, work_dir=isolated_example_env)
 
 
 async def test_custom_cognify_pipeline_example(isolated_example_env):
-    module = import_example("examples/custom_pipelines/custom_cognify_pipeline_example.py")
-    await module.main()
+    rel_path = "examples/custom_pipelines/custom_cognify_pipeline_example.py"
+    module = import_example(rel_path)
+    await invoke_example_main(module, rel_path, work_dir=isolated_example_env)

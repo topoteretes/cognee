@@ -28,17 +28,39 @@ walking ``model_fields``.
 from __future__ import annotations
 
 import enum
+import json
 import typing
 from contextlib import contextmanager
+from types import SimpleNamespace
 from typing import Any, get_args, get_origin
 from unittest.mock import patch
 
 from pydantic import BaseModel
 
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.types import (
+    TranscriptionReturnType,
+)
+
 MOCK_ANSWER = "MOCK_ANSWER"
 MOCK_SUMMARY = "Mock summary. This is a deterministic canned response for tests."
 MOCK_TRANSCRIPT = "Mock transcript of the provided audio."
 MOCK_IMAGE_DESCRIPTION = "Mock description of the provided image."
+MOCK_JSON_ANSWER = json.dumps(
+    {
+        "diff_risk_summary": "Mock diff risk summary.",
+        "comment_evaluation": "Mock comment evaluation.",
+        "skill_to_improve": "mock-skill",
+        "score": 0.5,
+        "feedback": "Mock feedback.",
+        "missing_instruction": "Mock instruction.",
+    }
+)
+
+# Fixed UUID-shaped ids for deterministic KnowledgeGraph nodes.
+_NODE_ALICE = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+_NODE_BOB = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+_NODE_PARIS = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+_NODE_NY = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
 
 _LLM_GATEWAY_PATH = "cognee.infrastructure.llm.LLMGateway.LLMGateway"
 
@@ -48,18 +70,27 @@ _LLM_GATEWAY_PATH = "cognee.infrastructure.llm.LLMGateway.LLMGateway"
 # ---------------------------------------------------------------------------
 
 
-def build_mock_response(response_model: Any) -> Any:
+def build_mock_response(
+    response_model: Any,
+    *,
+    text_input: Any = None,
+    system_prompt: Any = None,
+) -> Any:
     """Return a minimal, valid instance of ``response_model``.
 
     Handles ``str`` (the common completion/answer case), the well-known cognee
     response models, and any other Pydantic model via field introspection.
     """
     if response_model is None or response_model is str:
+        if _prompt_requests_json(text_input, system_prompt):
+            return MOCK_JSON_ANSWER
         return MOCK_ANSWER
 
     if not (isinstance(response_model, type) and issubclass(response_model, BaseModel)):
         # Non-pydantic, non-str response models are rare; a string is the
         # safest universally-consumable value.
+        if _prompt_requests_json(text_input, system_prompt):
+            return MOCK_JSON_ANSWER
         return MOCK_ANSWER
 
     field_names = set(getattr(response_model, "model_fields", {}).keys())
@@ -71,8 +102,18 @@ def build_mock_response(response_model: Any) -> Any:
     return _build_generic_model(response_model)
 
 
+def _prompt_requests_json(text_input: Any, system_prompt: Any) -> bool:
+    """Return True when the caller prompt expects a JSON-shaped string answer."""
+    parts: list[str] = []
+    for value in (text_input, system_prompt):
+        if isinstance(value, str):
+            parts.append(value)
+    combined = " ".join(parts).lower()
+    return "json" in combined or "return only json" in combined
+
+
 def _build_knowledge_graph(kg_cls: type[BaseModel]) -> BaseModel:
-    """Build a small, self-consistent KnowledgeGraph (2 nodes, 1 edge)."""
+    """Build a small, self-consistent KnowledgeGraph (people, cities, lives_in)."""
     fields = kg_cls.model_fields
     node_cls = _first_model_arg(fields["nodes"].annotation)
     edge_cls = _first_model_arg(fields["edges"].annotation)
@@ -83,30 +124,53 @@ def _build_knowledge_graph(kg_cls: type[BaseModel]) -> BaseModel:
         nodes = [
             _instantiate(
                 node_cls,
-                id="node_alice",
+                id=_NODE_ALICE,
                 name="Alice",
                 type="Person",
-                description="A person named Alice.",
+                description="A person named Alice who lives in Paris.",
                 label="Person",
             ),
             _instantiate(
                 node_cls,
-                id="node_bob",
+                id=_NODE_BOB,
                 name="Bob",
                 type="Person",
-                description="A person named Bob.",
+                description="A person named Bob who lives in New York.",
                 label="Person",
+            ),
+            _instantiate(
+                node_cls,
+                id=_NODE_PARIS,
+                name="Paris",
+                type="City",
+                description="The city of Paris.",
+                label="City",
+            ),
+            _instantiate(
+                node_cls,
+                id=_NODE_NY,
+                name="New York",
+                type="City",
+                description="The city of New York.",
+                label="City",
             ),
         ]
     if edge_cls is not None:
         edges = [
             _instantiate(
                 edge_cls,
-                source_node_id="node_alice",
-                target_node_id="node_bob",
-                relationship_name="knows",
-                description="Alice knows Bob.",
-            )
+                source_node_id=_NODE_ALICE,
+                target_node_id=_NODE_PARIS,
+                relationship_name="lives_in",
+                description="Alice lives in Paris.",
+            ),
+            _instantiate(
+                edge_cls,
+                source_node_id=_NODE_BOB,
+                target_node_id=_NODE_NY,
+                relationship_name="lives_in",
+                description="Bob lives in New York.",
+            ),
         ]
 
     kwargs: dict[str, Any] = {"nodes": nodes, "edges": edges}
@@ -127,7 +191,8 @@ def _build_generic_model(model_cls: type[BaseModel]) -> BaseModel:
             kwargs[field_name] = MOCK_SUMMARY
             continue
         if not field_info.is_required():
-            # Leave optional/defaulted fields to their defaults.
+            if field_name not in kwargs and _is_list_annotation(field_info.annotation):
+                kwargs[field_name] = []
             continue
         kwargs[field_name] = _value_for_annotation(field_info.annotation)
     try:
@@ -143,13 +208,30 @@ def _instantiate(model_cls: type[BaseModel], **preferred: Any) -> BaseModel:
     declared = set(model_cls.model_fields.keys())
     kwargs = {k: v for k, v in preferred.items() if k in declared}
     for field_name, field_info in model_cls.model_fields.items():
-        if field_name in kwargs or not field_info.is_required():
+        if field_name in kwargs:
+            continue
+        if not field_info.is_required():
+            if _is_list_annotation(field_info.annotation):
+                kwargs[field_name] = []
             continue
         kwargs[field_name] = _value_for_annotation(field_info.annotation)
     try:
         return model_cls(**kwargs)
     except Exception:
         return model_cls.model_construct(**kwargs)
+
+
+def _is_list_annotation(annotation: Any) -> bool:
+    """Return True when ``annotation`` is a list type (including Optional[list[...]])."""
+    if annotation is None:
+        return False
+    origin = get_origin(annotation)
+    if origin in (list, set, tuple, frozenset):
+        return origin is list
+    if origin is typing.Union:
+        non_none = [a for a in get_args(annotation) if a is not type(None)]
+        return len(non_none) == 1 and _is_list_annotation(non_none[0])
+    return False
 
 
 def _value_for_annotation(annotation: Any) -> Any:
@@ -209,6 +291,13 @@ def _is_model(obj: Any) -> bool:
     return isinstance(obj, type) and issubclass(obj, BaseModel)
 
 
+def _mock_completion_content(text: str) -> SimpleNamespace:
+    """Return a litellm-like completion object with ``.choices[0].message.content``."""
+    return SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content=text))],
+    )
+
+
 # ---------------------------------------------------------------------------
 # Patched gateway methods
 # ---------------------------------------------------------------------------
@@ -224,15 +313,20 @@ async def _mock_acreate_structured_output(
     # response_model may arrive positionally (text_input, system_prompt, response_model).
     if response_model is None and args:
         response_model = args[0]
-    return build_mock_response(response_model)
+    return build_mock_response(
+        response_model,
+        text_input=text_input,
+        system_prompt=system_prompt,
+    )
 
 
-async def _mock_create_transcript(*args: Any, **kwargs: Any) -> str:
-    return MOCK_TRANSCRIPT
+async def _mock_create_transcript(*args: Any, **kwargs: Any) -> TranscriptionReturnType:
+    payload = _mock_completion_content(MOCK_TRANSCRIPT)
+    return TranscriptionReturnType(MOCK_TRANSCRIPT, payload)
 
 
-async def _mock_transcribe_image(*args: Any, **kwargs: Any) -> str:
-    return MOCK_IMAGE_DESCRIPTION
+async def _mock_transcribe_image(*args: Any, **kwargs: Any) -> SimpleNamespace:
+    return _mock_completion_content(MOCK_IMAGE_DESCRIPTION)
 
 
 # ---------------------------------------------------------------------------

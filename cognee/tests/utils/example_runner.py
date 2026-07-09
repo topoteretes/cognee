@@ -2,7 +2,7 @@
 
 ``import_example`` loads an example module by file path (so the on-disk script
 is exercised verbatim -- no copy-pasting example logic into tests) and returns
-the imported module, from which a test typically awaits ``module.main()``.
+the imported module, from which a test typically awaits ``invoke_example_main``.
 
 ``requires_docker`` / ``requires_aws`` are skip markers for the minority of
 examples that genuinely need an external service; they keep the default suite
@@ -15,6 +15,7 @@ import importlib.util
 import os
 import shutil
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 from types import ModuleType
 from typing import Mapping
@@ -32,6 +33,26 @@ def example_path(rel_path: str) -> Path:
     if not path.exists():
         raise FileNotFoundError(f"Example script not found: {path}")
     return path
+
+
+@contextmanager
+def _script_import_context(path: Path):
+    """Isolate import side effects: ``sys.argv``, CWD, and ``sys.path``."""
+    script_dir = str(path.parent)
+    old_argv = sys.argv
+    old_cwd = os.getcwd()
+    added_to_path = script_dir not in sys.path
+    if added_to_path:
+        sys.path.insert(0, script_dir)
+    sys.argv = [str(path)]
+    os.chdir(script_dir)
+    try:
+        yield
+    finally:
+        sys.argv = old_argv
+        os.chdir(old_cwd)
+        if added_to_path and script_dir in sys.path:
+            sys.path.remove(script_dir)
 
 
 def import_example(
@@ -69,18 +90,48 @@ def import_example(
         raise ImportError(f"Could not create import spec for {path}")
     module = importlib.util.module_from_spec(spec)
 
-    # Make sibling modules importable (some examples import neighbouring files).
-    script_dir = str(path.parent)
-    added_to_path = script_dir not in sys.path
-    if added_to_path:
-        sys.path.insert(0, script_dir)
     sys.modules[name] = module
-    try:
+    with _script_import_context(path):
         spec.loader.exec_module(module)
-    finally:
-        if added_to_path and script_dir in sys.path:
-            sys.path.remove(script_dir)
     return module
+
+
+async def invoke_example_main(
+    module: ModuleType,
+    rel_path: str,
+    *,
+    work_dir: Path | None = None,
+    chdir_to_script: bool = False,
+) -> None:
+    """Await ``module.main()`` with pytest-safe ``sys.argv`` and CWD.
+
+    Parameters
+    ----------
+    work_dir:
+        Directory to use as CWD while ``main()`` runs (typically the test
+        ``tmp_path`` sandbox). Defaults to the script directory when
+        ``chdir_to_script`` is True, otherwise the current working directory.
+    chdir_to_script:
+        When True, run ``main()`` with CWD set to the script's parent so
+        examples that read CWD-relative files (e.g. ``prompts/prompt1.txt``)
+        work without per-test workarounds.
+    """
+    path = example_path(rel_path)
+    old_argv = sys.argv
+    old_cwd = os.getcwd()
+    if chdir_to_script:
+        target_dir = path.parent
+    elif work_dir is not None:
+        target_dir = work_dir
+    else:
+        target_dir = Path(old_cwd)
+    sys.argv = [str(path)]
+    os.chdir(target_dir)
+    try:
+        await module.main()
+    finally:
+        sys.argv = old_argv
+        os.chdir(old_cwd)
 
 
 def _docker_available() -> bool:
