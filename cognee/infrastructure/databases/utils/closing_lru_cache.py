@@ -485,6 +485,20 @@ class ClosingLRUCache:
         self._detach_entry(entry)
         return True
 
+    def evict_where(self, predicate) -> int:
+        """Remove every entry whose key satisfies *predicate* and request close.
+
+        Returns the number of entries evicted. Uses the same
+        defer-close-after-lock pattern as ``evict``. The predicate runs under
+        the cache lock, so it must be a pure function of the key.
+        """
+        with self._lock:
+            matched_keys = [key for key in self._cache if predicate(key)]
+            entries = [self._cache.pop(key) for key in matched_keys]
+        for entry in entries:
+            self._detach_entry(entry)
+        return len(entries)
+
     def contains(self, key) -> bool:
         """Check whether *key* is currently in the cache without creating."""
         with self._lock:
@@ -539,12 +553,23 @@ def closing_lru_cache(maxsize: Optional[int] = 128, lease: bool = True):
             """
             return cache.evict(_key(args, kwargs))
 
+        def cache_evict_where(predicate) -> int:
+            """Evict every cached entry whose key satisfies *predicate*.
+
+            The predicate receives the raw cache key: the positional-args
+            tuple, extended with ``(_KW_MARK, *sorted kwarg items)`` when the
+            cached call used keyword arguments. Returns the number of
+            evicted entries.
+            """
+            return cache.evict_where(predicate)
+
         def cache_contains(*args, **kwargs) -> bool:
             """Return True if the key is cached, without creating."""
             return cache.contains(_key(args, kwargs))
 
         wrapper.cache_clear = cache.cache_clear
         wrapper.cache_evict = cache_evict
+        wrapper.cache_evict_where = cache_evict_where
         wrapper.cache_contains = cache_contains
         wrapper.cache_info = cache.cache_info
         wrapper.acall = acall

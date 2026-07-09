@@ -45,6 +45,30 @@ async def main():
         f"Vector engine cache size too large after delete: {vector_cache_size}"
     )
 
+    # Re-add the same dataset name: it resolves to the same deterministic dataset id,
+    # so any cached engine that survived the delete (stale connection pool, stale
+    # collection metadata) would serve the recreated dataset and fail here.
+    await cognee.add(data=text, dataset_name=dataset_name)
+    await cognee.cognify(datasets=[dataset_name])
+
+    results = await cognee.search(
+        query_text="What is the capital of Germany?",
+        query_type=SearchType.CHUNKS,
+        datasets=[dataset_name],
+        only_context=True,
+    )
+    assert len(results) > 0, "Search returned no results after dataset re-add"
+
+    graph_cache_size = _create_graph_engine.cache_info().currsize
+    vector_cache_size = _create_vector_engine.cache_info().currsize
+
+    assert graph_cache_size <= 2, (
+        f"Graph engine cache size too large after re-add: {graph_cache_size}"
+    )
+    assert vector_cache_size <= 2, (
+        f"Vector engine cache size too large after re-add: {vector_cache_size}"
+    )
+
 
 if __name__ == "__main__":
     asyncio.run(main())

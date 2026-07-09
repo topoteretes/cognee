@@ -306,6 +306,30 @@ def evict_graph_engine(**kwargs) -> bool:
     )
 
 
+def evict_graph_engines_for_database(graph_database_name: str) -> int:
+    """Evict every cached graph engine bound to *graph_database_name*.
+
+    The same per-dataset database can be cached under multiple keys: the
+    dataset-handler creation key and the pipeline's context-config key differ
+    in ``graph_file_path`` and ``graph_dataset_database_handler``, so key-exact
+    ``evict_graph_engine`` misses the pipeline's entry and leaves an engine
+    whose connection pool died with the dropped database. Per-dataset database
+    names are dataset UUIDs, so matching the name against key fields cannot
+    collide with other entries.
+
+    Returns the number of evicted entries.
+    """
+
+    def matches(key) -> bool:
+        return any(
+            element == graph_database_name
+            or (isinstance(element, tuple) and graph_database_name in element)
+            for element in key
+        )
+
+    return _create_graph_engine.cache_evict_where(matches)
+
+
 def is_graph_engine_cached(**kwargs) -> bool:
     """Check whether a graph engine entry exists in the cache without creating."""
     normalized = _normalize_optional_create_graph_engine_params(kwargs)
