@@ -17,11 +17,11 @@ def test_strip_quotes_from_strings():
         # Empty quoted strings ("" → empty string)
         fallback_model='""',
         # None values (should remain None)
-        baml_llm_api_key=None,
+        llama_cpp_model_path=None,
         # Mixed quotes ("value' → unchanged)
         fallback_endpoint="\"mixed_quote'",
         # Strings with internal quotes ("internal\"quotes" → internal"quotes")
-        baml_llm_model='"internal"quotes"',
+        llm_model='"internal"quotes"',
     )
 
     # Strings with surrounding double quotes ("value" → value)
@@ -37,10 +37,10 @@ def test_strip_quotes_from_strings():
     assert config.fallback_model == ""
 
     # None values (should remain None)
-    assert config.baml_llm_api_key is None
+    assert config.llama_cpp_model_path is None
 
     # Mixed quotes ("value' → unchanged)
     assert config.fallback_endpoint == "\"mixed_quote'"
 
     # Strings with internal quotes ("internal\"quotes" → internal"quotes")
-    assert config.baml_llm_model == 'internal"quotes'
+    assert config.llm_model == 'internal"quotes'

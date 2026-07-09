@@ -340,6 +340,7 @@ class config:
         InvalidConfigAttributeError
             If any key in config_dict is not a valid attribute of config_obj.
         """
+        current_data = config_obj.model_dump()
         for key, value in config_dict.items():
             if hasattr(config_obj, key):
                 # Coerce stringy values to the field's declared bool/int
@@ -348,10 +349,12 @@ class config:
                 # single-key setters (``set_graph_database_subprocess_enabled``
                 # etc.) which accept ``"true"`` / ``"4"`` and parse them.
                 coerced = _coerce_for_field(config_obj, key, value)
-                object.__setattr__(config_obj, key, coerced)
+                current_data[key] = coerced
             else:
                 raise InvalidConfigAttributeError(attribute=key)
 
+        # Re-initialize the object to ensure Pydantic validators and model_post_init are re-run
+        config_obj.__init__(**current_data)
         return config_obj
 
     @staticmethod
