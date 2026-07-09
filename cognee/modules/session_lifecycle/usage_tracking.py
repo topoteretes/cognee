@@ -49,10 +49,21 @@ def _estimate_tokens(text: str) -> int:
     return max(1, len(text) // 4)
 
 
-# Minimal per-model pricing table. Conservative and incomplete —
-# unrecognized models cost $0.
-# USD per 1M tokens: (input, output)
+# Rough per-model pricing table for the dry-run estimator and session cost
+# tracking. Unrecognized models cost $0 (callers that surface the number warn).
+# Matching is longest-prefix-first (see below), so a model id need only start
+# with one of these keys; date suffixes and newer point releases fall back to
+# their family. Prices are USD per 1M tokens: (input, output), using each
+# provider's base short-context tier. Verified against the official pricing
+# pages July 2026 — update as providers change rates.
 _PRICING_PER_M_TOKENS = {
+    # OpenAI — https://developers.openai.com/api/docs/pricing
+    "gpt-5.5": (5.00, 30.00),
+    "gpt-5.5-pro": (30.00, 180.00),
+    "gpt-5.4": (2.50, 15.00),
+    "gpt-5.4-mini": (0.75, 4.50),
+    "gpt-5.4-nano": (0.20, 1.25),
+    "gpt-5.4-pro": (30.00, 180.00),
     "gpt-5": (1.25, 10.00),
     "gpt-5-mini": (0.25, 2.00),
     "gpt-5-nano": (0.05, 0.40),
@@ -66,15 +77,29 @@ _PRICING_PER_M_TOKENS = {
     "gpt-3.5-turbo": (0.50, 1.50),
     "o3": (2.00, 8.00),
     "o4-mini": (1.10, 4.40),
+    # Anthropic — https://platform.claude.com/docs/en/about-claude/pricing
+    "claude-fable-5": (10.00, 50.00),
+    "claude-opus-4-8": (5.00, 25.00),
+    "claude-opus-4-7": (5.00, 25.00),
+    "claude-opus-4-6": (5.00, 25.00),
     "claude-opus-4-5": (5.00, 25.00),
-    "claude-opus-4": (15.00, 75.00),
-    "claude-sonnet-4": (3.00, 15.00),
+    "claude-opus-4": (15.00, 75.00),  # Opus 4.0 / 4.1
+    "claude-sonnet-5": (3.00, 15.00),  # $2/$10 introductory through 2026-08-31
+    "claude-sonnet-4": (3.00, 15.00),  # Sonnet 4.0 / 4.5 / 4.6
     "claude-haiku-4-5": (1.00, 5.00),
     "claude-3-5-sonnet": (3.00, 15.00),
+    "claude-3-5-haiku": (0.80, 4.00),
     "claude-3-opus": (15.00, 75.00),
     "claude-3-haiku": (0.25, 1.25),
+    # Google Gemini — https://ai.google.dev/gemini-api/docs/pricing
+    "gemini-3.5-flash": (1.50, 9.00),
+    "gemini-3.1-pro": (2.00, 12.00),
+    "gemini-3.1-flash-lite": (0.25, 1.50),
+    "gemini-3-flash": (0.50, 3.00),
     "gemini-2.5-pro": (1.25, 10.00),
+    "gemini-2.5-flash-lite": (0.10, 0.40),
     "gemini-2.5-flash": (0.30, 2.50),
+    "gemini-2.0-flash-lite": (0.075, 0.30),
     "gemini-2.0-flash": (0.10, 0.40),
     "gemini-1.5-pro": (1.25, 5.00),
     "gemini-1.5-flash": (0.075, 0.30),
