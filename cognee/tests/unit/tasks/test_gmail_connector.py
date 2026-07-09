@@ -13,8 +13,8 @@ libraries and no live credentials are required, so these run in CI. Coverage:
 
 The e2e test drives gmail_source through a real (offline, LLM-free) dlt merge
 to prove a ``_deleted`` marker removes the row from the destination table.
-cognee's existing ``orphan_cleanup`` path (see test_dlt_p0_correctness.py)
-then turns that into removal from the graph + vector + relational stores.
+cognee's existing ``orphan_cleanup`` path then turns that into removal from
+the graph + vector + relational stores.
 """
 
 import base64
