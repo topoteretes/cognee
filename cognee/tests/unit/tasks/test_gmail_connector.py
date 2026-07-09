@@ -298,6 +298,23 @@ def test_incremental_fetch_transient_error_does_not_delete_live_message():
     assert state["last_history_id"] == "1000"  # cursor NOT advanced
 
 
+def test_incremental_fetch_advances_cursor_across_digit_boundary():
+    # historyIds are integers; a lexicographic compare treats "1000" < "999"
+    # and would freeze the cursor forever. It must advance numerically.
+    svc = FakeGmailService(
+        messages=[_make_message("n", subject="New", history_id="1000")],
+        history_response={
+            "history": [{"id": "1000", "messagesAdded": [{"message": {"id": "n"}}]}],
+            "historyId": "1000",
+        },
+    )
+    state = {"last_history_id": "999"}
+    rows = list(incremental_fetch(svc, state))
+
+    assert [r["id"] for r in rows] == ["n"]
+    assert state["last_history_id"] == "1000"  # advanced past the boundary
+
+
 # ---------------------------------------------------------------------------
 # gmail_source (dlt wiring) — requires dlt
 # ---------------------------------------------------------------------------

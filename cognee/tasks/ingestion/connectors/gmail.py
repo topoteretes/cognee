@@ -356,7 +356,9 @@ def incremental_fetch(
 
         for record in response.get("history", []) or []:
             record_history_id = record.get("id")
-            if record_history_id and str(record_history_id) > str(newest_history_id):
+            # historyIds are monotonically increasing integers — compare
+            # numerically, not lexicographically ("1000" < "999" as strings).
+            if record_history_id and int(record_history_id) > int(newest_history_id):
                 newest_history_id = str(record_history_id)
 
             for deleted in record.get("messagesDeleted", []) or []:
@@ -372,10 +374,8 @@ def incremental_fetch(
                         seen_added.add(msg_id)
 
         page_token = response.get("nextPageToken")
-        if response.get("historyId"):
-            candidate = str(response["historyId"])
-            if candidate > str(newest_history_id):
-                newest_history_id = candidate
+        if response.get("historyId") and int(response["historyId"]) > int(newest_history_id):
+            newest_history_id = str(response["historyId"])
         if not page_token:
             break
 
