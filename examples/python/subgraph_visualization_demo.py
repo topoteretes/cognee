@@ -1,94 +1,60 @@
-"""Demo: bounded subgraph visualization (no LLM / no live DB required).
+"""Bounded subgraph visualization demo.
 
-Builds a synthetic 20-node chain graph and drives the real subgraph
-selection layer plus HTML renderer:
+``visualize_graph`` renders a *bounded subgraph* by default (seed nodes plus
+their k-hop neighborhood, capped at ``max_nodes``) instead of the whole graph.
+This script builds a small graph and writes one HTML file per seeding mode.
 
-* ``fetch_visualization_graph_data`` — seed resolution + ``get_neighborhood``
-* ``cognee_network_visualization`` — existing renderer (unchanged)
-
-Writes one HTML file per mode under ``examples/python/.artifacts/``.
+It uses a dedicated ``subgraph_demo`` dataset and does not prune, so it will not
+touch your other cognee data. Requires a working LLM/embedding configuration
+(see the project README), same as any other cognee example.
 """
 
 import asyncio
-import json
 import os
-import re
-from unittest.mock import AsyncMock, MagicMock
 
-from cognee.modules.visualization.cognee_network_visualization import cognee_network_visualization
-from cognee.modules.visualization.subgraph_data import (
-    DEFAULT_MAX_NODES,
-    DEFAULT_NEIGHBORHOOD_DEPTH,
-    DEFAULT_SEED_TOP_K,
-    fetch_visualization_graph_data,
-    resolve_seeds_from_recall,
-)
+import cognee
+from cognee import visualize_graph
 
 ARTIFACTS = os.path.join(os.path.dirname(__file__), ".artifacts", "subgraph_demo")
+DATASET = "subgraph_demo"
 
-
-def _chain_graph(node_count: int = 20):
-    nodes = [(str(i), {"type": "Entity", "name": f"Node{i}"}) for i in range(node_count)]
-    edges = [(str(i), str(i + 1), "related_to", {}) for i in range(node_count - 1)]
-    return nodes, edges
-
-
-def _story_node_count(html: str) -> int:
-    match = re.search(r"var nodes\s*=\s*(\[.*?\]);", html, re.DOTALL)
-    if not match:
-        return 0
-    return len(json.loads(match.group(1)))
-
-
-def _mock_engine(full_graph):
-    engine = MagicMock()
-    nodes, edges = full_graph
-    engine.get_graph_data = AsyncMock(return_value=full_graph)
-    engine.get_neighborhood = AsyncMock(
-        return_value=(nodes[8:14], edges[8:13]),
-    )
-    engine.query = AsyncMock(return_value=[("10",)])
-    return engine
-
-
-async def _render_mode(engine, label: str, **fetch_kwargs):
-    graph_data, meta = await fetch_visualization_graph_data(engine, **fetch_kwargs)
-    output_path = os.path.join(ARTIFACTS, f"{label}.html")
-    html = await cognee_network_visualization(graph_data, output_path)
-    print(
-        f"{label:16} scope={meta.scope:<8} seeds={len(meta.seed_ids):<2} "
-        f"source={meta.seed_source:<8} nodes={len(graph_data[0]):<3} "
-        f"html_nodes={_story_node_count(html):<3} -> {output_path}"
-    )
+TEXT = (
+    "Python is a programming language. Guido van Rossum created Python. "
+    "Django is a web framework written in Python. NLP is a subfield of AI. "
+    "spaCy is an NLP library for Python."
+)
 
 
 async def main():
     os.makedirs(ARTIFACTS, exist_ok=True)
-    full_graph = _chain_graph(20)
-    engine = _mock_engine(full_graph)
 
-    print("Subgraph visualization caps:")
-    print(f"  neighborhood_depth={DEFAULT_NEIGHBORHOOD_DEPTH}")
-    print(f"  neighborhood_seed_top_k={DEFAULT_SEED_TOP_K}")
-    print(f"  max_nodes={DEFAULT_MAX_NODES}")
-    print()
+    # Build a small knowledge graph in a dedicated dataset.
+    await cognee.add(TEXT, dataset_name=DATASET)
+    await cognee.cognify(datasets=[DATASET])
 
-    await _render_mode(engine, "default_degree", seed_node_ids=None)
-    await _render_mode(engine, "explicit_seeds", seed_node_ids=["10", "11"])
-    await _render_mode(
-        engine,
-        "recall_seeds",
-        recall_result={"node_ids": resolve_seeds_from_recall({"node_ids": ["9", "10"]})},
-    )
-    await _render_mode(engine, "full_graph", full=True)
+    def out(name: str) -> str:
+        return os.path.join(ARTIFACTS, f"{name}.html")
 
-    print()
-    print("SDK usage (live dataset):")
-    print('  await visualize_graph("out.html")  # bounded subgraph (default)')
-    print('  await visualize_graph("out.html", query="What is Python?")')
-    print('  await visualize_graph("out.html", seed_node_ids=["..."])')
-    print('  await visualize_graph("out.html", full=True)  # legacy full graph')
-    print('  await visualize_search_subgraph(recall_results, "out.html")')
+    # Default: bounded subgraph seeded by a query's nearest vector hits.
+    await visualize_graph(out("query_seeded"), dataset=DATASET, query="What is Python used for?")
+
+    # Bare call with no seed: highest-degree nodes seed a representative view.
+    await visualize_graph(out("default_degree"), dataset=DATASET)
+
+    # Legacy whole-graph render.
+    await visualize_graph(out("full_graph"), dataset=DATASET, full=True)
+
+    # Explicit seeds: pass node ids you already have (e.g. from a prior query or
+    # recall result). Uncomment with real ids from your graph:
+    #   await visualize_graph(out("explicit_seeds"), dataset=DATASET, seed_node_ids=[...])
+
+    # "Subgraph behind an answer": pass a recall/search result whose provenance
+    # (used_graph_element_ids) seeds the view:
+    #   result = await cognee.recall("What is Python?", session_id="demo")
+    #   await visualize_graph(out("recall_seeded"), dataset=DATASET, recall_result=result)
+
+    print(f"Wrote subgraph visualizations to {ARTIFACTS}")
+    print("Caps: neighborhood_depth=2, neighborhood_seed_top_k=10, max_nodes=500")
 
 
 if __name__ == "__main__":

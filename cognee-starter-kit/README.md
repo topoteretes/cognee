@@ -83,7 +83,7 @@ python src/pipelines/custom-model.py
 ## Graph preview
 
 cognee provides a `visualize_graph` function that renders the knowledge graph to HTML.
-By default it shows a **bounded subgraph** (seed nodes + k-hop neighborhood) instead of
+By default it shows a **bounded subgraph** (seed nodes + k-hop neighborhood) rather than
 the entire graph. Pass `full=True` for the legacy whole-graph view.
 
 ```
@@ -92,12 +92,9 @@ the entire graph. Pass `full=True` for the legacy whole-graph view.
             os.path.join(pathlib.Path(__file__).parent, ".artifacts/graph_visualization.html")
         ).resolve()
     )
-    await visualize_graph(graph_file_path)          # bounded subgraph (default)
+    await visualize_graph(graph_file_path)             # bounded subgraph (default)
     await visualize_graph(graph_file_path, full=True)  # entire graph
 ```
-
-See `examples/python/subgraph_visualization_demo.py` for query seeds, explicit seeds,
-and recall-result subgraph modes.
 
 # What will you build with cognee?
 

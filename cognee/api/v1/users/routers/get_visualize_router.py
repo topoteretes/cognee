@@ -5,6 +5,11 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 from uuid import UUID
 from cognee.shared.logging_utils import get_logger
+from cognee.modules.visualization.subgraph_data import (
+    DEFAULT_MAX_NODES,
+    DEFAULT_NEIGHBORHOOD_DEPTH,
+    DEFAULT_SEED_TOP_K,
+)
 from cognee.modules.users.methods import get_authenticated_user, get_user
 from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.users.models import User
@@ -47,44 +52,49 @@ def get_visualize_router() -> APIRouter:
         ),
         full: bool = Query(
             False,
-            description="When true, render the entire graph instead of a bounded subgraph.",
+            description="Render the entire graph instead of a bounded subgraph.",
         ),
         query: Optional[str] = Query(
             None,
-            description="Optional query string; vector hits seed the bounded subgraph.",
+            description="Query string whose nearest vector hits seed the subgraph.",
         ),
         seed_node_ids: Optional[List[str]] = Query(
             None,
-            description="Explicit seed node IDs for subgraph neighborhood expansion.",
+            description="Explicit seed node ids for subgraph neighborhood expansion.",
         ),
         neighborhood_depth: int = Query(
-            2,
+            DEFAULT_NEIGHBORHOOD_DEPTH,
             ge=1,
-            description="k-hop neighborhood depth for subgraph expansion (default: 2).",
+            le=10,
+            description="k-hop neighborhood depth for subgraph expansion.",
         ),
         neighborhood_seed_top_k: int = Query(
-            10,
+            DEFAULT_SEED_TOP_K,
             ge=1,
-            description="Maximum number of seed nodes (default: 10).",
+            le=100,
+            description="Maximum number of seed nodes.",
         ),
         max_nodes: int = Query(
-            500,
+            DEFAULT_MAX_NODES,
             ge=1,
-            description="Hard cap on rendered nodes after expansion (default: 500).",
+            le=5000,
+            description="Hard cap on rendered nodes after expansion.",
         ),
         user: User = Depends(get_authenticated_user),
     ):
         """
         Generate an HTML visualization of the dataset's knowledge graph.
 
-        By default renders a bounded subgraph around relevant seed nodes. Pass
-        ``full=true`` to render the entire graph (legacy behavior).
+        By default renders a bounded subgraph around relevant seed nodes; pass
+        ``full=true`` to render the entire graph (legacy behavior). Seeds come
+        from ``query`` or ``seed_node_ids`` when given, otherwise the graph's
+        highest-degree nodes.
 
         ## Query Parameters
         - **dataset_id** (UUID): The unique identifier of the dataset to visualize
         - **full** (bool): Render the full graph when true
         - **query** (str): Query string to seed the subgraph via vector search
-        - **seed_node_ids** (list[str]): Explicit seed node IDs
+        - **seed_node_ids** (list[str]): Explicit seed node ids
         - **neighborhood_depth** (int): k-hop expansion depth (default 2)
         - **neighborhood_seed_top_k** (int): Max seeds (default 10)
         - **max_nodes** (int): Node cap after expansion (default 500)
@@ -130,6 +140,7 @@ def get_visualize_router() -> APIRouter:
             return HTMLResponse(html_visualization)
 
         except Exception as error:
+            logger.exception("Visualization failed for dataset %s", dataset_id)
             return JSONResponse(status_code=409, content={"error": str(error)})
 
     @router.post("/multi", response_model=None)
