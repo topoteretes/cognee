@@ -52,12 +52,10 @@ async def _record_session_usage_after(
 
 
 async def _fail_fast_on_quota(coro: Coroutine) -> T:
-    """Surface provider quota/billing exhaustion as an actionable typed error.
+    """Convert provider quota/billing exhaustion into ``LLMQuotaExceededError``.
 
-    The adapters' retry policies already refuse to retry these failures (see
-    ``retry_config``); this converts the raw provider error into
-    ``LLMQuotaExceededError`` at the one place every structured-output call
-    flows through, regardless of provider or framework.
+    Runs at the single choke point every structured-output call flows through,
+    so it is provider- and framework-agnostic.
     """
     try:
         return await coro

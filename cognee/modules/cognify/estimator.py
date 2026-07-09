@@ -300,11 +300,10 @@ def _require_text_like(name: str) -> None:
 def _path_candidate(value: str) -> Optional[Path]:
     """The local path this string refers to, or None when it is raw text.
 
-    Mirrors the routing in ``save_data_item_to_storage``: remote URLs and
-    missing absolute paths are loud errors, ``file://`` URIs resolve to local
-    paths, and anything that does not name an existing file is raw text. The
-    scheme is checked first (``urlparse`` strips embedded newlines, matching the
-    real ingestion path) so a trailing-newline URL cannot slip through as text.
+    Mirrors ``save_data_item_to_storage``: remote URLs and missing absolute
+    paths are loud errors, ``file://`` URIs resolve to local paths, everything
+    else that is not an existing file is raw text. Scheme is checked before the
+    newline guard so a trailing-newline URL cannot slip through as text.
     """
     scheme = urlparse(value).scheme.lower()
     if scheme in _UNSUPPORTED_SCHEMES:

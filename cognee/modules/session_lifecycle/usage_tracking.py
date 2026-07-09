@@ -49,13 +49,10 @@ def _estimate_tokens(text: str) -> int:
     return max(1, len(text) // 4)
 
 
-# Rough per-model pricing table for the dry-run estimator and session cost
-# tracking. Unrecognized models cost $0 (callers that surface the number warn).
-# Matching is longest-prefix-first (see below), so a model id need only start
-# with one of these keys; date suffixes and newer point releases fall back to
-# their family. Prices are USD per 1M tokens: (input, output), using each
-# provider's base short-context tier. Verified against the official pricing
-# pages July 2026 — update as providers change rates.
+# Rough per-model pricing for cost estimates. Longest-prefix match (see below),
+# so a model id need only start with a key; unknown models cost $0 and callers
+# warn. USD per 1M tokens (input, output) at each provider's base tier; verified
+# against the official pricing pages July 2026.
 _PRICING_PER_M_TOKENS = {
     # OpenAI — https://developers.openai.com/api/docs/pricing
     "gpt-5.5": (5.00, 30.00),

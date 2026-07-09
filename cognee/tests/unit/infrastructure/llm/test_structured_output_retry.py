@@ -142,12 +142,10 @@ async def test_structured_output_does_not_retry_quota_errors():
 # --------------------------------------------------------------------------- #
 @pytest.mark.asyncio
 async def test_llm_gateway_converts_quota_errors():
-    # Resolve the module objects via sys.modules, not a dotted patch string or
-    # `import ... as`: the ``cognee.infrastructure.llm`` package re-exports the
-    # ``LLMGateway`` class, so "cognee.infrastructure.llm.LLMGateway" resolves to
-    # the class (via getattr on the package) rather than the module, and which
-    # one wins depends on import order across Python versions. sys.modules is
-    # keyed by dotted name and always returns the module.
+    # Resolve modules via sys.modules, not a dotted patch string: the llm package
+    # re-exports the LLMGateway *class*, so "cognee.infrastructure.llm.LLMGateway"
+    # can resolve to the class instead of the module (order-dependent across Python
+    # versions). sys.modules is keyed by name and always gives the module.
     import sys
     import cognee.infrastructure.llm.LLMGateway  # noqa: F401 — ensure in sys.modules
     import cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.get_llm_client  # noqa: E501,F401

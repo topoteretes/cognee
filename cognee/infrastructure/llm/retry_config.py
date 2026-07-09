@@ -36,12 +36,10 @@ llm_retry_stop_condition = stop_after_attempt(LLM_MIN_RETRY_ATTEMPTS) & stop_aft
     LLM_MIN_RETRY_SECONDS
 )
 
-# Provider error codes/wordings that signal exhausted quota or billing limits —
-# failures no amount of retrying can fix. Deliberately narrow and specific:
-# transient per-minute rate limits must NOT match, or retryable 429s would fail
-# fast. In particular the bare phrase "exceeded your current quota" is avoided
-# because Google Gemini returns it for recoverable free-tier per-minute limits;
-# OpenAI's terminal case is still caught by its "insufficient_quota" code.
+# Terminal quota/billing wordings — no retry can fix these. Kept narrow so
+# transient per-minute rate limits stay retryable: the bare phrase "exceeded
+# your current quota" is excluded because Gemini free tier uses it for
+# recoverable limits (OpenAI's terminal case still matches "insufficient_quota").
 _TERMINAL_QUOTA_PATTERNS = (
     "insufficient_quota",  # OpenAI / Azure OpenAI: billing quota exhausted
     "quota_exceeded",  # provider quota-exhaustion error code
@@ -52,12 +50,11 @@ _TERMINAL_QUOTA_PATTERNS = (
 
 
 def is_quota_or_billing_error(error: BaseException) -> bool:
-    """True when the error, or an error it was explicitly raised from, reports exhaustion.
+    """True when the error, or its ``__cause__`` chain, reports quota/billing exhaustion.
 
-    Follows the explicit ``raise ... from`` (``__cause__``) chain — instructor and
-    the adapters wrap the raw provider error that way — but not the implicit
-    ``__context__`` chain, which would misclassify an unrelated transient error
-    merely raised while handling a quota error.
+    Walks ``__cause__`` (adapters/instructor wrap the provider error with
+    ``raise ... from``) but not ``__context__``, so an unrelated error merely
+    raised while handling a quota error is not misclassified.
     """
     seen: set[int] = set()
     current: BaseException | None = error
