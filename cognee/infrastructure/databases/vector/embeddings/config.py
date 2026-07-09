@@ -85,7 +85,7 @@ class EmbeddingConfig(BaseSettings):
     # knobs sit with the embedding settings they govern.
     embedding_rate_limit_enabled: bool = False
     embedding_rate_limit_requests: int = 60
-    embedding_rate_limit_interval: int = 60  # seconds (default: 60 requests per minute)
+    embedding_rate_limit_interval: int = 60  # in seconds (default is 60 requests per minute)
     embedding_rate_limit_tokens: int = 0  # max tokens per interval (0 = disabled)
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
@@ -134,7 +134,6 @@ class EmbeddingConfig(BaseSettings):
             "embedding_rate_limit_enabled": self.embedding_rate_limit_enabled,
             "embedding_rate_limit_requests": self.embedding_rate_limit_requests,
             "embedding_rate_limit_interval": self.embedding_rate_limit_interval,
-            "embedding_rate_limit_tokens": self.embedding_rate_limit_tokens,
         }
 
 
