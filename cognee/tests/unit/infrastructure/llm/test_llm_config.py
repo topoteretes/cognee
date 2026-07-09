@@ -188,8 +188,9 @@ def test_instructor_mode_table_and_adapter_wiring():
     # Table values match the historical per-adapter defaults.
     assert get_instructor_mode("openai") == "json_schema_mode"
     assert get_instructor_mode("anthropic") == "anthropic_tools"
-    # Unknown providers fall back to the default.
-    assert get_instructor_mode("totally-unknown-provider") == "json_mode"
+    # An unknown provider fails loudly rather than silently defaulting.
+    with pytest.raises(KeyError):
+        get_instructor_mode("totally-unknown-provider")
 
     # Adapters now derive their default from the table. OpenAIAdapter is used
     # here because it has no optional third-party dependency to import.
