@@ -21,6 +21,7 @@ Any vector-engine failure is logged and yields a partial/empty dict — the clas
 render must never break because the semantic tab couldn't fetch vectors.
 """
 
+import inspect
 import random
 from collections import defaultdict
 from typing import Any, Dict, List, Optional
@@ -93,11 +94,19 @@ async def _fetch_for_collection(
 ) -> Dict[str, List[float]]:
     """One batched retrieve for a collection, with re-embed fallback."""
     ids = [str(node["id"]) for node in type_nodes]
+    # Capability detection (not error handling): only LanceDB's retrieve() declares
+    # ``include_vector``. Probe the signature — the same idiom run_async / Task use
+    # for optional params — so a genuine TypeError raised *inside* a supporting
+    # retrieve() surfaces via fetch_node_embeddings' ``except Exception`` instead of
+    # being silently reinterpreted as "unsupported" and masked behind a re-embed.
     try:
-        results = await vector_engine.retrieve(collection, ids, include_vector=True)
-    except TypeError:
-        # Adapter's retrieve() doesn't accept include_vector -> unsupported.
+        supports_vector = "include_vector" in inspect.signature(vector_engine.retrieve).parameters
+    except (ValueError, TypeError):
+        supports_vector = False
+    if not supports_vector:
         return await _reembed(vector_engine, type_nodes, field)
+
+    results = await vector_engine.retrieve(collection, ids, include_vector=True)
 
     found: Dict[str, List[float]] = {}
     for result in results:

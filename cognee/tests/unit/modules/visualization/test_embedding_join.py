@@ -28,32 +28,48 @@ class FakeEmbeddingEngine:
 
 
 class FakeVectorEngine:
-    """Stands in for a real adapter. ``store`` maps collection -> {id: vector}."""
+    """A supporting adapter: ``retrieve()`` declares ``include_vector`` like LanceDB.
 
-    def __init__(self, store, supports_include_vector=True):
+    ``store`` maps collection -> {id: vector}. ``attaches_vector=False`` models an
+    adapter that accepts the flag but returns rows carrying no vector, exercising
+    the "accepted the flag but returned nothing" re-embed branch.
+    """
+
+    def __init__(self, store, attaches_vector=True):
         self.store = store
-        self.supports_include_vector = supports_include_vector
+        self.attaches_vector = attaches_vector
         self.embedding_engine = FakeEmbeddingEngine()
         self.retrieve_calls = []
 
     async def has_collection(self, collection_name):
         return collection_name in self.store
 
-    async def retrieve(self, collection_name, data_point_ids, **kwargs):
-        if not self.supports_include_vector:
-            # Mimic an unmodified adapter whose retrieve() rejects the kwarg.
-            raise TypeError("retrieve() got an unexpected keyword argument 'include_vector'")
-        include_vector = kwargs.get("include_vector", False)
+    async def retrieve(self, collection_name, data_point_ids, *, include_vector=False):
         self.retrieve_calls.append((collection_name, list(data_point_ids)))
         rows = self.store.get(collection_name, {})
         results = []
         for did in data_point_ids:
             if did in rows:
                 payload = {"text": f"payload-{did}"}
-                if include_vector:
+                if include_vector and self.attaches_vector:
                     payload = {**payload, "vector": rows[did]}
                 results.append(ScoredResult(id=did, payload=payload, score=0))
         return results
+
+
+class LegacyVectorEngine(FakeVectorEngine):
+    """An unsupported adapter: ``retrieve()`` has no ``include_vector`` param (like
+    PGVector). The signature probe must route it straight to the re-embed fallback,
+    so this ``retrieve()`` is never even called with the flag."""
+
+    async def retrieve(self, collection_name, data_point_ids):
+        self.retrieve_calls.append((collection_name, list(data_point_ids)))
+        rows = self.store.get(collection_name, {})
+        return [
+            ScoredResult(id=did, payload={"text": f"payload-{did}"}, score=0)
+            for did in data_point_ids
+            if did in rows
+        ]
 
 
 # ScoredResult.id is a UUID, so fixtures use canonical UUID strings.
@@ -122,15 +138,17 @@ def test_missing_ids_absent_not_reembedded():
 
 
 def test_reembed_fallback_when_include_vector_unsupported():
-    # Adapter without include_vector support: every node is positioned via one
-    # batched embed_text call.
+    # Adapter whose retrieve() lacks include_vector: the signature probe routes it
+    # to the re-embed fallback, positioning every node via one batched embed_text.
     store = {"Entity_name": {E1: [9.9], E2: [9.9]}}
-    engine = FakeVectorEngine(store, supports_include_vector=False)
+    engine = LegacyVectorEngine(store)
     nodes = [_node(E1, "Entity", name="abc"), _node(E2, "Entity", name="abcd")]
 
     result = asyncio.run(fetch_node_embeddings(nodes, vector_engine=engine))
 
-    # Fallback embeds the indexed field (name) once, in a single batch.
+    # Fallback embeds the indexed field (name) once, in a single batch, and the
+    # unsupported retrieve() is never called with the flag.
+    assert engine.retrieve_calls == []
     assert len(engine.embedding_engine.calls) == 1
     assert engine.embedding_engine.calls[0] == ["abc", "abcd"]
     assert result == {E1: [3.0, 1.0, 2.0], E2: [4.0, 1.0, 2.0]}
@@ -138,12 +156,28 @@ def test_reembed_fallback_when_include_vector_unsupported():
 
 def test_reembed_uses_text_field_for_text_types():
     store = {"DocumentChunk_text": {C1: [0.0]}}
-    engine = FakeVectorEngine(store, supports_include_vector=False)
+    engine = LegacyVectorEngine(store)
     nodes = [{"id": C1, "type": "DocumentChunk", "name": "ignored", "text": "hello"}]
 
     asyncio.run(fetch_node_embeddings(nodes, vector_engine=engine))
 
     assert engine.embedding_engine.calls == [["hello"]]
+
+
+def test_reembed_fallback_when_adapter_ignores_include_vector():
+    # Adapter that accepts include_vector (no TypeError) but never attaches a
+    # vector -> retrieve returns rows, none carrying a vector, so the join must
+    # fall back to a single batched re-embed (the "not found and results" branch).
+    store = {"Entity_name": {E1: [9.9], E2: [9.9]}}
+    engine = FakeVectorEngine(store, attaches_vector=False)
+    nodes = [_node(E1, "Entity", name="abc"), _node(E2, "Entity", name="abcd")]
+
+    result = asyncio.run(fetch_node_embeddings(nodes, vector_engine=engine))
+
+    assert engine.retrieve_calls  # retrieve WAS attempted before the fallback
+    assert len(engine.embedding_engine.calls) == 1
+    assert engine.embedding_engine.calls[0] == ["abc", "abcd"]
+    assert result == {E1: [3.0, 1.0, 2.0], E2: [4.0, 1.0, 2.0]}
 
 
 def test_sampling_cap_deterministic():

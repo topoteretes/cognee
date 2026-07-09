@@ -72,6 +72,18 @@ def test_nearest_neighbors_cosine_topk():
     assert "a" not in nbrs
 
 
+def test_nearest_neighbors_excludes_self_on_small_graphs():
+    # With <= TOP_NEIGHBORS (5) embedded nodes the self index would fall inside
+    # the top-k slice unless it is explicitly dropped. Every node's neighbor list
+    # must exclude itself regardless of graph size.
+    ids = ["a", "b", "c"]  # 3 nodes < top-5
+    result = compute_clusters(_nodes(ids), {i: BLOB[i] for i in ids}, k=2, seed=42)
+    for nid in ids:
+        nbrs = result["neighbors"][nid]
+        assert nid not in nbrs
+        assert len(nbrs) == len(ids) - 1  # every other node, self excluded
+
+
 def test_labels_use_top_degree_entities():
     # 'b' has the highest degree in the positive blob -> leads its cluster label.
     nodes = _nodes(["a", "b", "c", "d", "e", "f"], degree={"b": 9, "a": 1, "d": 9})

@@ -82,7 +82,9 @@ def _nearest_neighbors(ids: List[str], x: np.ndarray, top: int) -> Dict[str, Lis
     np.fill_diagonal(sim, -np.inf)
     out: Dict[str, List[str]] = {}
     for i, nid in enumerate(ids):
-        order = np.argsort(-sim[i], kind="stable")[:top]
+        # Drop self before truncating: with <= ``top`` other nodes the self index
+        # would otherwise fall inside the slice (fill_diagonal only sorts it last).
+        order = [j for j in np.argsort(-sim[i], kind="stable") if j != i][:top]
         out[nid] = [ids[j] for j in order]
     return out
 

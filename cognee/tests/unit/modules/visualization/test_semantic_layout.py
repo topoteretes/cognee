@@ -6,6 +6,8 @@ fallback, isolated-node ring placement, de-overlap separation, and the UMAP
 ImportError fallback (CI has no umap-learn).
 """
 
+import logging
+
 import numpy as np
 
 from cognee.modules.visualization.layouts import semantic_layout
@@ -113,9 +115,11 @@ def test_umap_method_falls_back_to_pca(monkeypatch, caplog):
 
     monkeypatch.setattr(builtins, "__import__", fake_import)
     nodes = _nodes(["a", "b", "c", "d"])
-    umap_pos = compute_positions(nodes, [], FIXED_EMB, method="umap", seed=42)
+    with caplog.at_level(logging.INFO):
+        umap_pos = compute_positions(nodes, [], FIXED_EMB, method="umap", seed=42)
     pca_pos = compute_positions(nodes, [], FIXED_EMB, method="pca", seed=42)
     assert umap_pos == pca_pos  # identical -> fell back to PCA
+    assert "falling back to PCA" in caplog.text  # log half of the contract
 
 
 def test_emit_js_carries_position_token():

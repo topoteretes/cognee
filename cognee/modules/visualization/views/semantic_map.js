@@ -330,7 +330,7 @@
     row.style.cssText = 'display:flex;align-items:center;gap:8px;cursor:pointer;padding:1px 0;';
     row.innerHTML = '<span style="width:10px;height:10px;border-radius:50%;background:'
       + color + ';display:inline-block;flex:0 0 auto;"></span>'
-      + '<span>' + esc(text.length > 30 ? text.slice(0, 29) + '…' : text) + '</span>';
+      + '<span>' + esc(truncate(text, 30)) + '</span>';
     row.addEventListener('click', onClick);
     return row;
   }
@@ -414,7 +414,7 @@
       const opt = document.createElement('option');
       opt.value = String(i);
       const q = (e.question || 'recall ' + (i + 1)).trim();
-      opt.textContent = q.length > 40 ? q.slice(0, 39) + '…' : q;
+      opt.textContent = truncate(q, 40);
       select.appendChild(opt);
     });
     select.addEventListener('change', () => {

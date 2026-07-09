@@ -40,7 +40,7 @@ from cognee.modules.visualization.semantic_clusters import compute_clusters
 logger = get_logger()
 
 
-async def _semantic_payload(pre):
+async def _semantic_payload(pre) -> tuple[Optional[dict], Optional[dict]]:
     """Best-effort semantic positions + clusters. Never blocks the classic render.
 
     Returns ``(positions, clusters)`` or ``(None, None)`` when they can't be
