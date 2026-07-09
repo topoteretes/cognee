@@ -29,12 +29,6 @@ def write_multiline_output(name: str, lines: list[str]) -> None:
         fh.write("EOF\n")
 
 
-def read_markdown_file(path: Path) -> list[str]:
-    if not path.is_file():
-        return []
-    return path.read_text(encoding="utf-8").rstrip().splitlines()
-
-
 def main() -> None:
     args = parse_args()
     notes = json.loads(args.notes_json.read_text())
@@ -52,14 +46,6 @@ def main() -> None:
         if line.strip()
     ]
     normalized_files = [entry[3:] if len(entry) > 3 else entry for entry in changed_files]
-    branch_notes_dir = args.notes_json.parent
-
-    generated_markdown_files = [
-        ("branch_notes.md", branch_notes_dir / "branch_notes.md"),
-        ("docs_assessment.md", branch_notes_dir / "docs_assessment.md"),
-        ("docs_edit_scope.md", branch_notes_dir / "docs_edit_scope.md"),
-        ("docs_scope_plan.md", branch_notes_dir / "docs_scope_plan.md"),
-    ]
 
     pr_body_lines = [
         "## Summary",
@@ -85,23 +71,6 @@ def main() -> None:
     if normalized_files:
         pr_body_lines.extend(["", "## Documentation Files Updated", ""])
         pr_body_lines.extend([f"- `{item}`" for item in normalized_files])
-
-    generated_markdown = [
-        (label, read_markdown_file(path))
-        for label, path in generated_markdown_files
-        if path.is_file()
-    ]
-    if generated_markdown:
-        pr_body_lines.extend(["", "## Generated Planning Markdown", ""])
-        pr_body_lines.append(
-            "The workflow also generated the following planning files in `branch-dev-notes/`."
-        )
-        pr_body_lines.append(
-            "Their contents are included below so the PR captures the Claude-produced planning artifacts."
-        )
-        for label, lines in generated_markdown:
-            pr_body_lines.extend(["", f"### {label}", ""])
-            pr_body_lines.extend(lines or ["(empty file)"])
 
     output_path = Path(os.environ["GITHUB_OUTPUT"])
     with output_path.open("a", encoding="utf-8") as fh:

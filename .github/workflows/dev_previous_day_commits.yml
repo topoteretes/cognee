@@ -1,6 +1,7 @@
 name: automation | Draft Docs PRs For Previous Day Dev PRs
 
 on:
+  pull_request:
   workflow_dispatch:
     inputs:
       lookback_days:
@@ -234,6 +235,24 @@ jobs:
         run: |
           python3 tools/write_docs_scope_plan_outputs.py \
             --scope-plan "${{ steps.branch_paths.outputs.docs_scope_plan }}"
+
+      - name: Print generated planning markdown
+        if: ${{ steps.assessment.outputs.needs_update == 'true' }}
+        run: |
+          for file in \
+            "${{ steps.branch_paths.outputs.notes_markdown }}" \
+            "${{ steps.branch_paths.outputs.assessment_markdown }}" \
+            "${{ steps.branch_paths.outputs.docs_edit_scope_markdown }}" \
+            "${{ steps.branch_paths.outputs.docs_scope_plan }}"
+          do
+            if [ -s "$file" ]; then
+              echo "## ${file}"
+              cat "$file"
+              echo
+            else
+              echo "## ${file} (missing or empty)"
+            fi
+          done
 
       - name: Generate docs changes with Claude
         if: ${{ steps.assessment.outputs.needs_update == 'true' && steps.scope_plan.outputs.docs_needed == 'true' }}
