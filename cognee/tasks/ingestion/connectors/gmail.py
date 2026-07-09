@@ -113,8 +113,12 @@ def build_gmail_service(
                 )
             flow = InstalledAppFlow.from_client_secrets_file(credentials_path, scopes)
             creds = flow.run_local_server(port=0)
-        with open(token_path, "w", encoding="utf-8") as token_file:
+        # token.json holds the long-lived OAuth refresh token — keep it private.
+        # Create it 0600 (no group/world read) rather than the default 0644.
+        fd = os.open(token_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as token_file:
             token_file.write(creds.to_json())
+        os.chmod(token_path, 0o600)  # tighten a pre-existing token file too
 
     return build("gmail", "v1", credentials=creds, cache_discovery=False)
 
