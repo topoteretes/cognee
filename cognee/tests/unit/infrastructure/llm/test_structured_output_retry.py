@@ -142,6 +142,21 @@ async def test_structured_output_does_not_retry_quota_errors():
 # --------------------------------------------------------------------------- #
 @pytest.mark.asyncio
 async def test_llm_gateway_converts_quota_errors():
+    # Resolve the module objects via sys.modules, not a dotted patch string or
+    # `import ... as`: the ``cognee.infrastructure.llm`` package re-exports the
+    # ``LLMGateway`` class, so "cognee.infrastructure.llm.LLMGateway" resolves to
+    # the class (via getattr on the package) rather than the module, and which
+    # one wins depends on import order across Python versions. sys.modules is
+    # keyed by dotted name and always returns the module.
+    import sys
+    import cognee.infrastructure.llm.LLMGateway  # noqa: F401 — ensure in sys.modules
+    import cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.get_llm_client  # noqa: E501,F401
+
+    gateway_module = sys.modules["cognee.infrastructure.llm.LLMGateway"]
+    get_llm_client_module = sys.modules[
+        "cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.get_llm_client"
+    ]
+
     failing_client = Mock()
     failing_client.acreate_structured_output = AsyncMock(
         side_effect=RuntimeError("insufficient_quota: exceeded your current quota")
@@ -149,17 +164,11 @@ async def test_llm_gateway_converts_quota_errors():
     fake_config = SimpleNamespace(structured_output_framework="instructor", llm_model="gpt-4o-mini")
 
     with (
-        patch("cognee.infrastructure.llm.LLMGateway.get_llm_config", return_value=fake_config),
-        patch(
-            "cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm"
-            ".get_llm_client.get_llm_client",
-            return_value=failing_client,
-        ),
+        patch.object(gateway_module, "get_llm_config", return_value=fake_config),
+        patch.object(get_llm_client_module, "get_llm_client", return_value=failing_client),
     ):
-        from cognee.infrastructure.llm.LLMGateway import LLMGateway
-
         with pytest.raises(LLMQuotaExceededError, match="not retryable"):
-            await LLMGateway.acreate_structured_output("hi", "system", _Resp)
+            await gateway_module.LLMGateway.acreate_structured_output("hi", "system", _Resp)
 
     assert failing_client.acreate_structured_output.await_count == 1
 
