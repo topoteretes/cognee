@@ -58,6 +58,7 @@ token file (``token.json``) private, and prefer a dedicated dataset so you can
 from __future__ import annotations
 
 import base64
+import os
 from typing import Any, Dict, Iterator, List, Optional
 
 from cognee.shared.logging_utils import get_logger
@@ -97,8 +98,6 @@ def build_gmail_service(
             '    pip install "cognee[gmail]"\n'
             "(provides google-api-python-client, google-auth, google-auth-oauthlib)."
         ) from exc
-
-    import os
 
     scopes = [GMAIL_READONLY_SCOPE]
     creds = None
@@ -273,7 +272,7 @@ def _mailbox_history_id(service: Any) -> Optional[str]:
         history_id = profile.get("historyId")
         return str(history_id) if history_id is not None else None
     except Exception as exc:  # pragma: no cover - network dependent
-        logger.warning("Gmail: failed to read profile historyId: %s", exc)
+        logger.warning("Failed to read profile historyId: %s", exc)
         return None
 
 
@@ -305,7 +304,7 @@ def full_backfill(
 
     if baseline_history_id is not None:
         state["last_history_id"] = baseline_history_id
-    logger.info("Gmail: full backfill yielded %d message(s).", count)
+    logger.info("Full backfill yielded %d message(s).", count)
 
 
 def incremental_fetch(
@@ -355,7 +354,7 @@ def incremental_fetch(
             status = getattr(getattr(exc, "resp", None), "status", None)
             if status == 404 or "404" in str(exc):
                 logger.warning(
-                    "Gmail: history id %s expired; falling back to full backfill.",
+                    "History id %s expired; falling back to full backfill.",
                     start_history_id,
                 )
                 state.pop("last_history_id", None)
@@ -423,7 +422,7 @@ def incremental_fetch(
 
     state["last_history_id"] = str(newest_history_id)
     logger.info(
-        "Gmail: incremental sync yielded %d added/changed and %d deleted message(s).",
+        "Incremental sync yielded %d added/changed and %d deleted message(s).",
         added_count,
         len(seen_deleted),
     )
