@@ -205,6 +205,25 @@ async def test_missing_absolute_path_is_rejected():
 
 
 @pytest.mark.asyncio
+async def test_local_paths_are_rejected_when_gate_disabled(tmp_path, monkeypatch):
+    # ACCEPT_LOCAL_FILE_PATH=false must gate dry_run exactly like real ingestion.
+    from cognee.tasks.ingestion.save_data_item_to_storage import settings
+
+    monkeypatch.setattr(settings, "accept_local_file_path", False)
+    file_path = tmp_path / "notes.txt"
+    file_path.write_text("stored text")
+
+    with pytest.raises(ValueError, match="not accepted"):
+        await estimator._input_to_texts(file_path.as_uri())
+    with pytest.raises(ValueError, match="not accepted"):
+        await estimator._input_to_texts("/no/such/file.txt")
+    # A real run treats a relative path to an existing file as raw text when
+    # the gate is off.
+    monkeypatch.chdir(tmp_path)
+    assert await estimator._input_to_texts("notes.txt") == ["notes.txt"]
+
+
+@pytest.mark.asyncio
 async def test_unsupported_upload_extension_is_rejected():
     upload = _AsyncUpload("image.png", b"not text")
 

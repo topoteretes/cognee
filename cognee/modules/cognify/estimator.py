@@ -297,13 +297,22 @@ def _require_text_like(name: str) -> None:
         raise ValueError(f"dry_run supports text-like file inputs only, got {name!r}.")
 
 
+def _accept_local_file_path() -> bool:
+    """The same ACCEPT_LOCAL_FILE_PATH gate real ingestion applies."""
+    from cognee.tasks.ingestion.save_data_item_to_storage import settings
+
+    return settings.accept_local_file_path
+
+
 def _path_candidate(value: str) -> Optional[Path]:
     """The local path this string refers to, or None when it is raw text.
 
     Mirrors ``save_data_item_to_storage``: remote URLs and missing absolute
     paths are loud errors, ``file://`` URIs resolve to local paths, everything
     else that is not an existing file is raw text. Scheme is checked before the
-    newline guard so a trailing-newline URL cannot slip through as text.
+    newline guard so a trailing-newline URL cannot slip through as text. When
+    ``ACCEPT_LOCAL_FILE_PATH`` is disabled, path references are rejected and
+    relative strings are raw text, exactly as in a real run.
     """
     scheme = urlparse(value).scheme.lower()
     if scheme in _UNSUPPORTED_SCHEMES:
@@ -312,9 +321,16 @@ def _path_candidate(value: str) -> Optional[Path]:
             "A real run would fetch and ingest this URL."
         )
     if scheme == "file":
+        if not _accept_local_file_path():
+            raise ValueError(f"Local files are not accepted, got {value!r}.")
         return Path(url2pathname(urlparse(value).path))
 
     if "\n" in value or "\r" in value or len(value) > 4096:
+        return None
+
+    if not _accept_local_file_path():
+        if value.startswith("/"):
+            raise ValueError(f"Local files are not accepted, got {value!r}.")
         return None
 
     try:
