@@ -84,14 +84,6 @@ class PGVectorDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
     async def delete_dataset(cls, dataset_database: DatasetDatabase):
         dataset_database = await cls.resolve_dataset_connection_info(dataset_database)
 
-        # The pipeline caches its engine for this database under a context-config
-        # key (pgvector handler) that differs from other creation paths, so evict
-        # by database name to close every engine — and drop its cached collection
-        # metadata with it — before the database is dropped. A surviving engine
-        # would serve the recreated database with a dead pool and a stale
-        # "collection exists" cache.
-        evict_vector_engines_for_database(dataset_database.vector_database_name)
-
         info = dataset_database.vector_database_connection_info
         await drop_pg_database_if_exists(
             dataset_database.vector_database_name,
@@ -100,3 +92,12 @@ class PGVectorDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
             username=info["username"],
             password=info["password"],
         )
+
+        # The pipeline caches its engine for this database under a context-config
+        # key (pgvector handler) that differs from other creation paths, so evict
+        # by database name — closing every engine and its cached collection
+        # metadata. Evict AFTER the drop: an engine resolved concurrently during
+        # the drop's awaits would be re-cached and survive a pre-drop eviction.
+        # Post-drop nothing stale can persist — engines connect lazily and a fresh
+        # adapter starts with empty collection metadata.
+        evict_vector_engines_for_database(dataset_database.vector_database_name)

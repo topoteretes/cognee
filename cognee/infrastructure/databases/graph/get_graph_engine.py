@@ -319,15 +319,9 @@ def evict_graph_engines_for_database(graph_database_name: str) -> int:
 
     Returns the number of evicted entries.
     """
-
-    def matches(key) -> bool:
-        return any(
-            element == graph_database_name
-            or (isinstance(element, tuple) and graph_database_name in element)
-            for element in key
-        )
-
-    return _create_graph_engine.cache_evict_where(matches)
+    if not graph_database_name:
+        raise ValueError("graph_database_name must be a non-empty database name")
+    return _create_graph_engine.cache_evict_matching(graph_database_name=graph_database_name)
 
 
 def is_graph_engine_cached(**kwargs) -> bool:

@@ -84,12 +84,6 @@ class PostgresGraphDatasetDatabaseHandler:
         password = info.get("graph_database_password", "")
         db_name = dataset_database.graph_database_name
 
-        # The pipeline caches its engine for this database under a context-config
-        # key (per-dataset graph_file_path, postgres_graph handler) that differs
-        # from this handler's creation key, so evict by database name to close
-        # every engine before the database (and its connections) is dropped.
-        evict_graph_engines_for_database(db_name)
-
         await drop_pg_database_if_exists(
             db_name,
             host=host,
@@ -97,3 +91,13 @@ class PostgresGraphDatasetDatabaseHandler:
             username=username,
             password=password,
         )
+
+        # The pipeline caches its engine for this database under a context-config
+        # key (per-dataset graph_file_path, postgres_graph handler) that differs
+        # from this handler's creation key, so evict by database name. Evict AFTER
+        # the drop: an engine resolved concurrently during the drop's awaits would
+        # be re-cached and survive a pre-drop eviction. Post-drop nothing stale can
+        # persist — engines connect lazily, so an entry cached even after this
+        # eviction holds no dead connections and either reaches the recreated
+        # database or fails fast on a nonexistent one.
+        evict_graph_engines_for_database(db_name)

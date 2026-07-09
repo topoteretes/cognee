@@ -526,6 +526,13 @@ def closing_lru_cache(maxsize: Optional[int] = 128, lease: bool = True):
     def decorator(fn):
         cache = ClosingLRUCache(maxsize=maxsize, lease=lease)
 
+        # Parameter-name -> positional index of ``fn``, so key-scanning helpers
+        # (``cache_evict_matching``) can resolve named criteria against the
+        # positional part of a cache key.
+        _param_positions = {
+            name: index for index, name in enumerate(inspect.signature(fn).parameters)
+        }
+
         def _key(args, kwargs):
             # ``_KW_MARK`` separates positional from keyword args so
             # ``fn(("a", 1))`` and ``fn(a=1)`` don't collide.
@@ -563,6 +570,52 @@ def closing_lru_cache(maxsize: Optional[int] = 128, lease: bool = True):
             """
             return cache.evict_where(predicate)
 
+        def cache_evict_matching(**criteria) -> int:
+            """Evict every cached entry created with ALL the given argument values.
+
+            Criteria are matched by *parameter name* against the cached call's
+            arguments, whether they were passed positionally or by keyword —
+            e.g. ``cache_evict_matching(graph_database_name="<uuid>")`` evicts
+            only entries whose ``graph_database_name`` argument equals that
+            value, never entries where the value happens to appear in some
+            other field. Callers evicting by a shared identity field (e.g. a
+            database name cached under several differently-keyed entries) use
+            this instead of reconstructing exact keys.
+
+            Raises ``ValueError`` on no criteria (it would evict the whole
+            cache) or on parameter names not in the wrapped function's
+            signature (typo protection). Entries whose key does not record a
+            criterion's parameter (the call omitted an optional argument) do
+            not match. Returns the number of evicted entries.
+            """
+            if not criteria:
+                raise ValueError("cache_evict_matching requires at least one criterion")
+            unknown = set(criteria) - set(_param_positions)
+            if unknown:
+                raise ValueError(f"Unknown parameter name(s) for {fn.__name__}: {sorted(unknown)}")
+
+            def matches(key) -> bool:
+                if _KW_MARK in key:
+                    marker_index = key.index(_KW_MARK)
+                    positional = key[:marker_index]
+                    kwarg_values = dict(key[marker_index + 1 :])
+                else:
+                    positional = key
+                    kwarg_values = {}
+                for name, expected in criteria.items():
+                    if name in kwarg_values:
+                        actual = kwarg_values[name]
+                    else:
+                        position = _param_positions[name]
+                        if position >= len(positional):
+                            return False
+                        actual = positional[position]
+                    if actual != expected:
+                        return False
+                return True
+
+            return cache.evict_where(matches)
+
         def cache_contains(*args, **kwargs) -> bool:
             """Return True if the key is cached, without creating."""
             return cache.contains(_key(args, kwargs))
@@ -570,6 +623,7 @@ def closing_lru_cache(maxsize: Optional[int] = 128, lease: bool = True):
         wrapper.cache_clear = cache.cache_clear
         wrapper.cache_evict = cache_evict
         wrapper.cache_evict_where = cache_evict_where
+        wrapper.cache_evict_matching = cache_evict_matching
         wrapper.cache_contains = cache_contains
         wrapper.cache_info = cache.cache_info
         wrapper.acall = acall

@@ -146,14 +146,9 @@ def evict_vector_engines_for_database(vector_db_name: str) -> int:
 
     Returns the number of evicted entries.
     """
-
-    def matches(key) -> bool:
-        return any(
-            element == vector_db_name or (isinstance(element, tuple) and vector_db_name in element)
-            for element in key
-        )
-
-    return _create_vector_engine.cache_evict_where(matches)
+    if not vector_db_name:
+        raise ValueError("vector_db_name must be a non-empty database name")
+    return _create_vector_engine.cache_evict_matching(vector_db_name=vector_db_name)
 
 
 def is_vector_engine_cached(**kwargs) -> bool:
