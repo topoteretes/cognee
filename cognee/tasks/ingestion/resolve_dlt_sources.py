@@ -159,6 +159,7 @@ async def resolve_dlt_sources(
             "fk_references": fk_references,
             "dlt_db_name": table_meta["dlt_db_name"],
             "content_hash": row.content_hash,
+            "dlt_source_name": row.dlt_source_name,
         }
 
         item = DataItem(
@@ -196,9 +197,10 @@ async def resolve_dlt_sources(
     orphan_cleanup: Optional[Callable[[], Any]] = None
     if write_disposition != "append":
         fresh_data_ids: Set[UUID] = set(row_id_lookup.values())
+        active_dlt_source_names = {getattr(item, "name", "dlt_source") for item in dlt_items}
 
         async def _cleanup() -> None:
-            await _delete_dlt_orphans(dataset_name, user, fresh_data_ids)
+            await _delete_dlt_orphans(dataset_name, user, fresh_data_ids, active_dlt_source_names)
 
         orphan_cleanup = _cleanup
 
@@ -316,6 +318,7 @@ async def _delete_dlt_orphans(
     dataset_name: str,
     user: User,
     fresh_data_ids: Set[UUID],
+    active_dlt_source_names: Set[str] = None,
 ) -> None:
     """Delete dlt-sourced Data records (and their graph/vector artifacts) that
     are no longer present in the freshly-ingested dlt source.
@@ -348,6 +351,9 @@ async def _delete_dlt_orphans(
         ext = data_item.external_metadata
         if not isinstance(ext, dict) or ext.get("source") != "dlt":
             continue
+        if active_dlt_source_names is not None:
+            if ext.get("dlt_source_name") not in active_dlt_source_names:
+                continue
         if data_item.id not in fresh_data_ids:
             orphans.append(data_item)
 

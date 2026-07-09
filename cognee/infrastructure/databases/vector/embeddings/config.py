@@ -1,5 +1,6 @@
 from typing import Optional
 from functools import lru_cache
+from pydantic import Field, AliasChoices
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from cognee.shared.logging_utils import get_logger
@@ -68,8 +69,8 @@ class EmbeddingConfig(BaseSettings):
     - to_dict: Serialize the configuration settings to a dictionary.
     """
 
-    embedding_provider: Optional[str] = "openai"
-    embedding_model: Optional[str] = "openai/text-embedding-3-large"
+    embedding_provider: Optional[str] = None
+    embedding_model: Optional[str] = None
     # Resolved in model_post_init when not set explicitly. Was hard-defaulted
     # to 3072, which silently broke every non-OpenAI-text-embedding-3-large
     # embedder by causing a Vector(3072) / 384-dim (etc.) mismatch on first
@@ -78,32 +79,58 @@ class EmbeddingConfig(BaseSettings):
     embedding_endpoint: Optional[str] = None
     embedding_api_key: Optional[str] = None
     embedding_api_version: Optional[str] = None
-    embedding_max_completion_tokens: Optional[int] = 8191
+    embedding_max_completion_tokens: Optional[int] = Field(
+        default=8191,
+        validation_alias=AliasChoices(
+            "EMBEDDING_MAX_TOKENS",
+            "embedding_max_tokens",
+            "EMBEDDING_MAX_COMPLETION_TOKENS",
+            "embedding_max_completion_tokens",
+        ),
+    )
     embedding_batch_size: Optional[int] = None
     huggingface_tokenizer: Optional[str] = None
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
     def model_post_init(self, __context) -> None:
+        if self.embedding_provider is None or self.embedding_model is None:
+            try:
+                from cognee.infrastructure.llm.config import get_llm_context_config
+
+                llm_config = get_llm_context_config()
+
+                if llm_config.llm_provider and llm_config.llm_provider.lower() != "openai":
+                    if self.embedding_provider is None:
+                        from cognee.exceptions import CogneeConfigurationError
+
+                        raise CogneeConfigurationError(
+                            f"LLM provider is set to '{llm_config.llm_provider}' but no embedding provider is configured. "
+                            "Please configure EMBEDDING_PROVIDER and EMBEDDING_MODEL explicitly."
+                        )
+                else:
+                    if self.embedding_provider is None:
+                        self.embedding_provider = "openai"
+                    if self.embedding_model is None:
+                        self.embedding_model = "openai/text-embedding-3-large"
+            except ImportError:
+                if self.embedding_provider is None:
+                    self.embedding_provider = "openai"
+                if self.embedding_model is None:
+                    self.embedding_model = "openai/text-embedding-3-large"
+
         if self.embedding_dimensions is None:
             derived = _resolve_embedding_dimensions(self.embedding_provider, self.embedding_model)
             if derived is not None:
                 self.embedding_dimensions = derived
             else:
-                logger.warning(
-                    "Could not auto-derive embedding_dimensions for "
-                    "provider=%r model=%r. Falling back to %d. If your embedder "
-                    "produces vectors of a different size, set EMBEDDING_DIMENSIONS "
-                    "explicitly — otherwise the first write into the vector store "
-                    "will fail with a shape mismatch.",
-                    self.embedding_provider,
-                    self.embedding_model,
-                    _FALLBACK_DIMENSIONS,
-                )
-                self.embedding_dimensions = _FALLBACK_DIMENSIONS
+                from cognee.exceptions import CogneeConfigurationError
 
-        if not self.embedding_batch_size and self.embedding_provider.lower() == "openai":
-            self.embedding_batch_size = 36
-        elif not self.embedding_batch_size:
+                raise CogneeConfigurationError(
+                    f"Could not auto-derive embedding dimensions for model '{self.embedding_model}' "
+                    f"under provider '{self.embedding_provider}'. Please set EMBEDDING_DIMENSIONS explicitly."
+                )
+
+        if not self.embedding_batch_size:
             self.embedding_batch_size = 36
 
     def to_dict(self) -> dict:
