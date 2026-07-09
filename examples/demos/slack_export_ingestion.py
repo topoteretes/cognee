@@ -41,12 +41,11 @@ async def sync(snapshot: str) -> None:
 
 
 async def main() -> None:
-    # Best-effort clean slate so the demo is repeatable. Scoped to this dataset
-    # only — never use forget(everything=True) in real code; it wipes all memory.
-    try:
-        await cognee.forget(dataset=DATASET)
-    except Exception:
-        pass  # dataset does not exist yet on the first run
+    # Start from a clean slate so the demo is reproducible. NOTE: this wipes ALL
+    # of the user's cognee memory (the standard reset used across the examples,
+    # and it also handles the first run when nothing exists yet). In real code,
+    # prefer cognee.forget(dataset=DATASET) to scope deletion to this export.
+    await cognee.forget(everything=True)
 
     # First snapshot: the full history.
     await sync("v1")
