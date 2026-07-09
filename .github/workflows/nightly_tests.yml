@@ -81,10 +81,23 @@ jobs:
   # ══ Performance (Rust SDK): builds latest cognee-rs and drives the SAME ═════
   # ══ orchestrator via cognee-cli bench (file_based, mock LLM, offline). ══════
   perf-rust:
-    name: Performance — Rust SDK (mock LLM)
+    name: Performance — Rust SDK — 50 Small Documents (mock LLM)
     uses: ./.github/workflows/performance_report_rust.yml
     with:
       runs: '3'
+      label: 50_small_documents
+      memories: scripts/perf/fixtures/memories.json
+      cassette: scripts/perf/fixtures/cassette.json
+    secrets: inherit
+
+  perf-rust-wap:
+    name: Performance — Rust SDK — War and Peace (mock LLM)
+    uses: ./.github/workflows/performance_report_rust.yml
+    with:
+      runs: '3'
+      label: war_and_peace
+      memories: scripts/perf/fixtures/war_and_peace/memories.json
+      cassette: scripts/perf/fixtures/war_and_peace/cassette.json
     secrets: inherit
 
   notify:
@@ -97,6 +110,7 @@ jobs:
       perf-wap-llm,
       perf-wap-mock,
       perf-rust,
+      perf-rust-wap,
     ]
     runs-on: ubuntu-latest
     if: ${{ !cancelled() }}
@@ -110,7 +124,8 @@ jobs:
                 "${{ needs.perf-small-mock.result }}" == "success" &&
                 "${{ needs.perf-wap-llm.result }}" == "success" &&
                 "${{ needs.perf-wap-mock.result }}" == "success" &&
-                "${{ needs.perf-rust.result }}" == "success" ]]; then
+                "${{ needs.perf-rust.result }}" == "success" &&
+                "${{ needs.perf-rust-wap.result }}" == "success" ]]; then
             echo "passed=true" >> "$GITHUB_OUTPUT"
             echo "emoji=✅" >> "$GITHUB_OUTPUT"
             echo "summary=All nightly test suites completed successfully!" >> "$GITHUB_OUTPUT"
@@ -140,6 +155,7 @@ jobs:
             url_pg_wap_llm ${{ needs.perf-wap-llm.outputs.postgres_html_key }}
             url_pg_wap_mock ${{ needs.perf-wap-mock.outputs.postgres_html_key }}
             url_rust ${{ needs.perf-rust.outputs.html_key }}
+            url_rust_wap ${{ needs.perf-rust-wap.outputs.html_key }}
         run: |
           set -euo pipefail
           # 7 days = 604800s is the maximum lifetime for an IAM-user presigned URL.
@@ -259,6 +275,16 @@ jobs:
                     search     p50 `${{ fromJSON(needs.perf-rust.outputs.metrics || '{}').search.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-rust.outputs.metrics || '{}').search.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-rust.outputs.metrics || '{}').search.p99 }}s`
                     total      p50 `${{ fromJSON(needs.perf-rust.outputs.metrics || '{}').total.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-rust.outputs.metrics || '{}').total.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-rust.outputs.metrics || '{}').total.p99 }}s`
                     <${{ steps.presign.outputs.url_rust }}|HTML report>
+              - type: "section"
+                text:
+                  type: "mrkdwn"
+                  text: |
+                    *🦀 Rust SDK (file_based) — War and Peace — Mock LLM* (`${{ needs.perf-rust-wap.result }}`)  •  runs `${{ fromJSON(needs.perf-rust-wap.outputs.metrics || '{}').success }}`
+                    add      p50 `${{ fromJSON(needs.perf-rust-wap.outputs.metrics || '{}').add.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-rust-wap.outputs.metrics || '{}').add.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-rust-wap.outputs.metrics || '{}').add.p99 }}s`
+                    cognify  p50 `${{ fromJSON(needs.perf-rust-wap.outputs.metrics || '{}').cognify.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-rust-wap.outputs.metrics || '{}').cognify.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-rust-wap.outputs.metrics || '{}').cognify.p99 }}s`
+                    search     p50 `${{ fromJSON(needs.perf-rust-wap.outputs.metrics || '{}').search.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-rust-wap.outputs.metrics || '{}').search.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-rust-wap.outputs.metrics || '{}').search.p99 }}s`
+                    total      p50 `${{ fromJSON(needs.perf-rust-wap.outputs.metrics || '{}').total.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-rust-wap.outputs.metrics || '{}').total.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-rust-wap.outputs.metrics || '{}').total.p99 }}s`
+                    <${{ steps.presign.outputs.url_rust_wap }}|HTML report>
               - type: "section"
                 text:
                   type: "mrkdwn"
