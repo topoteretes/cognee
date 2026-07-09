@@ -36,22 +36,28 @@ class _FakeTranscript:
         self.payload = _FakePayload(segments) if segments is not None else object()
 
 
-class _spy_on_remove:
-    """Record paths passed to os.remove while still deleting the real file."""
+class _RemoveSpy:
+    """Context manager recording paths passed to os.remove while still deleting them."""
 
     def __init__(self):
         self.paths = []
 
-    def patch(self):
+    def __enter__(self):
         real_remove = os.remove
 
         def _record(path):
             self.paths.append(path)
             real_remove(path)
 
-        return patch(
+        self._patcher = patch(
             "cognee.infrastructure.loaders.core.video_loader.os.remove", side_effect=_record
         )
+        self._patcher.start()
+        return self
+
+    def __exit__(self, *exc):
+        self._patcher.stop()
+        return False
 
 
 @pytest.fixture
@@ -325,9 +331,8 @@ async def test_transcribe_empty_when_nothing_transcribed(mock_transcript, loader
 async def test_extract_audio_nonzero_exit_raises_and_cleans_up(mock_run, loader):
     """A non-zero ffmpeg exit raises with stderr and removes the temp WAV."""
     mock_run.return_value = MagicMock(returncode=1, stderr=b"Invalid data found")
-    removed = _spy_on_remove()
 
-    with removed.patch():
+    with _RemoveSpy() as removed:
         with pytest.raises(RuntimeError, match="ffmpeg failed to extract audio"):
             await loader._extract_audio("/usr/bin/ffmpeg", "/videos/clip.mkv")
 
@@ -342,9 +347,7 @@ async def test_extract_audio_nonzero_exit_raises_and_cleans_up(mock_run, loader)
 )
 async def test_extract_audio_invocation_error_cleans_up(mock_run, loader):
     """If the ffmpeg invocation itself raises, the temp WAV is still removed."""
-    removed = _spy_on_remove()
-
-    with removed.patch():
+    with _RemoveSpy() as removed:
         with pytest.raises(OSError):
             await loader._extract_audio("/usr/bin/ffmpeg", "/videos/clip.mkv")
 

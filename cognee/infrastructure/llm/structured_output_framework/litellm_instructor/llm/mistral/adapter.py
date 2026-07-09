@@ -168,7 +168,7 @@ class MistralAdapter(GenericAPIAdapter):
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
-    async def create_transcript(self, input, **kwargs: Any) -> TranscriptionReturnType | None:
+    async def create_transcript(self, input: str, **kwargs: Any) -> TranscriptionReturnType | None:
         """
         Generate an audio transcript from a user query.
 
