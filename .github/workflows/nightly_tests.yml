@@ -150,6 +150,10 @@ jobs:
           done <<< "$REPORT_KEYS"
 
       - name: Post status to Slack
+        # Only post on the real scheduled/manual runs. The pull_request trigger
+        # (which fires when this workflow file itself changes) validates the
+        # pipeline without spamming the nightly Slack channel.
+        if: ${{ github.event_name != 'pull_request' }}
         uses: slackapi/slack-github-action@v2.1.0
         with:
           method: chat.postMessage
