@@ -381,8 +381,8 @@ jobs:
         env:
           SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
           SMTP_PORT: ${{ secrets.SMTP_PORT || '587' }}
-          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
-          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          SMTP_USERNAME: ${{ secrets.MILENKO_SMTP_USERNAME || vars.DEV_PREVIOUS_DAY_COMMITS_NOTIFICATION_EMAIL }}
+          SMTP_PASSWORD: ${{ secrets.MILENKO_sSMTP_PASSWORD }}
           SMTP_USE_TLS: ${{ vars.SMTP_USE_TLS || 'true' }}
           NOTIFICATION_EMAIL: 'milenko@topoteretes.com'
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
