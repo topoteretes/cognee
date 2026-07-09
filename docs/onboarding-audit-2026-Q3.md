@@ -199,6 +199,122 @@ Code paths inspected without running:
 - `README.md` L105-L182 (Quickstart section)
 - `.env.template` (tiered environment configuration)
 
-## What Part 2 and Part 3 build
+## Part 2. Proposal
 
-Part 2 (Proposal) turns the six findings into concrete UX changes. Part 3 (Quick wins) lands the low-risk half of the proposal in this PR. See the acceptance criteria on issue #3605 and the follow-up sections of this document once Part 2 lands.
+Each of the six findings above lands as a specific, bounded UX change below. Every proposal names the file and function the change lives in, the effort tier (Quick / Follow-up), and the risk. **Quick** items ship in this PR under Part 3. **Follow-up** items are documented here so the plan is legible but land in separate issues so this PR stays reviewable.
+
+The design principles the whole proposal is measured against:
+
+- **Calm.** No scary stack traces on first run. Errors are one line, plain-language, and name a fix.
+- **Honest.** Tell the user up front what a command will cost, take, or require. Do not leak upstream implementation details unless the user asked for them.
+- **Actionable.** Every failure surfaces one concrete next step the user can copy-paste.
+
+### P1. Fail fast on authentication errors (addresses F1)
+
+**Change:** classify `litellm.AuthenticationError` (and equivalent provider-level 401 / 403 errors) as terminal. The `tenacity` retry wrapper around `LiteLLMEmbeddingEngine.embed_text` and `LLMGateway.acreate_structured_output` skips the retry chain for these classes and raises immediately.
+
+**Where in code:** the retry decorator sits inside `cognee/infrastructure/databases/vector/embeddings/LiteLLMEmbeddingEngine.py` and mirrors on the LLM path in `cognee/infrastructure/llm/LLMGateway.py`. Both use `tenacity.retry(retry=retry_if_exception_type(...))`. Add a `retry=retry_if_not_exception_type((AuthenticationError, PermissionDeniedError, ...))` predicate at the top of the classifier so authentication and authorization failures fall through without waiting.
+
+**Effort:** Quick. Two files, ~10 lines each, one shared helper for the predicate. Behavior tests already have LLM stubs from #3601's harness pattern that can be reused.
+
+**Risk:** low. The exception classes are already imported; we are narrowing the retry set, not expanding it. No user with a working key sees any behavior change.
+
+### P2. Error-message contract with local remediation (addresses F2)
+
+**Change:** every user-visible error from the primary CLI commands (`remember`, `recall`, `cognify`, `forget`) goes through one helper that renders a two-line block:
+
+```
+Cognee could not <action>: <plain-language cause>.
+Try: <concrete next command or fix>
+```
+
+The helper reads `code`, `message`, and `remediation` from the exception object when they exist (which is what @ANAMASGARD's Pillar B work in #3604 lands) and falls back to a local remediation table for the four common first-run failures otherwise.
+
+**Where in code:** new module `cognee/cli/echo.py` extension or a sibling `cognee/cli/messaging.py`. Called from each command's outer `except CliCommandException` block (see `remember_command.py::execute` L112, and identical shape in the three sibling commands).
+
+**Also under this proposal:** suppress the aiohttp `Unclosed client session` warning at the CLI boundary. Wrap the async runner in `warnings.catch_warnings()` with a `ResourceWarning` filter so cleanup noise stays out of the user's terminal.
+
+**Effort:** Quick for the aiohttp suppression and the local-remediation table for the four common failures. **Follow-up** for full alignment with #3604 Pillar B (that PR has not merged yet). Local remediation stubs are the bridge.
+
+**Risk:** low. Additive helper, existing except blocks call it; existing metadata (`Note: Please refer to our docs at 'https://docs.cognee.ai'...`) stays as the third line for anything not in the remediation table.
+
+### P3. Next-step hints on every primary command (addresses F3)
+
+**Change:** each of the four primary commands appends a single line after its success block naming the next natural command with a copy-paste example. Suppressible with `--quiet`.
+
+**Where in code:** the success branch of `execute()` in `cognee/cli/commands/remember_command.py`, `recall_command.py`, `cognify_command.py`, `forget_command.py`. Copy-write per command:
+
+| Command   | Next-step hint |
+| --------- | -------------- |
+| `remember` | `Next: cognee-cli recall "your question" -d <dataset-name>` |
+| `cognify`  | `Next: cognee-cli recall "your question" -d <dataset-name>` |
+| `recall`   | `Next: cognee-cli remember <path-or-text> -d <dataset-name>` (if the result set was empty) or nothing (if it returned results) |
+| `forget`   | `Next: cognee-cli remember <path-or-text> -d <dataset-name> to start fresh` |
+
+`--quiet` flag is added at the parser level for each command; when set, the hint is suppressed for use in scripts and pipelines.
+
+**Effort:** Quick. Four files, ~5 lines of new logic in each, one shared constant for the hint format.
+
+**Risk:** low. Purely additive output. Scripts that grep for a specific line still work; the new line comes after everything else. `--quiet` gives scripts a clean opt-out.
+
+### P4. Extract Docker preflight pattern into a shared preflight module (addresses F4)
+
+**Change:** `_check_docker_available()` (currently in `cognee/api/v1/ui/ui.py`) is extracted into `cognee/cli/preflight.py` alongside four sibling checks: `check_python_version`, `check_llm_key_present`, `check_llm_provider_reachable`, `check_storage_writable`. Each returns `(bool, message)` matching the existing contract.
+
+The primary commands call the relevant checks eagerly at the top of `execute()`; on failure they emit the same "Cognee could not X: Y. Try: Z" block as P2 and exit non-zero with no retry, no stack trace.
+
+**Effort:** **Follow-up.** Landing the shared module fully is 4-5 preflight functions, wiring into each command, and tests for each check. Bigger than the quick-win bar.
+
+**What lands in Part 3 under this proposal:** only the fail-fast + friendly-error path from P1 and P2. Full preflight ships as a separate PR alongside P6 (`cognee doctor`) so the review surface stays small.
+
+**Risk:** low functionally, medium in scope. Splitting keeps this PR reviewable.
+
+### P5. `--sample-data` offline path (addresses F5)
+
+**Change:** new flag on `cognee-cli remember`, plus a new `cognee-cli demo` sub-command that wraps it. When `--sample-data` is set the command:
+
+1. Ingests a small bundled text fixture (`cognee/data/samples/quickstart.txt`, ~500 tokens of clean prose).
+2. Runs cognify against a stubbed LLM that returns deterministic entity extractions (reuses the #3601 mocked harness).
+3. Runs a canned recall against the resulting graph.
+4. Prints the result plus a "You just ran remember → cognify → recall against bundled data with no API calls. Now set `LLM_API_KEY` and try it with your own text." message.
+
+**Where in code:** new fixture file, small runner in `cognee/cli/commands/remember_command.py`, and the LLM stub reuses whatever pattern the #3601 mocked harness lands. If #3601 has not landed yet the stub is a minimal in-line helper we replace once it does.
+
+**Effort:** Quick for the fixture + runner, contingent on the mocked harness pattern being clear. If #3601 has not landed, we ship a small local stub and note the follow-up.
+
+**Risk:** medium. Introduces a new user-facing flag; needs a clean opt-out. Cognee entity extractors need to be threadsafe against the stub.
+
+### P6. `cognee doctor` preflight (addresses F6)
+
+**Change:** new sub-command `cognee-cli doctor` that runs every preflight check from P4 and prints a bullet list of pass/fail with the actionable-message contract borrowed from `_check_docker_available()`. Zero exit code if everything passes; non-zero and a summary line if anything fails.
+
+**Effort:** **Follow-up.** Depends on P4's shared preflight module. Ships as a separate PR.
+
+**Risk:** low, but out of scope for this PR to keep the review surface small.
+
+### Quick wins scoped for this PR (Part 3 preview)
+
+Landing here in Part 3:
+
+- **W1.** Fail fast on `AuthenticationError` in the tenacity retry policy (P1).
+- **W2.** Local remediation table for the four common first-run errors + aiohttp warning suppression at CLI boundary (P2 partial).
+- **W3.** Next-step hints on `remember`, `recall`, `cognify`, `forget` plus a `--quiet` flag (P3 in full).
+- **W4.** `--sample-data` offline path with bundled fixture (P5).
+
+Deferred to follow-up issues (not in this PR):
+
+- Full `cognee doctor` preflight command (P6).
+- Extracting the preflight pattern into `cognee/cli/preflight.py` (P4 in full).
+- Replacing every "Please refer to our docs" instance with a remediation string once @ANAMASGARD's Pillar B (#3604) lands.
+- Streamlined canonical README quickstart section rewrite. Kept out of scope so this PR is not entangled with a docs-review cycle. Follow-up.
+
+### Non-goals
+
+Explicit non-goals to prevent scope creep in review:
+
+- Not changing the SDK-level `remember` / `recall` / `forget` function signatures. Only the CLI wrapping around them.
+- Not touching the `-ui` launcher. Its Docker preflight is already good; extracting it is P4 (Follow-up).
+- Not changing the LLM provider defaults or the pricing table (F7, F8 are #3606's scope).
+- Not adding new configuration surface beyond one CLI flag (`--sample-data`) and one sub-command (`demo`). Everything else honors existing env-var conventions.
+
+Part 3 quick-win implementation lands as separate commits on this same PR.
