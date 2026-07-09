@@ -12,6 +12,10 @@ dependencies = [
     "mcp>=1.12.0,<2.0.0",
     "uv>=0.6.3,<1.0.0",
     "httpx>=0.27.0,<1.0.0",
+    # Declared explicitly (already pulled in transitively via cognee[docs] ->
+    # unstructured) so the [tool.uv.sources] CPU-index redirect below actually
+    # binds — uv only applies source overrides to direct dependencies.
+    "torch>=2.0.0",
 ]
 
 authors = [
@@ -51,6 +55,20 @@ asyncio_mode = "auto"
 
 [tool.hatch.metadata]
 allow-direct-references = true
+
+# Pull torch from PyTorch's CPU wheel index on Linux. The default PyPI Linux
+# x86_64 torch wheel declares the full nvidia-*-cu12 CUDA stack (~4.3GB) plus
+# triton as dependencies; the +cpu wheels do not, so they drop out of the
+# resolution. The MCP image has no GPU and, in proxy mode, never runs torch at
+# all. Scoped to Linux only so macOS/Windows dev installs keep resolving torch
+# from PyPI (the CPU index has no wheels for those platforms).
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
 
 [tool.uv]
 # onnxruntime is pulled in transitively via cognee[docs] -> unstructured.
