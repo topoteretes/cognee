@@ -387,7 +387,18 @@ def incremental_fetch(
     for msg_id in seen_added:
         message = _get_message(service, msg_id)
         if message is None:
-            # Disappeared between history and fetch — treat as a deletion.
+            # Genuinely gone (404/410) — treat as a deletion.
+            seen_deleted.add(msg_id)
+            continue
+        # A message that was trashed or moved out of the configured label scope
+        # must be forgotten, not re-ingested as live. Trashing INBOX mail fires
+        # labelsRemoved(INBOX) (not messagesDeleted), so without this check the
+        # trashed message would be fetched and upserted. Re-checking the full
+        # label set here also matches full_backfill's AND-of-all-labels scope
+        # (history.list can pre-filter by a single labelId only).
+        labels = set(message.get("labelIds", []) or [])
+        out_of_scope = bool(label_ids) and not set(label_ids).issubset(labels)
+        if "TRASH" in labels or "SPAM" in labels or out_of_scope:
             seen_deleted.add(msg_id)
             continue
         added_count += 1

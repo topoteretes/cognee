@@ -315,6 +315,46 @@ def test_incremental_fetch_advances_cursor_across_digit_boundary():
     assert state["last_history_id"] == "1000"  # advanced past the boundary
 
 
+def test_incremental_fetch_trashed_message_is_forgotten():
+    # Trashing INBOX mail fires labelsRemoved(INBOX), not messagesDeleted; the
+    # message is still fetchable but now labelled TRASH. It must be forgotten.
+    trashed = _make_message("t1", subject="Old", labels=["TRASH"], history_id="1020")
+    svc = FakeGmailService(
+        messages=[trashed],
+        history_response={
+            "history": [{"id": "1020", "labelsRemoved": [{"message": {"id": "t1"}}]}],
+            "historyId": "1020",
+        },
+    )
+    rows = list(incremental_fetch(svc, {"last_history_id": "1000"}, label_ids=["INBOX"]))
+    assert rows == [{"id": "t1", "_deleted": True}]
+
+
+def test_incremental_fetch_multi_label_keeps_in_scope_and_forgets_out_of_scope():
+    # full_backfill scopes by ALL label_ids (AND); incremental must match that:
+    # a message still carrying every label is kept, one that lost a label is
+    # forgotten (not re-ingested as live).
+    keep = _make_message("keep", labels=["INBOX", "IMPORTANT"], history_id="1030")
+    drop = _make_message("drop", labels=["INBOX"], history_id="1031")  # lost IMPORTANT
+    svc = FakeGmailService(
+        messages=[keep, drop],
+        history_response={
+            "history": [
+                {"id": "1030", "messagesAdded": [{"message": {"id": "keep"}}]},
+                {"id": "1031", "labelsRemoved": [{"message": {"id": "drop"}}]},
+            ],
+            "historyId": "1031",
+        },
+    )
+    rows = list(
+        incremental_fetch(svc, {"last_history_id": "1000"}, label_ids=["INBOX", "IMPORTANT"])
+    )
+    by_id = {r["id"]: r for r in rows}
+
+    assert by_id["keep"]["_deleted"] is False
+    assert by_id["drop"] == {"id": "drop", "_deleted": True}
+
+
 # ---------------------------------------------------------------------------
 # gmail_source (dlt wiring) — requires dlt
 # ---------------------------------------------------------------------------
