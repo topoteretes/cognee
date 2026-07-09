@@ -1,20 +1,13 @@
 """LLM adapter that delegates completions to the host via MCP sampling.
 
-When cognee runs as an MCP server, this adapter routes structured-output requests
-through the host client's ``sampling/createMessage`` capability instead of a
-provider API, so no ``LLM_API_KEY`` is needed (issue #3644).
+When cognee runs as an MCP server, this routes structured-output requests through
+the host client's ``sampling/createMessage`` capability instead of a provider API,
+so no ``LLM_API_KEY`` is needed (issue #3644).
 
-Limitations, documented honestly:
-
-* MCP sampling returns **free text** — the protocol guarantees no JSON-schema or
-  tool mode. Structured output is therefore produced by embedding the response
-  model's JSON Schema in the prompt and validating/repairing the reply, rather
-  than relying on native schema enforcement.
-* The sampling call must run in the server process, inside the MCP request scope
-  (that is where the client connection lives). LLM calls that cognee runs in a
-  detached background task or subprocess cannot reach the host session and will
-  raise :class:`MCPSamplingUnavailableError`.
-* Audio transcription and image description have no sampling equivalent.
+MCP sampling returns free text — the protocol guarantees no JSON-schema or tool
+mode — so structured output is produced by embedding the response model's JSON
+Schema in the prompt and validating/repairing the reply. Audio transcription and
+image description have no sampling equivalent.
 """
 
 import json
@@ -26,6 +19,9 @@ from cognee.infrastructure.llm.exceptions import MCPSamplingUnavailableError
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.llm_interface import (
     LLMInterface,
 )
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.types import (
+    TranscriptionReturnType,
+)
 from cognee.shared.logging_utils import get_logger
 
 from .session_context import get_sampling_session
@@ -34,36 +30,19 @@ logger = get_logger()
 
 
 def _extract_json(text: str) -> str:
-    """Best-effort extraction of a JSON object from a free-text sampling reply.
+    """Extract a JSON object from a free-text reply that may be fenced or prosey.
 
-    Hosts often wrap JSON in Markdown fences or add prose; take the substring
-    between the first ``{`` and the last ``}`` after stripping code fences.
+    Takes the substring between the first ``{`` and the last ``}``; that alone
+    strips Markdown code fences and surrounding prose.
     """
-    cleaned = text.strip()
-    if cleaned.startswith("```"):
-        # Drop the opening fence (``` or ```json) and the trailing fence.
-        cleaned = cleaned.split("\n", 1)[-1] if "\n" in cleaned else cleaned
-        if cleaned.endswith("```"):
-            cleaned = cleaned[: -len("```")]
-        cleaned = cleaned.strip()
-    start = cleaned.find("{")
-    end = cleaned.rfind("}")
-    if start != -1 and end != -1 and end > start:
-        return cleaned[start : end + 1]
-    return cleaned
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end > start:
+        return text[start : end + 1]
+    return text.strip()
 
 
-def _result_text(result: Any) -> str:
-    """Pull the text out of an MCP ``CreateMessageResult`` (duck-typed)."""
-    content = getattr(result, "content", result)
-    if isinstance(content, list):
-        parts = [getattr(block, "text", "") for block in content]
-        return "".join(p for p in parts if p)
-    text = getattr(content, "text", None)
-    return text if text is not None else str(content)
-
-
-class McpSamplingAdapter(LLMInterface):
+class MCPSamplingAdapter(LLMInterface):
     """Delegate completions to the host harness via MCP sampling."""
 
     def __init__(
@@ -79,17 +58,42 @@ class McpSamplingAdapter(LLMInterface):
 
     async def _sample(self, session: Any, system_prompt: str, user_text: str) -> str:
         """One ``sampling/createMessage`` round trip; returns the reply text."""
-        messages = [{"role": "user", "content": {"type": "text", "text": user_text}}]
         result = await session.create_message(
-            messages=messages,
+            messages=[{"role": "user", "content": {"type": "text", "text": user_text}}],
             max_tokens=self.max_completion_tokens,
             system_prompt=system_prompt,
         )
-        return _result_text(result)
+        # CreateMessageResult.content is a single text block.
+        text = getattr(result.content, "text", None)
+        return text if text is not None else str(result.content)
 
     async def acreate_structured_output(
-        self, text_input: str, system_prompt: str, response_model: type
-    ) -> Any:
+        self,
+        text_input: str,
+        system_prompt: str,
+        response_model: type[BaseModel | str],
+        **kwargs: Any,
+    ) -> BaseModel | str:
+        """
+        Generate structured output by delegating to the host via MCP sampling.
+
+        The response model's JSON Schema is embedded in the prompt and the host's
+        free-text reply is validated (and repaired on failure) against it.
+
+        Parameters:
+        -----------
+
+            - text_input (str): The input text from the user to be processed.
+            - system_prompt (str): The system prompt that guides the model's response.
+            - response_model (type[BaseModel | str]): The model type that structures the
+              response, or ``str`` for a plain-text reply.
+
+        Returns:
+        --------
+
+            - BaseModel | str: The validated structured output, or the raw reply text when
+              ``response_model`` is ``str``.
+        """
         session = get_sampling_session()
         if session is None:
             raise MCPSamplingUnavailableError()
@@ -100,37 +104,33 @@ class McpSamplingAdapter(LLMInterface):
 
         if not (isinstance(response_model, type) and issubclass(response_model, BaseModel)):
             raise TypeError(
-                "McpSamplingAdapter.acreate_structured_output expects a Pydantic model or `str`, "
+                "MCPSamplingAdapter.acreate_structured_output expects a Pydantic model or `str`, "
                 f"got {response_model!r}"
             )
 
         schema = json.dumps(response_model.model_json_schema())
-        schema_instructions = (
+        instructions = (
             "Respond with ONLY a single JSON object that validates against this JSON Schema. "
             "Do not include any prose, explanation, or Markdown code fences.\n\n"
             f"JSON Schema:\n{schema}"
         )
-        prompt = f"{system_prompt}\n\n{schema_instructions}"
+        prompt = f"{system_prompt}\n\n{instructions}"
 
         last_error: Exception | None = None
         for attempt in range(self.structured_output_retries):
             raw = await self._sample(session, prompt, text_input)
-            candidate = _extract_json(raw)
             try:
-                return response_model.model_validate_json(candidate)
+                return response_model.model_validate_json(_extract_json(raw))
             except (ValidationError, ValueError) as error:
                 last_error = error
                 logger.warning(
-                    "MCP sampling structured output failed validation (attempt %d/%d): %s",
-                    attempt + 1,
-                    self.structured_output_retries,
-                    error,
+                    f"MCP sampling structured output failed validation "
+                    f"(attempt {attempt + 1}/{self.structured_output_retries}): {error}"
                 )
-                # Repair prompt: show the model its error and ask for corrected JSON.
+                # Repair: show the validation error and ask for corrected JSON.
                 prompt = (
-                    f"{system_prompt}\n\n{schema_instructions}\n\n"
-                    "Your previous response did not validate against the schema: "
-                    f"{error}. Return corrected JSON only."
+                    f"{system_prompt}\n\n{instructions}\n\n"
+                    f"The previous response did not validate: {error}. Return corrected JSON only."
                 )
 
         raise ValueError(
@@ -139,12 +139,13 @@ class McpSamplingAdapter(LLMInterface):
             f"Last error: {last_error}"
         )
 
-    async def create_transcript(self, input: str):
+    async def create_transcript(self, input: str) -> TranscriptionReturnType | None:
         """Audio transcription has no MCP sampling equivalent — graceful no-audio."""
         logger.debug("create_transcript is not supported over MCP sampling; returning None")
         return None
 
     async def transcribe_image(self, input: str) -> Any:
+        """Image description has no MCP sampling equivalent; use a vision-capable provider."""
         raise NotImplementedError(
             "Image description is not supported over MCP sampling. Configure a vision-capable "
             "LLM provider instead."

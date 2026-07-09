@@ -1,60 +1,54 @@
 """Access to the host MCP sampling session.
 
 When cognee runs as an MCP server (``cognee-mcp``), the host client (Claude Code,
-Cursor, Opencode, …) can grant a ``sampling/createMessage`` capability. The
-sampling call must happen in the server process, within the request, where the
-client connection lives. This module lets the [`McpSamplingAdapter`], built deep
-inside the LLM gateway and far from the MCP request handler, reach that session
-without every pipeline task threading it down explicitly.
+Cursor, …) can grant a ``sampling/createMessage`` capability. That call must
+happen in the server process within the request, where the client connection
+lives. This module lets the LLM adapter — built deep in the gateway, far from the
+MCP request handler — reach that session without threading it through every
+pipeline task.
 
-Two ways the session becomes visible here:
-
-1. Explicit — a caller (or a test) binds it with :func:`set_sampling_session`.
-2. Automatic — when running inside an MCP server, :func:`get_sampling_session`
-   falls back to the MCP SDK's per-request context
-   (``mcp.server.lowlevel.server.request_ctx``). ``mcp`` is imported lazily so
-   core cognee keeps no hard dependency on it.
+``get_sampling_session`` reads the MCP SDK's per-request context and confirms the
+client actually granted sampling. ``mcp`` is imported lazily, so core cognee
+keeps no hard dependency on it.
 """
 
-from contextvars import ContextVar, Token
-from typing import Any, Optional
-
-# The active MCP sampling session for the current request/task, or None.
-_sampling_session: ContextVar[Optional[Any]] = ContextVar(
-    "cognee_mcp_sampling_session", default=None
-)
+from typing import Any
 
 
-def set_sampling_session(session: Any) -> Token:
-    """Bind ``session`` as the active MCP sampling session.
+def _client_granted_sampling(session: Any) -> bool:
+    """Whether the connected MCP client granted the ``sampling`` capability.
 
-    Returns a token that :func:`reset_sampling_session` can use to restore the
-    previous value (contextvar semantics), so binding is scoped and re-entrant.
+    Real MCP sessions expose ``check_client_capability``; a session stand-in that
+    does not is assumed usable. The host SDK does not verify this grant before
+    issuing ``sampling/createMessage``, so checking here lets cognee fail with a
+    clear error instead of a raw protocol error.
     """
-    return _sampling_session.set(session)
+    check = getattr(session, "check_client_capability", None)
+    if check is None:
+        return True
+
+    from mcp.types import ClientCapabilities, SamplingCapability  # ty:ignore[unresolved-import]
+
+    return bool(check(ClientCapabilities(sampling=SamplingCapability())))
 
 
-def reset_sampling_session(token: Token) -> None:
-    """Undo a previous :func:`set_sampling_session` using its token."""
-    _sampling_session.reset(token)
+def get_sampling_session() -> Any | None:
+    """Return a usable host MCP sampling session, or ``None`` if unavailable.
 
-
-def get_sampling_session() -> Optional[Any]:
-    """Return the active MCP sampling session, or ``None`` if unavailable.
-
-    Prefers an explicitly bound session; otherwise, when running inside an MCP
-    server, falls back to the SDK's per-request context so in-request LLM calls
-    pick up the host session automatically.
+    Falls back to the SDK's per-request context so in-request LLM calls (and
+    background tasks that copy that context) pick up the host session
+    automatically, and returns ``None`` unless the client granted sampling.
     """
-    session = _sampling_session.get()
-    if session is not None:
-        return session
-
     try:
-        from mcp.server.lowlevel.server import request_ctx  # type: ignore
-
+        from mcp.server.lowlevel.server import request_ctx  # ty:ignore[unresolved-import]
+    except ImportError:
+        return None
+    try:
         ctx = request_ctx.get()
-    except (ImportError, LookupError):
+    except LookupError:
         return None
 
-    return getattr(ctx, "session", None)
+    session = getattr(ctx, "session", None)
+    if session is None or not _client_granted_sampling(session):
+        return None
+    return session
