@@ -384,7 +384,7 @@ jobs:
           SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           SMTP_USE_TLS: ${{ vars.SMTP_USE_TLS || 'true' }}
-          NOTIFICATION_EMAIL: ${{ vars.DEV_PREVIOUS_DAY_COMMITS_NOTIFICATION_EMAIL }}
+          NOTIFICATION_EMAIL: 'milenko@topoteretes.com'
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           PREPARE_RESULT: ${{ needs.prepare-merged-branches.result }}
           CREATE_DOCS_PRS_RESULT: ${{ needs.create-docs-prs.result }}
