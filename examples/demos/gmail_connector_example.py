@@ -12,8 +12,8 @@ Gmail are forgotten from memory on the next sync.
 Privacy / opt-in
 ────────────────────────────────────────────────────────────────────────────
 This reads the *content* of your email. It is strictly opt-in — nothing is
-fetched until you run this script. Scope what you ingest with ``label_ids`` /
-``query``, keep ``token.json`` private, and use a dedicated dataset so you can
+fetched until you run this script. Scope what you ingest with ``label_ids``,
+keep ``token.json`` private, and use a dedicated dataset so you can
 wipe it with a single ``cognee.forget``.
 
 ────────────────────────────────────────────────────────────────────────────

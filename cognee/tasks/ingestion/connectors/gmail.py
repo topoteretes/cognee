@@ -1,6 +1,6 @@
 """Gmail connector for cognee — a ``dlt`` source that turns your inbox into memory.
 
-Pull Gmail messages (optionally label/query-scoped) into cognee, incrementally
+Pull Gmail messages (optionally label-scoped) into cognee, incrementally
 and with forget-on-deletion — "ask my inbox".  This builds entirely on the
 existing DLT ingestion subsystem; the source produced here is meant to be
 handed directly to :func:`cognee.remember`::
@@ -45,7 +45,7 @@ Privacy
 -------
 This connector reads the content of your email.  It is **opt-in**: nothing is
 fetched until you explicitly construct a source and call ``remember``.  Use
-``label_ids`` / ``query`` to scope what leaves your mailbox, keep the OAuth
+``label_ids`` to scope what leaves your mailbox, keep the OAuth
 token file (``token.json``) private, and prefer a dedicated dataset so you can
 ``cognee.forget`` the inbox in one call.
 """
@@ -72,7 +72,6 @@ _HISTORY_TYPES = ["messageAdded", "messageDeleted", "labelAdded", "labelRemoved"
 def build_gmail_service(
     credentials_path: str = "credentials.json",
     token_path: str = "token.json",
-    scopes: Optional[List[str]] = None,
 ) -> Any:
     """Build an authenticated Gmail API client via the OAuth2 installed-app flow.
 
@@ -96,7 +95,7 @@ def build_gmail_service(
 
     import os
 
-    scopes = scopes or [GMAIL_READONLY_SCOPE]
+    scopes = [GMAIL_READONLY_SCOPE]
     creds = None
 
     if os.path.exists(token_path):
@@ -197,7 +196,6 @@ def parse_message(message: dict) -> Dict[str, Any]:
         "snippet": message.get("snippet", ""),
         "body": _extract_plaintext(payload),
         "internal_date": internal_date,
-        "history_id": str(message.get("historyId")) if message.get("historyId") else None,
         # Hard-delete marker (always False for live messages). Deleted/trashed
         # messages are emitted separately with _deleted=True.
         "_deleted": False,
@@ -215,11 +213,9 @@ def _deleted_row(message_id: str) -> Dict[str, Any]:
 def _list_message_ids(
     service: Any,
     label_ids: Optional[List[str]],
-    query: Optional[str],
-    include_spam_trash: bool,
     max_results: Optional[int],
 ) -> Iterator[str]:
-    """Yield message ids matching the given filters, following pagination."""
+    """Yield message ids matching the given labels, following pagination."""
     page_token = None
     fetched = 0
     while True:
@@ -229,8 +225,6 @@ def _list_message_ids(
             .list(
                 userId="me",
                 labelIds=label_ids or None,
-                q=query or None,
-                includeSpamTrash=include_spam_trash,
                 pageToken=page_token,
             )
         )
@@ -273,8 +267,6 @@ def full_backfill(
     state: dict,
     *,
     label_ids: Optional[List[str]] = None,
-    query: Optional[str] = None,
-    include_spam_trash: bool = False,
     max_results: Optional[int] = None,
 ) -> Iterator[Dict[str, Any]]:
     """Yield every matching message and record the incremental baseline.
@@ -286,7 +278,7 @@ def full_backfill(
     baseline_history_id = _mailbox_history_id(service)
 
     count = 0
-    for message_id in _list_message_ids(service, label_ids, query, include_spam_trash, max_results):
+    for message_id in _list_message_ids(service, label_ids, max_results):
         message = _get_message(service, message_id)
         if message is None:
             continue
@@ -411,8 +403,6 @@ def gmail_source(
     credentials_path: str = "credentials.json",
     token_path: str = "token.json",
     label_ids: Optional[List[str]] = None,
-    query: Optional[str] = None,
-    include_spam_trash: bool = False,
     max_results: Optional[int] = None,
     service: Any = None,
 ):
@@ -422,8 +412,6 @@ def gmail_source(
         credentials_path: Path to the OAuth client-secret JSON (Desktop app).
         token_path: Where the cached user token is read/written.
         label_ids: Restrict to these Gmail label ids (e.g. ``["INBOX"]``).
-        query: Gmail search query (e.g. ``"from:boss@x.com newer_than:30d"``).
-        include_spam_trash: Include SPAM/TRASH in the backfill listing.
         max_results: Cap the number of messages pulled in a full backfill
             (handy for demos/tests). ``None`` = no cap.
         service: Pre-built Gmail API client. Mainly an injection point for
@@ -461,8 +449,6 @@ def gmail_source(
                 client,
                 resource_state,
                 label_ids=label_ids,
-                query=query,
-                include_spam_trash=include_spam_trash,
                 max_results=max_results,
             )
 

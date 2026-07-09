@@ -16,7 +16,7 @@ all share the same guarantees instead of each reinventing ingestion:
 
 | Source | Extra | Factory | Example | Notes |
 |---|---|---|---|---|
-| **Gmail** | `cognee[gmail]` | `cognee.tasks.ingestion.connectors.gmail_source` | [`demos/gmail_connector_example.py`](../demos/gmail_connector_example.py) | Messages/threads, label & query scoped. Incremental via `historyId`; trashed/deleted mail forgotten on next sync. OAuth2 (read-only). |
+| **Gmail** | `cognee[gmail]` | `cognee.tasks.ingestion.connectors.gmail_source` | [`demos/gmail_connector_example.py`](../demos/gmail_connector_example.py) | Messages/threads, label scoped. Incremental via `historyId`; trashed/deleted mail forgotten on next sync. OAuth2 (read-only). |
 
 ## Gmail quickstart
 
