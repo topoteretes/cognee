@@ -32,8 +32,8 @@ await cognee.remember(
     gmail_source(label_ids=["INBOX"], credentials_path="credentials.json"),
     dataset_name="gmail_inbox",
     primary_key="id",
-    write_disposition="merge",
-    max_rows_per_table=0,   # 0 = no read cap, so forget-on-delete sees the whole inbox
+    write_disposition="merge",  # REQUIRED — any other disposition wipes the corpus on re-sync
+    max_rows_per_table=0,       # REQUIRED for a real inbox — forget-on-delete must see every row
 )
 
 answer = await cognee.search(
@@ -44,12 +44,3 @@ answer = await cognee.search(
 
 See the [example](../demos/gmail_connector_example.py) for OAuth setup,
 incremental re-sync, and the privacy / opt-in notes.
-
-## Adding a new connector
-
-1. Create `cognee/tasks/ingestion/connectors/<source>.py` exposing a factory
-   that returns a `dlt` resource/source (`primary_key`, `write_disposition="merge"`,
-   and a `hard_delete` marker column for deletions). Keep the SDK import lazy.
-2. Add a matching optional-dependency extra in `pyproject.toml`.
-3. Add a runnable example under `examples/demos/` and a row to the table above.
-4. Add mocked-SaaS + mocked-LLM tests (no live credentials in CI).

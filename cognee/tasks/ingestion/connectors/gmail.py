@@ -12,9 +12,14 @@ handed directly to :func:`cognee.remember`::
         gmail_source(label_ids=["INBOX"]),
         dataset_name="my_inbox",
         primary_key="id",
-        write_disposition="merge",   # incremental upsert by message id
-        max_rows_per_table=0,        # 0 = no row cap (see note below)
+        write_disposition="merge",   # REQUIRED (see .. important:: below)
+        max_rows_per_table=0,        # REQUIRED for a real inbox (see .. note:: below)
     )
+
+.. important::
+   ``write_disposition="merge"`` is **mandatory**.  The add pipeline defaults to
+   ``"replace"`` (drop + reload the table each run); on the second, incremental
+   sync that would wipe the entire synced inbox.  Always pass ``"merge"``.
 
 Design
 ------

@@ -47,9 +47,12 @@ from cognee.tasks.ingestion.connectors import gmail_source
 # Keep the inbox in its own dataset so it is easy to inspect and forget.
 DATASET_NAME = "gmail_inbox"
 
-# Routing kwargs shared by every remember() call below. ``max_rows_per_table=0``
-# disables cognee's per-table read cap so orphan-cleanup (forget-on-delete)
-# compares against the *entire* synced corpus, not a 50-row window.
+# Routing kwargs shared by every remember() call below.
+#   write_disposition="merge" is REQUIRED: the add pipeline defaults to
+#     "replace", which would wipe the whole synced inbox on the second sync.
+#   max_rows_per_table=0 disables cognee's per-table read cap so orphan-cleanup
+#     (forget-on-delete) compares against the *entire* synced corpus, not a
+#     50-row window.
 GMAIL_REMEMBER_KWARGS = {
     "primary_key": "id",
     "write_disposition": "merge",
