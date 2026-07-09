@@ -3,9 +3,6 @@ import logging
 from typing import Any
 
 import instructor
-from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.instructor_modes import (
-    get_instructor_mode,
-)
 import litellm
 from litellm import JSONSchemaValidationError
 from mistralai import Mistral  # ty:ignore[unresolved-import]
@@ -25,6 +22,9 @@ from cognee.infrastructure.llm.retry_config import (
 
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.llm.config import get_llm_config
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.instructor_modes import (
+    get_instructor_mode,
+)
 from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError, is_budget_exhausted_error
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.generic_llm_api.adapter import (
     GenericAPIAdapter,
