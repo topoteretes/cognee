@@ -27,7 +27,9 @@ Design
   read back reflect only the current snapshot; a message removed upstream falls
   out of that set and cognee's ``orphan_cleanup`` purges it from the graph +
   vector + relational stores. (Contrast the Gmail connector, which is a live
-  feed and uses ``merge`` + a hard-delete marker.)
+  feed and uses ``merge`` + a hard-delete marker.) Passing a different
+  ``write_disposition`` to ``remember`` overrides this and breaks
+  forget-on-delete, so leave it at the default for this source.
 * **Incremental cognify** — message ids/content are stable, so re-ingesting a
   later snapshot only re-cognifies new/changed messages; keep the default
   ``incremental_loading=True``. ``merge`` would be wrong here: it never removes
@@ -39,6 +41,12 @@ Design
    ``max_rows_per_table=0`` (unlimited) so orphan cleanup compares against the
    *whole* snapshot rather than a truncated window. Use a dedicated
    ``dataset_name`` per workspace so cleanup only touches this export.
+
+Limitations
+-----------
+Only public channels listed in ``channels.json`` are ingested. Private channels
+(``groups.json``), DMs (``dms.json``) and group DMs (``mpims.json``) are not;
+their folders are skipped (reported in the parse summary log).
 """
 
 from __future__ import annotations
@@ -90,7 +98,7 @@ def _build_user_lookup(users: List[dict]) -> Dict[str, str]:
             continue
         display = (
             user.get("real_name")
-            or user.get("profile", {}).get("real_name")
+            or (user.get("profile") or {}).get("real_name")
             or user.get("name")
             or user_id
         )
@@ -150,6 +158,7 @@ def iter_slack_export_messages(export_path: str | os.PathLike) -> Iterator[dict]
     user_lookup = _build_user_lookup(users)
 
     yielded = 0
+    skipped_dirs = 0
     for channel_dir in sorted(root.iterdir()):
         if not channel_dir.is_dir():
             continue
@@ -158,6 +167,7 @@ def iter_slack_export_messages(export_path: str | os.PathLike) -> Iterator[dict]
         if channel_meta is None:
             # A directory with no matching entry in channels.json (e.g. a
             # private channel from groups.json, a DM, or a non-channel folder).
+            skipped_dirs += 1
             logger.debug(
                 "Slack export: skipping directory not in channels.json: %s", channel_dir.name
             )
@@ -167,7 +177,13 @@ def iter_slack_export_messages(export_path: str | os.PathLike) -> Iterator[dict]
         channel_name = channel_meta.get("name", channel_dir.name)
 
         for message_file in sorted(channel_dir.glob("*.json")):
-            day_messages = _load_json(message_file)
+            try:
+                day_messages = _load_json(message_file)
+            except (json.JSONDecodeError, OSError):
+                # One corrupt/unreadable day file should not abort the whole
+                # export — skip it and keep ingesting the rest.
+                logger.warning("Slack export: skipping unreadable file %s", message_file)
+                continue
             if not isinstance(day_messages, list):
                 continue
 
@@ -199,7 +215,12 @@ def iter_slack_export_messages(export_path: str | os.PathLike) -> Iterator[dict]
                     "text": text,
                 }
 
-    logger.info("Slack export %s: parsed %d message(s).", root, yielded)
+    logger.info(
+        "Slack export %s: parsed %d message(s); skipped %d directory(ies) not in channels.json.",
+        root,
+        yielded,
+        skipped_dirs,
+    )
 
 
 def slack_export_source(export_path: str | os.PathLike):
@@ -223,7 +244,7 @@ def slack_export_source(export_path: str | os.PathLike):
 
     path = str(export_path)
 
-    @dlt.resource(name="slack_messages", write_disposition="replace")
+    @dlt.resource(name="slack_messages", primary_key="id", write_disposition="replace")
     def slack_messages():
         yield from iter_slack_export_messages(path)
 
