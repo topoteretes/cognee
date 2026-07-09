@@ -9,10 +9,12 @@ libraries and no live credentials are required, so these run in CI. Coverage:
   - deleted/trashed messages become hard-delete markers (forget-on-delete)
   - an expired historyId (404) transparently falls back to a full backfill
   - the dlt resource is wired with merge + id PK + the hard_delete column
+  - a dlt-gated e2e run proves a delete marker physically removes the row
 
-The end-to-end "deletion removes from memory" guarantee is provided by the
-existing ``orphan_cleanup`` path (see test_dlt_p0_correctness.py); here we
-prove the connector emits the markers that drive it.
+The e2e test drives gmail_source through a real (offline, LLM-free) dlt merge
+to prove a ``_deleted`` marker removes the row from the destination table.
+cognee's existing ``orphan_cleanup`` path (see test_dlt_p0_correctness.py)
+then turns that into removal from the graph + vector + relational stores.
 """
 
 import base64
@@ -393,3 +395,48 @@ def test_gmail_source_requires_dlt(monkeypatch):
     monkeypatch.setattr(builtins, "__import__", fake_import)
     with pytest.raises(ImportError, match="cognee\\[dlt\\]"):
         gmail_source(service=object())
+
+
+def test_e2e_dlt_merge_hard_delete_removes_deleted_message(tmp_path):
+    """End-to-end, offline (no LLM): drive gmail_source through a real dlt
+    merge and prove a ``_deleted`` marker physically removes the row from the
+    destination — which is exactly what cognee's orphan_cleanup reconciles
+    against. Also exercises the gmail_source() closure dispatching from
+    backfill to incremental via persisted dlt resource_state.
+    """
+    dlt = pytest.importorskip("dlt")
+
+    pipelines_dir = str(tmp_path / "dlt_pipelines")
+    db_path = tmp_path / "gmail.db"
+
+    def sync(service):
+        # Same pipeline name + dir on both runs so resource_state (the
+        # historyId cursor) persists and run 2 takes the incremental branch.
+        pipeline = dlt.pipeline(
+            pipeline_name="gmail_e2e_test",
+            destination=dlt.destinations.sqlalchemy(f"sqlite:///{db_path}"),
+            dataset_name="gmail_e2e",
+            pipelines_dir=pipelines_dir,
+        )
+        pipeline.run(gmail_source(service=service))
+        with pipeline.sql_client() as client:
+            rows = client.execute_sql("SELECT id FROM gmail_messages ORDER BY id")
+        return [row[0] for row in rows]
+
+    # Run 1 — backfill loads both messages and records the historyId baseline.
+    backfill_svc = FakeGmailService(
+        messages=[_make_message("a"), _make_message("b")],
+        profile_history_id="500",
+    )
+    assert sync(backfill_svc) == ["a", "b"]
+
+    # Run 2 — incremental reports 'a' deleted; the hard-delete marker must
+    # physically remove it from the destination, leaving only 'b'.
+    incremental_svc = FakeGmailService(
+        messages=[_make_message("b")],
+        history_response={
+            "history": [{"id": "600", "messagesDeleted": [{"message": {"id": "a"}}]}],
+            "historyId": "600",
+        },
+    )
+    assert sync(incremental_svc) == ["b"]
