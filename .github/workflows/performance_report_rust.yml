@@ -48,7 +48,9 @@ env:
 jobs:
   rust_file_based:
     name: rust file_based — 50_small_documents (mock_llm)
-    runs-on: ubuntu-22.04
+    # ubuntu-latest (not 22.04): lbug's bundled simsimd needs a C compiler with
+    # avx512fp16 / _Float16 support (GCC >= 12). This matches cognee-rs's own CI.
+    runs-on: ubuntu-latest
     timeout-minutes: 90
     outputs:
       metrics: ${{ steps.parse.outputs.metrics }}
@@ -130,8 +132,8 @@ jobs:
             --mock-llm \
             --mock-memories scripts/perf/fixtures/cassette.json \
             --memories scripts/perf/fixtures/memories.json \
-            --num-memories 5 \
-            --output /tmp/freshness.json 2>"$log" || { cat "$log"; }
+            --num-memories 8 \
+            --output /tmp/freshness.json >"$log" 2>&1 || { cat "$log"; }
           entities="$(grep -oE 'Stored [0-9]+ entity types as graph nodes' "$log" \
                       | grep -oE '[0-9]+' | head -1 || true)"
           echo "entity-type nodes created on replay: ${entities:-0}"
