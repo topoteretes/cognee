@@ -44,7 +44,7 @@ jobs:
       - name: Install dependencies
         # fastembed so `ty check` can resolve the optional import in
         # FastembedEmbeddingEngine / the tokenizer resolver.
-        run: uv sync --extra dev --extra fastembed
+        run: uv sync --extra dev
 
       - name: Ruff check
         run: uv run ruff check .
