@@ -737,3 +737,55 @@ def test_decorator_args_and_kwargs_with_same_payload_do_not_collide():
     b = create(a=1)
     assert a is not b, "positional and keyword call shapes must not collide"
     assert call_count == 2
+
+
+def test_cache_evict_matching_by_parameter_name():
+    """cache_evict_matching evicts only entries whose named argument equals the
+    criterion value, across positional and keyword call shapes."""
+
+    @closing_lru_cache(maxsize=8, lease=False)
+    def create(provider, db_name, password=""):
+        return _Closeable(f"{provider}/{db_name}")
+
+    kept = create("postgres", "other-db", "secret")
+    create("postgres", "dataset-uuid", "secret")
+    create("ladybug", db_name="dataset-uuid")
+
+    evicted = create.cache_evict_matching(db_name="dataset-uuid")
+    assert evicted == 2
+
+    still_cached = create("postgres", "other-db", "secret")
+    assert still_cached is kept, "non-matching entry must survive"
+
+
+def test_cache_evict_matching_requires_all_criteria():
+    """Multiple criteria AND together; a value colliding in a different field
+    does not match."""
+
+    @closing_lru_cache(maxsize=8, lease=False)
+    def create(provider, db_name):
+        return _Closeable(f"{provider}/{db_name}")
+
+    create("postgres", "dataset-uuid")
+    # same value, different field: must NOT be touched by db_name criterion
+    create("dataset-uuid", "postgres")
+
+    assert create.cache_evict_matching(provider="postgres", db_name="dataset-uuid") == 1
+    assert create.cache_info().currsize == 1
+
+
+def test_cache_evict_matching_rejects_bad_criteria():
+    """No criteria (would evict everything) and unknown parameter names raise."""
+    import pytest
+
+    @closing_lru_cache(maxsize=8, lease=False)
+    def create(provider, db_name):
+        return _Closeable(f"{provider}/{db_name}")
+
+    create("postgres", "dataset-uuid")
+
+    with pytest.raises(ValueError):
+        create.cache_evict_matching()
+    with pytest.raises(ValueError):
+        create.cache_evict_matching(db_nmae="typo")
+    assert create.cache_info().currsize == 1
