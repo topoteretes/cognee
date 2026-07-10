@@ -389,7 +389,7 @@ jobs:
           PREPARE_RESULT: ${{ needs.prepare-merged-branches.result }}
           CREATE_DOCS_PRS_RESULT: ${{ needs.create-docs-prs.result }}
         run: |
-          if [ -z "${SMTP_SERVER}" ] || [ -z "${SMTP_USERNAME}" ] || [ -z "${SMTP_PASSWORD}" ] || [ -z "${NOTIFICATION_EMAIL_SENDER}" ] || [ -z "${NOTIFICATION_EMAIL_RECEIVER}"]; then
+          if [ -z "${SMTP_SERVER}" ] || [ -z "${SMTP_USERNAME}" ] || [ -z "${SMTP_PASSWORD}" ] || [ -z "${NOTIFICATION_EMAIL_SENDER}" ] || [ -z "${NOTIFICATION_EMAIL_RECEIVER}" ]; then
             echo "SMTP secrets or DEV_PREVIOUS_DAY_COMMITS_NOTIFICATION_EMAIL variable are not configured; skipping failure email."
             exit 0
           fi
