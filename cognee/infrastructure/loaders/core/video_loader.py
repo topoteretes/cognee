@@ -3,6 +3,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+from contextlib import asynccontextmanager
 from typing import Any
 
 from cognee.infrastructure.files.storage import get_file_storage, get_storage_config
@@ -140,12 +141,8 @@ class VideoLoader(LoaderInterface):
         storage_file_name = "text_" + file_metadata["content_hash"] + ".txt"
         extension = (file_metadata.get("extension") or "").lower()
 
-        audio_path, temp_audio = await self._prepare_audio(file_path, extension)
-        try:
+        async with self._audio_source(file_path, extension) as audio_path:
             transcript = await self._transcribe(audio_path)
-        finally:
-            if temp_audio and os.path.exists(temp_audio):
-                os.remove(temp_audio)
 
         if not kwargs.get("persist", True):
             return transcript
@@ -158,27 +155,33 @@ class VideoLoader(LoaderInterface):
 
         return full_file_path
 
-    async def _prepare_audio(self, file_path: str, extension: str) -> tuple[str, str | None]:
-        """Return an audio path to transcribe and a temp file to clean up.
+    @asynccontextmanager
+    async def _audio_source(self, file_path: str, extension: str):
+        """Yield an audio path to transcribe, removing any temp file afterward.
 
-        With ffmpeg available, extracts the audio track for every container.
-        Without ffmpeg, only ``mp4``/``webm`` are transcribable directly; any
-        other container raises an actionable error.
+        With ffmpeg available, the audio track is extracted to a temp WAV (for
+        every container) and deleted on exit. Without ffmpeg, ``mp4``/``webm``
+        are transcribed directly from the original file, which is left untouched;
+        any other container raises an actionable error.
         """
         ffmpeg = _resolve_ffmpeg()
-        if ffmpeg is not None:
-            temp_audio = await self._extract_audio(ffmpeg, file_path)
-            return temp_audio, temp_audio
+        if ffmpeg is None:
+            if extension not in DIRECT_TRANSCRIBE_EXTENSIONS:
+                raise RuntimeError(
+                    f"Cannot process a '.{extension}' video without ffmpeg, which is needed to "
+                    "extract the audio track for transcription. Install ffmpeg and make sure it "
+                    "is on your PATH, or provide the video as .mp4 or .webm, which can be "
+                    "transcribed directly."
+                )
+            yield file_path
+            return
 
-        if extension in DIRECT_TRANSCRIBE_EXTENSIONS:
-            return file_path, None
-
-        raise RuntimeError(
-            f"Cannot process a '.{extension}' video without ffmpeg, which is needed to "
-            "extract the audio track for transcription. Install ffmpeg and make sure it "
-            "is on your PATH, or provide the video as .mp4 or .webm, which can be "
-            "transcribed directly."
-        )
+        temp_audio = await self._extract_audio(ffmpeg, file_path)
+        try:
+            yield temp_audio
+        finally:
+            if os.path.exists(temp_audio):
+                os.remove(temp_audio)
 
     async def _extract_audio(self, ffmpeg: str, file_path: str) -> str:
         """Extract a mono 16 kHz WAV audio track from the video with ffmpeg."""
