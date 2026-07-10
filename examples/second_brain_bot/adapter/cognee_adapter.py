@@ -32,7 +32,7 @@ from __future__ import annotations
 import re
 import uuid
 from dataclasses import dataclass
-from typing import Optional, Union
+from typing import Union
 
 from .interface import Answer, ChatMemoryAdapter, Citation, Conversation, Message, Scope
 from .scope_policy import per_user_scope, resolve_user
@@ -61,13 +61,11 @@ class _CitationRecord:
     ts: str
     deeplink: str
     data_id: uuid.UUID
-    dataset_id: Optional[str] = None
 
 
 class CogneeChatMemoryAdapter(ChatMemoryAdapter):
-    def __init__(self, top_k: int = 15, use_graph_completion: bool = True) -> None:
+    def __init__(self, top_k: int = 15) -> None:
         self._top_k = top_k
-        self._use_graph_completion = use_graph_completion
         # dataset name -> ingest-time citation records (the source-to-message map)
         self._citations: dict[str, list[_CitationRecord]] = {}
 
@@ -110,7 +108,7 @@ class CogneeChatMemoryAdapter(ChatMemoryAdapter):
         # would populate scope.session instead. self_improvement=False because the
         # dataset path does not need the improve enrichment and skipping it avoids
         # needless latency (dataset-only ingest throws no 422 either way).
-        result = await cognee.remember(
+        await cognee.remember(
             item,
             dataset_name=scope.dataset,
             run_in_background=True,
@@ -124,7 +122,6 @@ class CogneeChatMemoryAdapter(ChatMemoryAdapter):
                 ts=message.ts,
                 deeplink=message.deeplink or conversation.msg_ref or "",
                 data_id=data_id,
-                dataset_id=getattr(result, "dataset_id", None),
             )
         )
 
@@ -136,21 +133,20 @@ class CogneeChatMemoryAdapter(ChatMemoryAdapter):
 
         from cognee.modules.data.exceptions.exceptions import DatasetNotFoundError
 
+        # Real multi-hop graph traversal across transports, the cross-source demo
+        # moment. No session_id on recall either: this adapter is dataset-only
+        # (see ingest).
+        from cognee.modules.search.types.SearchType import SearchType
+
         scope = self.scope(conversation)
-        # No session_id on recall either: this adapter is dataset-only (see ingest).
-        kwargs = dict(
-            datasets=[scope.dataset],
-            include_references=True,
-            top_k=self._top_k,
-        )
-        if self._use_graph_completion:
-            # Real multi-hop traversal across transports, the cross-source demo moment.
-            from cognee.modules.search.types.SearchType import SearchType
-
-            kwargs["query_type"] = SearchType.GRAPH_COMPLETION
-
         try:
-            results = await cognee.recall(query, **kwargs)
+            results = await cognee.recall(
+                query,
+                datasets=[scope.dataset],
+                include_references=True,
+                top_k=self._top_k,
+                query_type=SearchType.GRAPH_COMPLETION,
+            )
         except DatasetNotFoundError:
             # No dataset yet, or it was just wiped by forget. Empty memory, not an error.
             return Answer(text=_EMPTY_MEMORY)
