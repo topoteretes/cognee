@@ -113,8 +113,19 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
     @retry(
         stop=stop_after_delay(128),
         wait=wait_exponential_jitter(2, 128),
+        # Skip the retry chain for terminal error classes. Authentication /
+        # authorization / not-found / payment-required errors will never succeed
+        # on a retry, so the previous behaviour of running the full backoff
+        # ladder wasted ~2 minutes of user wall clock on a mis-typed API key.
+        # Matches the exclusion set already used by the LLM adapters
+        # (see cognee/infrastructure/llm/structured_output_framework/litellm_instructor/llm/openai/adapter.py).
         retry=retry_if_not_exception_type(
-            (litellm.exceptions.NotFoundError, asyncio.CancelledError)
+            (
+                litellm.exceptions.NotFoundError,
+                litellm.exceptions.AuthenticationError,
+                litellm.exceptions.PermissionDeniedError,
+                asyncio.CancelledError,
+            )
         ),
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
@@ -232,6 +243,17 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
             raise EmbeddingException(
                 "Cannot connect to embedding endpoint. Check EMBEDDING_ENDPOINT."
             ) from e
+
+        except (
+            litellm.exceptions.AuthenticationError,
+            litellm.exceptions.PermissionDeniedError,
+            asyncio.CancelledError,
+        ):
+            # Terminal failures must reach tenacity unwrapped so
+            # ``retry_if_not_exception_type`` can short-circuit the
+            # backoff ladder. Wrapping in EmbeddingException here would
+            # hide the class and force the full ~2-minute retry cycle.
+            raise
 
         except (
             litellm.exceptions.BadRequestError,
