@@ -74,6 +74,12 @@ class CommandHandler:
             self._consent.opt_in(canonical)
             return "Capture on. Send me notes and I will remember them."
 
+        # /ask, /recall and /note are routing prefixes, not commands: let them
+        # fall through so the router's classify() forces recall or capture (the
+        # escape hatch for a question-shaped note or a note-shaped question).
+        if command in ("/ask", "/recall", "/note"):
+            return None
+
         return f"Unknown command {command}. Send /help to see what I can do."
 
     def _handle_link(self, conversation: Conversation, canonical: str, argument: str) -> str:

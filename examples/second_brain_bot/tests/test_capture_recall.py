@@ -35,3 +35,23 @@ def test_capture_on_telegram_recall_on_web_with_citation(harness):
         assert citation.source_ref
 
     asyncio.run(run())
+
+
+def test_note_prefix_forces_capture_of_a_question_shaped_note(harness):
+    async def run():
+        # A message ending in "?" is normally recalled; /note forces capture.
+        saved = await harness.send("web", "bob", "/note ask Bob about the merger?")
+        assert "Saved" in saved
+        reply = await harness.send("web", "bob", "merger?")
+        assert "merger" in reply.lower()
+
+    asyncio.run(run())
+
+
+def test_ask_prefix_forces_recall_without_a_question_mark(harness):
+    async def run():
+        await harness.send("web", "bob", "the vault code is 4417")
+        reply = await harness.send("web", "bob", "/ask vault code")
+        assert "4417" in reply
+
+    asyncio.run(run())
