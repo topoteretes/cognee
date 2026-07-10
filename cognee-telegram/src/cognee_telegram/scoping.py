@@ -1,15 +1,13 @@
-"""Map a Telegram conversation to a cognee dataset + session.
+"""Map a Telegram conversation to a cognee dataset.
 
-Each Telegram chat is one memory boundary. The **dataset** is the durable
-store and the unit ``/forget`` clears; the **session_id** is an optional
-freshness cache so a just-sent message is answerable before the background
-graph sync finishes.
+Each Telegram chat is one memory boundary: the **dataset** is the durable
+store and the unit ``/forget`` clears.
 
 Convention (per-chat by default)::
 
-    DM (private)   dataset telegram_dm_<user_id>             session telegram:dm:<user_id>
-    group / super  dataset telegram_group_<chat_id>          session telegram:group:<chat_id>
-    forum topic    dataset telegram_group_<chat_id>_<thread> session telegram:group:<chat_id>:<thread>
+    DM (private)   dataset telegram_dm_<user_id>
+    group / super  dataset telegram_group_<chat_id>
+    forum topic    dataset telegram_group_<chat_id>_<thread>
 
 With ``per_user_in_group=True`` a group is split per sender
 (``telegram_group_<chat_id>_user_<user_id>``) so hard per-user deletion works.
@@ -44,10 +42,8 @@ class Scope:
     """The resolved memory boundary for one Telegram conversation."""
 
     dataset_name: str
-    session_id: str
     chat_id: int
     thread_id: int | None = None
-    is_private: bool = False
 
 
 def resolve_scope(
@@ -58,7 +54,7 @@ def resolve_scope(
     thread_id: int | None = None,
     per_user_in_group: bool = False,
 ) -> Scope:
-    """Resolve a Telegram chat into its ``Scope`` (dataset + session).
+    """Resolve a Telegram chat into its ``Scope`` (dataset).
 
     Args:
         chat_type: Telegram ``chat.type`` (``private`` / ``group`` / ``supergroup``).
@@ -68,31 +64,19 @@ def resolve_scope(
         per_user_in_group: Split group memory per sender when True.
 
     Returns:
-        The ``Scope`` describing this conversation's dataset and session id.
+        The ``Scope`` describing this conversation's dataset.
     """
-    is_private = chat_type == PRIVATE
-    if is_private:
+    if chat_type == PRIVATE:
         return Scope(
             dataset_name=f"telegram_dm_{_sanitize(user_id)}",
-            session_id=f"telegram:dm:{user_id}",
             chat_id=chat_id,
             thread_id=None,
-            is_private=True,
         )
 
-    base_ds = f"telegram_group_{_sanitize(chat_id)}"
-    base_sid = f"telegram:group:{chat_id}"
+    dataset_name = f"telegram_group_{_sanitize(chat_id)}"
     if thread_id is not None:
-        base_ds += f"_{_sanitize(thread_id)}"
-        base_sid += f":{thread_id}"
+        dataset_name += f"_{_sanitize(thread_id)}"
     if per_user_in_group:
-        base_ds += f"_user_{_sanitize(user_id)}"
-        base_sid += f":user:{user_id}"
+        dataset_name += f"_user_{_sanitize(user_id)}"
 
-    return Scope(
-        dataset_name=base_ds,
-        session_id=base_sid,
-        chat_id=chat_id,
-        thread_id=thread_id,
-        is_private=False,
-    )
+    return Scope(dataset_name=dataset_name, chat_id=chat_id, thread_id=thread_id)
