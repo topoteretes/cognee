@@ -6,6 +6,7 @@ from cognee.cli.reference import SupportsCliCommand
 from cognee.cli import DEFAULT_DOCS_URL
 import cognee.cli.echo as fmt
 from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
+from cognee.cli.hints import add_quiet_flag, forget_hint
 
 
 class ForgetCommand(SupportsCliCommand):
@@ -36,6 +37,7 @@ to delete a dataset, or dataset + --data-id to delete a single item.
             default=False,
             help="Delete all datasets and data",
         )
+        add_quiet_flag(parser)
 
     def execute(self, args: argparse.Namespace) -> None:
         try:
@@ -68,6 +70,12 @@ to delete a dataset, or dataset + --data-id to delete a single item.
 
             result = asyncio.run(run_forget())
             fmt.success(f"Done: {result}")
+
+            # After a successful forget the natural next step is to seed the
+            # graph again with remember; a placeholder is used when the user
+            # wiped everything so no specific dataset name is meaningful.
+            hint_dataset = dataset or "<dataset-name>"
+            forget_hint(args, hint_dataset)
 
         except Exception as e:
             if isinstance(e, CliCommandInnerException):

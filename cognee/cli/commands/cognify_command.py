@@ -8,6 +8,7 @@ from cognee.cli import DEFAULT_DOCS_URL
 from cognee.cli.config import CHUNKER_CHOICES
 import cognee.cli.echo as fmt
 from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
+from cognee.cli.hints import add_quiet_flag, cognify_hint
 
 
 class CognifyCommand(SupportsCliCommand):
@@ -70,6 +71,7 @@ After successful cognify processing, use `cognee search` to query the knowledge 
             type=int,
             help="Number of chunks to process per task batch (try 50 for large single documents).",
         )
+        add_quiet_flag(parser)
 
     def execute(self, args: argparse.Namespace) -> None:
         try:
@@ -170,6 +172,11 @@ After successful cognify processing, use `cognee search` to query the knowledge 
                 fmt.success("Cognification completed successfully!")
                 if args.verbose and result:
                     fmt.echo(f"Processing results: {result}")
+
+            # The hint uses the first dataset supplied or a placeholder so it
+            # copy-pastes cleanly when the user targeted all data.
+            hint_dataset = args.datasets[0] if args.datasets else "<dataset-name>"
+            cognify_hint(args, hint_dataset)
 
         except Exception as e:
             if isinstance(e, CliCommandInnerException):
