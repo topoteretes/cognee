@@ -209,6 +209,9 @@ class AzureOpenAIAdapter(OpenAIAdapter):
         merged_kwargs.pop("api_key", None)
         merged_kwargs.pop("api_base", None)
         merged_kwargs.pop("api_version", None)
+        # None means "use Instructor's default"; ty cannot narrow **kwargs after this pop.
+        if merged_kwargs.get("strict") is None:
+            merged_kwargs.pop("strict", None)
 
         try:
             async with llm_rate_limiter_context_manager():
@@ -226,7 +229,7 @@ class AzureOpenAIAdapter(OpenAIAdapter):
                     ],
                     response_model=response_model,
                     max_retries=self.MAX_RETRIES,
-                    **merged_kwargs,
+                    **merged_kwargs,  # ty: ignore[invalid-argument-type]
                 )
         except (
             ContentFilterFinishReasonError,

@@ -28,8 +28,8 @@ services:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
-      retries: 3
-      start_period: 40s
+      retries: 10
+      start_period: 180s
     deploy:
       resources:
         limits:
@@ -73,6 +73,18 @@ services:
       # (the MCP server still listens on 8000 inside the container).
       - "8001:8000" # MCP port
       - "5679:5678" # MCP debugger port
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=5)",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
     deploy:
       resources:
         limits:
@@ -126,9 +138,16 @@ services:
       POSTGRES_USER: cognee
       POSTGRES_PASSWORD: cognee
       POSTGRES_DB: cognee_db
-      # - postgres_data:/var/lib/postgresql/data
     ports:
       - 5432:5432
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cognee -d cognee_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     networks:
       - cognee-network
 

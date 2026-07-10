@@ -19,7 +19,7 @@ raises into the trace write path — a failure just means no lesson this time.
 import json
 import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import read_query_prompt
@@ -182,7 +182,7 @@ async def _save_processed_trace_count(
         "id": TRACE_EXTRACTION_STATE_ID,
         "kind": TRACE_EXTRACTION_STATE_KIND,
         "processed_trace_count": max(0, int(processed_trace_count)),
-        "updated_at": datetime.utcnow().isoformat(),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
     }
     updated = await session_manager.update_session_context_entry(
         user_id=user_id,
