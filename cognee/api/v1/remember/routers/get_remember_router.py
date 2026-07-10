@@ -1,10 +1,11 @@
 import json
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from fastapi import Form, File, UploadFile as UF, Depends
+from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError
 from typing import List, Optional, Union, Literal, Annotated
 from pydantic import BaseModel, Field, WithJsonSchema
 
@@ -375,6 +376,11 @@ def get_remember_router() -> APIRouter:
                 )
 
             return jsonable_encoder(result.to_dict())
+        except LLMPaymentRequiredError as error:
+            return JSONResponse(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                content={"error": "Token budget exhausted", "detail": str(error)},
+            )
         except ValueError as error:
             logger.error("Remember endpoint validation error: %s", error, exc_info=True)
             return JSONResponse(

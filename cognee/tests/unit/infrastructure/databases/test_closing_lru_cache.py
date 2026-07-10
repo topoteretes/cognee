@@ -48,19 +48,35 @@ class _AsyncWorker(_Closeable):
 
 class _SlowSubprocessWorker:
     """Stub modeling a subprocess-backed adapter: it advertises
-    ``_subprocess_mode`` (so its close runs off-loop) and its async close takes
-    measurable time, like tearing down a worker process / releasing a file lock.
+    ``_subprocess_mode`` (so its close runs off-loop) and its async close is
+    gated so a test can observe it mid-flight, like tearing down a worker
+    process / releasing a file lock.
+
+    When ``started``/``release`` events are supplied, ``close`` sets ``started``
+    the instant it begins and then blocks until ``release`` is set, instead of
+    sleeping a fixed amount. This removes the wall-clock race where a slow
+    ``gc.collect()`` on a loaded CI runner let the fixed-sleep close finish
+    before the test could assert it was in flight (``assert True is False``).
+    Without the events the close completes immediately.
     """
 
-    def __init__(self, name=""):
+    def __init__(self, name="", started=None, release=None):
         self.name = name
         self.closed = False
         self._subprocess_mode = True
+        self._started = started
+        self._release = release
 
     async def close(self):
         import asyncio
 
-        await asyncio.sleep(0.2)
+        if self._started is not None:
+            self._started.set()
+        if self._release is not None:
+            # Block a worker thread (not the off-loop) until the test releases
+            # us. The 30s timeout is only a safety net so a buggy test that
+            # never releases fails instead of hanging CI forever.
+            await asyncio.get_running_loop().run_in_executor(None, self._release.wait, 30)
         self.closed = True
 
 
@@ -80,6 +96,23 @@ class _ThreadRecordingWorker:
         import threading
 
         self.closed_on = threading.current_thread().name
+
+
+async def _wait_until(predicate, timeout=5.0):
+    """Poll ``predicate`` on the running loop until it is truthy or ``timeout``
+    seconds elapse. Used instead of a fixed sleep so assertions about off-loop
+    close progress don't depend on wall-clock timing (which flakes on loaded
+    CI runners). Returns the final predicate value.
+    """
+    import asyncio
+
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while loop.time() < deadline:
+        if predicate():
+            return True
+        await asyncio.sleep(0.005)
+    return predicate()
 
 
 # -- ClosingLRUCache: basic caching -----------------------------------------
@@ -320,21 +353,27 @@ def test_subprocess_close_runs_off_loop_and_is_tracked():
     the close is registered in the cache's closing registry until it finishes.
     """
     import asyncio
+    import threading
 
     cache = ClosingLRUCache(maxsize=4)
 
     async def run():
-        proxy = cache.get_or_create("k", lambda: _SlowSubprocessWorker("first"))
+        started = threading.Event()
+        release = threading.Event()
+        proxy = cache.get_or_create("k", lambda: _SlowSubprocessWorker("first", started, release))
         raw = proxy.__wrapped__
         cache.evict("k")
         del proxy
         gc.collect()
-        # Close started off-loop (still running due to the 0.2s sleep) and is
-        # tracked. The loop is NOT blocked, so the registry entry is visible.
+        # Wait until the close has actually begun off-loop (deterministic). It is
+        # gated on ``release``, so it cannot have finished — and because the loop
+        # is NOT blocked, the registry entry is visible.
+        assert await _wait_until(started.is_set)
         assert raw.closed is False
         assert "k" in cache._closing
-        # Wait for it to finish and confirm the registry self-cleans.
-        await asyncio.sleep(0.4)
+        # Release it, then confirm it finishes and the registry self-cleans.
+        release.set()
+        assert await _wait_until(lambda: raw.closed and "k" not in cache._closing)
         assert raw.closed is True
         assert "k" not in cache._closing
 
@@ -348,19 +387,32 @@ def test_aget_or_create_waits_for_in_flight_close():
     for the file lock.
     """
     import asyncio
+    import threading
 
     cache = ClosingLRUCache(maxsize=4)
 
     async def run():
-        proxy = cache.get_or_create("k", lambda: _SlowSubprocessWorker("first"))
+        started = threading.Event()
+        release = threading.Event()
+        proxy = cache.get_or_create("k", lambda: _SlowSubprocessWorker("first", started, release))
         raw_first = proxy.__wrapped__
         cache.evict("k")
         del proxy
         gc.collect()
-        assert raw_first.closed is False  # close in flight
+        assert await _wait_until(started.is_set)
+        assert raw_first.closed is False  # gated -> definitely in flight
 
-        second = await cache.aget_or_create("k", lambda: _SlowSubprocessWorker("second"))
-        # The await must not return until the first close completed.
+        # ``aget_or_create`` must not return until the in-flight close finishes.
+        # Release the close only after a short delay, so aget_or_create is forced
+        # to wait for it (deterministically, without a wall-clock in-flight race).
+        async def _release_soon():
+            await asyncio.sleep(0.05)
+            release.set()
+
+        _, second = await asyncio.gather(
+            _release_soon(),
+            cache.aget_or_create("k", lambda: _SlowSubprocessWorker("second")),
+        )
         assert raw_first.closed is True
         assert second.__wrapped__.name == "second"
 
@@ -389,16 +441,20 @@ def test_aget_or_create_concurrent_callers_single_construction():
     must all wait on the one in-flight close and then resolve to a single newly
     constructed value — no thundering-herd of duplicate workers."""
     import asyncio
+    import threading
 
     cache = ClosingLRUCache(maxsize=4)
 
     async def run():
-        proxy = cache.get_or_create("k", lambda: _SlowSubprocessWorker("first"))
+        started = threading.Event()
+        release = threading.Event()
+        proxy = cache.get_or_create("k", lambda: _SlowSubprocessWorker("first", started, release))
         raw_first = proxy.__wrapped__
         cache.evict("k")
         del proxy
         gc.collect()
-        assert raw_first.closed is False  # close in flight
+        assert await _wait_until(started.is_set)
+        assert raw_first.closed is False  # gated -> definitely in flight
 
         constructed = []
 
@@ -407,7 +463,13 @@ def test_aget_or_create_concurrent_callers_single_construction():
             constructed.append(w)
             return w
 
+        async def _release_soon():
+            await asyncio.sleep(0.05)
+            release.set()
+
+        release_task = asyncio.ensure_future(_release_soon())
         results = await asyncio.gather(*[cache.aget_or_create("k", factory) for _ in range(10)])
+        await release_task
 
         assert len(constructed) == 1, "exactly one new value should be constructed"
         assert all(r.__wrapped__ is results[0].__wrapped__ for r in results)
@@ -675,3 +737,55 @@ def test_decorator_args_and_kwargs_with_same_payload_do_not_collide():
     b = create(a=1)
     assert a is not b, "positional and keyword call shapes must not collide"
     assert call_count == 2
+
+
+def test_cache_evict_matching_by_parameter_name():
+    """cache_evict_matching evicts only entries whose named argument equals the
+    criterion value, across positional and keyword call shapes."""
+
+    @closing_lru_cache(maxsize=8, lease=False)
+    def create(provider, db_name, password=""):
+        return _Closeable(f"{provider}/{db_name}")
+
+    kept = create("postgres", "other-db", "secret")
+    create("postgres", "dataset-uuid", "secret")
+    create("ladybug", db_name="dataset-uuid")
+
+    evicted = create.cache_evict_matching(db_name="dataset-uuid")
+    assert evicted == 2
+
+    still_cached = create("postgres", "other-db", "secret")
+    assert still_cached is kept, "non-matching entry must survive"
+
+
+def test_cache_evict_matching_requires_all_criteria():
+    """Multiple criteria AND together; a value colliding in a different field
+    does not match."""
+
+    @closing_lru_cache(maxsize=8, lease=False)
+    def create(provider, db_name):
+        return _Closeable(f"{provider}/{db_name}")
+
+    create("postgres", "dataset-uuid")
+    # same value, different field: must NOT be touched by db_name criterion
+    create("dataset-uuid", "postgres")
+
+    assert create.cache_evict_matching(provider="postgres", db_name="dataset-uuid") == 1
+    assert create.cache_info().currsize == 1
+
+
+def test_cache_evict_matching_rejects_bad_criteria():
+    """No criteria (would evict everything) and unknown parameter names raise."""
+    import pytest
+
+    @closing_lru_cache(maxsize=8, lease=False)
+    def create(provider, db_name):
+        return _Closeable(f"{provider}/{db_name}")
+
+    create("postgres", "dataset-uuid")
+
+    with pytest.raises(ValueError):
+        create.cache_evict_matching()
+    with pytest.raises(ValueError):
+        create.cache_evict_matching(db_nmae="typo")
+    assert create.cache_info().currsize == 1

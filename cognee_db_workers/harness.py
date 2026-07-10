@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import atexit
+import concurrent.futures
 import ctypes
 import ctypes.util
 import itertools
@@ -21,7 +22,7 @@ import threading
 import time
 import traceback
 import weakref
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Dict, Optional
 
 
@@ -63,7 +64,18 @@ def _env_int(name: str, default: int) -> int:
 # disable entirely — not recommended outside benchmarks).
 _DEFAULT_CALL_TIMEOUT: Optional[float] = _env_float("SUBPROCESS_CALL_TIMEOUT", 300.0)
 _DEFAULT_MAX_RETRIES = _env_int("SUBPROCESS_MAX_RETRIES", 2)
+# Reader-thread poll interval for the response queue and for the
+# ``_closed_event`` flag. NOTE: any caller setting an explicit
+# ``shutdown_timeout`` should keep it >= this interval — otherwise the
+# reader-thread ``join()`` in ``shutdown()`` can time out before the
+# reader observes the closed flag, producing spurious "join timed out"
+# warnings even on a clean shutdown.
 _PROCESS_CHECK_INTERVAL = 1.0
+# Per-call timeouts in a row before the retry loop forces a respawn.
+# A single per-call timeout under concurrent RPC is just a slow op (the
+# session stays open so sibling calls keep working); two in a row almost
+# always means the worker is wedged.
+_TIMEOUT_BEFORE_RESPAWN = 2
 
 # Number of times the worker retries opening a database that is currently
 # lock-held by another (still-shutting-down) worker for the same file, and the
@@ -99,6 +111,11 @@ class SubprocessTransportError(RuntimeError):
 @dataclass
 class Request:
     op: int
+    # Per-request id used to correlate responses with waiters in the main
+    # process. ``0`` is reserved for protocol sentinels (the SHUTDOWN ack
+    # and the ``_READY_SENTINEL`` response). The session assigns ids from
+    # ``itertools.count(1)`` in ``_issue`` / ``_issue_async``.
+    request_id: int = 0
     handle_id: Optional[int] = None
     args: tuple = ()
     kwargs: dict = field(default_factory=dict)
@@ -106,6 +123,10 @@ class Request:
 
 @dataclass
 class Response:
+    # Echoed from the originating Request so the main-process reader thread
+    # can route this response to the correct pending future. ``0`` for
+    # protocol sentinels (SHUTDOWN ack, READY).
+    request_id: int = 0
     result: Any = None
     new_handle_id: Optional[int] = None
     error: Optional[str] = None
@@ -384,8 +405,18 @@ def run_worker_loop(
     resp_q,
     init: Optional[Callable[[HandleRegistry], None]] = None,
 ) -> None:
-    """Serialize all requests on a single event loop. Handlers may be sync or
-    return a coroutine; coroutines are awaited on the worker's asyncio loop.
+    """Concurrent worker dispatch.
+
+    Async handlers (any handler that returns a coroutine) are launched as
+    ``asyncio.create_task`` so multiple can be in flight at once — bounded
+    by a semaphore (``SUBPROCESS_WORKER_MAX_INFLIGHT``, default 16) to keep
+    the worker's memory footprint predictable. Sync handlers continue to
+    run inline on the event loop thread, preserving today's serialization
+    for adapters whose underlying library is not thread-safe (e.g. Kuzu).
+
+    Responses carry the originating ``request_id`` so the main-process
+    reader thread can route them to the correct waiter; the protocol
+    sentinels (READY, SHUTDOWN ack) use ``request_id=0``.
     """
     _enable_faulthandler()
     # pdeathsig is the authoritative parent-death signal on Linux. Only fall
@@ -400,6 +431,19 @@ def run_worker_loop(
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     registry = HandleRegistry()
+    # ``SUBPROCESS_WORKER_MAX_INFLIGHT`` must be > 0. A zero or negative
+    # value would create a semaphore that deadlocks on every ``async with sem``.
+    # This is a load-bearing validation: silent degradation (clamping to 1) would
+    # hide configuration errors. Callers wanting "no cap" should pass a
+    # sufficiently large value explicitly (e.g., 10000).
+    max_inflight = _env_int("SUBPROCESS_WORKER_MAX_INFLIGHT", 16)
+    if max_inflight <= 0:
+        raise ValueError(
+            f"SUBPROCESS_WORKER_MAX_INFLIGHT must be > 0, got {max_inflight}. "
+            "This controls the worker's concurrent task semaphore; zero or negative "
+            "values would deadlock all async handlers."
+        )
+    sem = asyncio.Semaphore(max_inflight)
 
     try:
         if init is not None:
@@ -409,33 +453,71 @@ def run_worker_loop(
         resp_q.put(Response(error=traceback.format_exc(), exception=_safe_pickle_exception(e)))
         return
 
-    try:
-        while True:
-            msg = req_q.get()
-            if msg == SHUTDOWN:
-                resp_q.put(Response())
-                break
+    pending: "set[asyncio.Task]" = set()
 
+    def _emit(rid: int, result: Any) -> None:
+        if isinstance(result, HandleResult):
+            resp_q.put(
+                Response(request_id=rid, result=result.value, new_handle_id=result.handle_id)
+            )
+        else:
+            resp_q.put(Response(request_id=rid, result=result))
+
+    def _emit_error(rid: int, e: BaseException) -> None:
+        resp_q.put(
+            Response(
+                request_id=rid,
+                error=traceback.format_exc(),
+                exception=_safe_pickle_exception(e),
+            )
+        )
+
+    async def _run_async(coro, rid: int) -> None:
+        # The semaphore bounds in-flight async ops on the worker. The cap
+        # is the whole point of running these in a subprocess — we don't
+        # want to trade main-process memory pressure for unbounded worker
+        # memory pressure.
+        async with sem:
+            try:
+                _emit(rid, await coro)
+            except Exception as e:
+                _emit_error(rid, e)
+
+    async def serve() -> None:
+        while True:
+            # Block the request fetch on a thread so the event loop stays
+            # free to drive in-flight async handlers.
+            msg = await loop.run_in_executor(None, req_q.get)
+            if msg == SHUTDOWN:
+                # Drain in-flight tasks before acking so callers that
+                # already submitted a request before SHUTDOWN see a real
+                # response rather than a closed-session error.
+                if pending:
+                    await asyncio.gather(*pending, return_exceptions=True)
+                resp_q.put(Response())  # request_id=0 ack
+                return
+
+            rid = getattr(msg, "request_id", 0)
             handler = dispatch.get(msg.op)
             if handler is None:
-                resp_q.put(Response(error=f"Unknown op {msg.op!r}"))
+                resp_q.put(Response(request_id=rid, error=f"Unknown op {msg.op!r}"))
                 continue
 
             try:
                 result = handler(registry, msg)
-                if asyncio.iscoroutine(result):
-                    result = loop.run_until_complete(result)
-                if isinstance(result, HandleResult):
-                    resp_q.put(Response(result=result.value, new_handle_id=result.handle_id))
-                else:
-                    resp_q.put(Response(result=result))
             except Exception as e:
-                resp_q.put(
-                    Response(
-                        error=traceback.format_exc(),
-                        exception=_safe_pickle_exception(e),
-                    )
-                )
+                _emit_error(rid, e)
+                continue
+
+            if asyncio.iscoroutine(result):
+                t = asyncio.create_task(_run_async(result, rid))
+                pending.add(t)
+                t.add_done_callback(pending.discard)
+            else:
+                _emit(rid, result)
+
+    try:
+        loop.run_until_complete(serve())
     finally:
         try:
             loop.close()
@@ -476,7 +558,7 @@ _all_sessions: "weakref.WeakSet[SubprocessSession]" = weakref.WeakSet()
 def collect_garbage_in_all_workers(timeout: float = 5.0) -> int:
     """Send ``OP_GC_COLLECT`` to every live session's worker. Returns the
     count of sessions that responded successfully. Best-effort: a session
-    that's mid-shutdown, crashed, or busy is skipped silently.
+    that's mid-shutdown or crashed is skipped silently.
 
     Intended as a preamble to RSS measurement so subprocess memory numbers
     reflect reachable objects only.
@@ -488,31 +570,17 @@ def collect_garbage_in_all_workers(timeout: float = 5.0) -> int:
     # strong refs, but the broad try/except below still covers the narrower
     # race where a session is mid-shutdown by the time we call into it.
     for session in list(_all_sessions):
-        # Skip busy sessions rather than blocking on ``_rpc_lock`` — the
-        # docstring says this is best-effort, but ``session.call`` would
-        # otherwise wait behind a long-running RPC before the per-call
-        # timeout even starts ticking.
-        if not session._rpc_lock.acquire(blocking=False):
-            continue
         try:
-            if session._closed or not session._proc.is_alive():
+            if session._closed_event.is_set() or not session._proc.is_alive():
                 continue
-            session.touch()
-            session._req_q.put(Request(op=OP_GC_COLLECT))
-            # Direct queue read with a bounded timeout — NOT
-            # ``_wait_response``: that helper flips
-            # ``session._closed = True`` on timeout, which would
-            # silently brick a perfectly healthy session whose GC pass
-            # just happened to overrun this best-effort budget. Empty
-            # / pickle errors are caught by the broad except below.
-            t = timeout if timeout is not None else 5.0
-            resp = session._resp_q.get(timeout=t)
-            session._handle_response(resp)
+            # Goes through the normal id-routed call path. With concurrent
+            # RPC, this no longer blocks other in-flight calls — it just
+            # runs alongside them. The worker's GC handler is sync and
+            # quick, so the practical impact on other ops is negligible.
+            session.call(Request(op=OP_GC_COLLECT), timeout=timeout)
             collected += 1
         except Exception:
             continue
-        finally:
-            session._rpc_lock.release()
     return collected
 
 
@@ -563,7 +631,6 @@ class SubprocessSession:
         self._proc = proc
         self._req_q = req_q
         self._resp_q = resp_q
-        self._closed = False
         self._last_accessed_at = time.time()
         self._shutdown_timeout = shutdown_timeout
         self._init_timeout = init_timeout
@@ -581,13 +648,29 @@ class SubprocessSession:
         self._max_retries = max(0, int(max_retries)) if respawn_factory else 0
         self._replay_steps: "list[ReplayStep]" = []
         self._handle_remap: "dict[int, int]" = {}
-        # Single ``threading.Lock`` shared by both sync ``call`` and async
-        # ``call_async``. The two paths MUST NOT use independent locks — they
-        # share the same ``multiprocessing.Queue`` pair, which has no
-        # per-caller correlation, so interleaved put/get pairs would return
-        # responses to the wrong caller. Async path acquires via a
-        # ``run_in_executor`` hop to avoid blocking the loop.
-        self._rpc_lock = threading.Lock()
+        # Per-request pending registry: request_id -> concurrent.futures.Future.
+        # The reader thread sets ``set_result(resp)`` on the matching future;
+        # both sync and async callers wait on the same primitive (sync via
+        # ``Future.result(timeout)``, async via ``asyncio.wrap_future``).
+        # ``Future.set_result`` / ``set_exception`` are thread-safe so the
+        # reader can resolve them without a ``call_soon_threadsafe`` dance.
+        self._id_counter = itertools.count(1)
+        self._pending: "dict[int, concurrent.futures.Future]" = {}
+        self._pending_lock = threading.Lock()
+        self._reader_thread: Optional[threading.Thread] = None
+        # "No more RPCs accepted" flag. An Event (vs the previous plain
+        # bool) lets the reader poll it cheaply at the top of its loop and
+        # avoids a separate mutex for the closed-state read/write.
+        self._closed_event = threading.Event()
+        # Per-call retry state. The session-level deadline (per-call
+        # timeout) does NOT mark the session closed — sibling calls may
+        # still succeed — but consecutive timeouts on the same caller
+        # almost certainly mean the worker is wedged. After
+        # ``_TIMEOUT_BEFORE_RESPAWN`` timeouts in a row, the retry loop
+        # forces a respawn instead of issuing the same RPC against the
+        # same hung worker.
+        self._consecutive_timeouts = 0
+        self._consecutive_timeouts_lock = threading.Lock()
         self._terminate_lock = threading.Lock()
         self._respawn_lock = threading.Lock()
         # Set by ``wait_for_ready`` after the worker emits its READY
@@ -608,6 +691,20 @@ class SubprocessSession:
 
     def touch(self) -> None:
         self._last_accessed_at = time.time()
+
+    # Backward-compat shim: a handful of external call sites (and the old
+    # internal logic the reader thread now subsumes) read/write ``_closed``
+    # as a bool. Route both through the underlying ``Event``.
+    @property
+    def _closed(self) -> bool:
+        return self._closed_event.is_set()
+
+    @_closed.setter
+    def _closed(self, value: bool) -> None:
+        if value:
+            self._closed_event.set()
+        else:
+            self._closed_event.clear()
 
     def _init_diagnostics(self) -> str:
         """Compact ``pid=… exitcode=… alive=…`` summary of the worker process,
@@ -687,7 +784,7 @@ class SubprocessSession:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 self._terminate()
-                self._closed = True
+                self._closed_event.set()
                 raise SubprocessTransportError(self._init_failure_message("timed out"))
             try:
                 resp = self._resp_q.get(timeout=min(poll_interval, remaining))
@@ -712,19 +809,19 @@ class SubprocessSession:
                         resp = drained
                         break
                     self._terminate()
-                    self._closed = True
+                    self._closed_event.set()
                     raise SubprocessTransportError(
                         self._init_failure_message("exited before signalling ready")
                     )
         if resp.error:
             self._terminate()
-            self._closed = True
+            self._closed_event.set()
             raise SubprocessTransportError(
                 f"Subprocess init failed ({self._init_diagnostics()}):\n{resp.error}"
             )
         if resp.result != _READY_SENTINEL:
             self._terminate()
-            self._closed = True
+            self._closed_event.set()
             raise SubprocessTransportError(
                 f"Unexpected subprocess startup response "
                 f"({self._init_diagnostics()}): {resp.result!r}"
@@ -737,6 +834,122 @@ class SubprocessSession:
         # out and kill a healthy worker.
         self._ready = True
         _all_sessions.add(self)
+        # The reader is the single consumer of ``_resp_q`` from this point
+        # on. Starting it BEFORE returning is important: if a caller
+        # invokes ``call_async`` immediately after ``wait_for_ready``, the
+        # reader must already be draining responses or the future never
+        # resolves.
+        self._start_reader_thread()
+
+    def _start_reader_thread(self) -> None:
+        t = threading.Thread(
+            target=self._reader_loop,
+            name=f"subproc-session-reader-{self._proc.pid}",
+            daemon=True,
+        )
+        self._reader_thread = t
+        t.start()
+
+    def _reader_loop(self) -> None:
+        """Single consumer of ``self._resp_q``. Routes responses to pending
+        futures by ``request_id`` and fails every waiter on any path that
+        ends the session.
+
+        **Invariant (load-bearing):** the ``finally`` block always runs
+        ``_fail_all_pending``, so worker crashes, transport-level errors,
+        and explicit shutdown all propagate ``SubprocessTransportError`` to
+        every pending future. No path that stops the reader can leak
+        futures.
+        """
+        transport_err: Optional[BaseException] = None
+        try:
+            while not self._closed_event.is_set():
+                try:
+                    resp = self._resp_q.get(timeout=_PROCESS_CHECK_INTERVAL)
+                except std_queue.Empty:
+                    if not self._proc.is_alive():
+                        transport_err = SubprocessTransportError(
+                            f"Subprocess exited unexpectedly (exit code {self._proc.exitcode})"
+                        )
+                        break
+                    continue
+                except (EOFError, OSError, BrokenPipeError) as e:
+                    # Queue's underlying pipe died — treat as transport
+                    # failure rather than letting the reader die silently.
+                    transport_err = SubprocessTransportError(
+                        f"Subprocess response queue broken: {e!r}"
+                    )
+                    break
+                except (pickle.UnpicklingError, EOFError) as e:
+                    # The worker emitted a value we couldn't deserialize
+                    # (corrupted queue payload, partial write, etc.).
+                    # Treat as a transport failure too — every pending
+                    # caller will be failed via ``_fail_all_pending`` in
+                    # the outer ``finally``, and the session is no longer
+                    # trustworthy for further RPCs.
+                    transport_err = SubprocessTransportError(
+                        f"Subprocess response decode failed: {e!r}"
+                    )
+                    break
+                except Exception as e:
+                    # Defensive: any unexpected exception inside the
+                    # reader must propagate as a transport error so the
+                    # ``finally`` invariant (drain every pending future)
+                    # still applies. Without this, a fresh exception
+                    # type that slipped past the targeted clauses above
+                    # would bubble out and leave callers waiting on
+                    # futures forever.
+                    transport_err = SubprocessTransportError(
+                        f"Subprocess reader internal error: {e!r}"
+                    )
+                    break
+                rid = getattr(resp, "request_id", 0)
+                if rid == 0:
+                    # Protocol sentinel (SHUTDOWN ack, an unsolicited
+                    # response, or a response from the legacy
+                    # un-id'd protocol). Drop it.
+                    continue
+                with self._pending_lock:
+                    fut = self._pending.pop(rid, None)
+                if fut is None or fut.done():
+                    # Caller already gave up (timeout / cancel) and
+                    # popped its own entry, or a racing failure already
+                    # resolved the future. Dropping the response here
+                    # is correct.
+                    continue
+                try:
+                    fut.set_result(resp)
+                except concurrent.futures.InvalidStateError:
+                    # A near-simultaneous ``_fail_all_pending`` may have
+                    # raced our ``pop`` + ``set_result``. Either resolution
+                    # is acceptable — the caller wakes up either way.
+                    pass
+        finally:
+            self._closed_event.set()
+            self._fail_all_pending(
+                transport_err or SubprocessTransportError("Subprocess session is closed")
+            )
+
+    def _fail_all_pending(self, err: BaseException) -> None:
+        """Atomically drain the pending registry and propagate ``err`` to
+        every future. Runs from the reader's ``finally`` (the load-bearing
+        path) and also from explicit lifecycle transitions.
+
+        The dict swap-with-``{}`` under ``_pending_lock`` is what gives the
+        "no leaked futures" guarantee — every entry that existed at the
+        moment the session closed is failed exactly once.
+        """
+        with self._pending_lock:
+            pending, self._pending = self._pending, {}
+        for fut in pending.values():
+            if fut.done():
+                continue
+            try:
+                fut.set_exception(err)
+            except concurrent.futures.InvalidStateError:
+                # Raced with a ``set_result`` from the reader for the same
+                # id. Harmless — the caller already woke.
+                pass
 
     def add_replay_step(self, step: ReplayStep) -> None:
         """Register a setup RPC to replay after a respawn. Order is preserved.
@@ -754,31 +967,141 @@ class SubprocessSession:
         except ValueError:
             pass
 
-    def _do_locked_call(self, req: Request, deadline, effective_timeout) -> Response:
-        """Single RPC round trip under ``_rpc_lock``. Shared by sync and async
-        entry points so the two paths can't interleave put/get on the same
-        queues.
+    def _register_pending(self, rid: int, fut: "concurrent.futures.Future") -> None:
+        """Atomically insert ``fut`` into the pending registry, refusing
+        the insert if the session has been closed.
+
+        Called by ``_issue`` / ``_issue_async`` immediately after a
+        lock-free ``_check_alive`` probe; the in-lock re-check below is
+        the one that closes the TOCTOU window with a racing close.
         """
-        with self._rpc_lock:
-            self._check_alive()
+        with self._pending_lock:
+            if self._closed_event.is_set():
+                raise SubprocessTransportError("Subprocess session is closed")
+            self._pending[rid] = fut
+
+    def _issue(self, req: Request, timeout) -> Response:
+        """Single-shot sync RPC: register a future, send the request, block
+        on ``future.result(timeout)``. ``try/finally`` pops the registry
+        entry on every exit path (success, timeout, exception) so the
+        reader never has to clean up after sync callers.
+        """
+        deadline, eff = self._resolve_deadline(timeout)
+        # ``_check_alive`` does the ``proc.is_alive()`` syscall and may set
+        # ``_closed_event`` if the worker exited; running it outside the
+        # registry lock keeps that syscall off the hot path. The in-lock
+        # re-check in ``_register_pending`` catches a close racing this
+        # caller (TOCTOU-safe under ``_pending_lock``).
+        self._check_alive()
+        rid = next(self._id_counter)
+        fut: concurrent.futures.Future = concurrent.futures.Future()
+        req_to_send = self._apply_remap(replace(req, request_id=rid))
+        self._register_pending(rid, fut)
+        try:
             self.touch()
-            self._req_q.put(req)
-            resp = self._wait_response(deadline, effective_timeout)
-        return self._handle_response(resp)
+            self._req_q.put(req_to_send)
+            remaining = None if deadline is None else max(0.0, deadline - time.monotonic())
+            try:
+                resp = fut.result(timeout=remaining)
+            except concurrent.futures.TimeoutError:
+                raise TimeoutError(f"Subprocess call exceeded {eff}s deadline")
+            # The worker responded — even an application error proves it
+            # is still serving. Reset the consecutive-timeout counter
+            # BEFORE ``_handle_response`` so a worker-side raise doesn't
+            # leave the counter pointing at a wedged-worker state and
+            # trigger a spurious respawn on the next per-call timeout.
+            self._reset_timeout_counter()
+            return self._handle_response(resp)
+        finally:
+            with self._pending_lock:
+                self._pending.pop(rid, None)
+
+    async def _issue_async(self, req: Request, timeout) -> Response:
+        """Async counterpart of ``_issue``. Wraps the ``concurrent.futures.Future``
+        for the current event loop and awaits with ``asyncio.wait_for`` so
+        per-call deadlines work uniformly across sync / async callers.
+        """
+        deadline, eff = self._resolve_deadline(timeout)
+        # See ``_issue`` for why ``_check_alive`` runs outside the lock.
+        self._check_alive()
+        rid = next(self._id_counter)
+        fut: concurrent.futures.Future = concurrent.futures.Future()
+        req_to_send = self._apply_remap(replace(req, request_id=rid))
+        self._register_pending(rid, fut)
+        try:
+            self.touch()
+            self._req_q.put(req_to_send)
+            # ``wrap_future`` auto-detects the running loop. Passing
+            # ``loop=`` explicitly is deprecated (and removed in newer
+            # Pythons) so we let asyncio infer it from the running
+            # context here.
+            aio_fut = asyncio.wrap_future(fut)
+            timeout_s = None if deadline is None else max(0.0, deadline - time.monotonic())
+            try:
+                resp = await asyncio.wait_for(aio_fut, timeout=timeout_s)
+            except asyncio.TimeoutError:
+                # Cancel the wrapped concurrent future so a late response
+                # from the worker for this id is dropped by the reader.
+                if not fut.done():
+                    fut.cancel()
+                raise TimeoutError(f"Subprocess call_async exceeded {eff}s deadline")
+            # Worker responded — reset the streak (see ``_issue`` for why
+            # this is unconditional, not gated on success vs app error).
+            self._reset_timeout_counter()
+            return self._handle_response(resp)
+        finally:
+            with self._pending_lock:
+                self._pending.pop(rid, None)
+
+    def _record_timeout(self) -> int:
+        """Bump the session-wide consecutive-timeout counter and return the
+        new value. Reset to zero on any successful call.
+        """
+        with self._consecutive_timeouts_lock:
+            self._consecutive_timeouts += 1
+            return self._consecutive_timeouts
+
+    def _reset_timeout_counter(self) -> None:
+        with self._consecutive_timeouts_lock:
+            self._consecutive_timeouts = 0
+
+    def _force_respawn_after_timeouts(self) -> None:
+        """Mark the session closed so the next ``_respawn`` actually
+        respawns instead of early-returning. Called after
+        ``_TIMEOUT_BEFORE_RESPAWN`` consecutive per-call timeouts on the
+        assumption the worker is wedged.
+
+        Without this hook, the retry loop would keep issuing RPCs against
+        the same hung worker because ``_respawn`` short-circuits when the
+        process is still ``is_alive()``.
+        """
+        self._closed_event.set()
+        self._reset_timeout_counter()
 
     def call(self, req: Request, timeout: Optional[float] = ...) -> Response:
         """Blocking synchronous call. Retries transport failures up to
         ``max_retries`` times (respawning + replaying setup steps between
         attempts). Application errors raised inside the worker are NOT
         retried — they would fail the same way on any new subprocess.
+
+        Per-call timeouts no longer mark the session closed (sibling
+        in-flight calls keep working), but ``_TIMEOUT_BEFORE_RESPAWN``
+        consecutive timeouts force a respawn — the worker is almost
+        certainly wedged at that point and issuing the same RPC against
+        it would just time out again.
         """
         attempts_left = self._max_retries
         while True:
-            deadline, effective_timeout = self._resolve_deadline(timeout)
-            req_to_send = self._apply_remap(req)
             try:
-                return self._do_locked_call(req_to_send, deadline, effective_timeout)
-            except (SubprocessTransportError, TimeoutError):
+                return self._issue(req, timeout)
+            except TimeoutError:
+                if attempts_left <= 0 or not self._can_respawn():
+                    raise
+                if self._record_timeout() >= _TIMEOUT_BEFORE_RESPAWN:
+                    self._force_respawn_after_timeouts()
+                attempts_left -= 1
+                self._respawn()
+            except SubprocessTransportError:
                 if attempts_left <= 0 or not self._can_respawn():
                     raise
                 attempts_left -= 1
@@ -787,24 +1110,24 @@ class SubprocessSession:
     async def call_async(self, req: Request, timeout: Optional[float] = ...) -> Response:
         """Async counterpart of ``call`` with identical retry semantics.
 
-        Hops the same ``_rpc_lock``-protected routine onto a thread via
-        ``run_in_executor`` — a dedicated asyncio.Lock would let a sync
-        caller slip a request between our put and get on the shared queues.
+        Concurrent ``call_async`` invocations no longer queue at a session
+        lock: per-request ids let the reader thread route responses, and
+        the per-call ``concurrent.futures.Future`` carries the response or
+        the close-error to the awaiting coroutine.
         """
-        attempts_left = self._max_retries
         loop = asyncio.get_running_loop()
+        attempts_left = self._max_retries
         while True:
-            deadline, effective_timeout = self._resolve_deadline(timeout)
-            req_to_send = self._apply_remap(req)
             try:
-                return await loop.run_in_executor(
-                    None,
-                    self._do_locked_call,
-                    req_to_send,
-                    deadline,
-                    effective_timeout,
-                )
-            except (SubprocessTransportError, TimeoutError):
+                return await self._issue_async(req, timeout)
+            except TimeoutError:
+                if attempts_left <= 0 or not self._can_respawn():
+                    raise
+                if self._record_timeout() >= _TIMEOUT_BEFORE_RESPAWN:
+                    self._force_respawn_after_timeouts()
+                attempts_left -= 1
+                await loop.run_in_executor(None, self._respawn)
+            except SubprocessTransportError:
                 if attempts_left <= 0 or not self._can_respawn():
                     raise
                 attempts_left -= 1
@@ -823,9 +1146,7 @@ class SubprocessSession:
         new_id = self._handle_remap.get(req.handle_id)
         if new_id is None:
             return req
-        from dataclasses import replace as _replace
-
-        return _replace(req, handle_id=new_id)
+        return replace(req, handle_id=new_id)
 
     def _resolve_deadline(self, timeout) -> tuple:
         """Collapse (``...``, ``None``, float) into ``(deadline, effective_timeout)``.
@@ -866,42 +1187,11 @@ class SubprocessSession:
             raise RuntimeError(resp.error)
         return resp
 
-    def _wait_response(
-        self,
-        deadline: Optional[float] = None,
-        effective_timeout: Optional[float] = None,
-    ) -> Response:
-        while True:
-            remaining = _PROCESS_CHECK_INTERVAL
-            if deadline is not None:
-                # ``time.monotonic()`` matches the domain ``deadline`` was
-                # computed in (see ``_resolve_deadline``).
-                remaining = max(0.0, min(remaining, deadline - time.monotonic()))
-                if remaining <= 0.0:
-                    # Past deadline — mark session dead so follow-up calls
-                    # fail fast and the caller can rebuild an adapter.
-                    self._closed = True
-                    raise TimeoutError(
-                        f"Subprocess call exceeded {effective_timeout}s deadline; "
-                        f"session marked closed"
-                    )
-            try:
-                return self._resp_q.get(timeout=remaining)
-            except std_queue.Empty:
-                if not self._proc.is_alive():
-                    # Detected worker death — flip to closed so subsequent
-                    # callers see a consistent state instead of racing on
-                    # proc.is_alive() each time.
-                    self._closed = True
-                    raise SubprocessTransportError(
-                        f"Subprocess exited unexpectedly (exit code {self._proc.exitcode})"
-                    )
-
     def _check_alive(self) -> None:
-        if self._closed:
+        if self._closed_event.is_set():
             raise SubprocessTransportError("Subprocess session is closed")
         if not self._proc.is_alive():
-            self._closed = True
+            self._closed_event.set()
             raise SubprocessTransportError(
                 f"Subprocess exited unexpectedly (exit code {self._proc.exitcode})"
             )
@@ -912,26 +1202,45 @@ class SubprocessSession:
         requests targeting the old handles are rewritten to the new ones.
 
         Serialized by ``_respawn_lock`` so concurrent retries coalesce onto
-        one new process rather than spawning N new workers.
+        one new process rather than spawning N new workers. The old reader
+        thread is stopped (its ``finally`` block fails any still-pending
+        futures); the new one is started after replay completes.
         """
         if self._respawn_factory is None:
             raise SubprocessTransportError(
                 "Subprocess session has no respawn factory; retry is disabled"
             )
 
-        # Take BOTH ``_respawn_lock`` (coalesces concurrent retries) and
-        # ``_rpc_lock`` (serializes against in-flight / incoming RPCs). Once
-        # ``self._closed`` flips back to False, another caller can immediately
-        # use the new queues — without ``_rpc_lock`` here, that caller could
-        # consume the ``_READY_SENTINEL`` from ``wait_for_ready`` or interleave
-        # with a replay RPC on the fresh queue pair.
-        with self._respawn_lock, self._rpc_lock:
+        with self._respawn_lock:
             # Another concurrent retry may have already respawned successfully
             # between the moment the current caller's RPC failed and us
             # acquiring the lock. If the process is alive again, bail out —
             # the caller's outer retry loop will just try the RPC again.
-            if not self._closed and self._proc.is_alive():
+            if not self._closed_event.is_set() and self._proc.is_alive():
                 return
+
+            # Stop the old reader if still running; its ``finally`` block
+            # fails any futures that hadn't been resolved yet. After
+            # ``_fail_all_pending`` runs from inside the reader, no new
+            # callers can add to ``_pending`` until we clear the closed
+            # flag below (``_check_alive`` rejects under ``_pending_lock``).
+            self._closed_event.set()
+            if self._reader_thread is not None and self._reader_thread.is_alive():
+                self._reader_thread.join(timeout=self._shutdown_timeout)
+                if self._reader_thread.is_alive():
+                    # The old reader is still running. If we proceeded
+                    # and reassigned ``self._resp_q`` below, the old
+                    # reader's next iteration would pull from the NEW
+                    # queue (it dereferences ``self._resp_q`` per loop),
+                    # producing two consumers on the same queue and
+                    # nondeterministic response routing. Bail out
+                    # instead — the session is now bricked and callers
+                    # will see this as a transport error.
+                    raise SubprocessTransportError(
+                        f"Reader thread did not stop within "
+                        f"{self._shutdown_timeout}s; refusing to respawn"
+                    )
+            self._reader_thread = None
 
             self._terminate()
 
@@ -939,36 +1248,54 @@ class SubprocessSession:
             self._proc = new_proc
             self._req_q = new_req_q
             self._resp_q = new_resp_q
-            self._closed = False
 
-            # Wait for the new worker's ready sentinel before replay.
-            self.wait_for_ready()
+            # ``_closed_event`` stays set through the entire ready +
+            # replay sequence. New callers (including non-retry ones)
+            # see ``_closed_event.is_set()`` in ``_register_pending`` and
+            # bail with ``SubprocessTransportError`` — they retry via the
+            # outer loop and end up parked on ``_respawn_lock``. Without
+            # this, a caller could insert into ``_pending`` after the old
+            # reader exited but before the new reader started, then
+            # block on ``fut.result()`` forever.
+            #
+            # Replay calls use ``_raw_call_locked`` which bypasses
+            # ``_pending`` and reads directly from ``_resp_q`` — so
+            # keeping the close flag set does not block replay itself.
+            self._ready = False
+            try:
+                resp = self._resp_q.get(timeout=self._init_timeout)
+            except std_queue.Empty:
+                self._terminate()
+                raise SubprocessTransportError(
+                    f"Respawn init timed out after {self._init_timeout}s"
+                )
+            if resp.error:
+                self._terminate()
+                raise SubprocessTransportError(f"Respawn init failed:\n{resp.error}")
+            if resp.result != _READY_SENTINEL:
+                self._terminate()
+                raise SubprocessTransportError(
+                    f"Unexpected respawn startup response: {resp.result!r}"
+                )
+            self._ready = True
 
-            # Replay setup in registration order. Each step runs against the
-            # already-open session; handle remaps accumulate so later steps
-            # that reference earlier handles (e.g. OPEN_CONNECTION uses the
-            # just-reopened Database handle via its proxy's ``self._handle_id``
-            # which apply_new_handle updated) work correctly.
+            # Replay setup in registration order BEFORE starting the reader.
+            # Replay calls read responses directly from ``_resp_q``; running
+            # them with the reader live would race the reader for those
+            # messages.
             new_remap: "dict[int, int]" = {}
             for step in list(self._replay_steps):
                 req = step.make_request()
                 # Rewrite any handle_id that was already remapped in this
                 # replay pass (e.g. OP_DB_INIT after OP_OPEN_DATABASE).
                 if new_remap and req.handle_id in new_remap:
-                    from dataclasses import replace as _replace
-
-                    req = _replace(req, handle_id=new_remap[req.handle_id])
-                # Bypass the retry loop for replay itself — we don't want
-                # recursive retries while we're already mid-respawn. The
-                # per-call deadline still applies (``_raw_call_locked`` uses
-                # ``_resolve_deadline(...)`` which collapses to the session
-                # default), so a hung worker on replay will eventually
-                # surface as ``TimeoutError`` rather than blocking forever.
+                    req = replace(req, handle_id=new_remap[req.handle_id])
                 resp = self._raw_call_locked(req)
                 if resp.new_handle_id is not None and step.apply_new_handle is not None:
                     old_id = step.apply_new_handle(resp.new_handle_id)
                     if old_id is not None:
                         new_remap[old_id] = resp.new_handle_id
+
             # Compose this respawn's remap with the accumulated one so that
             # in-flight Requests carrying a handle id from *any* previous
             # incarnation (not just the immediately preceding one) get
@@ -988,76 +1315,119 @@ class SubprocessSession:
                 composed.setdefault(old, new)
             self._handle_remap = composed
 
+            # Replay finished, remap is final, reader can take over.
+            # Clear the close flag and start the reader in that order so
+            # any caller that races past the in-lock check finds a
+            # running reader.
+            self._closed_event.clear()
+            self._start_reader_thread()
+
     def _raw_call_locked(self, req: Request) -> Response:
-        """Single-shot RPC without retry or rpc_lock acquisition. Caller must
-        already hold ``_rpc_lock`` (and typically ``_respawn_lock``). Used
-        during replay inside ``_respawn``.
+        """Single-shot RPC for use during ``_respawn`` replay only.
+
+        Replay runs while the reader thread is NOT live (we stopped the old
+        one before reseting state, and we haven't started the new one yet),
+        so we can read responses directly from ``_resp_q``. The
+        ``request_id`` check below catches a stale response lingering
+        from the previous worker — that response would never line up with
+        the freshly-spawned worker's reply and silently corrupt replay.
+        It's an ``if/raise`` (not ``assert``) so it stays in place under
+        ``python -O`` / ``PYTHONOPTIMIZE``, where ``assert`` is stripped.
         """
-        self._check_alive()
+        rid = next(self._id_counter)
+        req_to_send = replace(req, request_id=rid)
         self.touch()
-        self._req_q.put(req)
-        deadline, effective_timeout = self._resolve_deadline(...)
-        resp = self._wait_response(deadline, effective_timeout)
+        self._req_q.put(req_to_send)
+        _deadline, effective_timeout = self._resolve_deadline(...)
+        # ``effective_timeout is None`` means the caller explicitly
+        # disabled per-call deadlines (``SUBPROCESS_CALL_TIMEOUT<=0``).
+        # Honor that here by issuing a blocking ``get()`` rather than
+        # inventing an arbitrary fallback; otherwise benchmark runs that
+        # disable the timeout would still see a 60s ceiling on replay.
+        if effective_timeout is None:
+            resp = self._resp_q.get()
+        else:
+            try:
+                resp = self._resp_q.get(timeout=effective_timeout)
+            except std_queue.Empty:
+                raise TimeoutError(f"Subprocess replay call exceeded {effective_timeout}s deadline")
+        if resp.request_id != rid:
+            raise SubprocessTransportError(
+                f"Replay response id mismatch: expected {rid}, got {resp.request_id!r}"
+            )
         return self._handle_response(resp)
 
     def shutdown(self, timeout: Optional[float] = None) -> None:
         """Tear down the worker process. Always reaches ``_terminate``, even
-        if the session is already marked ``_closed`` — a timeout or crash
-        flips ``_closed`` to True without reaping the child, and a second
-        call would orphan a still-alive process holding file locks.
-        Skip only the graceful SHUTDOWN sentinel when already closed.
+        if the session is already marked closed — a timeout or crash flips
+        the closed flag without reaping the child, and a second call would
+        orphan a still-alive process holding file locks.
 
         ``timeout`` (or ``self._shutdown_timeout`` when ``None``) is the
-        *shutdown* budget — distinct from the per-call ``effective_timeout``
-        used by ``call`` / ``call_async``. A healthy in-flight RPC can run
-        for up to its own deadline (default 300s via
-        ``SUBPROCESS_CALL_TIMEOUT``), which is normally well above the
-        shutdown budget. When ``_rpc_lock`` is pinned by such an RPC
-        longer than ``t``, we skip the graceful sentinel and
-        force-terminate — shutdown is allowed to be aggressive about
-        reaping a worker even if it interrupts an otherwise healthy call.
-
-        Serializes the SHUTDOWN/ACK round trip against ``_rpc_lock`` so a
-        concurrent ``call`` / ``call_async`` can't consume the shutdown ACK
-        as its own response (and vice versa) — both paths read from the
-        same ``_resp_q`` and ``Queue.get()`` is atomic, so two competing
-        consumers race and one ends up with the wrong message. The lock
-        acquire is bounded by ``t``: if a hung RPC pins the lock for
-        longer than that, we fall through to ``_terminate`` without
-        sending the graceful sentinel. The kill chain in ``_terminate``
-        reaps the worker regardless of whether the worker cooperates,
-        and the in-flight RPC will surface a transport error from the
-        dead queues — which is the point of having a hard timeout.
+        *shutdown* budget. The reader thread is signaled to exit, joined,
+        and its ``finally`` block fails any still-pending futures. Then we
+        send the graceful SHUTDOWN sentinel (if the worker is still alive)
+        and force-terminate.
         """
         t = timeout if timeout is not None else self._shutdown_timeout
 
-        acquired = self._rpc_lock.acquire(timeout=t)
-        try:
-            # Flip ``_closed`` under the lock when we got it so a concurrent
-            # ``shutdown()`` (or a fresh ``call``) sees the closed state and
-            # bails early. If we didn't acquire, set it anyway — better to
-            # block subsequent calls than to let them race the dying queues.
-            already_closed = self._closed
-            self._closed = True
-            if acquired and not already_closed and self._proc.is_alive():
-                try:
-                    self._req_q.put(SHUTDOWN)
+        already_closed = self._closed_event.is_set()
+        # Set closed under the registry lock so any caller about to add a
+        # new entry sees the closed state and bails before inserting.
+        with self._pending_lock:
+            self._closed_event.set()
+
+        # Try to stop the reader cleanly. If it joins within ``t`` we
+        # own ``_resp_q`` exclusively and can drain the SHUTDOWN ack
+        # ourselves. If it doesn't, the reader is still alive — we let
+        # ``_terminate`` break the queue pipes below, which forces the
+        # reader's ``get()`` to raise (EOFError / OSError caught by the
+        # reader loop's exception clauses) and then we do a second
+        # join. Importantly: we do NOT reassign ``_resp_q``, so an
+        # in-flight reader can't end up as a second consumer of a
+        # fresh queue (contrast ``_respawn``, which DOES reassign and
+        # therefore raises if the join times out).
+        reader_owned = False
+        if self._reader_thread is not None and self._reader_thread.is_alive():
+            self._reader_thread.join(timeout=t)
+            reader_owned = not self._reader_thread.is_alive()
+        else:
+            reader_owned = True
+
+        if not already_closed and self._proc.is_alive():
+            try:
+                self._req_q.put(SHUTDOWN)
+                # Only drain the ack here if the reader is confirmed
+                # gone. With a still-running reader we'd race it for
+                # the message; it'll drop the ack (request_id=0) on
+                # its own.
+                if reader_owned:
                     try:
                         self._resp_q.get(timeout=t)
                     except std_queue.Empty:
                         pass
-                except Exception:
-                    pass
-        finally:
-            if acquired:
-                self._rpc_lock.release()
-        # ``_terminate`` runs outside ``_rpc_lock`` on purpose: holding the
-        # lock through ``join``/``terminate``/``kill`` could pin it for
-        # seconds, and any caller that acquires the lock next would put on
-        # a dead queue and hang. ``_check_alive`` (which all calls go
-        # through under the lock) reads ``_closed`` and bails first, so a
-        # post-terminate caller never reaches the queue ops.
+            except Exception:
+                pass
+
+        # ``_terminate`` reaps the worker process, which closes the
+        # multiprocessing queue's underlying pipe; that unblocks any
+        # reader still parked in ``get()``.
         self._terminate(timeout=t)
+
+        # Second join opportunity for a reader that was stuck inside
+        # ``get()`` — the queue pipe just died, so its exception path
+        # should run and the thread should exit promptly. If it
+        # doesn't, the thread is a daemon and the process will reap
+        # it at exit; nothing more we can do without unsafe forcible
+        # cancellation.
+        if self._reader_thread is not None and self._reader_thread.is_alive():
+            self._reader_thread.join(timeout=t)
+        self._reader_thread = None
+
+        # Safety net: if the reader didn't drain pending (e.g. it was
+        # never started because ``wait_for_ready`` failed, or it was
+        # still wedged above), do it now.
+        self._fail_all_pending(SubprocessTransportError("Subprocess session is closed"))
 
         # Break the ref cycle: each ReplayStep's ``make_request`` is a
         # closure that captures a proxy object, and the proxy holds

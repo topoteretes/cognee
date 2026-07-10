@@ -1,12 +1,8 @@
-import localFetch from "@/modules/instances/localFetch";
+import { CogneeInstance } from "../instances/types";
 
-export default async function deleteApiKey(keyId: string): Promise<void> {
-  const response = await localFetch(`/v1/auth/api-keys/${encodeURIComponent(keyId)}`, {
-    method: "DELETE",
-  });
-
+export default async function deleteApiKey(instance: CogneeInstance, keyId: string): Promise<void> {
+  const response = await instance.fetch(`/auth/api-keys/${keyId}`, { method: "DELETE" });
   if (!response.ok) {
-    const err = await response.text().catch(() => "Failed to delete API key");
-    throw new Error(err);
+    throw new Error(`Failed to delete API key (${response.status})`);
   }
 }
