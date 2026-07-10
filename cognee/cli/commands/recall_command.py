@@ -7,6 +7,7 @@ from cognee.cli import DEFAULT_DOCS_URL
 from cognee.cli.config import SEARCH_TYPE_CHOICES, OUTPUT_FORMAT_CHOICES
 import cognee.cli.echo as fmt
 from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
+from cognee.cli.hints import add_quiet_flag, recall_hint
 
 
 class RecallCommand(SupportsCliCommand):
@@ -64,6 +65,7 @@ Otherwise, this is a memory-oriented alias for `cognee search`.
             default="pretty",
             help="Output format (default: pretty)",
         )
+        add_quiet_flag(parser)
 
     def execute(self, args: argparse.Namespace) -> None:
         try:
@@ -129,6 +131,12 @@ Otherwise, this is a memory-oriented alias for `cognee search`.
             else:
                 if not results:
                     fmt.warning("No results found for your query.")
+                    # Hint scoped to the pretty output path: json/simple are
+                    # for scripting so an extra line would corrupt the sink.
+                    hint_dataset = (
+                        args.datasets[0] if getattr(args, "datasets", None) else "<dataset-name>"
+                    )
+                    recall_hint(args, hint_dataset, had_results=False)
                     return
 
                 # Detect session results by _source tag

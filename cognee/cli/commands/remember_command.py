@@ -6,6 +6,7 @@ from cognee.cli import DEFAULT_DOCS_URL
 from cognee.cli.config import CHUNKER_CHOICES
 import cognee.cli.echo as fmt
 from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
+from cognee.cli.hints import add_quiet_flag, remember_hint
 
 
 class RememberCommand(SupportsCliCommand):
@@ -60,6 +61,7 @@ After completion, use `cognee recall` (or `cognee search`) to query the graph.
             action="store_true",
             help="Estimate LLM token usage and cost without ingesting data or making LLM calls",
         )
+        add_quiet_flag(parser)
 
     def execute(self, args: argparse.Namespace) -> None:
         try:
@@ -124,6 +126,8 @@ After completion, use `cognee recall` (or `cognee search`) to query the graph.
                     fmt.echo(f"  Content hash: {result.content_hash}")
                 if result.elapsed_seconds is not None:
                     fmt.echo(f"  Elapsed: {result.elapsed_seconds:.1f}s")
+
+            remember_hint(args, args.dataset_name)
 
         except Exception as e:
             if isinstance(e, CliCommandInnerException):
