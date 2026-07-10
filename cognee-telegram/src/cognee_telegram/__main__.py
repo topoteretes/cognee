@@ -15,6 +15,9 @@ def main() -> None:
     logging.basicConfig(
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s", level=logging.INFO
     )
+    # python-telegram-bot talks to the API over httpx, which logs each request line
+    # at INFO — and the request URL embeds the bot token. Keep it out of the logs.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
     settings = Settings.from_env()
 
     # Imported here so a missing python-telegram-bot fails with a clear message
