@@ -278,6 +278,8 @@ _STOPWORDS = frozenset(
     you your about above after again all also any because before below between both
     but can could would should over under out up down if so such than too very
     provided context information based mention determine contain contains details
+    sorry apologize unfortunately unable relevant regarding specify specified
+    found find available covered
     """.split()
 )
 
