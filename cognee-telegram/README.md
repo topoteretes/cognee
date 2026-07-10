@@ -45,6 +45,11 @@ Bot:  The Q3 review is on Friday at 2pm in room 4.
       • "The Q3 review is on Friday at 2pm in room 4."
 ```
 
+> **Using it in a group?** Telegram bots have *privacy mode* on by default, so a bot only
+> sees commands and @-mentions there. To let it passively capture every message, either
+> disable privacy mode via [@BotFather](https://t.me/BotFather) (`/setprivacy` → *Disable*)
+> or make the bot a group admin. DMs work either way.
+
 ## Commands
 
 | Command | What it does |
