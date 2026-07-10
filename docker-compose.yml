@@ -98,6 +98,7 @@ services:
     restart: always
     environment:
       - NEXT_PUBLIC_BACKEND_API_URL=${NEXT_PUBLIC_BACKEND_API_URL:-http://localhost:8000}
+      - NEXT_PUBLIC_IS_CLOUD_ENVIRONMENT=false
     profiles:
         - ui
     build:
