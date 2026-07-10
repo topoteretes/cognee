@@ -19,7 +19,7 @@ so no property is lost.
 """
 
 import json
-from typing import Any, Dict, List, Optional, Type, Union
+from typing import Any, Dict, Iterable, List, Optional, Tuple, Type, Union
 
 from pydantic import BaseModel, ConfigDict, Field, SerializeAsAny, create_model, field_validator
 
@@ -59,13 +59,41 @@ class _DynamicDataPoint(DataPoint):
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="allow")
 
 
-_dynamic_models: Dict[str, Type[DataPoint]] = {}
+_dynamic_models: Dict[Tuple[str, Tuple[str, ...], Tuple[str, ...]], Type[DataPoint]] = {}
 
 
-def _dynamic_model(type_name: str) -> Type[DataPoint]:
-    if type_name not in _dynamic_models:
-        _dynamic_models[type_name] = create_model(type_name, __base__=_DynamicDataPoint)
-    return _dynamic_models[type_name]
+def _dynamic_model(
+    type_name: str,
+    property_names: Optional[Iterable[str]] = None,
+    index_fields: Optional[List[str]] = None,
+) -> Type[DataPoint]:
+    """A DataPoint subclass named ``type_name`` that DECLARES the record's
+    properties as fields and bakes ``index_fields`` into the CLASS-level
+    metadata default.
+
+    Instance-level state is not enough on either count: downstream model
+    machinery only sees declared fields. ``get_graph_from_model`` iterates
+    declared fields when collecting node properties (``extra="allow"`` values
+    are silently dropped — imported DocumentChunk text never reached storage),
+    and rebuilds nodes through ``copy_model``, which re-applies class field
+    defaults (a plain DataPoint metadata default of ``index_fields: []``
+    dropped the embeddable-field markers, so nothing was vector-indexed).
+    """
+    extra_fields = tuple(
+        sorted(
+            name
+            for name in (property_names or ())
+            if name != "metadata" and name not in DataPoint.model_fields
+        )
+    )
+    key = (type_name, extra_fields, tuple(index_fields or ()))
+    if key not in _dynamic_models:
+        field_definitions: Dict[str, Any] = {name: (Any, None) for name in extra_fields}
+        field_definitions["metadata"] = (dict, {"index_fields": list(index_fields or [])})
+        _dynamic_models[key] = create_model(
+            type_name, __base__=_DynamicDataPoint, **field_definitions
+        )
+    return _dynamic_models[key]
 
 
 def _clean_properties(properties: Dict[str, Any]) -> Dict[str, Any]:
@@ -101,14 +129,20 @@ def rehydrate_node(
         except Exception:  # noqa: BLE001 — fall back to a dynamic model
             pass
 
+    # Carry the record's properties and embeddable fields onto the dynamic
+    # CLASS so they survive downstream field iteration and copy_model
+    # rebuilds (see _dynamic_model).
+    metadata = props.get("metadata")
+    index_fields = metadata.get("index_fields") if isinstance(metadata, dict) else None
+
     try:
         # Created lazily: only when the registered class is absent or fails.
-        return _dynamic_model(type_name)(**props)
+        return _dynamic_model(type_name, props, index_fields)(**props)
     except Exception:  # noqa: BLE001 — final fallback below
         pass
 
     base_safe = {key: value for key, value in props.items() if key in _BASE_FIELDS}
-    return _dynamic_model(type_name)(**base_safe)
+    return _dynamic_model(type_name, base_safe, index_fields)(**base_safe)
 
 
 class GraphEdge(BaseModel):

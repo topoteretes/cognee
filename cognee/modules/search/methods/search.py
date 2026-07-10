@@ -4,6 +4,7 @@ from typing import Any, List, Optional, Tuple, Type, Union
 from uuid import UUID
 
 from cognee import __version__ as cognee_version
+from cognee.base_config import get_base_config
 from cognee.context_global_variables import (
     backend_access_control_enabled,
     set_database_global_context_variables,
@@ -51,7 +52,7 @@ async def search(
     session_id: Optional[str] = None,
     wide_search_top_k: Optional[int] = 100,
     triplet_distance_penalty: Optional[float] = 6.5,
-    feedback_influence: float = 0.0,
+    feedback_influence: float = get_base_config().default_feedback_influence,
     verbose=False,
     retriever_specific_config: Optional[dict] = None,
     neighborhood_depth: Optional[int] = None,
@@ -164,7 +165,7 @@ async def authorized_search(
     session_id: Optional[str] = None,
     wide_search_top_k: Optional[int] = 100,
     triplet_distance_penalty: Optional[float] = 6.5,
-    feedback_influence: float = 0.0,
+    feedback_influence: float = get_base_config().default_feedback_influence,
     retriever_specific_config: Optional[dict] = None,
     neighborhood_depth: Optional[int] = None,
     neighborhood_seed_top_k: Optional[int] = None,
@@ -224,7 +225,7 @@ async def search_in_datasets_context(
     session_id: Optional[str] = None,
     wide_search_top_k: Optional[int] = 100,
     triplet_distance_penalty: Optional[float] = 6.5,
-    feedback_influence: float = 0.0,
+    feedback_influence: float = get_base_config().default_feedback_influence,
     retriever_specific_config: Optional[dict] = None,
     neighborhood_depth: Optional[int] = None,
     neighborhood_seed_top_k: Optional[int] = None,
@@ -251,7 +252,7 @@ async def search_in_datasets_context(
         session_id: Optional[str] = None,
         wide_search_top_k: Optional[int] = 100,
         triplet_distance_penalty: Optional[float] = 6.5,
-        feedback_influence: float = 0.0,
+        feedback_influence: float = get_base_config().default_feedback_influence,
         retriever_specific_config: Optional[dict] = None,
         neighborhood_depth: Optional[int] = None,
         neighborhood_seed_top_k: Optional[int] = None,
@@ -368,15 +369,13 @@ async def search_in_datasets_context(
             # still forward any per-call LLM/embedding overrides onto the async
             # context (set_database_global_context_variables applies these even
             # in single-tenant mode and ignores the dataset argument).
-            if llm_config is not None or embedding_config is not None:
-                async with set_database_global_context_variables(
-                    dataset.id if dataset else None,
-                    user.id,
-                    llm_config=llm_config,
-                    embedding_config=embedding_config,
-                ):
-                    return await get_retriever_output(**retriever_kwargs)
-            return await get_retriever_output(**retriever_kwargs)
+            async with set_database_global_context_variables(
+                dataset.id if dataset else None,
+                user.id,
+                llm_config=llm_config,
+                embedding_config=embedding_config,
+            ):
+                return await get_retriever_output(**retriever_kwargs)
 
         tasks.append(_search_without_context())
 

@@ -10,7 +10,7 @@ from typing import AsyncGenerator, List, Optional, Union
 from pydantic import BaseModel, Field
 
 from cognee.infrastructure.databases.graph import get_graph_engine
-from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.llm import LLMGateway
 from cognee.infrastructure.llm.prompts import render_prompt, read_query_prompt
 from cognee.shared.logging_utils import get_logger
@@ -150,7 +150,7 @@ async def create_chunk_associations(
         f"Creating associations for {len(valid_chunks)} chunks with threshold {similarity_threshold}"
     )
 
-    vector_engine = get_vector_engine()
+    vector_engine = await get_vector_engine_async()
 
     id_to_text = {}
     for chunk_text in valid_chunks:

@@ -5,7 +5,7 @@ import pathlib
 import cognee
 from cognee.api.v1.datasets import datasets
 from cognee.context_global_variables import backend_access_control_enabled
-from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.engine.operations.setup import setup
 from cognee.modules.graph.methods import (
@@ -60,7 +60,7 @@ async def main():
     )
     maries_data_id = add_result.data_ingestion_info[0]["data_id"]
 
-    vector_engine = get_vector_engine()
+    vector_engine = await get_vector_engine_async()
 
     assert not await vector_engine.has_collection("EdgeType_relationship_name")
     assert not await vector_engine.has_collection("Entity_name")
