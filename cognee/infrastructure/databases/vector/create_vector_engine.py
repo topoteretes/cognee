@@ -133,6 +133,24 @@ def evict_vector_engine(**kwargs) -> bool:
     )
 
 
+def evict_vector_engines_for_database(vector_db_name: str) -> int:
+    """Evict every cached vector engine bound to *vector_db_name*.
+
+    The same per-dataset database can be cached under multiple keys: the
+    dataset-handler paths and the pipeline's context-config path build their
+    engines with different kwargs (e.g. ``vector_dataset_database_handler``),
+    so key-exact ``evict_vector_engine`` misses entries and leaves an engine
+    with a dead connection pool and stale collection metadata. Per-dataset
+    database names are dataset UUIDs, so matching the name against key fields
+    cannot collide with other entries.
+
+    Returns the number of evicted entries.
+    """
+    if not vector_db_name:
+        raise ValueError("vector_db_name must be a non-empty database name")
+    return _create_vector_engine.cache_evict_matching(vector_db_name=vector_db_name)
+
+
 def is_vector_engine_cached(**kwargs) -> bool:
     """Check whether a vector engine entry exists in the cache without creating."""
     normalized = _normalize_optional_create_vector_engine_params(kwargs)
