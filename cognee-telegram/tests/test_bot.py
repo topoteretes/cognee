@@ -81,7 +81,7 @@ def test_render_answer_forum_topic_deep_link():
 
 # -- handlers ------------------------------------------------------------
 async def test_ingest_message_stores_to_memory(mock_cognee):
-    adapter = CogneeMemoryAdapter(batch_size=1)
+    adapter = CogneeMemoryAdapter()
     update = make_update(text="remember the wifi password is hunter2")
     await ingest_message(update, make_context(adapter))
 
@@ -92,7 +92,7 @@ async def test_ingest_message_stores_to_memory(mock_cognee):
 
 
 async def test_ingest_skips_when_opted_out(mock_cognee):
-    adapter = CogneeMemoryAdapter(batch_size=1)
+    adapter = CogneeMemoryAdapter()
     adapter.opt_out(7)
     update = make_update(text="should not be stored")
     await ingest_message(update, make_context(adapter))
@@ -101,7 +101,7 @@ async def test_ingest_skips_when_opted_out(mock_cognee):
 
 async def test_ask_command_replies_with_answer_and_sources(mock_cognee, graph_result):
     mock_cognee.recall.return_value = [graph_result("The wifi password is hunter2.")]
-    adapter = CogneeMemoryAdapter(batch_size=1)
+    adapter = CogneeMemoryAdapter()
     # seed the ledger so the citation resolves
     update_seed = make_update(text="the wifi password is hunter2", message_id=5)
     await ingest_message(update_seed, make_context(adapter))
@@ -115,7 +115,7 @@ async def test_ask_command_replies_with_answer_and_sources(mock_cognee, graph_re
 
 
 async def test_ask_without_query_shows_usage(mock_cognee):
-    adapter = CogneeMemoryAdapter(batch_size=1)
+    adapter = CogneeMemoryAdapter()
     update = make_update(text="/ask")
     await ask_command(update, make_context(adapter, args=[]))
     reply = update.effective_message.reply_text.call_args.args[0]
@@ -126,7 +126,7 @@ async def test_ask_without_query_shows_usage(mock_cognee):
 async def test_ask_replies_friendly_error_on_backend_failure(mock_cognee):
     # Live test exposed: a rate-limited/failed backend must not leave /ask silent.
     mock_cognee.recall.side_effect = RuntimeError("rate limited")
-    adapter = CogneeMemoryAdapter(batch_size=1)
+    adapter = CogneeMemoryAdapter()
     update = make_update(text="/ask")
     await ask_command(update, make_context(adapter, args=["anything"]))
     reply = update.effective_message.reply_text.call_args.args[0]
@@ -134,7 +134,7 @@ async def test_ask_replies_friendly_error_on_backend_failure(mock_cognee):
 
 
 async def test_forget_command_clears_memory(mock_cognee):
-    adapter = CogneeMemoryAdapter(batch_size=1)
+    adapter = CogneeMemoryAdapter()
     update = make_update(text="/forget")
     await forget_command(update, make_context(adapter))
 
@@ -144,7 +144,7 @@ async def test_forget_command_clears_memory(mock_cognee):
 
 
 async def test_optout_then_optin_toggles_capture(mock_cognee):
-    adapter = CogneeMemoryAdapter(batch_size=1)
+    adapter = CogneeMemoryAdapter()
     await optout_command(make_update(text="/optout"), make_context(adapter))
     assert adapter.is_opted_out(7) is True
     await optin_command(make_update(text="/optin"), make_context(adapter))

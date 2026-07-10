@@ -63,8 +63,7 @@ Bot:  The Q3 review is on Friday at 2pm in room 4.
   boundary `/forget` clears.
 - **Durable graph memory** — messages are ingested with `remember(dataset_name=...)`, which
   runs `add` + `cognify` to build a queryable knowledge graph for the chat. `/ask` then runs
-  `recall` over that graph. (Buffer with `COGNEE_TG_BATCH_SIZE` so a busy group triggers one
-  graph build per batch instead of per message.)
+  `recall` over that graph.
 - **Citations** — the bot keeps a `message → (chat_id, message_id)` ledger; when `recall`
   grounds an answer, the bot maps it back to the originating message and renders a
   `t.me/c/...` deep link (supergroups) or quotes the snippet (DMs / basic groups).
@@ -82,7 +81,6 @@ back a Slack/Discord bot later — the Telegram layer is just I/O.
 | `TELEGRAM_BOT_TOKEN` | — | **Required.** @BotFather token. |
 | `LLM_API_KEY` | — | **Required** (by cognee) to build/query memory. |
 | `COGNEE_TG_PER_USER` | `false` | Split group memory per sender (hard per-user delete). |
-| `COGNEE_TG_BATCH_SIZE` | `1` | Buffer N messages before one cognee write (raise it for busy groups). |
 | `COGNEE_TG_INGEST_DEFAULT` | `true` | Capture by default until a chat runs `/optout`. |
 
 ## Tests

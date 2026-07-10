@@ -11,7 +11,7 @@ def _dm(adapter, user_id=7):
 
 
 async def test_ingest_immediately_remembers_with_right_scope(mock_cognee):
-    adapter = CogneeMemoryAdapter(batch_size=1)
+    adapter = CogneeMemoryAdapter()
     scope = _dm(adapter)
     await adapter.ingest(scope, MessageRef(chat_id=7, message_id=1, text="hello", author="Ada"))
 
@@ -24,28 +24,13 @@ async def test_ingest_immediately_remembers_with_right_scope(mock_cognee):
 
 
 async def test_opted_out_chat_is_not_ingested(mock_cognee):
-    adapter = CogneeMemoryAdapter(batch_size=1)
+    adapter = CogneeMemoryAdapter()
     scope = _dm(adapter)
     adapter.opt_out(scope.chat_id)
 
     ingested = await adapter.ingest(scope, MessageRef(chat_id=7, message_id=1, text="secret"))
     assert ingested is False
     mock_cognee.remember.assert_not_awaited()
-
-
-async def test_batching_flushes_only_at_threshold(mock_cognee):
-    adapter = CogneeMemoryAdapter(batch_size=2)
-    scope = _dm(adapter)
-
-    flushed = await adapter.ingest(scope, MessageRef(chat_id=7, message_id=1, text="one"))
-    assert flushed is False
-    mock_cognee.remember.assert_not_awaited()
-
-    flushed = await adapter.ingest(scope, MessageRef(chat_id=7, message_id=2, text="two"))
-    assert flushed is True
-    mock_cognee.remember.assert_awaited_once()
-    args, _ = mock_cognee.remember.call_args
-    assert args[0] == ["one", "two"]
 
 
 async def test_extract_reads_real_recall_shapes(graph_result, session_result):
@@ -58,7 +43,7 @@ async def test_extract_reads_real_recall_shapes(graph_result, session_result):
 
 async def test_answer_tags_mixed_sources(mock_cognee, graph_result, session_result):
     mock_cognee.recall.return_value = [session_result("fresh note"), graph_result("durable fact")]
-    adapter = CogneeMemoryAdapter(batch_size=1)
+    adapter = CogneeMemoryAdapter()
     answer = await adapter.answer(_dm(adapter), "what do you know?")
     assert answer.source_tag == "mixed"
     assert "fresh note" in answer.text and "durable fact" in answer.text
@@ -66,7 +51,7 @@ async def test_answer_tags_mixed_sources(mock_cognee, graph_result, session_resu
 
 async def test_answer_recalls_with_references_and_resolves_citations(mock_cognee, graph_result):
     mock_cognee.recall.return_value = [graph_result("The revenue report is due Friday.")]
-    adapter = CogneeMemoryAdapter(batch_size=1)
+    adapter = CogneeMemoryAdapter()
     scope = _dm(adapter)
     await adapter.ingest(
         scope, MessageRef(chat_id=7, message_id=11, text="the revenue report is due friday")
@@ -84,18 +69,8 @@ async def test_answer_recalls_with_references_and_resolves_citations(mock_cognee
     assert answer.citations[0].message_id == 11
 
 
-async def test_answer_flushes_pending_messages_first(mock_cognee):
-    adapter = CogneeMemoryAdapter(batch_size=10)  # nothing auto-flushes
-    scope = _dm(adapter)
-    await adapter.ingest(scope, MessageRef(chat_id=7, message_id=1, text="buffered note"))
-    mock_cognee.remember.assert_not_awaited()
-
-    await adapter.answer(scope, "anything?")
-    mock_cognee.remember.assert_awaited_once()  # /ask forced the flush
-
-
 async def test_forget_clears_dataset_and_drops_ledger(mock_cognee):
-    adapter = CogneeMemoryAdapter(batch_size=1)
+    adapter = CogneeMemoryAdapter()
     scope = _dm(adapter)
     await adapter.ingest(scope, MessageRef(chat_id=7, message_id=1, text="remember me"))
 
@@ -106,25 +81,13 @@ async def test_forget_clears_dataset_and_drops_ledger(mock_cognee):
     assert adapter.ledger.refs("telegram_dm_7") == []
 
 
-async def test_forget_clears_pending_buffer(mock_cognee):
-    # Buffered-but-not-yet-flushed messages must be dropped by /forget too.
-    adapter = CogneeMemoryAdapter(batch_size=10)
-    scope = _dm(adapter)
-    await adapter.ingest(scope, MessageRef(chat_id=7, message_id=1, text="buffered"))
-    mock_cognee.remember.assert_not_awaited()  # still in the buffer
-
-    await adapter.forget(scope)
-    await adapter.flush(scope)  # nothing should be left to flush
-    mock_cognee.remember.assert_not_awaited()
-
-
 async def test_answer_returns_empty_when_dataset_missing(mock_cognee):
     # Before any ingest (or after /forget) the dataset doesn't exist; recall raises
     # DatasetNotFoundError — the bot must say "nothing here yet", not crash.
     from cognee.modules.data.exceptions.exceptions import DatasetNotFoundError
 
     mock_cognee.recall.side_effect = DatasetNotFoundError(message="No datasets found.")
-    adapter = CogneeMemoryAdapter(batch_size=1)
+    adapter = CogneeMemoryAdapter()
     answer = await adapter.answer(_dm(adapter), "anything?")
     assert answer.text == ""
     assert answer.citations == []
@@ -135,7 +98,7 @@ async def test_answer_strips_raw_evidence_block(mock_cognee, graph_result):
     # show only the answer and render its own clean sources instead.
     raw = 'The Q3 review is Friday.\n\nEvidence:\n- chunk 1 of document text_x (data_id: a): "x"'
     mock_cognee.recall.return_value = [graph_result(raw)]
-    adapter = CogneeMemoryAdapter(batch_size=1)
+    adapter = CogneeMemoryAdapter()
     answer = await adapter.answer(_dm(adapter), "when is the review?")
     assert answer.text == "The Q3 review is Friday."
     assert "Evidence:" not in answer.text
@@ -143,7 +106,7 @@ async def test_answer_strips_raw_evidence_block(mock_cognee, graph_result):
 
 async def test_empty_recall_yields_no_citations(mock_cognee):
     mock_cognee.recall.return_value = []
-    adapter = CogneeMemoryAdapter(batch_size=1)
+    adapter = CogneeMemoryAdapter()
     scope = _dm(adapter)
     answer = await adapter.answer(scope, "nothing stored yet")
     assert answer.text == ""
@@ -153,7 +116,7 @@ async def test_empty_recall_yields_no_citations(mock_cognee):
 
 async def test_opt_in_mode_captures_only_after_opt_in(mock_cognee):
     # With ingest_enabled_default=False a chat must opt in before anything is stored.
-    adapter = CogneeMemoryAdapter(batch_size=1, ingest_enabled_default=False)
+    adapter = CogneeMemoryAdapter(ingest_enabled_default=False)
     scope = _dm(adapter)
     assert adapter.is_opted_out(scope.chat_id) is True
     assert await adapter.ingest(scope, MessageRef(chat_id=7, message_id=1, text="hi")) is False

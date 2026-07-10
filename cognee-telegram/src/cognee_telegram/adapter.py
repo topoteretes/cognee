@@ -64,8 +64,6 @@ class CogneeMemoryAdapter:
 
     Args:
         per_user_in_group: Split group memory per sender (hard per-user delete).
-        batch_size: Buffer this many messages before one ``remember`` call;
-            ``1`` ingests immediately. A query always flushes first.
         ingest_enabled_default: Whether a fresh chat captures messages until
             it runs ``/optout``.
     """
@@ -74,14 +72,11 @@ class CogneeMemoryAdapter:
         self,
         *,
         per_user_in_group: bool = False,
-        batch_size: int = 1,
         ingest_enabled_default: bool = True,
     ) -> None:
         self.per_user_in_group = per_user_in_group
-        self.batch_size = max(1, batch_size)
         self.ingest_enabled_default = ingest_enabled_default
         self.ledger = CitationLedger()
-        self._buffers: dict[str, list[MessageRef]] = {}
         # chat_id -> capturing? Absent means "use ingest_enabled_default".
         self._capture: dict[int, bool] = {}
 
@@ -109,44 +104,29 @@ class CogneeMemoryAdapter:
 
     # -- ingest ----------------------------------------------------------
     async def ingest(self, scope: Scope, ref: MessageRef) -> bool:
-        """Capture one message. Returns True if it was flushed to cognee now.
+        """Capture one message into the chat's durable graph.
 
-        No-op when the chat has opted out. Records the message in the citation
-        ledger immediately so a later ``/ask`` can cite it.
+        No-op when the chat has opted out. Uses ``remember(dataset_name=...)``
+        (add + cognify), which creates the per-chat dataset and builds a
+        queryable knowledge graph. We deliberately do **not** pass a
+        ``session_id``: a session-only write never creates the dataset, so the
+        background graph bridge can't populate it. The message is recorded in
+        the citation ledger only after it is durably stored, so ``/ask`` never
+        cites a message that failed to persist.
         """
         if self.is_opted_out(scope.chat_id):
             return False
+        await cognee.remember([ref.attributed_text()], dataset_name=scope.dataset_name)
         self.ledger.record(scope.dataset_name, ref)
-        buffer = self._buffers.setdefault(scope.dataset_name, [])
-        buffer.append(ref)
-        if len(buffer) >= self.batch_size:
-            await self.flush(scope)
-            return True
-        return False
-
-    async def flush(self, scope: Scope) -> None:
-        """Ingest any buffered messages into the chat's durable graph.
-
-        Uses ``remember(dataset_name=...)`` (add + cognify), which creates the
-        per-chat dataset and builds a queryable knowledge graph. We deliberately
-        do **not** pass ``session_id`` here: a session-only write never creates
-        the dataset, so the background graph bridge can't populate it.
-        """
-        buffer = self._buffers.pop(scope.dataset_name, [])
-        if not buffer:
-            return
-        texts = [ref.attributed_text() for ref in buffer]
-        await cognee.remember(texts, dataset_name=scope.dataset_name)
+        return True
 
     # -- answer ----------------------------------------------------------
     async def answer(self, scope: Scope, query: str) -> Answer:
         """Recall an answer for ``query`` and resolve its Telegram citations.
 
-        Flushes pending messages first so the query sees everything just sent.
         Returns an empty ``Answer`` when this chat has no memory yet (no dataset)
         instead of raising, so the bot can say "nothing here yet".
         """
-        await self.flush(scope)
         try:
             results = await cognee.recall(
                 query, datasets=[scope.dataset_name], include_references=True
@@ -178,4 +158,3 @@ class CogneeMemoryAdapter:
         """Clear a chat's durable dataset (graph + vectors) and drop the ledger."""
         await cognee.forget(dataset=scope.dataset_name)
         self.ledger.drop(scope.dataset_name)
-        self._buffers.pop(scope.dataset_name, None)
