@@ -1,7 +1,6 @@
 name: automation | Draft Docs PRs For Previous Day Dev PRs
 
 on:
-  pull_request:
   workflow_dispatch:
     inputs:
       lookback_days:
@@ -374,7 +373,7 @@ jobs:
     needs:
       - prepare-merged-branches
       - create-docs-prs
-    #if: ${{ failure() }}
+    if: ${{ failure() }}
     runs-on: ubuntu-22.04
     steps:
       - name: Send failure email
