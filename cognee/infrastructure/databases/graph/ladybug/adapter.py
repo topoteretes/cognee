@@ -339,7 +339,7 @@ class LadybugAdapter(GraphDBInterface):
         # down, surfacing "cannot schedule new futures after shutdown".
         # ``threading.Lock`` (not ``asyncio.Lock``) for cross-loop safety:
         # ``close()`` may be invoked from a foreign loop via
-        # ``closing_lru_cache._close_value`` running ``asyncio.run``.
+        # ``closing_lru_cache._start_close`` running ``asyncio.run``.
         self._lifecycle_lock = threading.Lock()
 
     def _ensure_schema(self) -> None:
@@ -870,7 +870,7 @@ class LadybugAdapter(GraphDBInterface):
         Intentionally does **not** hold ``_connection_lock``: that lock is an
         ``asyncio.Lock`` bound to the loop on which the adapter was created.
         LRU eviction may invoke ``close()`` from a different loop (for
-        example via ``asyncio.run`` in ``closing_lru_cache._close_value``),
+        example via ``asyncio.run`` in ``closing_lru_cache._start_close``),
         and awaiting a foreign-loop lock raises "got Future attached to a
         different loop". After this call the adapter is not reusable — see
         ``_drop_native_resources`` if you want a transient drop.
@@ -913,7 +913,7 @@ class LadybugAdapter(GraphDBInterface):
         # worker thread so awaiting ``close()`` doesn't freeze the calling
         # event loop. ``asyncio.to_thread`` is safe across loops — required
         # because ``close()`` may be invoked from a foreign loop via
-        # ``closing_lru_cache._close_value`` running ``asyncio.run``.
+        # ``closing_lru_cache._start_close`` running ``asyncio.run``.
         if executor is not None:
             await asyncio.to_thread(executor.shutdown, True)
         # In subprocess mode, ``_drop_native_resources`` calls

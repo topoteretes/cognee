@@ -2,7 +2,7 @@ from uuid import UUID
 
 from cognee.context_global_variables import backend_access_control_enabled
 from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
-from cognee.infrastructure.databases.vector.get_vector_engine import get_vector_engine
+from cognee.infrastructure.databases.vector.get_vector_engine import get_vector_engine_async
 from cognee.modules.graph.legacy.has_edges_in_legacy_ledger import has_edges_in_legacy_ledger
 from cognee.modules.graph.legacy.has_nodes_in_legacy_ledger import has_nodes_in_legacy_ledger
 from cognee.modules.graph.methods import (
@@ -109,7 +109,7 @@ async def delete_data_nodes_and_edges(dataset_id: UUID, data_id: UUID, user_id: 
                 e,
             )
         try:
-            vector_engine = get_vector_engine()
+            vector_engine = await get_vector_engine_async()
             await vector_engine.remove_belongs_to_set_tags(
                 orphaned_nodeset_labels, node_ids=slug_ids
             )

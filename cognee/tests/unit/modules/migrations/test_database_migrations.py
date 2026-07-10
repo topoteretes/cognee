@@ -369,8 +369,11 @@ def test_adapter_storage_sync_runs_on_version_change_even_at_chain_head(monkeypa
         async def _fake_graph():
             return object()
 
+        async def _fake_vector():
+            return fake_vector
+
         monkeypatch.setattr(runner, "get_graph_engine", _fake_graph)
-        monkeypatch.setattr(runner, "get_vector_engine", lambda: fake_vector)
+        monkeypatch.setattr(runner, "get_vector_engine_async", _fake_vector)
 
         # version changed (0.0.0-old != 9.9.9-new) -> adapter sync runs once,
         # even though the chain is at head (no data migration applied).

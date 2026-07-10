@@ -30,7 +30,7 @@ async def test_create_chunk_associations_folds_provenance(monkeypatch):
     )
 
     monkeypatch.setattr(chunk_module, "get_graph_engine", AsyncMock(return_value=graph))
-    monkeypatch.setattr(chunk_module, "get_vector_engine", lambda: vector)
+    monkeypatch.setattr(chunk_module, "get_vector_engine_async", AsyncMock(return_value=vector))
     monkeypatch.setattr(
         chunk_module,
         "_compare_chunks",
