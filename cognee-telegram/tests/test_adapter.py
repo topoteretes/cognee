@@ -42,7 +42,13 @@ async def test_extract_reads_real_recall_shapes(graph_result, session_result):
 
 
 async def test_answer_recalls_with_references_and_resolves_citations(mock_cognee, graph_result):
-    mock_cognee.recall.return_value = [graph_result("The revenue report is due Friday.")]
+    # include_references appends an Evidence block quoting the retrieved source;
+    # citations resolve from that grounded block back to the original message.
+    grounded = (
+        "The revenue report is due Friday.\n\nEvidence:\n"
+        '- chunk 1 of document text_x (data_id: a): "the revenue report is due friday"'
+    )
+    mock_cognee.recall.return_value = [graph_result(grounded)]
     adapter = CogneeMemoryAdapter()
     scope = _dm(adapter)
     await adapter.ingest(
@@ -58,6 +64,22 @@ async def test_answer_recalls_with_references_and_resolves_citations(mock_cognee
     assert answer.text == "The revenue report is due Friday."
     assert len(answer.citations) == 1
     assert answer.citations[0].message_id == 11
+
+
+async def test_refusal_answer_is_never_cited(mock_cognee, graph_result):
+    # A "no information" answer carries no Evidence block; even though it shares
+    # "revenue"/"report" with a stored message, the bot must not cite it — matching
+    # an answer's own words against the ledger would fabricate a source.
+    mock_cognee.recall.return_value = [
+        graph_result("I don't have any information about the revenue report.")
+    ]
+    adapter = CogneeMemoryAdapter()
+    scope = _dm(adapter)
+    await adapter.ingest(
+        scope, MessageRef(chat_id=7, message_id=11, text="the revenue report is due friday")
+    )
+    answer = await adapter.answer(scope, "when is the revenue report due?")
+    assert answer.citations == []
 
 
 async def test_forget_clears_dataset_and_drops_ledger(mock_cognee):

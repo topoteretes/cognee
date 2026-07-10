@@ -98,12 +98,13 @@ class CogneeMemoryAdapter:
             return Answer(text="")
         texts = [text for text in (_answer_text(item) for item in results or []) if text]
         full_text = "\n\n".join(texts).strip()
-        # include_references appends a raw "Evidence:" block (doc/chunk ids) to the
-        # answer — use it to resolve citations, but show only the answer itself; the
-        # bot renders its own clean, tappable Sources from the ledger.
-        display_text = full_text.split("\n\nEvidence:")[0].strip()
-        citations = self.ledger.resolve(scope.dataset_name, full_text) if full_text else []
-        return Answer(text=display_text, citations=citations)
+        # include_references appends a grounded "Evidence:" block (the retrieved
+        # source chunks) to the answer. Show only the answer, but resolve citations
+        # from the Evidence block alone: it quotes what was actually retrieved, so a
+        # "no information" answer — which carries no Evidence — is never cited.
+        display_text, _, evidence = full_text.partition("\n\nEvidence:")
+        citations = self.ledger.resolve(scope.dataset_name, evidence) if evidence.strip() else []
+        return Answer(text=display_text.strip(), citations=citations)
 
     # -- forget ----------------------------------------------------------
     async def forget(self, scope: Scope) -> None:
