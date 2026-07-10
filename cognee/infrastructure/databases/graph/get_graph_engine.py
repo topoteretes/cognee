@@ -192,16 +192,16 @@ async def get_graph_engine() -> GraphDBInterface:
     return handle
 
 
-def _make_pghybrid_adapter():
-    """Build the uncached Postgres hybrid adapter used when
-    ``USE_UNIFIED_PROVIDER=pghybrid``. Not cached — the caller owns it, matching
-    the original inline behavior."""
-    from .postgres.adapter import PostgresAdapter
-    from cognee.infrastructure.databases.relational.get_relational_engine import (
-        get_relational_engine,
-    )
-
-    return PostgresAdapter(connection_string=get_relational_engine().db_uri)
+# def _make_pghybrid_adapter():
+#     """Build the uncached Postgres hybrid adapter used when
+#     ``USE_UNIFIED_PROVIDER=pghybrid``. Not cached — the caller owns it, matching
+#     the original inline behavior."""
+#     from .postgres.adapter import PostgresAdapter
+#     from cognee.infrastructure.databases.relational.get_relational_engine import (
+#         get_relational_engine,
+#     )
+#
+#     return PostgresAdapter(connection_string=get_relational_engine().db_uri)
 
 
 def _resolve_graph_engine_args(params: dict) -> tuple:
@@ -255,8 +255,8 @@ def create_graph_engine(
     For a detailed description, see _create_graph_engine.
     """
     # Check USE_UNIFIED_PROVIDER outside the cache so it's always re-read
-    if os.environ.get("USE_UNIFIED_PROVIDER", "") == "pghybrid":
-        return _make_pghybrid_adapter()
+    # if os.environ.get("USE_UNIFIED_PROVIDER", "") == "pghybrid":
+    #     return _make_pghybrid_adapter()
 
     return _create_graph_engine(*_resolve_graph_engine_args(locals()))
 
@@ -269,8 +269,8 @@ async def acreate_graph_engine(**kwargs):
     subprocess engine's worker has fully exited (releasing its file lock) before
     a new worker opens the same DB path.
     """
-    if os.environ.get("USE_UNIFIED_PROVIDER", "") == "pghybrid":
-        return _make_pghybrid_adapter()
+    # if os.environ.get("USE_UNIFIED_PROVIDER", "") == "pghybrid":
+    #     return _make_pghybrid_adapter()
 
     return await _create_graph_engine.acall(*_resolve_graph_engine_args(kwargs))
 
