@@ -45,7 +45,7 @@ jobs:
         uses: ./.github/actions/cognee_setup
         with:
           python-version: '3.11.x'
-          extra-dependencies: "scraping"
+          extra-dependencies: "scraping fastembed"
 
       - name: Run Retrieval Tests
         run: uv run pytest cognee/tests/integration/retrieval/ --splits 4 --group ${{ matrix.split-group }}
