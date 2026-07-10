@@ -18,18 +18,32 @@ from cognee_telegram.citations import MessageRef
 
 
 def make_update(
-    *, text=None, chat_id=7, chat_type="private", user_id=7, message_id=1, thread_id=None
+    *,
+    text=None,
+    caption=None,
+    chat_id=7,
+    chat_type="private",
+    user_id=7,
+    message_id=1,
+    thread_id=None,
+    is_topic_message=False,
+    has_user=True,
 ):
     update = MagicMock()
     update.effective_chat.id = chat_id
     update.effective_chat.type = chat_type
-    update.effective_user.id = user_id
-    update.effective_user.full_name = "Ada"
-    update.effective_user.username = "ada"
+    if has_user:
+        update.effective_user.id = user_id
+        update.effective_user.full_name = "Ada"
+        update.effective_user.username = "ada"
+    else:
+        update.effective_user = None
     message = MagicMock()
     message.message_id = message_id
     message.text = text
+    message.caption = caption
     message.message_thread_id = thread_id
+    message.is_topic_message = is_topic_message
     message.reply_text = AsyncMock()
     update.effective_message = message
     return update
@@ -87,6 +101,61 @@ async def test_ingest_message_stores_to_memory(mock_cognee):
     args, kwargs = mock_cognee.remember.call_args
     assert args[0] == ["Ada: remember the wifi password is hunter2"]
     assert kwargs["dataset_name"] == "telegram_dm_7"
+
+
+async def test_ingest_captures_media_caption(mock_cognee):
+    # A forwarded article/photo arrives as media with a caption, not message.text.
+    adapter = CogneeMemoryAdapter()
+    update = make_update(text=None, caption="great read https://example.com/article")
+    await ingest_message(update, make_context(adapter))
+    mock_cognee.remember.assert_awaited_once()
+    args, _ = mock_cognee.remember.call_args
+    assert "article" in args[0][0]
+
+
+async def test_forum_topic_scopes_to_its_thread(mock_cognee):
+    adapter = CogneeMemoryAdapter()
+    update = make_update(
+        text="topic note",
+        chat_type="supergroup",
+        chat_id=-1001234567890,
+        thread_id=42,
+        is_topic_message=True,
+    )
+    await ingest_message(update, make_context(adapter))
+    _, kwargs = mock_cognee.remember.call_args
+    assert kwargs["dataset_name"] == "telegram_group_n1001234567890_42"
+
+
+async def test_reply_thread_does_not_fork_dataset(mock_cognee):
+    # message_thread_id is populated for ordinary reply chains too; only real forum
+    # topics (is_topic_message) should get their own dataset.
+    adapter = CogneeMemoryAdapter()
+    update = make_update(
+        text="just a reply",
+        chat_type="supergroup",
+        chat_id=-1001234567890,
+        thread_id=42,
+        is_topic_message=False,
+    )
+    await ingest_message(update, make_context(adapter))
+    _, kwargs = mock_cognee.remember.call_args
+    assert kwargs["dataset_name"] == "telegram_group_n1001234567890"
+
+
+async def test_ingest_channel_post_without_sender(mock_cognee):
+    # Auto-forwarded channel posts / anonymous admins have no effective_user.
+    adapter = CogneeMemoryAdapter()
+    update = make_update(
+        text="auto-forwarded post",
+        chat_type="supergroup",
+        chat_id=-1001234567890,
+        has_user=False,
+    )
+    await ingest_message(update, make_context(adapter))
+    mock_cognee.remember.assert_awaited_once()
+    _, kwargs = mock_cognee.remember.call_args
+    assert kwargs["dataset_name"] == "telegram_group_n1001234567890"
 
 
 async def test_ingest_skips_when_opted_out(mock_cognee):

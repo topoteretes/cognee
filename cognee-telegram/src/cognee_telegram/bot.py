@@ -53,9 +53,15 @@ def _scope(adapter: CogneeMemoryAdapter, update: Update) -> Scope:
     chat = update.effective_chat
     user = update.effective_user
     message = update.effective_message
-    thread_id = getattr(message, "message_thread_id", None) if message else None
+    # message_thread_id is set for any reply thread, but only forum *topics* are a
+    # distinct memory boundary — otherwise ordinary reply chains would fork the dataset.
+    thread_id = message.message_thread_id if getattr(message, "is_topic_message", False) else None
+    # user is absent for channel/anonymous posts; user_id only scopes DMs, so 0 is safe.
     return adapter.scope_for(
-        chat_type=chat.type, chat_id=chat.id, user_id=user.id, thread_id=thread_id
+        chat_type=chat.type,
+        chat_id=chat.id,
+        user_id=user.id if user else 0,
+        thread_id=thread_id,
     )
 
 
@@ -81,7 +87,9 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 async def ingest_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     adapter: CogneeMemoryAdapter = context.bot_data["adapter"]
     message = update.effective_message
-    if message is None or not message.text:
+    # Capture plain text plus the caption on forwarded/media posts (links, articles).
+    text = (message.text or message.caption) if message else None
+    if not text:
         return
     scope = _scope(adapter, update)
     if adapter.is_opted_out(scope.chat_id):
@@ -89,7 +97,7 @@ async def ingest_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     ref = MessageRef(
         chat_id=scope.chat_id,
         message_id=message.message_id,
-        text=message.text,
+        text=text,
         thread_id=scope.thread_id,
         author=_author(update),
     )
@@ -171,7 +179,9 @@ def build_application(
     app.add_handler(CommandHandler("optout", optout_command))
     app.add_handler(CommandHandler("optin", optin_command))
     app.add_handler(ChatMemberHandler(greet_on_join, ChatMemberHandler.MY_CHAT_MEMBER))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, ingest_message))
+    app.add_handler(
+        MessageHandler((filters.TEXT | filters.CAPTION) & ~filters.COMMAND, ingest_message)
+    )
     app.add_error_handler(_on_error)
     return app
 
