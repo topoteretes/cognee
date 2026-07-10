@@ -36,3 +36,14 @@ def test_link_flow_merges_identities_and_shares_brain(harness):
         assert "1234" in reply or "passport" in reply.lower()
 
     asyncio.run(run())
+
+
+def test_link_code_redeems_case_insensitively(harness):
+    async def run():
+        link_reply = await harness.send("telegram", "alice_tg", "/link")
+        code = _extract_code(link_reply)
+        # Codes are lowercase hex; a code retyped in uppercase must still redeem.
+        redeem_reply = await harness.send("web", "alice_web", f"/link {code.upper()}")
+        assert "Linked" in redeem_reply
+
+    asyncio.run(run())

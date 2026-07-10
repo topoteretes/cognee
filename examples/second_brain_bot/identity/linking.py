@@ -44,6 +44,9 @@ class LinkingService:
         Returns the canonical user id on success, or None if the code is
         unknown or expired.
         """
+        # Minted codes are lowercase hex; normalize so a code retyped with a
+        # different case (e.g. mobile autocapitalization) still redeems.
+        code = code.strip().lower()
         entry = self._codes.get(code)
         if entry is None:
             return None
