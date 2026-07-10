@@ -10,10 +10,15 @@ answer's evidence back to the originating message to render a deep link.
 from __future__ import annotations
 
 import re
+from collections import deque
 from dataclasses import dataclass, field
 
 _WORD = re.compile(r"[a-z0-9]+")
 _MIN_TERM_LEN = 3
+
+# Cap the per-chat ledger so a long-lived bot's memory stays bounded. Recall only
+# ranks the newest messages anyway (recency), so we keep the most recent N.
+_MAX_REFS_PER_DATASET = 1000
 
 # Common words that shouldn't, on their own, link an answer back to a message.
 _STOPWORDS = frozenset(
@@ -104,12 +109,19 @@ class MessageRef:
 
 @dataclass
 class CitationLedger:
-    """Per-dataset record of ingested messages, used to resolve citations."""
+    """Per-dataset record of ingested messages, used to resolve citations.
 
-    _by_dataset: dict[str, list[MessageRef]] = field(default_factory=dict)
+    Each dataset keeps at most ``_MAX_REFS_PER_DATASET`` most-recent messages so
+    a long-running bot's memory footprint stays bounded.
+    """
+
+    _by_dataset: dict[str, deque[MessageRef]] = field(default_factory=dict)
 
     def record(self, dataset_name: str, ref: MessageRef) -> None:
-        self._by_dataset.setdefault(dataset_name, []).append(ref)
+        refs = self._by_dataset.get(dataset_name)
+        if refs is None:
+            refs = self._by_dataset[dataset_name] = deque(maxlen=_MAX_REFS_PER_DATASET)
+        refs.append(ref)
 
     def drop(self, dataset_name: str) -> None:
         """Forget a dataset's ledger (called on ``/forget``)."""

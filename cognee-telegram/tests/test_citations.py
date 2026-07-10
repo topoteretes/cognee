@@ -51,3 +51,18 @@ def test_ledger_drop_clears_dataset():
     ledger.record(ds, MessageRef(chat_id=7, message_id=1, text="something to remember"))
     ledger.drop(ds)
     assert ledger.refs(ds) == []
+
+
+def test_ledger_caps_entries_per_dataset():
+    # A long-running bot must not grow the ledger without bound; only the most
+    # recent N messages per chat are kept.
+    from cognee_telegram.citations import _MAX_REFS_PER_DATASET
+
+    ledger = CitationLedger()
+    ds = "telegram_dm_7"
+    for i in range(_MAX_REFS_PER_DATASET + 50):
+        ledger.record(ds, MessageRef(chat_id=7, message_id=i, text=f"note {i}"))
+    kept = ledger.refs(ds)
+    assert len(kept) == _MAX_REFS_PER_DATASET
+    assert kept[0].message_id == 50  # the 50 oldest were evicted
+    assert kept[-1].message_id == _MAX_REFS_PER_DATASET + 49
