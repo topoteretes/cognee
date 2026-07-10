@@ -60,7 +60,7 @@ def _scope(adapter: CogneeMemoryAdapter, update: Update) -> Scope:
 
 
 def render_answer(answer: Answer) -> str:
-    """Format a recall answer with tappable sources and an honest freshness tag."""
+    """Format a recall answer with tappable sources back to the original messages."""
     if not answer.text:
         return _EMPTY
     lines = [answer.text]
@@ -70,8 +70,6 @@ def render_answer(answer: Answer) -> str:
             label = ref.text if len(ref.text) <= 60 else ref.text[:59] + "…"
             link = ref.deep_link()
             lines.append(f"• {label} — {link}" if link else f'• "{label}"')
-    if answer.source_tag:
-        lines += ["", f"(from {answer.source_tag} memory)"]
     return "\n".join(lines)
 
 

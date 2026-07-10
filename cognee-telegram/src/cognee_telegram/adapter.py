@@ -15,39 +15,20 @@ from cognee.modules.data.exceptions.exceptions import DatasetNotFoundError
 from .citations import CitationLedger, MessageRef
 from .scoping import Scope, resolve_scope
 
-# recall() returns a list of RecallResponse models discriminated by a ``source``
-# field; the renderable text lives in a type-specific field: ``text`` for graph
-# hits (SearchResultItem), ``content`` for graph/session context, ``answer`` for
-# session QA entries. We read whichever is present.
-_TEXT_KEYS = ("answer", "text", "content", "search_result", "result")
-_SOURCE_KEYS = ("source", "_source")
+# recall() returns a discriminated union of RecallResponse models; the
+# renderable text lives in a type-specific field — ``answer`` for QA entries,
+# ``text`` for graph hits (SearchResultItem), ``content`` for context entries.
+# We read whichever is set.
+_TEXT_ATTRS = ("answer", "text", "content")
 
 
-def _extract(item: object) -> tuple[str, str | None]:
-    """Pull (text, source) out of one recall result item.
-
-    Handles the real cognee shape (Pydantic ``RecallResponse`` objects with a
-    ``source`` discriminator) and the dict/MCP shape, so the bot is robust to
-    either.
-    """
-    if isinstance(item, str):
-        return item, None
-    get = item.get if isinstance(item, dict) else (lambda key: getattr(item, key, None))
-    source = next((s for s in (get(k) for k in _SOURCE_KEYS) if s), None)
-    for key in _TEXT_KEYS:
-        value = get(key)
-        if value not in (None, ""):
-            return str(value), source
-    return str(item), source
-
-
-def _summarize_sources(sources: list[str]) -> str | None:
-    present = {s for s in sources if s}
-    if not present:
-        return None
-    if len(present) == 1:
-        return next(iter(present))
-    return "mixed"
+def _answer_text(item: object) -> str:
+    """Pull the renderable text out of one recall result item."""
+    for attr in _TEXT_ATTRS:
+        value = getattr(item, attr, None)
+        if value:
+            return str(value)
+    return ""
 
 
 @dataclass
@@ -55,7 +36,6 @@ class Answer:
     """A recall answer plus its resolved Telegram citations."""
 
     text: str
-    source_tag: str | None = None
     citations: list[MessageRef] = field(default_factory=list)
 
 
@@ -116,25 +96,14 @@ class CogneeMemoryAdapter:
             )
         except DatasetNotFoundError:
             return Answer(text="")
-        texts: list[str] = []
-        sources: list[str] = []
-        for item in results or []:
-            text, source = _extract(item)
-            if text:
-                texts.append(text)
-            if source:
-                sources.append(source)
+        texts = [text for text in (_answer_text(item) for item in results or []) if text]
         full_text = "\n\n".join(texts).strip()
         # include_references appends a raw "Evidence:" block (doc/chunk ids) to the
         # answer — use it to resolve citations, but show only the answer itself; the
         # bot renders its own clean, tappable Sources from the ledger.
         display_text = full_text.split("\n\nEvidence:")[0].strip()
         citations = self.ledger.resolve(scope.dataset_name, full_text) if full_text else []
-        return Answer(
-            text=display_text,
-            source_tag=_summarize_sources(sources),
-            citations=citations,
-        )
+        return Answer(text=display_text, citations=citations)
 
     # -- forget ----------------------------------------------------------
     async def forget(self, scope: Scope) -> None:

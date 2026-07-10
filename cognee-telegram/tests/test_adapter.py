@@ -35,18 +35,10 @@ async def test_opted_out_chat_is_not_ingested(mock_cognee):
 
 async def test_extract_reads_real_recall_shapes(graph_result, session_result):
     # Guards against the mock drifting from cognee's real RecallResponse shape.
-    from cognee_telegram.adapter import _extract
+    from cognee_telegram.adapter import _answer_text
 
-    assert _extract(graph_result("durable answer")) == ("durable answer", "graph")
-    assert _extract(session_result("fresh answer")) == ("fresh answer", "session")
-
-
-async def test_answer_tags_mixed_sources(mock_cognee, graph_result, session_result):
-    mock_cognee.recall.return_value = [session_result("fresh note"), graph_result("durable fact")]
-    adapter = CogneeMemoryAdapter()
-    answer = await adapter.answer(_dm(adapter), "what do you know?")
-    assert answer.source_tag == "mixed"
-    assert "fresh note" in answer.text and "durable fact" in answer.text
+    assert _answer_text(graph_result("durable answer")) == "durable answer"
+    assert _answer_text(session_result("fresh answer")) == "fresh answer"
 
 
 async def test_answer_recalls_with_references_and_resolves_citations(mock_cognee, graph_result):
@@ -64,7 +56,6 @@ async def test_answer_recalls_with_references_and_resolves_citations(mock_cognee
     assert kwargs["include_references"] is True
 
     assert answer.text == "The revenue report is due Friday."
-    assert answer.source_tag == "graph"
     assert len(answer.citations) == 1
     assert answer.citations[0].message_id == 11
 
@@ -111,7 +102,6 @@ async def test_empty_recall_yields_no_citations(mock_cognee):
     answer = await adapter.answer(scope, "nothing stored yet")
     assert answer.text == ""
     assert answer.citations == []
-    assert answer.source_tag is None
 
 
 async def test_capture_is_on_by_default_until_opt_out(mock_cognee):

@@ -51,13 +51,11 @@ def test_render_answer_empty():
 def test_render_answer_with_deep_link_citation():
     answer = Answer(
         text="It's due Friday.",
-        source_tag="graph",
         citations=[MessageRef(chat_id=-1001234567890, message_id=99, text="report due friday")],
     )
     out = render_answer(answer)
     assert "It's due Friday." in out
     assert "https://t.me/c/1234567890/99" in out
-    assert "from graph memory" in out
 
 
 def test_render_answer_quotes_when_no_public_link():

@@ -43,7 +43,6 @@ You:  /ask when is the Q3 review?
 Bot:  The Q3 review is on Friday at 2pm in room 4.
       Sources:
       • "The Q3 review is on Friday at 2pm in room 4."
-      (from graph memory)
 ```
 
 ## Commands
