@@ -107,9 +107,14 @@ class SQLAlchemyAdapter:
             if pool_args.get("poolclass", "").lower() == "nullpool":
                 pool_args["poolclass"] = NullPool
             else:
-                # Standard QueuePool settings
-                pool_args.setdefault("pool_size", 20)
-                pool_args.setdefault("max_overflow", 20)
+                # Standard QueuePool settings. Lean pool_size with a large
+                # max_overflow: only pool_size connections are retained while
+                # idle (overflow connections close on release), so engines —
+                # which multiply per dataset under access control — hold few
+                # of the server's max_connections slots between bursts while
+                # keeping a 40-connection burst ceiling.
+                pool_args.setdefault("pool_size", 5)
+                pool_args.setdefault("max_overflow", 35)
                 pool_args.setdefault("pool_pre_ping", True)
                 pool_args.setdefault("pool_recycle", 280)
                 pool_args.setdefault("pool_timeout", 280)
