@@ -68,8 +68,13 @@ async def test_llm_and_embedding_config_reset_on_exception(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_dataset_database_configs_reset_on_exit(monkeypatch):
-    """graph/vector/file-storage overrides set in multi-user mode must not leak."""
+async def test_dataset_database_configs_persist_after_exit(monkeypatch):
+    """graph/vector/file-storage configs intentionally persist after exit.
+
+    Callers (and integration tests) read the per-dataset databases right after
+    a pipeline run, outside the ``async with`` block; only the LLM/embedding
+    overrides and the dataset id are restored on exit.
+    """
     dataset_id = uuid4()
     user_id = uuid4()
     fake_user = SimpleNamespace(id=user_id, tenant_id=None)
@@ -124,6 +129,6 @@ async def test_dataset_database_configs_reset_on_exit(monkeypatch):
         assert vector_db_config.get()["vector_db_name"] == "test_vector_db"
         assert file_storage_config.get() is not None
 
-    assert graph_db_config.get() is None
-    assert vector_db_config.get() is None
-    assert file_storage_config.get() is None
+    assert graph_db_config.get()["graph_database_name"] == "test_graph_db"
+    assert vector_db_config.get()["vector_db_name"] == "test_vector_db"
+    assert file_storage_config.get() is not None

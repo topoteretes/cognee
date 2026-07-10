@@ -126,9 +126,6 @@ class DatabaseContextManager:
         "_dataset_token",
         "_llm_token",
         "_embedding_token",
-        "_graph_token",
-        "_vector_token",
-        "_storage_token",
     )
 
     def __init__(
@@ -146,9 +143,6 @@ class DatabaseContextManager:
         self._dataset_token = None
         self._llm_token = None
         self._embedding_token = None
-        self._graph_token = None
-        self._vector_token = None
-        self._storage_token = None
 
     async def apply_database_context_variables(
         self, dataset: Union[str, UUID], user_id: UUID
@@ -251,10 +245,13 @@ class DatabaseContextManager:
         }
 
         # Use ContextVar to use these graph and vector configurations are used
-        # in the current async context across Cognee
-        self._graph_token = graph_db_config.set(graph_config)
-        self._vector_token = vector_db_config.set(vector_config)
-        self._storage_token = file_storage_config.set(storage_config)
+        # in the current async context across Cognee. Unlike the LLM/embedding
+        # overrides these intentionally persist after async-with exit: callers
+        # read the per-dataset databases right after a pipeline run, outside
+        # this context manager.
+        graph_db_config.set(graph_config)
+        vector_db_config.set(vector_config)
+        file_storage_config.set(storage_config)
 
     async def _apply(self) -> None:
         if self._applied:
@@ -281,12 +278,11 @@ class DatabaseContextManager:
         return self
 
     async def __aexit__(self, exc_type, exc, tb) -> None:
-        # Restore every ContextVar overridden on enter (reverse order of set)
-        # so no config leaks into the surrounding async context.
+        # Restore the caller-provided LLM/embedding overrides and the dataset id
+        # so they don't leak into the surrounding async context. The dataset
+        # graph/vector/file-storage configs are left in place on purpose (see
+        # apply_database_context_variables).
         for context_var, token_attr in (
-            (file_storage_config, "_storage_token"),
-            (vector_db_config, "_vector_token"),
-            (graph_db_config, "_graph_token"),
             (embedding_config, "_embedding_token"),
             (llm_config, "_llm_token"),
             (current_dataset_id, "_dataset_token"),
@@ -335,7 +331,10 @@ def set_database_global_context_variables(
     their respective ContextVars and picked up by ``get_llm_client`` (LiteLLM)
     and ``get_embedding_engine`` in the current async context. Unlike the
     graph/vector configs these are applied even when backend access control is
-    disabled, since they are an explicit caller-provided override.
+    disabled, since they are an explicit caller-provided override. In the
+    ``async with`` form they are restored to their prior values on exit, while
+    the per-dataset graph/vector/file-storage configs persist after exit so
+    callers can keep reading the dataset databases.
 
     Args:
         dataset: Cognee dataset name or id
