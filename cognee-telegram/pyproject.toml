@@ -6,7 +6,9 @@ readme = "README.md"
 requires-python = ">=3.10"
 
 dependencies = [
-    "cognee>=1.1.0,<2.0.0",
+    # recall(..., include_references=True), which the citation resolver relies on,
+    # first shipped in cognee 1.2.0.
+    "cognee>=1.2.0,<2.0.0",
     "python-telegram-bot>=21.0,<22.0",
 ]
 
