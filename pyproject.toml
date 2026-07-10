@@ -191,6 +191,7 @@ Repository = "https://github.com/topoteretes/cognee"
 
 [project.scripts]
 cognee-cli = "cognee.cli._cognee:main"
+cognee = "cognee.cli._cognee:main"
 
 [build-system]
 requires = ["hatchling"]
