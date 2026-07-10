@@ -160,10 +160,7 @@ def build_application(
     settings: Settings, adapter: CogneeMemoryAdapter | None = None
 ) -> Application:
     """Wire the adapter and handlers into a python-telegram-bot Application."""
-    adapter = adapter or CogneeMemoryAdapter(
-        per_user_in_group=settings.per_user_in_group,
-        ingest_enabled_default=settings.ingest_enabled_default,
-    )
+    adapter = adapter or CogneeMemoryAdapter()
     # concurrent_updates keeps the bot responsive: a slow ingest (cognify) on one
     # message won't block /ask or other commands.
     app = Application.builder().token(settings.bot_token).concurrent_updates(True).build()

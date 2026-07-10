@@ -114,14 +114,14 @@ async def test_empty_recall_yields_no_citations(mock_cognee):
     assert answer.source_tag is None
 
 
-async def test_opt_in_mode_captures_only_after_opt_in(mock_cognee):
-    # With ingest_enabled_default=False a chat must opt in before anything is stored.
-    adapter = CogneeMemoryAdapter(ingest_enabled_default=False)
+async def test_capture_is_on_by_default_until_opt_out(mock_cognee):
+    # Opt-out model: a fresh chat captures until it runs /optout.
+    adapter = CogneeMemoryAdapter()
     scope = _dm(adapter)
-    assert adapter.is_opted_out(scope.chat_id) is True
-    assert await adapter.ingest(scope, MessageRef(chat_id=7, message_id=1, text="hi")) is False
-    mock_cognee.remember.assert_not_awaited()
-
-    adapter.opt_in(scope.chat_id)
-    await adapter.ingest(scope, MessageRef(chat_id=7, message_id=2, text="now captured"))
+    assert adapter.is_opted_out(scope.chat_id) is False
+    await adapter.ingest(scope, MessageRef(chat_id=7, message_id=1, text="captured"))
     mock_cognee.remember.assert_awaited_once()
+
+    adapter.opt_out(scope.chat_id)
+    assert await adapter.ingest(scope, MessageRef(chat_id=7, message_id=2, text="ignored")) is False
+    mock_cognee.remember.assert_awaited_once()  # unchanged

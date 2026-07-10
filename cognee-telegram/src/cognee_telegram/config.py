@@ -6,12 +6,6 @@ import os
 from dataclasses import dataclass
 
 
-def _as_bool(value: str | None, default: bool) -> bool:
-    if value is None:
-        return default
-    return value.strip().lower() in {"1", "true", "yes", "on"}
-
-
 @dataclass(frozen=True)
 class Settings:
     """Bot configuration.
@@ -22,8 +16,6 @@ class Settings:
     """
 
     bot_token: str
-    per_user_in_group: bool = False
-    ingest_enabled_default: bool = True
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -33,8 +25,4 @@ class Settings:
                 "TELEGRAM_BOT_TOKEN is not set. Create a bot with @BotFather, then "
                 "export TELEGRAM_BOT_TOKEN=<token>. See the README for the 5-minute setup."
             )
-        return cls(
-            bot_token=token,
-            per_user_in_group=_as_bool(os.environ.get("COGNEE_TG_PER_USER"), False),
-            ingest_enabled_default=_as_bool(os.environ.get("COGNEE_TG_INGEST_DEFAULT"), True),
-        )
+        return cls(bot_token=token)

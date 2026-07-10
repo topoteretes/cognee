@@ -20,14 +20,6 @@ def test_forum_topic_extends_chat():
     assert scope.thread_id == 55
 
 
-def test_per_user_in_group_splits_by_sender():
-    a = resolve_scope(chat_type="group", chat_id=-100, user_id=1, per_user_in_group=True)
-    b = resolve_scope(chat_type="group", chat_id=-100, user_id=2, per_user_in_group=True)
-    assert a.dataset_name != b.dataset_name
-    assert a.dataset_name.endswith("_user_1")
-    assert b.dataset_name.endswith("_user_2")
-
-
 def test_dataset_names_are_identifier_safe():
     # Negative ids must not leak a '-' into the dataset name, and positive vs
     # negative ids of the same magnitude must not collide.

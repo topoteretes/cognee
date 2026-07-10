@@ -80,8 +80,6 @@ back a Slack/Discord bot later — the Telegram layer is just I/O.
 |---|---|---|
 | `TELEGRAM_BOT_TOKEN` | — | **Required.** @BotFather token. |
 | `LLM_API_KEY` | — | **Required** (by cognee) to build/query memory. |
-| `COGNEE_TG_PER_USER` | `false` | Split group memory per sender (hard per-user delete). |
-| `COGNEE_TG_INGEST_DEFAULT` | `true` | Capture by default until a chat runs `/optout`. |
 
 ## Tests
 

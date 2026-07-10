@@ -3,14 +3,11 @@
 Each Telegram chat is one memory boundary: the **dataset** is the durable
 store and the unit ``/forget`` clears.
 
-Convention (per-chat by default)::
+Convention::
 
     DM (private)   dataset telegram_dm_<user_id>
     group / super  dataset telegram_group_<chat_id>
     forum topic    dataset telegram_group_<chat_id>_<thread>
-
-With ``per_user_in_group=True`` a group is split per sender
-(``telegram_group_<chat_id>_user_<user_id>``) so hard per-user deletion works.
 """
 
 from __future__ import annotations
@@ -52,16 +49,14 @@ def resolve_scope(
     chat_id: int,
     user_id: int,
     thread_id: int | None = None,
-    per_user_in_group: bool = False,
 ) -> Scope:
     """Resolve a Telegram chat into its ``Scope`` (dataset).
 
     Args:
         chat_type: Telegram ``chat.type`` (``private`` / ``group`` / ``supergroup``).
         chat_id: Telegram ``chat.id``.
-        user_id: Sender ``user.id`` (used for DMs and per-user group scoping).
+        user_id: Sender ``user.id`` (used to scope DMs to the user).
         thread_id: Forum-topic ``message_thread_id`` when present.
-        per_user_in_group: Split group memory per sender when True.
 
     Returns:
         The ``Scope`` describing this conversation's dataset.
@@ -76,7 +71,5 @@ def resolve_scope(
     dataset_name = f"telegram_group_{_sanitize(chat_id)}"
     if thread_id is not None:
         dataset_name += f"_{_sanitize(thread_id)}"
-    if per_user_in_group:
-        dataset_name += f"_user_{_sanitize(user_id)}"
 
     return Scope(dataset_name=dataset_name, chat_id=chat_id, thread_id=thread_id)

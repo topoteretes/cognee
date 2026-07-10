@@ -60,24 +60,11 @@ class Answer:
 
 
 class CogneeMemoryAdapter:
-    """Maps Telegram conversations onto cognee memory.
+    """Maps Telegram conversations onto cognee memory."""
 
-    Args:
-        per_user_in_group: Split group memory per sender (hard per-user delete).
-        ingest_enabled_default: Whether a fresh chat captures messages until
-            it runs ``/optout``.
-    """
-
-    def __init__(
-        self,
-        *,
-        per_user_in_group: bool = False,
-        ingest_enabled_default: bool = True,
-    ) -> None:
-        self.per_user_in_group = per_user_in_group
-        self.ingest_enabled_default = ingest_enabled_default
+    def __init__(self) -> None:
         self.ledger = CitationLedger()
-        # chat_id -> capturing? Absent means "use ingest_enabled_default".
+        # chat_id -> capturing? Absent means "capturing" (opt-out model).
         self._capture: dict[int, bool] = {}
 
     # -- scoping ---------------------------------------------------------
@@ -85,16 +72,12 @@ class CogneeMemoryAdapter:
         self, *, chat_type: str, chat_id: int, user_id: int, thread_id: int | None = None
     ) -> Scope:
         return resolve_scope(
-            chat_type=chat_type,
-            chat_id=chat_id,
-            user_id=user_id,
-            thread_id=thread_id,
-            per_user_in_group=self.per_user_in_group,
+            chat_type=chat_type, chat_id=chat_id, user_id=user_id, thread_id=thread_id
         )
 
     # -- opt-out ---------------------------------------------------------
     def is_opted_out(self, chat_id: int) -> bool:
-        return not self._capture.get(chat_id, self.ingest_enabled_default)
+        return not self._capture.get(chat_id, True)
 
     def opt_out(self, chat_id: int) -> None:
         self._capture[chat_id] = False
