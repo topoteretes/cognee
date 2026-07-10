@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 import cognee
-from cognee.modules.data.exceptions.exceptions import DatasetNotFoundError
+from cognee.exceptions import CogneeValidationError
 
 from .citations import CitationLedger, MessageRef
 from .scoping import Scope, resolve_scope
@@ -87,14 +87,16 @@ class CogneeMemoryAdapter:
     async def answer(self, scope: Scope, query: str) -> Answer:
         """Recall an answer for ``query`` and resolve its Telegram citations.
 
-        Returns an empty ``Answer`` when this chat has no memory yet (no dataset)
-        instead of raising, so the bot can say "nothing here yet".
+        Returns an empty ``Answer`` when this chat has no memory yet — either the
+        dataset is missing (``DatasetNotFoundError``) or, on a brand-new install,
+        no database exists so recall raises a precondition error. Both are
+        ``CogneeValidationError`` subclasses and mean "nothing here yet".
         """
         try:
             results = await cognee.recall(
                 query, datasets=[scope.dataset_name], include_references=True
             )
-        except DatasetNotFoundError:
+        except CogneeValidationError:
             return Answer(text="")
         texts = [text for text in (_answer_text(item) for item in results or []) if text]
         full_text = "\n\n".join(texts).strip()
@@ -108,6 +110,15 @@ class CogneeMemoryAdapter:
 
     # -- forget ----------------------------------------------------------
     async def forget(self, scope: Scope) -> None:
-        """Clear a chat's durable dataset (graph + vectors) and drop the ledger."""
-        await cognee.forget(dataset=scope.dataset_name)
+        """Clear a chat's durable dataset (graph + vectors) and drop the ledger.
+
+        Idempotent: clearing a chat that never captured anything is a no-op, not
+        an error. Resolving a missing dataset name inside cognee raises either a
+        ``CogneeValidationError`` or an ``AttributeError`` (the name resolves to
+        ``None``); treat both as "already clear".
+        """
+        try:
+            await cognee.forget(dataset=scope.dataset_name)
+        except (CogneeValidationError, AttributeError):
+            pass
         self.ledger.drop(scope.dataset_name)

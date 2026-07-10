@@ -106,6 +106,29 @@ async def test_answer_returns_empty_when_dataset_missing(mock_cognee):
     assert answer.citations == []
 
 
+async def test_answer_returns_empty_on_fresh_install(mock_cognee):
+    # On a brand-new install (no DB yet) recall raises a precondition error, not
+    # DatasetNotFoundError; the bot must still say "nothing here yet", not crash.
+    from cognee.exceptions import CogneeValidationError
+
+    mock_cognee.recall.side_effect = CogneeValidationError(
+        message="Recall prerequisites not met.", name="RecallPreconditionError"
+    )
+    adapter = CogneeMemoryAdapter()
+    answer = await adapter.answer(_dm(adapter), "anything?")
+    assert answer.text == ""
+
+
+async def test_forget_is_idempotent_on_missing_dataset(mock_cognee):
+    # /forget on a chat that never captured anything: cognee raises AttributeError
+    # resolving the unknown dataset name. Treat it as already-clear, not an error.
+    mock_cognee.forget.side_effect = AttributeError("'NoneType' object has no attribute 'id'")
+    adapter = CogneeMemoryAdapter()
+    scope = _dm(adapter)
+    await adapter.forget(scope)  # must not raise
+    assert adapter.ledger.refs(scope.dataset_name) == []
+
+
 async def test_answer_strips_raw_evidence_block(mock_cognee, graph_result):
     # recall appends an "Evidence:" block when include_references=True; the bot must
     # show only the answer and render its own clean sources instead.
