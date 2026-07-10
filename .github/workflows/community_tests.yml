@@ -42,8 +42,6 @@ jobs:
         uses: pre-commit/action@v3.0.1
 
       - name: Install dependencies
-        # fastembed so `ty check` can resolve the optional import in
-        # FastembedEmbeddingEngine / the tokenizer resolver.
         run: uv sync --extra dev
 
       - name: Ruff check
@@ -79,8 +77,7 @@ jobs:
           enable-cache: true
 
       - name: Install dependencies
-        # postgres is needed so the SQL cache adapter tests run instead of skipping;
-        # fastembed so the infrastructure/llm tests can import FastembedEmbeddingEngine.
+        # postgres is needed so the SQL cache adapter tests run instead of skipping.
         run: uv sync --extra dev --extra postgres
 
       - name: Run mocked unit tests

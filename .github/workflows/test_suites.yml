@@ -168,8 +168,6 @@ jobs:
       os: '["ubuntu-22.04"]'
       # postgres so the SQL cache adapter tests run instead of skipping; omitted
       # on macos/windows (extended) where psycopg2 has no prebuilt wheels.
-      # fastembed so the 3.14 unit tests can import FastembedEmbeddingEngine;
-      # 3.10-3.13 already get it transitively via the codegraph extra.
       extra-dependencies: 'postgres'
     secrets: inherit
 

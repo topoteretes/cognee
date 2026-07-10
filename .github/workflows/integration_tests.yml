@@ -113,7 +113,9 @@ jobs:
         uses: ./.github/actions/cognee_setup
         with:
           python-version: '3.11.x'
-          extra-dependencies: "scraping"
+          # fastembed so the embedding tokenizer delegation tests can import
+          # FastembedEmbeddingEngine.
+          extra-dependencies: "scraping fastembed"
 
       - name: Run Infrastructure Tests
         run: uv run pytest cognee/tests/integration/infrastructure/ --splits 3 --group ${{ matrix.split-group }}
