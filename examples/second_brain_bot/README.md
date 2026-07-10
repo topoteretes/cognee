@@ -31,7 +31,8 @@ Prerequisites: Python 3.10 to 3.14.
 USE_FAKE_ADAPTER=true python run.py
 ```
 
-You will see the web transport come up on `http://0.0.0.0:8080/message`.
+You will see the web transport come up on `http://127.0.0.1:8080/message`
+(loopback by default; set `WEB_HOST=0.0.0.0` to expose it, e.g. in a container).
 
 ### 3. Capture a note, then recall it
 

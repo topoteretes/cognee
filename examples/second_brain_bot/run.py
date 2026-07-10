@@ -4,6 +4,8 @@
 
 Reads configuration from the environment:
 
+    WEB_HOST            web transport bind address (default 127.0.0.1; set to
+                        0.0.0.0 only to expose it, e.g. inside a container)
     WEB_PORT            web transport port (default 8080)
     TELEGRAM_BOT_TOKEN  enables the Telegram transport when set
     REQUIRE_OPTIN       set to "true" to require /optin before capturing
@@ -54,14 +56,18 @@ async def main() -> None:
     import uvicorn
 
     bot = build_bot()
+    # Loopback by default: the bot runs without authentication, so binding to all
+    # interfaces would expose a private brain to the whole network. Opt in with
+    # WEB_HOST=0.0.0.0 for container/remote use.
+    web_host = os.getenv("WEB_HOST", "127.0.0.1")
     web_port = int(os.getenv("WEB_PORT", "8080"))
     telegram_token = os.getenv("TELEGRAM_BOT_TOKEN")
 
     app = build_web_app(bot)
-    server = uvicorn.Server(uvicorn.Config(app, host="0.0.0.0", port=web_port, log_level="info"))
+    server = uvicorn.Server(uvicorn.Config(app, host=web_host, port=web_port, log_level="info"))
 
     tasks = [server.serve()]
-    print(f"Web transport listening on http://0.0.0.0:{web_port}/message")
+    print(f"Web transport listening on http://{web_host}:{web_port}/message")
     if telegram_token:
         tasks.append(TelegramTransport(bot, telegram_token).run())
         print("Telegram transport enabled.")
