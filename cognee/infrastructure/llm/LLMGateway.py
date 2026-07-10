@@ -4,6 +4,7 @@ from typing import Any, TypeVar
 from pydantic import BaseModel
 
 from cognee.infrastructure.llm import get_llm_config
+from cognee.infrastructure.llm.config import get_llm_context_config
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.types import (
     TranscriptionReturnType,
 )
@@ -38,7 +39,7 @@ async def _record_session_usage_after(
             output_repr = result.model_dump_json()
         else:
             output_repr = str(result)
-        model = get_llm_config().llm_model
+        model = get_llm_context_config().llm_model
         await record_llm_call(
             input_text=text_input,
             output_text=output_repr,
