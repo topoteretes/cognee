@@ -21,6 +21,7 @@ async def forget(
     everything: bool = False,
     memory_only: bool = False,
     user: Any = None,
+    undo: bool = False,
 ) -> dict:
     """Remove data from the knowledge graph.
 
@@ -58,6 +59,7 @@ async def forget(
             Raw files and data records are preserved so the dataset can
             be re-cognified with different settings.
         user: User context. Resolved to default user when None.
+        undo: If True, restore the soft-deleted nodes/edges for the data item.
 
     Returns:
         Dict with deletion summary: items removed, datasets removed.
@@ -144,13 +146,26 @@ async def forget(
                 raise ValueError("data_id requires dataset or dataset_id.")
             raise ValueError("Specify dataset, dataset_id, data_id+dataset, or everything=True.")
 
+        if undo:
+            resolved_dataset_id = await _resolve_dataset_id(dataset_ref, user)
+            if data_id is None:
+                raise ValueError("undo requires data_id and dataset/dataset_id.")
+            return await undo_forget(data_id, resolved_dataset_id, user)
+
         async with set_database_global_context_variables(dataset_ref, user.id):
             if memory_only:
                 if data_id is not None:
                     return await _forget_data_memory(data_id, dataset_ref, user)
                 return await _forget_dataset_memory(dataset_ref, user)
 
+            from cognee.infrastructure.llm import get_llm_config
+            llm_config = get_llm_config()
+            versioning_enabled = getattr(llm_config, "versioning_enabled", False)
+
             if data_id is not None:
+                if versioning_enabled:
+                    resolved_dataset_id = await _resolve_dataset_id(dataset_ref, user)
+                    return await _soft_forget_data_item(data_id, resolved_dataset_id, user)
                 return await _forget_data_item(data_id, dataset_ref, user)
 
             return await _forget_dataset(dataset_ref, user)
@@ -381,3 +396,158 @@ async def _resolve_dataset_id(dataset_ref: Union[str, UUID], user: Any) -> UUID:
 
     dataset = await get_authorized_dataset_by_name(dataset_ref, user, "delete")
     return dataset.id
+
+
+async def _soft_forget_data_item(data_id: UUID, dataset_id: UUID, user: Any) -> dict:
+    """Soft-delete a single data item's graph nodes by setting their valid_to timestamp.
+
+    Records the soft-deleted node IDs in the tombstones table for undo capability.
+    """
+    from datetime import datetime, timezone
+    import sqlite3
+
+    db_path = "mvcc_versioning.db"
+    try:
+        from cognee.root_dir import get_absolute_path
+        db_path = get_absolute_path(".cognee_system/databases/mvcc_versioning.db")
+    except Exception:
+        pass
+
+    tombstoned_at = datetime.now(timezone.utc).isoformat()
+
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS versioned_nodes (
+                node_id TEXT PRIMARY KEY,
+                data_id TEXT,
+                dataset_id TEXT,
+                properties TEXT,
+                valid_from TEXT,
+                valid_to TEXT
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS tombstones (
+                data_id TEXT NOT NULL,
+                dataset_id TEXT NOT NULL,
+                node_id TEXT NOT NULL,
+                tombstoned_at TEXT NOT NULL,
+                PRIMARY KEY (data_id, dataset_id, node_id)
+            )
+            """
+        )
+
+        cursor = conn.execute(
+            "SELECT node_id FROM versioned_nodes WHERE data_id = ? AND dataset_id = ? AND valid_to IS NULL",
+            (str(data_id), str(dataset_id)),
+        )
+        active_nodes = [row[0] for row in cursor.fetchall()]
+
+        for node_id in active_nodes:
+            conn.execute(
+                """
+                UPDATE versioned_nodes
+                SET valid_to = ?
+                WHERE node_id = ?
+                """,
+                (tombstoned_at, node_id),
+            )
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO tombstones (data_id, dataset_id, node_id, tombstoned_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (str(data_id), str(dataset_id), node_id, tombstoned_at),
+            )
+        conn.commit()
+
+    logger.info(
+        "Soft-deleted data item %s for dataset %s (%d nodes tombstoned)",
+        data_id,
+        dataset_id,
+        len(active_nodes),
+    )
+    return {
+        "data_id": str(data_id),
+        "dataset_id": str(dataset_id),
+        "status": "success",
+        "soft_deleted_count": len(active_nodes),
+    }
+
+
+async def undo_forget(data_id: UUID, dataset_id: UUID, user: Any) -> dict:
+    """Restores soft-deleted graph nodes by resetting their valid_to metadata back to None.
+
+    Returns the count of restored items.
+    """
+    import sqlite3
+
+    db_path = "mvcc_versioning.db"
+    try:
+        from cognee.root_dir import get_absolute_path
+        db_path = get_absolute_path(".cognee_system/databases/mvcc_versioning.db")
+    except Exception:
+        pass
+
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS versioned_nodes (
+                node_id TEXT PRIMARY KEY,
+                data_id TEXT,
+                dataset_id TEXT,
+                properties TEXT,
+                valid_from TEXT,
+                valid_to TEXT
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS tombstones (
+                data_id TEXT NOT NULL,
+                dataset_id TEXT NOT NULL,
+                node_id TEXT NOT NULL,
+                tombstoned_at TEXT NOT NULL,
+                PRIMARY KEY (data_id, dataset_id, node_id)
+            )
+            """
+        )
+
+        cursor = conn.execute(
+            "SELECT node_id FROM tombstones WHERE data_id = ? AND dataset_id = ?",
+            (str(data_id), str(dataset_id)),
+        )
+        tombstoned_nodes = [row[0] for row in cursor.fetchall()]
+
+        for node_id in tombstoned_nodes:
+            conn.execute(
+                """
+                UPDATE versioned_nodes
+                SET valid_to = NULL
+                WHERE node_id = ?
+                """,
+                (node_id,),
+            )
+
+        conn.execute(
+            "DELETE FROM tombstones WHERE data_id = ? AND dataset_id = ?",
+            (str(data_id), str(dataset_id)),
+        )
+        conn.commit()
+
+    logger.info(
+        "Restored data item %s for dataset %s (%d nodes restored)",
+        data_id,
+        dataset_id,
+        len(tombstoned_nodes),
+    )
+    return {
+        "data_id": str(data_id),
+        "dataset_id": str(dataset_id),
+        "status": "success",
+        "restored_count": len(tombstoned_nodes),
+    }

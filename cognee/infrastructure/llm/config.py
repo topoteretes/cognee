@@ -50,6 +50,10 @@ class LLMConfig(BaseSettings):
     llm_streaming: bool = False
     llm_max_completion_tokens: int = 16384
 
+    versioning_enabled: bool = False
+    versioning_retention_days: int = 30
+    versioning_checkpoint_interval: int = 50
+
     baml_llm_provider: str = "openai"
     baml_llm_model: str = "gpt-5-mini"
     baml_llm_endpoint: str = ""
@@ -256,6 +260,9 @@ class LLMConfig(BaseSettings):
             "llama_cpp_n_gpu_layers": self.llama_cpp_n_gpu_layers,
             "llama_cpp_chat_format": self.llama_cpp_chat_format,
             "llm_args": self.llm_args,
+            "versioning_enabled": self.versioning_enabled,
+            "versioning_retention_days": self.versioning_retention_days,
+            "versioning_checkpoint_interval": self.versioning_checkpoint_interval,
         }
 
 
