@@ -18,6 +18,7 @@ from cognee.modules.graph.utils import (
 )
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.infrastructure.llm.extraction import extract_content_graph
+from cognee.infrastructure.llm.pipeline_stage import pipeline_stage
 from cognee.infrastructure.engine import DataPoint
 from cognee.tasks.graph.exceptions import (
     InvalidGraphModelError,
@@ -163,14 +164,15 @@ async def extract_graph_from_data(
         extracted = calculate_chunk_graphs(non_dlt_chunks, graph_model, custom_prompt, **kwargs)
         chunk_graphs = await extracted if inspect.isawaitable(extracted) else extracted
     else:
-        chunk_graphs = await asyncio.gather(
-            *[
-                extract_content_graph(
-                    chunk.text, graph_model, custom_prompt=custom_prompt, **kwargs
-                )
-                for chunk in non_dlt_chunks
-            ]
-        )
+        with pipeline_stage("extraction"):
+            chunk_graphs = await asyncio.gather(
+                *[
+                    extract_content_graph(
+                        chunk.text, graph_model, custom_prompt=custom_prompt, **kwargs
+                    )
+                    for chunk in non_dlt_chunks
+                ]
+            )
     cache_entity_embeddings = kwargs.get("cache_entity_embeddings")
     if callable(cache_entity_embeddings):
         callback_result = cache_entity_embeddings(chunk_graphs, **kwargs)

@@ -5,6 +5,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
 
+from cognee.base_config import get_base_config
 from cognee.context_global_variables import set_session_user_context_variable
 from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
@@ -375,7 +376,7 @@ async def recall(
     context_profile: str = "qa",
     wide_search_top_k: int | None = 100,
     triplet_distance_penalty: float | None = 6.5,
-    feedback_influence: float = 0.0,
+    feedback_influence: float = get_base_config().default_feedback_influence,
     verbose: bool = False,
     retriever_specific_config: dict | None = None,
     neighborhood_depth: int | None = None,

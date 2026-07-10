@@ -1,5 +1,9 @@
 import { CogneeInstance } from "../instances/types";
 
+// Sessions created by the Search page's chat UI carry this prefix — it is how
+// user search conversations are told apart from agent sessions everywhere.
+export const SEARCH_SESSION_PREFIX = "search-ui-";
+
 export interface SessionRow {
   session_id: string;
   user_id: string;

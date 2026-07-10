@@ -330,7 +330,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
         # EXTRACT: split Documents into semantic text chunks
         Task(
             extract_chunks_from_documents,
-            max_chunk_size=chunk_size or get_max_chunk_tokens(),
+            max_chunk_size=chunk_size or await get_max_chunk_tokens(),
             chunker=chunker,
         ),
         # COGNIFY: LLM-extract entities and relationships into a knowledge graph
@@ -389,7 +389,7 @@ async def get_temporal_tasks(
         # EXTRACT: split Documents into semantic text chunks
         Task(
             extract_chunks_from_documents,
-            max_chunk_size=chunk_size or get_max_chunk_tokens(),
+            max_chunk_size=chunk_size or await get_max_chunk_tokens(),
             chunker=chunker,
         ),
         # COGNIFY: extract temporal events and timestamps from chunks
