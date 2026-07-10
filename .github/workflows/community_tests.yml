@@ -81,7 +81,7 @@ jobs:
       - name: Install dependencies
         # postgres is needed so the SQL cache adapter tests run instead of skipping;
         # fastembed so the infrastructure/llm tests can import FastembedEmbeddingEngine.
-        run: uv sync --extra dev --extra postgres --extra fastembed
+        run: uv sync --extra dev --extra postgres
 
       - name: Run mocked unit tests
         run: |
