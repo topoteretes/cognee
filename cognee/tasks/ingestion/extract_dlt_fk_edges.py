@@ -41,12 +41,16 @@ async def extract_dlt_fk_edges(
     This reuses the SchemaTable/SchemaRelationship models from the existing
     relational pipeline mapper (migrate_relational_database / ingest_database_schema).
 
-    The schema nodes and FK edges are also registered in the relational rollback
-    ledger (tagged with ``pipeline_run_id``) so the cognify rollback handler can
-    clean them up on failure/startup recovery. Without this they would be written
-    to the graph/vector stores untracked and orphaned by a rollback. Cross-run
-    sharing of schema nodes is preserved by the rollback handler's shared-node
-    check, which spares any node still referenced by another run's ledger row.
+    On a ledger graph, the schema nodes and FK edges are also registered in the
+    relational rollback ledger (tagged with ``pipeline_run_id``) so the cognify
+    rollback handler can clean them up on failure/startup recovery. Without this
+    they would be written to the graph/vector stores untracked and orphaned by a
+    rollback. Cross-run sharing of schema nodes is preserved by the rollback
+    handler's shared-node check, which spares any node still referenced by
+    another run's ledger row. On a graph-provenance graph the writes are stamped
+    in-graph instead and the ledger is skipped (mirrors add_data_points — no
+    dual tracking): delete and rollback resolve ownership from the stamped refs,
+    so ledger rows would never be cleaned up.
     """
     from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
 
@@ -256,9 +260,13 @@ async def extract_dlt_fk_edges(
 
     # Register the schema nodes and FK edges in the relational rollback ledger so
     # the cognify rollback handler can find and remove them on failure/recovery.
+    # When the writes were stamped in-graph, provenance lives in the graph and
+    # the ledger is skipped (mirrors add_data_points — no dual tracking).
     # Skipped when no pipeline context is available (e.g. direct task invocation).
+    stamped_in_graph = provenance_kwargs["source_ref_key"] is not None
     if (
-        (schema_nodes or all_edges)
+        not stamped_in_graph
+        and (schema_nodes or all_edges)
         and ctx is not None
         and getattr(ctx, "user", None) is not None
         and getattr(ctx, "dataset", None) is not None
