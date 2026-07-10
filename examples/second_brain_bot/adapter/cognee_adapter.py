@@ -195,11 +195,22 @@ class CogneeChatMemoryAdapter(ChatMemoryAdapter):
         load_cognee_env()
         import cognee
 
+        from cognee.modules.data.exceptions.exceptions import DatasetNotFoundError
+
         if isinstance(target, Conversation):
             dataset = self.scope(target).dataset
         else:
             dataset = f"brain:{target}"
-        await cognee.forget(dataset=dataset)
+        try:
+            await cognee.forget(dataset=dataset)
+        except (DatasetNotFoundError, AttributeError):
+            # Idempotent wipe: the brain may never have been created (/forget me
+            # before any capture) or was already wiped. cognee resolves an unknown
+            # dataset name to None and dereferences .id, raising AttributeError
+            # (not DatasetNotFoundError), so both mean "already empty". Kept narrow,
+            # never `except Exception`, so a real failure on a destructive command
+            # is not silently swallowed.
+            pass
         self._citations.pop(dataset, None)
 
     # TODO(follow-up, #3608 adapter core): per-transport / selective forget
