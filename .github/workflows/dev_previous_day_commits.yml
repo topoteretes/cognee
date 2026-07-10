@@ -19,7 +19,7 @@ permissions:
   pull-requests: read
 
 env:
-  lookback_days: '2'
+  lookback_days: ${{ github.event.inputs.lookback_days || vars.lookback_days || '1' }}
 
 jobs:
   prepare-merged-branches:
