@@ -1003,65 +1003,6 @@ class Neo4jAdapter(GraphDBInterface):
                 result[edge] = contributed
         return result
 
-    async def get_edges_created_since(
-        self,
-        since: Optional[datetime],
-        limit: int,
-        after_key: Optional[Tuple[str, str, str]] = None,
-    ) -> Tuple[List[Tuple[str, str, str, datetime]], Dict[str, Dict[str, Any]]]:
-        """Return edges created after ``since``/``after_key`` (oldest first) plus endpoint nodes.
-
-        Reads the edge ``created_at`` column (stamped once on create) so the
-        session-sync incremental checkpoint keeps the same created-order model as
-        the relational path. created_at is stored as epoch millis and returned as
-        an aware UTC datetime, matching the Ladybug/Postgres adapters.
-
-        Keyset-paginated on (created_at, source id, target id, relationship type):
-        one add_edges batch stamps every edge with the same created_at (Cypher's
-        ``timestamp()`` is the statement clock), so the edge-identity tie-breaker
-        lets a page boundary inside such a group resume without skipping the rest
-        of it.
-        """
-        params: Dict[str, Any] = {"limit": limit}
-        where_clause = ""
-        if since is not None:
-            params["since_ms"] = self._datetime_to_ms(since)
-            if after_key is not None:
-                where_clause = (
-                    "WHERE r.created_at > $since_ms"
-                    " OR (r.created_at = $since_ms AND (a.id > $after_source"
-                    " OR (a.id = $after_source AND (b.id > $after_target"
-                    " OR (b.id = $after_target AND type(r) > $after_rel)))))"
-                )
-                params["after_source"], params["after_target"], params["after_rel"] = after_key
-            else:
-                where_clause = "WHERE r.created_at > $since_ms"
-
-        rows = await self.query(
-            f"""
-            MATCH (a:`{BASE_LABEL}`)-[r]->(b:`{BASE_LABEL}`)
-            {where_clause}
-            RETURN a.id AS s, properties(a) AS a_props,
-                   b.id AS t, properties(b) AS b_props,
-                   type(r) AS rel, r.created_at AS created_at
-            ORDER BY r.created_at ASC, a.id ASC, b.id ASC, type(r) ASC
-            LIMIT $limit
-            """,
-            params,
-        )
-
-        edges: List[Tuple[str, str, str, datetime]] = []
-        node_map: Dict[str, Dict[str, Any]] = {}
-        for row in rows:
-            source_id, target_id = str(row["s"]), str(row["t"])
-            for node_id, props in ((source_id, row["a_props"]), (target_id, row["b_props"])):
-                if node_id not in node_map:
-                    node_map[node_id] = _strip_provenance(props or {})
-            edges.append(
-                (source_id, target_id, str(row["rel"]), self._ms_to_datetime(row["created_at"]))
-            )
-        return edges, node_map
-
     async def set_graph_metadata(self, metadata: dict[str, str]) -> None:
         if not metadata:
             return
@@ -1248,7 +1189,7 @@ class Neo4jAdapter(GraphDBInterface):
         # Properties are set explicitly after the merge so they apply on BOTH
         # create and match (a re-cognify updates the edge); apoc's 4th arg is
         # onCreate-only. created_at is stamped once (coalesce keeps the original
-        # on match) so get_edges_created_since can order edges by first write.
+        # on match) so edge provenance retains the first write time.
         # When a source ref is supplied its provenance stamp is folded into the
         # same statement (atomic — no write-then-attach window).
         fold_clause = ""

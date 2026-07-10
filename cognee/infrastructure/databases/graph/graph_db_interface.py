@@ -1,6 +1,5 @@
 from uuid import UUID
 from abc import abstractmethod, ABC
-from datetime import datetime
 from typing import Optional, Dict, Any, List, Tuple, Type, Union
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.engine import DataPoint
@@ -418,48 +417,6 @@ class GraphDBInterface(ABC):
 
     async def get_graph_metadata(self) -> dict[str, str]:
         """Return graph-level metadata used to identify provenance schema support."""
-        raise UnsupportedProvenanceCapability()
-
-    async def get_edges_created_since(
-        self,
-        since: Optional[datetime],
-        limit: int,
-        after_key: Optional[Tuple[str, str, str]] = None,
-    ) -> Tuple[List[Tuple[str, str, str, datetime]], Dict[str, Dict[str, Any]]]:
-        """Return edges created after ``since`` (oldest first), with endpoint nodes.
-
-        Graph-provenance equivalent of the relational incremental edge fetch used to
-        sync recent graph knowledge into the session cache. On graphs that store
-        provenance in the graph itself the relational Edge/Node tables are empty,
-        so callers read new edges here instead.
-
-        Pagination is keyset-based on (created_at, source_id, target_id,
-        relationship_name) — a total order, since the triple is the edge's unique
-        key on every backend. Every edge of one add_edges batch shares a single
-        created_at stamp, so paging on the timestamp alone would silently skip
-        the rest of such a tie group whenever a page boundary lands inside one.
-
-        Parameters:
-        -----------
-
-            - since (Optional[datetime]): Return only edges created at or after
-              this timestamp; None returns from the beginning.
-            - limit (int): Maximum number of edges to return.
-            - after_key (Optional[Tuple[str, str, str]]): (source_id, target_id,
-              relationship_name) of the last edge already consumed. When set,
-              edges created exactly at ``since`` are included if their key sorts
-              after it; without it, ``since`` is exclusive. Only meaningful when
-              ``since`` is set.
-
-        Returns:
-        --------
-
-            - Tuple of (edges, node_map):
-                - edges: list of (source_id, target_id, relationship_name, created_at),
-                  ordered by (created_at, source_id, target_id, relationship_name)
-                  ascending.
-                - node_map: {node_id: properties} for every endpoint node.
-        """
         raise UnsupportedProvenanceCapability()
 
     @abstractmethod

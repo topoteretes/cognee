@@ -83,8 +83,8 @@ class RecallPayloadDTO(InDTO):
         examples=[None],
         description=(
             "Which memory sources to include: 'graph', 'session', 'trace', "
-            "'graph_context', 'session_context', 'all', 'auto', or a list of these. Defaults "
-            "to 'auto' (session first when session_id is set, else graph)."
+            "'session_context', 'all', 'auto', or a list of these. Defaults to "
+            "'auto' (session first when session_id is set, else graph)."
         ),
     )
     context_profile: str = Field(
@@ -154,7 +154,7 @@ def get_recall_router() -> APIRouter:
         - **session_id** (Optional[str]): Session whose cached QA and trace entries
           should be searched
         - **scope** (Optional[str | List[str]]): Memory sources to include: "graph",
-          "session", "trace", "graph_context", "all", "auto", or a list of these
+          "session", "trace", "session_context", "all", "auto", or a list of these
           (default: "auto" — session first when session_id is set, else graph)
 
         ## Error Codes

@@ -1473,69 +1473,6 @@ class PostgresAdapter(GraphDBInterface):
                     out[edge] = contributed
             return out
 
-    async def get_edges_created_since(
-        self,
-        since: Optional[datetime],
-        limit: int,
-        after_key: Optional[Tuple[str, str, str]] = None,
-    ) -> Tuple[List[Tuple[str, str, str, datetime]], Dict[str, Dict[str, Any]]]:
-        """Return edges created after ``since``/``after_key`` (oldest first) plus endpoint nodes.
-
-        Keyset-paginated on (created_at, source_id, target_id, relationship_name):
-        one add_edges batch stamps every edge with the same created_at, so the
-        edge-identity tie-breaker lets a page boundary inside such a group resume
-        without skipping the rest of it.
-        """
-        where_clause = ""
-        params: Dict[str, Any] = {"limit": limit}
-        if since is not None:
-            params["since"] = since
-            if after_key is not None:
-                where_clause = (
-                    "WHERE e.created_at > :since"
-                    " OR (e.created_at = :since"
-                    " AND (e.source_id, e.target_id, e.relationship_name)"
-                    " > (:after_source, :after_target, :after_rel))"
-                )
-                params["after_source"], params["after_target"], params["after_rel"] = after_key
-            else:
-                where_clause = "WHERE e.created_at > :since"
-
-        async with self._session() as session:
-            result = await session.execute(
-                text(f"""
-                    SELECT a.id, a.name, a.type, a.properties,
-                           b.id, b.name, b.type, b.properties,
-                           e.relationship_name, e.created_at
-                    FROM graph_edge e
-                    JOIN graph_node a ON a.id = e.source_id
-                    JOIN graph_node b ON b.id = e.target_id
-                    {where_clause}
-                    ORDER BY e.created_at, e.source_id, e.target_id, e.relationship_name
-                    LIMIT :limit
-                """),
-                params,
-            )
-
-            edges: List[Tuple[str, str, str, datetime]] = []
-            node_map: Dict[str, Dict[str, Any]] = {}
-            for row in result.fetchall():
-                source_id, target_id = str(row[0]), str(row[4])
-                for node_id, name, node_type, props_blob in (
-                    (source_id, row[1], row[2], row[3]),
-                    (target_id, row[5], row[6], row[7]),
-                ):
-                    if node_id not in node_map:
-                        node_map[node_id] = {
-                            "id": node_id,
-                            "name": name,
-                            "type": node_type,
-                            **self._props_dict(props_blob),
-                        }
-                edges.append((source_id, target_id, str(row[8]), row[9]))
-
-            return edges, node_map
-
     async def set_graph_metadata(self, metadata: dict[str, str]) -> None:
         if not metadata:
             return
