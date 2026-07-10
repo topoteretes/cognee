@@ -13,6 +13,7 @@ require it.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 
 from ..adapter.interface import Conversation
@@ -33,15 +34,26 @@ class TelegramTransport:
 
         async with httpx.AsyncClient(timeout=self._poll_timeout + 10) as client:
             while True:
-                for update in await self._get_updates(client):
-                    await self._handle_update(client, update)
+                try:
+                    for update in await self._get_updates(client):
+                        await self._handle_update(client, update)
+                except Exception as exc:  # noqa: BLE001 - keep the poller (and web transport) alive
+                    # A transient network/API error must not tear down the loop
+                    # (asyncio.gather in run.py would kill the web transport too).
+                    print(f"Telegram poll error, retrying in 3s: {exc}")
+                    await asyncio.sleep(3)
 
     async def _get_updates(self, client) -> list[dict]:
         params: dict = {"timeout": self._poll_timeout}
         if self._offset is not None:
             params["offset"] = self._offset
         response = await client.get(f"{self._base}/getUpdates", params=params)
-        updates = response.json().get("result", [])
+        data = response.json()
+        if not data.get("ok", False):
+            # A wrong/revoked token returns ok=false (not an HTTP error httpx
+            # would raise); without this the loop busy-spins silently forever.
+            raise RuntimeError(f"Telegram API error: {data.get('description', data)}")
+        updates = data.get("result", [])
         if updates:
             self._offset = updates[-1]["update_id"] + 1
         return updates
