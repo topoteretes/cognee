@@ -15,3 +15,4 @@ class DltRowData:
     foreign_keys: list
     dlt_db_name: str
     dataset_name: str
+    dlt_source_name: str = "dlt_source"
