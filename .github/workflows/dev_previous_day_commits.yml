@@ -1,7 +1,6 @@
 name: automation | Draft Docs PRs For Previous Day Dev PRs
 
 on:
-  pull_request:
   workflow_dispatch:
     inputs:
       lookback_days:
@@ -20,7 +19,7 @@ permissions:
   pull-requests: read
 
 env:
-  lookback_days: ${{ github.event.inputs.lookback_days || vars.lookback_days || '1' }}
+  lookback_days: 3
 
 jobs:
   prepare-merged-branches:
@@ -384,12 +383,13 @@ jobs:
           SMTP_USERNAME: ${{ secrets.MILENKO_SMTP_USERNAME || vars.DEV_PREVIOUS_DAY_COMMITS_NOTIFICATION_EMAIL }}
           SMTP_PASSWORD: ${{ secrets.MILENKO_SMTP_PASSWORD }}
           SMTP_USE_TLS: ${{ vars.SMTP_USE_TLS || 'true' }}
-          NOTIFICATION_EMAIL: 'milenko@topoteretes.com'
+          NOTIFICATION_EMAIL_SENDER: ${{ secrets.NOTIFICATION_EMAIL_SENDER }}
+          NOTIFICATION_EMAIL_RECEIVER: ${{ secrets.NOTIFICATION_EMAIL_RECEIVER }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           PREPARE_RESULT: ${{ needs.prepare-merged-branches.result }}
           CREATE_DOCS_PRS_RESULT: ${{ needs.create-docs-prs.result }}
         run: |
-          if [ -z "${SMTP_SERVER}" ] || [ -z "${SMTP_USERNAME}" ] || [ -z "${SMTP_PASSWORD}" ] || [ -z "${NOTIFICATION_EMAIL}" ]; then
+          if [ -z "${SMTP_SERVER}" ] || [ -z "${SMTP_USERNAME}" ] || [ -z "${SMTP_PASSWORD}" ] || [ -z "${NOTIFICATION_EMAIL_SENDER}" ] || [ -z "${NOTIFICATION_EMAIL_RECEIVER}"]; then
             echo "SMTP secrets or DEV_PREVIOUS_DAY_COMMITS_NOTIFICATION_EMAIL variable are not configured; skipping failure email."
             exit 0
           fi
