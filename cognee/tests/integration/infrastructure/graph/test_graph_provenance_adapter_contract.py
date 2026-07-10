@@ -471,6 +471,42 @@ async def test_get_edges_created_since_orders_limits_and_returns_endpoint_metada
     assert none_after_latest == []
 
 
+async def test_get_edges_created_since_resumes_inside_same_timestamp_batch(
+    graph_provenance_adapter,
+):
+    """One add_edges batch stamps every edge with the same created_at, so a page
+    boundary can land inside the tie group. The keyset cursor (created_at plus
+    edge identity) must resume inside the group instead of skipping the rest."""
+    adapter = graph_provenance_adapter
+    germany_id, _alice_id = await _seed_two_entities(adapter)
+
+    hubs = [_Ent(id=uuid4(), name=f"Hub {i}") for i in range(5)]
+    await adapter.add_nodes(hubs)
+    hub_ids = [str(hub.id) for hub in hubs]
+    # A single batch -> a single created_at stamp shared by all five edges.
+    await adapter.add_edges(
+        [(germany_id, hub_id, "links", {"edge_text": "t"}) for hub_id in hub_ids]
+    )
+
+    collected = []
+    since, after_key = None, None
+    for _ in range(10):  # bounded: a correct walk needs 4 pages (2+2+1+empty)
+        page, _node_map = await adapter.get_edges_created_since(since, 2, after_key=after_key)
+        if not page:
+            break
+        collected.extend(page)
+        last_source, last_target, last_relationship, since = page[-1]
+        after_key = (last_source, last_target, last_relationship)
+    else:
+        pytest.fail("keyset pagination did not terminate")
+
+    assert len(collected) == 5, "tie-group edges were skipped or duplicated"
+    assert {(edge[0], edge[1], edge[2]) for edge in collected} == {
+        (germany_id, hub_id, "links") for hub_id in hub_ids
+    }
+    assert len({edge[3] for edge in collected}) == 1, "batch should share one created_at"
+
+
 async def test_add_nodes_folds_provenance_in_one_write(graph_provenance_adapter):
     adapter = graph_provenance_adapter
     d1, r1 = uuid4(), uuid4()

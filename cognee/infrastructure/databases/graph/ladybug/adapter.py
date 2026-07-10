@@ -1618,19 +1618,34 @@ class LadybugAdapter(GraphDBInterface):
         self,
         since: Optional[datetime],
         limit: int,
+        after_key: Optional[Tuple[str, str, str]] = None,
     ) -> Tuple[List[Tuple[str, str, str, datetime]], Dict[str, Dict[str, Any]]]:
-        """Return edges created after ``since`` (oldest first) plus endpoint nodes.
+        """Return edges created after ``since``/``after_key`` (oldest first) plus endpoint nodes.
 
         Reads the edge ``created_at`` column directly (``get_graph_data`` drops it),
         so the session-sync incremental checkpoint keeps the same timestamp model
         as the relational path. Endpoint node properties are returned so callers
         can render triplets without a second lookup.
+
+        Keyset-paginated on (created_at, source id, target id, relationship_name):
+        one add_edges batch stamps every edge with the same created_at, so the
+        edge-identity tie-breaker lets a page boundary inside such a group resume
+        without skipping the rest of it.
         """
         where_clause = ""
         params: Dict[str, Any] = {"limit": limit}
         if since is not None:
-            where_clause = "WHERE r.created_at > timestamp($since)"
             params["since"] = since.strftime("%Y-%m-%d %H:%M:%S.%f")
+            if after_key is not None:
+                where_clause = (
+                    "WHERE r.created_at > timestamp($since)"
+                    " OR (r.created_at = timestamp($since) AND (a.id > $after_source"
+                    " OR (a.id = $after_source AND (b.id > $after_target"
+                    " OR (b.id = $after_target AND r.relationship_name > $after_rel)))))"
+                )
+                params["after_source"], params["after_target"], params["after_rel"] = after_key
+            else:
+                where_clause = "WHERE r.created_at > timestamp($since)"
 
         rows = await self.query(
             f"""
@@ -1639,7 +1654,7 @@ class LadybugAdapter(GraphDBInterface):
             RETURN a.id, a.name, a.type, a.properties,
                    b.id, b.name, b.type, b.properties,
                    r.relationship_name, r.created_at
-            ORDER BY r.created_at ASC
+            ORDER BY r.created_at ASC, a.id ASC, b.id ASC, r.relationship_name ASC
             LIMIT $limit
             """,
             params,

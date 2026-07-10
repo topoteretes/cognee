@@ -204,11 +204,19 @@ async def _collect_relational_lines(db_engine, dataset_id: UUID, since: Optional
 async def _collect_graph_provenance_lines(graph_engine, since: Optional[datetime]):
     """Walk new graph edges (by created_at) on a graph-provenance graph, returning
     (triplet_lines, latest_timestamp). Mirrors the relational collector but reads
-    provenance-carrying edges straight from the graph instead of the ledger."""
+    provenance-carrying edges straight from the graph instead of the ledger.
+
+    Pages with a keyset cursor (created_at plus edge identity), not the timestamp
+    alone: the graph adapters stamp every edge of one add_edges batch with the
+    same created_at, so a timestamp-only cursor would permanently skip the rest
+    of a tie group whenever a page boundary lands inside one."""
     lines: list[str] = []
     latest = since
+    after_key = None
     while True:
-        edges, node_map = await graph_engine.get_edges_created_since(latest, BATCH_SIZE)
+        edges, node_map = await graph_engine.get_edges_created_since(
+            latest, BATCH_SIZE, after_key=after_key
+        )
         if not edges:
             break
         for source_id, target_id, relationship, created_at in edges:
@@ -216,8 +224,10 @@ async def _collect_graph_provenance_lines(graph_engine, since: Optional[datetime
             dst = node_map.get(target_id)
             if src and dst:
                 lines.append(_triplet_line(src, relationship, dst))
-            if latest is None or created_at > latest:
-                latest = created_at
+        # Pages are totally ordered, so the last row is both the newest timestamp
+        # and the exact resume point inside its tie group.
+        last_source, last_target, last_relationship, latest = edges[-1]
+        after_key = (last_source, last_target, last_relationship)
         if len(edges) < BATCH_SIZE:
             break
     return lines, latest

@@ -1007,19 +1007,35 @@ class Neo4jAdapter(GraphDBInterface):
         self,
         since: Optional[datetime],
         limit: int,
+        after_key: Optional[Tuple[str, str, str]] = None,
     ) -> Tuple[List[Tuple[str, str, str, datetime]], Dict[str, Dict[str, Any]]]:
-        """Return edges created after ``since`` (oldest first) plus endpoint nodes.
+        """Return edges created after ``since``/``after_key`` (oldest first) plus endpoint nodes.
 
         Reads the edge ``created_at`` column (stamped once on create) so the
         session-sync incremental checkpoint keeps the same created-order model as
         the relational path. created_at is stored as epoch millis and returned as
         an aware UTC datetime, matching the Ladybug/Postgres adapters.
+
+        Keyset-paginated on (created_at, source id, target id, relationship type):
+        one add_edges batch stamps every edge with the same created_at (Cypher's
+        ``timestamp()`` is the statement clock), so the edge-identity tie-breaker
+        lets a page boundary inside such a group resume without skipping the rest
+        of it.
         """
         params: Dict[str, Any] = {"limit": limit}
         where_clause = ""
         if since is not None:
-            where_clause = "WHERE r.created_at > $since_ms"
             params["since_ms"] = self._datetime_to_ms(since)
+            if after_key is not None:
+                where_clause = (
+                    "WHERE r.created_at > $since_ms"
+                    " OR (r.created_at = $since_ms AND (a.id > $after_source"
+                    " OR (a.id = $after_source AND (b.id > $after_target"
+                    " OR (b.id = $after_target AND type(r) > $after_rel)))))"
+                )
+                params["after_source"], params["after_target"], params["after_rel"] = after_key
+            else:
+                where_clause = "WHERE r.created_at > $since_ms"
 
         rows = await self.query(
             f"""
@@ -1028,7 +1044,7 @@ class Neo4jAdapter(GraphDBInterface):
             RETURN a.id AS s, properties(a) AS a_props,
                    b.id AS t, properties(b) AS b_props,
                    type(r) AS rel, r.created_at AS created_at
-            ORDER BY r.created_at ASC
+            ORDER BY r.created_at ASC, a.id ASC, b.id ASC, type(r) ASC
             LIMIT $limit
             """,
             params,

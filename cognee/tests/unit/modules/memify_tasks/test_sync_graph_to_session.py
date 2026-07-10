@@ -1323,3 +1323,77 @@ class TestRecallSessionMode:
 
         assert [result.source for result in results] == ["session", "graph"]
         assert authorized_search_mock.await_args.kwargs["dataset_ids"] == [dataset_id]
+
+
+# ---------------------------------------------------------------------------
+# _collect_graph_provenance_lines — keyset pagination across a timestamp tie group
+# ---------------------------------------------------------------------------
+
+
+class _KeysetGraphStub:
+    """In-memory reference implementation of the get_edges_created_since keyset
+    contract: total order on (created_at, source, target, relationship), strict
+    ``>`` on the timestamp alone, resume inside a tie group via ``after_key``."""
+
+    def __init__(self, edges, node_map):
+        self._edges = sorted(edges, key=lambda edge: (edge[3], edge[0], edge[1], edge[2]))
+        self._node_map = node_map
+        self.calls = 0
+
+    async def get_edges_created_since(self, since, limit, after_key=None):
+        self.calls += 1
+
+        def visible(edge):
+            source, target, relationship, created_at = edge
+            if since is None:
+                return True
+            if created_at > since:
+                return True
+            if after_key is not None and created_at == since:
+                return (source, target, relationship) > after_key
+            return False
+
+        return [edge for edge in self._edges if visible(edge)][:limit], self._node_map
+
+
+@pytest.mark.asyncio
+async def test_collect_graph_provenance_lines_survives_timestamp_tie_group():
+    """Adapters stamp every edge of one add_edges batch with the same created_at.
+    With more than BATCH_SIZE such edges, a timestamp-only cursor would sync the
+    first page and permanently skip the rest; the keyset cursor must page through
+    the whole tie group AND keep advancing into a later batch with its own stamp,
+    so both halves of the mechanism (tie-break resume, timestamp advance) hold."""
+    from cognee.tasks.memify.sync_graph_to_session import (
+        BATCH_SIZE,
+        _collect_graph_provenance_lines,
+    )
+
+    total_tied = 2 * BATCH_SIZE + 200  # 1200 edges sharing one created_at stamp
+    total_later = BATCH_SIZE  # 500 edges from a later batch, later stamp
+    stamp = datetime(2026, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+    later_stamp = datetime(2026, 1, 2, 3, 4, 6, tzinfo=timezone.utc)
+    edges = [(f"s{i:05d}", f"t{i:05d}", "links", stamp) for i in range(total_tied)] + [
+        (f"u{i:05d}", f"v{i:05d}", "follows", later_stamp) for i in range(total_later)
+    ]
+    node_map = {
+        node_id: {"id": node_id, "name": node_id, "type": "Entity"}
+        for edge in edges
+        for node_id in (edge[0], edge[1])
+    }
+    graph = _KeysetGraphStub(edges, node_map)
+
+    lines, latest = await _collect_graph_provenance_lines(graph, since=None)
+
+    total = total_tied + total_later
+    assert len(lines) == total, "edges were skipped"
+    assert len(set(lines)) == total, "pagination returned duplicate edges"
+    assert sum('"relationship": "links"' in line for line in lines) == total_tied, (
+        "edges sharing a created_at stamp were skipped"
+    )
+    assert sum('"relationship": "follows"' in line for line in lines) == total_later, (
+        "edges after the tie group were skipped"
+    )
+    assert latest == later_stamp
+    # 500 tied + 500 tied + (200 tied + 300 later, crossing the stamp boundary
+    # mid-page) + terminating short page of 200 later.
+    assert graph.calls == 4

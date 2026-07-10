@@ -1461,13 +1461,29 @@ class PostgresAdapter(GraphDBInterface):
         self,
         since: Optional[datetime],
         limit: int,
+        after_key: Optional[Tuple[str, str, str]] = None,
     ) -> Tuple[List[Tuple[str, str, str, datetime]], Dict[str, Dict[str, Any]]]:
-        """Return edges created after ``since`` (oldest first) plus endpoint nodes."""
+        """Return edges created after ``since``/``after_key`` (oldest first) plus endpoint nodes.
+
+        Keyset-paginated on (created_at, source_id, target_id, relationship_name):
+        one add_edges batch stamps every edge with the same created_at, so the
+        edge-identity tie-breaker lets a page boundary inside such a group resume
+        without skipping the rest of it.
+        """
         where_clause = ""
         params: Dict[str, Any] = {"limit": limit}
         if since is not None:
-            where_clause = "WHERE e.created_at > :since"
             params["since"] = since
+            if after_key is not None:
+                where_clause = (
+                    "WHERE e.created_at > :since"
+                    " OR (e.created_at = :since"
+                    " AND (e.source_id, e.target_id, e.relationship_name)"
+                    " > (:after_source, :after_target, :after_rel))"
+                )
+                params["after_source"], params["after_target"], params["after_rel"] = after_key
+            else:
+                where_clause = "WHERE e.created_at > :since"
 
         async with self._session() as session:
             result = await session.execute(
@@ -1479,7 +1495,7 @@ class PostgresAdapter(GraphDBInterface):
                     JOIN graph_node a ON a.id = e.source_id
                     JOIN graph_node b ON b.id = e.target_id
                     {where_clause}
-                    ORDER BY e.created_at ASC
+                    ORDER BY e.created_at, e.source_id, e.target_id, e.relationship_name
                     LIMIT :limit
                 """),
                 params,
