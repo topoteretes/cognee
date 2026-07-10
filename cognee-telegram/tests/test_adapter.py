@@ -129,6 +129,15 @@ async def test_forget_is_idempotent_on_missing_dataset(mock_cognee):
     assert adapter.ledger.refs(scope.dataset_name) == []
 
 
+async def test_forget_is_idempotent_on_validation_error(mock_cognee):
+    # The other not-found shape: cognee raises a CogneeValidationError; also a no-op.
+    from cognee.exceptions import CogneeValidationError
+
+    mock_cognee.forget.side_effect = CogneeValidationError(message="No datasets found.")
+    adapter = CogneeMemoryAdapter()
+    await adapter.forget(_dm(adapter))  # must not raise
+
+
 async def test_answer_strips_raw_evidence_block(mock_cognee, graph_result):
     # recall appends an "Evidence:" block when include_references=True; the bot must
     # show only the answer and render its own clean sources instead.

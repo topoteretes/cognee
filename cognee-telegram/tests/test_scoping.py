@@ -1,4 +1,4 @@
-"""Scoping: chat → dataset + session mapping (pure logic, no cognee, no keys)."""
+"""Scoping: chat → dataset mapping (pure logic, no cognee, no keys)."""
 
 from cognee_telegram.scoping import resolve_scope
 

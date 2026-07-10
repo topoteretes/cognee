@@ -154,8 +154,9 @@ async def test_ingest_channel_post_without_sender(mock_cognee):
     )
     await ingest_message(update, make_context(adapter))
     mock_cognee.remember.assert_awaited_once()
-    _, kwargs = mock_cognee.remember.call_args
+    args, kwargs = mock_cognee.remember.call_args
     assert kwargs["dataset_name"] == "telegram_group_n1001234567890"
+    assert args[0] == ["auto-forwarded post"]  # no sender, so no author prefix
 
 
 async def test_ingest_skips_when_opted_out(mock_cognee):

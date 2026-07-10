@@ -16,8 +16,9 @@ from dataclasses import dataclass, field
 _WORD = re.compile(r"[a-z0-9]+")
 _MIN_TERM_LEN = 3
 
-# Cap the per-chat ledger so a long-lived bot's memory stays bounded. Recall only
-# ranks the newest messages anyway (recency), so we keep the most recent N.
+# Cap the per-chat ledger so a long-lived bot's memory stays bounded. We keep the
+# most recent N messages; if recall ever grounds an answer in an older, evicted
+# message, the bot omits that citation rather than mis-attributing it.
 _MAX_REFS_PER_DATASET = 1000
 
 # Common words that shouldn't, on their own, link an answer back to a message.
