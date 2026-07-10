@@ -74,6 +74,22 @@ class UnsupportedLLMProviderError(CogneeValidationError):
         super().__init__(message=message, name="UnsupportedLLMProviderError")
 
 
+class ProviderNotDeducibleError(CogneeValidationError):
+    """
+    Raised when ``llm_provider`` is not set and cannot be inferred from the
+    ``llm_model`` prefix because the prefix is not a provider cognee supports.
+
+    Tells the user to set the provider explicitly, since it could not be inferred.
+    """
+
+    def __init__(self, model: str) -> None:
+        message = (
+            f"Could not infer an LLM provider from LLM_MODEL={model!r}: the prefix "
+            "is not a provider cognee supports. Set LLM_PROVIDER explicitly."
+        )
+        super().__init__(message=message, name="ProviderNotDeducibleError")
+
+
 class MissingSystemPromptPathError(CogneeValidationError):
     def __init__(
         self,
