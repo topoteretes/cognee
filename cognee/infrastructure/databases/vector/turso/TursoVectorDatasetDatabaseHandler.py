@@ -2,7 +2,9 @@ import os
 from uuid import UUID
 from typing import Optional
 
-from cognee.infrastructure.databases.vector.create_vector_engine import create_vector_engine
+from cognee.infrastructure.databases.vector.create_vector_engine import (
+    aevict_vector_engines_for_database,
+)
 from cognee.modules.users.models import User
 from cognee.modules.users.models import DatasetDatabase
 from cognee.base_config import get_base_config
@@ -49,11 +51,16 @@ class TursoVectorDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
 
     @classmethod
     async def delete_dataset(cls, dataset_database: DatasetDatabase):
-        """Drop the dataset's vector tables by pruning its dedicated libSQL file."""
-        vector_engine = create_vector_engine(
-            vector_db_provider=dataset_database.vector_database_provider,
-            vector_db_url=dataset_database.vector_database_url,
-            vector_db_key=dataset_database.vector_database_key,
-            vector_db_name=dataset_database.vector_database_name,
+        """Remove the dataset's dedicated libSQL file (its embedded store)."""
+        # Never re-open the DB to drop it: create_vector_engine would spawn and
+        # cache a fresh engine whose connection then leaks, and DROP TABLE never
+        # removes the file. Evict every cached engine for this database (waiting
+        # for their closes to release the file handle), then delete the on-disk
+        # libSQL file. Turso's embedded store is a single file (unlike LanceDB's
+        # directory), so remove the file, not a tree. Mirrors the LanceDB handler.
+        await aevict_vector_engines_for_database(dataset_database.vector_database_name)
+
+        databases_directory_path = os.path.dirname(dataset_database.vector_database_url)
+        await get_file_storage(databases_directory_path).remove(
+            dataset_database.vector_database_name
         )
-        await vector_engine.prune()
