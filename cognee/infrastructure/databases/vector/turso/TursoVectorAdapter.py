@@ -455,30 +455,42 @@ class TursoVectorAdapter(VectorDBInterface):
                 f"AND EXISTS (SELECT 1 FROM json_each(payload, '$.belongs_to_set') je "
                 f"WHERE je.value IN (SELECT value FROM json_each(?))){id_scope}"
             )
+            # The SELECT doubles as the "is this a vector collection?" probe: a
+            # PascalCase relational table without a JSON belongs_to_set payload
+            # errors here and is skipped quietly.
             try:
                 rows = await self._execute(select_sql, [tags_json] + scope_params, fetch=True)
-                target_ids = [row[0] for row in rows or []]
-                if not target_ids:
-                    continue
-
-                id_placeholders = ",".join("?" for _ in target_ids)
-                # Strip the tags from exactly those rows.
-                update_sql = (
-                    f"UPDATE \"{table_name}\" SET payload = json_set(payload, '$.belongs_to_set', ("
-                    f"  SELECT json_group_array(value) FROM json_each(payload, '$.belongs_to_set')"
-                    f"  WHERE value NOT IN (SELECT value FROM json_each(?))"
-                    f")) WHERE id IN ({id_placeholders})"
-                )
-                await self._execute(update_sql, [tags_json] + target_ids, commit=True)
-
-                # Delete only the captured rows that are now empty.
-                delete_sql = (
-                    f'DELETE FROM "{table_name}" WHERE id IN ({id_placeholders}) '
-                    f"AND json_array_length(payload, '$.belongs_to_set') = 0"
-                )
-                await self._execute(delete_sql, target_ids, commit=True)
-            except Exception as error:  # noqa: BLE001 - one bad table must not abort the rest
+            except Exception as error:  # noqa: BLE001 - not a vector collection; skip
                 logger.debug("remove_belongs_to_set_tags skipped '%s': %s", table_name, error)
+                continue
+
+            target_ids = [row[0] for row in rows or []]
+            if not target_ids:
+                continue
+
+            id_placeholders = ",".join("?" for _ in target_ids)
+            # Strip the tags from exactly those rows.
+            update_sql = (
+                f"UPDATE \"{table_name}\" SET payload = json_set(payload, '$.belongs_to_set', ("
+                f"  SELECT json_group_array(value) FROM json_each(payload, '$.belongs_to_set')"
+                f"  WHERE value NOT IN (SELECT value FROM json_each(?))"
+                f")) WHERE id IN ({id_placeholders})"
+            )
+            # Delete only the captured rows that are now empty.
+            delete_sql = (
+                f'DELETE FROM "{table_name}" WHERE id IN ({id_placeholders}) '
+                f"AND json_array_length(payload, '$.belongs_to_set') = 0"
+            )
+            # A write failure once we know the table is a real collection is a
+            # genuine error: surface it at warning rather than hiding it at
+            # debug, but keep going so one table can't abort the rest.
+            try:
+                await self._execute(update_sql, [tags_json] + target_ids, commit=True)
+                await self._execute(delete_sql, target_ids, commit=True)
+            except Exception as error:  # noqa: BLE001 - surface, but continue other tables
+                logger.warning(
+                    "remove_belongs_to_set_tags failed to update '%s': %s", table_name, error
+                )
 
         return None
 
