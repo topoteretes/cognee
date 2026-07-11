@@ -61,16 +61,22 @@ def should_ingest(event: dict, opted_in: set[str], bot_user_id: str | None) -> b
     """Decide whether a ``message`` event should be ingested.
 
     Skips: message subtypes (edits ``message_changed``, deletions, joins, and
-    ``bot_message``), any bot-authored message, the bot's own messages, empty
-    text, and channels the bot hasn't been opted into.
+    ``bot_message``), any bot-authored message, the bot's own messages, messages
+    that @mention the bot, empty text, and channels not opted into.
+
+    The @mention skip matters because Slack delivers a plain ``message`` event
+    *alongside* the ``app_mention`` for the same text; that question is answered
+    by the mention handler, so ingesting it too would feed the bot's own
+    questions back into the channel's memory.
     """
     if event.get("subtype"):
         return False
     if event.get("bot_id"):
         return False
-    if bot_user_id and event.get("user") == bot_user_id:
+    text = (event.get("text") or "").strip()
+    if not text:
         return False
-    if not (event.get("text") or "").strip():
+    if bot_user_id and (event.get("user") == bot_user_id or f"<@{bot_user_id}>" in text):
         return False
     if event.get("channel") not in opted_in:
         return False
@@ -258,25 +264,25 @@ def build_app(
     buffer: IngestionBuffer,
     settings: SlackSettings,
     opted_in: set[str],
-    *,
-    bot_user_id: str | None = None,
 ):
     """Construct the Bolt ``AsyncApp`` and register the handlers.
 
-    ``opted_in`` is a live set (commit 6's opt-out command mutates it).
+    ``opted_in`` is a live set (the opt-in/opt-out commands mutate it). The bot's
+    own user id comes from Bolt's ``context`` (populated by its auth middleware),
+    so the own-message / self-mention skips work without a manual auth.test.
     """
     AsyncApp, _ = _load_bolt()
     app = AsyncApp(token=settings.bot_token)
     default_team_id = settings.default_team_id
 
     @app.event("message")
-    async def _on_message(event, client):
+    async def _on_message(event, client, context):
         await handle_message_event(
             event,
             client,
             buffer,
             opted_in=opted_in,
-            bot_user_id=bot_user_id,
+            bot_user_id=context.get("bot_user_id"),
             default_team_id=default_team_id,
         )
 

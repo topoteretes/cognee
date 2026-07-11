@@ -151,6 +151,30 @@ def test_should_ingest_predicate_direct():
     )
 
 
+def test_message_mentioning_the_bot_is_skipped():
+    # The @cognee question arrives as its own message event too; it is answered by
+    # the app_mention handler, so ingesting it would pollute memory with questions.
+    buffer = _fake_buffer()
+    client = _permalink_client()
+    event = {"channel": "C1", "ts": "1.0", "text": "<@U_bot> what did we decide?", "user": "U_a"}
+
+    ingested = asyncio.run(
+        handle_message_event(event, client, buffer, opted_in={"C1"}, bot_user_id="U_bot")
+    )
+
+    assert ingested is False
+    buffer.add_message.assert_not_awaited()
+
+
+def test_message_mentioning_another_user_is_still_ingested():
+    # Only a mention of the BOT is skipped; ordinary messages that @mention a
+    # teammate are normal channel content and must still be remembered.
+    assert (
+        should_ingest({"channel": "C1", "text": "ping <@U_other>", "user": "U_a"}, {"C1"}, "U_bot")
+        is True
+    )
+
+
 # --------------------------------------------------------------------------- #
 # @mention answer                                                             #
 # --------------------------------------------------------------------------- #
