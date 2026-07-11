@@ -33,8 +33,10 @@ EXPECTED_TOOLS = {
     "get_client_info_json",
 }
 
-# Host-validation rejection statuses, tolerant across MCP SDK versions.
-HOST_REJECTION_CODES = {400, 403, 421}
+# The MCP SDK's transport-security middleware rejects a bad Host with 421 (and a
+# bad Origin with 403); 400 is its Content-Type/JSON-parse status, so it is left
+# out here to avoid misreading a valid-Host protocol error as a Host rejection.
+HOST_REJECTION_CODES = {403, 421}
 
 _MCP_POST_HEADERS = {
     "Accept": "application/json, text/event-stream",
