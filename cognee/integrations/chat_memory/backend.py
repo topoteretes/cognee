@@ -20,7 +20,7 @@ from uuid import UUID, uuid5, NAMESPACE_URL
 
 from cognee.shared.logging_utils import get_logger
 
-from .models import RecalledItem
+from .models import Citation
 
 logger = get_logger("chat_memory.backend")
 
@@ -48,9 +48,7 @@ class MemoryBackend(Protocol):
         """
         ...
 
-    async def recall(
-        self, query: str, *, dataset: str, session: str, top_k: int
-    ) -> list[RecalledItem]:
+    async def recall(self, query: str, *, dataset: str, session: str, top_k: int) -> list[Citation]:
         """Recall the most relevant items for ``query`` from ``dataset``."""
         ...
 
@@ -126,11 +124,9 @@ class InMemoryMemoryBackend:
             "external_metadata": dict(external_metadata),
         }
 
-    async def recall(
-        self, query: str, *, dataset: str, session: str, top_k: int
-    ) -> list[RecalledItem]:
+    async def recall(self, query: str, *, dataset: str, session: str, top_k: int) -> list[Citation]:
         records = self._store.get(dataset, {})
-        scored: list[tuple[int, RecalledItem]] = []
+        scored: list[tuple[int, Citation]] = []
         for record in records.values():
             hits = _keyword_overlap(query, record["text"])
             if hits == 0:
@@ -139,7 +135,7 @@ class InMemoryMemoryBackend:
             scored.append(
                 (
                     hits,
-                    RecalledItem(
+                    Citation(
                         text=record["text"],
                         # Same-session items came from the fast cache; others
                         # are recalled from the shared dataset graph.
@@ -147,8 +143,6 @@ class InMemoryMemoryBackend:
                         score=float(hits),
                         permalink=stamp.get("permalink"),
                         user=str(stamp["user"]) if stamp.get("user") is not None else None,
-                        # Copy so a caller mutating a citation can't corrupt the store.
-                        metadata=dict(stamp),
                     ),
                 )
             )
@@ -227,9 +221,7 @@ class CogneeMemoryBackend:
             run_in_background=self.run_in_background,
         )
 
-    async def recall(
-        self, query: str, *, dataset: str, session: str, top_k: int
-    ) -> list[RecalledItem]:
+    async def recall(self, query: str, *, dataset: str, session: str, top_k: int) -> list[Citation]:
         import cognee
 
         responses = await cognee.recall(
@@ -243,7 +235,7 @@ class CogneeMemoryBackend:
         # recall reports each hit's origin as a data_id (the ingested Data.id);
         # the permalink/author live in the stamp we wrote onto that Data row.
         stamps = await self._stamps_by_data_id(dataset)
-        return [self._to_recalled_item(response, stamps) for response in responses]
+        return [self._to_citation(response, stamps) for response in responses]
 
     async def forget_scope(self, *, dataset: str) -> dict:
         import cognee
@@ -351,8 +343,8 @@ class CogneeMemoryBackend:
             return uuid5(NAMESPACE_URL, item_id)
 
     @staticmethod
-    def _to_recalled_item(response: Any, stamps: dict[str, dict[str, Any]]) -> RecalledItem:
-        """Normalize a cognee ``RecallResponse`` (a tagged union) to a RecalledItem.
+    def _to_citation(response: Any, stamps: dict[str, dict[str, Any]]) -> Citation:
+        """Normalize a cognee ``RecallResponse`` (a tagged union) to a Citation.
 
         Handled generically via attribute access so it survives the union
         growing new member types: every member carries ``source``; graph
@@ -373,11 +365,10 @@ class CogneeMemoryBackend:
         data_id = metadata.get("data_id") if isinstance(metadata, dict) else None
         stamp = stamps.get(str(data_id), {}) if data_id is not None else {}
         author = stamp.get("user")
-        return RecalledItem(
+        return Citation(
             text=text,
             source=source,
             score=getattr(response, "score", None),
             permalink=stamp.get("permalink"),
             user=str(author) if author is not None else None,
-            metadata=dict(stamp),
         )

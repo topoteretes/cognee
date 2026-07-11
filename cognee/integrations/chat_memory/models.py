@@ -30,7 +30,6 @@ class Conversation:
         channel: Channel / chat / room id.
         user: Id of the user who sent the triggering event.
         thread: Optional thread id within the channel.
-        metadata: Free-form platform extras (permalink template, locale, etc.).
     """
 
     platform: str
@@ -38,7 +37,6 @@ class Conversation:
     channel: str
     user: str
     thread: Optional[str] = None
-    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -95,10 +93,12 @@ class Scope:
 
 @dataclass(frozen=True)
 class Citation:
-    """A single source behind an :class:`Answer`.
+    """One recalled source, as returned by a :class:`MemoryBackend` and carried
+    on an :class:`Answer`.
 
-    Built from a recalled item's ``external_metadata`` stamp, which is the same
-    stamp that powers per-user forget, so one mechanism covers both.
+    Its ``permalink`` / ``user`` are resolved from the ``external_metadata``
+    stamp written at ingest — the same stamp that powers per-user forget, so one
+    mechanism covers both.
 
     Attributes:
         text: The recalled snippet.
@@ -107,7 +107,6 @@ class Citation:
         permalink: Link back to the original message, when known.
         user: Author of the original message, when known.
         score: Retriever score, when the source provides one.
-        metadata: The raw item metadata for callers that need more.
     """
 
     text: str
@@ -115,7 +114,6 @@ class Citation:
     permalink: Optional[str] = None
     user: Optional[str] = None
     score: Optional[float] = None
-    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -135,20 +133,3 @@ class Answer:
     def is_empty(self) -> bool:
         """True when recall found nothing to answer with."""
         return not self.text and not self.citations
-
-
-@dataclass(frozen=True)
-class RecalledItem:
-    """One normalized recall hit, as returned by a :class:`MemoryBackend`.
-
-    This is the backend-facing shape the adapter turns into a :class:`Citation`.
-    Keeping it separate from ``Citation`` lets a backend be mocked in tests
-    without importing any cognee recall types.
-    """
-
-    text: str
-    source: str
-    score: Optional[float] = None
-    permalink: Optional[str] = None
-    user: Optional[str] = None
-    metadata: dict[str, Any] = field(default_factory=dict)

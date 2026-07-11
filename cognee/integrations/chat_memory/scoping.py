@@ -6,15 +6,14 @@ A scope strategy is just ``Callable[[Conversation], Scope]``. Each one answers
 on :class:`Scope`. A bot picks a strategy (or writes its own one-liner) and
 never touches cognee dataset/session semantics directly.
 
-Three strategies cover almost everything:
+Two strategies cover the issue's cases; a bot wanting another boundary (say
+per-workspace) writes its own one-line ``Conversation -> Scope``:
 
 * :func:`per_channel_scope`: collaborative team memory (Slack/Discord/Telegram
   channel bots). One connected graph per channel, so "what did we decide" can
   traverse across users.
 * :func:`per_user_scope`: a personal cross-transport "second brain". One graph
   per user, spanning every platform, with a per-transport live session.
-* :func:`per_workspace_scope`: memory shared across every channel in a
-  workspace. The opt-in wide boundary.
 
 All keys are produced through :func:`sanitize_key`, so the returned
 :class:`Scope` is ready to use.
@@ -79,25 +78,6 @@ def per_user_scope(conversation: Conversation) -> Scope:
     * ``session  = {platform}:{workspace}:{channel}:{thread}``
     """
     dataset = sanitize_key("brain", _require(conversation.user, "user"))
-    session = sanitize_key(
-        conversation.platform,
-        conversation.workspace,
-        conversation.channel,
-        conversation.thread or "",
-    )
-    return Scope(dataset=dataset, session=session)
-
-
-def per_workspace_scope(conversation: Conversation) -> Scope:
-    """Per-workspace memory: shared across every channel in a workspace.
-
-    The opt-in wide boundary: memory and "forget this workspace" span all
-    channels. ``session`` remains per-thread so recent context stays local.
-
-    * ``dataset  = chat:{platform}:{workspace}``
-    * ``session  = {platform}:{workspace}:{channel}:{thread}``
-    """
-    dataset = sanitize_key("chat", conversation.platform, conversation.workspace)
     session = sanitize_key(
         conversation.platform,
         conversation.workspace,

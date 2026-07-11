@@ -22,25 +22,18 @@ The full "build your own bot in 5 minutes" guide lives in this package's
 ``README.md``.
 """
 
-from .adapter import ChatMemoryAdapter, ScopeStrategy
-from .backend import (
-    CogneeMemoryBackend,
-    InMemoryMemoryBackend,
-    MemoryBackend,
-    deterministic_item_id,
-)
+from .adapter import ChatMemoryAdapter
+from .backend import CogneeMemoryBackend, InMemoryMemoryBackend, MemoryBackend
 from .consent import ConsentStore, InMemoryConsentStore
-from .models import Answer, Citation, Conversation, Message, RecalledItem, Scope
-from .sanitizer import sanitize_key, sanitize_token
-from .scoping import per_channel_scope, per_user_scope, per_workspace_scope
+from .models import Answer, Citation, Conversation, Message, Scope
+from .sanitizer import sanitize_key
+from .scoping import per_channel_scope, per_user_scope
 
 __all__ = [
     "ChatMemoryAdapter",
-    "ScopeStrategy",
     "MemoryBackend",
     "CogneeMemoryBackend",
     "InMemoryMemoryBackend",
-    "deterministic_item_id",
     "ConsentStore",
     "InMemoryConsentStore",
     "Conversation",
@@ -48,10 +41,7 @@ __all__ = [
     "Scope",
     "Answer",
     "Citation",
-    "RecalledItem",
     "sanitize_key",
-    "sanitize_token",
     "per_channel_scope",
     "per_user_scope",
-    "per_workspace_scope",
 ]

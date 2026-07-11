@@ -10,10 +10,9 @@ from cognee.integrations.chat_memory import (
     Conversation,
     per_channel_scope,
     per_user_scope,
-    per_workspace_scope,
     sanitize_key,
-    sanitize_token,
 )
+from cognee.integrations.chat_memory.sanitizer import sanitize_token
 
 
 # ---------------------------------------------------------------------------
@@ -91,10 +90,13 @@ class TestScoping:
         # The live session still follows the transport.
         assert web.session != tele.session
 
-    def test_per_workspace_spans_channels(self):
-        a = per_workspace_scope(_convo(channel="C1"))
-        b = per_workspace_scope(_convo(channel="C2"))
-        assert a.dataset == b.dataset == "chat:slack:t1"
+    def test_missing_identity_segment_raises(self):
+        # A channel that sanitizes to empty must not silently alias into one
+        # dataset — the privacy/forget boundary has to stay distinct.
+        with pytest.raises(ValueError):
+            per_channel_scope(_convo(channel="!!!"))
+        with pytest.raises(ValueError):
+            per_user_scope(_convo(user=""))
 
     def test_collapsed_case_is_representable(self):
         # A per-channel bot that wants dataset == session can build one; the

@@ -52,7 +52,6 @@ def conversation_of(update: Update) -> Conversation:
         channel=str(chat.id),
         user=str(user.id),
         thread=str(update.message.message_thread_id) if update.message else None,
-        metadata={"chat_type": chat.type},
     )
 
 

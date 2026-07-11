@@ -20,7 +20,7 @@ from cognee.shared.logging_utils import get_logger
 
 from .backend import CogneeMemoryBackend, MemoryBackend, deterministic_item_id
 from .consent import ConsentStore, InMemoryConsentStore
-from .models import Answer, Citation, Conversation, Message, Scope
+from .models import Answer, Conversation, Message, Scope
 from .scoping import per_channel_scope
 
 logger = get_logger("chat_memory.adapter")
@@ -146,24 +146,13 @@ class ChatMemoryAdapter:
         returned as a :class:`Citation` resolved back to its source message.
         """
         scope = self.scope(conversation)
-        items = await self.backend.recall(
+        citations = await self.backend.recall(
             query,
             dataset=scope.dataset,
             session=scope.session,
             top_k=top_k or self.top_k,
         )
-        citations = [
-            Citation(
-                text=item.text,
-                source=item.source,
-                permalink=item.permalink,
-                user=item.user,
-                score=item.score,
-                metadata=item.metadata,
-            )
-            for item in items
-        ]
-        return Answer(text=self._compose_answer_text(items), citations=citations)
+        return Answer(text=self._compose_answer_text(citations), citations=citations)
 
     async def forget(
         self,
