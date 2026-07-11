@@ -103,7 +103,7 @@
     wrap.className = "cognee-cites";
     wrap.appendChild(el("", "Sources:"));
     cites.slice(0, 4).forEach(function (c) {
-      var line = c.snippet + (c.dataset ? "  (" + c.dataset + ")" : "");
+      var line = c.snippet + (c.document ? "  (" + c.document + ")" : "");
       wrap.appendChild(el("cognee-cite", line));
     });
     log.appendChild(wrap);

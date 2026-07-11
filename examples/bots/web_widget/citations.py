@@ -1,116 +1,78 @@
-"""Citation extraction for cognee-powered bots.
+"""Turn cognee's Evidence block into inline citations.
 
-``cognee.recall(..., include_references=True)`` returns a list of result
-entries (session QA hits, graph completions, graph context, ...). Agents
-and end users both need to *attribute* an answer to its sources, so this
-module normalizes those heterogeneous entries into a flat list of
-``Citation`` objects the transport layer can render inline.
+``cognee.recall(..., include_references=True)`` grounds an answer by appending
+an ``Evidence:`` block to the answer text — one bullet per source chunk::
 
-The extractor is intentionally defensive: results may arrive as Pydantic
-models (``RecallResponse``) or plain dicts, and references may live under
-``metadata``/``raw`` depending on the retriever. When no explicit
-reference is present we fall back to a snippet of the entry text so a
-reply is never uncited.
+    <answer prose>
+
+    Evidence:
+    - chunk 3 of document report.pdf (data_id: d1, chunk_id: c1): "…snippet…"
+
+The widget shows the clean prose and renders each bullet as a citation below
+it. This module does the split. Answers with no Evidence block (for example a
+plain session-memory recall) simply carry no citations — we never fabricate a
+source by re-quoting the answer.
 """
 
 from __future__ import annotations
 
 import dataclasses
-from typing import Any, Iterable, List, Optional
+import re
+from typing import List, Optional, Tuple
 
-# Score in cognee is a raw backend distance where *lower is better*. At the
-# surface we want the intuitive direction (higher = more relevant), matching
-# the ranking work in issue #3604.
-_MAX_SNIPPET = 240
+# The exact separator cognee inserts before the block (EVIDENCE_HEADER in
+# cognee/modules/retrieval/utils/references.py, appended as "\n\n" + header).
+_EVIDENCE_MARKER = "\n\nEvidence:\n"
+
+# - chunk 3 of document report.pdf (data_id: d1, chunk_id: c1): "snippet"
+# The parenthetical is optional (omitted when no ids are known).
+_BULLET = re.compile(
+    r"-\s*chunk\s+\d+\s+of\s+document\s+(?P<document>.+?)"
+    r'(?:\s+\((?P<provenance>[^)]*)\))?:\s*"(?P<snippet>.*)"\s*$'
+)
 
 
 @dataclasses.dataclass
 class Citation:
-    """One attributable source behind an answer."""
+    """One source chunk backing an answer."""
 
-    source: str  # "session" | "graph" | "graph_context" | "docs" | ...
+    document: str
     snippet: str
-    score: Optional[float] = None
-    dataset: Optional[str] = None
-    reference: Optional[str] = None  # data_id / chunk_id / url when available
+    data_id: Optional[str] = None
+    chunk_id: Optional[str] = None
 
     def as_dict(self) -> dict:
         return dataclasses.asdict(self)
 
 
-def _to_dict(entry: Any) -> dict:
-    """Normalize a Pydantic model or dict result entry into a plain dict."""
-    if isinstance(entry, dict):
-        return entry
-    for attr in ("model_dump", "dict"):
-        fn = getattr(entry, attr, None)
-        if callable(fn):
-            try:
-                return fn()
-            except Exception:  # noqa: BLE001 - best-effort normalization
-                pass
-    return {k: v for k, v in vars(entry).items() if not k.startswith("_")}
+def _provenance(text: Optional[str]) -> dict:
+    """Parse 'data_id: d1, chunk_id: c1' into {'data_id': 'd1', ...}."""
+    ids: dict = {}
+    for part in (text or "").split(","):
+        key, _, value = part.partition(":")
+        if key.strip() in ("data_id", "chunk_id") and value.strip():
+            ids[key.strip()] = value.strip()
+    return ids
 
 
-def _snippet(text: Optional[str]) -> str:
-    if not text:
-        return ""
-    text = " ".join(str(text).split())
-    return text if len(text) <= _MAX_SNIPPET else text[: _MAX_SNIPPET - 1] + "…"
+def split_evidence(answer: str) -> Tuple[str, List[Citation]]:
+    """Split an answer into (clean prose, citations parsed from its Evidence)."""
+    if not isinstance(answer, str) or _EVIDENCE_MARKER not in answer:
+        return (answer or "").strip(), []
 
-
-def _reference_id(ref: dict) -> Optional[str]:
-    for key in ("url", "reference", "chunk_id", "data_id", "id"):
-        value = ref.get(key)
-        if value:
-            return str(value)
-    return None
-
-
-def _references_from(entry: dict) -> List[dict]:
-    """Pull an explicit references list from wherever the retriever put it."""
-    for container in (entry, entry.get("metadata") or {}, entry.get("raw") or {}):
-        refs = container.get("references") if isinstance(container, dict) else None
-        if isinstance(refs, list) and refs:
-            return [r for r in refs if isinstance(r, dict)]
-    return []
-
-
-def extract_citations(results: Iterable[Any]) -> List[Citation]:
-    """Turn ``recall`` results into a flat, de-duplicated citation list."""
+    prose, _, block = answer.partition(_EVIDENCE_MARKER)
     citations: List[Citation] = []
-    seen: set = set()
-
-    for entry in results or []:
-        data = _to_dict(entry)
-        source = str(data.get("source") or "graph")
-        dataset = data.get("dataset_name") or data.get("dataset")
-        score = data.get("score")
-
-        explicit = _references_from(data)
-        if explicit:
-            for ref in explicit:
-                snippet = _snippet(ref.get("snippet") or ref.get("text"))
-                key = (snippet, _reference_id(ref))
-                if not snippet or key in seen:
-                    continue
-                seen.add(key)
-                citations.append(
-                    Citation(
-                        source=source,
-                        snippet=snippet,
-                        score=ref.get("score", score),
-                        dataset=ref.get("dataset") or dataset,
-                        reference=_reference_id(ref),
-                    )
-                )
+    for line in block.splitlines():
+        match = _BULLET.match(line.strip())
+        if not match:
             continue
-
-        # Fallback: cite the entry itself so a reply is never uncited.
-        snippet = _snippet(data.get("text") or data.get("answer") or data.get("content"))
-        key = (snippet, None)
-        if snippet and key not in seen:
-            seen.add(key)
-            citations.append(Citation(source=source, snippet=snippet, score=score, dataset=dataset))
-
-    return citations
+        ids = _provenance(match.group("provenance"))
+        citations.append(
+            Citation(
+                document=match.group("document").strip(),
+                snippet=match.group("snippet").strip(),
+                data_id=ids.get("data_id"),
+                chunk_id=ids.get("chunk_id"),
+            )
+        )
+    return prose.strip(), citations

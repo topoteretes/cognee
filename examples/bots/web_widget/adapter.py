@@ -25,13 +25,19 @@ it.
 from __future__ import annotations
 
 import dataclasses
-from typing import Any, List, Optional, Sequence
+from typing import Any, List, Sequence
 
 import cognee
 from cognee.infrastructure.session.get_session_manager import get_session_manager
 from cognee.modules.users.methods import get_default_user
 
-from citations import Citation, extract_citations
+from citations import Citation, split_evidence
+
+# cognee tags each recall entry with its origin. The answer to the *current*
+# query is a graph/graph_context completion; a stored session entry is a prior
+# turn, never the answer to display.
+_ANSWER_SOURCES = ("graph", "graph_context")
+_EMPTY_ANSWER = "I don't have anything in memory for that yet."
 
 
 @dataclasses.dataclass(frozen=True)
@@ -57,33 +63,40 @@ class Answer:
     session_id: str
 
     def as_dict(self) -> dict:
+        # "answer" is the wire name the widget and README use for the prose.
         return {
-            "text": self.text,
+            "answer": self.text,
             "citations": [c.as_dict() for c in self.citations],
             "session_id": self.session_id,
         }
 
 
-def _first_answer_text(results: Sequence[Any]) -> str:
-    """Pick the best renderable answer string across heterogeneous results."""
-    for entry in results or []:
-        data = entry if isinstance(entry, dict) else _model_dump(entry)
-        for key in ("answer", "text", "content"):
-            value = data.get(key)
-            if value and str(value).strip():
-                return str(value).strip()
-    return "I don't have anything in memory for that yet."
+def _field(entry: Any, name: str) -> Any:
+    """Read a field from a recall entry (a Pydantic model or a plain dict)."""
+    return entry.get(name) if isinstance(entry, dict) else getattr(entry, name, None)
 
 
-def _model_dump(entry: Any) -> dict:
-    for attr in ("model_dump", "dict"):
-        fn = getattr(entry, attr, None)
-        if callable(fn):
-            try:
-                return fn()
-            except Exception:  # noqa: BLE001
-                pass
-    return {k: v for k, v in vars(entry).items() if not k.startswith("_")}
+def _entry_text(entry: Any) -> str:
+    for key in ("text", "answer", "content"):
+        value = _field(entry, key)
+        if value and str(value).strip():
+            return str(value).strip()
+    return ""
+
+
+def _answer_text(results: Sequence[Any]) -> str:
+    """Pick the answer to display: the generated completion, else any hit."""
+    entries = list(results or [])
+    # Prefer the freshly generated completion (it carries the Evidence block);
+    # fall back to any entry so a plain session-memory recall still answers.
+    for generated_only in (True, False):
+        for entry in entries:
+            if generated_only and _field(entry, "source") not in _ANSWER_SOURCES:
+                continue
+            text = _entry_text(entry)
+            if text:
+                return text
+    return _EMPTY_ANSWER
 
 
 class ChatMemoryAdapter:
@@ -116,12 +129,7 @@ class ChatMemoryAdapter:
         role: str = "user",
         opt_in: bool = True,
     ) -> bool:
-        """Remember one conversation turn. No-op when the visitor opted out.
-
-        Runs as a background ``remember`` so replies are never blocked on the
-        write, and keeps the turn in the session cache
-        (``self_improvement=False``) so it stays private to this conversation.
-        """
+        """Remember one conversation turn. No-op when the visitor opted out."""
         if not opt_in or not message.strip():
             return False
         await cognee.remember(
@@ -139,7 +147,7 @@ class ChatMemoryAdapter:
             return
         await cognee.remember(list(docs), dataset_name=self.docs_dataset(site_id))
 
-    # -- retrieval (synchronous recall + citations) ------------------------
+    # -- retrieval (recall + citations) ------------------------------------
 
     async def answer(
         self, *, conversation: Conversation, query: str, use_docs: bool = True
@@ -153,11 +161,8 @@ class ChatMemoryAdapter:
             top_k=self.top_k,
             include_references=True,
         )
-        return Answer(
-            text=_first_answer_text(results),
-            citations=extract_citations(results),
-            session_id=conversation.session_id,
-        )
+        text, citations = split_evidence(_answer_text(results))
+        return Answer(text=text, citations=citations, session_id=conversation.session_id)
 
     # -- forget / opt-out --------------------------------------------------
 
