@@ -151,10 +151,16 @@ async def extract_graph_from_data(
     # deterministically by extract_dlt_fk_edges from schema metadata.
     from cognee.modules.data.processing.document_types import DltRowDocument
 
-    dlt_chunks = [
-        c for c in data_chunks if isinstance(getattr(c, "is_part_of", None), DltRowDocument)
-    ]
-    non_dlt_chunks = [c for c in data_chunks if c not in dlt_chunks]
+    # Partition in a single pass: a list-membership check against dlt_chunks
+    # rescans the list for every chunk (O(n^2) with Pydantic __eq__ comparisons),
+    # which becomes a bottleneck on the extraction hot path for large DLT sources.
+    dlt_chunks = []
+    non_dlt_chunks = []
+    for c in data_chunks:
+        if isinstance(getattr(c, "is_part_of", None), DltRowDocument):
+            dlt_chunks.append(c)
+        else:
+            non_dlt_chunks.append(c)
 
     if not non_dlt_chunks:
         return data_chunks
