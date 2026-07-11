@@ -79,7 +79,7 @@ The full schema lives in `catalog/schema.json`. Highlights:
    uv run python -m catalog.loader
    uv run python -m catalog.inventory_sync
    ```
-   The loader must exit 0 for the entry to be considered valid. The drift check tolerates coverage gaps (integrations in the inventory but not yet in the catalog) but fails on stale references.
+   The loader must exit 0 for the entry to be considered valid — that is the blocking gate. The drift check is advisory: it tolerates coverage gaps (integrations in the inventory but not yet in the catalog) and flags stale references, and it runs as a non-blocking CI step so an upstream change never fails your PR.
 7. Open a PR. The `Catalog` workflow will re-run both checks.
 
 ## Coverage gaps

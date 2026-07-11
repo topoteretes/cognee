@@ -20,18 +20,16 @@ run locally by anyone wanting to check drift before opening a PR.
 
 from __future__ import annotations
 
-import argparse
 import base64
 import json
 import os
 import sys
-import urllib.error
 import urllib.request
 from typing import Any
 
 import yaml
 
-from catalog.loader import CatalogError, ENTRIES_ROOT, load_catalog
+from catalog.loader import CatalogError, load_catalog
 
 INVENTORY_REPO = "topoteretes/cognee-integrations"
 INVENTORY_PATH = "integrations/inventory.yml"
@@ -58,7 +56,9 @@ def _github_headers() -> dict[str, str]:
 def fetch_inventory() -> dict[str, Any]:
     """Fetch and parse the upstream ``inventory.yml``.
 
-    Uses ``GITHUB_TOKEN`` when set (avoids anonymous rate limits in CI).
+    Uses ``GITHUB_TOKEN`` when set (avoids anonymous rate limits in CI). Any
+    network, decode, or parse failure is re-raised as :class:`InventoryFetchError`
+    so callers get one clean error type instead of a raw traceback.
     """
 
     url = f"{GITHUB_API}/repos/{INVENTORY_REPO}/contents/{INVENTORY_PATH}"
@@ -66,16 +66,16 @@ def fetch_inventory() -> dict[str, Any]:
     try:
         with urllib.request.urlopen(request, timeout=15) as response:
             payload = json.load(response)
-    except urllib.error.URLError as cause:
-        raise InventoryFetchError(f"could not fetch inventory.yml from GitHub: {cause}") from cause
+        content = payload.get("content")
+        encoding = payload.get("encoding")
+        if not content or encoding != "base64":
+            raise InventoryFetchError("inventory.yml payload was not base64-encoded content")
+        parsed = yaml.safe_load(base64.b64decode(content).decode("utf-8"))
+    except InventoryFetchError:
+        raise
+    except (OSError, ValueError, yaml.YAMLError) as cause:
+        raise InventoryFetchError(f"could not fetch or parse inventory.yml: {cause}") from cause
 
-    content = payload.get("content")
-    encoding = payload.get("encoding")
-    if not content or encoding != "base64":
-        raise InventoryFetchError("inventory.yml payload was not base64-encoded content")
-
-    decoded = base64.b64decode(content).decode("utf-8")
-    parsed = yaml.safe_load(decoded)
     if not isinstance(parsed, dict):
         raise InventoryFetchError("inventory.yml top-level was not a mapping")
     return parsed
@@ -116,9 +116,7 @@ def report_drift(inventory_slugs: set[str], catalog_slugs: dict[str, str]) -> li
     for slug in uncovered:
         problems.append(
             f"coverage gap: inventory.yml slug '{slug}' has no catalog entry "
-            "(add catalog/entries/integrations/{slug}.yaml with inventory_slug: {slug})".format(
-                slug=slug
-            )
+            f"(add catalog/entries/integrations/{slug}.yaml with inventory_slug: {slug})"
         )
 
     stale = sorted(set(catalog_slugs) - inventory_slugs)
@@ -132,19 +130,17 @@ def report_drift(inventory_slugs: set[str], catalog_slugs: dict[str, str]) -> li
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Cross-repo drift check for the catalog.")
-    parser.add_argument(
-        "--strict-coverage",
-        action="store_true",
-        help=(
-            "Treat coverage gaps (inventory slugs without a catalog entry) as errors. "
-            "Default is to warn but exit 0 so drift can accumulate for a batch PR."
-        ),
-    )
-    args = parser.parse_args()
+    """Report catalog/inventory drift.
+
+    Exit codes: 0 when in sync or only coverage gaps remain; 1 on stale
+    references (a catalog entry claims a slug the inventory no longer has);
+    2 when the inventory could not be fetched. The CI step runs non-blocking,
+    so an upstream reshape or a transient fetch failure never fails a PR.
+    """
 
     try:
         inventory = fetch_inventory()
+        inventory_slugs = collect_inventory_slugs(inventory)
     except InventoryFetchError as cause:
         print(f"error: {cause}", file=sys.stderr)
         return 2
@@ -155,7 +151,6 @@ def main() -> int:
         print(str(cause), file=sys.stderr)
         return 1
 
-    inventory_slugs = collect_inventory_slugs(inventory)
     problems = report_drift(inventory_slugs, catalog_slugs)
 
     if not problems:
@@ -172,11 +167,10 @@ def main() -> int:
         if problem.startswith("stale reference:"):
             stale_seen = True
 
-    if stale_seen or args.strict_coverage:
+    if stale_seen:
         return 1
 
-    print("(coverage gaps only; run with --strict-coverage to fail on these)")
-    _ = ENTRIES_ROOT  # keep the import used even when we exit early
+    print("(coverage gaps only; informational, not a failure)")
     return 0
 
 

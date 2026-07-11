@@ -35,7 +35,11 @@ jobs:
       - name: Load and validate catalog entries
         run: uv run python -m catalog.loader
 
+      # Advisory only: this hits the GitHub API and depends on another repo's
+      # inventory.yml, so a transient failure or an upstream reshape must not
+      # fail an unrelated catalog PR. Stale references still surface in the log.
       - name: Check drift against cognee-integrations/inventory.yml
+        continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: uv run python -m catalog.inventory_sync
