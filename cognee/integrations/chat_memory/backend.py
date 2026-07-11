@@ -174,8 +174,9 @@ class CogneeMemoryBackend:
     """In-process reference backend backed by the cognee Python SDK.
 
     Maps the adapter's four methods onto ``cognee.remember`` / ``cognee.recall``
-    / ``cognee.forget`` and nothing else. All cognee imports are local to the
-    methods so the heavy import graph is deferred until a primitive is called.
+    / ``cognee.forget`` and nothing else. Those entrypoints are imported lazily
+    inside each method, so the SDK's operational import graph is only pulled in
+    when a primitive actually runs.
 
     Storage is durable: a message is ingested through cognee's permanent
     ``add()`` + ``cognify()`` path (``run_in_background=True`` keeps it

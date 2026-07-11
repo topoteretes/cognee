@@ -140,10 +140,9 @@ class ChatMemoryAdapter:
     ) -> Answer:
         """Recall against this conversation's scope and return text + citations.
 
-        Recall reads the fast session cache first and falls through to the
-        dataset graph. The answer body is the best synthesized/graph result when
-        present, otherwise the top session snippet; every recalled item is
-        returned as a :class:`Citation` resolved back to its source message.
+        The answer body is the best synthesized/graph result when present,
+        otherwise the top snippet; every recalled item is returned as a
+        :class:`Citation` resolved back to its source message.
         """
         scope = self.scope(conversation)
         citations = await self.backend.recall(

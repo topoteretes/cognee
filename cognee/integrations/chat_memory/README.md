@@ -32,7 +32,7 @@ bot:
   `session` still follows the transport for recent context.
 
 Pick a strategy from [`scoping.py`](./scoping.py) (`per_channel_scope`,
-`per_user_scope`, `per_workspace_scope`) or pass your own `Conversation -> Scope`.
+`per_user_scope`) or pass your own `Conversation -> Scope`.
 
 ## Build your own bot in 5 minutes
 

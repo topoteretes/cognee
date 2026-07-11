@@ -45,6 +45,17 @@ answer = await cognee.search(
 See the [example](../demos/gmail_connector_example.py) for OAuth setup,
 incremental re-sync, and the privacy / opt-in notes.
 
+## Adapters
+
+Adapters are the mirror image of the connectors above: instead of pulling from
+an external source into cognee, they let an external system *write to and read
+from* cognee memory through a small, framework-agnostic interface. They are not
+DLT sources and don't use the ingestion subsystem above.
+
+| Adapter | Import | Example | What it is |
+|---|---|---|---|
+| **Chat memory** | `cognee.integrations.chat_memory` | [`chat_memory/`](./chat_memory/) | A shared core every cognee chat bot (Slack, Telegram, Discord, a personal "second brain") plugs into: `ingest` / `answer` (with citations) / `forget`, a consent gate, and one scope convention — so each bot stays ~100 lines. See its [README](../../cognee/integrations/chat_memory/README.md). |
+
 ## Adding a new connector
 
 1. Create `cognee/tasks/ingestion/connectors/<source>.py` exposing a factory

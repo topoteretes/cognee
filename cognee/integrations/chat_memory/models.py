@@ -64,27 +64,18 @@ class Message:
 
 @dataclass(frozen=True)
 class Scope:
-    """The two keys a conversation maps to.
+    """The two keys a conversation maps to — cognee's two storage knobs.
 
-    cognee exposes two distinct storage knobs, and the adapter keeps them
-    distinct rather than folding them into one:
+    * ``dataset`` is the durable graph + recall boundary, and the unit
+      ``forget`` wipes: where memory is shared.
+    * ``session`` identifies the live conversation (the recency axis).
 
-    * ``dataset`` is the durable graph and recall boundary, and the unit
-      ``forget`` wipes. This is where memory is shared and traversed.
-    * ``session`` is the fast per-conversation cache key. ``recall`` reads the
-      session first and falls through to the dataset graph.
-
-    They are kept separate because a single key cannot serve every bot. A
-    per-channel team bot can use the same value for both. A per-user "second
-    brain" cannot: a note saved from Telegram needs to be recallable from the
-    web, so its memory is shared per user (``dataset = "brain:{user}"``) while
-    the live thread stays per transport (``session = "{transport}:{source}"``).
-    With ``dataset`` and ``session`` as separate fields, both bots use the same
-    adapter, and the collapsed case is simply ``dataset == session``.
-
-    Both keys are already sanitized when a :class:`Scope` is produced through
-    :func:`cognee.integrations.chat_memory.scoping`, so downstream code can use
-    them as-is.
+    They are separate fields because one key cannot serve every bot: a
+    per-channel bot can use one value for both, but a per-user "second brain"
+    needs a per-user ``dataset`` (recallable across transports) with a
+    per-transport ``session``. The collapsed case is just ``dataset ==
+    session``. Keys produced via :mod:`.scoping` are already sanitized; see the
+    package README for the full rationale.
     """
 
     dataset: str
