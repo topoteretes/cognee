@@ -31,7 +31,7 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
-from typing import List, Optional
+from typing import List
 
 # Make the example importable whether run as a script or a module.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -108,20 +108,12 @@ async def chat(req: ChatRequest) -> JSONResponse:
             }
         )
 
-    # Remember the user turn in the background (skipped if opted out).
-    await adapter.ingest(
-        conversation=conversation, message=req.message, role="user", opt_in=req.opt_in
-    )
-
     answer = await adapter.answer(
-        conversation=conversation, query=req.message, use_docs=req.use_docs
+        conversation=conversation,
+        query=req.message,
+        remember=req.opt_in,
+        use_docs=req.use_docs,
     )
-
-    # Remember the assistant turn too so follow-ups have context.
-    await adapter.ingest(
-        conversation=conversation, message=answer.text, role="assistant", opt_in=req.opt_in
-    )
-
     return JSONResponse(answer.as_dict())
 
 

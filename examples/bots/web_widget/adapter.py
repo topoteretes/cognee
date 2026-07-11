@@ -1,10 +1,9 @@
 """Framework-agnostic chat-memory adapter for cognee-powered bots.
 
 Every transport (web chat widget, WhatsApp, MS Teams, ...) plugs into this
-thin layer so each bot stays small and they all share one memory model.
-The adapter maps a platform conversation to a stable cognee ``session_id``
-and delegates storage/retrieval to cognee's memory API
-(``remember`` / ``recall`` / ``forget``).
+thin layer so each bot stays small and they all share one memory model. The
+adapter maps a platform conversation to a stable cognee ``session_id`` and
+delegates to cognee's memory API (``recall`` / ``remember`` / ``forget``).
 
 This ships inside the web-widget example so it is copy-pastable today; it is
 deliberately shaped to fold onto the shared chat-memory adapter core
@@ -14,12 +13,12 @@ Session convention::
 
     web:{site_id}:{visitor_id}:{conversation_id}
 
-Memory boundary (default): **per visitor-conversation**. Conversation turns
-are stored in cognee's *session cache* (scoped by ``session_id``), so one
-visitor's chat never leaks into another's. An optional shared, read-only
-*docs* dataset (``{namespace}:{site_id}:docs``) powers the "ask our docs"
-mode: every conversation can recall from it, but no conversation writes to
-it.
+Memory boundary (default): **per visitor-conversation**. Answering with a
+``session_id`` lets cognee's session-aware recall both use *and persist* that
+conversation's history, so one visitor's chat never leaks into another's. An
+optional shared, read-only *docs* dataset (``{namespace}:{site_id}:docs``)
+powers the "ask our docs" mode: every conversation can recall from it, but no
+conversation writes to it.
 """
 
 from __future__ import annotations
@@ -29,6 +28,7 @@ from typing import Any, List, Sequence
 
 import cognee
 from cognee.infrastructure.session.get_session_manager import get_session_manager
+from cognee.modules.data.exceptions import DatasetNotFoundError
 from cognee.modules.users.methods import get_default_user
 
 from citations import Citation, split_evidence
@@ -100,7 +100,7 @@ def _answer_text(results: Sequence[Any]) -> str:
 
 
 class ChatMemoryAdapter:
-    """Thin ingest / answer / forget layer over cognee memory."""
+    """Thin answer / seed-docs / forget layer over cognee memory."""
 
     def __init__(self, *, namespace: str = "web", top_k: int = 8) -> None:
         self.namespace = namespace
@@ -119,52 +119,51 @@ class ChatMemoryAdapter:
     def docs_dataset(self, site_id: str) -> str:
         return f"{self.namespace}:{site_id}:docs"
 
-    # -- ingestion (background remember) -----------------------------------
-
-    async def ingest(
-        self,
-        *,
-        conversation: Conversation,
-        message: str,
-        role: str = "user",
-        opt_in: bool = True,
-    ) -> bool:
-        """Remember one conversation turn. No-op when the visitor opted out."""
-        if not opt_in or not message.strip():
-            return False
-        await cognee.remember(
-            f"{role}: {message}",
-            session_id=conversation.session_id,
-            run_in_background=True,
-            self_improvement=False,
-        )
-        return True
+    # -- "ask our docs" corpus ---------------------------------------------
 
     async def ingest_docs(self, *, site_id: str, documents: Sequence[str]) -> None:
         """Seed the shared, read-only "ask our docs" corpus for a site."""
         docs = [d for d in documents if d and d.strip()]
-        if not docs:
-            return
-        await cognee.remember(list(docs), dataset_name=self.docs_dataset(site_id))
+        if docs:
+            await cognee.remember(list(docs), dataset_name=self.docs_dataset(site_id))
 
-    # -- retrieval (recall + citations) ------------------------------------
+    # -- answer (recall + citations) ---------------------------------------
 
     async def answer(
-        self, *, conversation: Conversation, query: str, use_docs: bool = True
+        self,
+        *,
+        conversation: Conversation,
+        query: str,
+        remember: bool = True,
+        use_docs: bool = True,
     ) -> Answer:
-        """Recall an answer scoped to this conversation (+ docs in docs mode)."""
-        datasets = [self.docs_dataset(conversation.site_id)] if use_docs else None
-        results = await cognee.recall(
+        """Answer a query, scoped to this conversation and (optionally) the docs.
+
+        With ``remember=True`` the ``session_id`` is passed so cognee's
+        session-aware recall both uses and persists this conversation's history.
+        ``remember=False`` is the opt-out: the turn is answered statelessly and
+        nothing is stored.
+        """
+        session_id = conversation.session_id if remember else None
+        docs_dataset = self.docs_dataset(conversation.site_id)
+        try:
+            results = await self._recall(query, session_id, [docs_dataset] if use_docs else None)
+        except DatasetNotFoundError:
+            # Docs corpus not seeded yet — answer from session/graph only.
+            results = await self._recall(query, session_id, None)
+        text, citations = split_evidence(_answer_text(results))
+        return Answer(text=text, citations=citations, session_id=conversation.session_id)
+
+    async def _recall(self, query: str, session_id, datasets) -> list:
+        return await cognee.recall(
             query_text=query,
-            session_id=conversation.session_id,
+            session_id=session_id,
             datasets=datasets,
             top_k=self.top_k,
             include_references=True,
         )
-        text, citations = split_evidence(_answer_text(results))
-        return Answer(text=text, citations=citations, session_id=conversation.session_id)
 
-    # -- forget / opt-out --------------------------------------------------
+    # -- forget ------------------------------------------------------------
 
     async def forget(self, *, conversation: Conversation) -> bool:
         """Forget everything remembered for a single conversation."""
