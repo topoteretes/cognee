@@ -102,11 +102,7 @@ class datasets:
 
     @staticmethod
     async def empty_dataset(dataset_id: UUID, user: Optional[User] = None):
-        from cognee.modules.data.methods import delete_data, delete_dataset, get_dataset_database
-        from cognee.modules.graph.methods import (
-            delete_dataset_related_edges,
-            delete_dataset_related_nodes,
-        )
+        from cognee.modules.data.methods import delete_data, delete_dataset
 
         if not user:
             user = await get_default_user()
@@ -117,16 +113,7 @@ class datasets:
             raise UnauthorizedDataAccessError(f"Dataset {dataset_id} not accessible.")
 
         async with set_database_global_context_variables(dataset.id, dataset.owner_id):
-            if await get_dataset_database(dataset.id) is not None:
-                # The dataset owns its physical graph/vector databases, which
-                # ``delete_dataset`` below drops wholesale via the dataset
-                # database handlers. Opening them here just to delete nodes is
-                # wasted work and races the engine teardown for their file
-                # locks; only the relational ownership ledger needs cleanup.
-                await delete_dataset_related_nodes(dataset.id)
-                await delete_dataset_related_edges(dataset.id)
-            else:
-                await delete_dataset_nodes_and_edges(dataset_id, user.id)
+            await delete_dataset_nodes_and_edges(dataset_id, user.id)
 
             dataset_data = await get_dataset_data(dataset.id)
 

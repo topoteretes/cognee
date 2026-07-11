@@ -1,8 +1,8 @@
+from cognee.modules.users.models import DatasetDatabase
 from sqlalchemy import select, text
 from sqlalchemy.orm.attributes import flag_modified
 
 from cognee.modules.data.models import Dataset, DatasetData, Data
-from cognee.modules.data.methods.get_dataset_database import get_dataset_database
 from cognee.infrastructure.databases.utils.get_vector_dataset_database_handler import (
     get_vector_dataset_database_handler,
 )
@@ -21,7 +21,10 @@ async def delete_dataset(dataset: Dataset):
             # so must be enabled for each database connection/session separately.
             await session.execute(text("PRAGMA foreign_keys = ON;"))
 
-        dataset_database = await get_dataset_database(dataset.id)
+        stmt = select(DatasetDatabase).where(
+            DatasetDatabase.dataset_id == dataset.id,
+        )
+        dataset_database: DatasetDatabase = await session.scalar(stmt)
         if dataset_database:
             graph_dataset_database_handler = get_graph_dataset_database_handler(dataset_database)
             vector_dataset_database_handler = get_vector_dataset_database_handler(dataset_database)
