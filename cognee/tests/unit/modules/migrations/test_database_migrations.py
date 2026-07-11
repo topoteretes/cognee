@@ -146,6 +146,7 @@ def test_shipped_slugs_are_pinned():
     assert [m.slug for m in order_migrations(MIGRATIONS)] == [
         "namespace_entity_type_node_ids",
         "namespace_edge_type_point_ids",
+        "postgres_graph_provenance_columns",
     ]
 
 
