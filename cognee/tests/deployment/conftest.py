@@ -1,8 +1,9 @@
 """Pytest fixtures and marker registration for deployment end-to-end tests.
 
-Deployment tests build and run Docker images and are therefore opt-in via the
-``deployment`` marker (select with ``pytest -m deployment``). They are skipped
-automatically when no Docker daemon is reachable.
+Deployment tests run a prebuilt ``cognee-mcp`` Docker image and are therefore
+opt-in via the ``deployment`` marker (select with ``pytest -m deployment``).
+They are skipped automatically when Docker is unavailable or the image has not
+been built.
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ import pytest
 from mcp_harness import (
     MCPContainer,
     docker_available,
-    ensure_mcp_image,
+    image_exists,
     run_mcp_http_container,
 )
 
@@ -26,24 +27,29 @@ HEALTH_TIMEOUT = float(os.getenv("COGNEE_DEPLOYMENT_HEALTH_TIMEOUT", "120"))
 def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line(
         "markers",
-        "deployment: end-to-end tests that build and run Docker images "
+        "deployment: end-to-end tests that run a prebuilt Docker image "
         "(opt-in; excluded from the default unit run).",
     )
 
 
 @pytest.fixture(scope="session")
 def mcp_image() -> str:
-    """Ensure the cognee-mcp image exists locally and return its tag.
+    """Return the tag of a locally available cognee-mcp image.
 
     Skips the whole suite (rather than failing) when Docker is unavailable or
-    the image cannot be built, so the marker stays friendly on dev machines.
+    the image has not been built, so the marker stays friendly on dev machines.
+    The image is built explicitly beforehand (CI does this) rather than from
+    inside a fixture, so a bare ``pytest -m deployment`` never triggers a
+    surprise multi-minute build.
     """
     if not docker_available():
         pytest.skip("Docker daemon is not available; skipping deployment tests.")
-    try:
-        return ensure_mcp_image(DEFAULT_MCP_IMAGE)
-    except Exception as exc:  # noqa: BLE001 - surface as skip with context
-        pytest.skip(f"Could not build/find cognee-mcp image {DEFAULT_MCP_IMAGE!r}: {exc}")
+    if not image_exists(DEFAULT_MCP_IMAGE):
+        pytest.skip(
+            f"cognee-mcp image {DEFAULT_MCP_IMAGE!r} not found; build it first:\n"
+            f"  docker build -f cognee-mcp/Dockerfile -t {DEFAULT_MCP_IMAGE} ."
+        )
+    return DEFAULT_MCP_IMAGE
 
 
 @pytest.fixture(scope="module")

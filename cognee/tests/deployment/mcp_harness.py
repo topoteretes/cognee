@@ -1,8 +1,8 @@
 """Helpers for the MCP Docker HTTP e2e suite (T3 / #3361).
 
 Drive the built ``cognee-mcp`` image over HTTP (Docker CLI + httpx + mcp): image
-availability/build, a free-port picker, a health poller, a container context
-manager with guaranteed teardown, and an MCP streamable-HTTP client session.
+availability, a free-port picker, a health poller, a container context manager
+with guaranteed teardown, and an MCP streamable-HTTP client session.
 """
 
 from __future__ import annotations
@@ -12,11 +12,7 @@ import shutil
 import socket
 import subprocess
 import time
-from pathlib import Path
 from typing import AsyncIterator, Iterator, Optional
-
-# mcp_harness.py -> deployment -> tests -> cognee -> repo root
-REPO_ROOT = Path(__file__).resolve().parents[3]
 
 # Port the MCP server listens on inside the container (entrypoint default).
 CONTAINER_HTTP_PORT = 8000
@@ -47,27 +43,6 @@ def image_exists(tag: str) -> bool:
         ).returncode
         == 0
     )
-
-
-def ensure_mcp_image(tag: str) -> str:
-    """Return ``tag`` if present locally, otherwise build it from cognee-mcp/Dockerfile."""
-    if image_exists(tag):
-        return tag
-
-    dockerfile = REPO_ROOT / "cognee-mcp" / "Dockerfile"
-    subprocess.run(
-        [
-            "docker",
-            "build",
-            "-f",
-            str(dockerfile),
-            "-t",
-            tag,
-            str(REPO_ROOT),
-        ],
-        check=True,
-    )
-    return tag
 
 
 def free_port() -> int:
