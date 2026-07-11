@@ -533,14 +533,22 @@ class ClosingLRUCache:
             # Nothing in this module cancels registry futures, so a cancelled
             # one means an invariant broke — surface it, then proceed with
             # creation as usual.
-            logger.error("Pending close for cache key %r was cancelled unexpectedly", key)
+            logger.error(
+                "BUG: pending close for cache key %r was cancelled unexpectedly — nothing in "
+                "cognee cancels registry futures, so the closing-registry contract was "
+                "violated and must be root-caused (the operation itself continues safely)",
+                key,
+            )
         except Exception:
             # By construction nothing lands here: close futures resolve with
             # a result, never an exception (see _start_close). Getting here
             # means that invariant broke — surface it loudly, but still
             # proceed: a creator must not fail over close bookkeeping.
             logger.error(
-                "Unexpected error while waiting for pending close of cache key %r",
+                "BUG: unexpected error while waiting for pending close of cache key %r — "
+                "registry futures must only ever resolve with None (see _start_close), so "
+                "the closing-registry contract was violated and must be root-caused "
+                "(the operation itself continues safely)",
                 key,
                 exc_info=True,
             )
@@ -608,14 +616,22 @@ class ClosingLRUCache:
             # own task being cancelled, which must propagate.
             if not future.cancelled():
                 raise
-            logger.error("Pending close for cache key %r was cancelled unexpectedly", key)
+            logger.error(
+                "BUG: pending close for cache key %r was cancelled unexpectedly — nothing in "
+                "cognee cancels registry futures, so the closing-registry contract was "
+                "violated and must be root-caused (the operation itself continues safely)",
+                key,
+            )
         except Exception:
             # By construction nothing lands here: close futures resolve with
             # a result, never an exception (see _start_close). Getting here
             # means that invariant broke — surface it loudly, but let the
             # caller proceed: failing it over close bookkeeping is worse.
             logger.error(
-                "Unexpected error while waiting for pending close of cache key %r",
+                "BUG: unexpected error while waiting for pending close of cache key %r — "
+                "registry futures must only ever resolve with None (see _start_close), so "
+                "the closing-registry contract was violated and must be root-caused "
+                "(the operation itself continues safely)",
                 key,
                 exc_info=True,
             )

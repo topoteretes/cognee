@@ -1298,7 +1298,11 @@ def test_registry_future_carrying_exception_is_logged_and_creation_proceeds(capl
         new_value = asyncio.run(scenario())
 
     assert new_value.name == "new"
-    matching = [r for r in caplog.records if "Unexpected error while waiting" in r.getMessage()]
+    matching = [
+        r
+        for r in caplog.records
+        if "unexpected error while waiting for pending close" in r.getMessage()
+    ]
     assert matching and matching[0].exc_info is not None
 
 
@@ -1414,5 +1418,53 @@ def test_sync_creator_logs_and_proceeds_on_registry_future_with_exception(caplog
     timer.join()
 
     assert new_value.name == "new"
-    matching = [r for r in caplog.records if "Unexpected error while waiting" in r.getMessage()]
+    matching = [
+        r
+        for r in caplog.records
+        if "unexpected error while waiting for pending close" in r.getMessage()
+    ]
     assert matching and matching[0].exc_info is not None
+
+
+def test_factory_exceptions_always_propagate_to_the_caller():
+    """The cache must never absorb exceptions from user code: a factory that
+    raises (bad engine construction) propagates out of both creation paths,
+    and nothing gets cached."""
+    import asyncio
+
+    import pytest
+
+    cache = ClosingLRUCache(maxsize=8, lease=True)
+
+    def bad_factory():
+        raise ValueError("boom in engine construction")
+
+    with pytest.raises(ValueError, match="boom in engine construction"):
+        cache.get_or_create("k", bad_factory)
+
+    async def create_async():
+        await cache.aget_or_create("k", bad_factory)
+
+    with pytest.raises(ValueError, match="boom in engine construction"):
+        asyncio.run(create_async())
+
+    assert cache.cache_info().currsize == 0
+
+
+def test_proxied_method_exceptions_always_propagate_to_the_caller():
+    """Exceptions raised by the cached value's own methods pass through the
+    lease proxy untouched — using an engine never routes through any of the
+    cache's exception handlers."""
+    import pytest
+
+    class _EngineWithBadMethod:
+        def query(self):
+            raise RuntimeError("boom in engine usage")
+
+        def close(self):
+            pass
+
+    cache = ClosingLRUCache(maxsize=8, lease=True)
+    engine = cache.get_or_create("k", _EngineWithBadMethod)
+    with pytest.raises(RuntimeError, match="boom in engine usage"):
+        engine.query()
