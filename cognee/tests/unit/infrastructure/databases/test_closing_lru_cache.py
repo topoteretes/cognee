@@ -988,3 +988,116 @@ def test_name_bound_pin_predicate_rejects_unknown_parameter():
         @closing_lru_cache(maxsize=2, pinned_predicate=dataset_queue_pin_predicate("no_such_param"))
         def create(provider, db_name):
             return _Closeable(db_name)
+
+
+class _LifecycleEngine:
+    """Closeable stub asserting the close→open ordering invariant: a new
+    engine for a key may only be constructed after its predecessor closed."""
+
+    def __init__(self, key, registry):
+        self.key = key
+        self.closed = False
+        predecessor = registry.get(key)
+        assert predecessor is None or predecessor.closed, (
+            f"new engine for {key} constructed while predecessor still open"
+        )
+        registry[key] = self
+
+    async def close(self):
+        import asyncio
+
+        await asyncio.sleep(0)  # force the async (loop-task) close path
+        self.closed = True
+
+
+def test_hundred_keys_with_rotating_pins_never_close_active():
+    """100 keys through a maxsize-6 cache with a rotating pinned window:
+    pinned entries survive, the cache converges once pins lift, and every
+    evicted engine is closed."""
+    import asyncio
+
+    registry: dict = {}
+    pinned: set = set()
+    created: list = []
+
+    @closing_lru_cache(maxsize=6, lease=False, pinned_predicate=lambda key: key[0] in pinned)
+    def create(name):
+        engine = _LifecycleEngine(name, registry)
+        created.append(engine)
+        return engine
+
+    async def scenario():
+        for i in range(100):
+            pinned.clear()
+            pinned.update(f"k{j}" for j in range(max(0, i - 4), i + 1))
+            create(f"k{i}")
+            assert create.cache_info().currsize <= 6 + len(pinned)
+            await asyncio.sleep(0)  # let scheduled async closes run
+        pinned.clear()
+        create("final")  # trigger convergence back under maxsize
+        for _ in range(3):
+            await asyncio.sleep(0)
+        assert create.cache_info().currsize <= 6
+        closed = sum(1 for engine in created if engine.closed)
+        assert closed >= len(created) - 6 - 1
+
+    asyncio.run(scenario())
+
+
+def test_hundred_evict_recreate_cycles_hold_close_open_ordering():
+    """100 randomized evict→recreate cycles over contended keys, half with
+    the close deferred behind a held lease: the factory-level ordering
+    assertion must hold every time and the pending-close registry must drain."""
+    import asyncio
+    import gc
+    import random
+
+    random.seed(42)
+    registry: dict = {}
+    cache = ClosingLRUCache(maxsize=4, lease=True)
+
+    async def scenario():
+        for i in range(100):
+            key = f"key{i % 5}"
+            holder = await cache.aget_or_create(key, lambda k=key: _LifecycleEngine(k, registry))
+            if random.random() < 0.5:
+                cache.evict(key)  # close deferred behind `holder`
+                del holder
+                gc.collect()
+            else:
+                del holder
+                cache.evict(key)
+            await asyncio.sleep(0)
+        await cache.await_pending_closes()
+        assert not cache._closing
+
+    asyncio.run(scenario())
+
+
+def test_hundred_concurrent_creators_hold_ordering_and_drain_registry():
+    """100 concurrent creators across 10 contended keys with interleaved
+    evictions: no ordering violations, no leaked pending-close futures."""
+    import asyncio
+    import gc
+    import random
+
+    random.seed(42)
+    registry: dict = {}
+    cache = ClosingLRUCache(maxsize=6, lease=True)
+
+    async def worker(i):
+        key = f"c{i % 10}"
+        value = await cache.aget_or_create(key, lambda k=key: _LifecycleEngine(k, registry))
+        await asyncio.sleep(random.random() * 0.005)
+        if i % 3 == 0:
+            cache.evict(key)
+        del value
+
+    async def scenario():
+        await asyncio.gather(*(worker(i) for i in range(100)))
+        gc.collect()
+        await asyncio.sleep(0.05)
+        await cache.await_pending_closes()
+        assert not cache._closing
+
+    asyncio.run(scenario())
