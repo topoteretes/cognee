@@ -1101,3 +1101,98 @@ def test_hundred_concurrent_creators_hold_ordering_and_drain_registry():
         assert not cache._closing
 
     asyncio.run(scenario())
+
+
+# -- Pending-close resilience: cancelled, stranded, or lost closes -----------
+
+
+def test_close_cancelled_at_loop_exit_does_not_wedge_next_creation():
+    """Regression for the CI hang shipped with the pending-close registry: an
+    async close scheduled as a loop task is cancelled by ``asyncio.run`` at
+    loop teardown if still pending. The done-callback must resolve the registry
+    entry even on cancellation — otherwise the next creation for the same key
+    waits on it forever."""
+    import asyncio
+
+    cache = ClosingLRUCache(maxsize=8, lease=True)
+
+    class _NeverFinishesClose:
+        async def close(self):
+            await asyncio.sleep(3600)  # cancelled at loop teardown
+
+    async def evict_and_exit():
+        proxy = cache.get_or_create("k", _NeverFinishesClose)
+        del proxy
+        gc.collect()  # release the lease so evict() starts the close now
+        assert cache.evict("k") is True
+        # Exit while the close task is still pending: asyncio.run cancels it.
+
+    asyncio.run(evict_and_exit())
+
+    async def recreate():
+        return await asyncio.wait_for(
+            cache.aget_or_create("k", lambda: _Closeable("new")), timeout=5
+        )
+
+    new_value = asyncio.run(recreate())
+    assert new_value.name == "new"
+
+
+def test_pending_close_stranded_on_dead_loop_is_skipped():
+    """A pending close whose scheduling loop has closed can never resolve;
+    both creation paths must detect this, clear the note, and proceed."""
+    import asyncio
+    import concurrent.futures
+
+    cache = ClosingLRUCache(maxsize=8, lease=True)
+    dead_loop = asyncio.new_event_loop()
+    dead_loop.close()
+
+    stranded = concurrent.futures.Future()
+    stranded._close_loop = dead_loop
+    with cache._lock:
+        cache._closing["k"] = stranded
+
+    async def recreate():
+        return await asyncio.wait_for(
+            cache.aget_or_create("k", lambda: _Closeable("new")), timeout=5
+        )
+
+    new_value = asyncio.run(recreate())
+    assert new_value.name == "new"
+    assert stranded.done()
+    assert "k" not in cache._closing
+
+    stranded_sync = concurrent.futures.Future()
+    stranded_sync._close_loop = dead_loop
+    with cache._lock:
+        cache._closing["k2"] = stranded_sync
+    sync_value = cache.get_or_create("k2", lambda: _Closeable("new-sync"))
+    assert sync_value.name == "new-sync"
+    assert stranded_sync.done()
+    assert "k2" not in cache._closing
+
+
+def test_wait_for_pending_close_is_bounded(monkeypatch):
+    """A pending close that never resolves (completion signal lost some other
+    way) delays a creator by at most ``PENDING_CLOSE_WAIT_SECONDS``, then
+    creation proceeds with a warning instead of hanging."""
+    import asyncio
+    import concurrent.futures
+    from cognee.infrastructure.databases.utils import closing_lru_cache as cache_module
+
+    monkeypatch.setattr(cache_module, "PENDING_CLOSE_WAIT_SECONDS", 0.2)
+
+    cache = ClosingLRUCache(maxsize=8, lease=True)
+    lost = concurrent.futures.Future()  # no _close_loop marker: looks live, never resolves
+    with cache._lock:
+        cache._closing["k"] = lost
+
+    async def recreate():
+        return await asyncio.wait_for(
+            cache.aget_or_create("k", lambda: _Closeable("new")), timeout=5
+        )
+
+    new_value = asyncio.run(recreate())
+    assert new_value.name == "new"
+    assert lost.done() is False  # we gave up waiting; the note itself is untouched
