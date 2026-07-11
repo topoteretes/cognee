@@ -20,7 +20,7 @@ catalog tooling adds nothing to the shipped package.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -74,7 +74,6 @@ class CatalogEntry:
     example_path: str | None = None
     inventory_slug: str | None = None
     docs_url: str | None = None
-    raw: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any], source_path: Path) -> CatalogEntry:
@@ -95,7 +94,6 @@ class CatalogEntry:
             example_path=data.get("example_path"),
             inventory_slug=data.get("inventory_slug"),
             docs_url=data.get("docs_url"),
-            raw=data,
         )
 
 
@@ -114,16 +112,14 @@ def _load_yaml(source_path: Path) -> dict[str, Any]:
     return loaded
 
 
-def validate_entry(data: dict[str, Any], source_path: Path) -> list[str]:
-    """Validate a single already-parsed entry.
+def _validate_entry(
+    data: dict[str, Any], source_path: Path, validator: Draft7Validator
+) -> list[str]:
+    """Validate a single already-parsed entry against the schema and naming rules.
 
-    Returns a list of human-readable error strings. Empty list means valid.
-    Kept public because both :func:`load_catalog` and the CI drift check use
-    it, and future tooling (an editor plugin, a preview site) may want it too.
+    Returns a list of human-readable error strings; an empty list means valid.
     """
 
-    schema = _load_schema()
-    validator = Draft7Validator(schema)
     errors: list[str] = []
 
     for problem in validator.iter_errors(data):
@@ -179,6 +175,7 @@ def load_catalog(entries_root: Path | None = None) -> list[CatalogEntry]:
     if not root.exists():
         raise CatalogError([f"catalog entries root does not exist: {root}"])
 
+    validator = Draft7Validator(_load_schema())
     all_errors: list[str] = []
     entries: list[CatalogEntry] = []
     seen_ids: dict[str, Path] = {}
@@ -193,7 +190,7 @@ def load_catalog(entries_root: Path | None = None) -> list[CatalogEntry]:
             all_errors.extend(cause.errors)
             continue
 
-        errors = validate_entry(data, source_path)
+        errors = _validate_entry(data, source_path, validator)
         if errors:
             all_errors.extend(errors)
             continue
