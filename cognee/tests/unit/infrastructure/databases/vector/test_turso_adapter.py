@@ -95,7 +95,28 @@ async def test_create_data_points_and_search_ordering(adapter):
     assert len(results) == 3
     # cosine distance is lower-is-better; results must be ascending by score
     assert results == sorted(results, key=lambda r: r.score)
+    # the "quantum" query vector equals docs[0]'s, so docs[0] must rank first
+    # with a strictly smaller distance than the runner-up — this pins real
+    # vector_distance_cos ranking rather than the tautological sorted() check.
+    assert str(results[0].id) == str(docs[0].id)
+    assert results[0].score < results[1].score
     assert "quantum" in results[0].payload["text"]
+
+
+@pytest.mark.asyncio
+async def test_in_batch_duplicate_ids_merge(adapter):
+    # Two data points sharing an id in ONE batch must merge via the per-row
+    # ON CONFLICT alone (no in-Python dedup): last payload wins and the
+    # belongs_to_set arrays are unioned.
+    first = _Doc(text="quantum first", belongs_to_set=["Quantum", "Computers"])
+    second = _Doc(text="quantum second", belongs_to_set=["Computers", "Physics"])
+    second.id = first.id
+    await adapter.create_data_points("DocumentChunk_text", [first, second])
+
+    rows = await adapter.retrieve("DocumentChunk_text", [first.id])
+    assert len(rows) == 1
+    assert set(rows[0].payload["belongs_to_set"]) == {"Quantum", "Computers", "Physics"}
+    assert rows[0].payload["text"] == "quantum second"
 
 
 @pytest.mark.asyncio
