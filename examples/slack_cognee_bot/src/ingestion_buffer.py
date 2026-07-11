@@ -46,6 +46,8 @@ class IngestionBuffer:
         self._lock = asyncio.Lock()
         # channel_id -> count of messages ingested but not yet cognified.
         self._pending: dict[str, int] = {}
+        # channel_id -> lock serializing cognify for that channel (see flush()).
+        self._flush_locks: dict[str, asyncio.Lock] = {}
 
     def pending_count(self, channel_id: str) -> int:
         """Number of buffered-but-not-yet-cognified messages for a channel."""
@@ -76,15 +78,22 @@ class IngestionBuffer:
         """Cognify the channel's dataset if it has pending messages; else no-op.
 
         Empty-buffer flush never calls the adapter (clean no-op). The counter is
-        reset under the lock before the (idempotent) cognify runs.
+        reset under the lock, then cognify runs under a per-channel lock so a
+        size-triggered flush and an on-demand (answer-time) flush never run
+        cognee.cognify on the same dataset concurrently — overlapping cognify on
+        one dataset can corrupt/deadlock the underlying store.
         """
         channel_id = ref.channel_id
         async with self._lock:
             if self._pending.get(channel_id, 0) == 0:
                 return
             self._pending[channel_id] = 0
+            flush_lock = self._flush_locks.get(channel_id)
+            if flush_lock is None:
+                flush_lock = self._flush_locks[channel_id] = asyncio.Lock()
 
-        await self._memory.flush(ref)
+        async with flush_lock:
+            await self._memory.flush(ref)
 
     async def answer(self, ref: ConversationRef, *, query: str) -> Answer:
         """Flush pending messages for the channel, then answer the query."""

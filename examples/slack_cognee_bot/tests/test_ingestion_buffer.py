@@ -199,6 +199,40 @@ def test_flush_is_noop_again_immediately_after_flushing():
     assert memory.flush.await_count == 1  # unchanged
 
 
+def test_concurrent_flushes_do_not_cognify_a_channel_at_once():
+    # A size-triggered flush and an on-demand flush can overlap on one channel;
+    # the per-channel flush lock must serialize the actual cognify calls.
+    memory = _fake_memory()
+    buffer = IngestionBuffer(memory, batch_size=5)
+
+    async def _run():
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        calls: list[str] = []
+
+        async def gated_flush(ref):
+            calls.append(ref.channel_id)
+            entered.set()
+            await release.wait()
+
+        memory.flush.side_effect = gated_flush
+
+        buffer._pending["A"] = 5
+        first = asyncio.create_task(buffer.flush(REF_A))
+        await entered.wait()  # first flush is now inside cognify, holding the lock
+
+        buffer._pending["A"] = 5  # new messages arrived during the slow cognify
+        second = asyncio.create_task(buffer.flush(REF_A))
+        await asyncio.sleep(0)  # give the second flush a chance to (wrongly) enter
+        assert calls == ["A"]  # blocked on the per-channel lock, not running
+
+        release.set()
+        await asyncio.gather(first, second)
+        assert calls == ["A", "A"]  # second cognify ran only after the first finished
+
+    asyncio.run(_run())
+
+
 def test_batch_size_floor_is_one():
     # A non-positive batch size would never flush on size; it is clamped to 1.
     memory = _fake_memory()
