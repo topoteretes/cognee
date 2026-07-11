@@ -33,9 +33,9 @@ def _reset_cache_backend_caches():
 
 async def _reset_engines_and_prune() -> None:
     try:
-        from cognee.infrastructure.databases.vector import get_vector_engine
+        from cognee.infrastructure.databases.vector import get_vector_engine_async
 
-        vector_engine = await get_vector_engine()
+        vector_engine = await get_vector_engine_async()
         if hasattr(vector_engine, "engine") and hasattr(vector_engine.engine, "dispose"):
             await vector_engine.engine.dispose(close=True)
     except Exception:

@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, List, Optional
 from uuid import uuid5, NAMESPACE_OID
 
 from cognee.infrastructure.engine.models.DataPoint import DataPoint
+from cognee.infrastructure.databases.provenance import graph_provenance_write_kwargs
 from cognee.tasks.schema.models import SchemaTable, SchemaRelationship
 from cognee.tasks.storage.index_data_points import index_data_points
 from cognee.shared.logging_utils import get_logger
@@ -40,12 +41,16 @@ async def extract_dlt_fk_edges(
     This reuses the SchemaTable/SchemaRelationship models from the existing
     relational pipeline mapper (migrate_relational_database / ingest_database_schema).
 
-    The schema nodes and FK edges are also registered in the relational rollback
-    ledger (tagged with ``pipeline_run_id``) so the cognify rollback handler can
-    clean them up on failure/startup recovery. Without this they would be written
-    to the graph/vector stores untracked and orphaned by a rollback. Cross-run
-    sharing of schema nodes is preserved by the rollback handler's shared-node
-    check, which spares any node still referenced by another run's ledger row.
+    On a ledger graph, the schema nodes and FK edges are also registered in the
+    relational rollback ledger (tagged with ``pipeline_run_id``) so the cognify
+    rollback handler can clean them up on failure/startup recovery. Without this
+    they would be written to the graph/vector stores untracked and orphaned by a
+    rollback. Cross-run sharing of schema nodes is preserved by the rollback
+    handler's shared-node check, which spares any node still referenced by
+    another run's ledger row. On a graph-provenance graph the writes are stamped
+    in-graph instead and the ledger is skipped (mirrors add_data_points — no
+    dual tracking): delete and rollback resolve ownership from the stamped refs,
+    so ledger rows would never be cleaned up.
     """
     from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
 
@@ -84,6 +89,7 @@ async def extract_dlt_fk_edges(
         return data_points
 
     graph_engine = await get_graph_engine()
+    provenance_kwargs = await graph_provenance_write_kwargs(graph_engine, ctx)
     schema_nodes = []
     schema_edges = []
     fk_row_edges = []
@@ -233,7 +239,7 @@ async def extract_dlt_fk_edges(
 
     # Persist to graph
     if schema_nodes:
-        await graph_engine.add_nodes(schema_nodes)
+        await graph_engine.add_nodes(schema_nodes, **provenance_kwargs)
         await index_data_points(schema_nodes)
         logger.info(
             "Added %d schema nodes to graph (%d tables, %d relationships).",
@@ -244,7 +250,7 @@ async def extract_dlt_fk_edges(
 
     all_edges = schema_edges + fk_row_edges
     if all_edges:
-        await graph_engine.add_edges(all_edges)
+        await graph_engine.add_edges(all_edges, **provenance_kwargs)
         logger.info(
             "Added %d edges to graph (%d schema edges, %d FK row edges).",
             len(all_edges),
@@ -254,9 +260,13 @@ async def extract_dlt_fk_edges(
 
     # Register the schema nodes and FK edges in the relational rollback ledger so
     # the cognify rollback handler can find and remove them on failure/recovery.
+    # When the writes were stamped in-graph, provenance lives in the graph and
+    # the ledger is skipped (mirrors add_data_points — no dual tracking).
     # Skipped when no pipeline context is available (e.g. direct task invocation).
+    stamped_in_graph = provenance_kwargs["source_ref_key"] is not None
     if (
-        (schema_nodes or all_edges)
+        not stamped_in_graph
+        and (schema_nodes or all_edges)
         and ctx is not None
         and getattr(ctx, "user", None) is not None
         and getattr(ctx, "dataset", None) is not None

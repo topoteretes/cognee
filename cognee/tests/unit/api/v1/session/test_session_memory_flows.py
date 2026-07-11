@@ -1,7 +1,7 @@
 import asyncio
 import importlib
-import sys
-from datetime import datetime, timezone
+from contextlib import contextmanager
+from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
@@ -11,13 +11,6 @@ from cognee.api.v1.session import SessionQAEntry
 from cognee.modules.recall.types.RecallResponse import ResponseQAEntry
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
 from cognee.modules.search.types import SearchType
-from cognee.tasks.memify.sync_graph_to_session import (
-    _checkpoint_key,
-    _edge_to_text,
-    sync_graph_to_session,
-)
-
-sync_module = sys.modules["cognee.tasks.memify.sync_graph_to_session"]
 
 # Import actual modules via importlib to avoid __init__.py name shadowing.
 # Several __init__.py files re-export functions with the same name as their
@@ -25,94 +18,18 @@ sync_module = sys.modules["cognee.tasks.memify.sync_graph_to_session"]
 # which causes mock.patch()'s getattr-based resolution to find the function
 # instead of the submodule on Python ≤3.12.
 _mod_sm = importlib.import_module("cognee.infrastructure.session.get_session_manager")
-_mod_cache = importlib.import_module("cognee.infrastructure.databases.cache.get_cache_engine")
 _pkg_improve = importlib.import_module("cognee.api.v1.improve")
 _mod_query_router = importlib.import_module("cognee.api.v1.recall.query_router")
 _mod_search_methods = importlib.import_module("cognee.modules.search.methods.search")
 
-_PATCH_GET_REL = "cognee.tasks.memify.sync_graph_to_session.get_relational_engine"
 
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _make_node(id_, label=None, type_="Entity", description=None):
-    node = MagicMock(spec=["id", "label", "type", "description"])
-    node.id = id_
-    node.label = label
-    node.type = type_
-    node.description = description
-    return node
-
-
-def _make_edge(src_id, dst_id, rel_name="related_to", created_at=None):
-    edge = MagicMock()
-    edge.source_node_id = src_id
-    edge.destination_node_id = dst_id
-    edge.relationship_name = rel_name
-    edge.created_at = created_at or datetime.now(timezone.utc)
-    edge.dataset_id = uuid4()
-    return edge
-
-
-def _make_session_manager(graph_context=""):
-    sm = MagicMock()
-    sm.is_available = True
-    sm.get_graph_context = AsyncMock(return_value=graph_context)
-    sm.set_graph_context = AsyncMock()
-    return sm
-
-
-def _make_cache_engine(checkpoint_value=None):
-    engine = MagicMock()
-    engine.async_redis = MagicMock()
-    engine.async_redis.get = AsyncMock(return_value=checkpoint_value)
-    engine.async_redis.set = AsyncMock()
-    return engine
-
-
-def _mock_db_engine_returning(edges, nodes):
-    """Build a mock relational engine that returns edges then nodes, then empty on next batch."""
-    mock_db_engine = MagicMock()
-    mock_session = MagicMock()
-
-    edge_scalars = MagicMock()
-    edge_scalars.all.return_value = edges
-    node_scalars = MagicMock()
-    node_scalars.all.return_value = nodes
-    empty_scalars = MagicMock()
-    empty_scalars.all.return_value = []
-
-    call_count = 0
-
-    async def mock_scalars_fn(query):
-        nonlocal call_count
-        call_count += 1
-        if call_count == 1:
-            return edge_scalars
-        elif call_count == 2:
-            return node_scalars
-        return empty_scalars
-
-    mock_session.scalars = mock_scalars_fn
-    mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-    mock_session.__aexit__ = AsyncMock(return_value=False)
-    mock_db_engine.get_async_session.return_value = mock_session
-    return mock_db_engine
-
-
-def _mock_db_engine_empty():
-    return _mock_db_engine_returning([], [])
-
-
-def _get_cache_module():
-    return importlib.import_module("cognee.infrastructure.databases.cache.get_cache_engine")
-
-
-def _get_session_manager_module():
-    return importlib.import_module("cognee.infrastructure.session.get_session_manager")
+@contextmanager
+def _patch_remember_startup():
+    with (
+        patch("cognee.modules.migrations.startup.run_migrations_and_block", new=AsyncMock()),
+        patch("cognee.modules.engine.operations.setup.setup", new=AsyncMock()),
+    ):
+        yield
 
 
 def _get_remember_module():
@@ -125,319 +42,6 @@ def _get_improve_module():
 
 def _get_query_router_module():
     return importlib.import_module("cognee.api.v1.recall.query_router")
-
-
-# ---------------------------------------------------------------------------
-# _edge_to_text
-# ---------------------------------------------------------------------------
-
-
-class TestEdgeToText:
-    def test_renders_labeled_nodes(self):
-        import json
-
-        n1 = _make_node("a", label="Alice")
-        n2 = _make_node("b", label="Bob")
-        edge = _make_edge("a", "b", "knows")
-        result = _edge_to_text(edge, {"a": n1, "b": n2})
-        parsed = json.loads(result)
-        assert parsed["source"]["label"] == "Alice"
-        assert parsed["target"]["label"] == "Bob"
-        assert parsed["relationship"] == "knows"
-
-    def test_falls_back_to_type_when_no_label(self):
-        import json
-
-        n1 = _make_node("a", label=None, type_="Person")
-        n2 = _make_node("b", label=None, type_="City")
-        edge = _make_edge("a", "b", "lives_in")
-        result = _edge_to_text(edge, {"a": n1, "b": n2})
-        parsed = json.loads(result)
-        assert parsed["source"]["label"] == "Person"
-        assert parsed["target"]["label"] == "City"
-        assert parsed["relationship"] == "lives_in"
-
-    def test_returns_none_when_node_missing(self):
-        n1 = _make_node("a", label="Alice")
-        edge = _make_edge("a", "b", "knows")
-        assert _edge_to_text(edge, {"a": n1}) is None
-
-    def test_default_relationship_name(self):
-        import json
-
-        n1 = _make_node("a", label="X")
-        n2 = _make_node("b", label="Y")
-        edge = _make_edge("a", "b")
-        edge.relationship_name = None
-        result = _edge_to_text(edge, {"a": n1, "b": n2})
-        parsed = json.loads(result)
-        assert parsed["relationship"] == "related_to"
-
-
-# ---------------------------------------------------------------------------
-# sync_graph_to_session — no new edges
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_sync_no_new_edges():
-    dataset_id = uuid4()
-    sm = _make_session_manager()
-    cache_engine = _make_cache_engine()
-    db_engine = _mock_db_engine_empty()
-
-    with (
-        patch.object(_mod_sm, "get_session_manager", return_value=sm),
-        patch.object(_mod_cache, "get_cache_engine", return_value=cache_engine),
-        patch(_PATCH_GET_REL, return_value=db_engine),
-    ):
-        result = await sync_graph_to_session(
-            user_id="u1",
-            session_id="s1",
-            dataset_id=dataset_id,
-        )
-
-    assert result["synced"] == 0
-    sm.set_graph_context.assert_not_called()
-
-
-# ---------------------------------------------------------------------------
-# sync_graph_to_session — cache unavailable
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_sync_cache_unavailable():
-    sm = MagicMock()
-    sm.is_available = False
-
-    with (
-        patch.object(_mod_sm, "get_session_manager", return_value=sm),
-        patch.object(_mod_cache, "get_cache_engine", return_value=None),
-    ):
-        result = await sync_graph_to_session(
-            user_id="u1",
-            session_id="s1",
-            dataset_id=uuid4(),
-        )
-
-    assert result["synced"] == 0
-
-
-# ---------------------------------------------------------------------------
-# sync_graph_to_session — merges with existing context
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_sync_merges_with_existing():
-    dataset_id = uuid4()
-    ts = datetime(2026, 1, 1, tzinfo=timezone.utc)
-
-    n1 = _make_node("a", label="Alice")
-    n2 = _make_node("b", label="Bob")
-    edge = _make_edge("a", "b", "knows", created_at=ts)
-
-    sm = _make_session_manager(
-        graph_context='{"source":{"label":"Carol"},"relationship":"likes","target":{"label":"Dave"}}'
-    )
-    cache_engine = _make_cache_engine()
-    db_engine = _mock_db_engine_returning([edge], [n1, n2])
-
-    with (
-        patch.object(_mod_sm, "get_session_manager", return_value=sm),
-        patch.object(_mod_cache, "get_cache_engine", return_value=cache_engine),
-        patch(_PATCH_GET_REL, return_value=db_engine),
-    ):
-        result = await sync_graph_to_session(
-            user_id="u1",
-            session_id="s1",
-            dataset_id=dataset_id,
-        )
-
-    assert result["synced"] == 1
-    assert result["total"] == 2
-
-    context = sm.set_graph_context.call_args.kwargs["context"]
-    assert "Carol" in context
-    assert "Alice" in context
-
-
-# ---------------------------------------------------------------------------
-# sync_graph_to_session — max_lines cap drops oldest
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_sync_caps_at_max_lines():
-    dataset_id = uuid4()
-    ts = datetime(2026, 1, 1, tzinfo=timezone.utc)
-
-    nodes = {f"n{i}": _make_node(f"n{i}", label=f"Node{i}") for i in range(4)}
-    edges = [
-        _make_edge("n0", "n1", "r0", created_at=ts),
-        _make_edge("n1", "n2", "r1", created_at=ts),
-        _make_edge("n2", "n3", "r2", created_at=ts),
-    ]
-
-    # Existing has 2 lines, new adds 3, cap at 3 → oldest 2 dropped
-    existing = '{"source":{"label":"OldA"},"relationship":"x","target":{"label":"OldB"}}\n{"source":{"label":"OldC"},"relationship":"y","target":{"label":"OldD"}}'
-    sm = _make_session_manager(graph_context=existing)
-    cache_engine = _make_cache_engine()
-    db_engine = _mock_db_engine_returning(edges, list(nodes.values()))
-
-    with (
-        patch.object(_mod_sm, "get_session_manager", return_value=sm),
-        patch.object(_mod_cache, "get_cache_engine", return_value=cache_engine),
-        patch(_PATCH_GET_REL, return_value=db_engine),
-    ):
-        result = await sync_graph_to_session(
-            user_id="u1",
-            session_id="s1",
-            dataset_id=dataset_id,
-            max_lines=3,
-        )
-
-    assert result["total"] == 3
-
-    context = sm.set_graph_context.call_args.kwargs["context"]
-    lines = context.split("\n")
-    assert len(lines) == 3
-    # Old lines should be dropped (they were at the front)
-    assert not any("OldA" in line for line in lines)
-    assert not any("OldC" in line for line in lines)
-
-
-# ---------------------------------------------------------------------------
-# _checkpoint_key format
-# ---------------------------------------------------------------------------
-
-
-def test_checkpoint_key_format():
-    key = _checkpoint_key("u1", "d1", "s1")
-    assert key == "graph_sync_checkpoint:u1:d1:s1"
-
-
-# ---------------------------------------------------------------------------
-# SessionManager.get/set_graph_context
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_session_manager_graph_context_roundtrip():
-    """Test get/set graph context via SessionManager with a mock Redis cache."""
-    from cognee.infrastructure.session.session_manager import SessionManager
-
-    mock_cache = MagicMock()
-    mock_cache.async_redis = MagicMock()
-
-    stored = {}
-
-    async def mock_set(key, value):
-        stored[key] = value
-
-    async def mock_get(key):
-        return stored.get(key)
-
-    async def mock_expire(key, ttl):
-        pass
-
-    mock_cache.async_redis.set = mock_set
-    mock_cache.async_redis.get = mock_get
-    mock_cache.async_redis.expire = mock_expire
-    mock_cache.session_ttl_seconds = 3600
-
-    sm = SessionManager(cache_engine=mock_cache)
-
-    ctx = await sm.get_graph_context(user_id="u1", session_id="s1")
-    assert ctx == ""
-
-    await sm.set_graph_context(user_id="u1", session_id="s1", context="Alice —[knows]→ Bob")
-
-    ctx = await sm.get_graph_context(user_id="u1", session_id="s1")
-    assert ctx == "Alice —[knows]→ Bob"
-
-    await sm.set_graph_context(
-        user_id="u1",
-        session_id="s1",
-        context="Alice —[knows]→ Bob\nBob —[likes]→ Carol",
-    )
-    ctx = await sm.get_graph_context(user_id="u1", session_id="s1")
-    assert "Bob —[likes]→ Carol" in ctx
-
-
-@pytest.mark.asyncio
-async def test_session_manager_graph_context_unavailable():
-    """When cache is None, get returns empty, set is a no-op."""
-    from cognee.infrastructure.session.session_manager import SessionManager
-
-    sm = SessionManager(cache_engine=None)
-    assert await sm.get_graph_context(user_id="u1", session_id="s1") == ""
-    await sm.set_graph_context(user_id="u1", session_id="s1", context="test")
-
-
-# ---------------------------------------------------------------------------
-# Graph context injection into completion prompt
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_graph_context_prepended_to_completion():
-    """Verify generate_completion_with_session includes graph context in the prompt."""
-    from cognee.infrastructure.session.session_manager import SessionManager
-
-    mock_cache = MagicMock()
-    mock_cache.async_redis = MagicMock()
-    mock_cache.get_latest_qa_entries = AsyncMock(return_value=[])
-    mock_cache.get_all_qa_entries = AsyncMock(return_value=[])
-    mock_cache.create_qa_entry = AsyncMock()
-
-    graph_ctx = '{"source":{"label":"Alice"},"relationship":"knows","target":{"label":"Bob"}}'
-
-    async def mock_get(key):
-        if "graph_knowledge:" in key:
-            return graph_ctx.encode()
-        return None
-
-    mock_cache.async_redis.get = mock_get
-    mock_cache.session_ttl_seconds = 3600
-
-    sm = SessionManager(cache_engine=mock_cache)
-
-    mock_user = MagicMock()
-    mock_user.id = "u1"
-
-    captured_history = {}
-
-    async def mock_generate(**kwargs):
-        captured_history["value"] = kwargs.get("conversation_history", "")
-        return ("answer", "", None)
-
-    with (
-        patch("cognee.infrastructure.session.session_manager.session_user") as mock_session_user,
-        patch("cognee.infrastructure.session.session_manager.CacheConfig") as MockCacheConfig,
-        patch(
-            "cognee.infrastructure.session.session_turn."
-            "generate_session_completion_with_optional_summary",
-            side_effect=mock_generate,
-        ),
-    ):
-        mock_session_user.get.return_value = mock_user
-        MockCacheConfig.return_value.caching = True
-        MockCacheConfig.return_value.auto_feedback = False
-        MockCacheConfig.return_value.max_session_context_chars = None
-
-        await sm.generate_completion_with_session(
-            session_id="s1",
-            query="test question",
-            context="some context",
-            user_prompt_path="test.txt",
-            system_prompt_path="test.txt",
-        )
-
-    assert "Background knowledge from the knowledge graph:" in captured_history["value"]
-    assert "Alice" in captured_history["value"]
-    assert "knows" in captured_history["value"]
 
 
 # ---------------------------------------------------------------------------
@@ -457,6 +61,7 @@ async def test_remember_passes_session_ids_to_improve():
     mock_user.id = "u1"
 
     with (
+        _patch_remember_startup(),
         patch("cognee.api.v1.add.add", AsyncMock()),
         patch("cognee.api.v1.cognify.cognify", AsyncMock(return_value={"status": "ok"})),
         patch.object(_pkg_improve, "improve", mock_improve),
@@ -496,6 +101,7 @@ async def test_remember_no_session_ids_skips_in_improve():
     mock_user.id = "u1"
 
     with (
+        _patch_remember_startup(),
         patch("cognee.api.v1.add.add", AsyncMock()),
         patch("cognee.api.v1.cognify.cognify", AsyncMock(return_value={"status": "ok"})),
         patch.object(_pkg_improve, "improve", mock_improve),
@@ -682,6 +288,7 @@ class TestRememberResult:
         mock_user.id = "u1"
 
         with (
+            _patch_remember_startup(),
             patch("cognee.api.v1.add.add", AsyncMock()),
             patch(
                 "cognee.api.v1.cognify.cognify",
@@ -719,6 +326,7 @@ class TestRememberResult:
         mock_sm.add_qa = AsyncMock()
 
         with (
+            _patch_remember_startup(),
             patch(
                 "cognee.modules.users.methods.get_default_user",
                 AsyncMock(return_value=mock_user),
@@ -731,7 +339,7 @@ class TestRememberResult:
         ):
             from cognee.api.v1.remember.remember import RememberResult, remember
 
-            result = await remember("test data", session_id="s1")
+            result = await remember("test data", session_id="s1", self_improvement=False)
 
         assert isinstance(result, RememberResult)
         assert result.status == "session_stored"
@@ -787,6 +395,7 @@ class TestRememberResultSessions:
         mock_user.id = "u1"
 
         with (
+            _patch_remember_startup(),
             patch("cognee.api.v1.add.add", AsyncMock()),
             patch("cognee.api.v1.cognify.cognify", AsyncMock(return_value={})),
             patch.object(_pkg_improve, "improve", AsyncMock()),

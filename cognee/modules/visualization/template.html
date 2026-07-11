@@ -161,6 +161,7 @@ canvas:active{cursor:grabbing}
   <button class="tab-btn active" data-view="graph" style="background:#1F9E6E;color:#fff;border:none;padding:6px 18px;border-radius:6px 6px 0 0;cursor:pointer;font-size:12px;font-weight:600;">Graph</button>
   <button class="tab-btn" data-view="schema" style="background:transparent;color:var(--text2);border:none;padding:6px 18px;border-radius:6px 6px 0 0;cursor:pointer;font-size:12px;font-weight:600;">Schema</button>
   <button class="tab-btn" data-view="memory" style="background:transparent;color:var(--text2);border:none;padding:6px 18px;border-radius:6px 6px 0 0;cursor:pointer;font-size:12px;font-weight:600;">Memory</button>
+  <button class="tab-btn" data-view="semantic" style="background:transparent;color:var(--text2);border:none;padding:6px 18px;border-radius:6px 6px 0 0;cursor:pointer;font-size:12px;font-weight:600;">Semantic</button>
 </div>
 
 <button id="theme-toggle" style="position:fixed;top:12px;right:20px;z-index:1200;background:var(--bg2);border:1px solid var(--border);cursor:pointer;font-size:12px;padding:6px 14px;border-radius:8px;color:var(--text);font-family:inherit;font-weight:500;transition:all 0.15s;">Dark mode</button>
@@ -262,6 +263,45 @@ canvas:active{cursor:grabbing}
   <div id="memory-empty"><div>No memory content to map yet. Run <b>cognify</b> first.</div></div>
   <div id="memory-side-panel"></div>
   <div id="memory-timeline"></div>
+</div>
+
+<!-- Semantic tab: a meaning-space scatter of the graph. Nodes are pinned at
+     PCA/UMAP positions of their embeddings, shaded by cluster; hovering a node
+     surfaces its nearest neighbors. Rendered lazily by views/semantic_map.js
+     into #semantic-svg. -->
+<div id="semantic-view" style="display:none;position:fixed;inset:0;padding:56px 0 0;overflow:hidden;z-index:900;background:var(--bg);">
+  <div id="semantic-header" style="position:absolute;top:56px;left:0;right:0;padding:12px 28px;display:flex;align-items:center;gap:16px;">
+    <div id="semantic-status" style="font-size:13px;color:var(--text2);"></div>
+    <div id="semantic-controls" style="margin-left:auto;display:flex;gap:16px;align-items:center;">
+      <div id="semantic-recall-wrap" style="display:flex;gap:6px;align-items:center;">
+        <select id="semantic-recall" title="Overlay a recall query's retrieved nodes" style="background:var(--surface);color:var(--text);border:1px solid var(--border);padding:5px 8px;border-radius:6px;cursor:pointer;font-size:12px;max-width:200px;">
+          <option value="">Recall overlay: off</option>
+        </select>
+        <span id="semantic-recall-note" style="font-size:11px;color:var(--text2);"></span>
+      </div>
+      <div style="display:flex;gap:4px;">
+        <button class="sem-layout-btn active" data-layout="semantic" style="background:var(--accent);color:#fff;border:none;padding:5px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;">Semantic</button>
+        <button class="sem-layout-btn" data-layout="structural" style="background:var(--surface);color:var(--text2);border:1px solid var(--border);padding:5px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;">Structural</button>
+      </div>
+      <div style="display:flex;gap:4px;">
+        <button class="sem-color-btn active" data-colorby="cluster" style="background:var(--accent);color:#fff;border:none;padding:5px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;">Cluster</button>
+        <button class="sem-color-btn" data-colorby="type" style="background:var(--surface);color:var(--text2);border:1px solid var(--border);padding:5px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;">Type</button>
+      </div>
+    </div>
+  </div>
+  <div id="semantic-diagram-section" style="position:absolute;top:100px;left:0;right:0;bottom:0;overflow:hidden;">
+    <svg id="semantic-svg" style="display:block;width:100%;height:100%;cursor:grab;"></svg>
+  </div>
+  <div id="semantic-zoom" style="position:absolute;left:20px;bottom:20px;z-index:6;display:flex;gap:4px;background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:4px;">
+    <button id="semantic-zoom-out" title="Zoom out" style="width:30px;height:30px;border:none;background:transparent;border-radius:7px;cursor:pointer;font-size:18px;color:var(--text2);">&minus;</button>
+    <button id="semantic-zoom-in" title="Zoom in" style="width:30px;height:30px;border:none;background:transparent;border-radius:7px;cursor:pointer;font-size:18px;color:var(--text2);">+</button>
+    <button id="semantic-zoom-fit" title="Fit to view" style="height:30px;padding:0 12px;border:none;background:transparent;border-radius:7px;cursor:pointer;font-size:12px;font-weight:600;color:var(--text2);">Fit</button>
+  </div>
+  <div id="semantic-legend" style="position:absolute;right:20px;bottom:20px;z-index:6;max-height:40%;overflow-y:auto;background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:10px 13px;font-size:11px;color:var(--text2);line-height:1.7;"></div>
+  <div id="semantic-panel" style="display:none;position:absolute;top:100px;right:0;bottom:0;width:320px;background:var(--bg2);border-left:1px solid var(--border);box-shadow:-12px 0 32px rgba(0,0,0,0.25);padding:22px 22px;overflow-y:auto;z-index:7;color:var(--text);"></div>
+  <div id="semantic-empty" style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;color:var(--text2);font-size:14px;">
+    <div>No embeddings to map yet. Run <b>cognify</b> first.</div>
+  </div>
 </div>
 <style>
 /* ── Schema diagram ─────────────────────────────────────────────── */
@@ -456,6 +496,8 @@ __STORY_VIEW_JS__
 __PIPELINE_LAYOUT_JS__
 __INSPECTOR_JS__
 __MEMORY_VIEW_JS__
+__SEMANTIC_LAYOUT_JS__
+__SEMANTIC_VIEW_JS__
 </script>
 </body>
 </html>

@@ -24,7 +24,7 @@ async def test_embedding_connection_returns_detected_dimensions(monkeypatch):
     async def _get_vector_engine():
         return fake_vector_engine
 
-    monkeypatch.setattr(vector_module, "get_vector_engine", _get_vector_engine)
+    monkeypatch.setattr(vector_module, "get_vector_engine_async", _get_vector_engine)
     assert await llm_utils.test_embedding_connection() == 3
 
 
@@ -42,7 +42,7 @@ async def test_determine_embedding_dimensions_uses_env_dimensions_when_provided(
     async def _get_vector_engine():
         return fake_vector_engine
 
-    monkeypatch.setattr(vector_module, "get_vector_engine", _get_vector_engine)
+    monkeypatch.setattr(vector_module, "get_vector_engine_async", _get_vector_engine)
     monkeypatch.setattr(
         embedding_config_module, "get_embedding_config", lambda: fake_embedding_config
     )
@@ -69,7 +69,7 @@ async def test_determine_embedding_dimensions_uses_detected_dimensions_when_env_
     async def _get_vector_engine():
         return fake_vector_engine
 
-    monkeypatch.setattr(vector_module, "get_vector_engine", _get_vector_engine)
+    monkeypatch.setattr(vector_module, "get_vector_engine_async", _get_vector_engine)
     monkeypatch.setattr(
         embedding_config_module, "get_embedding_config", lambda: fake_embedding_config
     )
