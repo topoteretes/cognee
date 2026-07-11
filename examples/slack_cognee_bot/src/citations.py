@@ -10,11 +10,9 @@ Block Kit reference — blocks used:
 * ``context`` with ``mrkdwn`` elements (the Sources list / no-sources note).
 
 Dedupe: the adapter already collapses multiple chunks of one message to a single
-Citation (keyed by ``document_id`` in ``cognee_memory._build_citations``). This
-renderer additionally does a *defensive, display-level* dedupe keyed on
-``(channel_id, ts)`` — idempotent when the input is already unique, and it never
-merges the empty-``ts`` fallback citations. Citation order (relevance order from
-the adapter) is preserved.
+Citation (keyed by ``document_id`` in ``cognee_memory._build_citations``, and
+``document_id == uuid5("channel:ts")`` so it is one citation per source message).
+Citation order (relevance order from the adapter) is preserved.
 
 Graceful degradation (the #3604 "actionable, never broken output" bar):
 * missing/blank permalink → plain-text source entry, never a broken ``<|>`` link;
@@ -72,24 +70,6 @@ def _format_source(cite: Citation) -> str:
     return f"• {cite.snippet or 'source'}"
 
 
-def _dedupe_for_display(citations: list[Citation]) -> list[Citation]:
-    """Drop repeat (channel_id, ts) citations, preserving order.
-
-    Defensive only — the adapter already dedupes by document_id. Citations with
-    an empty ``ts`` (the missing-metadata fallback) are never merged.
-    """
-    seen: set[tuple[str, str]] = set()
-    result: list[Citation] = []
-    for cite in citations:
-        key = (cite.channel_id, cite.ts)
-        if cite.ts and key in seen:
-            continue
-        if cite.ts:
-            seen.add(key)
-        result.append(cite)
-    return result
-
-
 def _answer_section_text(answer: Answer) -> str:
     text = answer.text.strip() if answer.text else ""
     if not text:
@@ -105,7 +85,7 @@ def render_answer(answer: Answer, *, max_sources: int = DEFAULT_MAX_SOURCES) -> 
         {"type": "section", "text": {"type": "mrkdwn", "text": _answer_section_text(answer)}}
     ]
 
-    citations = _dedupe_for_display(answer.citations)
+    citations = answer.citations
     if not citations:
         blocks.append(
             {"type": "context", "elements": [{"type": "mrkdwn", "text": _NO_SOURCES_NOTE}]}

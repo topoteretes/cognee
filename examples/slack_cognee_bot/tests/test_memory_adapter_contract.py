@@ -34,23 +34,12 @@ def test_node_set_tags_the_channel():
     assert ref.node_set == ["C42"]
 
 
-def test_session_id_includes_team_channel_thread():
-    ref = ConversationRef(team_id="T1", channel_id="C42", thread_ts="1700000000.1")
-    assert ref.session_id == "T1:C42:1700000000.1"
-
-
-def test_session_id_falls_back_to_channel_without_thread():
-    ref = ConversationRef(team_id="T1", channel_id="C42")
-    assert ref.session_id == "T1:C42"
-
-
 def test_mapping_is_deterministic():
     a = ConversationRef(team_id="T1", channel_id="C42", thread_ts="99.1")
     b = ConversationRef(team_id="T1", channel_id="C42", thread_ts="99.1")
     assert a == b
     assert a.dataset_name == b.dataset_name
-    assert a.session_id == b.session_id
-    # Frozen dataclass is hashable (usable as a dict/queue key by later commits).
+    # Frozen dataclass is hashable (usable as a dict/queue key).
     assert hash(a) == hash(b)
 
 

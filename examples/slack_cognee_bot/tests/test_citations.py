@@ -56,19 +56,6 @@ def test_two_citations_render_two_ordered_permalink_sources():
     assert "#C1" in text and "alice" in text
 
 
-def test_same_ts_citations_dedupe_to_one_source():
-    answer = Answer(
-        text="Answer.",
-        citations=[
-            _cite(ts="1700000000.000100", permalink="https://slack.example/a"),
-            _cite(ts="1700000000.000100", permalink="https://slack.example/a"),
-        ],
-    )
-    blocks = render_answer(answer)
-    text = _blocks_text(blocks)
-    assert text.count("https://slack.example/a") == 1
-
-
 def test_missing_permalink_renders_plain_text_no_broken_link():
     answer = Answer(
         text="Answer.",

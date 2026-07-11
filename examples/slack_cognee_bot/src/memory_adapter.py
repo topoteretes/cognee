@@ -19,9 +19,8 @@ Session / dataset mapping (see the Phase 2 design contract):
   it is the boundary that makes the ``forget`` story work.
 * **Node-set tag = ``[channel_id]``** so chunk retrieval can be filtered to a
   single channel within a dataset.
-* **session_id = ``<team>:<channel>[:<thread>]``** — a deterministic, per-thread
-  identifier used only as optional conversational Q&A context, never as the
-  store of ingested messages.
+* **Thread** — ``thread_ts`` is captured so an @mention asked inside a thread can
+  be answered in that thread; it does not change the memory boundary.
 * **Per-message identity = ``uuid5(namespace, "<channel>:<ts>")``** — a stable,
   controllable id assigned at ingest so a retrieved chunk's ``document_id`` can
   be joined back to the original Slack message (the citation key).
@@ -77,12 +76,6 @@ class ConversationRef:
     def node_set(self) -> list[str]:
         """Node-set tag applied at ingest, used to filter chunk retrieval by channel."""
         return [self.channel_id]
-
-    @property
-    def session_id(self) -> str:
-        """Deterministic per-thread session id (optional Q&A-context scope only)."""
-        base = f"{self.team_id}:{self.channel_id}"
-        return f"{base}:{self.thread_ts}" if self.thread_ts else base
 
 
 @dataclass(frozen=True)
