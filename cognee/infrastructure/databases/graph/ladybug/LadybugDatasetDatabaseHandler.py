@@ -68,9 +68,10 @@ class LadybugDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
         # (in subprocess mode, a worker that must take the on-disk file lock)
         # which races the just-torn-down one. Evict every cached engine for
         # this database — the same DB can sit under multiple cache keys —
-        # wait for their closes to fully finish (worker exited, lock
-        # released), then remove the files directly. Server-backed handlers
-        # (e.g. Postgres) are different on purpose: they drop the per-dataset
+        # wait for their in-flight closes to finish (a close deferred behind
+        # an idle holder is not waited on; see aevict_graph_engines_for_database),
+        # then remove the files directly. Server-backed handlers (e.g.
+        # Postgres) are different on purpose: they drop the per-dataset
         # database over a connection, so no file handling applies there.
         await aevict_graph_engines_for_database(graph_db_name)
 
