@@ -1,4 +1,35 @@
-"""LRU cache that closes entries after they leave the cache and caller scope."""
+"""LRU cache that closes entries after they leave the cache and caller scope.
+
+Cached values are live database engines (in subprocess mode: a worker process
+holding an exclusive file lock), so removal and death are separate events with
+an ordered lifecycle::
+
+    cached --(evict / clear / capacity)--> detached --(last proxy drops)--> closing --> closed
+       |                                      |                                           |
+       |                            pending-close future                          future resolves;
+    leased proxies stay usable      registered HERE                               creators proceed
+
+A key is present in the pending-close registry from the moment its entry
+leaves the cache — including while the close is still deferred behind a held
+caller proxy — until ``close()`` has fully completed (for subprocess adapters:
+the worker exited and released its on-disk lock). Creators for the same key
+wait on that future so a new engine never races a dying one for the same
+resource:
+
+- ``aget_or_create``: always awaits the pending close.
+- ``get_or_create`` in a thread with no running event loop: blocks on it.
+- ``get_or_create`` on the event loop: cannot block (the close may need this
+  very loop to progress); the adapters' open-retry remains the backstop for
+  this residual window.
+
+Capacity eviction honors an optional ``pinned_predicate`` (see
+``dataset_queue.pinning``): pinned entries are skipped in LRU order, and when
+every entry is pinned the cache temporarily overflows ``maxsize`` instead of
+closing a value that is still in use — bounded by the dataset queue's slot
+count, converging back once pins lift. Explicit eviction (``evict``,
+``evict_where``, ``cache_clear``) ignores pins; those are intentional
+lifecycle events.
+"""
 
 import asyncio
 import concurrent.futures

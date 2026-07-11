@@ -50,6 +50,9 @@ class LanceDBDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
         # (in subprocess mode, a worker) that races the just-torn-down one.
         # Evict every cached engine for this database, wait for their closes
         # to fully finish, then remove the on-disk store directly.
+        # Server-backed handlers (e.g. PGVector) are different on purpose:
+        # they drop the per-dataset database over a connection, so no file
+        # handling applies there.
         await aevict_vector_engines_for_database(dataset_database.vector_database_name)
 
         databases_directory_path = os.path.dirname(dataset_database.vector_database_url)

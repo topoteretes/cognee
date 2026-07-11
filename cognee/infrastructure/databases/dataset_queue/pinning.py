@@ -14,6 +14,14 @@ def dataset_queue_pin_predicate(database_name_index: int):
     key; per-dataset databases are named ``<dataset_id>.<ext>``, so the name
     stem maps directly to the queue's active ids. The predicate runs under
     the cache lock: it stays cheap and never re-enters the cache.
+
+    The signal is deliberately queue-scoped: with the dataset queue disabled
+    there are no slots, nothing pins, and capacity eviction falls back to
+    plain recency — the close→reopen ordering (the cache's pending-close
+    registry) still applies. Queue slots are the only activity signal with a
+    guaranteed expiry (scoped release plus the task-end backstop), so pins
+    can never wedge the cache the way a GC-dependent signal (e.g. "a lease
+    proxy is still held") could.
     """
 
     def is_pinned(key) -> bool:
