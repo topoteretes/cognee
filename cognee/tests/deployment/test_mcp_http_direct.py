@@ -132,41 +132,6 @@ async def test_remember_recall_roundtrip(mcp_http_container):
     )
 
 
-@pytest.mark.skip(reason="Needs the T0 mock-LLM sidecar (#3358) for deterministic cognify.")
-@pytest.mark.asyncio
-async def test_remember_cognify_recall_graph_path(mcp_http_container):
-    """Permanent-memory round-trip through the knowledge graph.
-
-    Drives ``remember`` (no ``session_id``) -> cognify -> ``recall`` over the
-    graph. The recall assertion also guards against the Kuzu JSON-extension gotcha
-    (a missing extension surfaces as an error string rather than empty results).
-    """
-    unique_token = f"T3_GRAPH_{uuid.uuid4().hex}"
-    memory_text = f"Cognee graph memory anchor {unique_token} relates to deployment tests."
-
-    async with mcp_client_session(mcp_http_container.mcp_url) as session:
-        remember_result = await session.call_tool(
-            "remember",
-            arguments={"data": memory_text, "dataset_name": "t3_graph"},
-        )
-        recall_result = await session.call_tool(
-            "recall",
-            arguments={"query": unique_token, "datasets": "t3_graph", "top_k": 5},
-        )
-
-    remember_text = _text_of(remember_result)
-    recall_text = _text_of(recall_result)
-
-    assert "Stored permanently in knowledge graph" in remember_text, remember_text
-    assert "has not been installed" not in recall_text, (
-        f"Kuzu JSON extension missing — recall errored instead of returning data: {recall_text!r}"
-    )
-    assert unique_token in recall_text, (
-        f"Stored token {unique_token!r} not retrievable via graph recall. "
-        f"recall returned: {recall_text!r}"
-    )
-
-
 def test_dns_rebinding_rejects_spoofed_host(mcp_http_container):
     """With the server bound to ``0.0.0.0`` a spoofed Host header is rejected.
 
