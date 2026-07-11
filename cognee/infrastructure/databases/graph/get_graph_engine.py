@@ -4,6 +4,7 @@ import inspect
 import os
 from numbers import Number
 
+from cognee.infrastructure.databases.dataset_queue.pinning import dataset_queue_pin_predicate
 from cognee.infrastructure.databases.utils.closing_lru_cache import closing_lru_cache
 from cognee.shared.lru_cache import DATABASE_MAX_LRU_CACHE_SIZE
 from cognee.shared.logging_utils import get_logger
@@ -324,6 +325,19 @@ def evict_graph_engines_for_database(graph_database_name: str) -> int:
     return _create_graph_engine.cache_evict_matching(graph_database_name=graph_database_name)
 
 
+async def aevict_graph_engines_for_database(graph_database_name: str) -> int:
+    """Evict every cached graph engine bound to *graph_database_name* and wait
+    until their closes have fully completed (workers exited, file locks
+    released). Use before removing the database's files so a concurrent
+    holder's teardown cannot race the removal.
+
+    Returns the number of evicted entries.
+    """
+    evicted = evict_graph_engines_for_database(graph_database_name)
+    await _create_graph_engine.cache_await_closed(graph_database_name=graph_database_name)
+    return evicted
+
+
 def is_graph_engine_cached(**kwargs) -> bool:
     """Check whether a graph engine entry exists in the cache without creating."""
     normalized = _normalize_optional_create_graph_engine_params(kwargs)
@@ -347,7 +361,10 @@ def is_graph_engine_cached(**kwargs) -> bool:
     )
 
 
-@closing_lru_cache(maxsize=DATABASE_MAX_LRU_CACHE_SIZE)
+@closing_lru_cache(
+    maxsize=DATABASE_MAX_LRU_CACHE_SIZE,
+    pinned_predicate=dataset_queue_pin_predicate("graph_database_name"),
+)
 def _create_graph_engine(
     graph_database_provider,
     graph_file_path,

@@ -4,6 +4,7 @@ from numbers import Number
 
 from .supported_databases import supported_databases
 from .embeddings import get_embedding_engine
+from cognee.infrastructure.databases.dataset_queue.pinning import dataset_queue_pin_predicate
 from cognee.infrastructure.databases.utils.closing_lru_cache import closing_lru_cache
 from cognee.shared.lru_cache import DATABASE_MAX_LRU_CACHE_SIZE
 from cognee.shared.logging_utils import get_logger
@@ -151,6 +152,19 @@ def evict_vector_engines_for_database(vector_db_name: str) -> int:
     return _create_vector_engine.cache_evict_matching(vector_db_name=vector_db_name)
 
 
+async def aevict_vector_engines_for_database(vector_db_name: str) -> int:
+    """Evict every cached vector engine bound to *vector_db_name* and wait
+    until their closes have fully completed (workers exited, file locks
+    released). Use before removing the database's files so a concurrent
+    holder's teardown cannot race the removal.
+
+    Returns the number of evicted entries.
+    """
+    evicted = evict_vector_engines_for_database(vector_db_name)
+    await _create_vector_engine.cache_await_closed(vector_db_name=vector_db_name)
+    return evicted
+
+
 def is_vector_engine_cached(**kwargs) -> bool:
     """Check whether a vector engine entry exists in the cache without creating."""
     normalized = _normalize_optional_create_vector_engine_params(kwargs)
@@ -168,7 +182,10 @@ def is_vector_engine_cached(**kwargs) -> bool:
     )
 
 
-@closing_lru_cache(maxsize=DATABASE_MAX_LRU_CACHE_SIZE)
+@closing_lru_cache(
+    maxsize=DATABASE_MAX_LRU_CACHE_SIZE,
+    pinned_predicate=dataset_queue_pin_predicate("vector_db_name"),
+)
 def _create_vector_engine(
     vector_db_provider: str,
     vector_db_url: str,

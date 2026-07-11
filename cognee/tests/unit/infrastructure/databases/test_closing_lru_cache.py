@@ -789,3 +789,202 @@ def test_cache_evict_matching_rejects_bad_criteria():
     with pytest.raises(ValueError):
         create.cache_evict_matching(db_nmae="typo")
     assert create.cache_info().currsize == 1
+
+
+def test_pinned_entries_skipped_by_capacity_eviction():
+    """Capacity eviction picks the least-recently-used UNPINNED entry."""
+    pinned = {("a",)}
+
+    @closing_lru_cache(maxsize=2, lease=False, pinned_predicate=lambda key: key in pinned)
+    def create(name):
+        return _Closeable(name)
+
+    value_a = create("a")
+    value_b = create("b")
+    create("c")  # capacity hit: "a" is pinned, so "b" (next LRU) is evicted
+
+    assert value_a.closed is False
+    assert value_b.closed is True
+    assert create.cache_contains("a")
+    assert not create.cache_contains("b")
+    assert create.cache_contains("c")
+
+
+def test_all_pinned_overflows_instead_of_closing():
+    """When every entry is pinned the cache exceeds maxsize; nothing closes."""
+
+    @closing_lru_cache(maxsize=2, lease=False, pinned_predicate=lambda key: True)
+    def create(name):
+        return _Closeable(name)
+
+    values = [create(name) for name in ("a", "b", "c")]
+
+    assert create.cache_info().currsize == 3
+    assert all(value.closed is False for value in values)
+
+
+def test_explicit_evict_ignores_pins():
+    """evict/evict_matching are intentional lifecycle events; pins don't apply."""
+
+    @closing_lru_cache(maxsize=2, lease=False, pinned_predicate=lambda key: True)
+    def create(name):
+        return _Closeable(name)
+
+    value_a = create("a")
+
+    assert create.cache_evict("a") is True
+    assert value_a.closed is True
+    assert create.cache_info().currsize == 0
+
+
+def test_overflow_converges_back_after_unpin():
+    """An overflowed cache evicts down below maxsize once entries unpin."""
+    pinned = {("a",), ("b",)}
+
+    @closing_lru_cache(maxsize=2, lease=False, pinned_predicate=lambda key: key in pinned)
+    def create(name):
+        return _Closeable(name)
+
+    value_a = create("a")
+    create("b")
+    value_c = create("c")  # both pinned -> overflow to 3
+    assert create.cache_info().currsize == 3
+
+    pinned.discard(("a",))
+    create("d")  # evicts "a" (unpinned LRU), then "c" to get back under maxsize
+
+    assert value_a.closed is True
+    assert value_c.closed is True
+    assert create.cache_info().currsize == 2
+    assert create.cache_contains("b")
+    assert create.cache_contains("d")
+
+
+def test_aget_waits_for_deferred_close_of_evicted_entry():
+    """The pending-close registry must cover the detach->close window: a
+    creator arriving while the close is still deferred behind a held proxy
+    waits until the proxy is released and the close completes."""
+    import asyncio
+
+    cache = ClosingLRUCache(maxsize=8, lease=True)
+    closeable = _Closeable("old")
+    holder = {"proxy": cache.get_or_create("k", lambda: closeable)}
+    assert cache.evict("k") is True  # close deferred: proxy still held
+
+    created = []
+
+    async def create_new():
+        created.append(await cache.aget_or_create("k", lambda: _Closeable("new")))
+
+    async def scenario():
+        task = asyncio.create_task(create_new())
+        await asyncio.sleep(0.05)
+        assert created == [], "creator proceeded while old value was still open"
+        assert closeable.closed is False
+        holder.pop("proxy")
+        gc.collect()  # run the proxy finalizer -> deferred close -> resolve
+        await asyncio.wait_for(task, timeout=2)
+
+    asyncio.run(scenario())
+    assert closeable.closed is True
+    assert len(created) == 1
+
+
+def test_sync_get_or_create_blocks_for_pending_close_off_loop():
+    """Without a running loop, sync creation blocks until the previous value
+    for the key has fully closed."""
+    import threading
+    import time
+
+    cache = ClosingLRUCache(maxsize=8, lease=True)
+    closeable = _Closeable("old")
+    holder = {"proxy": cache.get_or_create("k", lambda: closeable)}
+    assert cache.evict("k") is True  # close deferred behind the held proxy
+
+    def release_later():
+        time.sleep(0.2)
+        holder.pop("proxy")
+        gc.collect()
+
+    releaser = threading.Thread(target=release_later)
+    releaser.start()
+    new_value = cache.get_or_create("k", lambda: _Closeable("new"))
+    releaser.join()
+
+    assert closeable.closed is True, "creator returned before the old value closed"
+    assert new_value.name == "new"
+
+
+def test_cache_clear_ignores_pins():
+    """cache_clear is an intentional lifecycle event: pinned entries close too."""
+
+    @closing_lru_cache(maxsize=4, lease=False, pinned_predicate=lambda key: True)
+    def create(name):
+        return _Closeable(name)
+
+    values = [create(name) for name in ("a", "b")]
+    create.cache_clear()
+
+    assert all(value.closed is True for value in values)
+    assert create.cache_info().currsize == 0
+
+
+def test_pinning_with_maxsize_one_converges():
+    """Extreme bound: maxsize=1 with a pinned entry overflows, then converges
+    to a single entry once the pin lifts."""
+    pinned = {("a",)}
+
+    @closing_lru_cache(maxsize=1, lease=False, pinned_predicate=lambda key: key in pinned)
+    def create(name):
+        return _Closeable(name)
+
+    value_a = create("a")
+    value_b = create("b")  # pinned "a" -> overflow to 2
+    assert create.cache_info().currsize == 2
+
+    pinned.clear()
+    create("c")  # evicts "a" and "b" to get back under maxsize
+
+    assert value_a.closed is True
+    assert value_b.closed is True
+    assert create.cache_info().currsize == 1
+    assert create.cache_contains("c")
+
+
+def test_name_bound_pin_predicate_resolves_parameter():
+    """A DatasetQueuePinPredicate addresses the key by parameter NAME; the
+    decorator binds it to the real signature, and pinning follows the queue."""
+    from unittest.mock import MagicMock, patch
+
+    from cognee.infrastructure.databases.dataset_queue.pinning import dataset_queue_pin_predicate
+
+    predicate = dataset_queue_pin_predicate("db_name")
+
+    @closing_lru_cache(maxsize=1, lease=False, pinned_predicate=predicate)
+    def create(provider, db_name):
+        return _Closeable(f"{provider}/{db_name}")
+
+    fake_queue = MagicMock()
+    fake_queue.active_dataset_ids.return_value = {"dataset-1"}
+    with patch(
+        "cognee.infrastructure.databases.dataset_queue.dataset_queue",
+        return_value=fake_queue,
+    ):
+        pinned_value = create("kuzu", "dataset-1.pkl")  # active -> pinned
+        create("kuzu", "other.pkl")  # would evict LRU, but it is pinned -> overflow
+
+    assert pinned_value.closed is False
+    assert create.cache_info().currsize == 2
+
+
+def test_name_bound_pin_predicate_rejects_unknown_parameter():
+    """A typo'd parameter name fails at decoration time, not silently at runtime."""
+    import pytest
+
+    from cognee.infrastructure.databases.dataset_queue.pinning import dataset_queue_pin_predicate
+
+    with pytest.raises(ValueError, match="no_such_param"):
+
+        @closing_lru_cache(maxsize=2, pinned_predicate=dataset_queue_pin_predicate("no_such_param"))
+        def create(provider, db_name):
+            return _Closeable(db_name)
