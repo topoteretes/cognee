@@ -1,20 +1,14 @@
 """Environment bootstrap for running the bot against real cognee.
 
-Two things have to happen before cognee is imported:
+Loads a local (gitignored) ``.env`` for the LLM/embedding provider config, then
+sets two cognee knobs that must be in place BEFORE the first ``import cognee``
+(cognee reads them at import time; with access control left on it would require
+an authenticated user and the bot's calls would fail):
 
-1. The LLM / embedding provider config has to be in the environment. We keep it
-   in a local ``.env`` (gitignored) so the key lives in exactly one place.
-2. Two cognee knobs must be set BEFORE the first ``import cognee``:
+    ENABLE_BACKEND_ACCESS_CONTROL=false   single-user: no auth, one shared store
+    CACHING=false                         disable session-memory side calls
 
-       ENABLE_BACKEND_ACCESS_CONTROL=false   single-user: no auth, one shared store
-       CACHING=false                         disable session-memory side calls
-
-   cognee reads these at import time. With access control left on (the default),
-   cognee requires an authenticated user and the bot's calls fail.
-
-Both knobs use ``setdefault``, so an explicit environment variable or a ``.env``
-entry always wins. ``load_cognee_env`` is idempotent and is called from run.py
-and from the cognee adapter just before it imports cognee.
+Both use ``setdefault`` (an explicit env var or .env entry wins). Idempotent.
 """
 
 from __future__ import annotations

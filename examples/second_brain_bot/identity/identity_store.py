@@ -1,17 +1,14 @@
 """Cross-transport identity resolution: the ownable core of #3613.
 
-A link table maps an external identity, ``(transport, external_user)``, to a
-single ``canonical_user_id``. First contact from any transport auto-creates a
-canonical user. Linking points a second external identity at an existing
-canonical user, so two front-ends resolve to one brain.
+A link table maps an external identity ``(transport, external_user)`` to one
+``canonical_user_id``. First contact auto-creates a canonical user; ``/link``
+points a second identity at an existing one, so two front-ends share one brain.
 
-Canonical ids are derived deterministically (uuid5) from the external
-identity that first created them. That keeps tests reproducible and gives
-clean forget semantics: wiping and unlinking a user, then messaging again,
-yields a fresh empty brain rather than silently re-attaching to the old one.
+Canonical ids are deterministic (uuid5) from the first external identity, which
+keeps tests reproducible and gives clean forget semantics: after wiping and
+unlinking, messaging again yields a fresh empty brain, not the old one.
 
-In-memory by default (per the #3608 design note: small pluggable stores, no
-hard backend dependency). Swap the dict for a real table in production.
+In-memory by default; swap the dict for a real table in production.
 """
 
 from __future__ import annotations

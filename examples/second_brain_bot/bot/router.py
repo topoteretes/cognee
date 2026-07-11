@@ -1,13 +1,10 @@
 """The bot core: resolve identity, dispatch commands, then capture or recall.
 
-This is the one place every transport funnels into. It is transport-agnostic:
-a transport normalizes a raw platform event to a Conversation plus text plus
-timestamp, and the router does the rest.
-
-Capture vs recall is decided by a small, predictable rule rather than an LLM:
-a message ending in "?" (or prefixed /ask or /recall) is a question to recall;
-anything else is a note to remember. This keeps the demo deterministic and the
-tests free of any model.
+Every transport funnels here: it normalizes a platform event to a Conversation
+plus text and timestamp, and the router does the rest. Capture vs recall is a
+small, predictable rule (a message ending in "?", or prefixed /ask or /recall,
+is a recall; anything else is a note), so the demo stays deterministic and the
+tests need no model.
 """
 
 from __future__ import annotations

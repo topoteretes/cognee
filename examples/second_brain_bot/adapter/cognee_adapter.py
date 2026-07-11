@@ -147,13 +147,7 @@ class CogneeChatMemoryAdapter(ChatMemoryAdapter):
         return Answer(text=answer_text, citations=citations)
 
     async def forget(self, target: Union[Conversation, str]) -> None:
-        """Whole-brain forget.
-
-        Wipes the entire per-user brain in one call. Safe because the brain is
-        single-user: there is no other user's data in the dataset to orphan.
-        The caller (the bot) also drops the user's identity links so no
-        transport silently re-attaches.
-        """
+        """Wipe the whole per-user brain. The bot also drops the identity links."""
         from ..config import load_cognee_env
 
         load_cognee_env()
@@ -174,18 +168,10 @@ class CogneeChatMemoryAdapter(ChatMemoryAdapter):
             pass
         self._citations.pop(dataset, None)
 
-    # TODO(follow-up, #3608 adapter core): per-transport / selective forget
-    # (drop only one transport's captures, e.g. "forget just my Telegram
-    # notes") is intentionally NOT implemented here. After cognify merges facts
-    # from different transports into shared nodes within one brain, naive subset
-    # deletion by external_metadata["transport"] can orphan shared facts that
-    # other captures still reference. A correct implementation needs
-    # deduplication-aware deletion: remove a node/edge only when no other data
-    # references it. That belongs in the #3608 adapter core, not in this bot, so
-    # it is deferred. The ingest-time external_metadata stamp (transport,
-    # source, canonical_user, ts, deeplink) and the deterministic data_id are
-    # retained precisely so that future dedup-aware partial forget has what it
-    # needs.
+    # Selective (per-transport) forget is intentionally out of scope: once cognify
+    # merges facts from different transports into shared nodes, deleting a subset
+    # safely needs dedup-aware deletion. `/forget me` is whole-brain only; the
+    # ingest-time metadata stamp is kept so a future partial forget has what it needs.
 
 
 def select_citations(
