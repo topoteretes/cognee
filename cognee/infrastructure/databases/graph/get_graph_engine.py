@@ -361,9 +361,9 @@ def is_graph_engine_cached(**kwargs) -> bool:
     )
 
 
-# key[3] is graph_database_name in _create_graph_engine's positional cache key.
 @closing_lru_cache(
-    maxsize=DATABASE_MAX_LRU_CACHE_SIZE, pinned_predicate=dataset_queue_pin_predicate(3)
+    maxsize=DATABASE_MAX_LRU_CACHE_SIZE,
+    pinned_predicate=dataset_queue_pin_predicate("graph_database_name"),
 )
 def _create_graph_engine(
     graph_database_provider,

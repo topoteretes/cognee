@@ -949,3 +949,42 @@ def test_pinning_with_maxsize_one_converges():
     assert value_b.closed is True
     assert create.cache_info().currsize == 1
     assert create.cache_contains("c")
+
+
+def test_name_bound_pin_predicate_resolves_parameter():
+    """A DatasetQueuePinPredicate addresses the key by parameter NAME; the
+    decorator binds it to the real signature, and pinning follows the queue."""
+    from unittest.mock import MagicMock, patch
+
+    from cognee.infrastructure.databases.dataset_queue.pinning import dataset_queue_pin_predicate
+
+    predicate = dataset_queue_pin_predicate("db_name")
+
+    @closing_lru_cache(maxsize=1, lease=False, pinned_predicate=predicate)
+    def create(provider, db_name):
+        return _Closeable(f"{provider}/{db_name}")
+
+    fake_queue = MagicMock()
+    fake_queue.active_dataset_ids.return_value = {"dataset-1"}
+    with patch(
+        "cognee.infrastructure.databases.dataset_queue.dataset_queue",
+        return_value=fake_queue,
+    ):
+        pinned_value = create("kuzu", "dataset-1.pkl")  # active -> pinned
+        create("kuzu", "other.pkl")  # would evict LRU, but it is pinned -> overflow
+
+    assert pinned_value.closed is False
+    assert create.cache_info().currsize == 2
+
+
+def test_name_bound_pin_predicate_rejects_unknown_parameter():
+    """A typo'd parameter name fails at decoration time, not silently at runtime."""
+    import pytest
+
+    from cognee.infrastructure.databases.dataset_queue.pinning import dataset_queue_pin_predicate
+
+    with pytest.raises(ValueError, match="no_such_param"):
+
+        @closing_lru_cache(maxsize=2, pinned_predicate=dataset_queue_pin_predicate("no_such_param"))
+        def create(provider, db_name):
+            return _Closeable(db_name)

@@ -624,7 +624,11 @@ def closing_lru_cache(maxsize: Optional[int] = 128, lease: bool = True, pinned_p
     ``maxsize`` semantics match ``functools.lru_cache``: positive int =
     bounded; ``0`` (or negative) = disabled; ``None`` = unbounded.
     ``pinned_predicate`` protects matching keys from capacity eviction (see
-    :class:`ClosingLRUCache`).
+    :class:`ClosingLRUCache`). A predicate that exposes ``bind_signature`` is
+    bound to the cached function's parameter-name -> position map at
+    decoration time, so it can address key fields by parameter name and fail
+    loudly on a name that doesn't exist (e.g.
+    ``dataset_queue_pin_predicate("graph_database_name")``).
 
     The decorated function gains ``cache_clear()`` and ``cache_info()``
     attributes, matching the ``lru_cache`` API, as well as a ``__wrapped__``
@@ -632,14 +636,18 @@ def closing_lru_cache(maxsize: Optional[int] = 128, lease: bool = True, pinned_p
     """
 
     def decorator(fn):
-        cache = ClosingLRUCache(maxsize=maxsize, lease=lease, pinned_predicate=pinned_predicate)
-
         # Parameter-name -> positional index of ``fn``, so key-scanning helpers
-        # (``cache_evict_matching``) can resolve named criteria against the
-        # positional part of a cache key.
+        # (``cache_evict_matching``) and name-bound pin predicates can resolve
+        # named criteria against the positional part of a cache key.
         _param_positions = {
             name: index for index, name in enumerate(inspect.signature(fn).parameters)
         }
+
+        bind_signature = getattr(pinned_predicate, "bind_signature", None)
+        if callable(bind_signature):
+            bind_signature(_param_positions)
+
+        cache = ClosingLRUCache(maxsize=maxsize, lease=lease, pinned_predicate=pinned_predicate)
 
         def _key(args, kwargs):
             # ``_KW_MARK`` separates positional from keyword args so

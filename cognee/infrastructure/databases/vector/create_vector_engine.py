@@ -182,9 +182,9 @@ def is_vector_engine_cached(**kwargs) -> bool:
     )
 
 
-# key[2] is vector_db_name in _create_vector_engine's positional cache key.
 @closing_lru_cache(
-    maxsize=DATABASE_MAX_LRU_CACHE_SIZE, pinned_predicate=dataset_queue_pin_predicate(2)
+    maxsize=DATABASE_MAX_LRU_CACHE_SIZE,
+    pinned_predicate=dataset_queue_pin_predicate("vector_db_name"),
 )
 def _create_vector_engine(
     vector_db_provider: str,
