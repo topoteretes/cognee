@@ -233,9 +233,8 @@ class TursoVectorAdapter(VectorDBInterface):
         """Execute one write per row inside a single committed transaction."""
         with self._connection_lock:
             connection = self._get_connection()
-            for start in range(0, len(params), QUERY_BATCH_SIZE):
-                for row in params[start : start + QUERY_BATCH_SIZE]:
-                    connection.execute(sql, tuple(row))
+            for row in params:
+                connection.execute(sql, tuple(row))
             connection.commit()
 
     async def create_vector_index(self, index_name: str, index_property_name: str):
