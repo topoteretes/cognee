@@ -68,13 +68,19 @@ handles, the dataset queue, and the delete flows rely on::
 
 7. Failure policy. Expected events — bounded-wait timeouts, close tasks
    cancelled at event loop teardown, thread-pool rejection at interpreter
-   shutdown — are handled with an explicit reason (timeouts warn loudly).
-   Everything unexpected logs with a full traceback: a ``close()`` raising on
-   any of its execution paths, a registry future carrying an exception or
-   cancelled (disambiguated from genuine caller cancellation, which always
-   propagates), and pool-thread ``BaseException``s that would otherwise
-   vanish. No creator, sweep, or eviction ever fails over close bookkeeping —
-   and none of it is ever silent.
+   shutdown — are handled with an explicit reason (timeouts log a WARNING:
+   operational, worth watching). Broken invariants — a registry future
+   carrying an exception or cancelled (disambiguated from genuine caller
+   cancellation, which always propagates) — log at ERROR level with the full
+   traceback: an entry there is a defect to root-cause immediately, never
+   operational noise. Close failures on any execution path and pool-thread
+   ``BaseException``s that would otherwise vanish are logged with tracebacks
+   as well. Callers still proceed in every case, because the waits are
+   best-effort by design: the system must stay correct even when a wait never
+   happens (the sync-on-loop path never waits at all), so an error in wait
+   bookkeeping can never justify failing a user operation. No creator, sweep,
+   or eviction ever fails over close bookkeeping — and none of it is ever
+   silent.
 """
 
 import asyncio
@@ -527,13 +533,13 @@ class ClosingLRUCache:
             # Nothing in this module cancels registry futures, so a cancelled
             # one means an invariant broke — surface it, then proceed with
             # creation as usual.
-            logger.warning("Pending close for cache key %r was cancelled unexpectedly", key)
+            logger.error("Pending close for cache key %r was cancelled unexpectedly", key)
         except Exception:
             # By construction nothing lands here: close futures resolve with
             # a result, never an exception (see _start_close). Getting here
             # means that invariant broke — surface it loudly, but still
             # proceed: a creator must not fail over close bookkeeping.
-            logger.warning(
+            logger.error(
                 "Unexpected error while waiting for pending close of cache key %r",
                 key,
                 exc_info=True,
@@ -602,13 +608,13 @@ class ClosingLRUCache:
             # own task being cancelled, which must propagate.
             if not future.cancelled():
                 raise
-            logger.warning("Pending close for cache key %r was cancelled unexpectedly", key)
+            logger.error("Pending close for cache key %r was cancelled unexpectedly", key)
         except Exception:
             # By construction nothing lands here: close futures resolve with
             # a result, never an exception (see _start_close). Getting here
             # means that invariant broke — surface it loudly, but let the
             # caller proceed: failing it over close bookkeeping is worse.
-            logger.warning(
+            logger.error(
                 "Unexpected error while waiting for pending close of cache key %r",
                 key,
                 exc_info=True,
