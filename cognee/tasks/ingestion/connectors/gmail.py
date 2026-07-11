@@ -259,8 +259,9 @@ def _get_message(service: Any, message_id: str) -> Optional[dict]:
     try:
         return service.users().messages().get(userId="me", id=message_id, format="full").execute()
     except Exception as exc:
-        status = getattr(getattr(exc, "resp", None), "status", None)
-        if status in (404, 410) or "404" in str(exc) or "410" in str(exc):
+        # Trust only the structured HTTP status: str(exc) embeds the request
+        # URL, and a hex message id can spuriously contain "404"/"410".
+        if getattr(getattr(exc, "resp", None), "status", None) in (404, 410):
             return None
         raise
 
