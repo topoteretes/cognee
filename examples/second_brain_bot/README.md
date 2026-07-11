@@ -134,7 +134,7 @@ ask a question (end ?)   recall it, with citations
 ```
 transports/   telegram + web. Each normalizes a platform event to a Conversation. Thin.
 identity/     link table (external identity -> canonical user) + one-time-code linking.
-adapter/      the #3608 contract: scope / ingest / answer / forget.
+adapter/      ingest / answer / forget behind one interface.
                 interface.py     the contract
                 fake_adapter.py  in-memory, for tests and the no-key run
                 cognee_adapter.py real impl over cognee
@@ -144,17 +144,7 @@ bot/          router (resolve identity, route capture vs recall), commands, cons
 Memory boundary: the dataset is keyed by the canonical user, `brain:{user}`, so
 a note from any transport lands in one shared brain. Durable recall targets the
 whole brain, which is the persistence-across-sessions story this bot
-demonstrates.
-
-A note on `session`: the `Scope` contract carries a per-transport
-`session = {transport}:{source}` field (the shape aligned with #3608), but this
-reference adapter ingests dataset-only and does not write to the session cache.
-Under access-control-off in a single-user config, cognee's session-to-graph
-distillation bridge returns a 422 (the background improve task runs as a user
-without write access to `brain:...`), so a session-ingested note never reaches
-the durable graph. Dataset-only ingest is what makes cross-transport recall
-work here. A session-cache-backed adapter (CACHING on, or the merged #3608
-adapter) would use the `session` field for fast recent context.
+demonstrates. Ingest is dataset-only (no session cache).
 
 Citations: the adapter records a source-to-message map at ingest, so a recalled
 answer can link back to the original Telegram or web message. cognee's
@@ -178,10 +168,8 @@ each external identity keeps its own brain until linked.
 
 ## Relationship to #3608
 
-Built against the #3608 three-primitive interface as a contract. The adapter
-author confirmed `scope()` returns `dataset` and `session` as separate fields,
-so this bot's per-user scope (`dataset=brain:{user}`,
-`session={transport}:{source}`) maps to the merged adapter natively. The local
+Built against the #3608 three-primitive interface (ingest / answer / forget) as
+a contract, with a per-user `brain:{user}` memory boundary. The local
 `cognee_adapter.py` is swappable for the merged #3608 adapter behind the same
 interface. The ownable piece here is the cross-transport identity layer, which
 #3608 does not cover.

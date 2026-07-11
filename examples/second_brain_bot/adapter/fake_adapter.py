@@ -5,8 +5,8 @@ recall. It carries no cognee dependency and needs no API keys, so the bot's
 identity, routing, and forget logic can be proven offline in under a second.
 
 It satisfies the exact same ``ChatMemoryAdapter`` contract as the real cognee
-adapter and resolves scope through the same ``per_user_scope`` policy, so a
-green test here exercises the real scope boundary.
+adapter and resolves the dataset through the same ``dataset_for`` policy, so a
+green test here exercises the real memory boundary.
 """
 
 from __future__ import annotations
@@ -14,8 +14,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Union
 
-from .interface import Answer, ChatMemoryAdapter, Citation, Conversation, Message, Scope
-from .scope_policy import per_user_scope, resolve_user
+from .interface import (
+    Answer,
+    ChatMemoryAdapter,
+    Citation,
+    Conversation,
+    Message,
+    dataset_for,
+    resolve_user,
+)
 
 
 @dataclass
@@ -35,11 +42,7 @@ class FakeChatMemoryAdapter(ChatMemoryAdapter):
         # dataset name -> list of stored items
         self._store: dict[str, list[_StoredItem]] = {}
 
-    def scope(self, conversation: Conversation) -> Scope:
-        return per_user_scope(conversation)
-
     async def ingest(self, conversation: Conversation, message: Message) -> None:
-        scope = self.scope(conversation)
         item = _StoredItem(
             text=message.text,
             transport=conversation.transport,
@@ -48,11 +51,10 @@ class FakeChatMemoryAdapter(ChatMemoryAdapter):
             ts=message.ts,
             deeplink=message.deeplink or conversation.msg_ref or "",
         )
-        self._store.setdefault(scope.dataset, []).append(item)
+        self._store.setdefault(dataset_for(conversation), []).append(item)
 
     async def answer(self, conversation: Conversation, query: str) -> Answer:
-        scope = self.scope(conversation)
-        items = self._store.get(scope.dataset, [])
+        items = self._store.get(dataset_for(conversation), [])
         matches = [item for item in items if _matches(query, item.text)]
 
         if not matches:
@@ -71,11 +73,8 @@ class FakeChatMemoryAdapter(ChatMemoryAdapter):
         return Answer(text=f"From your memory: {snippets}", citations=citations)
 
     async def forget(self, target: Union[Conversation, str]) -> None:
-        if isinstance(target, Conversation):
-            dataset = self.scope(target).dataset
-        else:
-            # target is a canonical user id
-            dataset = f"brain:{target}"
+        # target is a Conversation (scoped wipe) or a raw canonical user id
+        dataset = dataset_for(target) if isinstance(target, Conversation) else f"brain:{target}"
         self._store.pop(dataset, None)
 
 

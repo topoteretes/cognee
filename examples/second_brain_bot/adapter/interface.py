@@ -1,22 +1,10 @@
-"""Chat-memory adapter interface (the #3608 contract).
+"""Chat-memory adapter interface: the small seam both the fake and the real
+cognee adapter implement, so the bot logic proven offline is the logic that
+runs live.
 
-This is the small, framework-agnostic seam every cognee-powered bot plugs
-into. It is defined here locally as a contract so the second-brain bot
-(#3613) can be built and tested before the shared #3608 adapter merges.
-When the real #3608 adapter lands, it drops in behind this same interface.
-
-The interface exposes three primitives plus a scope resolver:
-
-    scope(conversation)           -> Scope { dataset, session }
-    ingest(conversation, message) -> None      (background remember, returns fast)
-    answer(conversation, query)   -> Answer { text, citations }
-    forget(target)                -> None      (target is a Conversation or a user id)
-
-Note on the scope shape: #3608's original proposal collapses session_id and
-dataset_name into one resolved key. The second-brain case needs them
-decoupled, a per-user dataset (brain:{canonical_user}) for durable recall and
-a per-transport session for recent context, so Scope carries both as separate
-fields. The collapsed case stays expressible by setting both equal.
+Three primitives (ingest / answer / forget) plus a dataset resolver. The memory
+boundary for #3613 is per canonical user -- ``dataset = brain:{user}`` -- so a
+note captured on any transport is recallable from any other.
 """
 
 from __future__ import annotations
@@ -30,37 +18,16 @@ from typing import Optional, Union
 class Conversation:
     """A normalized handle to one conversation on one transport.
 
-    Every transport reduces a raw platform event down to this. The bot's
-    identity layer fills in ``canonical_user`` after resolving the external
-    identity; transports leave it empty.
+    Every transport reduces a raw platform event to this. The identity layer
+    fills ``canonical_user`` after resolving the external identity; transports
+    leave it empty.
     """
 
     transport: str  # "telegram" | "web"
     source: str  # chat_id, web session id, etc. (the per-transport conversation key)
     canonical_user: Optional[str] = None  # resolved by the identity layer
-    external_user: Optional[str] = None  # raw per-transport user id, e.g. telegram sender id
-    msg_ref: Optional[str] = None  # deeplink / permalink / web anchor for the source message
-
-
-@dataclass(frozen=True)
-class Scope:
-    """Where a conversation reads and writes memory.
-
-    dataset is the durable memory boundary (the whole brain).
-    session is the per-conversation cache key, part of the #3608 contract.
-
-    Note: the CogneeChatMemoryAdapter reference impl in this bot resolves
-    ``session`` but deliberately does not write to the session cache. Under
-    access-control-off in a single-user config, cognee's session->graph
-    distillation bridge fails with a 422 (the background improve task runs as a
-    user without write access to ``brain:...``), so a session-ingested note
-    never reaches the durable graph. This adapter ingests dataset-only. A
-    session-cache-backed adapter (CACHING on, or the merged #3608 adapter)
-    populates ``session`` instead.
-    """
-
-    dataset: str
-    session: str
+    external_user: Optional[str] = None  # raw per-transport user id
+    msg_ref: Optional[str] = None  # deeplink to the source message
 
 
 @dataclass(frozen=True)
@@ -69,16 +36,12 @@ class Message:
 
     text: str
     ts: str  # ISO 8601 timestamp, supplied by the transport (deterministic in tests)
-    deeplink: Optional[str] = None  # link back to the original message, if the transport has one
+    deeplink: Optional[str] = None  # link back to the original message, if any
 
 
 @dataclass(frozen=True)
 class Citation:
-    """Provenance for one piece of evidence behind an answer.
-
-    Matches the #3604 spirit: what was said, on which transport, when, with a
-    link back. No relevance score; that is #3604's separate concern.
-    """
+    """Provenance for one note behind an answer: what was said, where, and when."""
 
     content: str
     source_transport: str
@@ -94,13 +57,25 @@ class Answer:
     citations: list[Citation] = field(default_factory=list)
 
 
-class ChatMemoryAdapter(ABC):
-    """The three-primitive contract every bot builds on."""
+def resolve_user(conversation: Conversation) -> str:
+    """The canonical user id, falling back to the raw external identity.
 
-    @abstractmethod
-    def scope(self, conversation: Conversation) -> Scope:
-        """Resolve a conversation to its (dataset, session) memory scope."""
-        raise NotImplementedError
+    The identity layer normally fills ``canonical_user`` before a conversation
+    reaches the adapter; the fallback keeps the adapter usable on its own (each
+    unlinked external identity gets its own brain).
+    """
+    if conversation.canonical_user:
+        return conversation.canonical_user
+    return f"{conversation.transport}:{conversation.external_user or conversation.source}"
+
+
+def dataset_for(conversation: Conversation) -> str:
+    """The per-user memory boundary: one dataset keyed by the canonical user."""
+    return f"brain:{resolve_user(conversation)}"
+
+
+class ChatMemoryAdapter(ABC):
+    """The three-primitive contract both adapters implement."""
 
     @abstractmethod
     async def ingest(self, conversation: Conversation, message: Message) -> None:
@@ -114,5 +89,5 @@ class ChatMemoryAdapter(ABC):
 
     @abstractmethod
     async def forget(self, target: Union[Conversation, str]) -> None:
-        """Delete memory. target is a Conversation (scoped wipe) or a canonical user id."""
+        """Delete memory. target is a Conversation or a canonical user id."""
         raise NotImplementedError

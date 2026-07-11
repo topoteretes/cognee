@@ -1,30 +1,18 @@
 """The real chat-memory adapter, backed by cognee.
 
-This satisfies the same contract as the fake adapter and resolves scope through
-the same per_user_scope policy, so the bot logic proven offline is the bot
-logic that runs live.
+Same contract as the fake adapter, resolving the dataset through the same
+``dataset_for`` policy, so the bot logic proven offline is the logic that runs
+live. Ingest writes dataset-only (``brain:{user}``); recall targets the whole
+brain, so a note from Telegram last week is recalled from web today.
 
-Two design notes worth reading before you trust the citation path:
+Citations: cognee's ``recall(include_references=True)`` grounds its Evidence
+block in document chunks (via term overlap), not in the deeplink we stamp at
+ingest. So the adapter keeps its own ingest-time ``data_id -> source message``
+map and matches the data_id cognee prints in the Evidence block back to the
+original transport message.
 
-1. Memory boundary. ingest writes with dataset_name=brain:{canonical_user} and
-   session_id={transport}:{source}. Durable recall targets the whole brain
-   dataset, so a note from Telegram last week is recalled from web today; the
-   session only gives fast recent context.
-
-2. Citations. cognee's recall(include_references=True) grounds its Evidence
-   block in document chunks via term overlap, NOT in the external_metadata
-   deeplink stamped at ingest (verified against
-   cognee/modules/retrieval/utils/references.py). So to cite the original
-   transport message, this adapter keeps its own ingest-time citation map, the
-   approach the #3608 design calls for ("the adapter records a cognee source to
-   platform message ref mapping at ingest"). include_references is still passed
-   so cognee's own grounding enriches the answer text. The external_metadata
-   stamp and the deterministic data_id are kept for citations and for a future
-   dedup-aware partial forget (see the TODO on forget()); forget in this version
-   is whole-brain only.
-
-cognee is imported lazily inside each method so importing this module (and the
-scope smoke test) needs neither cognee installed nor any API key.
+cognee is imported lazily inside each method, so importing this module (and the
+smoke test) needs neither cognee installed nor any API key.
 """
 
 from __future__ import annotations
@@ -34,8 +22,15 @@ import uuid
 from dataclasses import dataclass
 from typing import Union
 
-from .interface import Answer, ChatMemoryAdapter, Citation, Conversation, Message, Scope
-from .scope_policy import per_user_scope, resolve_user
+from .interface import (
+    Answer,
+    ChatMemoryAdapter,
+    Citation,
+    Conversation,
+    Message,
+    dataset_for,
+    resolve_user,
+)
 
 # Stable namespace so a given (transport, source, ts) always maps to the same
 # data_id. Idempotent ingest, and resolvable for per-message forget.
@@ -69,9 +64,6 @@ class CogneeChatMemoryAdapter(ChatMemoryAdapter):
         # dataset name -> ingest-time citation records (the source-to-message map)
         self._citations: dict[str, list[_CitationRecord]] = {}
 
-    def scope(self, conversation: Conversation) -> Scope:
-        return per_user_scope(conversation)
-
     async def ingest(self, conversation: Conversation, message: Message) -> None:
         from ..config import load_cognee_env
 
@@ -79,7 +71,7 @@ class CogneeChatMemoryAdapter(ChatMemoryAdapter):
         import cognee
         from cognee.tasks.ingestion.data_item import DataItem
 
-        scope = self.scope(conversation)
+        dataset = dataset_for(conversation)
         canonical = resolve_user(conversation)
         data_id = uuid.uuid5(
             _DATA_ID_NAMESPACE, f"{conversation.transport}:{conversation.source}:{message.ts}"
@@ -95,26 +87,16 @@ class CogneeChatMemoryAdapter(ChatMemoryAdapter):
                 "deeplink": message.deeplink or conversation.msg_ref or "",
             },
         )
-        # Ingest writes dataset-only. The session field is resolved (scope.session)
-        # and stays in the Scope contract for #3608 compatibility, but this
-        # reference adapter deliberately does NOT write to the session cache,
-        # because under access-control-off in this single-user config cognee's
-        # session->graph distillation bridge fails with a 422 (the background
-        # improve task runs as a user that "does not have write access to dataset:
-        # brain:..."), which strands the note in the session cache and never
-        # reaches the durable graph. Diagnosed with isolated probes: dataset-only
-        # ingest reaches the graph and recalls cleanly; session ingest does not.
-        # A session-cache-backed adapter (CACHING on, or the merged #3608 adapter)
-        # would populate scope.session instead. self_improvement=False because the
-        # dataset path does not need the improve enrichment and skipping it avoids
-        # needless latency (dataset-only ingest throws no 422 either way).
+        # Dataset-only ingest: no session_id. run_in_background returns fast;
+        # self_improvement=False skips the improve() enrichment the dataset path
+        # does not need.
         await cognee.remember(
             item,
-            dataset_name=scope.dataset,
+            dataset_name=dataset,
             run_in_background=True,
             self_improvement=False,
         )
-        self._citations.setdefault(scope.dataset, []).append(
+        self._citations.setdefault(dataset, []).append(
             _CitationRecord(
                 text=message.text,
                 transport=conversation.transport,
@@ -138,11 +120,11 @@ class CogneeChatMemoryAdapter(ChatMemoryAdapter):
         # (see ingest).
         from cognee.modules.search.types.SearchType import SearchType
 
-        scope = self.scope(conversation)
+        dataset = dataset_for(conversation)
         try:
             results = await cognee.recall(
                 query,
-                datasets=[scope.dataset],
+                datasets=[dataset],
                 include_references=True,
                 top_k=self._top_k,
                 query_type=SearchType.GRAPH_COMPLETION,
@@ -167,9 +149,7 @@ class CogneeChatMemoryAdapter(ChatMemoryAdapter):
         # the note during the post-ingest race where the chunk exists but the
         # graph is not built): it contributes no distinctive term, so it is never
         # cited, regardless of how the refusal is phrased. See select_citations.
-        citations = select_citations(
-            self._citations.get(scope.dataset, []), evidence, answer_text, query
-        )
+        citations = select_citations(self._citations.get(dataset, []), evidence, answer_text, query)
 
         # Cosmetic only: tidy an obviously-refusing, already-uncited answer into the
         # friendly empty message. Correctness (no false citation) does NOT depend on
@@ -193,10 +173,7 @@ class CogneeChatMemoryAdapter(ChatMemoryAdapter):
 
         from cognee.modules.data.exceptions.exceptions import DatasetNotFoundError
 
-        if isinstance(target, Conversation):
-            dataset = self.scope(target).dataset
-        else:
-            dataset = f"brain:{target}"
+        dataset = dataset_for(target) if isinstance(target, Conversation) else f"brain:{target}"
         try:
             await cognee.forget(dataset=dataset)
         except (DatasetNotFoundError, AttributeError):
