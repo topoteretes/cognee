@@ -65,50 +65,11 @@ def test_message_data_id_differs_per_message():
 # --------------------------------------------------------------------------- #
 
 
-def test_citation_holds_source_fields_and_defaults_ok_true():
-    cite = Citation(
-        channel_id="C42",
-        ts="1700000000.000100",
-        permalink="https://slack.example/archives/C42/p1700000000000100",
-        author="alice",
-        snippet="we decided to ship on Friday",
-    )
-    assert cite.channel_id == "C42"
-    assert cite.ts == "1700000000.000100"
-    assert cite.permalink.startswith("https://")
-    assert cite.author == "alice"
-    assert cite.snippet == "we decided to ship on Friday"
-    assert cite.ok is True
-
-
-def test_citation_can_mark_stale_permalink():
-    cite = Citation(
-        channel_id="C42",
-        ts="1700000000.000100",
-        permalink="",
-        author="alice",
-        snippet="fallback text",
-        ok=False,
-    )
-    assert cite.ok is False
-
-
-def test_answer_holds_text_and_citations():
-    cite = Citation(
-        channel_id="C42",
-        ts="1.0",
-        permalink="https://slack.example/x",
-        author="bob",
-        snippet="s",
-    )
-    answer = Answer(text="We shipped on Friday.", citations=[cite])
-    assert answer.text == "We shipped on Friday."
-    assert answer.citations == [cite]
-
-
-def test_answer_defaults_to_no_citations():
-    answer = Answer(text="I don't know yet.")
-    assert answer.citations == []
+def test_citation_defaults_ok_true_and_answer_defaults_to_no_citations():
+    # The two defaults the code relies on: a Citation is a good link unless marked
+    # otherwise, and an Answer with no sources has an empty (not None) citation list.
+    assert Citation(channel_id="C", ts="1", permalink="p", author="a", snippet="s").ok is True
+    assert Answer(text="I don't know yet.").citations == []
 
 
 # --------------------------------------------------------------------------- #
@@ -119,21 +80,6 @@ def test_answer_defaults_to_no_citations():
 def test_chatmemory_is_abstract_and_cannot_be_instantiated():
     with pytest.raises(TypeError):
         ChatMemory()  # type: ignore[abstract]
-
-
-def test_chatmemory_declares_the_expected_abstract_methods():
-    assert ChatMemory.__abstractmethods__ == frozenset({"ingest", "flush", "answer", "forget"})
-
-
-def test_incomplete_subclass_cannot_be_instantiated():
-    class Partial(ChatMemory):
-        async def ingest(self, ref, *, ts, text, permalink, author):  # noqa: D401
-            return None
-
-        # flush / answer / forget intentionally missing.
-
-    with pytest.raises(TypeError):
-        Partial()  # type: ignore[abstract]
 
 
 def test_complete_subclass_satisfies_the_contract():

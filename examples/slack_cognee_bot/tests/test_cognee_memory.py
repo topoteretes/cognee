@@ -40,18 +40,19 @@ def memory(index):
 def _real_chunk_payload(document_id: str, text: str, chunk_index: int = 0) -> dict:
     """A dict shaped like a real search(SearchType.CHUNKS) result item.
 
-    Keys mirror the DocumentChunk vector payload kept by LanceDB
-    (``_build_data_point_schema`` keeps scalar fields + id + belongs_to_set,
-    drops ``metadata`` and nested models). ``document_id`` is the join key.
+    CHUNKS reads the ``DocumentChunk_text`` vector collection whose payload is an
+    ``IndexSchema`` — scalar fields only; ``metadata`` and nested models are
+    excluded (``_build_data_point_schema``). ``document_id`` — set from our
+    ``DataItem.data_id`` at ingest — is the citation join key that survives.
     """
     return {
         "id": f"chunk-{document_id}-{chunk_index}",
         "text": text,
-        "chunk_size": len(text),
-        "chunk_index": chunk_index,
-        "cut_type": "sentence_end",
         "document_id": document_id,
         "document_name": "slack_message.txt",
+        "chunk_index": chunk_index,
+        "source_chunk_id": None,
+        "importance_weight": 0.5,
         "belongs_to_set": ["C42"],
     }
 
@@ -179,6 +180,14 @@ def test_answer_round_trip_maps_chunks_to_citations(memory, index, monkeypatch):
     )
     assert chunks_call.kwargs["datasets"] == ["slack_C42"]
     assert chunks_call.kwargs["node_name"] == ["C42"]
+    # top_k (from the fixture) is forwarded to search, not silently dropped.
+    assert chunks_call.kwargs["top_k"] == 5
+    prose_call = next(
+        c
+        for c in search_mock.await_args_list
+        if c.kwargs["query_type"] == cognee.SearchType.GRAPH_COMPLETION
+    )
+    assert prose_call.kwargs["top_k"] == 5
 
 
 def test_answer_dedupes_multiple_chunks_from_one_message(memory, index, monkeypatch):
