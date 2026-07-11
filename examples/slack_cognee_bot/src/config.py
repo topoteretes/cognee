@@ -19,31 +19,25 @@ DEFAULT_COGNIFY_BATCH_SIZE = 10
 
 @dataclass(frozen=True)
 class IngestionSettings:
-    """Batch/timer thresholds for the ingestion buffer.
+    """Batch threshold for the ingestion buffer.
 
     Attributes
     ----------
     cognify_batch_size:
         Flush (cognify) a channel once this many messages have been buffered.
-    flush_interval_seconds:
-        Optional time-based trigger. ``None`` disables the timer (size-only).
     """
 
     cognify_batch_size: int = DEFAULT_COGNIFY_BATCH_SIZE
-    flush_interval_seconds: float | None = None
 
 
 def load_ingestion_settings() -> IngestionSettings:
     """Build :class:`IngestionSettings` from the environment.
 
     * ``COGNEE_SLACK_COGNIFY_BATCH`` — int, batch size (default 10).
-    * ``COGNEE_SLACK_FLUSH_INTERVAL_SECONDS`` — float, timer (default: disabled).
     """
     batch = os.getenv("COGNEE_SLACK_COGNIFY_BATCH")
-    interval = os.getenv("COGNEE_SLACK_FLUSH_INTERVAL_SECONDS")
     return IngestionSettings(
         cognify_batch_size=int(batch) if batch else DEFAULT_COGNIFY_BATCH_SIZE,
-        flush_interval_seconds=float(interval) if interval else None,
     )
 
 

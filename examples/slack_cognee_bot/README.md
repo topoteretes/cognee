@@ -87,7 +87,6 @@ required; the rest have sensible defaults.
 | `COGNEE_SLACK_DEFAULT_TEAM_ID` | Workspace id fallback for the session id | `""` |
 | `COGNEE_SLACK_OPTED_IN_CHANNELS` | Comma-separated channels to ingest at startup | `""` |
 | `COGNEE_SLACK_COGNIFY_BATCH` | Messages buffered before a cognify runs | `10` |
-| `COGNEE_SLACK_FLUSH_INTERVAL_SECONDS` | Timer flush (seconds); unset = size-only | off |
 
 ## How it works
 
@@ -107,9 +106,9 @@ locally; when that shared core lands, only the adapter implementation is swapped
 ## Limitations (read me)
 
 - **Answers reflect the last flush, not every message instantly.** Ingestion is
-  batched/triggered — a channel is cognified when it hits
-  `COGNEE_SLACK_COGNIFY_BATCH` messages, on the optional timer, or right before a
-  question. A message sent seconds before you ask may not be in the answer yet.
+  batched — a channel is cognified when it hits `COGNEE_SLACK_COGNIFY_BATCH`
+  messages or right before a question is answered. This keeps cost sane (a full
+  `cognify` per message would be prohibitively expensive).
 - **Forget is channel-level only.** `/cognee-forget` deletes the whole channel
   dataset. cognee has no per-user delete today, so a per-user "forget me" is
   **not** supported — it's a follow-up.

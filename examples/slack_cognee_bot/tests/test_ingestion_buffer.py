@@ -201,50 +201,6 @@ def test_flush_is_noop_again_immediately_after_flushing():
 
 
 # --------------------------------------------------------------------------- #
-# time-interval trigger (injectable clock)                                     #
-# --------------------------------------------------------------------------- #
-
-
-def test_time_interval_trigger_fires_after_elapsed():
-    memory = _fake_memory()
-    clock = {"t": 100.0}
-    buffer = IngestionBuffer(
-        memory,
-        settings=IngestionSettings(cognify_batch_size=100, flush_interval_seconds=30.0),
-        time_fn=lambda: clock["t"],
-    )
-
-    # First message opens the batch at t=100; below size threshold, no flush.
-    _add(buffer, REF_A, 1)
-    memory.flush.assert_not_awaited()
-    assert buffer.pending_count("A") == 1
-
-    # Advance past the interval; the next message's check trips the timer.
-    clock["t"] = 131.0
-    _add(buffer, REF_A, 1, start=1)
-
-    memory.flush.assert_awaited_once()
-    assert buffer.pending_count("A") == 0
-
-
-def test_time_interval_does_not_fire_before_elapsed():
-    memory = _fake_memory()
-    clock = {"t": 100.0}
-    buffer = IngestionBuffer(
-        memory,
-        settings=IngestionSettings(cognify_batch_size=100, flush_interval_seconds=30.0),
-        time_fn=lambda: clock["t"],
-    )
-
-    _add(buffer, REF_A, 1)
-    clock["t"] = 110.0  # only 10s elapsed
-    _add(buffer, REF_A, 1, start=1)
-
-    memory.flush.assert_not_awaited()
-    assert buffer.pending_count("A") == 2
-
-
-# --------------------------------------------------------------------------- #
 # config                                                                       #
 # --------------------------------------------------------------------------- #
 
@@ -253,17 +209,13 @@ def test_load_ingestion_settings_reads_env(monkeypatch):
     from src.config import load_ingestion_settings
 
     monkeypatch.setenv("COGNEE_SLACK_COGNIFY_BATCH", "7")
-    monkeypatch.setenv("COGNEE_SLACK_FLUSH_INTERVAL_SECONDS", "45.5")
     settings = load_ingestion_settings()
     assert settings.cognify_batch_size == 7
-    assert settings.flush_interval_seconds == 45.5
 
 
 def test_load_ingestion_settings_defaults(monkeypatch):
     from src.config import DEFAULT_COGNIFY_BATCH_SIZE, load_ingestion_settings
 
     monkeypatch.delenv("COGNEE_SLACK_COGNIFY_BATCH", raising=False)
-    monkeypatch.delenv("COGNEE_SLACK_FLUSH_INTERVAL_SECONDS", raising=False)
     settings = load_ingestion_settings()
     assert settings.cognify_batch_size == DEFAULT_COGNIFY_BATCH_SIZE
-    assert settings.flush_interval_seconds is None
