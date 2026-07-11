@@ -4,6 +4,7 @@ import inspect
 import os
 from numbers import Number
 
+from cognee.infrastructure.databases.dataset_queue.pinning import dataset_queue_pin_predicate
 from cognee.infrastructure.databases.utils.closing_lru_cache import closing_lru_cache
 from cognee.shared.lru_cache import DATABASE_MAX_LRU_CACHE_SIZE
 from cognee.shared.logging_utils import get_logger
@@ -360,27 +361,9 @@ def is_graph_engine_cached(**kwargs) -> bool:
     )
 
 
-def _is_pinned_by_dataset_queue(key) -> bool:
-    """True when the engine's database belongs to a dataset currently holding
-    a dataset-queue slot. Capacity eviction must not close an engine that an
-    admitted pipeline is still using — a mid-cognify dataset idling on an LLM
-    call looks least-recently-used exactly when closing it is most dangerous.
-
-    ``key[3]`` is ``graph_database_name``; per-dataset databases are named
-    ``<dataset_id>.<ext>``, so the stem maps directly to the queue's ids.
-    Runs under the cache lock: must stay cheap and never re-enter the cache.
-    """
-    from cognee.infrastructure.databases.dataset_queue import dataset_queue
-
-    database_name = key[3] if len(key) > 3 else ""
-    if not isinstance(database_name, str) or not database_name:
-        return False
-    active = dataset_queue().active_dataset_ids()
-    return bool(active) and database_name.split(".", 1)[0] in active
-
-
+# key[3] is graph_database_name in _create_graph_engine's positional cache key.
 @closing_lru_cache(
-    maxsize=DATABASE_MAX_LRU_CACHE_SIZE, pinned_predicate=_is_pinned_by_dataset_queue
+    maxsize=DATABASE_MAX_LRU_CACHE_SIZE, pinned_predicate=dataset_queue_pin_predicate(3)
 )
 def _create_graph_engine(
     graph_database_provider,
