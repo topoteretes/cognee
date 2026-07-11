@@ -207,6 +207,47 @@ def test_app_mention_answers_extracted_question_and_replies():
 # --------------------------------------------------------------------------- #
 
 
+def test_bare_mention_shows_usage_hint_without_querying():
+    buffer = _fake_buffer()
+    say = AsyncMock()
+    event = {"channel": "C1", "team": "T1", "ts": "5.0", "text": "<@U0BOT123>"}
+
+    asyncio.run(handle_app_mention(event, say, buffer, default_team_id="T0"))
+
+    buffer.answer.assert_not_awaited()  # no empty query, no needless cognify
+    say.assert_awaited_once()
+    assert "ask me" in say.await_args.args[0].lower()
+
+
+def test_mention_in_thread_replies_in_that_thread():
+    buffer = _fake_buffer()
+    say = AsyncMock()
+    event = {
+        "channel": "C1",
+        "team": "T1",
+        "ts": "5.001",
+        "thread_ts": "5.000",
+        "text": "<@U0BOT123> what did we decide?",
+    }
+
+    asyncio.run(handle_app_mention(event, say, buffer, default_team_id="T0"))
+
+    assert say.await_args.kwargs["thread_ts"] == "5.000"
+
+
+def test_empty_recall_shows_usage_hint_without_querying():
+    buffer = _fake_buffer()
+    say = AsyncMock()
+    ack = AsyncMock()
+    command = {"channel_id": "C1", "team_id": "T1", "text": "   "}
+
+    asyncio.run(handle_recall_command(command, ack, say, buffer, default_team_id="T0"))
+
+    ack.assert_awaited_once()
+    buffer.answer.assert_not_awaited()
+    assert "ask me" in say.await_args.args[0].lower()
+
+
 def test_answer_reply_apologizes_on_unexpected_error():
     # An unexpected failure in the answer path (e.g. LLM auth/rate-limit) must still
     # produce a reply, never a silent non-response.

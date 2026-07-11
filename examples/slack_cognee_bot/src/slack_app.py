@@ -133,6 +133,10 @@ async def handle_message_event(
 _ERROR_REPLY = (
     "Sorry — I hit an error answering that. Please try again; check the bot logs if it persists."
 )
+_EMPTY_QUESTION_REPLY = (
+    "Ask me a question, e.g. `@cognee what did we decide about the launch?` "
+    "or `/recall who owns billing?`"
+)
 
 
 async def _answer_and_reply(
@@ -140,6 +144,8 @@ async def _answer_and_reply(
     question: str,
     buffer: IngestionBuffer,
     say: Any,
+    *,
+    thread_ts: str | None = None,
 ) -> None:
     # A fresh/empty channel is handled inside answer() (calm empty reply). Any
     # OTHER failure (LLM auth/rate-limit, cognify error) must still get a reply
@@ -147,11 +153,11 @@ async def _answer_and_reply(
     try:
         answer = await buffer.answer(ref, query=question)
     except Exception:  # noqa: BLE001 - never leave the user without a reply
-        await say(_ERROR_REPLY)
+        await say(_ERROR_REPLY, thread_ts=thread_ts)
         return
     # Rich Block Kit citations reply; text= is the notification/accessibility
     # fallback Slack shows when blocks can't be rendered.
-    await say(blocks=render_answer(answer), text=notification_text(answer))
+    await say(blocks=render_answer(answer), text=notification_text(answer), thread_ts=thread_ts)
 
 
 async def handle_app_mention(
@@ -161,9 +167,19 @@ async def handle_app_mention(
     *,
     default_team_id: str = "",
 ) -> None:
-    """Answer an "@cognee …" mention from the channel's memory."""
+    """Answer an "@cognee …" mention from the channel's memory.
+
+    Replies inside the thread when the mention was posted in one, so the answer
+    stays attached to the question instead of landing at the channel root.
+    """
+    thread_ts = event.get("thread_ts")
     question = _MENTION_TOKEN.sub("", event.get("text", "")).strip()
-    await _answer_and_reply(_conversation_ref(event, default_team_id), question, buffer, say)
+    if not question:
+        await say(_EMPTY_QUESTION_REPLY, thread_ts=thread_ts)
+        return
+    await _answer_and_reply(
+        _conversation_ref(event, default_team_id), question, buffer, say, thread_ts=thread_ts
+    )
 
 
 async def handle_recall_command(
@@ -177,6 +193,9 @@ async def handle_recall_command(
     """Answer a ``/recall <question>`` slash command."""
     await ack()
     question = (command.get("text") or "").strip()
+    if not question:
+        await say(_EMPTY_QUESTION_REPLY)
+        return
     ref = ConversationRef(
         team_id=command.get("team_id") or default_team_id,
         channel_id=command["channel_id"],
