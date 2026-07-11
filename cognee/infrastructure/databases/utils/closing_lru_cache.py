@@ -5,22 +5,30 @@ holding an exclusive file lock), so removal and death are separate events with
 an ordered lifecycle::
 
     cached --(evict / clear / capacity)--> detached --(last proxy drops)--> closing --> closed
-       |                                      |                                           |
-       |                            pending-close future                          future resolves;
-    leased proxies stay usable      registered HERE                               creators proceed
+       |                                                                       |          |
+       |                                                             pending-close     future
+    leased proxies stay usable                                       future            resolves;
+                                                                     registered HERE   creators proceed
 
-A key is present in the pending-close registry from the moment its entry
-leaves the cache — including while the close is still deferred behind a held
-caller proxy — until ``close()`` has fully completed (for subprocess adapters:
-the worker exited and released its on-disk lock). Creators for the same key
-wait on that future so a new engine never races a dying one for the same
-resource:
+A key is present in the pending-close registry only while its ``close()`` is
+actually IN FLIGHT — from the moment the close starts until it has fully
+completed (for subprocess adapters: the worker exited and released its
+on-disk lock). Creators for the same key wait on that future so a new engine
+never races a dying one for the same resource:
 
-- ``aget_or_create``: always awaits the pending close.
+- ``aget_or_create``: awaits the pending close (bounded, see
+  ``PENDING_CLOSE_WAIT_SECONDS``).
 - ``get_or_create`` in a thread with no running event loop: blocks on it.
 - ``get_or_create`` on the event loop: cannot block (the close may need this
   very loop to progress); the adapters' open-retry remains the backstop for
   this residual window.
+
+A close still DEFERRED behind live caller proxies is deliberately NOT in the
+registry. Idle references (a second engine handle, a suspended coroutine
+frame) can hold a proxy for minutes — and can even belong to the waiting
+caller itself — so waiting for such a close to *start* is unbounded and can
+self-deadlock. Creators proceed instead; the adapters' open-retry covers the
+overlap with the old value's eventual close.
 
 Capacity eviction honors an optional ``pinned_predicate`` (see
 ``dataset_queue.pinning``): pinned entries are skipped in LRU order, and when
@@ -64,20 +72,13 @@ class CacheInfo(dict):
 _PENDING_CLOSE_TASKS: set = set()
 
 
-# Upper bound on waiting for a pending close before proceeding anyway. Real
-# closes finish in milliseconds to a few seconds; a wait this long means the
-# close's completion signal was lost (e.g. its event loop died before the
-# close ran). Proceeding restores the pre-registry behavior for that one
-# case — guarded by the adapters' own open-retry — instead of hanging.
-PENDING_CLOSE_WAIT_SECONDS = 30.0
-
-
-def _pending_close_unresolvable(pending) -> bool:
-    """True when the close backing ``pending`` can no longer complete: it was
-    scheduled as a task on an event loop that has since closed, so nothing
-    will ever resolve it. Waiting on such a future is waiting on a ghost."""
-    close_loop = getattr(pending, "_close_loop", None)
-    return close_loop is not None and close_loop.is_closed()
+# Upper bound on waiting for an in-flight close before proceeding anyway.
+# Real closes finish in milliseconds to a few seconds, so this ceiling is
+# generous on purpose: reaching it means the close is wedged or its completion
+# signal was lost. Proceeding restores the pre-registry behavior for that one
+# case — guarded by the adapters' own open-retry — instead of hanging the
+# caller (and CI) forever.
+PENDING_CLOSE_WAIT_SECONDS = 300.0
 
 
 # Dedicated threads for closing subprocess-backed adapters off the caller's
@@ -192,11 +193,6 @@ def _start_close(value) -> Optional[concurrent.futures.Future]:
     # concurrent.futures.Future. A creator awaiting on the same loop via
     # ``asyncio.wrap_future`` yields control so this task can run (no deadlock).
     cf = concurrent.futures.Future()
-    # Remember which loop the close task lives on. If that loop closes without
-    # the task ever running (so no done-callback fires), waiters use this to
-    # recognize the future can never resolve and stop waiting on it
-    # (see ``_pending_close_unresolvable``).
-    cf._close_loop = loop
     task = loop.create_task(result)
     _PENDING_CLOSE_TASKS.add(task)
 
@@ -296,14 +292,14 @@ class _LeasedCacheEntry:
             if proxy_to_drop is None and not self.closed:
                 self.closed = True
                 value_to_close = self.value
-            close_deferred = not self.closed
 
-        if close_deferred and self.cache is not None:
-            # The close waits for the last caller proxy to be dropped. Register
-            # it as pending NOW so a creator arriving in that window waits for
-            # this value instead of racing it for the underlying resource
-            # (``proxy_released`` -> ``_close`` resolves the future later).
-            self.cache._register_pending_close(self.key)
+        # When the close stays deferred behind live caller proxies, it is
+        # deliberately NOT registered as pending: idle holders can keep a
+        # proxy alive indefinitely (and may include a would-be waiter itself),
+        # so there is no bounded moment to wait for. The close registers
+        # itself once it actually starts (``proxy_released`` -> ``_close`` ->
+        # ``_track_close``); until then creators proceed and the adapters'
+        # open-retry covers the overlap with the old value.
         if value_to_close is not None:
             self._close(value_to_close)
         # Keep ``proxy_to_drop`` alive until after ``self._lock`` is released.
@@ -455,21 +451,15 @@ class ClosingLRUCache:
         """Close ``value`` and resolve ``key``'s pending-close future once the
         close (including async worker-process teardown) has fully completed.
 
-        The future is normally pre-registered at detach time; registering here
-        as well covers untracked paths (e.g. a lost create race's loser value).
+        This is the single point where a close enters the registry: the close
+        STARTS here, so the registered future is always backed by an in-flight
+        close that will resolve it.
         """
         pending = self._register_pending_close(key)
         cf = _start_close(value)
         if cf is None or cf.done():
             self._resolve_pending_close(key, pending)
             return
-
-        # Propagate the close task's scheduling loop from the mirror future to
-        # the registry future that waiters actually watch, so they can detect
-        # a close stranded on a dead loop (see ``_pending_close_unresolvable``).
-        close_loop = getattr(cf, "_close_loop", None)
-        if close_loop is not None:
-            pending._close_loop = close_loop
 
         def _on_close_complete(_done_future, _key=key, _pending=pending):
             self._resolve_pending_close(_key, _pending)
@@ -488,9 +478,6 @@ class ClosingLRUCache:
                 if (predicate is None or predicate(key)) and not future.done()
             ]
         for key, future in pendings:
-            if _pending_close_unresolvable(future):
-                self._resolve_pending_close(key, future)
-                continue
             try:
                 # ``shield`` so a timeout cancels only this wait, never the
                 # shared registry future other waiters may be watching.
@@ -504,10 +491,25 @@ class ClosingLRUCache:
                     key,
                     PENDING_CLOSE_WAIT_SECONDS,
                 )
+            except asyncio.CancelledError:
+                # Two distinct cases share this exception. A cancelled REGISTRY
+                # future is a broken invariant (nothing in this module cancels
+                # them) — surface it and keep sweeping. Anything else is the
+                # caller's own task being cancelled, which must propagate.
+                if not future.cancelled():
+                    raise
+                logger.warning("Pending close for cache key %r was cancelled unexpectedly", key)
             except Exception:
-                # Close futures never propagate failures (see _start_close);
-                # this guard keeps the sweep going regardless.
-                pass
+                # By construction nothing lands here: close futures resolve
+                # with a result, never an exception (see _start_close).
+                # Getting here means that invariant broke — surface it loudly,
+                # but keep the sweep going: failing the caller over close
+                # bookkeeping is worse than a lost wait.
+                logger.warning(
+                    "Unexpected error while waiting for pending close of cache key %r",
+                    key,
+                    exc_info=True,
+                )
 
     def _wrap_cached_value(self, entry):
         if self._lease:
@@ -536,33 +538,30 @@ class ClosingLRUCache:
             pending_close = self._closing.get(key)
 
         if pending_close is not None and not pending_close.done():
-            if _pending_close_unresolvable(pending_close):
-                # The close is stranded on a dead event loop and can never
-                # resolve — clear the note and proceed; the worker open-retry
-                # covers a still-held file lock.
-                self._resolve_pending_close(key, pending_close)
-            else:
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:
+                # No loop in this thread: block until the previous value for
+                # this key has fully closed (worker exited, locks released),
+                # bounded so a wedged close can't hang the caller forever.
                 try:
-                    asyncio.get_running_loop()
-                except RuntimeError:
-                    # No loop in this thread: block until the previous value for
-                    # this key has fully closed (worker exited, locks released),
-                    # bounded so a lost completion signal can't wedge the caller.
-                    try:
-                        pending_close.result(timeout=PENDING_CLOSE_WAIT_SECONDS)
-                    except concurrent.futures.TimeoutError:
-                        logger.warning(
-                            "Pending close for cache key %r did not finish within %ss; "
-                            "proceeding to create a new value",
-                            key,
-                            PENDING_CLOSE_WAIT_SECONDS,
-                        )
-                    except concurrent.futures.CancelledError:
-                        pass
-                # With a running loop we must not block it — the close may be a
-                # task scheduled on this very loop. Async callers go through
-                # ``aget_or_create``; this residual sync-on-loop window keeps the
-                # worker open-retry as its backstop.
+                    pending_close.result(timeout=PENDING_CLOSE_WAIT_SECONDS)
+                except concurrent.futures.TimeoutError:
+                    logger.warning(
+                        "Pending close for cache key %r did not finish within %ss; "
+                        "proceeding to create a new value",
+                        key,
+                        PENDING_CLOSE_WAIT_SECONDS,
+                    )
+                except concurrent.futures.CancelledError:
+                    # Nothing in this module cancels registry futures, so a
+                    # cancelled one means an invariant broke — surface it,
+                    # then proceed with creation as usual.
+                    logger.warning("Pending close for cache key %r was cancelled unexpectedly", key)
+            # With a running loop we must not block it — the close may be a
+            # task scheduled on this very loop. Async callers go through
+            # ``aget_or_create``; this residual sync-on-loop window keeps the
+            # worker open-retry as its backstop.
 
         value = factory()
         entry = self._make_entry(key, value)
@@ -635,31 +634,41 @@ class ClosingLRUCache:
             pending_close = self._closing.get(key)
 
         if pending_close is not None and not pending_close.done():
-            if _pending_close_unresolvable(pending_close):
-                # The close is stranded on a dead event loop and can never
-                # resolve — clear the note and proceed; the worker open-retry
-                # covers a still-held file lock.
-                self._resolve_pending_close(key, pending_close)
-            else:
-                try:
-                    # Bounded so a lost completion signal can't wedge the
-                    # creator forever; ``shield`` so a timeout cancels only
-                    # this wait, never the shared registry future.
-                    await asyncio.wait_for(
-                        asyncio.shield(asyncio.wrap_future(pending_close)),
-                        timeout=PENDING_CLOSE_WAIT_SECONDS,
-                    )
-                except asyncio.TimeoutError:
-                    logger.warning(
-                        "Pending close for cache key %r did not finish within %ss; "
-                        "proceeding to create a new value",
-                        key,
-                        PENDING_CLOSE_WAIT_SECONDS,
-                    )
-                except Exception:
-                    # The close future never propagates failures (see _start_close);
-                    # this guard is belt-and-suspenders so a creator always proceeds.
-                    pass
+            try:
+                # Bounded so a wedged close can't hang the creator forever;
+                # ``shield`` so a timeout cancels only this wait, never the
+                # shared registry future other waiters may be watching.
+                await asyncio.wait_for(
+                    asyncio.shield(asyncio.wrap_future(pending_close)),
+                    timeout=PENDING_CLOSE_WAIT_SECONDS,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "Pending close for cache key %r did not finish within %ss; "
+                    "proceeding to create a new value",
+                    key,
+                    PENDING_CLOSE_WAIT_SECONDS,
+                )
+            except asyncio.CancelledError:
+                # Two distinct cases share this exception. A cancelled REGISTRY
+                # future is a broken invariant (nothing in this module cancels
+                # them) — surface it and proceed with creation. Anything else
+                # is the caller's own task being cancelled, which must
+                # propagate.
+                if not pending_close.cancelled():
+                    raise
+                logger.warning("Pending close for cache key %r was cancelled unexpectedly", key)
+            except Exception:
+                # By construction nothing lands here: close futures resolve
+                # with a result, never an exception (see _start_close).
+                # Getting here means that invariant broke — surface it
+                # loudly, but still proceed: a creator must not fail over
+                # close bookkeeping.
+                logger.warning(
+                    "Unexpected error while waiting for pending close of cache key %r",
+                    key,
+                    exc_info=True,
+                )
 
         return self.get_or_create(key, factory)
 

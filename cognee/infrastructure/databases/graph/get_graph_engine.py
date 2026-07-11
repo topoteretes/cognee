@@ -82,17 +82,17 @@ class _GraphEngineHandle:
 
     Known limitation (subprocess + exclusive file lock, e.g. Ladybug): the cache
     leases a single shared proxy per entry, so two concurrently-held handles for
-    the same DB path pin the *same* proxy. If that entry is evicted while one
-    handle keeps holding it and never re-resolves (a long-lived, idle second
-    handle), the old worker's close stays deferred — it does not release the
-    file lock, and a fresh engine for the same path falls back to the worker's
-    open-retry (``SUBPROCESS_OPEN_LOCK_RETRIES``) rather than the deterministic
-    await-the-close path. This is inherent to "one exclusive lock per path with
-    concurrent live holders" and is narrow in practice: the primary multi-tenant
-    teardown path (``dataset_queue._teardown_subprocess_engines``) ``await``s
-    ``engine.close()`` to completion before any re-creation, and a handle that is
-    accessed again or garbage-collected drops its stale pin and converges. A
-    permanently-idle second handle is the only unrescued case.
+    the same DB path pin the *same* proxy. If that entry is evicted while an
+    idle second handle keeps holding the proxy, the old worker's close stays
+    deferred (it does not release the file lock) until that holder lets go or
+    is garbage-collected. Creators for the same path deliberately do NOT wait
+    for such a deferred close — an idle holder can pin it indefinitely, and
+    waiting on it from a handle's own re-resolution self-deadlocks (this hung
+    CI) — so a fresh engine relies on the worker's open-retry
+    (``SUBPROCESS_OPEN_LOCK_RETRIES``) for the overlap. Once a close is
+    actually in flight, creators wait for it deterministically; the primary
+    multi-tenant teardown path (``dataset_queue._teardown_subprocess_engines``)
+    also ``await``s ``engine.close()`` to completion before any re-creation.
     """
 
     __slots__ = ("_config", "_last_initialized_id", "_pinned")
@@ -119,6 +119,12 @@ class _GraphEngineHandle:
                 if not active():
                     return False
             except Exception:
+                # ``_leased_entry_active`` is two attribute reads and should
+                # never raise; if it does, surface it — then treat the pin as
+                # stale, which safely re-resolves through the cache.
+                logger.warning(
+                    "Unexpected error while checking pinned engine liveness", exc_info=True
+                )
                 return False
         # Subprocess adapters latch ``_permanently_closed`` on close.
         if getattr(engine, "_permanently_closed", False):
