@@ -6,9 +6,10 @@ from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInte
 from cognee.infrastructure.databases.vector.vector_db_interface import VectorDBInterface
 
 from .capabilities import EngineCapability
+from .graph_vector_store_interface import GraphVectorStoreInterface
 
 
-class UnifiedStoreEngine:
+class UnifiedStoreEngine(GraphVectorStoreInterface):
     """Facade that wraps graph and vector engines with capability flags.
 
     For separate backends (e.g. Ladybug + LanceDB), holds two independent engine
