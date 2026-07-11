@@ -324,6 +324,19 @@ def evict_graph_engines_for_database(graph_database_name: str) -> int:
     return _create_graph_engine.cache_evict_matching(graph_database_name=graph_database_name)
 
 
+async def aevict_graph_engines_for_database(graph_database_name: str) -> int:
+    """Evict every cached graph engine bound to *graph_database_name* and wait
+    until their closes have fully completed (workers exited, file locks
+    released). Use before removing the database's files so a concurrent
+    holder's teardown cannot race the removal.
+
+    Returns the number of evicted entries.
+    """
+    evicted = evict_graph_engines_for_database(graph_database_name)
+    await _create_graph_engine.cache_await_closed(graph_database_name=graph_database_name)
+    return evicted
+
+
 def is_graph_engine_cached(**kwargs) -> bool:
     """Check whether a graph engine entry exists in the cache without creating."""
     normalized = _normalize_optional_create_graph_engine_params(kwargs)
@@ -347,7 +360,28 @@ def is_graph_engine_cached(**kwargs) -> bool:
     )
 
 
-@closing_lru_cache(maxsize=DATABASE_MAX_LRU_CACHE_SIZE)
+def _is_pinned_by_dataset_queue(key) -> bool:
+    """True when the engine's database belongs to a dataset currently holding
+    a dataset-queue slot. Capacity eviction must not close an engine that an
+    admitted pipeline is still using — a mid-cognify dataset idling on an LLM
+    call looks least-recently-used exactly when closing it is most dangerous.
+
+    ``key[3]`` is ``graph_database_name``; per-dataset databases are named
+    ``<dataset_id>.<ext>``, so the stem maps directly to the queue's ids.
+    Runs under the cache lock: must stay cheap and never re-enter the cache.
+    """
+    from cognee.infrastructure.databases.dataset_queue import dataset_queue
+
+    database_name = key[3] if len(key) > 3 else ""
+    if not isinstance(database_name, str) or not database_name:
+        return False
+    active = dataset_queue().active_dataset_ids()
+    return bool(active) and database_name.split(".", 1)[0] in active
+
+
+@closing_lru_cache(
+    maxsize=DATABASE_MAX_LRU_CACHE_SIZE, pinned_predicate=_is_pinned_by_dataset_queue
+)
 def _create_graph_engine(
     graph_database_provider,
     graph_file_path,

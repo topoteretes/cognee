@@ -6,6 +6,7 @@ from .get_dataset import get_dataset
 from .get_datasets import get_datasets
 from .get_datasets_by_name import get_datasets_by_name
 from .get_dataset_data import get_dataset_data
+from .get_dataset_database import get_dataset_database
 from .get_authorized_dataset import get_authorized_dataset
 from .get_authorized_dataset_by_name import get_authorized_dataset_by_name
 from .get_data import get_data

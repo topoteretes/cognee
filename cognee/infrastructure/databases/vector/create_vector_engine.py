@@ -151,6 +151,19 @@ def evict_vector_engines_for_database(vector_db_name: str) -> int:
     return _create_vector_engine.cache_evict_matching(vector_db_name=vector_db_name)
 
 
+async def aevict_vector_engines_for_database(vector_db_name: str) -> int:
+    """Evict every cached vector engine bound to *vector_db_name* and wait
+    until their closes have fully completed (workers exited, file locks
+    released). Use before removing the database's files so a concurrent
+    holder's teardown cannot race the removal.
+
+    Returns the number of evicted entries.
+    """
+    evicted = evict_vector_engines_for_database(vector_db_name)
+    await _create_vector_engine.cache_await_closed(vector_db_name=vector_db_name)
+    return evicted
+
+
 def is_vector_engine_cached(**kwargs) -> bool:
     """Check whether a vector engine entry exists in the cache without creating."""
     normalized = _normalize_optional_create_vector_engine_params(kwargs)
@@ -168,7 +181,27 @@ def is_vector_engine_cached(**kwargs) -> bool:
     )
 
 
-@closing_lru_cache(maxsize=DATABASE_MAX_LRU_CACHE_SIZE)
+def _is_pinned_by_dataset_queue(key) -> bool:
+    """True when the engine's database belongs to a dataset currently holding
+    a dataset-queue slot. Capacity eviction must not close an engine that an
+    admitted pipeline is still using.
+
+    ``key[2]`` is ``vector_db_name``; per-dataset databases are named
+    ``<dataset_id>.<ext>``, so the stem maps directly to the queue's ids.
+    Runs under the cache lock: must stay cheap and never re-enter the cache.
+    """
+    from cognee.infrastructure.databases.dataset_queue import dataset_queue
+
+    database_name = key[2] if len(key) > 2 else ""
+    if not isinstance(database_name, str) or not database_name:
+        return False
+    active = dataset_queue().active_dataset_ids()
+    return bool(active) and database_name.split(".", 1)[0] in active
+
+
+@closing_lru_cache(
+    maxsize=DATABASE_MAX_LRU_CACHE_SIZE, pinned_predicate=_is_pinned_by_dataset_queue
+)
 def _create_vector_engine(
     vector_db_provider: str,
     vector_db_url: str,
