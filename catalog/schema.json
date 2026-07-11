@@ -79,11 +79,13 @@
     },
     "quickstart": {
       "type": "string",
-      "description": "Copy-paste block that gets a newcomer running. Include install, env, and a single run command. Multi-line YAML block scalar. No shell prompts, no wrapping backticks."
+      "description": "Copy-paste block that gets a newcomer running. Include install, env, and a single run command. Multi-line YAML block scalar. No shell prompts, no wrapping backticks.",
+      "minLength": 10
     },
     "expected_output": {
       "type": "string",
-      "description": "Concrete output the user should see after the quickstart. Ranges/summaries are fine; exact values are not required."
+      "description": "Concrete output the user should see after the quickstart. Ranges/summaries are fine; exact values are not required.",
+      "minLength": 10
     },
     "difficulty": {
       "type": "string",
@@ -123,15 +125,7 @@
   "allOf": [
     {
       "if": {
-        "properties": {"kind": {"const": "integration"}}
-      },
-      "then": {
-        "required": ["repo", "path"]
-      }
-    },
-    {
-      "if": {
-        "properties": {"kind": {"const": "package"}}
+        "properties": {"kind": {"enum": ["integration", "package"]}}
       },
       "then": {
         "required": ["repo", "path"]
