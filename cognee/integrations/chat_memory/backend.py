@@ -223,6 +223,14 @@ class CogneeMemoryBackend:
         )
 
     async def recall(self, query: str, *, dataset: str, session: str, top_k: int) -> list[Citation]:
+        """Recall from the dataset graph, resolving citations to their source.
+
+        A hit's permalink/author resolve only when the result carries a
+        ``data_id`` in its provenance (chunk/context-grounded results); a
+        synthesized graph answer has none, so its citation is text-only.
+        Building the ``data_id -> stamp`` map reads the dataset's ``Data`` rows
+        once per call.
+        """
         import cognee
 
         responses = await cognee.recall(
