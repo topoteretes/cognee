@@ -1183,7 +1183,7 @@ def test_wait_for_pending_close_is_bounded(monkeypatch):
     cache = ClosingLRUCache(maxsize=8, lease=True)
     lost = concurrent.futures.Future()  # a registered close that never resolves
     with cache._lock:
-        cache._closing["k"] = lost
+        cache._closing["k"] = {lost}
 
     async def recreate():
         return await asyncio.wait_for(
@@ -1192,7 +1192,8 @@ def test_wait_for_pending_close_is_bounded(monkeypatch):
 
     new_value = asyncio.run(recreate())
     assert new_value.name == "new"
-    assert lost.done() is False  # we gave up waiting; the note itself is untouched
+    assert lost.done() is False  # we gave up waiting; the future is not resolved...
+    assert "k" not in cache._closing  # ...but it is dropped, so no repeated waits
 
 
 # -- Exception surfacing: unexpected failures must never be silent -----------
@@ -1277,13 +1278,13 @@ def test_registry_future_carrying_exception_is_logged_and_creation_proceeds(capl
     broken = concurrent.futures.Future()
     broken.set_exception(RuntimeError("invariant broke"))
     with cache._lock:
-        cache._closing["k"] = broken
+        cache._closing["k"] = {broken}
 
     # The future is done, so the fast path skips the wait; register a
     # not-yet-done broken future via a delayed set_exception instead.
     pending = concurrent.futures.Future()
     with cache._lock:
-        cache._closing["k2"] = pending
+        cache._closing["k2"] = {pending}
 
     async def scenario():
         asyncio.get_running_loop().call_later(
@@ -1311,7 +1312,7 @@ def test_cancelled_registry_future_is_logged_and_creation_proceeds(caplog):
     cache = ClosingLRUCache(maxsize=8, lease=True)
     pending = concurrent.futures.Future()
     with cache._lock:
-        cache._closing["k"] = pending
+        cache._closing["k"] = {pending}
 
     async def scenario():
         asyncio.get_running_loop().call_later(0.05, pending.cancel)
@@ -1335,7 +1336,7 @@ def test_caller_cancellation_propagates_while_waiting_for_close():
     cache = ClosingLRUCache(maxsize=8, lease=True)
     pending = concurrent.futures.Future()  # never resolves
     with cache._lock:
-        cache._closing["k"] = pending
+        cache._closing["k"] = {pending}
 
     async def scenario():
         task = asyncio.ensure_future(cache.aget_or_create("k", lambda: _Closeable("new")))
@@ -1348,3 +1349,70 @@ def test_caller_cancellation_propagates_while_waiting_for_close():
         return "not cancelled"
 
     assert asyncio.run(scenario()) == "cancelled"
+
+
+def test_overlapping_closes_of_same_key_each_get_their_own_future():
+    """Two closes of the same key can overlap: a deferred close (behind a held
+    proxy) finally fires while its successor's close is already in flight.
+    Each must be tracked independently — a waiter must not be woken by the
+    FIRST close finishing while the other still holds the resource."""
+    import asyncio
+    import threading
+
+    cache = ClosingLRUCache(maxsize=8, lease=True)
+
+    # E1: close will be deferred behind this held proxy.
+    e1 = _Closeable("first")
+    holder = {"proxy": cache.get_or_create("k", lambda: e1)}
+    assert cache.evict("k") is True  # deferred, NOT registered
+
+    # E2: subprocess-style close, gated so it stays in flight.
+    started, release = threading.Event(), threading.Event()
+    e2 = _SlowSubprocessWorker("second", started=started, release=release)
+    proxy2 = cache.get_or_create("k", lambda: e2)
+    del proxy2
+    gc.collect()
+    assert cache.evict("k") is True  # starts E2's close -> in flight, registered
+    assert started.wait(5)
+
+    # E1's deferred close fires NOW (fast sync close) while E2's is in flight.
+    holder.pop("proxy")
+    gc.collect()
+    assert e1.closed is True
+
+    # E2's close has not finished: the registry must still track it.
+    with cache._lock:
+        still_tracked = [f for f in cache._closing.get("k", ()) if not f.done()]
+    assert still_tracked, "E1's fast close wiped the registry entry for E2's still-running close"
+
+    async def sweep():
+        release.set()
+        await cache.await_pending_closes()
+
+    asyncio.run(sweep())
+    assert e2.closed is True
+    assert not cache._closing
+
+
+def test_sync_creator_logs_and_proceeds_on_registry_future_with_exception(caplog):
+    """Sync counterpart of the broken-invariant test: a registry future
+    carrying an exception must be logged (with traceback) and creation must
+    still proceed — never propagate into the engine caller."""
+    import concurrent.futures
+    import logging
+    import threading
+
+    cache = ClosingLRUCache(maxsize=8, lease=True)
+    broken = concurrent.futures.Future()
+    with cache._lock:
+        cache._closing["k"] = {broken}
+
+    timer = threading.Timer(0.05, broken.set_exception, args=(RuntimeError("late boom"),))
+    timer.start()
+    with caplog.at_level(logging.WARNING, logger=_CACHE_LOGGER):
+        new_value = cache.get_or_create("k", lambda: _Closeable("new"))
+    timer.join()
+
+    assert new_value.name == "new"
+    matching = [r for r in caplog.records if "Unexpected error while waiting" in r.getMessage()]
+    assert matching and matching[0].exc_info is not None
