@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import asyncio
 
-from src.citation_index import CitationIndex
 from src.cognee_memory import CogneeChatMemory
 from src.config import load_ingestion_settings, load_slack_settings
 from src.ingestion_buffer import IngestionBuffer
@@ -27,7 +26,7 @@ async def _run() -> None:
     slack_settings = load_slack_settings()
     ingestion_settings = load_ingestion_settings()
 
-    memory = CogneeChatMemory(CitationIndex())
+    memory = CogneeChatMemory()
     buffer = IngestionBuffer(memory, settings=ingestion_settings)
     # The live opt-in set: seeded from config, then mutated by the
     # /cognee-optin and /cognee-optout commands.

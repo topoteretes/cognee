@@ -16,8 +16,8 @@ from unittest.mock import AsyncMock
 import cognee
 import pytest
 
-from src.citation_index import CitationIndex
 from src.cognee_memory import (
+    CitationStore,
     CogneeChatMemory,
     _first_text,
     _normalize_chunk_payloads,
@@ -29,9 +29,7 @@ REF = ConversationRef(team_id="T1", channel_id="C42")
 
 @pytest.fixture
 def index():
-    idx = CitationIndex(":memory:")
-    yield idx
-    idx.close()
+    return CitationStore()
 
 
 @pytest.fixture

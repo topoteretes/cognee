@@ -30,6 +30,8 @@ delete is ``cognee.forget(dataset=<name>)``, which is what ``forget`` uses below
 
 from __future__ import annotations
 
+from collections import OrderedDict
+from dataclasses import dataclass
 from typing import Any
 
 import cognee
@@ -39,7 +41,6 @@ from cognee.tasks.ingestion.data_item import DataItem
 from cognee.modules.data.exceptions import DatasetNotFoundError
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 
-from src.citation_index import CitationIndex
 from src.memory_adapter import (
     Answer,
     ChatMemory,
@@ -54,6 +55,75 @@ _CHUNK_DOCUMENT_ID_KEY = "document_id"
 _CHUNK_TEXT_KEY = "text"
 
 DEFAULT_TOP_K = 10
+
+# Citation store bounds/limits.
+SNIPPET_MAX_CHARS = 200
+DEFAULT_MAX_CITATIONS = 10_000
+
+
+@dataclass(frozen=True)
+class CitationRecord:
+    """The human-readable source fields for one message, joined by ``document_id``."""
+
+    channel_id: str
+    ts: str
+    permalink: str
+    author: str
+    snippet: str
+
+
+class CitationStore:
+    """In-memory ``document_id`` → :class:`CitationRecord` map backing cited answers.
+
+    Why a side store at all: cognee strips arbitrary metadata from the vector
+    payload, so ``channel``/``ts``/``permalink`` do NOT survive a ``search``. The
+    only field we control that does survive is ``document_id`` (we set it at
+    ingest via ``DataItem.data_id``), so citations are produced by joining that id
+    back to the source message here.
+
+    In-memory and bounded (oldest entries evicted past ``max_entries``). The bot
+    runs on a single asyncio loop, so no lock is needed. Not persisted across
+    restarts: the cognee graph survives, and a chunk whose permalink is no longer
+    known degrades to a plain-text citation (never a broken link) until the
+    message is re-ingested. See the README's limitations.
+    """
+
+    def __init__(self, max_entries: int = DEFAULT_MAX_CITATIONS):
+        self._rows: OrderedDict[str, CitationRecord] = OrderedDict()
+        self._max_entries = max_entries
+
+    def put(
+        self,
+        document_id: str,
+        *,
+        channel_id: str,
+        ts: str,
+        permalink: str,
+        author: str,
+        snippet: str,
+    ) -> None:
+        """Upsert the citation row for a message (keyed by its ``document_id``)."""
+        self._rows[document_id] = CitationRecord(
+            channel_id=channel_id,
+            ts=ts,
+            permalink=permalink,
+            author=author,
+            snippet=snippet[:SNIPPET_MAX_CHARS],
+        )
+        self._rows.move_to_end(document_id)
+        while len(self._rows) > self._max_entries:
+            self._rows.popitem(last=False)
+
+    def get(self, document_id: str) -> CitationRecord | None:
+        """Look up the citation row for a chunk's ``document_id`` (or ``None``)."""
+        return self._rows.get(document_id)
+
+    def delete_channel(self, channel_id: str) -> int:
+        """Delete every citation row for a channel (used by ``forget``). Returns row count."""
+        doomed = [key for key, row in self._rows.items() if row.channel_id == channel_id]
+        for key in doomed:
+            del self._rows[key]
+        return len(doomed)
 
 
 def _first_text(results: Any) -> str:
@@ -105,7 +175,7 @@ def _normalize_chunk_payloads(results: Any) -> list[dict]:
     return payloads
 
 
-def _build_citations(chunk_payloads: list[dict], index: CitationIndex) -> list[Citation]:
+def _build_citations(chunk_payloads: list[dict], index: CitationStore) -> list[Citation]:
     """Map chunk payloads → deduplicated ``Citation`` objects via the side index.
 
     * Dedupe by ``document_id`` so multiple chunks of one message collapse to a
@@ -153,8 +223,8 @@ def _build_citations(chunk_payloads: list[dict], index: CitationIndex) -> list[C
 class CogneeChatMemory(ChatMemory):
     """``ChatMemory`` backed by cognee's real add / cognify / search / forget API."""
 
-    def __init__(self, index: CitationIndex, *, top_k: int = DEFAULT_TOP_K):
-        self._index = index
+    def __init__(self, index: CitationStore | None = None, *, top_k: int = DEFAULT_TOP_K):
+        self._index = index if index is not None else CitationStore()
         self._top_k = top_k
 
     async def ingest(

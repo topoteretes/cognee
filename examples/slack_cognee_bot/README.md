@@ -114,6 +114,10 @@ locally; when that shared core lands, only the adapter implementation is swapped
   **not** supported — it's a follow-up.
 - **Scope is per channel.** Memory and answers are isolated to the channel you're
   in; the bot doesn't reason across channels.
+- **Citations aren't persisted across restarts.** The `document_id` → permalink
+  map is kept in memory. After a restart the cognee graph (and answers) survive,
+  but a source message whose permalink is no longer known degrades to a
+  plain-text citation (never a broken link) until it is ingested again.
 - **#3608 is local.** The chat-memory adapter is implemented in this example
   until the shared #3608 core is merged.
 

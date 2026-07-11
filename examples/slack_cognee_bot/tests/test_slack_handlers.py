@@ -311,7 +311,6 @@ def test_non_slack_modules_import_without_slack_bolt():
 
     for mod in (
         "src.memory_adapter",
-        "src.citation_index",
         "src.cognee_memory",
         "src.ingestion_buffer",
         "src.config",
