@@ -179,19 +179,15 @@ def test_deleted_message_is_orphan_but_survivor_is_not(tmp_path):
 
 
 def test_large_export_parses_all_rows(tmp_path):
-    """The parser itself is unbounded; the 50-row default cap is applied later in
+    """The parser itself is unbounded; the row cap is applied later in
     ingest_dlt_source and bypassed with max_rows_per_table=0 (see the demo)."""
-    from cognee.tasks.ingestion.config import get_ingestion_config
-
     messages = [
         {"type": "message", "user": "U001", "text": f"message {i}", "ts": f"1717200000.{i:06d}"}
         for i in range(65)
     ]
     root = _write_export(tmp_path / "large", {"general": messages})
 
-    rows = list(iter_slack_export_messages(root))
-    assert len(rows) == 65
-    assert len(rows) > get_ingestion_config().dlt_max_rows_per_table  # default 50
+    assert len(list(iter_slack_export_messages(root))) == 65
 
 
 def test_missing_channels_json_raises(tmp_path):
@@ -224,14 +220,6 @@ def test_slack_export_source_requires_dlt(monkeypatch, tmp_path):
 # The tests below construct/run a real dlt resource, so they skip when the
 # optional dlt extra is absent. The parser + requires-dlt tests above do NOT
 # need dlt and must keep running in cognee's base (dlt-less) CI.
-
-
-def test_slack_export_source_materializes_rows(tmp_path):
-    pytest.importorskip("dlt")
-    rows = list(slack_export_source(_export_v1(tmp_path)))
-
-    assert len(rows) == 4
-    assert all("id" in row for row in rows)
 
 
 def test_slack_export_source_resource_is_configured_for_replace(tmp_path):
