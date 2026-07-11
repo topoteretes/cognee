@@ -103,6 +103,9 @@ async def test_invalid_reply_triggers_repair_retry(monkeypatch):
 
     assert result.name == "Alan" and result.age == 41
     assert session.create_message.await_count == 2
+    # The retry must carry the repair feedback, not just resend the original prompt.
+    retry_kwargs = session.create_message.call_args_list[1].kwargs
+    assert "did not validate" in retry_kwargs["system_prompt"]
 
 
 @pytest.mark.asyncio
@@ -210,10 +213,14 @@ def test_factory_builds_mcp_sampling_adapter_without_api_key():
         llm_provider="mcp-sampling", llm_model="host-default", llm_api_key=None, llm_endpoint=""
     )
     token = llm_config_ctx.set(config)
+    # Keep the process-global adapter LRU cache hermetic, like the sibling
+    # factory tests (test_llm_global_cache, test_stage_routing).
+    _get_llm_client_cached.cache_clear()
     try:
         client = _get_llm_client_cached(_build_llm_client_cache_key(config, 256))
     finally:
         llm_config_ctx.reset(token)
+        _get_llm_client_cached.cache_clear()
 
     assert isinstance(client, MCPSamplingAdapter)
     assert client.model == "host-default"
@@ -237,6 +244,7 @@ class _CapabilitySession:
         self._granted = granted
         self._reply = reply
         self.create_message_calls = 0
+        self.last_create_message_kwargs: dict = {}
 
     def check_client_capability(self, capability) -> bool:
         return self._granted
@@ -245,6 +253,7 @@ class _CapabilitySession:
         from mcp.types import CreateMessageResult, TextContent
 
         self.create_message_calls += 1
+        self.last_create_message_kwargs = kwargs
         return CreateMessageResult(
             role="assistant",
             content=TextContent(type="text", text=self._reply),
@@ -305,8 +314,10 @@ async def test_auto_session_used_when_sampling_granted():
     # CreateMessageResult parsed into the response model.
     pytest.importorskip("mcp")
     from mcp.server.lowlevel.server import request_ctx
+    from mcp.types import SamplingMessage
 
-    token = _request_ctx_token(_CapabilitySession(granted=True))
+    session = _CapabilitySession(granted=True)
+    token = _request_ctx_token(session)
     try:
         adapter = MCPSamplingAdapter(model="host-default", max_completion_tokens=128)
         result = await adapter.acreate_structured_output(
@@ -316,3 +327,8 @@ async def test_auto_session_used_when_sampling_granted():
         request_ctx.reset(token)
 
     assert result.name == "Ada" and result.age == 36
+    # Messages must be typed SamplingMessage objects: the real SDK validates them
+    # before pydantic coercion (SEP-1577), so plain dicts crash create_message.
+    messages = session.last_create_message_kwargs["messages"]
+    assert isinstance(messages[0], SamplingMessage)
+    assert messages[0].content.text == "Ada Lovelace, 36"

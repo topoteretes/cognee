@@ -58,8 +58,22 @@ class MCPSamplingAdapter(LLMInterface):
 
     async def _sample(self, session: Any, system_prompt: str, user_text: str) -> str:
         """One ``sampling/createMessage`` round trip; returns the reply text."""
+        # Messages must be typed: ``ServerSession.create_message`` validates them
+        # (SEP-1577, ``msg.content_as_list``) before pydantic coercion, so plain
+        # dicts crash on mcp >= 1.25. mcp is installed in any real sampling
+        # deployment; the dict fallback only ever reaches mock sessions in
+        # environments without mcp.
+        try:
+            from mcp.types import SamplingMessage, TextContent  # ty:ignore[unresolved-import]
+
+            messages: list[Any] = [
+                SamplingMessage(role="user", content=TextContent(type="text", text=user_text))
+            ]
+        except ImportError:
+            messages = [{"role": "user", "content": {"type": "text", "text": user_text}}]
+
         result = await session.create_message(
-            messages=[{"role": "user", "content": {"type": "text", "text": user_text}}],
+            messages=messages,
             max_tokens=self.max_completion_tokens,
             system_prompt=system_prompt,
         )
