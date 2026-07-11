@@ -29,7 +29,8 @@ jobs:
         uses: ./.github/actions/cognee_setup
         with:
           python-version: "3.11.x"
-          extra-dependencies: "catalog"
+          # pyyaml + jsonschema (the only catalog tooling deps) are already
+          # present transitively in a standard cognee install; no extra needed.
 
       - name: Load and validate catalog entries
         run: uv run python -m catalog.loader

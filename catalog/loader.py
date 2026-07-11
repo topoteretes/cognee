@@ -13,8 +13,8 @@ Reads every YAML file under ``catalog/entries/`` and returns a validated list of
    which fetches them via the GitHub API.
 
 The loader is intentionally dependency-light: only ``pyyaml`` and
-``jsonschema``. Both live behind the ``cognee[catalog]`` extra so the core
-install path is untouched.
+``jsonschema``, both already present in a standard cognee install, so the
+catalog tooling adds nothing to the shipped package.
 """
 
 from __future__ import annotations

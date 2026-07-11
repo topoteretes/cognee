@@ -71,11 +71,6 @@ dependencies = [
 [project.optional-dependencies]
 api=[]
 
-catalog = [
-    "pyyaml>=6.0",
-    "jsonschema>=4.17.0",
-]
-
 distributed = [
     "modal>=1.0.5,<2.0.0",
 ]

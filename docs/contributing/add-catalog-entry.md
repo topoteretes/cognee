@@ -71,9 +71,9 @@ The full schema lives in `catalog/schema.json`. Highlights:
 3. Edit every field. The schema catches typos in field names, so a stray letter turns into a CI error, not a silent bug.
 4. Make sure the `example_path` (for use-cases) or the `path` (for integrations/packages pointing at `topoteretes/cognee`) resolves against the current checkout.
 5. If you're referencing an example that doesn't have a mocked test yet, coordinate with #3601 so the example runs in CI.
-6. Run the validation locally:
+6. Run the validation locally (a standard `uv sync` already provides the `pyyaml` and `jsonschema` the tooling needs):
    ```bash
-   uv sync --extra catalog
+   uv sync
    uv run python -m catalog.loader
    uv run python -m catalog.inventory_sync
    ```
