@@ -1,23 +1,23 @@
 """Embeddable web chat widget powered by cognee memory.
 
-Run a tiny FastAPI backend that any site can talk to via a single
-``<script>`` tag. It doubles as an "ask our docs" assistant: seed a docs
-corpus once and every visitor conversation can recall from it, with
-inline **citations** to the source material.
+Run a tiny FastAPI backend that any site can talk to via a single ``<script>``
+tag. It doubles as an "ask our docs" assistant: seed a docs corpus once and
+every visitor conversation can recall from it, with inline **citations** to the
+source material.
 
 The HTTP layer is intentionally thin — all memory behavior lives in
-``ChatMemoryAdapter`` (``adapter.py``), which any other transport
-(WhatsApp, Teams) can reuse unchanged.
+``ChatMemoryAdapter`` (``adapter.py``), which any other transport (WhatsApp,
+Teams) can reuse unchanged.
 
 Run it::
 
     uv run python examples/bots/web_widget/server.py
 
-Then open http://localhost:8000 for the "ask our docs" demo page, or embed
-the widget on your own site::
+Then open http://127.0.0.1:8000 for the "ask our docs" demo page, or embed the
+widget on your own site::
 
-    <script src="http://localhost:8000/widget.js"
-            data-site-id="acme" data-api="http://localhost:8000"></script>
+    <script src="http://127.0.0.1:8000/widget.js"
+            data-site-id="acme" data-api="http://127.0.0.1:8000"></script>
 
 Endpoints:
     POST /api/chat    -> {answer, citations, session_id}
@@ -30,13 +30,14 @@ from __future__ import annotations
 
 import os
 import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import List
 
 # Make the example importable whether run as a script or a module.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
@@ -46,7 +47,7 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 # A couple of "docs" so the demo returns something without external setup.
 # Replace these with your real docs/site content.
-DEMO_DOCS: List[str] = [
+DEMO_DOCS = [
     "Cognee is an open-source AI memory platform. It turns raw data into a "
     "knowledge graph that AI agents can recall from, replacing plain RAG "
     "with an Extract-Cognify-Load pipeline.",
@@ -59,8 +60,31 @@ DEMO_DOCS: List[str] = [
 
 DEMO_SITE_ID = os.getenv("WIDGET_SITE_ID", "demo")
 
-adapter = ChatMemoryAdapter(namespace="web", top_k=8)
-app = FastAPI(title="cognee web chat widget")
+adapter = ChatMemoryAdapter(top_k=8)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Seed the demo "ask our docs" corpus once, best-effort, on startup."""
+    try:
+        await adapter.ingest_docs(site_id=DEMO_SITE_ID, documents=DEMO_DOCS)
+    except Exception as error:  # noqa: BLE001 - the demo should still boot
+        print(f"[web_widget] docs seeding skipped: {error}")
+    yield
+
+
+app = FastAPI(title="cognee web chat widget", lifespan=lifespan)
+
+# The widget is embedded cross-origin on customer sites, so the browser needs
+# CORS on /api/*. "*" is the sensible default for a public docs assistant; set
+# WIDGET_ALLOWED_ORIGINS (comma-separated) to restrict it.
+_origins = [o.strip() for o in os.getenv("WIDGET_ALLOWED_ORIGINS", "*").split(",") if o.strip()]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_origins or ["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["*"],
+)
 
 
 class ChatRequest(BaseModel):
@@ -78,26 +102,13 @@ class ForgetRequest(BaseModel):
     site_id: str = DEMO_SITE_ID
 
 
-@app.on_event("startup")
-async def _seed_docs() -> None:
-    """Seed the demo "ask our docs" corpus once, best-effort."""
-    if os.getenv("WIDGET_SKIP_SEED") == "1":
-        return
-    try:
-        await adapter.ingest_docs(site_id=DEMO_SITE_ID, documents=DEMO_DOCS)
-    except Exception as error:  # noqa: BLE001 - demo should still boot
-        print(f"[web_widget] docs seeding skipped: {error}")
-
-
 @app.post("/api/chat")
 async def chat(req: ChatRequest) -> JSONResponse:
     conversation = adapter.conversation(
-        site_id=req.site_id,
-        visitor_id=req.visitor_id,
-        conversation_id=req.conversation_id,
+        site_id=req.site_id, visitor_id=req.visitor_id, conversation_id=req.conversation_id
     )
 
-    # A "/forget" message is a first-class command, not something to remember.
+    # "/forget" is a first-class command, not a question to answer.
     if req.message.strip().lower() in ("/forget", "forget me"):
         await adapter.forget(conversation=conversation)
         return JSONResponse(
@@ -120,9 +131,7 @@ async def chat(req: ChatRequest) -> JSONResponse:
 @app.post("/api/forget")
 async def forget(req: ForgetRequest) -> JSONResponse:
     conversation = adapter.conversation(
-        site_id=req.site_id,
-        visitor_id=req.visitor_id,
-        conversation_id=req.conversation_id,
+        site_id=req.site_id, visitor_id=req.visitor_id, conversation_id=req.conversation_id
     )
     cleared = await adapter.forget(conversation=conversation)
     return JSONResponse({"cleared": bool(cleared), "session_id": conversation.session_id})
@@ -141,5 +150,6 @@ async def widget_js() -> FileResponse:
 if __name__ == "__main__":
     import uvicorn
 
+    host = os.getenv("HOST", "127.0.0.1")
     port = int(os.getenv("PORT", "8000"))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    uvicorn.run(app, host=host, port=port)
