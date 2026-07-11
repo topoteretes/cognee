@@ -1,8 +1,10 @@
 """LRU cache that closes entries after they leave the cache and caller scope.
 
 Cached values are live database engines (in subprocess mode: a worker process
-holding an exclusive file lock), so removal and death are separate events with
-an ordered lifecycle::
+holding an exclusive on-disk file lock), so removal from the cache and death
+of the engine are separate events. This module is the single owner of that
+lifecycle; the walkthrough below is the end-to-end contract that the engine
+handles, the dataset queue, and the delete flows rely on::
 
     cached --(evict / clear / capacity)--> detached --(last proxy drops)--> closing --> closed
        |                                                                       |          |
@@ -10,34 +12,69 @@ an ordered lifecycle::
     leased proxies stay usable                                       future            resolves;
                                                                      registered HERE   creators proceed
 
-A key is present in the pending-close registry only while a ``close()`` is
-actually IN FLIGHT — from the moment the close starts until it has fully
-completed (for subprocess adapters: the worker exited and released its
-on-disk lock). Overlapping closes of the same key each get their own future.
-Creators for the same key wait on those futures so a new engine never races
-a dying one for the same resource:
+1. Acquisition. ``get_graph_engine()`` / vector equivalents resolve through
+   ``closing_lru_cache``-decorated factories. A cache hit returns the entry's
+   single shared lease proxy; engine handles pin that proxy so hot paths skip
+   the cache (see ``_GraphEngineHandle`` in ``graph/get_graph_engine.py``).
 
-- ``aget_or_create``: awaits the pending close (bounded, see
-  ``PENDING_CLOSE_WAIT_SECONDS``).
-- ``get_or_create`` in a thread with no running event loop: blocks on it.
-- ``get_or_create`` on the event loop: cannot block (the close may need this
-  very loop to progress); the adapters' open-retry remains the backstop for
-  this residual window.
+2. Detach. An entry leaves the cache by capacity eviction (LRU order,
+   skipping entries pinned via ``pinned_predicate`` — when every entry is
+   pinned, the cache temporarily overflows ``maxsize`` instead of closing an
+   engine in use, bounded by the dataset queue's slot count and converging
+   once pins lift), by explicit eviction (delete-dataset, queue teardown), or
+   by ``cache_clear`` (prune). Explicit eviction and clear ignore pins: those
+   are intentional lifecycle events. A detached entry vanishes from lookups
+   immediately, but proxies already held stay usable.
 
-A close still DEFERRED behind live caller proxies is deliberately NOT in the
-registry. Idle references (a second engine handle, a suspended coroutine
-frame) can hold a proxy for minutes — and can even belong to the waiting
-caller itself — so waiting for such a close to *start* is unbounded and can
-self-deadlock. Creators proceed instead; the adapters' open-retry covers the
-overlap with the old value's eventual close.
+3. The close fork at detach:
 
-Capacity eviction honors an optional ``pinned_predicate`` (see
-``dataset_queue.pinning``): pinned entries are skipped in LRU order, and when
-every entry is pinned the cache temporarily overflows ``maxsize`` instead of
-closing a value that is still in use — bounded by the dataset queue's slot
-count, converging back once pins lift. Explicit eviction (``evict``,
-``evict_where``, ``cache_clear``) ignores pins; those are intentional
-lifecycle events.
+   - No live proxy: the close starts immediately and registers a fresh
+     pending-close future for its key at that moment.
+   - Proxy still held: the close is DEFERRED and deliberately NOT registered.
+     It starts (and registers itself) only when the last holder drops the
+     proxy and the finalizer runs. Nobody ever waits for a close that has not
+     started: idle references (a second engine handle, a suspended coroutine
+     frame) can hold a proxy indefinitely and can even belong to the would-be
+     waiter itself — waiting on that is unbounded and self-deadlocks (this
+     once hung CI for the better part of an hour per job).
+
+4. The pending-close registry maps key -> set of IN-FLIGHT close futures.
+   Overlapping closes of one key (a deferred close finally firing while its
+   successor's close is already running) each get their own future — sharing
+   one would wake waiters when the FIRST close finishes while the other still
+   holds the resource. A future resolves when its close fully completes; for
+   subprocess adapters that means the worker exited and the lock is free.
+
+5. Creating over a closing key. A cache-miss creator checks the registry:
+
+   - ``aget_or_create`` awaits each in-flight close, suspending without
+     blocking the loop (the close may run as a task on this same loop).
+   - ``get_or_create`` in a thread with no running event loop blocks on them.
+   - ``get_or_create`` ON a running loop never waits — the close may need
+     this very loop to progress; the worker open-retry is the backstop.
+
+   Every wait is bounded by ``PENDING_CLOSE_WAIT_SECONDS``. On timeout it
+   warns with the cache key, drops that future from the registry so later
+   lookups for the key are not taxed again, and proceeds behind the worker
+   open-retry backstop.
+
+6. Delete flows (``aevict_*_for_database`` + the dataset database handlers)
+   evict every engine for a database, await the in-flight closes via
+   ``cache_await_closed``, then remove the files directly — never opening a
+   DB just to drop it. A close still deferred behind an idle holder is not
+   waited on; on POSIX removing files under such an engine is safe (the
+   holder keeps the unlinked inodes and its eventual close writes to
+   nowhere), which is acceptable for a dataset being deleted.
+
+7. Failure policy. Expected events — bounded-wait timeouts, close tasks
+   cancelled at event loop teardown, thread-pool rejection at interpreter
+   shutdown — are handled with an explicit reason (timeouts warn loudly).
+   Everything unexpected logs with a full traceback: a ``close()`` raising on
+   any of its execution paths, a registry future carrying an exception or
+   cancelled (disambiguated from genuine caller cancellation, which always
+   propagates), and pool-thread ``BaseException``s that would otherwise
+   vanish. No creator, sweep, or eviction ever fails over close bookkeeping —
+   and none of it is ever silent.
 """
 
 import asyncio
