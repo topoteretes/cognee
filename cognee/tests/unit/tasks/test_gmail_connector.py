@@ -10,11 +10,6 @@ libraries and no live credentials are required, so these run in CI. Coverage:
   - an expired historyId (404) transparently falls back to a full backfill
   - the dlt resource is wired with merge + id PK + the hard_delete column
   - a dlt-gated e2e run proves a delete marker physically removes the row
-
-The e2e test drives gmail_source through a real (offline, LLM-free) dlt merge
-to prove a ``_deleted`` marker removes the row from the destination table.
-cognee's existing ``orphan_cleanup`` path then turns that into removal from
-the graph + vector + relational stores.
 """
 
 import base64
@@ -317,63 +312,39 @@ def test_incremental_fetch_advances_cursor_across_digit_boundary():
     assert state["last_history_id"] == "1000"  # advanced past the boundary
 
 
-def test_incremental_fetch_trashed_message_is_forgotten():
-    # Trashing INBOX mail fires labelsRemoved(INBOX), not messagesDeleted; the
-    # message is still fetchable but now labelled TRASH. It must be forgotten.
-    trashed = _make_message("t1", subject="Old", labels=["TRASH"], history_id="1020")
+@pytest.mark.parametrize(
+    ("label_ids", "msg_labels", "kept"),
+    [
+        # Trashing INBOX mail fires labelsRemoved(INBOX), not messagesDeleted;
+        # the message is still fetchable but now out of scope -> forgotten.
+        pytest.param(["INBOX"], ["TRASH"], False, id="trashed-inbox-forgotten"),
+        # full_backfill scopes by ALL label_ids (AND); incremental must match:
+        pytest.param(["INBOX", "IMPORTANT"], ["INBOX", "IMPORTANT"], True, id="all-labels-kept"),
+        pytest.param(["INBOX", "IMPORTANT"], ["INBOX"], False, id="lost-one-label-forgotten"),
+        # Explicit SPAM scope means spam IS the corpus -> kept; the SPAM/TRASH
+        # exclusion only applies unscoped, mirroring messages.list defaults.
+        pytest.param(["SPAM"], ["SPAM"], True, id="explicitly-scoped-spam-kept"),
+        pytest.param(None, ["TRASH"], False, id="unscoped-trash-forgotten"),
+    ],
+)
+def test_incremental_fetch_scope_recheck(label_ids, msg_labels, kept):
+    # A changed message must be re-checked against the SAME scope full_backfill
+    # uses: still in scope -> upserted live; out of scope -> forgotten.
+    msg = _make_message("m", labels=msg_labels, history_id="1020")
     svc = FakeGmailService(
-        messages=[trashed],
+        messages=[msg],
         history_response={
-            "history": [{"id": "1020", "labelsRemoved": [{"message": {"id": "t1"}}]}],
+            "history": [{"id": "1020", "labelsRemoved": [{"message": {"id": "m"}}]}],
             "historyId": "1020",
         },
     )
-    rows = list(incremental_fetch(svc, {"last_history_id": "1000"}, label_ids=["INBOX"]))
-    assert rows == [{"id": "t1", "_deleted": True}]
+    rows = list(incremental_fetch(svc, {"last_history_id": "1000"}, label_ids=label_ids))
 
-
-def test_incremental_fetch_multi_label_keeps_in_scope_and_forgets_out_of_scope():
-    # full_backfill scopes by ALL label_ids (AND); incremental must match that:
-    # a message still carrying every label is kept, one that lost a label is
-    # forgotten (not re-ingested as live).
-    keep = _make_message("keep", labels=["INBOX", "IMPORTANT"], history_id="1030")
-    drop = _make_message("drop", labels=["INBOX"], history_id="1031")  # lost IMPORTANT
-    svc = FakeGmailService(
-        messages=[keep, drop],
-        history_response={
-            "history": [
-                {"id": "1030", "messagesAdded": [{"message": {"id": "keep"}}]},
-                {"id": "1031", "labelsRemoved": [{"message": {"id": "drop"}}]},
-            ],
-            "historyId": "1031",
-        },
-    )
-    rows = list(
-        incremental_fetch(svc, {"last_history_id": "1000"}, label_ids=["INBOX", "IMPORTANT"])
-    )
-    by_id = {r["id"]: r for r in rows}
-
-    assert by_id["keep"]["_deleted"] is False
-    assert by_id["drop"] == {"id": "drop", "_deleted": True}
-
-
-def test_incremental_fetch_keeps_explicitly_scoped_spam():
-    # When the caller explicitly scopes to SPAM, backfill ingests spam, so
-    # incremental must keep it too — the SPAM/TRASH exclusion only applies to
-    # the unscoped (label_ids=None) case that mirrors messages.list defaults.
-    spam = _make_message("s", labels=["SPAM"], history_id="1040")
-    svc = FakeGmailService(
-        messages=[spam],
-        history_response={
-            "history": [{"id": "1040", "messagesAdded": [{"message": {"id": "s"}}]}],
-            "historyId": "1040",
-        },
-    )
-    rows = list(incremental_fetch(svc, {"last_history_id": "1000"}, label_ids=["SPAM"]))
-
-    assert len(rows) == 1
-    assert rows[0]["id"] == "s"
-    assert rows[0]["_deleted"] is False
+    if kept:
+        assert [r["id"] for r in rows] == ["m"]
+        assert rows[0]["_deleted"] is False
+    else:
+        assert rows == [{"id": "m", "_deleted": True}]
 
 
 # ---------------------------------------------------------------------------
@@ -420,8 +391,7 @@ def test_e2e_dlt_merge_hard_delete_removes_deleted_message(tmp_path):
     """End-to-end, offline (no LLM): drive gmail_source through a real dlt
     merge and prove a ``_deleted`` marker physically removes the row from the
     destination — which is exactly what cognee's orphan_cleanup reconciles
-    against. Also exercises the gmail_source() closure dispatching from
-    backfill to incremental via persisted dlt resource_state.
+    against.
     """
     dlt = pytest.importorskip("dlt")
 
