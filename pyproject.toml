@@ -190,6 +190,7 @@ tracing = [
 ]
 
 docling = ["docling>=2.54", "transformers>=4.55"]
+rapidocr = ["rapidocr-onnxruntime>=1.3.0,<2"]
 
 [project.urls]
 Homepage = "https://www.cognee.ai"
