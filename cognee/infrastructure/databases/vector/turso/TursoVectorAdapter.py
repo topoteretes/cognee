@@ -343,10 +343,13 @@ class TursoVectorAdapter(VectorDBInterface):
                 params.extend(node_name)
 
         params.append(limit)
-        # Bind order matches the statement: SELECT's vector32(?), then any
-        # NodeSet placeholders (+ the AND count), then LIMIT.
+        # Skip the payload column unless the caller needs it (mirrors PGVector):
+        # the graph/RAG hot path wants only id + distance, and payloads are large
+        # chunk JSON. Bind order matches the statement: SELECT's vector32(?), then
+        # any NodeSet placeholders (+ the AND count), then LIMIT.
+        payload_column = "payload" if include_payload else "NULL"
         rows = await self._execute(
-            f"SELECT id, payload, "
+            f"SELECT id, {payload_column}, "
             f"vector_distance_cos(vector, vector32(?)) AS _distance "
             f'FROM "{collection_name}"{where_clause} ORDER BY _distance ASC LIMIT ?',
             params,
