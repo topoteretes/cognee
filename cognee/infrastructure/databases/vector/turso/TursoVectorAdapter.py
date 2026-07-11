@@ -2,6 +2,7 @@
 
 import json
 import asyncio
+import threading
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
@@ -66,10 +67,14 @@ class TursoVectorAdapter(VectorDBInterface):
         self.embedding_engine = embedding_engine
         self.database_name = database_name
 
-        # One lock serializes every DB call; the sync libSQL connection is
-        # shared across the asyncio.to_thread worker threads, so concurrent
-        # access must be funneled through here.
-        self.VECTOR_DB_LOCK = asyncio.Lock()
+        # One lock serializes access to the shared sync libSQL connection. It
+        # is a threading.Lock (not an asyncio.Lock) held inside the
+        # asyncio.to_thread worker: this adapter is cached process-globally, so
+        # a loop-bound asyncio.Lock would raise "bound to a different event
+        # loop" the moment a second event loop (e.g. a later asyncio.run)
+        # contends it. A threading.Lock is loop-agnostic — the same reason
+        # LanceDBAdapter uses one for its lifecycle state.
+        self._connection_lock = threading.Lock()
 
         # Reflected collection names; refreshed lazily by has_collection().
         self._known_collections: set[str] = set()
@@ -113,12 +118,13 @@ class TursoVectorAdapter(VectorDBInterface):
         commit: bool = False,
     ):
         """Run one statement synchronously. Called only inside asyncio.to_thread."""
-        connection = self._get_connection()
-        cursor = connection.execute(sql, tuple(params) if params else ())
-        rows = cursor.fetchall() if fetch else None
-        if commit:
-            connection.commit()
-        return rows
+        with self._connection_lock:
+            connection = self._get_connection()
+            cursor = connection.execute(sql, tuple(params) if params else ())
+            rows = cursor.fetchall() if fetch else None
+            if commit:
+                connection.commit()
+            return rows
 
     async def _execute(
         self,
@@ -128,8 +134,7 @@ class TursoVectorAdapter(VectorDBInterface):
         fetch: bool = False,
         commit: bool = False,
     ):
-        async with self.VECTOR_DB_LOCK:
-            return await asyncio.to_thread(self._run, sql, params, fetch=fetch, commit=commit)
+        return await asyncio.to_thread(self._run, sql, params, fetch=fetch, commit=commit)
 
     # ------------------------------------------------------------------ #
     # Embedding
@@ -161,14 +166,11 @@ class TursoVectorAdapter(VectorDBInterface):
         vector_size = self.embedding_engine.get_vector_size()
 
         if not await self.has_collection(collection_name):
-            async with self.VECTOR_DB_LOCK:
-                await asyncio.to_thread(
-                    self._run,
-                    f'CREATE TABLE IF NOT EXISTS "{collection_name}" '
-                    f"(id TEXT PRIMARY KEY, payload TEXT, vector F32_BLOB({vector_size}))",
-                    None,
-                    commit=True,
-                )
+            await self._execute(
+                f'CREATE TABLE IF NOT EXISTS "{collection_name}" '
+                f"(id TEXT PRIMARY KEY, payload TEXT, vector F32_BLOB({vector_size}))",
+                commit=True,
+            )
             self._known_collections.add(collection_name)
 
     async def get_table_names(self) -> List[str]:
@@ -237,16 +239,16 @@ class TursoVectorAdapter(VectorDBInterface):
             [row["id"], json.dumps(row["payload"]), row["vector"]] for row in deduped.values()
         ]
 
-        async with self.VECTOR_DB_LOCK:
-            await asyncio.to_thread(self._run_many, insert_sql, params)
+        await asyncio.to_thread(self._run_many, insert_sql, params)
 
     def _run_many(self, sql: str, params: List[List[Any]]):
         """Execute one write per row inside a single committed transaction."""
-        connection = self._get_connection()
-        for start in range(0, len(params), QUERY_BATCH_SIZE):
-            for row in params[start : start + QUERY_BATCH_SIZE]:
-                connection.execute(sql, tuple(row))
-        connection.commit()
+        with self._connection_lock:
+            connection = self._get_connection()
+            for start in range(0, len(params), QUERY_BATCH_SIZE):
+                for row in params[start : start + QUERY_BATCH_SIZE]:
+                    connection.execute(sql, tuple(row))
+            connection.commit()
 
     async def create_vector_index(self, index_name: str, index_property_name: str):
         """Create the index collection (table) for the given name/property pair."""
@@ -506,6 +508,11 @@ class TursoVectorAdapter(VectorDBInterface):
 
     async def close(self) -> None:
         """Close the libSQL connection. Driven by closing_lru_cache on eviction."""
-        if self._connection is not None:
-            connection, self._connection = self._connection, None
-            await asyncio.to_thread(connection.close)
+        await asyncio.to_thread(self._close)
+
+    def _close(self) -> None:
+        """Close the connection under the lock so it can't race an in-flight _run."""
+        with self._connection_lock:
+            if self._connection is not None:
+                connection, self._connection = self._connection, None
+                connection.close()
