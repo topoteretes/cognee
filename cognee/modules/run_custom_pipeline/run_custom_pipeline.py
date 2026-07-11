@@ -23,6 +23,7 @@ async def run_custom_pipeline(
     data_per_batch: int = 20,
     run_in_background: bool = False,
     pipeline_name: str = "custom_pipeline",
+    data_cache: bool = False,
 ):
     """
     Custom pipeline in Cognee, can work with already built graphs. Data needs to be provided which can be processed
@@ -46,6 +47,8 @@ async def run_custom_pipeline(
                         Pipelines ID is created based on the generate_pipeline_id function. Pipeline status can be manually reset with the reset_dataset_pipeline_run_status function.
         incremental_loading: If True, only new or modified data will be processed to avoid duplication. (Only works if data is used with the Cognee python Data model).
                             The incremental system stores and compares hashes of processed data in the Data model and skips data with the same content hash.
+        data_cache: If True, only new or modified data will be processed to avoid duplication. (Only works if data is used with the Cognee python Data model).
+                            The data cache stores and compares hashes of processed data in the Data model and skips data with the same content hash.
         data_per_batch: Number of data items to be processed in parallel.
         run_in_background: If True, starts processing asynchronously and returns immediately.
                           If False, waits for completion before returning.
@@ -73,4 +76,5 @@ async def run_custom_pipeline(
         incremental_loading=incremental_loading,
         data_per_batch=data_per_batch,
         pipeline_name=pipeline_name,
+        data_cache=data_cache,
     )

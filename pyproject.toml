@@ -1,7 +1,7 @@
 [project]
 name = "cognee"
 
-version = "1.2.2"
+version = "1.2.2.dev3"
 description = "Cognee - is a library for enriching LLM context with a semantic layer for better understanding and reasoning."
 authors = [
     { name = "Vasilije Markovic" },
@@ -154,6 +154,12 @@ graphiti = ["graphiti-core>=0.28.0"]
 # Always use comaptible fixed versions of these two dependencies
 aws = ["s3fs[boto3]==2025.3.2"]
 dlt = ["dlt[sqlalchemy]>=1.9.0,<2"]
+gmail = [
+    "dlt[sqlalchemy]>=1.9.0,<2",
+    "google-api-python-client>=2.100.0,<3",
+    "google-auth>=2.23.0,<3",
+    "google-auth-oauthlib>=1.1.0,<2",
+]
 baml = ["baml-py (==0.206.0)"]
 dev = [
     "pytest>=7.4.0,<8",

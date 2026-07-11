@@ -45,6 +45,7 @@ async def add(
     run_in_background: bool = False,
     llm_config: Optional[LLMConfig] = None,
     embedding_config: Optional[EmbeddingConfig] = None,
+    data_cache: bool = True,
     **kwargs,
 ):
     """
@@ -268,6 +269,7 @@ async def add(
         data_per_batch=data_per_batch,
         llm_config=llm_config,
         embedding_config=embedding_config,
+        data_cache=data_cache,
     )
 
     # run_pipeline_blocking returns {dataset_id: PipelineRunInfo} but callers
