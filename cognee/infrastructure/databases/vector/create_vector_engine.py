@@ -78,25 +78,25 @@ def create_vector_engine(
     vector_db_subprocess_enabled = normalized_optional_params["vector_db_subprocess_enabled"]
 
     # Check USE_UNIFIED_PROVIDER outside the cache so it's always re-read
-    unified_provider = os.environ.get("USE_UNIFIED_PROVIDER", "")
-    if unified_provider == "pghybrid":
-        from cognee.infrastructure.databases.relational import get_relational_config
-
-        embedding_engine = get_embedding_engine()
-        relational_config = get_relational_config()
-        connection_string = (
-            f"postgresql+asyncpg://{relational_config.db_username}:{relational_config.db_password}"
-            f"@{relational_config.db_host}:{relational_config.db_port}"
-            f"/{relational_config.db_name}"
-        )
-
-        from .pgvector.PGVectorAdapter import PGVectorAdapter
-
-        return PGVectorAdapter(
-            connection_string,
-            vector_db_key,
-            embedding_engine,
-        )
+    # unified_provider = os.environ.get("USE_UNIFIED_PROVIDER", "")
+    # if unified_provider == "pghybrid":
+    #     from cognee.infrastructure.databases.relational import get_relational_config
+    #
+    #     embedding_engine = get_embedding_engine()
+    #     relational_config = get_relational_config()
+    #     connection_string = (
+    #         f"postgresql+asyncpg://{relational_config.db_username}:{relational_config.db_password}"
+    #         f"@{relational_config.db_host}:{relational_config.db_port}"
+    #         f"/{relational_config.db_name}"
+    #     )
+    #
+    #     from .pgvector.PGVectorAdapter import PGVectorAdapter
+    #
+    #     return PGVectorAdapter(
+    #         connection_string,
+    #         vector_db_key,
+    #         embedding_engine,
+    #     )
 
     return _create_vector_engine(
         vector_db_provider,
@@ -131,6 +131,24 @@ def evict_vector_engine(**kwargs) -> bool:
         normalized["vector_db_host"],
         normalized["vector_db_subprocess_enabled"],
     )
+
+
+def evict_vector_engines_for_database(vector_db_name: str) -> int:
+    """Evict every cached vector engine bound to *vector_db_name*.
+
+    The same per-dataset database can be cached under multiple keys: the
+    dataset-handler paths and the pipeline's context-config path build their
+    engines with different kwargs (e.g. ``vector_dataset_database_handler``),
+    so key-exact ``evict_vector_engine`` misses entries and leaves an engine
+    with a dead connection pool and stale collection metadata. Per-dataset
+    database names are dataset UUIDs, so matching the name against key fields
+    cannot collide with other entries.
+
+    Returns the number of evicted entries.
+    """
+    if not vector_db_name:
+        raise ValueError("vector_db_name must be a non-empty database name")
+    return _create_vector_engine.cache_evict_matching(vector_db_name=vector_db_name)
 
 
 def is_vector_engine_cached(**kwargs) -> bool:

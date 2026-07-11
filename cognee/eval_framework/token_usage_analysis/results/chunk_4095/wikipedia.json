@@ -1,0 +1,67 @@
+{
+  "openai/gpt-5-mini": {
+    "ingestion_multiplier": 10.253,
+    "full_context": {
+      "corpus_tokens": 10037,
+      "query_overhead_tokens": 32,
+      "per_query_tokens": 10069
+    },
+    "cognee": {
+      "ingestion_tokens": 102913,
+      "retrieved_context_tokens": 1118,
+      "per_query_tokens": 1118
+    },
+    "reduction_milestones": {
+      "1": 11.5,
+      "2": 26.3,
+      "7": 321.2,
+      "10": null
+    },
+    "average_chunk": {
+      "llm_model": "openai/gpt-5-mini",
+      "input_tokens": 1922,
+      "summary_prompt_tokens": 2237,
+      "summary_completion_tokens": 3411,
+      "graph_prompt_tokens": 2692,
+      "graph_completion_tokens": 11367,
+      "ingestion_tokens": 19707,
+      "summary_ratio": 1.7747,
+      "graph_ratio": 5.9142
+    },
+    "chunk_measurements": [
+      {
+        "llm_model": "openai/gpt-5-mini",
+        "input_tokens": 2082,
+        "summary_prompt_tokens": 2397,
+        "summary_completion_tokens": 4239,
+        "graph_prompt_tokens": 2852,
+        "graph_completion_tokens": 9117,
+        "ingestion_tokens": 18605,
+        "summary_ratio": 2.036,
+        "graph_ratio": 4.379
+      },
+      {
+        "llm_model": "openai/gpt-5-mini",
+        "input_tokens": 1521,
+        "summary_prompt_tokens": 1836,
+        "summary_completion_tokens": 2711,
+        "graph_prompt_tokens": 2291,
+        "graph_completion_tokens": 10629,
+        "ingestion_tokens": 17467,
+        "summary_ratio": 1.7824,
+        "graph_ratio": 6.9882
+      },
+      {
+        "llm_model": "openai/gpt-5-mini",
+        "input_tokens": 2163,
+        "summary_prompt_tokens": 2478,
+        "summary_completion_tokens": 3282,
+        "graph_prompt_tokens": 2933,
+        "graph_completion_tokens": 14355,
+        "ingestion_tokens": 23048,
+        "summary_ratio": 1.5173,
+        "graph_ratio": 6.6366
+      }
+    ]
+  }
+}

@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from typing import AsyncIterator, Dict, Any, List, Union, Optional, Tuple, Type
 
-from sqlalchemy import text, values, select, exists, func, String
+from sqlalchemy import NullPool, text, values, select, exists, func, String
 from sqlalchemy import column as sa_column
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
@@ -44,6 +44,22 @@ class PostgresAdapter(GraphDBInterface):
 
         relational_config = get_relational_config()
         pool_args: dict = dict(relational_config.pool_args) if relational_config.pool_args else {}
+        if pool_args.get("poolclass", "").lower() == "nullpool":
+            pool_args["poolclass"] = NullPool
+        else:
+            # QueuePool defaults, mirroring SQLAlchemyAdapter: pre-ping detects
+            # connections killed when another process drops/recreates a per-dataset
+            # database (in-process cache eviction cannot reach other workers' pools);
+            # recycle refreshes idle connections before NAT/load balancers cut them.
+            # Pool sizing is deliberately leaner than the relational adapter's:
+            # per-dataset graph engines multiply with datasets, so retain almost no
+            # idle connections and serve bursts from overflow connections, which
+            # close on release instead of idling.
+            pool_args.setdefault("pool_size", 2)
+            pool_args.setdefault("max_overflow", 20)
+            pool_args.setdefault("pool_pre_ping", True)
+            pool_args.setdefault("pool_recycle", 280)
+            pool_args.setdefault("pool_timeout", 280)
         # Managed Postgres (e.g. Neon, RDS) requires SSL;
         # reuse the relational DATABASE_CONNECT_ARGS (asyncpg `ssl`) for the graph
         # engine too. Empty dict is a no-op for in-cluster Postgres.
