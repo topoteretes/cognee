@@ -180,7 +180,10 @@ def _create_entity_node(
     ontology_relationships: list,
 ) -> Entity:
     """Create or retrieve an entity node with ontology validation"""
-    generated_node_id = Entity.id_for(node_id)
+    if type_node is not None:
+        generated_node_id = Entity.id_for(node_id, type_node.name)
+    else:
+        generated_node_id = Entity.id_for(node_id)
     generated_node_name = generate_node_name(node_name)
     entity_node_key = _create_node_key(generated_node_id, "entity")
 
@@ -198,7 +201,10 @@ def _create_entity_node(
 
     if ontology_validated:
         old_key = entity_node_key
-        generated_node_id = Entity.id_for(start_ent_ont.name)
+        if type_node is not None:
+            generated_node_id = Entity.id_for(start_ent_ont.name, type_node.name)
+        else:
+            generated_node_id = Entity.id_for(start_ent_ont.name)
         entity_node_key = _create_node_key(generated_node_id, "entity")
         new_node_name = generate_node_name(start_ent_ont.name)
 

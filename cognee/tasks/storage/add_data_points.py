@@ -12,6 +12,9 @@ from cognee.modules.graph.utils import (
     ensure_default_edge_properties,
     get_graph_from_model,
 )
+from cognee.modules.graph.utils.merge_policy import MergePolicy
+from cognee.modules.graph.utils.canonicalization import load_alias_map
+from cognee.modules.graph.models.MergeRecord import MergeRecord
 from .index_data_points import index_data_points
 from .index_graph_edges import index_graph_edges
 from cognee.modules.engine.models import Triplet
@@ -43,6 +46,10 @@ async def add_data_points(
         custom_edges: Custom edges between datapoints.
         embed_triplets: If True, creates and indexes triplet embeddings.
         ctx: Pipeline runtime context (user, dataset, data_item).
+        
+    Known Limitation (TOCTOU): There is a gap between cross-run get_nodes and add_nodes
+    which is not protected by a spanning lock, leaving it vulnerable to time-of-check
+    to time-of-use races.
     """
     user = ctx.user if ctx else None
     data_item = ctx.data_item if ctx else None
@@ -77,7 +84,12 @@ async def add_data_points(
         nodes.extend(result_nodes)
         edges.extend(result_edges)
 
-    nodes, edges = deduplicate_nodes_and_edges(nodes, edges)
+    alias_map = load_alias_map()
+    merge_policy = MergePolicy()
+    
+    nodes, edges, batch_merge_records = deduplicate_nodes_and_edges(
+        nodes, edges, alias_map=alias_map, merge_policy=merge_policy
+    )
 
     edges = ensure_default_edge_properties(edges, nodes=nodes)
     custom_edges = (
@@ -90,6 +102,30 @@ async def add_data_points(
     graph_engine = unified.graph
     vector_engine = unified.vector
     use_hybrid = unified.has_capability(EngineCapability.HYBRID_WRITE)
+
+    # --- Cross-run Merge Phase ---
+    node_ids = [str(n.id) for n in nodes]
+    if node_ids:
+        existing_nodes = await graph_engine.get_nodes(node_ids)
+        existing_by_id = {str(n["id"]): n for n in existing_nodes if "id" in n}
+
+        cross_run_merge_records = []
+        for node in nodes:
+            nid = str(node.id)
+            if nid in existing_by_id:
+                existing_props = existing_by_id[nid]
+                field_resolutions = merge_policy.merge_with_existing(node, existing_props)
+                if field_resolutions:
+                    cross_run_merge_records.append(MergeRecord(
+                        survivor_id=node.id,
+                        absorbed_id=node.id,
+                        merge_reason="cross_run_merge",
+                        field_resolutions=field_resolutions,
+                        pipeline_run_id=pipeline_run_id,
+                    ))
+
+        all_merge_records = batch_merge_records + cross_run_merge_records
+        nodes.extend(all_merge_records)
 
     if user and dataset and data_item:
         # Single session for all upserts: one transaction, one commit. The

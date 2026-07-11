@@ -1,0 +1,28 @@
+{
+  "_version": 1,
+  "_note": "Keys are in post-Step-3 form: NFKC + diacritics stripped + lowercase",
+  "aliases": {
+    "u.s.a.": "united states",
+    "u.s.a": "united states",
+    "u. s. a.": "united states",
+    "usa": "united states",
+    "us": "united states",
+    "united states of america": "united states",
+    "nyc": "new york city",
+    "eu": "european union",
+    "uk": "united kingdom",
+    "u.k.": "united kingdom",
+    "dr.": "doctor",
+    "dr": "doctor",
+    "mr.": "mister",
+    "mr": "mister",
+    "mrs.": "missus",
+    "mrs": "missus",
+    "prof.": "professor",
+    "prof": "professor",
+    "st.": "saint",
+    "st": "saint",
+    "mt.": "mount",
+    "mt": "mount"
+  }
+}
