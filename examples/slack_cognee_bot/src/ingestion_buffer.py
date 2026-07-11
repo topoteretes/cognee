@@ -25,8 +25,10 @@ from __future__ import annotations
 
 import asyncio
 
-from src.config import IngestionSettings, load_ingestion_settings
 from src.memory_adapter import Answer, ChatMemory, ConversationRef
+
+# Default number of buffered messages that triggers a cognify for a channel.
+DEFAULT_COGNIFY_BATCH_SIZE = 10
 
 
 class IngestionBuffer:
@@ -36,11 +38,10 @@ class IngestionBuffer:
         self,
         memory: ChatMemory,
         *,
-        settings: IngestionSettings | None = None,
+        batch_size: int = DEFAULT_COGNIFY_BATCH_SIZE,
     ):
-        settings = settings or load_ingestion_settings()
         self._memory = memory
-        self._batch_size = max(1, settings.cognify_batch_size)
+        self._batch_size = max(1, batch_size)
 
         self._lock = asyncio.Lock()
         # channel_id -> count of messages ingested but not yet cognified.

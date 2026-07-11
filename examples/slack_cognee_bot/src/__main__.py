@@ -6,28 +6,29 @@ vars from the repo ``.env.template`` exported)::
     cd examples/slack_cognee_bot
     python -m src
 
-This module is pure wiring — it composes the pieces built in earlier commits
-(citation index → cognee-backed adapter → ingestion buffer → Bolt app) and
-starts Socket Mode. slack_bolt is imported lazily by ``build_app`` /
-``start_socket_mode``; running without the extra raises a clear install message.
+This module is pure wiring — it composes the pieces (cognee-backed adapter →
+ingestion buffer → Bolt app) and starts Socket Mode. slack_bolt is imported
+lazily by ``build_app`` / ``start_socket_mode``; running without the extra
+raises a clear install message.
 """
 
 from __future__ import annotations
 
 import asyncio
+import os
 
 from src.cognee_memory import CogneeChatMemory
-from src.config import load_ingestion_settings, load_slack_settings
-from src.ingestion_buffer import IngestionBuffer
+from src.config import load_slack_settings
+from src.ingestion_buffer import DEFAULT_COGNIFY_BATCH_SIZE, IngestionBuffer
 from src.slack_app import build_app, start_socket_mode
 
 
 async def _run() -> None:
     slack_settings = load_slack_settings()
-    ingestion_settings = load_ingestion_settings()
+    batch_size = int(os.getenv("COGNEE_SLACK_COGNIFY_BATCH") or DEFAULT_COGNIFY_BATCH_SIZE)
 
     memory = CogneeChatMemory()
-    buffer = IngestionBuffer(memory, settings=ingestion_settings)
+    buffer = IngestionBuffer(memory, batch_size=batch_size)
     # The live opt-in set: seeded from config, then mutated by the
     # /cognee-optin and /cognee-optout commands.
     opted_in = set(slack_settings.opted_in_channels)

@@ -9,7 +9,6 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from src.config import IngestionSettings
 from src.ingestion_buffer import IngestionBuffer
 from src.memory_adapter import Answer, ConversationRef
 
@@ -40,7 +39,7 @@ def _add(buffer, ref, n, start=0):
 
 def test_messages_accumulate_without_flushing_below_threshold():
     memory = _fake_memory()
-    buffer = IngestionBuffer(memory, settings=IngestionSettings(cognify_batch_size=5))
+    buffer = IngestionBuffer(memory, batch_size=5)
 
     _add(buffer, REF_A, 3)
 
@@ -56,7 +55,7 @@ def test_messages_accumulate_without_flushing_below_threshold():
 
 def test_size_threshold_fires_flush_at_exact_count():
     memory = _fake_memory()
-    buffer = IngestionBuffer(memory, settings=IngestionSettings(cognify_batch_size=3))
+    buffer = IngestionBuffer(memory, batch_size=3)
 
     # First two must not flush.
     _add(buffer, REF_A, 2)
@@ -72,7 +71,7 @@ def test_size_threshold_fires_flush_at_exact_count():
 
 def test_second_batch_triggers_a_second_flush():
     memory = _fake_memory()
-    buffer = IngestionBuffer(memory, settings=IngestionSettings(cognify_batch_size=2))
+    buffer = IngestionBuffer(memory, batch_size=2)
 
     _add(buffer, REF_A, 4)  # two full batches
 
@@ -97,7 +96,7 @@ def test_answer_flushes_pending_first():
 
     memory.answer.side_effect = _answer_side_effect
 
-    buffer = IngestionBuffer(memory, settings=IngestionSettings(cognify_batch_size=100))
+    buffer = IngestionBuffer(memory, batch_size=100)
     _add(buffer, REF_A, 2)  # pending, below threshold
     assert buffer.pending_count("A") == 2
 
@@ -111,7 +110,7 @@ def test_answer_flushes_pending_first():
 
 def test_answer_with_no_pending_is_still_answered_without_flush():
     memory = _fake_memory()
-    buffer = IngestionBuffer(memory, settings=IngestionSettings(cognify_batch_size=5))
+    buffer = IngestionBuffer(memory, batch_size=5)
 
     result = asyncio.run(buffer.answer(REF_A, query="q"))
 
@@ -127,7 +126,7 @@ def test_answer_with_no_pending_is_still_answered_without_flush():
 
 def test_buffers_are_isolated_per_channel():
     memory = _fake_memory()
-    buffer = IngestionBuffer(memory, settings=IngestionSettings(cognify_batch_size=3))
+    buffer = IngestionBuffer(memory, batch_size=3)
 
     _add(buffer, REF_A, 2)  # A: 2 pending
     _add(buffer, REF_B, 1)  # B: 1 pending
@@ -146,7 +145,7 @@ def test_buffers_are_isolated_per_channel():
 
 def test_flush_one_channel_does_not_touch_another():
     memory = _fake_memory()
-    buffer = IngestionBuffer(memory, settings=IngestionSettings(cognify_batch_size=100))
+    buffer = IngestionBuffer(memory, batch_size=100)
 
     _add(buffer, REF_A, 2)
     _add(buffer, REF_B, 2)
@@ -165,7 +164,7 @@ def test_flush_one_channel_does_not_touch_another():
 
 def test_empty_buffer_flush_is_noop():
     memory = _fake_memory()
-    buffer = IngestionBuffer(memory, settings=IngestionSettings(cognify_batch_size=5))
+    buffer = IngestionBuffer(memory, batch_size=5)
 
     asyncio.run(buffer.flush(REF_A))
 
@@ -175,7 +174,7 @@ def test_empty_buffer_flush_is_noop():
 
 def test_forget_clears_pending_and_delegates_to_adapter():
     memory = _fake_memory()
-    buffer = IngestionBuffer(memory, settings=IngestionSettings(cognify_batch_size=100))
+    buffer = IngestionBuffer(memory, batch_size=100)
 
     _add(buffer, REF_A, 2)  # A has pending
     _add(buffer, REF_B, 1)
@@ -191,7 +190,7 @@ def test_forget_clears_pending_and_delegates_to_adapter():
 
 def test_flush_is_noop_again_immediately_after_flushing():
     memory = _fake_memory()
-    buffer = IngestionBuffer(memory, settings=IngestionSettings(cognify_batch_size=2))
+    buffer = IngestionBuffer(memory, batch_size=2)
 
     _add(buffer, REF_A, 2)  # triggers one flush, resets to 0
     assert memory.flush.await_count == 1
@@ -200,22 +199,12 @@ def test_flush_is_noop_again_immediately_after_flushing():
     assert memory.flush.await_count == 1  # unchanged
 
 
-# --------------------------------------------------------------------------- #
-# config                                                                       #
-# --------------------------------------------------------------------------- #
+def test_batch_size_floor_is_one():
+    # A non-positive batch size would never flush on size; it is clamped to 1.
+    memory = _fake_memory()
+    buffer = IngestionBuffer(memory, batch_size=0)
 
+    _add(buffer, REF_A, 1)
 
-def test_load_ingestion_settings_reads_env(monkeypatch):
-    from src.config import load_ingestion_settings
-
-    monkeypatch.setenv("COGNEE_SLACK_COGNIFY_BATCH", "7")
-    settings = load_ingestion_settings()
-    assert settings.cognify_batch_size == 7
-
-
-def test_load_ingestion_settings_defaults(monkeypatch):
-    from src.config import DEFAULT_COGNIFY_BATCH_SIZE, load_ingestion_settings
-
-    monkeypatch.delenv("COGNEE_SLACK_COGNIFY_BATCH", raising=False)
-    settings = load_ingestion_settings()
-    assert settings.cognify_batch_size == DEFAULT_COGNIFY_BATCH_SIZE
+    memory.flush.assert_awaited_once()
+    assert buffer.pending_count("A") == 0

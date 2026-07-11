@@ -1,44 +1,13 @@
-"""Configuration for the Slack + cognee bot (issue #3609).
+"""Slack transport configuration for the Slack + cognee bot (issue #3609).
 
-Commit 3 scope: only the ingestion/trigger thresholds live here. Slack transport
-settings (bot/app tokens, opted-in channels) are added in commit 4 when the Bolt
-layer lands — this module is intentionally extended incrementally.
-
-Thresholds are environment-driven so the batch/timer behaviour can be tuned
-without code changes, following cognee's env-var configuration convention.
+The single ingestion knob (cognify batch size) is read directly in ``__main__``;
+this module only groups the Slack transport settings the Bolt app consumes.
 """
 
 from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-
-# Default number of buffered messages that triggers a cognify for a channel.
-DEFAULT_COGNIFY_BATCH_SIZE = 10
-
-
-@dataclass(frozen=True)
-class IngestionSettings:
-    """Batch threshold for the ingestion buffer.
-
-    Attributes
-    ----------
-    cognify_batch_size:
-        Flush (cognify) a channel once this many messages have been buffered.
-    """
-
-    cognify_batch_size: int = DEFAULT_COGNIFY_BATCH_SIZE
-
-
-def load_ingestion_settings() -> IngestionSettings:
-    """Build :class:`IngestionSettings` from the environment.
-
-    * ``COGNEE_SLACK_COGNIFY_BATCH`` — int, batch size (default 10).
-    """
-    batch = os.getenv("COGNEE_SLACK_COGNIFY_BATCH")
-    return IngestionSettings(
-        cognify_batch_size=int(batch) if batch else DEFAULT_COGNIFY_BATCH_SIZE,
-    )
 
 
 @dataclass(frozen=True)
