@@ -105,16 +105,17 @@ def run_mcp_http_container(
     image: str,
     *,
     extra_env: Optional[dict] = None,
-    name_suffix: str = "",
     health_timeout: float = 120.0,
 ) -> Iterator[MCPContainer]:
     """Start cognee-mcp with ``TRANSPORT_MODE=http``, yield it, always tear down.
 
-    ``LLM_API_KEY`` is a dummy: the session-cache remember/recall path never calls
-    a model, so the run is deterministic and key-free.
+    ``LLM_API_KEY`` is a dummy: the exercised session-cache recall matches stored
+    text by keyword and needs no model, so the assertions stay deterministic and
+    key-free. (A background session-distillation step may log a benign embedding
+    error under the dummy key; it does not affect the round-trip.)
     """
     port = free_port()
-    name = f"cognee-mcp-t3-{port}{name_suffix}"
+    name = f"cognee-mcp-t3-{port}"
 
     env = {
         "TRANSPORT_MODE": "http",

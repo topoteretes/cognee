@@ -165,7 +165,6 @@ def test_allowed_hosts_env_permits_configured_host(mcp_image):
     with run_mcp_http_container(
         mcp_image,
         extra_env={"MCP_ALLOWED_HOSTS": f"{allowed_host}:*"},
-        name_suffix="-allowedhosts",
     ) as container:
         with httpx.Client(timeout=10) as client:
             allowed_status = _post_initialize_status(

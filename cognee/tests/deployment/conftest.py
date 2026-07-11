@@ -21,7 +21,6 @@ from mcp_harness import (
 )
 
 DEFAULT_MCP_IMAGE = os.getenv("COGNEE_MCP_IMAGE", "cognee-mcp:local")
-HEALTH_TIMEOUT = float(os.getenv("COGNEE_DEPLOYMENT_HEALTH_TIMEOUT", "120"))
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -55,5 +54,5 @@ def mcp_image() -> str:
 @pytest.fixture(scope="module")
 def mcp_http_container(mcp_image: str) -> Iterator[MCPContainer]:
     """A module-scoped cognee-mcp container in HTTP transport (direct) mode."""
-    with run_mcp_http_container(mcp_image, health_timeout=HEALTH_TIMEOUT) as container:
+    with run_mcp_http_container(mcp_image) as container:
         yield container
