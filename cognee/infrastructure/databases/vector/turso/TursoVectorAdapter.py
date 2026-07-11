@@ -3,7 +3,7 @@
 import json
 import asyncio
 import threading
-from typing import Any, Dict, List, Optional
+from typing import Any, List, Optional
 from uuid import UUID
 
 from cognee.shared.logging_utils import get_logger
@@ -196,31 +196,14 @@ class TursoVectorAdapter(VectorDBInterface):
             [DataPoint.get_embeddable_data(data_point) for data_point in data_points]
         )
 
-        # Build (id, payload_json, vector_literal) rows, deduplicating by id
-        # within the batch and unioning belongs_to_set tags of duplicates so a
-        # tag present on only one duplicate is not dropped (mirrors PGVector).
-        deduped: Dict[str, Dict[str, Any]] = {}
-        for index, data_point in enumerate(data_points):
-            row_id = str(data_point.id)
-            payload = serialize_data(data_point.model_dump())
-            existing = deduped.get(row_id)
-            if existing is None:
-                deduped[row_id] = {
-                    "id": row_id,
-                    "payload": payload,
-                    "vector": _vector_literal(data_vectors[index]),
-                }
-                continue
-            existing_payload = existing["payload"] or {}
-            existing_tags = existing_payload.get("belongs_to_set") or []
-            incoming_tags = (payload or {}).get("belongs_to_set") or []
-            if existing_tags or incoming_tags:
-                merged_tags = list(dict.fromkeys(list(existing_tags) + list(incoming_tags)))
-                payload = {**payload, "belongs_to_set": merged_tags}
-            existing["payload"] = payload
-
-        # On conflict keep the existing vector (like PGVector) and merge the
-        # belongs_to_set arrays from the stored and incoming payloads via JSON1.
+        # One INSERT ... ON CONFLICT(id) DO UPDATE per row, all in one
+        # transaction. libSQL reads its own uncommitted writes, so duplicate ids
+        # within a single batch merge in SQL exactly like cross-call upserts do:
+        # the last row's payload wins, the stored and incoming belongs_to_set
+        # arrays are unioned (keeping the existing vector), so a tag present on
+        # only one duplicate is never dropped. (PGVector needs a separate
+        # in-Python dedup pass only because it sends the whole batch as a single
+        # multi-row VALUES statement, which cannot touch the same id twice.)
         insert_sql = (
             f'INSERT INTO "{collection_name}" (id, payload, vector) '
             f"VALUES (?, ?, vector32(?)) "
@@ -236,7 +219,12 @@ class TursoVectorAdapter(VectorDBInterface):
         )
 
         params = [
-            [row["id"], json.dumps(row["payload"]), row["vector"]] for row in deduped.values()
+            [
+                str(data_point.id),
+                json.dumps(serialize_data(data_point.model_dump())),
+                _vector_literal(data_vectors[index]),
+            ]
+            for index, data_point in enumerate(data_points)
         ]
 
         await asyncio.to_thread(self._run_many, insert_sql, params)
