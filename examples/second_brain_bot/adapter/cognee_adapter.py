@@ -141,21 +141,9 @@ class CogneeChatMemoryAdapter(ChatMemoryAdapter):
         if not answer_text:
             return Answer(text=_EMPTY_MEMORY)
 
-        # Cite structurally, not by prose-matching a refusal. A note is cited only
-        # if BOTH hold: cognee actually retrieved it (its data_id appears in the
-        # Evidence block) AND the answer uses content from that note beyond the
-        # query's own words. A graph-completion refusal only echoes the query
-        # subject (which is why an answer-grounded Evidence block can still name
-        # the note during the post-ingest race where the chunk exists but the
-        # graph is not built): it contributes no distinctive term, so it is never
-        # cited, regardless of how the refusal is phrased. See select_citations.
+        # Cite structurally (see select_citations): a refusal is never cited,
+        # however it is phrased, because it adds no term beyond the query.
         citations = select_citations(self._citations.get(dataset, []), evidence, answer_text, query)
-
-        # Cosmetic only: tidy an obviously-refusing, already-uncited answer into the
-        # friendly empty message. Correctness (no false citation) does NOT depend on
-        # this prose check; the structural guard above already guarantees it.
-        if not citations and _is_no_answer(answer_text):
-            return Answer(text=_EMPTY_MEMORY)
         return Answer(text=answer_text, citations=citations)
 
     async def forget(self, target: Union[Conversation, str]) -> None:
@@ -203,31 +191,23 @@ class CogneeChatMemoryAdapter(ChatMemoryAdapter):
 def select_citations(
     records: "list[_CitationRecord]", evidence: str, answer_text: str, query_text: str
 ) -> list[Citation]:
-    """Choose which stored notes to cite for an answer. Pure and unit-testable.
+    """Choose which stored notes to cite, resolving each back to its source message.
 
-    Two structural gates, both required, so citation correctness never depends on
-    matching refusal prose:
-
-    1. Retrieved: the note's data_id appears in cognee's Evidence block (verbatim
-       text is a fallback when the id is not printed). No Evidence -> nothing
-       retrieved -> no citations.
-    2. Used: the answer contains a distinctive term from the note, i.e. a
-       significant word shared by note and answer that is NOT already in the
-       query. A refusal only echoes the query subject, so it yields no
-       distinctive term and cites nothing, however it is worded.
-
-    Each retrieved data_id resolves back through the ingest-time record to its
-    source message (transport + deeplink), so the citation points at the real
-    Telegram / web message, not just the Evidence text.
+    Two structural gates (no refusal-prose matching): a note is cited only if it
+    was retrieved -- its data_id is in cognee's Evidence block, or its text is
+    quoted there -- AND the answer uses a "novel" term from it, one not already in
+    the query. A refusal only echoes the query, so it has no novel term and cites
+    nothing, however it is phrased.
     """
     if not evidence.strip():
+        return []
+    # What the answer adds beyond the query. Empty for a refusal -> cite nothing.
+    novel_terms = _significant_terms(answer_text) - _significant_terms(query_text)
+    if not novel_terms:
         return []
 
     retrieved_ids = set(_EVIDENCE_DATA_ID_RE.findall(evidence))
     evidence_lower = evidence.lower()
-    answer_terms = _significant_terms(answer_text)
-    query_terms = _significant_terms(query_text)
-
     cited: list[_CitationRecord] = []
     seen: set[str] = set()
     for record in records:
@@ -235,10 +215,7 @@ def select_citations(
         if rid in seen:
             continue
         retrieved = rid in retrieved_ids or record.text.strip().lower() in evidence_lower
-        if not retrieved:
-            continue
-        distinctive = (_significant_terms(record.text) & answer_terms) - query_terms
-        if distinctive:
+        if retrieved and (_significant_terms(record.text) & novel_terms):
             cited.append(record)
             seen.add(rid)
 
@@ -269,12 +246,8 @@ _STOPWORDS = frozenset(
 
 
 def _normalize(token: str) -> str:
-    """Crude stem so inflections collapse (open/opens/opened -> open).
-
-    Needed because a refusal often restates the query using the note's
-    inflection ("when the archive opens"); without collapsing, "opens" would
-    look distinctive from the query's "open" and wrongly earn a citation.
-    """
+    """Crude stem so inflections collapse (open/opens/opened -> open), so a refusal
+    restating the query's word in another inflection is not seen as novel."""
     for suffix in ("ing", "ed", "s"):
         if token.endswith(suffix) and len(token) - len(suffix) >= 3:
             return token[: -len(suffix)]
@@ -282,10 +255,8 @@ def _normalize(token: str) -> str:
 
 
 def _significant_terms(text: str) -> set[str]:
-    """Normalized content words of a string: lowercased, punctuation-stripped,
-    stopwords out, lightly stemmed. Short-but-meaningful tokens like "5th"
-    (len >= 2) are kept so date/number facts still count as distinctive.
-    """
+    """Normalized content words: lowercased, punctuation-stripped, stopwords out,
+    lightly stemmed. Short-but-meaningful tokens like "5th" (len >= 2) are kept."""
     terms = set()
     for raw in text.lower().split():
         token = raw.strip(".,;:!?\"'()[]{}<>")
@@ -302,40 +273,9 @@ def _render_result(item: object) -> str:
     return ""
 
 
-_NO_ANSWER_MARKERS = (
-    "no information",
-    "no relevant information",
-    "not enough information",
-    "no data about",
-    "cannot answer",
-    "could not find",
-    "couldn't find",
-    "do not have information",
-    "don't have information",
-)
-
-
-def _is_no_answer(answer_text: str) -> bool:
-    """Best-effort detection of a refusal, for display polish ONLY.
-
-    Used only to render an already-uncited refusal as the friendly empty
-    message. It is deliberately NOT the citation-correctness mechanism: prose
-    matching an LLM refusal is fragile (phrasings like "the context does not
-    mention ..." would slip past this list), so citation correctness lives in
-    select_citations' structural check instead. A refusal this list misses just
-    shows cognee's own wording, still with zero citations.
-    """
-    low = answer_text.lower()
-    return any(marker in low for marker in _NO_ANSWER_MARKERS)
-
-
 def _split_evidence(text: str) -> tuple[str, str]:
-    """Split a recall result into (answer prose, Evidence block).
-
-    cognee renders the grounded references under an ``Evidence:`` header. If
-    there is no such header, cognee retrieved nothing to ground the answer, and
-    the Evidence half is empty.
-    """
+    """Split a recall result into (answer prose, Evidence block) on the ``Evidence:``
+    header cognee renders. No header -> nothing was grounded -> empty Evidence half."""
     index = text.find(_EVIDENCE_HEADER)
     if index == -1:
         return text.strip(), ""
