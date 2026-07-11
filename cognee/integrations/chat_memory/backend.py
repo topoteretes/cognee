@@ -262,7 +262,7 @@ class CogneeMemoryBackend:
         """
         import cognee
 
-        dataset_id, rows = await self._dataset_rows(dataset)
+        dataset_id, rows = await self._dataset_rows(dataset, permission="delete")
         data_ids = [
             row.id
             for row in rows
@@ -293,11 +293,15 @@ class CogneeMemoryBackend:
             "status": "success",
         }
 
-    async def _dataset_rows(self, dataset: str) -> tuple[Optional[UUID], list[Any]]:
+    async def _dataset_rows(
+        self, dataset: str, *, permission: str = "read"
+    ) -> tuple[Optional[UUID], list[Any]]:
         """Resolve ``(dataset_id, Data rows)`` for ``dataset``; ``(None, [])`` if absent.
 
         Shared by forget-me and citation resolution: both need the ``Data`` rows
-        that carry the ``external_metadata`` stamp written at ingest.
+        that carry the ``external_metadata`` stamp written at ingest. Citation
+        resolution only reads (``permission="read"``); forget-me needs
+        ``"delete"``.
         """
         import cognee
         from cognee.modules.data.methods.get_authorized_dataset_by_name import (
@@ -307,7 +311,7 @@ class CogneeMemoryBackend:
 
         default_user = await get_default_user()
         try:
-            resolved = await get_authorized_dataset_by_name(dataset, default_user, "delete")
+            resolved = await get_authorized_dataset_by_name(dataset, default_user, permission)
         except Exception:
             resolved = None
         if resolved is None:
