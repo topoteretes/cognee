@@ -217,12 +217,13 @@ async def run_tasks_data_item(
     ctx: Optional[PipelineContext],
     user: User,
     incremental_loading: bool,
+    data_cache: bool,
 ) -> Optional[Dict[str, Any]]:
     """
     Process a single data item, choosing between incremental and regular processing.
 
     This is the main entry point for data item processing that delegates to either
-    incremental or regular processing based on the incremental_loading flag.
+    incremental or regular processing based on the data_cache/incremental_loading flags.
 
     Args:
         data_item: The data item to process
@@ -234,6 +235,7 @@ async def run_tasks_data_item(
         context: Optional context dictionary
         user: User performing the operation
         incremental_loading: Whether to use incremental processing
+        data_cache: Whether to use incremental processing (data caching)
 
     Returns:
         Dict containing the final processing result, or None if processing was skipped
@@ -241,7 +243,7 @@ async def run_tasks_data_item(
     # Go through async generator and return data item processing result. Result can be PipelineRunAlreadyCompleted when data item is skipped,
     # PipelineRunCompleted when processing was successful and PipelineRunErrored if there were issues
     result = None
-    if incremental_loading:
+    if data_cache or incremental_loading:
         async for result in run_tasks_data_item_incremental(
             data_item=data_item,
             dataset=dataset,
