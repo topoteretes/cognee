@@ -25,6 +25,7 @@ hosts / NFS, for which Postgres metadata is required.
 """
 
 import asyncio
+import concurrent.futures
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -119,18 +120,33 @@ async def _migration_lock(db_engine, key: int):
 
     from filelock import FileLock
 
-    # Acquire/release off the event loop. asyncio.to_thread may run acquire and
-    # release on DIFFERENT pool threads; FileLock is thread-local by default (its
-    # re-entrancy counter lives on the acquiring thread), so a release on another
-    # thread would no-op and leak the OS lock — deadlocking the next acquisition
-    # (e.g. run_migrations' failed-migration retry). thread_local=False
-    # shares the counter across threads; the OS lock itself is process/fd-scoped.
+    # Acquire and release MUST run on the same OS thread, off the event loop.
+    # filelock keeps two pieces of per-thread state that break if they don't:
+    # its deadlock-detection registry (a threading.local mapping lock path ->
+    # holder instance) is written by acquire and popped by release each on the
+    # thread they run on — a release on another thread leaves a ghost entry on
+    # the acquiring thread, and the NEXT acquisition landing there fails with a
+    # false "Deadlock: lock is already held by a different FileLock instance".
+    # asyncio.to_thread assigns pool threads arbitrarily, so instead run both
+    # calls on one dedicated short-lived thread. Each acquisition gets its own
+    # executor, so concurrent in-process acquisitions still block one another
+    # via the OS lock (each waiting on its own thread) — the same mutual
+    # exclusion the Postgres advisory-lock branch provides.
+    # thread_local=False keeps the instance's re-entrancy counter shared across
+    # threads so a release still works even if thread affinity ever regresses.
     lock = FileLock(lock_path, thread_local=False)
-    await asyncio.to_thread(lock.acquire)
+    loop = asyncio.get_running_loop()
+    executor = concurrent.futures.ThreadPoolExecutor(
+        max_workers=1, thread_name_prefix="cognee-migration-lock"
+    )
     try:
-        yield
+        await loop.run_in_executor(executor, lock.acquire)
+        try:
+            yield
+        finally:
+            await loop.run_in_executor(executor, lock.release)
     finally:
-        await asyncio.to_thread(lock.release)
+        executor.shutdown(wait=False)
 
 
 @asynccontextmanager

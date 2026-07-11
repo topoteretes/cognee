@@ -4,6 +4,7 @@ import inspect
 import os
 from numbers import Number
 
+from cognee.infrastructure.databases.dataset_queue.pinning import dataset_queue_pin_predicate
 from cognee.infrastructure.databases.utils.closing_lru_cache import closing_lru_cache
 from cognee.shared.lru_cache import DATABASE_MAX_LRU_CACHE_SIZE
 from cognee.shared.logging_utils import get_logger
@@ -192,16 +193,16 @@ async def get_graph_engine() -> GraphDBInterface:
     return handle
 
 
-def _make_pghybrid_adapter():
-    """Build the uncached Postgres hybrid adapter used when
-    ``USE_UNIFIED_PROVIDER=pghybrid``. Not cached — the caller owns it, matching
-    the original inline behavior."""
-    from .postgres.adapter import PostgresAdapter
-    from cognee.infrastructure.databases.relational.get_relational_engine import (
-        get_relational_engine,
-    )
-
-    return PostgresAdapter(connection_string=get_relational_engine().db_uri)
+# def _make_pghybrid_adapter():
+#     """Build the uncached Postgres hybrid adapter used when
+#     ``USE_UNIFIED_PROVIDER=pghybrid``. Not cached — the caller owns it, matching
+#     the original inline behavior."""
+#     from .postgres.adapter import PostgresAdapter
+#     from cognee.infrastructure.databases.relational.get_relational_engine import (
+#         get_relational_engine,
+#     )
+#
+#     return PostgresAdapter(connection_string=get_relational_engine().db_uri)
 
 
 def _resolve_graph_engine_args(params: dict) -> tuple:
@@ -255,8 +256,8 @@ def create_graph_engine(
     For a detailed description, see _create_graph_engine.
     """
     # Check USE_UNIFIED_PROVIDER outside the cache so it's always re-read
-    if os.environ.get("USE_UNIFIED_PROVIDER", "") == "pghybrid":
-        return _make_pghybrid_adapter()
+    # if os.environ.get("USE_UNIFIED_PROVIDER", "") == "pghybrid":
+    #     return _make_pghybrid_adapter()
 
     return _create_graph_engine(*_resolve_graph_engine_args(locals()))
 
@@ -269,8 +270,8 @@ async def acreate_graph_engine(**kwargs):
     subprocess engine's worker has fully exited (releasing its file lock) before
     a new worker opens the same DB path.
     """
-    if os.environ.get("USE_UNIFIED_PROVIDER", "") == "pghybrid":
-        return _make_pghybrid_adapter()
+    # if os.environ.get("USE_UNIFIED_PROVIDER", "") == "pghybrid":
+    #     return _make_pghybrid_adapter()
 
     return await _create_graph_engine.acall(*_resolve_graph_engine_args(kwargs))
 
@@ -306,6 +307,37 @@ def evict_graph_engine(**kwargs) -> bool:
     )
 
 
+def evict_graph_engines_for_database(graph_database_name: str) -> int:
+    """Evict every cached graph engine bound to *graph_database_name*.
+
+    The same per-dataset database can be cached under multiple keys: the
+    dataset-handler creation key and the pipeline's context-config key differ
+    in ``graph_file_path`` and ``graph_dataset_database_handler``, so key-exact
+    ``evict_graph_engine`` misses the pipeline's entry and leaves an engine
+    whose connection pool died with the dropped database. Per-dataset database
+    names are dataset UUIDs, so matching the name against key fields cannot
+    collide with other entries.
+
+    Returns the number of evicted entries.
+    """
+    if not graph_database_name:
+        raise ValueError("graph_database_name must be a non-empty database name")
+    return _create_graph_engine.cache_evict_matching(graph_database_name=graph_database_name)
+
+
+async def aevict_graph_engines_for_database(graph_database_name: str) -> int:
+    """Evict every cached graph engine bound to *graph_database_name* and wait
+    until their closes have fully completed (workers exited, file locks
+    released). Use before removing the database's files so a concurrent
+    holder's teardown cannot race the removal.
+
+    Returns the number of evicted entries.
+    """
+    evicted = evict_graph_engines_for_database(graph_database_name)
+    await _create_graph_engine.cache_await_closed(graph_database_name=graph_database_name)
+    return evicted
+
+
 def is_graph_engine_cached(**kwargs) -> bool:
     """Check whether a graph engine entry exists in the cache without creating."""
     normalized = _normalize_optional_create_graph_engine_params(kwargs)
@@ -329,7 +361,10 @@ def is_graph_engine_cached(**kwargs) -> bool:
     )
 
 
-@closing_lru_cache(maxsize=DATABASE_MAX_LRU_CACHE_SIZE)
+@closing_lru_cache(
+    maxsize=DATABASE_MAX_LRU_CACHE_SIZE,
+    pinned_predicate=dataset_queue_pin_predicate("graph_database_name"),
+)
 def _create_graph_engine(
     graph_database_provider,
     graph_file_path,

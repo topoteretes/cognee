@@ -34,6 +34,7 @@ COGNEE_DB_QUERY = "cognee.db.query"
 COGNEE_DB_ROW_COUNT = "cognee.db.row_count"
 COGNEE_LLM_MODEL = "cognee.llm.model"
 COGNEE_LLM_PROVIDER = "cognee.llm.provider"
+COGNEE_PIPELINE_STAGE = "cognee.pipeline.stage"
 COGNEE_SEARCH_TYPE = "cognee.search.type"
 COGNEE_SEARCH_QUERY = "cognee.search.query"
 COGNEE_PIPELINE_TASK_NAME = "cognee.pipeline.task_name"
@@ -55,7 +56,7 @@ COGNEE_RECALL_SCOPE = "cognee.recall.scope"  # "session", "graph", "auto"
 COGNEE_RECALL_SOURCE = "cognee.recall.source"  # where results came from
 COGNEE_FORGET_TARGET = "cognee.forget.target"  # "dataset", "data_item", "everything"
 COGNEE_IMPROVE_STAGES = "cognee.improve.stages"
-COGNEE_GRAPH_EDGES_SYNCED = "cognee.graph.edges_synced"
+COGNEE_GRAPH_EDGES_SYNCED = "cognee.graph.edges_synced"  # compatibility; no longer emitted
 
 # ---------------------------------------------------------------------------
 # Secret redaction

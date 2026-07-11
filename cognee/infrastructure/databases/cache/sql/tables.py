@@ -134,7 +134,7 @@ Index(
     cache_usage_logs.c.seq,
 )
 
-# String KV: graph_knowledge:{u}:{s}, graph_sync_checkpoint:{u}:{d}:{s} — keys kept verbatim.
+# Generic string KV storage for small cache values.
 cache_kv = Table(
     "cache_kv",
     cache_metadata,

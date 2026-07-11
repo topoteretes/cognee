@@ -1208,7 +1208,7 @@ wheels = [
 
 [[package]]
 name = "cognee"
-version = "1.2.2.dev3"
+version = "1.3.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiofiles" },
@@ -1334,6 +1334,12 @@ fastembed = [
     { name = "onnxruntime", version = "1.23.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.14'" },
     { name = "onnxruntime", version = "1.27.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.14'" },
 ]
+gmail = [
+    { name = "dlt", extra = ["sqlalchemy"] },
+    { name = "google-api-python-client" },
+    { name = "google-auth" },
+    { name = "google-auth-oauthlib" },
+]
 graphiti = [
     { name = "graphiti-core" },
 ]
@@ -1436,6 +1442,7 @@ requires-dist = [
     { name = "deptry", marker = "extra == 'dev'", specifier = ">=0.20.0,<0.21" },
     { name = "diskcache", specifier = ">=5.6.3" },
     { name = "dlt", extras = ["sqlalchemy"], marker = "extra == 'dlt'", specifier = ">=1.9.0,<2" },
+    { name = "dlt", extras = ["sqlalchemy"], marker = "extra == 'gmail'", specifier = ">=1.9.0,<2" },
     { name = "docling", marker = "extra == 'docling'", specifier = ">=2.54" },
     { name = "fakeredis", extras = ["lua"], specifier = ">=2.32.0" },
     { name = "fastapi", specifier = ">=0.116.2,<1.0.0" },
@@ -1446,6 +1453,9 @@ requires-dist = [
     { name = "filetype", specifier = ">=1.2.0,<2.0.0" },
     { name = "gdown", marker = "extra == 'evals'", specifier = ">=5.2.0,<6" },
     { name = "gitpython", marker = "extra == 'dev'", specifier = ">=3.1.43,<4" },
+    { name = "google-api-python-client", marker = "extra == 'gmail'", specifier = ">=2.100.0,<3" },
+    { name = "google-auth", marker = "extra == 'gmail'", specifier = ">=2.23.0,<3" },
+    { name = "google-auth-oauthlib", marker = "extra == 'gmail'", specifier = ">=1.1.0,<2" },
     { name = "graphiti-core", marker = "extra == 'graphiti'", specifier = ">=0.28.0" },
     { name = "groq", marker = "extra == 'groq'", specifier = ">=0.8.0,<1.0.0" },
     { name = "gunicorn", specifier = ">=20.1.0,<24" },
@@ -1538,7 +1548,7 @@ requires-dist = [
     { name = "uvicorn", specifier = ">=0.34.0,<1.0.0" },
     { name = "websockets", specifier = ">=15.0.1,<16.0.0" },
 ]
-provides-extras = ["api", "distributed", "scraping", "fastembed", "neo4j", "neptune", "postgres", "postgres-binary", "notebook", "langchain", "llama-index", "huggingface", "ollama", "mistral", "anthropic", "azure", "deepeval", "posthog", "groq", "llama-cpp", "docs", "codegraph", "evals", "graphiti", "aws", "dlt", "baml", "dev", "debug", "redis", "tracing", "docling"]
+provides-extras = ["api", "distributed", "scraping", "fastembed", "neo4j", "neptune", "postgres", "postgres-binary", "notebook", "langchain", "llama-index", "huggingface", "ollama", "mistral", "anthropic", "azure", "deepeval", "posthog", "groq", "llama-cpp", "docs", "codegraph", "evals", "graphiti", "aws", "dlt", "gmail", "baml", "dev", "debug", "redis", "tracing", "docling"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -3287,6 +3297,22 @@ grpc = [
 ]
 
 [[package]]
+name = "google-api-python-client"
+version = "2.198.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "google-api-core" },
+    { name = "google-auth" },
+    { name = "google-auth-httplib2" },
+    { name = "httplib2" },
+    { name = "uritemplate" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/6b/53/0cd38e3a29d72ce45e27feba2ce1cd8049d69af9c48cb14fb164f1be9133/google_api_python_client-2.198.0.tar.gz", hash = "sha256:dfe3e16fb241af6e9c460a33f65085b3450e05cea09364f6b5d8997fb7e43e2a", size = 15060142, upload-time = "2026-06-25T14:32:42.953Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d5/92/0fc9e7a09eb240c31b879bd8d2e43f81ed1f86c4798b79ead4a083921ab3/google_api_python_client-2.198.0-py3-none-any.whl", hash = "sha256:fabac935474e817da5e662ff61bf7139439d6f92b32d332a7318a2d45931e03e", size = 15644203, upload-time = "2026-06-25T14:32:39.963Z" },
+]
+
+[[package]]
 name = "google-auth"
 version = "2.55.0"
 source = { registry = "https://pypi.org/simple" }
@@ -3302,6 +3328,32 @@ wheels = [
 [package.optional-dependencies]
 requests = [
     { name = "requests" },
+]
+
+[[package]]
+name = "google-auth-httplib2"
+version = "0.4.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "google-auth" },
+    { name = "httplib2" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/1c/b3/f192c8bc7e41e0ebdbd95afcae4783417a34b6a6af62d22daf22c3fd38fc/google_auth_httplib2-0.4.0.tar.gz", hash = "sha256:d5b030a204b7a4b4d553ba9ca701b62481ee2b74419325580be70f7d85ffed35", size = 11161, upload-time = "2026-05-07T08:03:46.878Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/97/be/954c35a62b9e31de66b0a43c225c9b6bb9e0f98d6b1dc110a2308e3644f5/google_auth_httplib2-0.4.0-py3-none-any.whl", hash = "sha256:8e55cfafa3358cba85f6cad4a886138e88e158d71e7e5c9ee5936a5c1507fb91", size = 9529, upload-time = "2026-05-07T08:02:12.375Z" },
+]
+
+[[package]]
+name = "google-auth-oauthlib"
+version = "1.4.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "google-auth" },
+    { name = "requests-oauthlib" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/70/18/90c7fac516e63cf2058166fce0c88c353647c677b51cc036c09c49bb5cbb/google_auth_oauthlib-1.4.0.tar.gz", hash = "sha256:18b5e28880eb8eba9065c436becdc0ee8e4b59117a73a510679c82f70cd363d2", size = 21675, upload-time = "2026-05-07T08:03:47.816Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/37/d3/d7dff0d58a9e9244b48044bfb6a898bfcc8ecc42e0031d1bebc695344725/google_auth_oauthlib-1.4.0-py3-none-any.whl", hash = "sha256:251314f213a9ee46a5ae73988e84fd7cca8bb68e7ecf4bfd45940f9e7f51d070", size = 19261, upload-time = "2026-05-07T08:02:13.798Z" },
 ]
 
 [[package]]
@@ -3685,6 +3737,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/06/94/82699a10bca87a5556c9c59b5963f2d039dbd239f25bc2a63907a05a14cb/httpcore-1.0.9.tar.gz", hash = "sha256:6e34463af53fd2ab5d807f399a9b45ea31c3dfa2276f15a2c3f00afff6e176e8", size = 85484, upload-time = "2025-04-24T22:06:22.219Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/7e/f5/f66802a942d491edb555dd61e3a9961140fd64c90bce1eafd741609d334d/httpcore-1.0.9-py3-none-any.whl", hash = "sha256:2d400746a40668fc9dec9810239072b40b4484b640a8c38fd654a024c7a1bf55", size = 78784, upload-time = "2025-04-24T22:06:20.566Z" },
+]
+
+[[package]]
+name = "httplib2"
+version = "0.32.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyparsing" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/84/f5/ccf58de92d61e3ad921119668f54ed36ca1d0cf5dcc5c1657dfb164fd78b/httplib2-0.32.0.tar.gz", hash = "sha256:48a0ef30a42db65d8f3399045e1d09ab0ba66e3b9efc360d07f80ea55d286025", size = 254283, upload-time = "2026-06-26T10:13:56.265Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/33/a0/550eec327e5f5c7b732531c489f5307efec41f047b0d703bd4ca1e5ad2db/httplib2-0.32.0-py3-none-any.whl", hash = "sha256:dc6705cacdf3fb0a2aba7629fa33c90fd93e30035db0c157325826be177e4816", size = 93148, upload-time = "2026-06-26T10:13:54.985Z" },
 ]
 
 [[package]]
@@ -12450,6 +12514,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/31/c7/0336f2bd0bcbada6ccef7aaa25e443c118a704f828a0620c6fa0207c1b64/uri-template-1.3.0.tar.gz", hash = "sha256:0e00f8eb65e18c7de20d595a14336e9f337ead580c70934141624b6d1ffdacc7", size = 21678, upload-time = "2023-06-21T01:49:05.374Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e7/00/3fca040d7cf8a32776d3d81a00c8ee7457e00f80c649f1e4a863c8321ae9/uri_template-1.3.0-py3-none-any.whl", hash = "sha256:a44a133ea12d44a0c0f06d7d42a52d71282e77e2f937d8abd5655b8d56fc1363", size = 11140, upload-time = "2023-06-21T01:49:03.467Z" },
+]
+
+[[package]]
+name = "uritemplate"
+version = "4.2.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/98/60/f174043244c5306c9988380d2cb10009f91563fc4b31293d27e17201af56/uritemplate-4.2.0.tar.gz", hash = "sha256:480c2ed180878955863323eea31b0ede668795de182617fef9c6ca09e6ec9d0e", size = 33267, upload-time = "2025-06-02T15:12:06.318Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a9/99/3ae339466c9183ea5b8ae87b34c0b897eda475d2aec2307cae60e5cd4f29/uritemplate-4.2.0-py3-none-any.whl", hash = "sha256:962201ba1c4edcab02e60f9a0d3821e82dfc5d2d6662a21abd533879bdb8a686", size = 11488, upload-time = "2025-06-02T15:12:03.405Z" },
 ]
 
 [[package]]

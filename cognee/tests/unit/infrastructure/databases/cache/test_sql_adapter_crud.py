@@ -578,7 +578,7 @@ async def test_log_usage_and_get_usage_logs(adapter):
 @pytest.mark.asyncio
 async def test_kv_round_trip_and_overwrite(adapter):
     """set_value/get_value/delete_value round-trip; set is an upsert."""
-    key = "graph_knowledge:u1:s1"
+    key = "session_note:u1:s1"
     assert await adapter.get_value(key) is None
 
     await adapter.set_value(key, "snapshot-1")
@@ -597,7 +597,7 @@ async def test_kv_round_trip_and_overwrite(adapter):
 @pytest.mark.asyncio
 async def test_kv_ttl_expiry(adapter):
     """A keyed value with ttl becomes invisible once expires_at passes."""
-    key = "graph_sync_checkpoint:u1:d1:s1"
+    key = "checkpoint:test"
     await adapter.set_value(key, "checkpoint", ttl=3600)
     assert await adapter.get_value(key) == "checkpoint"
 
@@ -611,7 +611,7 @@ async def test_kv_ttl_expiry(adapter):
 @pytest.mark.asyncio
 async def test_kv_without_ttl_is_immortal(adapter):
     """ttl=None stores the value without expiry (expires_at stays NULL)."""
-    key = "graph_knowledge:u1:s1"
+    key = "session_note:u1:s1"
     await adapter.set_value(key, "forever")
 
     assert await _fetch_expirations(adapter, cache_kv, key=key) == [None]
@@ -631,7 +631,7 @@ async def test_prune_clears_only_the_four_cache_tables(adapter):
         "u1", "s1", trace_id="t1", origin_function="plan_trip", status="success"
     )
     await adapter.log_usage("u1", {"endpoint": "/add"})
-    await adapter.set_value("graph_knowledge:u1:s1", "snapshot")
+    await adapter.set_value("session_note:u1:s1", "note")
 
     async with adapter.engine.begin() as connection:
         await connection.execute(text("CREATE TABLE co_tenant (id INTEGER PRIMARY KEY, v TEXT)"))
@@ -642,7 +642,7 @@ async def test_prune_clears_only_the_four_cache_tables(adapter):
     assert await adapter.get_all_qa_entries("u1", "s1") == []
     assert await adapter.get_agent_trace_session("u1", "s1") == []
     assert await adapter.get_usage_logs("u1") == []
-    assert await adapter.get_value("graph_knowledge:u1:s1") is None
+    assert await adapter.get_value("session_note:u1:s1") is None
 
     async with adapter.engine.connect() as connection:
         survivors = (await connection.execute(text("SELECT v FROM co_tenant"))).scalars().all()

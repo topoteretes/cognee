@@ -19,6 +19,7 @@ async def update(
     graph_db_config: dict = None,
     preferred_loaders: dict[str, dict[str, Any]] = None,
     incremental_loading: bool = True,
+    data_cache: bool = True,
 ) -> Union[Dict[str, PipelineRunInfo], List[PipelineRunInfo]]:
     """
     Update existing data in Cognee.
@@ -92,6 +93,7 @@ async def update(
         graph_db_config=graph_db_config,
         preferred_loaders=preferred_loaders,
         incremental_loading=incremental_loading,
+        data_cache=data_cache,
     )
 
     cognify_run = await cognify(
@@ -100,6 +102,7 @@ async def update(
         vector_db_config=vector_db_config,
         graph_db_config=graph_db_config,
         incremental_loading=incremental_loading,
+        data_cache=data_cache,
     )
 
     return cognify_run
