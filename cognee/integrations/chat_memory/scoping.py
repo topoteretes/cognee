@@ -23,7 +23,20 @@ All keys are produced through :func:`sanitize_key`, so the returned
 from __future__ import annotations
 
 from .models import Conversation, Scope
-from .sanitizer import sanitize_key
+from .sanitizer import sanitize_key, sanitize_token
+
+
+def _require(token: str, field: str) -> str:
+    """Return ``token`` if it survives sanitization, else raise.
+
+    The dataset key is the privacy / forget boundary, so a distinguishing
+    segment that sanitizes to empty (which :func:`sanitize_key` would silently
+    drop) must be rejected rather than aliasing distinct conversations into one
+    dataset.
+    """
+    if not sanitize_token(token):
+        raise ValueError(f"Conversation.{field} is required but sanitizes to empty: {token!r}")
+    return token
 
 
 def per_channel_scope(conversation: Conversation) -> Scope:
@@ -39,7 +52,10 @@ def per_channel_scope(conversation: Conversation) -> Scope:
     * ``session  = {platform}:{workspace}:{channel}:{thread}``
     """
     dataset = sanitize_key(
-        "chat", conversation.platform, conversation.workspace, conversation.channel
+        "chat",
+        conversation.platform,
+        conversation.workspace,
+        _require(conversation.channel, "channel"),
     )
     session = sanitize_key(
         conversation.platform,
@@ -62,7 +78,7 @@ def per_user_scope(conversation: Conversation) -> Scope:
     * ``dataset  = brain:{user}``
     * ``session  = {platform}:{workspace}:{channel}:{thread}``
     """
-    dataset = sanitize_key("brain", conversation.user)
+    dataset = sanitize_key("brain", _require(conversation.user, "user"))
     session = sanitize_key(
         conversation.platform,
         conversation.workspace,

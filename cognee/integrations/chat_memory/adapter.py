@@ -204,26 +204,28 @@ class ChatMemoryAdapter:
     @staticmethod
     def _stamp(conversation: Conversation, message: Message, author: str) -> dict[str, Any]:
         """Build the ``external_metadata`` stamp carried by a stored item."""
-        stamp: dict[str, Any] = {
-            "platform": conversation.platform,
-            "workspace": conversation.workspace,
-            "channel": conversation.channel,
-            "thread": conversation.thread,
-            "user": author,
-            "ts": message.timestamp,
-            "permalink": message.permalink,
-        }
-        if message.metadata:
-            stamp.update(message.metadata)
+        # Free-form message extras first, then the adapter-owned identity keys,
+        # so a stray ``metadata`` entry can never overwrite the resolved author
+        # (which "forget me" and consent attribution depend on).
+        stamp: dict[str, Any] = dict(message.metadata)
+        stamp.update(
+            {
+                "platform": conversation.platform,
+                "workspace": conversation.workspace,
+                "channel": conversation.channel,
+                "thread": conversation.thread,
+                "user": author,
+                "ts": message.timestamp,
+                "permalink": message.permalink,
+            }
+        )
         # Drop keys with no value so the stamp stays compact and comparable.
         return {key: value for key, value in stamp.items() if value is not None}
 
     @staticmethod
     def _compose_answer_text(items) -> str:
-        """Pick the answer body: a synthesized/graph result if any, else session."""
-        if not items:
-            return ""
-        graph_like = [i for i in items if i.source in ("graph", "graph_context")]
-        if graph_like:
-            return graph_like[0].text
-        return items[0].text
+        """Pick the answer body: the first non-empty graph result, else any snippet."""
+        for item in items:
+            if item.source in ("graph", "graph_context") and item.text.strip():
+                return item.text
+        return next((item.text for item in items if item.text.strip()), "")

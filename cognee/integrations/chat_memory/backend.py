@@ -38,18 +38,20 @@ class MemoryBackend(Protocol):
         external_metadata: dict[str, Any],
         item_id: Optional[str] = None,
     ) -> None:
-        """Store ``text`` in ``dataset`` (+ fast ``session`` cache), returning fast.
+        """Store ``text`` durably in ``dataset``, returning fast.
 
         ``external_metadata`` is stamped onto the stored item; it carries the
         author and permalink that later power both per-user forget and
         citations. ``item_id`` is a stable, caller-chosen id for idempotency.
+        ``session`` identifies the live conversation; a backend may use it for a
+        recency cache (the in-memory one does) or ignore it.
         """
         ...
 
     async def recall(
         self, query: str, *, dataset: str, session: str, top_k: int
     ) -> list[RecalledItem]:
-        """Recall from the ``session`` cache first, then the ``dataset`` graph."""
+        """Recall the most relevant items for ``query`` from ``dataset``."""
         ...
 
     async def forget_scope(self, *, dataset: str) -> dict:
@@ -116,7 +118,7 @@ class InMemoryMemoryBackend:
         external_metadata: dict[str, Any],
         item_id: Optional[str] = None,
     ) -> None:
-        key = item_id or deterministic_item_id(dataset, session, text)
+        key = item_id or deterministic_item_id(dataset, text)
         # Dedup: a replayed message with the same id overwrites, never duplicates.
         self._store.setdefault(dataset, {})[key] = {
             "text": text,
@@ -145,7 +147,8 @@ class InMemoryMemoryBackend:
                         score=float(hits),
                         permalink=stamp.get("permalink"),
                         user=str(stamp["user"]) if stamp.get("user") is not None else None,
-                        metadata=stamp,
+                        # Copy so a caller mutating a citation can't corrupt the store.
+                        metadata=dict(stamp),
                     ),
                 )
             )
@@ -178,13 +181,20 @@ class CogneeMemoryBackend:
 
     Maps the adapter's four methods onto ``cognee.remember`` / ``cognee.recall``
     / ``cognee.forget`` and nothing else. All cognee imports are local to the
-    methods so importing the adapter package never triggers cognee's heavier
-    import graph.
+    methods so the heavy import graph is deferred until a primitive is called.
+
+    Storage is durable: a message is ingested through cognee's permanent
+    ``add()`` + ``cognify()`` path (``run_in_background=True`` keeps it
+    fire-and-forget). That path is the only one that writes ``external_metadata``
+    onto the ``Data`` row and honours a caller-set ``data_id`` — which is exactly
+    what per-user "forget me" and citation resolution rely on. cognee's
+    ``session_id`` path is a session-cache-only fast path that drops both, so
+    this backend does not use it; a session recency cache is a future add-on.
 
     Args:
         run_in_background: Pass-through to ``remember``. ``True`` (default) makes
             ingestion fire-and-forget: the call returns immediately and the
-            session-to-graph bridge proceeds in the background.
+            add/cognify build proceeds in the background.
         top_k: Default recall breadth when the adapter does not override it.
     """
 
@@ -204,20 +214,16 @@ class CogneeMemoryBackend:
         import cognee
         from cognee.tasks.ingestion.data_item import DataItem
 
-        data_id: Optional[UUID] = None
-        if item_id:
-            try:
-                data_id = UUID(item_id)
-            except (ValueError, AttributeError, TypeError):
-                # Not already a UUID, so derive a stable one so ingestion is
-                # idempotent on the caller's opaque id.
-                data_id = uuid5(NAMESPACE_URL, item_id)
-
-        item = DataItem(data=text, external_metadata=external_metadata, data_id=data_id)
+        item = DataItem(
+            data=text,
+            external_metadata=external_metadata,
+            data_id=self._as_uuid(item_id),
+        )
+        # Durable path (no session_id): add() writes external_metadata + honours
+        # data_id onto the Data row and cognify builds the graph.
         await cognee.remember(
             item,
             dataset_name=dataset,
-            session_id=session,
             run_in_background=self.run_in_background,
         )
 
@@ -229,11 +235,15 @@ class CogneeMemoryBackend:
         responses = await cognee.recall(
             query,
             datasets=[dataset],
-            session_id=session,
             top_k=top_k,
             include_references=True,
         )
-        return [self._to_recalled_item(response) for response in responses]
+        if not responses:
+            return []
+        # recall reports each hit's origin as a data_id (the ingested Data.id);
+        # the permalink/author live in the stamp we wrote onto that Data row.
+        stamps = await self._stamps_by_data_id(dataset)
+        return [self._to_recalled_item(response, stamps) for response in responses]
 
     async def forget_scope(self, *, dataset: str) -> dict:
         import cognee
@@ -259,14 +269,22 @@ class CogneeMemoryBackend:
         """
         import cognee
 
-        dataset_id, data_ids = await self._resolve_user_data_ids(dataset, user)
+        dataset_id, rows = await self._dataset_rows(dataset)
+        data_ids = [
+            row.id
+            for row in rows
+            if isinstance(getattr(row, "external_metadata", None), dict)
+            and str(row.external_metadata.get("user")) == str(user)
+        ]
         if not data_ids:
             return {"dataset": dataset, "user": user, "items_removed": 0, "status": "success"}
 
         removed = 0
         for data_id in data_ids:
             try:
-                await cognee.forget(data_id=data_id, dataset_id=dataset_id, memory_only=True)
+                # Full delete (not memory_only): "forget me" must drop the raw
+                # Data record too, not just its graph/vector projection.
+                await cognee.forget(data_id=data_id, dataset_id=dataset_id)
                 removed += 1
             except Exception as exc:  # pragma: no cover - defensive per-item guard
                 logger.warning(
@@ -282,10 +300,12 @@ class CogneeMemoryBackend:
             "status": "success",
         }
 
-    async def _resolve_user_data_ids(
-        self, dataset: str, user: str
-    ) -> tuple[Optional[UUID], list[UUID]]:
-        """Return ``(dataset_id, [data_id, ...])`` for items authored by ``user``."""
+    async def _dataset_rows(self, dataset: str) -> tuple[Optional[UUID], list[Any]]:
+        """Resolve ``(dataset_id, Data rows)`` for ``dataset``; ``(None, [])`` if absent.
+
+        Shared by forget-me and citation resolution: both need the ``Data`` rows
+        that carry the ``external_metadata`` stamp written at ingest.
+        """
         import cognee
         from cognee.modules.data.methods.get_authorized_dataset_by_name import (
             get_authorized_dataset_by_name,
@@ -299,27 +319,49 @@ class CogneeMemoryBackend:
             resolved = None
         if resolved is None:
             return None, []
-
         rows = await cognee.datasets.list_data(resolved.id, user=default_user)
-        matches: list[UUID] = []
-        for row in rows or []:
-            metadata = getattr(row, "external_metadata", None)
-            if isinstance(metadata, dict) and str(metadata.get("user")) == str(user):
-                matches.append(row.id)
-        return resolved.id, matches
+        return resolved.id, list(rows or [])
+
+    async def _stamps_by_data_id(self, dataset: str) -> dict[str, dict[str, Any]]:
+        """Map ``str(Data.id) -> external_metadata`` for citation resolution.
+
+        Returns ``{}`` when the dataset can't be resolved, so citations degrade
+        to text-only rather than failing.
+        """
+        _, rows = await self._dataset_rows(dataset)
+        stamps: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            stamp = getattr(row, "external_metadata", None)
+            if isinstance(stamp, dict):
+                stamps[str(row.id)] = stamp
+        return stamps
 
     @staticmethod
-    def _to_recalled_item(response: Any) -> RecalledItem:
+    def _as_uuid(item_id: Optional[str]) -> Optional[UUID]:
+        """Coerce a caller item id to the UUID cognee uses as ``Data.id``.
+
+        Accepts a real UUID string as-is; derives a stable UUIDv5 from any other
+        opaque id so ingestion stays idempotent on the caller's key.
+        """
+        if not item_id:
+            return None
+        try:
+            return UUID(item_id)
+        except (ValueError, AttributeError, TypeError):
+            return uuid5(NAMESPACE_URL, item_id)
+
+    @staticmethod
+    def _to_recalled_item(response: Any, stamps: dict[str, dict[str, Any]]) -> RecalledItem:
         """Normalize a cognee ``RecallResponse`` (a tagged union) to a RecalledItem.
 
         Handled generically via attribute access so it survives the union
         growing new member types: every member carries ``source``; graph
         entries carry ``text``/``score``/``metadata``; session entries carry
-        ``answer``/``content``. The ``external_metadata`` stamp, surfaced under
-        an item's ``metadata``, yields the permalink and author for citations.
+        ``answer``/``content``. When a result carries a ``data_id`` in its
+        provenance metadata, the matching stamp yields the permalink and author
+        for a citation; otherwise the citation is text-only.
         """
         source = getattr(response, "source", "graph")
-
         text = (
             getattr(response, "text", None)
             or getattr(response, "answer", None)
@@ -328,19 +370,8 @@ class CogneeMemoryBackend:
         )
 
         metadata = getattr(response, "metadata", None)
-        if not isinstance(metadata, dict):
-            metadata = {}
-        # cognee stamps external_metadata under raw / metadata depending on the
-        # retriever; check both so citations resolve regardless of source.
-        stamp = metadata.get("external_metadata")
-        if not isinstance(stamp, dict):
-            raw = getattr(response, "raw", None)
-            if isinstance(raw, dict):
-                candidate = raw.get("external_metadata")
-                stamp = candidate if isinstance(candidate, dict) else {}
-            else:
-                stamp = {}
-
+        data_id = metadata.get("data_id") if isinstance(metadata, dict) else None
+        stamp = stamps.get(str(data_id), {}) if data_id is not None else {}
         author = stamp.get("user")
         return RecalledItem(
             text=text,
@@ -348,5 +379,5 @@ class CogneeMemoryBackend:
             score=getattr(response, "score", None),
             permalink=stamp.get("permalink"),
             user=str(author) if author is not None else None,
-            metadata=metadata or stamp,
+            metadata=dict(stamp),
         )
