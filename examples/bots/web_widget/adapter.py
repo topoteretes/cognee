@@ -16,9 +16,8 @@ Session convention::
 Memory boundary (default): **per visitor-conversation**. Answering with a
 ``session_id`` lets cognee's session-aware recall both use *and persist* that
 conversation's history, so one visitor's chat never leaks into another's. An
-optional shared, read-only *docs* dataset (``{namespace}:{site_id}:docs``)
-powers the "ask our docs" mode: every conversation can recall from it, but no
-conversation writes to it.
+optional shared, read-only *docs* dataset (``web:{site_id}:docs``) powers the
+"ask our docs" mode: every conversation can recall from it, none writes to it.
 """
 
 from __future__ import annotations
@@ -47,11 +46,10 @@ class Conversation:
     site_id: str
     visitor_id: str
     conversation_id: str
-    namespace: str = "web"
 
     @property
     def session_id(self) -> str:
-        return f"{self.namespace}:{self.site_id}:{self.visitor_id}:{self.conversation_id}"
+        return f"web:{self.site_id}:{self.visitor_id}:{self.conversation_id}"
 
 
 @dataclasses.dataclass
@@ -102,22 +100,16 @@ def _answer_text(results: Sequence[Any]) -> str:
 class ChatMemoryAdapter:
     """Thin answer / seed-docs / forget layer over cognee memory."""
 
-    def __init__(self, *, namespace: str = "web", top_k: int = 8) -> None:
-        self.namespace = namespace
+    def __init__(self, *, top_k: int = 8) -> None:
         self.top_k = top_k
 
     # -- session helpers ---------------------------------------------------
 
     def conversation(self, *, site_id: str, visitor_id: str, conversation_id: str) -> Conversation:
-        return Conversation(
-            site_id=site_id,
-            visitor_id=visitor_id,
-            conversation_id=conversation_id,
-            namespace=self.namespace,
-        )
+        return Conversation(site_id=site_id, visitor_id=visitor_id, conversation_id=conversation_id)
 
     def docs_dataset(self, site_id: str) -> str:
-        return f"{self.namespace}:{site_id}:docs"
+        return f"web:{site_id}:docs"
 
     # -- "ask our docs" corpus ---------------------------------------------
 
@@ -167,12 +159,7 @@ class ChatMemoryAdapter:
 
     async def forget(self, *, conversation: Conversation) -> bool:
         """Forget everything remembered for a single conversation."""
-        session_manager = get_session_manager()
         user = await get_default_user()
-        return await session_manager.delete_session(
+        return await get_session_manager().delete_session(
             user_id=str(user.id), session_id=conversation.session_id
         )
-
-    async def forget_docs(self, *, site_id: str) -> dict:
-        """Drop the shared docs corpus for a site (account-level forget)."""
-        return await cognee.forget(dataset=self.docs_dataset(site_id))
