@@ -1,7 +1,7 @@
 """Access to the host MCP sampling session.
 
-When cognee runs as an MCP server (``cognee-mcp``), the host client (Claude Code,
-Cursor, …) can grant a ``sampling/createMessage`` capability. That call must
+When cognee runs as an MCP server (``cognee-mcp``), the host client can grant a
+``sampling/createMessage`` capability (support varies by host). That call must
 happen in the server process within the request, where the client connection
 lives. This module lets the LLM adapter — built deep in the gateway, far from the
 MCP request handler — reach that session without threading it through every

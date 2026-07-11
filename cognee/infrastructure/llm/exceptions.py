@@ -95,7 +95,7 @@ class MCPSamplingUnavailableError(CogneeValidationError):
         message: str = (
             "No MCP sampling session is available. LLM_PROVIDER=mcp-sampling only works while "
             "cognee runs as an MCP server inside a host that grants the `sampling` capability "
-            "(e.g. Claude Code / Cursor). Set LLM_PROVIDER to a provider with credentials, or "
+            "(support varies by host). Set LLM_PROVIDER to a provider with credentials, or "
             "run inside such a host."
         ),
     ) -> None:
