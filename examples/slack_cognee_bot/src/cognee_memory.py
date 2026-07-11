@@ -36,6 +36,8 @@ import cognee
 
 # DataItem is not exported at the cognee top level; import it from its module.
 from cognee.tasks.ingestion.data_item import DataItem
+from cognee.modules.data.exceptions import DatasetNotFoundError
+from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 
 from src.citation_index import CitationIndex
 from src.memory_adapter import (
@@ -194,26 +196,43 @@ class CogneeChatMemory(ChatMemory):
 
         Two searches: GRAPH_COMPLETION for the prose answer, CHUNKS (filtered to
         this channel's node set) for the citable source messages.
+
+        A channel with nothing ingested/cognified yet has no dataset (or no
+        vector collection), so cognee raises DatasetNotFoundError / NoDataError.
+        We map that to an empty answer; the renderer turns it into a calm
+        "no memory for this channel yet" reply instead of an error.
         """
-        prose_results = await cognee.search(
-            query,
-            query_type=cognee.SearchType.GRAPH_COMPLETION,
-            datasets=[ref.dataset_name],
-            top_k=self._top_k,
-        )
-        chunk_results = await cognee.search(
-            query,
-            query_type=cognee.SearchType.CHUNKS,
-            datasets=[ref.dataset_name],
-            node_name=ref.node_set,
-            top_k=self._top_k,
-        )
+        try:
+            prose_results = await cognee.search(
+                query,
+                query_type=cognee.SearchType.GRAPH_COMPLETION,
+                datasets=[ref.dataset_name],
+                top_k=self._top_k,
+            )
+            chunk_results = await cognee.search(
+                query,
+                query_type=cognee.SearchType.CHUNKS,
+                datasets=[ref.dataset_name],
+                node_name=ref.node_set,
+                top_k=self._top_k,
+            )
+        except (DatasetNotFoundError, NoDataError):
+            return Answer(text="", citations=[])
 
         answer_text = _first_text(prose_results)
         citations = _build_citations(_normalize_chunk_payloads(chunk_results), self._index)
         return Answer(text=answer_text, citations=citations)
 
     async def forget(self, ref: ConversationRef) -> None:
-        """Delete all memory for the channel (dataset-level forget) + its citations."""
-        await cognee.forget(dataset=ref.dataset_name)
+        """Delete all memory for the channel (dataset-level forget) + its citations.
+
+        Idempotent: forgetting a never-used channel is a no-op. cognee resolves an
+        unknown dataset name to ``None`` and then dereferences it, so a missing
+        dataset surfaces as DatasetNotFoundError or AttributeError — either way
+        there is nothing to delete.
+        """
+        try:
+            await cognee.forget(dataset=ref.dataset_name)
+        except (DatasetNotFoundError, AttributeError):
+            pass
         self._index.delete_channel(ref.channel_id)

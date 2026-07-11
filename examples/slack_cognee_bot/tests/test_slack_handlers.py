@@ -183,6 +183,20 @@ def test_app_mention_answers_extracted_question_and_replies():
 # --------------------------------------------------------------------------- #
 
 
+def test_answer_reply_apologizes_on_unexpected_error():
+    # An unexpected failure in the answer path (e.g. LLM auth/rate-limit) must still
+    # produce a reply, never a silent non-response.
+    buffer = _fake_buffer()
+    buffer.answer.side_effect = RuntimeError("llm exploded")
+    say = AsyncMock()
+    event = {"channel": "C1", "team": "T1", "ts": "5.0", "text": "<@U0BOT123> q?"}
+
+    asyncio.run(handle_app_mention(event, say, buffer, default_team_id="T0"))
+
+    say.assert_awaited_once()
+    assert "error" in say.await_args.args[0].lower()
+
+
 def test_recall_command_acks_answers_and_replies():
     buffer = _fake_buffer()
     say = AsyncMock()

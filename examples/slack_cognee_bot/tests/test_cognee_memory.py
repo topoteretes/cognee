@@ -254,6 +254,21 @@ def test_answer_blank_permalink_in_index_falls_back(memory, index, monkeypatch):
     assert cite.snippet == "stored snippet"
 
 
+def test_answer_returns_empty_when_channel_has_no_data(memory, monkeypatch):
+    # Fresh/empty channel: cognee.search raises DatasetNotFoundError. answer() must
+    # degrade to an empty Answer (the renderer shows a calm "no memory yet" reply)
+    # rather than propagate and leave the user with no response.
+    from cognee.modules.data.exceptions import DatasetNotFoundError
+
+    monkeypatch.setattr(cognee, "search", AsyncMock(side_effect=DatasetNotFoundError()))
+
+    answer = asyncio.run(memory.answer(REF, query="what did we decide?"))
+
+    assert isinstance(answer, Answer)
+    assert answer.text == ""
+    assert answer.citations == []
+
+
 def test_answer_handles_access_control_wrapper_shape(memory, index, monkeypatch):
     # Prove _first_text / _normalize handle the ENABLE_BACKEND_ACCESS_CONTROL shape:
     # search returns [{"dataset_id":..., "search_result": <result>}].
@@ -311,6 +326,27 @@ def test_forget_deletes_channel_dataset_and_citations(memory, index, monkeypatch
     forget_mock.assert_awaited_once()
     _, kwargs = forget_mock.await_args
     assert kwargs["dataset"] == "slack_C42"
+    assert index.get(document_id) is None
+
+
+def test_forget_is_idempotent_for_never_used_channel(memory, index, monkeypatch):
+    # cognee resolves an unknown dataset name to None and dereferences it, raising
+    # AttributeError. forget() must swallow it and still clear local citation rows.
+    document_id = str(message_data_id("C42", "1.0"))
+    index.put(
+        document_id,
+        channel_id="C42",
+        ts="1.0",
+        permalink="https://slack.example/x",
+        author="alice",
+        snippet="msg",
+    )
+    monkeypatch.setattr(
+        cognee, "forget", AsyncMock(side_effect=AttributeError("'NoneType' has no attribute 'id'"))
+    )
+
+    asyncio.run(memory.forget(REF))  # must not raise
+
     assert index.get(document_id) is None
 
 

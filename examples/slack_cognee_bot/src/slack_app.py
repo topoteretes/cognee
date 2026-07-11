@@ -124,13 +124,25 @@ async def handle_message_event(
     return True
 
 
+_ERROR_REPLY = (
+    "Sorry — I hit an error answering that. Please try again; check the bot logs if it persists."
+)
+
+
 async def _answer_and_reply(
     ref: ConversationRef,
     question: str,
     buffer: IngestionBuffer,
     say: Any,
 ) -> None:
-    answer = await buffer.answer(ref, query=question)
+    # A fresh/empty channel is handled inside answer() (calm empty reply). Any
+    # OTHER failure (LLM auth/rate-limit, cognify error) must still get a reply
+    # back to the user rather than a silent non-response.
+    try:
+        answer = await buffer.answer(ref, query=question)
+    except Exception:  # noqa: BLE001 - never leave the user without a reply
+        await say(_ERROR_REPLY)
+        return
     # Rich Block Kit citations reply; text= is the notification/accessibility
     # fallback Slack shows when blocks can't be rendered.
     await say(blocks=render_answer(answer), text=notification_text(answer))
