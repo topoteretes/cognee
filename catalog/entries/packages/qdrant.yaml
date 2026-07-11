@@ -10,12 +10,13 @@ tags:
 summary: Use Qdrant as cognee's vector store, backing recall and similarity search with a production-grade vector database.
 what_youll_build: A cognee deployment where all embeddings live in Qdrant, cognify and search go through the community-maintained adapter, and the built-in LanceDB is bypassed.
 quickstart: |
-  # start Qdrant locally
+  # start Qdrant locally (the example defaults to http://localhost:6333)
   docker run -p 6333:6333 qdrant/qdrant
+  git clone https://github.com/topoteretes/cognee-community.git
+  cd cognee-community/packages/vector/qdrant
   pip install cognee-community-vector-adapter-qdrant
-  export VECTOR_DB_PROVIDER=qdrant
-  export VECTOR_DB_URL=http://localhost:6333
-  python -m cognee-community/packages/vector/qdrant/example.py
+  export LLM_API_KEY=your_openai_key
+  python example.py
 expected_output: |
   Confirmation that embeddings are being written to Qdrant collections, and
   a search response drawn from Qdrant instead of LanceDB.

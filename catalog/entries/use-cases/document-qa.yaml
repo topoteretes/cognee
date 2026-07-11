@@ -10,6 +10,8 @@ tags:
 summary: Answer questions grounded in a set of documents using cognee's graph-completion retrieval instead of plain RAG.
 what_youll_build: A recall pipeline that ingests documents, extracts entities and relationships into a graph, and answers questions with citations back to source chunks.
 quickstart: |
+  git clone https://github.com/topoteretes/cognee.git
+  cd cognee
   uv pip install cognee
   export LLM_API_KEY=your_openai_key
   python examples/guides/recall_core.py

@@ -10,6 +10,8 @@ tags:
 summary: The minimum-viable path from a fresh cognee install to an agent that can remember and recall.
 what_youll_build: A Python script that ingests a few facts, cognifies them into a knowledge graph, and answers a natural-language question about them.
 quickstart: |
+  git clone https://github.com/topoteretes/cognee.git
+  cd cognee
   uv pip install cognee
   export LLM_API_KEY=your_openai_key
   python examples/guides/agent_memory_quickstart.py

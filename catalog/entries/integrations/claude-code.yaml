@@ -10,11 +10,10 @@ tags:
 summary: Persist Claude Code sessions to cognee and surface relevant prior context automatically on prompt.
 what_youll_build: A Claude Code setup where each session's history is captured to a knowledge graph and past decisions surface as context on future prompts.
 quickstart: |
-  # inside your Claude Code plugin directory
-  git clone https://github.com/topoteretes/cognee-integrations.git
-  cd cognee-integrations/integrations/claude-code
-  cp .env.example .env  # fill in LLM_API_KEY and cognee endpoint
-  # register the plugin in Claude Code, then run any coding session
+  claude plugin marketplace add topoteretes/cognee-integrations
+  claude plugin install cognee-memory@cognee
+  export LLM_API_KEY=your_openai_key  # local mode; the plugin bootstraps a local cognee API
+  claude  # first launch runs the SessionStart hook and connects memory
 expected_output: |
   A confirmation from the plugin that turns are being stored, plus a recall
   invoked from a follow-up session that returns prior context about the same

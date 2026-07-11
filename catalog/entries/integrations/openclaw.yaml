@@ -10,10 +10,10 @@ tags:
 summary: Give OpenClaw sessions persistent, recall-able memory through the cognee HTTP API.
 what_youll_build: An OpenClaw session that transparently remembers what happened before and can be queried by tool call.
 quickstart: |
-  npm install @cognee/cognee-openclaw
-  export COGNEE_API_URL=https://cognee.example.com
-  export COGNEE_API_TOKEN=your_token
-  # register the plugin in your OpenClaw config, then run a session
+  openclaw plugins install @cognee/cognee-openclaw
+  export COGNEE_BASE_URL=https://your-instance.cognee.ai
+  export COGNEE_API_KEY=ck_your_key
+  # add "@cognee/cognee-openclaw" to plugins.allow in ~/.openclaw/openclaw.json, then run a session
 expected_output: |
   A running OpenClaw session that pushes turns to cognee via `remember` and
   can recall past context on request. Confirm by triggering a recall and
