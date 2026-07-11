@@ -17,10 +17,10 @@ from __future__ import annotations
 import asyncio
 import os
 
-from src.cognee_memory import CogneeChatMemory
-from src.config import load_slack_settings
-from src.ingestion_buffer import DEFAULT_COGNIFY_BATCH_SIZE, IngestionBuffer
-from src.slack_app import build_app, start_socket_mode
+from .cognee_memory import CogneeChatMemory
+from .config import load_slack_settings
+from .ingestion_buffer import DEFAULT_COGNIFY_BATCH_SIZE, IngestionBuffer
+from .slack_app import build_app, start_socket_mode
 
 
 async def _run() -> None:

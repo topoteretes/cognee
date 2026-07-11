@@ -41,7 +41,7 @@ from cognee.tasks.ingestion.data_item import DataItem
 from cognee.modules.data.exceptions import DatasetNotFoundError
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 
-from src.memory_adapter import (
+from .memory_adapter import (
     Answer,
     ChatMemory,
     Citation,

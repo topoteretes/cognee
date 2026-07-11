@@ -28,10 +28,10 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from src.citations import notification_text, render_answer
-from src.config import SlackSettings
-from src.ingestion_buffer import IngestionBuffer
-from src.memory_adapter import ConversationRef
+from .citations import notification_text, render_answer
+from .config import SlackSettings
+from .ingestion_buffer import IngestionBuffer
+from .memory_adapter import ConversationRef
 
 # Matches a leading Slack user mention token like "<@U12345>" so we can strip
 # the "@cognee" prefix off an app_mention to get the bare question.
@@ -45,9 +45,8 @@ def _load_bolt():
         from slack_bolt.async_app import AsyncApp
     except ImportError as error:  # pragma: no cover - trivial re-raise
         raise ImportError(
-            "slack_bolt is required to run the Slack bot. Install the example's "
-            "dependencies with `pip install -e examples/slack_cognee_bot` "
-            "(or `pip install slack-bolt`)."
+            "slack_bolt is required to run the Slack bot. Install the slack extra with "
+            '`uv pip install -e ".[slack]"` (or `pip install slack-bolt`).'
         ) from error
     return AsyncApp, AsyncSocketModeHandler
 

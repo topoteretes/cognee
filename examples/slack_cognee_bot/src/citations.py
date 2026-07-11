@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from src.memory_adapter import Answer, Citation
+from .memory_adapter import Answer, Citation
 
 # Slack section text objects are capped at 3000 chars; keep a safe margin.
 _MAX_SECTION_CHARS = 2900

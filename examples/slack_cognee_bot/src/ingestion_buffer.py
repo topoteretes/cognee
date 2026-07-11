@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import asyncio
 
-from src.memory_adapter import Answer, ChatMemory, ConversationRef
+from .memory_adapter import Answer, ChatMemory, ConversationRef
 
 # Default number of buffered messages that triggers a cognify for a channel.
 DEFAULT_COGNIFY_BATCH_SIZE = 10

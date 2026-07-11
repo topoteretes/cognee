@@ -47,7 +47,7 @@ the source messages**.
 ## Run it (5 minutes)
 
 ```bash
-# 1. Install cognee with the slack extra
+# 1. Install cognee with the slack extra (from the repo root)
 uv pip install -e ".[slack]"
 
 # 2. Configure env: copy the template and fill in your keys/tokens
@@ -55,11 +55,8 @@ cp .env.template .env
 # set at least: LLM_API_KEY, SLACK_BOT_TOKEN, SLACK_APP_TOKEN
 # (see the "Slack bot example" section at the bottom of .env.template)
 
-# 3. Load the env vars into your shell
+# 3. Load the env vars, then start the bot from the example directory
 set -a && source .env && set +a
-# (or run with: uv run --env-file .env python -m src)
-
-# 4. Start the bot
 cd examples/slack_cognee_bot
 python -m src
 ```
