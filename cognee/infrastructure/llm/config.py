@@ -242,6 +242,13 @@ class LLMConfig(BaseSettings):
                 f"{missing_embed}"
             )
 
+        # Check model support matrix if LLM_MODEL is configured
+        model_name = os.environ.get("LLM_MODEL") or self.llm_model
+        if model_name:
+            from cognee.infrastructure.llm.ollama_support import check_model_support
+
+            check_model_support(model_name)
+
         return self
 
     def to_dict(self) -> dict[str, Any]:
