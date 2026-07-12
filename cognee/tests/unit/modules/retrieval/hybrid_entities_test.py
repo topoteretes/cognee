@@ -103,6 +103,37 @@ async def test_query_ranked_edge_beats_unranked_type_edge_before_cap():
 
 
 @pytest.mark.asyncio
+async def test_query_ranked_nonrendered_edge_is_reserved_as_fact_evidence():
+    first = "Alice works at Acme"
+    second = "Alice founded Initech"
+    graph = AsyncMock()
+    graph.get_neighborhood.return_value = (
+        [
+            ("seed", {"name": "Alice"}),
+            ("acme", {"name": "Acme"}),
+            ("initech", {"name": "Initech"}),
+        ],
+        [
+            ("seed", "acme", "works_at", {"edge_text": first}),
+            ("seed", "initech", "founded", {"edge_text": second}),
+        ],
+    )
+
+    entities = await build_entities(
+        graph,
+        [_hit("seed", [])],
+        1,
+        edge_ranks={
+            str(EdgeType.id_for(first)): 0,
+            str(EdgeType.id_for(second)): 1,
+        },
+    )
+
+    assert [edge["text"] for edge in entities[0]["edges"]] == [first]
+    assert [edge["text"] for edge in entities[0]["fact_evidence"]] == [second]
+
+
+@pytest.mark.asyncio
 async def test_edge_preserves_source_and_temporal_provenance():
     graph = AsyncMock()
     graph.get_neighborhood.return_value = (

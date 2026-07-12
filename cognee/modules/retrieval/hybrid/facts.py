@@ -1,5 +1,6 @@
 import re
 import unicodedata
+import json
 from typing import Any, Mapping, Optional
 
 from cognee.modules.graph.models.EdgeType import EdgeType
@@ -83,7 +84,10 @@ def graph_evidence_by_edge_type_id(entities: list[dict]) -> dict[str, list[dict]
     evidence_by_id: dict[str, list[dict]] = {}
     seen = set()
     for entity in entities or []:
-        for edge in entity.get("edges", []):
+        for edge in [
+            *entity.get("edges", []),
+            *entity.get("fact_evidence", []),
+        ]:
             edge_type_id = edge.get("edge_type_id")
             evidence = _edge_evidence(edge)
             evidence_key = (
@@ -91,12 +95,19 @@ def graph_evidence_by_edge_type_id(entities: list[dict]) -> dict[str, list[dict]
                 evidence.get("source_id"),
                 evidence.get("relationship"),
                 evidence.get("target_id"),
+                _provenance_identity(evidence.get("provenance")),
             )
             if not edge_type_id or evidence_key in seen:
                 continue
             seen.add(evidence_key)
             evidence_by_id.setdefault(edge_type_id, []).append(evidence)
     return evidence_by_id
+
+
+def _provenance_identity(provenance: Any) -> str:
+    if not isinstance(provenance, dict) or not provenance:
+        return ""
+    return json.dumps(provenance, sort_keys=True, ensure_ascii=False, default=str)
 
 
 def _fact_display_text(text: str) -> str:

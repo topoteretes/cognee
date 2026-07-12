@@ -159,6 +159,64 @@ def test_graph_evidence_is_deduplicated_and_keeps_temporal_provenance():
     ]
 
 
+def test_graph_evidence_keeps_distinct_temporal_and_source_variants():
+    edge_id = _edge_id("Alice works at Acme.")
+    base = {
+        "edge_type_id": edge_id,
+        "source": "Alice",
+        "source_id": "alice",
+        "relationship": "works_at",
+        "target": "Acme",
+        "target_id": "acme",
+    }
+    march = {**base, "provenance": {"source_chunk_id": "march", "valid_from": "2026-03"}}
+    june = {**base, "provenance": {"source_chunk_id": "june", "valid_from": "2026-06"}}
+
+    evidence = graph_evidence_by_edge_type_id([{"edges": [march], "fact_evidence": [june]}])
+
+    assert [item["provenance"] for item in evidence[edge_id]] == [
+        {"source_chunk_id": "march", "valid_from": "2026-03"},
+        {"source_chunk_id": "june", "valid_from": "2026-06"},
+    ]
+
+
+def test_reserved_entity_edge_can_be_selected_as_nonduplicative_grounded_fact():
+    shown_text = "Alice works at Acme."
+    reserved_text = "Alice founded Initech."
+    shown_id = _edge_id(shown_text)
+    reserved_id = _edge_id(reserved_text)
+    entities = [
+        {
+            "edges": [
+                {
+                    "edge_type_id": shown_id,
+                    "source_id": "alice",
+                    "relationship": "works_at",
+                    "target_id": "acme",
+                }
+            ],
+            "fact_evidence": [
+                {
+                    "edge_type_id": reserved_id,
+                    "source_id": "alice",
+                    "relationship": "founded",
+                    "target_id": "initech",
+                }
+            ],
+        }
+    ]
+
+    facts = select_facts(
+        [_hit(shown_text), _hit(reserved_text)],
+        {shown_id},
+        5,
+        evidence_by_id=graph_evidence_by_edge_type_id(entities),
+        require_evidence=True,
+    )
+
+    assert [fact["text"] for fact in facts] == [reserved_text]
+
+
 def test_select_facts_unicode_normalizes_deduplication():
     composed = _hit("Caf\u00e9 has a multilingual menu.")
     decomposed = _hit("Cafe\u0301   has a multilingual menu.")

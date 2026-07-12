@@ -53,11 +53,21 @@ async def build_entities(
         node_name_filter_operator=node_name_filter_operator,
     )
     for entity in entities:
-        entity["edges"] = _edge_bullets_from_connections(
+        ranked_edges = _ranked_edge_bullets_from_connections(
             connections_by_entity_id.get(entity["id"], []),
-            max_edges_per_entity,
             edge_ranks or {},
         )
+        entity["edges"] = ranked_edges[: max(0, max_edges_per_entity)]
+        # Query-ranked local edges that did not fit the entity bullet budget
+        # remain available as concrete evidence for the non-duplicative facts
+        # section. Unranked neighborhood noise is not retained.
+        fact_evidence = [
+            edge
+            for edge in ranked_edges[max(0, max_edges_per_entity) :]
+            if edge.get("edge_type_id") in (edge_ranks or {})
+        ]
+        if fact_evidence:
+            entity["fact_evidence"] = fact_evidence
     return entities
 
 
@@ -165,6 +175,13 @@ def _edge_bullets_from_connections(
     if max_edges <= 0:
         return []
 
+    return _ranked_edge_bullets_from_connections(connections, edge_ranks)[:max_edges]
+
+
+def _ranked_edge_bullets_from_connections(
+    connections: list[Any], edge_ranks: dict[str, int]
+) -> list[dict]:
+
     edges = []
     seen_keys = set()
     seen_texts = set()
@@ -191,7 +208,7 @@ def _edge_bullets_from_connections(
             seen_texts.add(normalized_text)
         edges.append(bullet)
     edges.sort(key=lambda edge: _edge_sort_key(edge, edge_ranks))
-    return edges[:max_edges]
+    return edges
 
 
 def _edge_sort_key(edge: dict, edge_ranks: dict[str, int]) -> tuple[int, int, int]:
