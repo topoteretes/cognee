@@ -261,10 +261,125 @@ class TestCognifyCommand:
             datasets=None,
             user=ANY,
             chunk_size=None,
-            ontology_file_path=None,
+            config=None,
             chunker=TextChunker,
             run_in_background=False,
             chunks_per_batch=None,
+        )
+
+    @patch(_RESOLVE_USER_PATCH, new_callable=lambda: AsyncMock(return_value=_mock_user()))
+    @patch("cognee.cli.commands.cognify_command.asyncio.run", side_effect=_mock_run)
+    def test_execute_with_ontology_file(self, mock_asyncio_run, _mock_resolve, tmp_path):
+        """--ontology-file is translated into the canonical ontology Config structure"""
+        ontology_path = tmp_path / "ontology.owl"
+        ontology_path.write_text(
+            '<?xml version="1.0"?>'
+            '<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"></rdf:RDF>'
+        )
+
+        mock_cognee = MagicMock()
+        mock_cognee.cognify = AsyncMock(return_value="success")
+
+        with patch.dict(sys.modules, {"cognee": mock_cognee}):
+            command = CognifyCommand()
+            args = argparse.Namespace(
+                datasets=None,
+                chunk_size=None,
+                ontology_file=str(ontology_path),
+                chunker="TextChunker",
+                background=False,
+                verbose=False,
+            )
+            command.execute(args)
+
+        from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
+
+        config = mock_cognee.cognify.await_args.kwargs["config"]
+        resolver = config["ontology_config"]["ontology_resolver"]
+        assert isinstance(resolver, RDFLibOntologyResolver)
+        assert resolver.ontology_file == str(ontology_path)
+
+    @patch(_RESOLVE_USER_PATCH, new_callable=lambda: AsyncMock(return_value=_mock_user()))
+    @patch("cognee.cli.commands.cognify_command.asyncio.run", side_effect=_mock_run)
+    def test_execute_with_multiple_ontology_files(self, mock_asyncio_run, _mock_resolve, tmp_path):
+        """A comma-separated --ontology-file loads all listed files into the resolver"""
+        rdf_stub = (
+            '<?xml version="1.0"?>'
+            '<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"></rdf:RDF>'
+        )
+        first_path = tmp_path / "first.owl"
+        second_path = tmp_path / "second.owl"
+        first_path.write_text(rdf_stub)
+        second_path.write_text(rdf_stub)
+
+        mock_cognee = MagicMock()
+        mock_cognee.cognify = AsyncMock(return_value="success")
+
+        with patch.dict(sys.modules, {"cognee": mock_cognee}):
+            command = CognifyCommand()
+            args = argparse.Namespace(
+                datasets=None,
+                chunk_size=None,
+                ontology_file=f"{first_path},{second_path}",
+                chunker="TextChunker",
+                background=False,
+                verbose=False,
+            )
+            command.execute(args)
+
+        config = mock_cognee.cognify.await_args.kwargs["config"]
+        resolver = config["ontology_config"]["ontology_resolver"]
+        assert resolver.ontology_file == [str(first_path), str(second_path)]
+
+    def test_execute_with_missing_ontology_file(self):
+        """A nonexistent --ontology-file fails fast, before any processing"""
+        command = CognifyCommand()
+        args = argparse.Namespace(
+            datasets=None,
+            chunk_size=None,
+            ontology_file="/nonexistent/ontology.owl",
+            chunker="TextChunker",
+            background=False,
+            verbose=False,
+        )
+
+        with pytest.raises(CliCommandException, match="Ontology file not found"):
+            command.execute(args)
+
+    @patch(_RESOLVE_USER_PATCH, new_callable=lambda: AsyncMock(return_value=_mock_user()))
+    @patch("cognee.cli.commands.cognify_command.asyncio.run", side_effect=_mock_run)
+    def test_cli_call_matches_real_cognify_signature(self, mock_asyncio_run, _mock_resolve):
+        """Every kwarg the CLI passes must be an explicit parameter of the real
+        cognee.cognify(). Its **kwargs silently swallows stray arguments and
+        forwards them to the LLM client, so a mocked call assertion alone
+        cannot catch signature drift (issue #3991)."""
+        import inspect
+
+        mock_cognee = MagicMock()
+        mock_cognee.cognify = AsyncMock(return_value="success")
+
+        with patch.dict(sys.modules, {"cognee": mock_cognee}):
+            command = CognifyCommand()
+            args = argparse.Namespace(
+                datasets=None,
+                chunk_size=None,
+                ontology_file=None,
+                chunker="TextChunker",
+                background=False,
+                verbose=False,
+            )
+            command.execute(args)
+
+        passed = set(mock_cognee.cognify.await_args.kwargs)
+        real_params = inspect.signature(cognee.cognify).parameters
+        explicit = {
+            name
+            for name, param in real_params.items()
+            if param.kind in (param.POSITIONAL_OR_KEYWORD, param.KEYWORD_ONLY)
+        }
+        unexpected = passed - explicit
+        assert not unexpected, (
+            f"CLI passes kwargs that are not explicit cognify() parameters: {unexpected}"
         )
 
     @patch("cognee.cli.commands.cognify_command.asyncio.run")
