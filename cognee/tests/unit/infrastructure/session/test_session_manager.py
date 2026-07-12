@@ -1190,3 +1190,142 @@ class TestSessionManager:
         qa_kw = mock_cache.create_qa_entry.call_args.kwargs
         assert qa_kw["feedback_text"] is None
         assert qa_kw["feedback_score"] is None
+
+
+class TestStaleSessionEntryFiltering:
+    """Session cache must not replay QA entries grounded in deleted graph nodes (#4030).
+
+    A session answer persists independently of the knowledge graph, so after a
+    document is hard-deleted (``forget`` / ``delete(mode="hard")``) its cached answers
+    would otherwise resurface — either as conversation history injected into the
+    completion prompt or as an exact-question cache hit — and make completions assert
+    facts from data that no longer exists. ``get_session`` /
+    ``get_session_entries_by_ids`` drop any entry whose grounding nodes are gone.
+    """
+
+    @staticmethod
+    def _patch_graph_engine(monkeypatch, factory):
+        """Patch get_graph_engine on its defining module.
+
+        The ``graph`` package re-exports the ``get_graph_engine`` function, so the
+        dotted string path is ambiguous; patch the module object directly instead.
+        """
+        import importlib
+
+        gge_module = importlib.import_module(
+            "cognee.infrastructure.databases.graph.get_graph_engine"
+        )
+        monkeypatch.setattr(gge_module, "get_graph_engine", factory)
+
+    @staticmethod
+    def _entry(qa_id: str, answer: str, node_ids=None) -> SessionQAEntry:
+        return SessionQAEntry(
+            time="2031-01-01T00:00:00",
+            question=f"q-{qa_id}",
+            context="",
+            answer=answer,
+            qa_id=qa_id,
+            used_graph_element_ids={"node_ids": node_ids} if node_ids else None,
+        )
+
+    def _graph_engine_returning(self, surviving_node_ids):
+        """Mock graph engine whose get_nodes echoes back only the surviving node ids."""
+        surviving = set(surviving_node_ids)
+
+        async def get_nodes(node_ids):
+            return [{"id": nid} for nid in node_ids if nid in surviving]
+
+        engine = MagicMock()
+        engine.get_nodes = AsyncMock(side_effect=get_nodes)
+        return engine
+
+    def _sm(self, entries):
+        cache = MagicMock()
+        cache.get_latest_qa_entries = AsyncMock(return_value=list(entries))
+        cache.get_all_qa_entries = AsyncMock(return_value=list(entries))
+        cache.get_qa_entries_by_ids = AsyncMock(return_value=list(entries))
+        return SessionManager(cache_engine=cache)
+
+    @pytest.mark.asyncio
+    async def test_get_session_drops_entries_grounded_in_deleted_nodes(self, monkeypatch):
+        """An entry citing a now-missing node is dropped; a live-grounded entry survives."""
+        alive = self._entry("qa-alive", "kept", node_ids=["n-alive"])
+        stale = self._entry("qa-stale", "leaked deleted fact", node_ids=["n-deleted"])
+        sm = self._sm([alive, stale])
+        self._patch_graph_engine(
+            monkeypatch,
+            AsyncMock(return_value=self._graph_engine_returning({"n-alive"})),
+        )
+
+        result = await sm.get_session(user_id="u1", last_n=10)
+
+        assert [e.qa_id for e in result] == ["qa-alive"]
+
+    @pytest.mark.asyncio
+    async def test_get_session_empty_graph_drops_all_grounded_entries(self, monkeypatch):
+        """The #4030 scenario: graph scrubbed to zero nodes → every grounded answer dropped."""
+        entries = [
+            self._entry("qa-1", "deleted fact one", node_ids=["n1"]),
+            self._entry("qa-2", "deleted fact two", node_ids=["n2", "n3"]),
+        ]
+        sm = self._sm(entries)
+        self._patch_graph_engine(
+            monkeypatch, AsyncMock(return_value=self._graph_engine_returning(set()))
+        )
+
+        result = await sm.get_session(user_id="u1", last_n=10)
+
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_partial_grounding_loss_drops_entry(self, monkeypatch):
+        """If any grounding node is gone the answer is stale, even if others survive."""
+        entry = self._entry("qa-mixed", "half deleted", node_ids=["n-alive", "n-deleted"])
+        sm = self._sm([entry])
+        self._patch_graph_engine(
+            monkeypatch,
+            AsyncMock(return_value=self._graph_engine_returning({"n-alive"})),
+        )
+
+        result = await sm.get_session(user_id="u1", last_n=10)
+
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_ungrounded_entries_kept_without_graph_call(self, monkeypatch):
+        """Feedback-only turns carry no graph grounding, so keep them and skip the graph query."""
+        entry = self._entry("qa-feedback", "thanks for your feedback", node_ids=None)
+        sm = self._sm([entry])
+        graph_engine_factory = AsyncMock()
+        self._patch_graph_engine(monkeypatch, graph_engine_factory)
+
+        result = await sm.get_session(user_id="u1", last_n=10)
+
+        assert [e.qa_id for e in result] == ["qa-feedback"]
+        graph_engine_factory.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_staleness_check_fails_open_on_graph_error(self, monkeypatch):
+        """A graph hiccup must never drop live history — return entries unchanged."""
+        entry = self._entry("qa-1", "answer", node_ids=["n1"])
+        sm = self._sm([entry])
+        self._patch_graph_engine(monkeypatch, AsyncMock(side_effect=RuntimeError("graph down")))
+
+        result = await sm.get_session(user_id="u1", last_n=10)
+
+        assert [e.qa_id for e in result] == ["qa-1"]
+
+    @pytest.mark.asyncio
+    async def test_get_session_entries_by_ids_filters_stale(self, monkeypatch):
+        """The vector-hit read path (exact-question replay) is filtered too."""
+        alive = self._entry("qa-alive", "kept", node_ids=["n-alive"])
+        stale = self._entry("qa-stale", "leaked deleted fact", node_ids=["n-deleted"])
+        sm = self._sm([alive, stale])
+        self._patch_graph_engine(
+            monkeypatch,
+            AsyncMock(return_value=self._graph_engine_returning({"n-alive"})),
+        )
+
+        result = await sm.get_session_entries_by_ids(user_id="u1", qa_ids=["qa-alive", "qa-stale"])
+
+        assert [e.qa_id for e in result] == ["qa-alive"]

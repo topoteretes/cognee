@@ -443,6 +443,74 @@ class SessionManager:
             lines.append(f"ANSWER: {entry.get('answer', '')}\n\n")
         return "".join(lines)
 
+    @staticmethod
+    def _entry_grounding_node_ids(entry: Any) -> list[str]:
+        """Return the graph node ids a QA entry's answer was grounded in (may be empty).
+
+        Accepts either a ``SessionQAEntry`` or a raw dict, since adapters may hand back
+        either shape.
+        """
+        if isinstance(entry, dict):
+            graph_elements = entry.get("used_graph_element_ids")
+        else:
+            graph_elements = getattr(entry, "used_graph_element_ids", None)
+        if not isinstance(graph_elements, dict):
+            return []
+        node_ids = graph_elements.get("node_ids") or []
+        return [str(node_id) for node_id in node_ids if node_id]
+
+    async def _drop_entries_grounded_in_deleted_nodes(
+        self, entries: list[SessionQAEntry]
+    ) -> list[SessionQAEntry]:
+        """Drop QA entries whose grounding graph nodes no longer exist.
+
+        Session-cache answers persist independently of the knowledge graph, so an
+        answer grounded in a document survives that document being hard-deleted
+        (``forget`` / ``delete(mode="hard")``). Replaying such an entry — either as
+        conversation history injected into the completion prompt or as an exact-question
+        cache hit — makes completions assert facts from deleted data (issue #4030).
+
+        We treat an entry as stale when any node it was grounded in is now missing from
+        the graph: its answer cited evidence that no longer exists, so it must not feed a
+        new completion. Entries without graph grounding (e.g. feedback-only turns) are
+        always kept. Fail-open: any error (or an unavailable graph engine) returns the
+        entries unchanged so a graph hiccup never drops live conversation history.
+        """
+        referenced_node_ids: set[str] = set()
+        for entry in entries:
+            referenced_node_ids.update(self._entry_grounding_node_ids(entry))
+
+        # No grounded entries → nothing the graph could have invalidated; skip the query.
+        if not referenced_node_ids:
+            return entries
+
+        try:
+            from cognee.infrastructure.databases.graph.get_graph_engine import (
+                get_graph_engine,
+            )
+
+            graph_engine = await get_graph_engine()
+            existing_nodes = await graph_engine.get_nodes(list(referenced_node_ids))
+            existing_node_ids = {
+                str(node.get("id"))
+                for node in existing_nodes
+                if isinstance(node, dict) and node.get("id") is not None
+            }
+        except Exception as error:
+            logger.warning(
+                "SessionManager: staleness check failed open, keeping session entries: %s",
+                error,
+            )
+            return entries
+
+        fresh_entries: list[SessionQAEntry] = []
+        for entry in entries:
+            grounding_ids = self._entry_grounding_node_ids(entry)
+            if grounding_ids and any(node_id not in existing_node_ids for node_id in grounding_ids):
+                continue
+            fresh_entries.append(entry)
+        return fresh_entries
+
     async def get_session(
         self,
         *,
@@ -488,10 +556,11 @@ class SessionManager:
 
         if entries is None:
             return "" if formatted else []
-        entries_list = list(entries)
+        entries_list = await self._drop_entries_grounded_in_deleted_nodes(list(entries))
         return (
             self.format_entries(
-                [entry.model_dump() for entry in entries_list], include_context=include_context
+                [entry.model_dump() for entry in entries_list],
+                include_context=include_context,
             )
             if formatted
             else entries_list
@@ -512,7 +581,8 @@ class SessionManager:
         if not self.is_available or not qa_ids:
             return []
 
-        return await self._cache.get_qa_entries_by_ids(user_id, session_id, qa_ids)
+        entries = await self._cache.get_qa_entries_by_ids(user_id, session_id, qa_ids)
+        return await self._drop_entries_grounded_in_deleted_nodes(list(entries or []))
 
     async def get_agent_trace_session(
         self,
