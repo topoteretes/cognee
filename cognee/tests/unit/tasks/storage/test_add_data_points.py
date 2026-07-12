@@ -184,6 +184,31 @@ async def test_add_data_points_with_single_datapoint(
     mock_index_nodes.assert_awaited_once()
 
 
+@pytest.mark.asyncio
+@patch.object(adp_module, "index_graph_edges")
+@patch.object(adp_module, "index_data_points")
+@patch.object(adp_module, "get_unified_engine")
+@patch.object(adp_module, "deduplicate_nodes_and_edges")
+@patch.object(adp_module, "get_graph_from_model")
+async def test_add_data_points_invalidates_bm25_cache_for_context_dataset(
+    mock_get_graph, mock_dedup, mock_get_unified, mock_index_nodes, mock_index_edges
+):
+    datapoint = SimplePoint(text="new searchable text")
+    dataset = SimpleNamespace(id=uuid4())
+    ctx = PipelineContext(dataset=dataset)
+    mock_get_graph.return_value = ([datapoint], [])
+    mock_dedup.side_effect = lambda nodes, edges: (nodes, edges)
+    unified, _, _ = _make_unified_mock()
+    mock_get_unified.return_value = unified
+
+    with patch(
+        "cognee.modules.retrieval.bm25_retriever.BM25ChunksRetriever.invalidate_cache"
+    ) as invalidate_cache:
+        await add_data_points([datapoint], ctx=ctx)
+
+    invalidate_cache.assert_called_once_with(str(dataset.id))
+
+
 class _AsyncCM:
     """Minimal async context manager yielding a fixed session."""
 

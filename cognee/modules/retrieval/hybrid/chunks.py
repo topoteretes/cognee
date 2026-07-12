@@ -52,9 +52,8 @@ async def retrieve_hybrid_chunks(
             required=True,
             query_vector=query_vector,
         ),
-        search_collection(
+        search_optional_summary_collection(
             vector_engine,
-            "TextSummary_text",
             query,
             summary_limit,
             node_name,
@@ -72,12 +71,19 @@ async def retrieve_hybrid_chunks(
     )
     missing_source_chunk_ids = source_chunk_ids_to_load(pairs)
     if missing_source_chunk_ids:
-        source_chunks = await load_source_chunks_for_summaries(
-            vector_engine,
-            missing_source_chunk_ids,
-            node_name,
-            node_name_filter_operator,
-        )
+        try:
+            source_chunks = await load_source_chunks_for_summaries(
+                vector_engine,
+                missing_source_chunk_ids,
+                node_name,
+                node_name_filter_operator,
+            )
+        except Exception as error:
+            logger.warning(
+                "TextSummary source-chunk load failed; continuing with existing chunks: %s",
+                error,
+            )
+            source_chunks = []
         attach_source_chunks(pairs, source_chunks)
 
     ranked_pairs = rank_chunk_summary_pairs(
@@ -97,10 +103,23 @@ async def retrieve_hybrid_chunks(
             node_name_filter_operator,
         )
 
-    return {
+    result = {
         "chunks": [pair["chunk"] for pair in ranked_pairs if pair["chunk"] is not None],
         "chunk_summaries": summary_text_by_chunk_id(ranked_pairs),
     }
+    if ranked_pairs:
+        result["chunk_attribution"] = [
+            {
+                "chunk_id": pair["chunk_id"],
+                "retrieval_score": pair["retrieval_score"],
+                "rrf_score": pair["rrf_score"],
+                "channels": [dict(channel) for channel in pair["retrieval_channels"]],
+                "importance_weight": pair["importance_weight"],
+                "truth_factor": pair["truth_factor"],
+            }
+            for pair in ranked_pairs
+        ]
+    return result
 
 
 def summary_candidate_limit(chunks_top_k: int, text_summaries_top_k: Optional[int]) -> int:
@@ -114,7 +133,7 @@ async def search_bm25_chunks(
     limit: int,
     node_name: Optional[list[str]],
     node_name_filter_operator: str,
-) -> list[dict]:
+) -> list[Any]:
     if limit <= 0:
         return []
 
@@ -143,7 +162,9 @@ async def search_bm25_chunks(
             continue
         if not payload_matches_node_filter(chunk, node_name, node_name_filter_operator):
             continue
-        chunks.append(chunk)
+        # Preserve the native BM25 score for attribution. It remains separate from
+        # uncalibrated vector distances and therefore does not affect RRF directly.
+        chunks.append((chunk, score))
     return chunks
 
 
@@ -179,6 +200,32 @@ async def search_collection(
             logger.error("%s collection not found", collection_name)
             raise NoDataError("No data found in the system, please add data first.") from error
         logger.debug("%s collection not found; using empty channel", collection_name)
+        return []
+
+
+async def search_optional_summary_collection(
+    vector_engine: Any,
+    query: str,
+    limit: int,
+    node_name: Optional[list[str]],
+    node_name_filter_operator: str,
+    query_vector: Optional[list[float]] = None,
+) -> list[Any]:
+    try:
+        return await search_collection(
+            vector_engine,
+            "TextSummary_text",
+            query,
+            limit,
+            node_name,
+            node_name_filter_operator,
+            query_vector=query_vector,
+        )
+    except Exception as error:
+        logger.warning(
+            "TextSummary_text search failed; continuing with lexical/vector chunks: %s",
+            error,
+        )
         return []
 
 
@@ -249,6 +296,12 @@ async def load_summary_text_for_ranked_pairs(
         )
     except CollectionNotFoundError:
         logger.warning("TextSummary_text collection missing while loading chunk summaries")
+        return
+    except Exception as error:
+        logger.warning(
+            "TextSummary_text load failed; continuing without paired summaries: %s",
+            error,
+        )
         return
 
     summaries_by_id = {result_id(summary): summary for summary in summaries}

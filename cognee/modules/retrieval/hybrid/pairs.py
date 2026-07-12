@@ -1,3 +1,5 @@
+import math
+from numbers import Real
 from typing import Any, Optional
 from uuid import UUID, uuid5
 
@@ -22,7 +24,9 @@ def chunk_summary_pairs(
     pairs = []
 
     for rank_field, chunks in (("bm25_rank", bm25_chunks), ("vector_rank", vector_chunks)):
-        for rank, chunk in enumerate(chunks or []):
+        score_field = rank_field.replace("_rank", "_score")
+        for rank, scored_chunk in enumerate(chunks or []):
+            chunk, native_score = _result_and_native_score(scored_chunk)
             chunk_id = result_id(chunk)
             chunk_text = display_value(payload(chunk).get("text"))
             if not chunk_id and not chunk_text:
@@ -40,8 +44,10 @@ def chunk_summary_pairs(
                 pair["chunk_id"] = chunk_id
             if pair[rank_field] is None:
                 pair[rank_field] = rank
+                pair[score_field] = native_score
 
-    for rank, summary in enumerate(summary_hits or []):
+    for rank, scored_summary in enumerate(summary_hits or []):
+        summary, native_score = _result_and_native_score(scored_summary)
         summary_payload = payload(summary)
         if not payload_matches_node_filter(summary_payload, node_name, node_name_filter_operator):
             continue
@@ -61,6 +67,7 @@ def chunk_summary_pairs(
             pair["summary_rank"] = rank
             pair["summary_id"] = result_id(summary)
             pair["summary_text"] = display_value(summary_payload.get("text"))
+            pair["summary_score"] = native_score
 
     return pairs
 
@@ -126,6 +133,24 @@ def _new_chunk_summary_pair(
         "summary_text": None,
         "chunk": None,
         "bm25_rank": None,
+        "bm25_score": None,
         "vector_rank": None,
+        "vector_score": None,
         "summary_rank": None,
+        "summary_score": None,
     }
+
+
+def _result_and_native_score(result: Any) -> tuple[Any, Optional[float]]:
+    """Return a channel result and its uncalibrated backend score, when available."""
+    if isinstance(result, (list, tuple)) and len(result) == 2:
+        candidate, raw_score = result
+    else:
+        candidate = result
+        raw_score = getattr(result, "score", None)
+
+    if isinstance(raw_score, Real) and not isinstance(raw_score, bool):
+        numeric_score = float(raw_score)
+        if math.isfinite(numeric_score):
+            return candidate, numeric_score
+    return candidate, None
