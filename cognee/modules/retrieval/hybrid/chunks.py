@@ -41,7 +41,13 @@ async def retrieve_hybrid_chunks(
     candidate_limit = max(0, chunks_top_k * 2)
     summary_limit = summary_candidate_limit(chunks_top_k, text_summaries_top_k)
     bm25_chunks, vector_chunks, summary_hits = await asyncio.gather(
-        search_bm25_chunks(query, candidate_limit, node_name, node_name_filter_operator),
+        search_bm25_chunks(
+            vector_engine,
+            query,
+            candidate_limit,
+            node_name,
+            node_name_filter_operator,
+        ),
         search_collection(
             vector_engine,
             "DocumentChunk_text",
@@ -129,6 +135,7 @@ def summary_candidate_limit(chunks_top_k: int, text_summaries_top_k: Optional[in
 
 
 async def search_bm25_chunks(
+    vector_engine: Any,
     query: str,
     limit: int,
     node_name: Optional[list[str]],
@@ -153,7 +160,7 @@ async def search_bm25_chunks(
         logger.warning("BM25 chunk retrieval failed; using vector chunks only: %s", error)
         return []
 
-    chunks = []
+    candidates = []
     for item in scored_chunks:
         chunk, score = scored_payload(item)
         if score <= 0:
@@ -162,9 +169,47 @@ async def search_bm25_chunks(
             continue
         if not payload_matches_node_filter(chunk, node_name, node_name_filter_operator):
             continue
-        # Preserve the native BM25 score for attribution. It remains separate from
-        # uncalibrated vector distances and therefore does not affect RRF directly.
-        chunks.append((chunk, score))
+        chunk_id = result_id(chunk)
+        if not chunk_id:
+            logger.warning("Dropping BM25 candidate without a stable chunk id")
+            continue
+        candidates.append((chunk_id, score))
+
+    if not candidates:
+        return []
+
+    try:
+        current_rows = await vector_engine.retrieve(
+            "DocumentChunk_text",
+            [chunk_id for chunk_id, _ in candidates],
+        )
+    except Exception as error:
+        # Cached lexical candidates are not authoritative. If freshness cannot be
+        # checked, fail this lane closed and let vector/graph retrieval continue.
+        logger.warning("BM25 candidate validation failed; using vector chunks only: %s", error)
+        return []
+
+    current_by_id = {result_id(row): row for row in current_rows if result_id(row)}
+    chunks = []
+    for chunk_id, score in candidates:
+        current_row = current_by_id.get(chunk_id)
+        if current_row is None:
+            logger.debug("Dropping deleted BM25 chunk candidate: %s", chunk_id)
+            continue
+
+        current_payload = payload(current_row)
+        if not current_payload:
+            logger.warning("Dropping BM25 candidate with empty current payload: %s", chunk_id)
+            continue
+        refreshed_payload = dict(current_payload)
+        refreshed_payload.setdefault("id", chunk_id)
+        if not payload_matches_node_filter(refreshed_payload, node_name, node_name_filter_operator):
+            logger.debug("Dropping out-of-scope BM25 chunk candidate: %s", chunk_id)
+            continue
+
+        # Preserve the native BM25 score for attribution while replacing stale graph
+        # payload with the current vector row.
+        chunks.append((refreshed_payload, score))
     return chunks
 
 

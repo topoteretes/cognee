@@ -247,6 +247,12 @@ async def test_chunk_retrieval_ranks_bm25_and_vector_channels_with_dedupe():
             _result("semantic-2", {"id": "semantic-2", "text": "Second semantic extra"}),
         ]
     )
+    vector.retrieve = AsyncMock(
+        return_value=[
+            _result("bm25-1", {"id": "bm25-1", "text": "BM25 first"}),
+            _result("shared", {"id": "shared", "text": "BM25 shared"}),
+        ]
+    )
     retriever = HybridRetriever(chunks_top_k=4, text_summaries_top_k=0)
 
     with (
@@ -289,6 +295,18 @@ async def test_bm25_chunks_respect_nodeset_filter_before_ranking():
     )
     vector = MagicMock()
     vector.search = AsyncMock(return_value=[])
+    vector.retrieve = AsyncMock(
+        return_value=[
+            _result(
+                "keep",
+                {
+                    "id": "keep",
+                    "text": "Keep",
+                    "belongs_to_set": ["KEN", "src_type:figure"],
+                },
+            )
+        ]
+    )
     retriever = HybridRetriever(
         chunks_top_k=4,
         node_name=["KEN", "src_type:figure"],
@@ -324,6 +342,9 @@ async def test_zero_score_bm25_chunks_do_not_reserve_context_slots():
     vector = MagicMock()
     vector.search = _vector_search(
         chunks=[_result("semantic", {"id": "semantic", "text": "Semantic fallback"})]
+    )
+    vector.retrieve = AsyncMock(
+        return_value=[_result("positive", {"id": "positive", "text": "Positive lexical score"})]
     )
     retriever = HybridRetriever(chunks_top_k=2, text_summaries_top_k=0)
 
@@ -366,7 +387,13 @@ async def test_default_summary_search_participates_in_chunk_ranking():
             )
         ],
     )
-    vector.retrieve = AsyncMock(return_value=[])
+
+    async def retrieve(collection_name, _ids):
+        if collection_name == "DocumentChunk_text":
+            return [_result("lexical", {"id": "lexical", "text": "Lexical"})]
+        return []
+
+    vector.retrieve = AsyncMock(side_effect=retrieve)
     retriever = HybridRetriever(chunks_top_k=1)
 
     with (
@@ -395,6 +422,7 @@ async def test_summary_retrieval_opt_out_disables_summary_channel_only():
     )
     vector = MagicMock()
     vector.search = _vector_search(chunks=[_result("semantic", {"id": "semantic", "text": "S"})])
+    vector.retrieve = AsyncMock(return_value=[_result("bm25", {"id": "bm25", "text": "BM25"})])
     retriever = HybridRetriever(chunks_top_k=2, text_summaries_top_k=0)
 
     with (
