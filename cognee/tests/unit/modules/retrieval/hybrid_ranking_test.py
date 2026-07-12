@@ -43,11 +43,24 @@ def test_summary_is_supporting_evidence_by_default_and_attribution_is_exposed():
     assert ranked[1]["retrieval_channels"] == [
         {
             "channel": "summary",
+            "family": "semantic",
             "rank": 0,
             "weight": 0.5,
             "contribution": pytest.approx(0.5 / 31),
         }
     ]
+
+
+def test_chunk_and_derived_summary_are_one_semantic_vote_family():
+    exact = _pair("exact", bm25_rank=0)
+    correlated = _pair("correlated", vector_rank=10, summary_rank=10)
+
+    ranked = rank_chunk_summary_pairs(
+        [correlated, exact], limit=2, use_importance_weight=False, rrf_k=50
+    )
+
+    assert [pair["chunk_id"] for pair in ranked] == ["exact", "correlated"]
+    assert ranked[1]["rrf_score"] == pytest.approx(1 / 61)
 
 
 def test_channel_weights_are_configurable_without_changing_callers():

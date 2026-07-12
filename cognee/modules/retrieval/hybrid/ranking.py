@@ -46,7 +46,7 @@ def rank_chunk_summary_pairs(
         if not attribution:
             continue
 
-        rrf_score = sum(channel["contribution"] for channel in attribution)
+        rrf_score = _fused_rrf_score(attribution)
         final_score = rrf_score
         importance = _importance(chunk) if use_importance_weight else None
 
@@ -124,6 +124,7 @@ def _channel_attribution(pair: dict, weights: Mapping[str, float], rrf_k: int) -
 
         item = {
             "channel": channel,
+            "family": "lexical" if channel == "bm25" else "semantic",
             "rank": rank,
             "weight": weight,
             "contribution": weight / (rrf_k + rank + 1),
@@ -135,3 +136,15 @@ def _channel_attribution(pair: dict, weights: Mapping[str, float], rrf_k: int) -
             item["native_score"] = float(native_score)
         attribution.append(item)
     return attribution
+
+
+def _fused_rrf_score(attribution: list[dict]) -> float:
+    """Fuse independent evidence families without double-counting derived summaries."""
+    lexical = sum(
+        channel["contribution"] for channel in attribution if channel["family"] == "lexical"
+    )
+    semantic = max(
+        (channel["contribution"] for channel in attribution if channel["family"] == "semantic"),
+        default=0.0,
+    )
+    return lexical + semantic
