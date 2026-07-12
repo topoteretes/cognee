@@ -153,4 +153,21 @@ def normalize_search_payload(payload: SearchResultPayload) -> list[SearchResultI
     else:
         entries = _flatten(payload.result_object)
 
-    return [_build_item(entry, payload, kind) for entry in entries]
+    result_objects = _flatten(payload.result_object)
+    items = []
+    for index, entry in enumerate(entries):
+        item = _build_item(entry, payload, kind)
+        result_object = result_objects[index] if index < len(result_objects) else None
+        if isinstance(result_object, dict):
+            retrieval_status = result_object.get("retrieval_status")
+            if isinstance(retrieval_status, dict):
+                # Completion payloads otherwise discard the retriever object. Keep
+                # lane health in the normalized envelope so callers can distinguish
+                # a fully healthy Hybrid answer from a degraded one.
+                item.metadata["retrieval_status"] = retrieval_status
+            chunk_attribution = result_object.get("chunk_attribution")
+            if isinstance(chunk_attribution, list):
+                item.metadata["chunk_attribution"] = chunk_attribution
+        items.append(item)
+
+    return items

@@ -16,6 +16,33 @@ def test_hybrid_completion_normalizes_as_graph_completion():
     assert items[0].kind == SearchResultKind.GRAPH_COMPLETION
 
 
+def test_hybrid_completion_surfaces_retrieval_lane_status():
+    retrieval_status = {
+        "chunks": {"status": "ok", "item_count": 2},
+        "entities": {"status": "degraded", "detail": "TimeoutError"},
+    }
+    chunk_attribution = [
+        {
+            "chunk_id": "chunk-1",
+            "rrf_score": 0.03,
+            "channels": [{"channel": "bm25", "rank": 0}],
+        }
+    ]
+    payload = SearchResultPayload(
+        completion=["answer"],
+        result_object={
+            "retrieval_status": retrieval_status,
+            "chunk_attribution": chunk_attribution,
+        },
+        search_type=SearchType.HYBRID_COMPLETION,
+    )
+
+    items = normalize_search_payload(payload)
+
+    assert items[0].metadata["retrieval_status"] == retrieval_status
+    assert items[0].metadata["chunk_attribution"] == chunk_attribution
+
+
 def test_chunk_result_exposes_provenance_metadata():
     """CHUNK results surface data_id/chunk_id/chunk_index so callers can trace
     a result back to the ingested document and the cited chunk."""

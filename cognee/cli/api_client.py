@@ -285,7 +285,7 @@ class CogneeApiClient:
     def recall(
         self,
         query: str,
-        search_type: Optional[str] = "GRAPH_COMPLETION",
+        search_type: Optional[str] = None,
         datasets: Optional[list[str]] = None,
         top_k: int = 15,
         system_prompt: Optional[str] = None,
@@ -294,8 +294,8 @@ class CogneeApiClient:
         only_context: bool = False,
         verbose: bool = False,
     ) -> list:
-        # search_type=None opts the server into auto-routing (session-only
-        # mode when session_id is set, graph otherwise).
+        # search_type=None opts the server into session-only recall when only a
+        # session is supplied, or its query router for dataset-backed recall.
         payload: dict[str, Any] = {
             "query": query,
             "search_type": search_type,
