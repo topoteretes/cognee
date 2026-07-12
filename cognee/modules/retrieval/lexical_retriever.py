@@ -25,7 +25,12 @@ def tokenize_words(text: str, stop_words: Optional[set[str]] = None) -> list[str
 
 class LexicalRetriever(BaseRetriever):
     def __init__(
-        self, tokenizer: Callable, scorer: Callable, top_k: int = 15, with_scores: bool = False
+        self,
+        tokenizer: Callable,
+        scorer: Callable,
+        top_k: int = 15,
+        with_scores: bool = False,
+        payload_filter: Optional[Callable[[dict], bool]] = None,
     ):
         if not callable(tokenizer) or not callable(scorer):
             raise TypeError("tokenizer and scorer must be callables")
@@ -36,6 +41,7 @@ class LexicalRetriever(BaseRetriever):
         self.scorer = scorer
         self.top_k = top_k
         self.with_scores = bool(with_scores)
+        self.payload_filter = payload_filter
 
         # Cache keyed by dataset context
         self.chunks: dict[str, Any] = {}  # {chunk_id: tokens}
@@ -68,6 +74,11 @@ class LexicalRetriever(BaseRetriever):
 
                 if document.get("type") == "DocumentChunk" and document.get("text"):
                     try:
+                        # Apply corpus-level filters before tokenization and ranking. This is
+                        # important for scoped lexical search: filtering a global top-k after
+                        # scoring can discard relevant scoped documents that never reached it.
+                        if self.payload_filter is not None and not self.payload_filter(document):
+                            continue
                         tokens = self.tokenizer(document["text"])
                         if not tokens:
                             continue

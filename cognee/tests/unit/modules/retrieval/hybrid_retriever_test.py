@@ -250,7 +250,13 @@ async def test_chunk_retrieval_ranks_bm25_and_vector_channels_with_dedupe():
     ):
         retrieved = await retriever.get_retrieved_objects(query="q")
 
-    bm25_cls.assert_called_once_with(top_k=8, with_scores=True)
+    bm25_cls.assert_called_once_with(
+        top_k=8,
+        with_scores=True,
+        node_name=None,
+        node_name_filter_operator="OR",
+        use_cache=True,
+    )
     bm25_retriever.get_retrieved_objects.assert_awaited_once_with("q")
     assert [_payload_text(chunk) for chunk in retrieved["chunks"]] == [
         "BM25 shared",

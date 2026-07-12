@@ -119,8 +119,15 @@ async def search_bm25_chunks(
         return []
 
     try:
-        retriever = BM25ChunksRetriever(top_k=limit, with_scores=True)
+        retriever = BM25ChunksRetriever(
+            top_k=limit,
+            with_scores=True,
+            node_name=node_name,
+            node_name_filter_operator=node_name_filter_operator,
+            use_cache=True,
+        )
         scored_chunks = await retriever.get_retrieved_objects(query)
+        logger.debug("BM25 corpus cache status: %s", retriever.cache_status)
     except NoDataError:
         return []
     except Exception as error:
