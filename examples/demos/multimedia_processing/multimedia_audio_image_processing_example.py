@@ -10,6 +10,10 @@ from cognee.shared.logging_utils import ERROR, setup_logging
 # 1. Copy `.env.template` and rename it to `.env`.
 # 2. Add your OpenAI API key to the `.env` file in the `LLM_API_KEY` field:
 #    LLM_API_KEY = "your_key_here"
+#
+# Optional richer image ingestion (both default off, see `.env.template`):
+#   IMAGE_EXTRACTION_ENABLED — extraction-oriented transcription prompt (entities/values/relations)
+#   IMAGE_OCR_ENABLED         — append local OCR text; needs pip install "cognee[rapidocr]"
 
 
 async def main():

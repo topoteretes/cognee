@@ -1,0 +1,11 @@
+Describe this image as concise, factual text for knowledge extraction.
+
+Capture:
+- The entities shown (people, organizations, objects, places, concepts) and their attributes.
+- The relationships and connections between them.
+- All visible text, numbers, dates, and labels, transcribed verbatim.
+- Structured content: tables as rows with their values, charts as their series and data points,
+  diagrams as how the elements connect.
+
+Keep it factual and to the point. Include only what is visible; do not guess or add outside
+knowledge.

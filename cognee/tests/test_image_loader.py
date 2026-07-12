@@ -4,8 +4,9 @@ from unittest.mock import patch, AsyncMock
 
 import pytest
 
+from cognee.infrastructure.llm.config import get_llm_config
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
-from cognee.infrastructure.loaders.core.image_loader import ImageLoader
+from cognee.infrastructure.loaders.core.image_loader import ImageLoader, MAX_OCR_TEXT_LENGTH
 
 TEST_DATA = Path(__file__).parent / "test_data"
 
@@ -87,6 +88,7 @@ async def test_load_appends_real_ocr_text(loader, monkeypatch, fixture_name):
 
     Only the LLM call is mocked (no API key); rapidocr runs for real over a fixture image.
     """
+    pytest.importorskip("rapidocr_onnxruntime", reason="requires the rapidocr extra")
     monkeypatch.setenv("IMAGE_OCR_ENABLED", "true")
 
     with patch.object(
@@ -131,3 +133,79 @@ async def test_load_skips_ocr_section_when_no_text(loader, monkeypatch):
         content = await loader.load(str(TEST_DATA / "revenue_table.png"), persist=False)
 
     assert content == MOCK_CAPTION, f"{content = } != {MOCK_CAPTION = }"
+
+
+@pytest.mark.parametrize(
+    "env_value, enabled",
+    [
+        (None, True),
+        ("false", False),
+        ("true", True),
+        ("TRUE", True),
+    ],
+)
+def test_transcription_overrides_env_gate(loader, monkeypatch, env_value, enabled):
+    """_transcription_overrides is on by default; IMAGE_EXTRACTION_ENABLED=false disables it."""
+    if env_value is None:
+        monkeypatch.delenv("IMAGE_EXTRACTION_ENABLED", raising=False)
+    else:
+        monkeypatch.setenv("IMAGE_EXTRACTION_ENABLED", env_value)
+
+    prompt, max_completion_tokens, reasoning_effort = loader._transcription_overrides()
+
+    if enabled:
+        config = get_llm_config()
+        assert isinstance(prompt, str) and prompt.strip()
+        assert max_completion_tokens == config.image_transcription_max_completion_tokens
+        assert reasoning_effort == config.image_transcription_reasoning_effort
+    else:
+        assert (prompt, max_completion_tokens, reasoning_effort) == (None, None, None)
+
+
+@pytest.mark.asyncio
+async def test_load_forwards_extraction_prompt_when_enabled(loader, monkeypatch):
+    """When enabled, load() forwards the configured extraction prompt + token cap to transcribe_image."""
+    monkeypatch.setenv("IMAGE_EXTRACTION_ENABLED", "true")
+    monkeypatch.delenv("IMAGE_OCR_ENABLED", raising=False)
+    mock = AsyncMock(return_value=_mock_transcription(MOCK_CAPTION))
+
+    with patch.object(LLMGateway, "transcribe_image", new=mock):
+        await loader.load(str(TEST_DATA / "revenue_table.png"), persist=False)
+
+    kwargs = mock.call_args.kwargs
+    config = get_llm_config()
+    assert isinstance(kwargs["prompt"], str) and kwargs["prompt"].strip()
+    assert kwargs["max_completion_tokens"] == config.image_transcription_max_completion_tokens
+    assert kwargs["reasoning_effort"] == config.image_transcription_reasoning_effort
+
+
+@pytest.mark.asyncio
+async def test_load_uses_default_prompt_when_disabled(loader, monkeypatch):
+    """With IMAGE_EXTRACTION_ENABLED=false, load() passes no prompt/cap so the adapter keeps its
+    legacy caption defaults."""
+    monkeypatch.setenv("IMAGE_EXTRACTION_ENABLED", "false")
+    monkeypatch.delenv("IMAGE_OCR_ENABLED", raising=False)
+    mock = AsyncMock(return_value=_mock_transcription(MOCK_CAPTION))
+
+    with patch.object(LLMGateway, "transcribe_image", new=mock):
+        await loader.load(str(TEST_DATA / "revenue_table.png"), persist=False)
+
+    assert mock.call_args.kwargs == {
+        "prompt": None,
+        "max_completion_tokens": None,
+        "reasoning_effort": None,
+    }
+
+
+@pytest.mark.asyncio
+async def test_extract_ocr_text_truncates_when_too_long(loader, monkeypatch):
+    """OCR text longer than MAX_OCR_TEXT_LENGTH is truncated with an ellipsis."""
+    oversized = [[None, "x" * 200, 0.9] for _ in range(MAX_OCR_TEXT_LENGTH // 100)]
+    monkeypatch.setattr(
+        ImageLoader, "_get_ocr_engine", staticmethod(lambda: lambda _fp: (oversized, None))
+    )
+
+    text = await loader._extract_ocr_text("unused.png")
+
+    assert len(text) == MAX_OCR_TEXT_LENGTH
+    assert text.endswith("...")

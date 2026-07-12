@@ -345,7 +345,13 @@ class GenericAPIAdapter(LLMInterface):
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
-    async def transcribe_image(self, input: str) -> litellm.ModelResponse:
+    async def transcribe_image(
+        self,
+        input: str,
+        prompt: str | None = None,
+        max_completion_tokens: int | None = None,
+        reasoning_effort: str | None = None,
+    ) -> litellm.ModelResponse:
         """
         Generate a transcription of an image from a user query.
 
@@ -355,6 +361,9 @@ class GenericAPIAdapter(LLMInterface):
         Parameters:
         -----------
             - input: The path to the image file that needs to be transcribed.
+            - prompt: Optional extraction instruction; falls back to "What's in this image?".
+            - max_completion_tokens: Optional length cap; falls back to 300 when omitted.
+            - reasoning_effort: Optional reasoning-effort hint; dropped on models without reasoning.
 
         Returns:
         --------
@@ -376,7 +385,7 @@ class GenericAPIAdapter(LLMInterface):
                     "content": [
                         {
                             "type": "text",
-                            "text": "What's in this image?",
+                            "text": prompt or "What's in this image?",
                         },
                         {
                             "type": "image_url",
@@ -390,7 +399,10 @@ class GenericAPIAdapter(LLMInterface):
             api_key=self.api_key,
             api_base=self.endpoint,
             api_version=self.api_version,
-            max_completion_tokens=300,
+            max_completion_tokens=max_completion_tokens or 300,
             max_retries=self.MAX_RETRIES,
+            # drop_params ignores reasoning_effort on models that don't support it.
+            reasoning_effort=reasoning_effort,
+            drop_params=True,
         )
         return response
