@@ -161,6 +161,9 @@ class VectorDBInterface(Protocol):
         """
         Delete specified data points from a collection.
 
+        Implementations should be idempotent for missing collections, empty ID
+        lists, and missing point IDs.
+
         Parameters:
         -----------
 

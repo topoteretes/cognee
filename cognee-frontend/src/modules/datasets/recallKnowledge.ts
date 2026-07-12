@@ -1,11 +1,13 @@
 import { CogneeInstance } from "../instances/types";
+import { getPipelineSettingsFromStorage } from "../configuration/pipelineSettings";
 
 export type RecallScope =
+  | "auto"
   | "all"
   | "graph"
   | "session"
   | "trace"
-  | "graph_context";
+  | "session_context";
 
 export interface RecallRequest {
   query: string;
@@ -20,24 +22,26 @@ export interface RecallRequest {
 /**
  * Unified recall call. Hits POST /v1/recall (not /v1/search), so the
  * server's scope-aware fan-out applies: graph + session + trace +
- * graph_context, tagged with _source.
+ * session_context, tagged with _source.
  *
  * Pass ``searchType: null`` to opt into the server's auto-router.
- * Default keeps ``GRAPH_COMPLETION`` for backward compat.
+ * Default is ``HYBRID_COMPLETION``.
  */
 export default function recallKnowledge(
   instance: CogneeInstance,
   req: RecallRequest,
 ): Promise<unknown[]> {
+  const pipelineSettings = getPipelineSettingsFromStorage();
   const body: Record<string, unknown> = { query: req.query };
   if (req.scope !== undefined) body.scope = req.scope;
   if (req.sessionId) body.session_id = req.sessionId;
   if (req.datasets) body.datasets = req.datasets;
   if (req.datasetIds) body.dataset_ids = req.datasetIds;
-  if (req.topK !== undefined) body.top_k = req.topK;
-  // Explicit null asks the server to auto-route; omitting keeps
-  // the current HTTP default (GRAPH_COMPLETION).
-  if (req.searchType !== undefined) body.search_type = req.searchType;
+  body.top_k = req.topK ?? pipelineSettings.topK;
+  // Server default is false; we default on so completions ship with citations.
+  body.include_references = pipelineSettings.includeReferences;
+  // Explicit null asks the server to auto-route; undefined falls back to HYBRID_COMPLETION.
+  body.search_type = req.searchType !== undefined ? req.searchType : "HYBRID_COMPLETION";
 
   return instance
     .fetch("/v1/recall", {

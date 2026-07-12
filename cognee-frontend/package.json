@@ -6,7 +6,8 @@
     "dev": "next dev --turbopack",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "check:tracking-plan": "node scripts/check-tracking-plan.js"
   },
   "dependencies": {
     "@mantine/core": "^8.3.13",
@@ -21,6 +22,7 @@
     "embla-carousel-autoplay": "^8.6.0",
     "embla-carousel-fade": "^8.6.0",
     "embla-carousel-react": "^8.6.0",
+    "jose": "^6.0.11",
     "mantine-form-valibot-resolver": "^3.0.1",
     "next": "^16.0.8",
     "react": "^19.1.2",

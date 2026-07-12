@@ -14,6 +14,7 @@ from cognee.modules.graph.methods import (
     delete_dataset_nodes_and_edges,
     has_data_related_nodes,
     legacy_delete,
+    try_delete_data_by_graph_provenance,
 )
 from cognee.modules.ingestion import discover_directory_datasets
 from cognee.modules.pipelines.operations.get_pipeline_status import get_pipeline_status
@@ -179,10 +180,13 @@ class datasets:
             raise UnauthorizedDataAccessError(f"Data {data_id} not accessible.")
 
         async with set_database_global_context_variables(dataset_id, dataset.owner_id):
-            if not await has_data_related_nodes(dataset_id, data_id):
-                await legacy_delete(data, "soft")
-            else:
+            # Delete mode is exclusive: ledger rows imply the relational-ledger
+            # path; only ledger-free data probes the graph marker to distinguish
+            # graph-provenance data from legacy data without graph ownership.
+            if await has_data_related_nodes(dataset_id, data_id):
                 await delete_data_nodes_and_edges(dataset_id, data_id, user.id)
+            elif not await try_delete_data_by_graph_provenance(dataset_id, data_id):
+                await legacy_delete(data, "soft")
 
             await delete_data(data, dataset_id)
 

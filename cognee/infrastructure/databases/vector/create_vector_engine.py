@@ -4,6 +4,7 @@ from numbers import Number
 
 from .supported_databases import supported_databases
 from .embeddings import get_embedding_engine
+from cognee.infrastructure.databases.dataset_queue.pinning import dataset_queue_pin_predicate
 from cognee.infrastructure.databases.utils.closing_lru_cache import closing_lru_cache
 from cognee.shared.lru_cache import DATABASE_MAX_LRU_CACHE_SIZE
 from cognee.shared.logging_utils import get_logger
@@ -78,25 +79,25 @@ def create_vector_engine(
     vector_db_subprocess_enabled = normalized_optional_params["vector_db_subprocess_enabled"]
 
     # Check USE_UNIFIED_PROVIDER outside the cache so it's always re-read
-    unified_provider = os.environ.get("USE_UNIFIED_PROVIDER", "")
-    if unified_provider == "pghybrid":
-        from cognee.infrastructure.databases.relational import get_relational_config
-
-        embedding_engine = get_embedding_engine()
-        relational_config = get_relational_config()
-        connection_string = (
-            f"postgresql+asyncpg://{relational_config.db_username}:{relational_config.db_password}"
-            f"@{relational_config.db_host}:{relational_config.db_port}"
-            f"/{relational_config.db_name}"
-        )
-
-        from .pgvector.PGVectorAdapter import PGVectorAdapter
-
-        return PGVectorAdapter(
-            connection_string,
-            vector_db_key,
-            embedding_engine,
-        )
+    # unified_provider = os.environ.get("USE_UNIFIED_PROVIDER", "")
+    # if unified_provider == "pghybrid":
+    #     from cognee.infrastructure.databases.relational import get_relational_config
+    #
+    #     embedding_engine = get_embedding_engine()
+    #     relational_config = get_relational_config()
+    #     connection_string = (
+    #         f"postgresql+asyncpg://{relational_config.db_username}:{relational_config.db_password}"
+    #         f"@{relational_config.db_host}:{relational_config.db_port}"
+    #         f"/{relational_config.db_name}"
+    #     )
+    #
+    #     from .pgvector.PGVectorAdapter import PGVectorAdapter
+    #
+    #     return PGVectorAdapter(
+    #         connection_string,
+    #         vector_db_key,
+    #         embedding_engine,
+    #     )
 
     return _create_vector_engine(
         vector_db_provider,
@@ -133,6 +134,43 @@ def evict_vector_engine(**kwargs) -> bool:
     )
 
 
+def evict_vector_engines_for_database(vector_db_name: str) -> int:
+    """Evict every cached vector engine bound to *vector_db_name*.
+
+    The same per-dataset database can be cached under multiple keys: the
+    dataset-handler paths and the pipeline's context-config path build their
+    engines with different kwargs (e.g. ``vector_dataset_database_handler``),
+    so key-exact ``evict_vector_engine`` misses entries and leaves an engine
+    with a dead connection pool and stale collection metadata. Per-dataset
+    database names are dataset UUIDs, so matching the name against key fields
+    cannot collide with other entries.
+
+    Returns the number of evicted entries.
+    """
+    if not vector_db_name:
+        raise ValueError("vector_db_name must be a non-empty database name")
+    return _create_vector_engine.cache_evict_matching(vector_db_name=vector_db_name)
+
+
+async def aevict_vector_engines_for_database(vector_db_name: str) -> int:
+    """Evict every cached vector engine bound to *vector_db_name* and wait
+    until their IN-FLIGHT closes have completed. Use before removing the
+    database's files so a teardown that is already running cannot race the
+    removal.
+
+    A close still deferred behind a live caller proxy (an idle engine handle)
+    is NOT waited on — see the ``closing_lru_cache`` module docstring. In that
+    case files are removed under an engine that closes later; on POSIX the
+    unlinked files stay valid for the holder and the eventual close writes to
+    nowhere, which is acceptable for a dataset being deleted.
+
+    Returns the number of evicted entries.
+    """
+    evicted = evict_vector_engines_for_database(vector_db_name)
+    await _create_vector_engine.cache_await_closed(vector_db_name=vector_db_name)
+    return evicted
+
+
 def is_vector_engine_cached(**kwargs) -> bool:
     """Check whether a vector engine entry exists in the cache without creating."""
     normalized = _normalize_optional_create_vector_engine_params(kwargs)
@@ -150,7 +188,10 @@ def is_vector_engine_cached(**kwargs) -> bool:
     )
 
 
-@closing_lru_cache(maxsize=DATABASE_MAX_LRU_CACHE_SIZE)
+@closing_lru_cache(
+    maxsize=DATABASE_MAX_LRU_CACHE_SIZE,
+    pinned_predicate=dataset_queue_pin_predicate("vector_db_name"),
+)
 def _create_vector_engine(
     vector_db_provider: str,
     vector_db_url: str,
