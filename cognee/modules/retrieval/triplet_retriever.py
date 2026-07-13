@@ -1,7 +1,7 @@
 from typing import Any, Dict, List, Optional, Type, Union
 
 from cognee.shared.logging_utils import get_logger
-from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.modules.retrieval.utils.completion import generate_completion
 from cognee.infrastructure.session.get_session_manager import get_session_manager
 from cognee.modules.retrieval.base_retriever import BaseRetriever
@@ -60,7 +60,7 @@ class TripletRetriever(BaseRetriever):
 
             - Any: A list containing the retrieved triplets, or an empty list if none are found.
         """
-        vector_engine = get_vector_engine()
+        vector_engine = await get_vector_engine_async()
 
         try:
             if not await vector_engine.has_collection(collection_name="Triplet_text"):
@@ -111,7 +111,12 @@ class TripletRetriever(BaseRetriever):
         return [completion]
 
     async def get_completion_from_context(
-        self, query: str, retrieved_objects: Any, context: Any
+        self,
+        query: str,
+        retrieved_objects: Any,
+        context: Any,
+        effective_query: Optional[str] = None,
+        turn_preparation=None,
     ) -> Union[List[str], List[dict]]:
         """
         Generates an LLM completion using the context.
@@ -153,6 +158,8 @@ class TripletRetriever(BaseRetriever):
                 summarize_context=False,
                 used_graph_element_ids=used_graph_element_ids,
                 max_context_chars=getattr(self, "max_context_chars", None),
+                effective_query=effective_query,
+                turn_preparation=turn_preparation,
             )
             completions = [completion]
         else:

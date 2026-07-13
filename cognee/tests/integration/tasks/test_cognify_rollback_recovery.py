@@ -46,6 +46,7 @@ async def clean_test_environment(request, tmp_path, monkeypatch):
     monkeypatch.setenv("ENABLE_BACKEND_ACCESS_CONTROL", "false")
     monkeypatch.setenv("GRAPH_DATASET_DATABASE_HANDLER", "ladybug")
     monkeypatch.setenv("VECTOR_DATASET_DATABASE_HANDLER", "lancedb")
+    monkeypatch.setenv("RAISE_INCREMENTAL_LOADING_ERRORS", "false")
     test_id = request.node.name
     root = pathlib.Path(tmp_path) / test_id
     system_directory_path = str(root / "system")
@@ -88,6 +89,19 @@ async def clean_test_environment(request, tmp_path, monkeypatch):
 
     monkeypatch.setattr(add_data_points_module, "index_data_points", _noop_index)
     monkeypatch.setattr(add_data_points_module, "index_graph_edges", _noop_index)
+
+    # This suite validates the relational-ledger rollback path (still the path
+    # for every graph backend that lacks provenance support — Neo4j, Neptune,
+    # Postgres). On the default Ladybug stack an empty graph would otherwise be
+    # marked graph-provenance and skip the ledger entirely. Force the ledger
+    # path so add_data_points writes the Node/Edge rows these tests assert on;
+    # the rollback handler then also reads the (unmarked) graph as ledger-mode.
+    # Graph-provenance rollback recovery is covered separately (test_rollback.py,
+    # test_graph_provenance_delete_default_stack.py).
+    async def _force_ledger(_graph_engine):
+        return False
+
+    monkeypatch.setattr(add_data_points_module, "mark_graph_provenance_if_empty", _force_ledger)
 
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
@@ -170,7 +184,12 @@ async def _dataset_context(dataset_id, owner_id):
         yield
 
 
-async def _mock_structured_output(self, _text_input: str, _system_prompt: str, response_model):
+async def _mock_structured_output(
+    _text_input: str,
+    _system_prompt: str,
+    response_model,
+    **_kwargs,
+):
     from cognee.shared.data_models import Edge as KGEdge
     from cognee.shared.data_models import KnowledgeGraph, Node as KGNode, SummarizedContent
 

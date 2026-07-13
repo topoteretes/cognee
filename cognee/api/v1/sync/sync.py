@@ -27,6 +27,12 @@ from cognee.shared.utils import create_secure_ssl_context
 
 logger = get_logger("sync")
 
+# Strong refs for fire-and-forget background sync tasks. The event loop only keeps
+# weak references to tasks, so without anchoring here Python's gc can collect an
+# in-flight task before it completes, silently aborting the background sync. Tasks
+# remove themselves on done, so this set's size tracks currently-running syncs.
+_BACKGROUND_SYNC_TASKS: set[asyncio.Task] = set()
+
 
 async def _safe_update_progress(run_id: str, stage: str, **kwargs):
     """
@@ -150,7 +156,9 @@ async def sync(
         # Continue without database tracking if record creation fails
 
     # Start the sync operation in the background
-    asyncio.create_task(_perform_background_sync(run_id, datasets, user))
+    task = asyncio.create_task(_perform_background_sync(run_id, datasets, user))
+    _BACKGROUND_SYNC_TASKS.add(task)
+    task.add_done_callback(_BACKGROUND_SYNC_TASKS.discard)
 
     # Return immediately with run_id
     return SyncResponse(
@@ -556,13 +564,25 @@ async def _get_file_size(file_path: str) -> int:
 
 
 async def _get_cloud_base_url() -> str:
-    """Get Cognee Cloud API base URL."""
-    return os.getenv("COGNEE_CLOUD_API_URL", "http://localhost:8001")
+    """Get Cognee Cloud API base URL.
+
+    Canonical: COGNEE_SERVICE_URL (shared with serve()/push()/MCP).
+    COGNEE_CLOUD_API_URL is accepted as a deprecated fallback.
+    """
+    return (
+        os.getenv("COGNEE_SERVICE_URL")
+        or os.getenv("COGNEE_CLOUD_API_URL")
+        or "http://localhost:8001"
+    )
 
 
 async def _get_cloud_auth_token(user: User) -> str:
-    """Get authentication token for Cognee Cloud API."""
-    return os.getenv("COGNEE_CLOUD_AUTH_TOKEN", "your-auth-token")
+    """Get authentication token for Cognee Cloud API.
+
+    Canonical: COGNEE_API_KEY (shared with serve()/push()/MCP).
+    COGNEE_CLOUD_AUTH_TOKEN is accepted as a deprecated fallback.
+    """
+    return os.getenv("COGNEE_API_KEY") or os.getenv("COGNEE_CLOUD_AUTH_TOKEN") or "your-auth-token"
 
 
 async def _check_hashes_diff(

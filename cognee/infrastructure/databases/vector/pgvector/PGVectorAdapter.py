@@ -34,8 +34,10 @@ logger = get_logger("PGVectorAdapter")
 QUERY_BATCH_SIZE = 1000
 
 # Default pool sizing for per-dataset PGVector engines when ENABLE_BACKEND_ACCESS_CONTROL=True.
-# Much smaller than the relational default (20+20) to limit connection fan-out across datasets.
-_ACCESS_CONTROL_DEFAULT_POOL_ARGS = {"pool_size": 2, "max_overflow": 2}
+# Lean pool_size limits connection fan-out across datasets (only pool_size connections are
+# retained while idle); the large max_overflow keeps burst headroom, since overflow
+# connections close on release instead of idling.
+_ACCESS_CONTROL_DEFAULT_POOL_ARGS = {"pool_size": 2, "max_overflow": 20}
 
 
 class IndexSchema(DataPoint):

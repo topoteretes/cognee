@@ -1,6 +1,7 @@
 import asyncio
 from typing import Any, List, Optional, Type
 
+from cognee.base_config import get_base_config
 from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import read_query_prompt
@@ -40,7 +41,7 @@ class GraphCompletionDecompositionRetriever(GraphCompletionRetriever):
         node_name_filter_operator: str = "OR",
         wide_search_top_k: Optional[int] = 100,
         triplet_distance_penalty: Optional[float] = 6.5,
-        feedback_influence: float = 0.0,
+        feedback_influence: float = get_base_config().default_feedback_influence,
         session_id: Optional[str] = None,
         response_model: Type = str,
         neighborhood_depth: Optional[int] = None,
@@ -235,6 +236,8 @@ class GraphCompletionDecompositionRetriever(GraphCompletionRetriever):
         query_batch: Optional[List[str]] = None,
         retrieved_objects: Optional[List[Edge]] = None,
         context: str = None,
+        effective_query: Optional[str] = None,
+        turn_preparation=None,
     ) -> List[Any]:
         """Generate the final completion for the original query."""
 
@@ -252,4 +255,6 @@ class GraphCompletionDecompositionRetriever(GraphCompletionRetriever):
             query=query,
             retrieved_objects=retrieved_objects,
             context=context,
+            effective_query=effective_query,
+            turn_preparation=turn_preparation,
         )

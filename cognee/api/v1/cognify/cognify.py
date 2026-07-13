@@ -40,9 +40,6 @@ from cognee.modules.observability import new_span, COGNEE_PIPELINE_NAME, COGNEE_
 logger = get_logger("cognify")
 
 
-update_status_lock = asyncio.Lock()
-
-
 async def cognify(
     datasets: Union[str, list[str], list[UUID]] = None,
     user: User = None,
@@ -60,6 +57,7 @@ async def cognify(
     data_per_batch: int = 20,
     llm_config: Optional[LLMConfig] = None,
     embedding_config: Optional[EmbeddingConfig] = None,
+    data_cache: bool = True,
     **kwargs,
 ):
     """
@@ -219,6 +217,10 @@ async def cognify(
         if datasets is not None:
             span.set_attribute("cognee.cognify.datasets", str(datasets))
 
+        from cognee.modules.migrations.startup import run_migrations_and_block
+
+        await run_migrations_and_block(datasets, user)
+
         if config is None:
             ontology_config = get_ontology_env_config()
             if (
@@ -269,12 +271,13 @@ async def cognify(
             vector_db_config=vector_db_config,
             graph_db_config=graph_db_config,
             incremental_loading=incremental_loading,
-            use_pipeline_cache=True,
+            use_pipeline_cache=False,
             pipeline_name="cognify_pipeline",
             data_per_batch=data_per_batch,
             rollback_handler=cognify_rollback_handler,
             llm_config=llm_config,
             embedding_config=embedding_config,
+            data_cache=data_cache,
         )
 
         dataset_desc = str(datasets) if datasets else "all datasets"
@@ -327,7 +330,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
         # EXTRACT: split Documents into semantic text chunks
         Task(
             extract_chunks_from_documents,
-            max_chunk_size=chunk_size or get_max_chunk_tokens(),
+            max_chunk_size=chunk_size or await get_max_chunk_tokens(),
             chunker=chunker,
         ),
         # COGNIFY: LLM-extract entities and relationships into a knowledge graph
@@ -386,7 +389,7 @@ async def get_temporal_tasks(
         # EXTRACT: split Documents into semantic text chunks
         Task(
             extract_chunks_from_documents,
-            max_chunk_size=chunk_size or get_max_chunk_tokens(),
+            max_chunk_size=chunk_size or await get_max_chunk_tokens(),
             chunker=chunker,
         ),
         # COGNIFY: extract temporal events and timestamps from chunks

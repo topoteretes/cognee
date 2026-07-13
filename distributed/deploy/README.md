@@ -172,11 +172,11 @@ docker-compose --profile ui up
 
 2. **Set `CORS_ALLOWED_ORIGINS`** to your actual frontend domain instead of `*`.
 
-3. **Enable authentication**: Set `REQUIRE_AUTHENTICATION=True` and configure user management.
+3. **Enable authentication for multi-tenant deployments**: Set `ENABLE_BACKEND_ACCESS_CONTROL=true` (default) and configure user management. For a single-user internal deployment with auth off, set `ENABLE_BACKEND_ACCESS_CONTROL=false`; `REQUIRE_AUTHENTICATION=false` alone is not sufficient when multi-tenant mode is on.
 
 4. **Configure rate limiting**: Set `LLM_RATE_LIMIT_ENABLED=true` to avoid hitting provider limits.
 
-5. **Monitor**: Set `SENTRY_REPORTING_URL` for error tracking. Install with `pip install cognee[monitoring]`.
+5. **Trace**: Enable OpenTelemetry tracing with `COGNEE_TRACING_ENABLED=true` and an OTLP endpoint. Install with `pip install cognee[tracing]`.
 
 ---
 
@@ -185,7 +185,7 @@ docker-compose --profile ui up
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `LLM_API_KEY` | Yes | — | API key for your LLM provider |
-| `LLM_MODEL` | No | `openai/gpt-4o-mini` | Model identifier |
+| `LLM_MODEL` | No | `openai/gpt-5-mini` | Model identifier |
 | `LLM_PROVIDER` | No | `openai` | LLM provider name |
 | `DB_PROVIDER` | No | `sqlite` | `sqlite` or `postgres` |
 | `DB_HOST` | If postgres | — | Database host |
@@ -196,4 +196,5 @@ docker-compose --profile ui up
 | `VECTOR_DB_PROVIDER` | No | `lancedb` | `lancedb`, `pgvector`, `chromadb` |
 | `GRAPH_DATABASE_PROVIDER` | No | `ladybug` | `ladybug`, `neo4j` |
 | `CORS_ALLOWED_ORIGINS` | No | `*` | Allowed CORS origins |
-| `REQUIRE_AUTHENTICATION` | No | `False` | Enable API auth |
+| `ENABLE_BACKEND_ACCESS_CONTROL` | No | `true` | Multi-tenant isolation; when `true`, auth is required |
+| `REQUIRE_AUTHENTICATION` | No | inherits from `ENABLE_BACKEND_ACCESS_CONTROL` | Explicit auth override (`false` ignored when multi-tenant is on) |

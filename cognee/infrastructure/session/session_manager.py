@@ -1,4 +1,3 @@
-import json
 import uuid
 from typing import Any
 
@@ -8,103 +7,64 @@ from cognee.infrastructure.databases.cache.cache_db_interface import CacheDBInte
 from cognee.infrastructure.databases.cache.config import CacheConfig
 from cognee.infrastructure.databases.cache.redis.RedisAdapter import RedisAdapter
 from cognee.infrastructure.databases.exceptions import SessionParameterValidationError
-from cognee.infrastructure.llm.LLMGateway import LLMGateway
-from cognee.infrastructure.llm.prompts import read_query_prompt
-from cognee.infrastructure.session.feedback_models import AgentTraceFeedbackSummary
-from cognee.modules.agent_memory.sanitization import sanitize_value
+from cognee.infrastructure.session.session_agent_trace import (
+    fallback_agent_trace_feedback,
+    generate_agent_trace_feedback,
+)
+from cognee.infrastructure.session.session_embeddings import (
+    delete_session_qa_vector,
+    delete_session_qa_vectors,
+    index_session_qa,
+)
+from cognee.infrastructure.session.session_turn import (
+    SessionTurnPreparation,
+    generate_session_answer,
+    prepare_session_turn as _prepare_turn,
+)
 from cognee.modules.observability import (
     COGNEE_DATA_SIZE_BYTES,
     COGNEE_SESSION_ENTRY_COUNT,
     COGNEE_SESSION_ID,
     new_span,
 )
-from cognee.modules.retrieval.utils.completion import (
-    generate_completion,
-    generate_session_completion_with_optional_summary,
-)
+from cognee.modules.retrieval.utils.completion import generate_completion
+from cognee.modules.session_lifecycle.metrics import record_session_activity
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.utils import send_telemetry
 
 logger = get_logger("SessionManager")
 
 
-_session_record_write_failed = False
-
-
-async def _record_session_activity(
-    user_id: str,
-    session_id: str,
-    *,
-    errored: bool = False,
-) -> None:
-    """Write a lifecycle heartbeat for this session.
-
-    Upserts + touches the SessionRecord row in one DB round trip.
-    Swallows failures — the session_records table is optional for
-    SessionManager correctness — but logs once at WARNING per process
-    so silent breakage is visible in ops.
-    """
-    global _session_record_write_failed
-
-    try:
-        from uuid import UUID
-
-        from cognee.modules.session_lifecycle.metrics import (
-            accumulate_usage,
-            ensure_and_touch_session,
-        )
-
-        try:
-            user_uuid = UUID(str(user_id))
-        except (ValueError, TypeError):
-            return
-
-        await ensure_and_touch_session(session_id=session_id, user_id=user_uuid)
-        if errored:
-            await accumulate_usage(session_id=session_id, user_id=user_uuid, errored=True)
-    except Exception as exc:
-        if not _session_record_write_failed:
-            _session_record_write_failed = True
-            logger.warning(
-                "SessionManager: session_records write failed (%s); "
-                "subsequent failures will log at debug. "
-                "Check alembic migrations for the session_records table.",
-                exc,
-            )
-        else:
-            logger.debug("SessionManager: session_records write failed (%s)", exc)
-
-
-def _validate_session_params(
-    *,
-    user_id: str | None = None,
-    session_id: str | None = None,
-    qa_id: str | None = None,
-    last_n: int | None = None,
-) -> None:
-    """
-    Validate session parameters. Raises SessionParameterValidationError if any
-    provided parameter is invalid.
-
-    - user_id, session_id, qa_id: must be non-empty strings when provided.
-    - last_n: when provided, must be a positive integer.
-    """
-    checks = (
-        (user_id, "user_id"),
-        (session_id, "session_id"),
-        (qa_id, "qa_id"),
-    )
-    for value, name in checks:
-        if value is not None and (not str(value).strip()):
-            raise SessionParameterValidationError(message=f"{name} must be a non-empty string")
-    if last_n is not None and (not isinstance(last_n, int) or last_n < 1):
-        raise SessionParameterValidationError(message="last_n must be a positive integer")
-
-
 class SessionManager:
     """
     Manages session QA entries.
     """
+
+    @staticmethod
+    def _validate_session_params(
+        *,
+        user_id: str | None = None,
+        session_id: str | None = None,
+        qa_id: str | None = None,
+        last_n: int | None = None,
+    ) -> None:
+        """
+        Validate session parameters. Raises SessionParameterValidationError if any
+        provided parameter is invalid.
+
+        - user_id, session_id, qa_id: must be non-empty strings when provided.
+        - last_n: when provided, must be a positive integer.
+        """
+        checks = (
+            (user_id, "user_id"),
+            (session_id, "session_id"),
+            (qa_id, "qa_id"),
+        )
+        for value, name in checks:
+            if value is not None and (not str(value).strip()):
+                raise SessionParameterValidationError(message=f"{name} must be a non-empty string")
+        if last_n is not None and (not isinstance(last_n, int) or last_n < 1):
+            raise SessionParameterValidationError(message="last_n must be a positive integer")
 
     def __init__(
         self,
@@ -149,13 +109,15 @@ class SessionManager:
         feedback_text: str | None = None,
         feedback_score: int | None = None,
         used_graph_element_ids: dict | None = None,
+        used_session_context_ids: list | None = None,
     ) -> str | None:
         """
         Add a QA to the session. Returns qa_id, or None if cache unavailable.
         used_graph_element_ids: Optional dict with keys "node_ids" and "edge_ids" (lists of str).
+        used_session_context_ids: Optional list of session-context entry ids served to this answer.
         """
         session_id = self._resolve_session_id(session_id)
-        _validate_session_params(user_id=user_id, session_id=session_id)
+        self._validate_session_params(user_id=user_id, session_id=session_id)
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, skipping add_qa")
             return None
@@ -190,68 +152,17 @@ class SessionManager:
                 feedback_text=feedback_text,
                 feedback_score=feedback_score,
                 used_graph_element_ids=used_graph_element_ids,
+                used_session_context_ids=used_session_context_ids,
             )
-            await _record_session_activity(user_id, session_id)
+            await index_session_qa(
+                user_id=user_id,
+                session_id=session_id,
+                qa_id=qa_id,
+                question=question,
+                answer=answer,
+            )
+            await record_session_activity(user_id, session_id)
             return qa_id
-
-    @staticmethod
-    def _fallback_agent_trace_feedback(
-        origin_function: str,
-        status: str,
-        error_message: str = "",
-    ) -> str:
-        """Generate deterministic fallback feedback for a trace step."""
-        normalized_origin = origin_function.strip()
-        normalized_status = status.strip().lower()
-        normalized_error = error_message.strip()
-
-        if normalized_status == "error":
-            if normalized_error:
-                return f"{normalized_origin} failed. Reason: {normalized_error}."
-            return f"{normalized_origin} failed."
-        return f"{normalized_origin} succeeded."
-
-    async def _generate_agent_trace_feedback(
-        self,
-        *,
-        origin_function: str,
-        status: str,
-        method_return_value: Any,
-        error_message: str = "",
-    ) -> str:
-        """Generate per-step feedback from method_return_value, or fall back deterministically."""
-        fallback_feedback = self._fallback_agent_trace_feedback(
-            origin_function=origin_function,
-            status=status,
-            error_message=error_message,
-        )
-
-        if method_return_value is None:
-            return fallback_feedback
-
-        try:
-            system_prompt = read_query_prompt("agent_trace_feedback_summary_system.txt")
-            if not system_prompt:
-                logger.warning("Agent trace feedback: system prompt not found, using fallback")
-                return fallback_feedback
-
-            sanitized_return_value = sanitize_value(method_return_value)
-            serialized_return_value = json.dumps(sanitized_return_value, ensure_ascii=False)
-
-            result = await LLMGateway.acreate_structured_output(
-                text_input=serialized_return_value,
-                system_prompt=system_prompt,
-                response_model=AgentTraceFeedbackSummary,
-            )
-            session_feedback = result.session_feedback.strip()
-            return session_feedback if session_feedback else fallback_feedback
-        except Exception as e:
-            logger.warning(
-                "Agent trace feedback generation failed, using fallback: %s",
-                e,
-                exc_info=False,
-            )
-            return fallback_feedback
 
     async def add_agent_trace_step(
         self,
@@ -273,21 +184,21 @@ class SessionManager:
         Returns trace_id, or None if cache unavailable.
         """
         session_id = self._resolve_session_id(session_id)
-        _validate_session_params(user_id=user_id, session_id=session_id)
+        self._validate_session_params(user_id=user_id, session_id=session_id)
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, skipping add_agent_trace_step")
             return None
 
         trace_id = str(uuid.uuid4())
         if generate_feedback_with_llm:
-            session_feedback = await self._generate_agent_trace_feedback(
+            session_feedback = await generate_agent_trace_feedback(
                 origin_function=origin_function,
                 status=status,
                 method_return_value=method_return_value,
                 error_message=error_message,
             )
         else:
-            session_feedback = self._fallback_agent_trace_feedback(
+            session_feedback = fallback_agent_trace_feedback(
                 origin_function=origin_function,
                 status=status,
                 error_message=error_message,
@@ -305,8 +216,56 @@ class SessionManager:
             error_message=error_message,
             session_feedback=session_feedback,
         )
-        await _record_session_activity(user_id, session_id, errored=status == "error")
+        await record_session_activity(user_id, session_id, errored=status == "error")
+        await self._maybe_extract_agent_context(
+            user_id=user_id,
+            session_id=session_id,
+            trace_id=trace_id,
+            origin_function=origin_function,
+            status=status,
+            error_message=error_message,
+        )
         return trace_id
+
+    async def _maybe_extract_agent_context(
+        self,
+        *,
+        user_id: str,
+        session_id: str,
+        trace_id: str,
+        origin_function: str,
+        status: str,
+        error_message: str,
+    ) -> None:
+        """Derive agent-profile lessons from a just-stored trace step. Gated and fail-open.
+
+        Runs only when automatic session context is enabled, and never lets an extraction
+        failure escape — the trace row is already saved by the time this runs.
+        """
+        if not self.is_auto_feedback_enabled():
+            return
+        try:
+            from cognee.infrastructure.session.agent_context_extraction import (
+                extract_live_agent_context,
+                extract_pending_agent_context,
+            )
+
+            await extract_live_agent_context(
+                session_manager=self,
+                user_id=user_id,
+                session_id=session_id,
+                trace_id=trace_id,
+                origin_function=origin_function,
+                status=status,
+                error_message=error_message,
+            )
+            await extract_pending_agent_context(
+                session_manager=self,
+                user_id=user_id,
+                session_id=session_id,
+            )
+        except Exception as error:
+            logger.warning("Agent-context extraction skipped: %s", error)
 
     def is_session_available_for_completion(self, user_id: str | None) -> bool:
         """Return True if session (history + save) is available for completion."""
@@ -315,16 +274,38 @@ class SessionManager:
         cache_config = CacheConfig()
         return bool(cache_config.caching)
 
-    async def _get_formatted_history(self, user_id: str, session_id: str) -> str:
-        """Load session and return formatted conversation history string."""
-        history: str | list = await self.get_session(
-            user_id=user_id,
-            session_id=session_id,
-            formatted=True,
-            last_n=self.session_history_last_n,
-            include_context=False,
-        )
-        return history if isinstance(history, str) else ""
+    def is_auto_feedback_enabled(self) -> bool:
+        """Return True if caching and automatic turn-feedback analysis are both enabled."""
+        cache_config = CacheConfig()
+        return bool(cache_config.caching and cache_config.auto_feedback)
+
+    async def prepare_session_turn(
+        self,
+        *,
+        query: str,
+        session_id: str | None = None,
+        user_id: str | None = None,
+    ) -> SessionTurnPreparation:
+        """Analyze one user turn before retrieval/answer generation.
+
+        Thin delegate to ``session_turn.prepare_session_turn``; see that module for the logic.
+        """
+        return await _prepare_turn(self, query=query, session_id=session_id, user_id=user_id)
+
+    def _session_usage_scope(self, user_id, session_id: str):
+        """Return a session-usage tracking context, or a no-op when usage can't be attributed."""
+        from contextlib import nullcontext
+        from uuid import UUID
+
+        from cognee.modules.session_lifecycle.usage_tracking import track_session_usage
+
+        try:
+            usage_uid = UUID(str(user_id)) if user_id is not None else None
+        except (ValueError, TypeError):
+            usage_uid = None
+        if usage_uid is not None and session_id:
+            return track_session_usage(session_id, usage_uid)
+        return nullcontext()
 
     async def generate_completion_with_session(
         self,
@@ -339,50 +320,34 @@ class SessionManager:
         summarize_context: bool = False,
         used_graph_element_ids: dict | None = None,
         max_context_chars: int | None = None,
+        effective_query: str | None = None,
+        turn_preparation: SessionTurnPreparation | None = None,
     ) -> Any:
-        from uuid import UUID as _UUID
+        """Run one session turn under a session-usage scope, then return the answer."""
+        user_id = getattr(session_user.get(), "id", None)
+        resolved_session_id = self._resolve_session_id(session_id)
+        async with self._session_usage_scope(user_id, resolved_session_id):
+            return await self._run_session_turn(
+                user_id=user_id,
+                session_id=resolved_session_id,
+                query=query,
+                context=context,
+                user_prompt_path=user_prompt_path,
+                system_prompt_path=system_prompt_path,
+                system_prompt=system_prompt,
+                response_model=response_model,
+                summarize_context=summarize_context,
+                used_graph_element_ids=used_graph_element_ids,
+                max_context_chars=max_context_chars,
+                effective_query=effective_query,
+                turn_preparation=turn_preparation,
+            )
 
-        from cognee.modules.session_lifecycle.usage_tracking import track_session_usage
-
-        _ctx_user = session_user.get()
-        _ctx_uid_raw = getattr(_ctx_user, "id", None)
-        _ctx_sid = self._resolve_session_id(session_id)
-        try:
-            _ctx_uid = _UUID(str(_ctx_uid_raw)) if _ctx_uid_raw is not None else None
-        except (ValueError, TypeError):
-            _ctx_uid = None
-
-        if _ctx_uid is not None and _ctx_sid:
-            async with track_session_usage(_ctx_sid, _ctx_uid):
-                return await self._generate_completion_with_session_inner(
-                    session_id=session_id,
-                    query=query,
-                    context=context,
-                    user_prompt_path=user_prompt_path,
-                    system_prompt_path=system_prompt_path,
-                    system_prompt=system_prompt,
-                    response_model=response_model,
-                    summarize_context=summarize_context,
-                    used_graph_element_ids=used_graph_element_ids,
-                    max_context_chars=max_context_chars,
-                )
-        return await self._generate_completion_with_session_inner(
-            session_id=session_id,
-            query=query,
-            context=context,
-            user_prompt_path=user_prompt_path,
-            system_prompt_path=system_prompt_path,
-            system_prompt=system_prompt,
-            response_model=response_model,
-            summarize_context=summarize_context,
-            used_graph_element_ids=used_graph_element_ids,
-            max_context_chars=max_context_chars,
-        )
-
-    async def _generate_completion_with_session_inner(
+    async def _run_session_turn(
         self,
         *,
-        session_id: str | None = None,
+        user_id,
+        session_id: str,
         query: str,
         context: str,
         user_prompt_path: str,
@@ -392,32 +357,15 @@ class SessionManager:
         summarize_context: bool = False,
         used_graph_element_ids: dict | None = None,
         max_context_chars: int | None = None,
+        effective_query: str | None = None,
+        turn_preparation: SessionTurnPreparation | None = None,
     ) -> Any:
+        """Answer or acknowledge one turn, then record it.
+
+        When session caching is unavailable, runs a plain completion without history and
+        does not record. Otherwise: prepare the turn, generate an answer (or take the
+        feedback acknowledgement), and store the exchange so every turn stays recallable.
         """
-        Run single-query completion with session: read history, generate, save QA.
-
-        Resolves user_id from session_user; if no user or caching disabled, runs
-        completion without history and does not save. Otherwise gets formatted
-        history, runs one or two LLM calls depending on summarize_context,
-        saves via add_qa, and returns the completion.
-
-        Args:
-            session_id: Session identifier; defaults to default_session_id if None.
-            query: User question.
-            context: Retrieved context for the completion.
-            user_prompt_path: Path for user prompt template.
-            system_prompt_path: Path for system prompt template.
-            system_prompt: Optional override system prompt.
-            response_model: Pydantic model or type for structured output (default str).
-            summarize_context: If True, run summarization LLM call and store summary
-                in QA context; if False, single LLM call and store "" for context.
-
-        Returns:
-            (completion, qa_id): completion from LLM; qa_id if saved, None otherwise.
-        """
-        user = session_user.get()
-        user_id = getattr(user, "id", None)
-
         if not self.is_session_available_for_completion(user_id):
             return await generate_completion(
                 query=query,
@@ -428,105 +376,51 @@ class SessionManager:
                 response_model=response_model,
             )
 
-        resolved_session_id = self._resolve_session_id(session_id)
-        conversation_history = await self._get_formatted_history(str(user_id), resolved_session_id)
-
-        # Prepend graph knowledge snapshot (from improve() sync) if available
-        graph_context = await self.get_graph_context(
-            user_id=str(user_id), session_id=resolved_session_id
-        )
-        if graph_context:
-            # Apply context char limit: explicit param > config > unlimited
-            char_limit = max_context_chars
-            if char_limit is None:
-                char_limit = CacheConfig().max_session_context_chars
-            if char_limit is not None:
-                graph_context = graph_context[:char_limit]
-            conversation_history = (
-                "Background knowledge from the knowledge graph:\n"
-                + graph_context
-                + "\n\n"
-                + conversation_history
+        if turn_preparation is None:
+            turn_preparation = await self.prepare_session_turn(
+                query=query, session_id=session_id, user_id=str(user_id)
             )
 
-        cache_config = CacheConfig()
-        run_auto_feedback = cache_config.caching and cache_config.auto_feedback
-
-        last_qa_id: str | None = None
-        if run_auto_feedback:
-            entries = await self.get_session(
+        # Every turn — answered or feedback-only — falls through to a single add_qa, so the
+        # whole conversation stays in history and vector recall.
+        if turn_preparation.should_answer:
+            answer_query = (
+                (turn_preparation.effective_query or "").strip()
+                or (effective_query or "").strip()
+                or query
+            )
+            answer, context_to_store, used_session_context_ids = await generate_session_answer(
+                self,
                 user_id=str(user_id),
-                session_id=resolved_session_id,
-                formatted=False,
-                last_n=1,
+                session_id=session_id,
+                answer_query=answer_query,
+                context=context,
+                user_prompt_path=user_prompt_path,
+                system_prompt_path=system_prompt_path,
+                system_prompt=system_prompt,
+                response_model=response_model,
+                summarize_context=summarize_context,
+                max_context_chars=max_context_chars,
             )
-            if isinstance(entries, list) and entries:
-                last_entry = entries[-1]
-                last_qa_id = getattr(last_entry, "qa_id", None) or (
-                    last_entry.get("qa_id") if isinstance(last_entry, dict) else None
-                )
-
-        (
-            completion,
-            context_to_store,
-            feedback_result,
-        ) = await generate_session_completion_with_optional_summary(
-            query=query,
-            context=context,
-            conversation_history=conversation_history,
-            user_prompt_path=user_prompt_path,
-            system_prompt_path=system_prompt_path,
-            system_prompt=system_prompt,
-            response_model=response_model,
-            summarize_context=summarize_context,
-            run_feedback_detection=run_auto_feedback,
-        )
-
-        feedback_detected = (
-            run_auto_feedback
-            and feedback_result is not None
-            and feedback_result.feedback_detected
-            and last_qa_id is not None
-        )
-
-        if feedback_detected:
-            try:
-                score: int | None = None
-                if feedback_result.feedback_score is not None:
-                    s = float(feedback_result.feedback_score)
-                    score = int(round(min(5, max(1, s))))
-                feedback_text = (feedback_result.feedback_text or "").strip()
-                if not feedback_text:
-                    feedback_text = f"User message: {query.strip()}"
-                await self.add_feedback(
-                    user_id=str(user_id),
-                    session_id=resolved_session_id,
-                    qa_id=last_qa_id,
-                    feedback_text=feedback_text,
-                    feedback_score=score,
-                )
-            except Exception as e:
-                logger.warning(
-                    "Auto-feedback persistence failed, proceeding without storing feedback: %s",
-                    e,
-                    exc_info=False,
-                )
-            if not feedback_result.contains_followup_question:
-                response = (feedback_result.response_to_user or "").strip()
-                return response if response else "Thanks for your feedback."
+            graph_elements = used_graph_element_ids
+        else:
+            # Feedback-only turn: nothing to answer, but we still record the exchange
+            # (question + acknowledgement) so it stays in history and vector recall.
+            answer = turn_preparation.response_to_user or "Thanks for your feedback."
+            context_to_store = ""
+            used_session_context_ids = None
+            graph_elements = None
 
         await self.add_qa(
             user_id=str(user_id),
             question=query,
             context=context_to_store,
-            answer=str(completion),
-            session_id=resolved_session_id,
-            used_graph_element_ids=used_graph_element_ids,
+            answer=str(answer),
+            session_id=session_id,
+            used_graph_element_ids=graph_elements,
+            used_session_context_ids=used_session_context_ids,
         )
-        if feedback_detected and feedback_result.contains_followup_question:
-            thanks = (feedback_result.response_to_user or "").strip()
-            return f"{thanks}\n\n{completion}" if thanks else completion
-        return completion
+        return answer
 
     @staticmethod
     def format_entries(entries: list[dict], include_context: bool = True) -> str:
@@ -574,7 +468,7 @@ class SessionManager:
             Empty list or empty string if cache unavailable or session not found.
         """
         session_id = self._resolve_session_id(session_id)
-        _validate_session_params(user_id=user_id, session_id=session_id, last_n=last_n)
+        self._validate_session_params(user_id=user_id, session_id=session_id, last_n=last_n)
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, returning empty session")
             return "" if formatted else []
@@ -603,6 +497,23 @@ class SessionManager:
             else entries_list
         )
 
+    async def get_session_entries_by_ids(
+        self,
+        *,
+        user_id: str,
+        qa_ids: list[str],
+        session_id: str | None = None,
+    ) -> list[SessionQAEntry]:
+        """Get specific session QA entries by qa_id, returned in chronological order."""
+        session_id = self._resolve_session_id(session_id)
+        self._validate_session_params(user_id=user_id, session_id=session_id)
+        for qa_id in qa_ids:
+            self._validate_session_params(qa_id=qa_id)
+        if not self.is_available or not qa_ids:
+            return []
+
+        return await self._cache.get_qa_entries_by_ids(user_id, session_id, qa_ids)
+
     async def get_agent_trace_session(
         self,
         *,
@@ -614,7 +525,7 @@ class SessionManager:
         Get the agent trace session for the given user/session pair.
         """
         session_id = self._resolve_session_id(session_id)
-        _validate_session_params(user_id=user_id, session_id=session_id, last_n=last_n)
+        self._validate_session_params(user_id=user_id, session_id=session_id, last_n=last_n)
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, returning empty agent trace session")
             return []
@@ -633,7 +544,7 @@ class SessionManager:
         Get only per-step feedback strings for the trace session.
         """
         session_id = self._resolve_session_id(session_id)
-        _validate_session_params(user_id=user_id, session_id=session_id, last_n=last_n)
+        self._validate_session_params(user_id=user_id, session_id=session_id, last_n=last_n)
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, returning empty agent trace feedback")
             return []
@@ -653,7 +564,7 @@ class SessionManager:
         Get the number of trace steps stored for the given user/session pair.
         """
         session_id = self._resolve_session_id(session_id)
-        _validate_session_params(user_id=user_id, session_id=session_id)
+        self._validate_session_params(user_id=user_id, session_id=session_id)
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, returning empty agent trace count")
             return 0
@@ -672,6 +583,7 @@ class SessionManager:
         feedback_score: int | None = None,
         used_graph_element_ids: dict | None = None,
         memify_metadata: dict | None = None,
+        used_session_context_ids: list | None = None,
         session_id: str | None = None,
     ) -> bool:
         """
@@ -681,17 +593,19 @@ class SessionManager:
         Returns True if updated, False if not found or cache unavailable.
         memify_metadata: Optional dict with status keys (e.g. "feedback_weights_applied") and bool values.
         used_graph_element_ids: Optional dict with "node_ids" and "edge_ids" lists for frequency weights.
+        used_session_context_ids: Optional list of session-context entry ids served to this answer.
         """
         from cognee.infrastructure.locks import session_lock
 
         session_id = self._resolve_session_id(session_id)
-        _validate_session_params(user_id=user_id, session_id=session_id, qa_id=qa_id)
+        self._validate_session_params(user_id=user_id, session_id=session_id, qa_id=qa_id)
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, skipping update_qa")
             return False
 
+        text_changed = question is not None or answer is not None
         async with session_lock(session_id, "update_qa"):
-            return await self._cache.update_qa_entry(
+            updated = await self._cache.update_qa_entry(
                 user_id=user_id,
                 session_id=session_id,
                 qa_id=qa_id,
@@ -702,7 +616,28 @@ class SessionManager:
                 feedback_score=feedback_score,
                 used_graph_element_ids=used_graph_element_ids,
                 memify_metadata=memify_metadata,
+                used_session_context_ids=used_session_context_ids,
             )
+            if not updated:
+                return False
+
+            if text_changed:
+                entries = await self.get_session_entries_by_ids(
+                    user_id=user_id,
+                    session_id=session_id,
+                    qa_ids=[qa_id],
+                )
+                await delete_session_qa_vector(qa_id=qa_id)
+                if entries:
+                    entry = entries[0]
+                    await index_session_qa(
+                        user_id=user_id,
+                        session_id=session_id,
+                        qa_id=qa_id,
+                        question=entry.question,
+                        answer=entry.answer,
+                    )
+            return True
 
     async def add_feedback(
         self,
@@ -746,7 +681,7 @@ class SessionManager:
         Returns True if updated, False if not found or cache unavailable.
         """
         session_id = self._resolve_session_id(session_id)
-        _validate_session_params(user_id=user_id, session_id=session_id, qa_id=qa_id)
+        self._validate_session_params(user_id=user_id, session_id=session_id, qa_id=qa_id)
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, skipping delete_feedback")
             return False
@@ -772,80 +707,128 @@ class SessionManager:
         from cognee.infrastructure.locks import session_lock
 
         session_id = self._resolve_session_id(session_id)
-        _validate_session_params(user_id=user_id, session_id=session_id, qa_id=qa_id)
+        self._validate_session_params(user_id=user_id, session_id=session_id, qa_id=qa_id)
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, skipping delete_qa")
             return False
 
         async with session_lock(session_id, "update_qa"):
-            return await self._cache.delete_qa_entry(
+            deleted = await self._cache.delete_qa_entry(
                 user_id=user_id,
                 session_id=session_id,
                 qa_id=qa_id,
             )
+            if deleted:
+                await delete_session_qa_vector(qa_id=qa_id)
+            return deleted
 
-    # -- Graph knowledge context (separate from QA history) -----------------
+    # -- Session context entries (active guidance layer) --------------------
 
-    @staticmethod
-    def _graph_context_key(user_id: str, session_id: str) -> str:
-        """Build the cache key used for session-scoped graph knowledge snapshots."""
-        return f"graph_knowledge:{user_id}:{session_id}"
+    async def create_session_context_entry(
+        self,
+        *,
+        user_id: str,
+        entry_dump: dict,
+        session_id: str | None = None,
+    ) -> bool:
+        """
+        Append one session-context entry (a plain dict carrying a "kind" field).
 
-    async def get_graph_context(self, *, user_id: str, session_id: str | None = None) -> str:
-        """Return the graph knowledge snapshot for this session, or empty string."""
-        if not self.is_available:
-            return ""
+        Fail-open: returns False when cache unavailable or on any error, never raises.
+        """
         session_id = self._resolve_session_id(session_id)
-        key = self._graph_context_key(user_id, session_id)
         try:
-            raw = await self._cache.get_value(key)
-            return raw if raw else ""
-        except (NotImplementedError, AttributeError, TypeError):
-            # Adapter predates the KV interface (missing, non-async, or
-            # different-signature get_value), fall back to legacy duck-typing
-            pass
+            self._validate_session_params(user_id=user_id, session_id=session_id)
         except Exception:
-            return ""
-        try:
-            raw = await self._cache.async_redis.get(key)
-            if raw:
-                return raw.decode() if isinstance(raw, bytes) else raw
-        except AttributeError:
-            # FsCacheAdapter
-            try:
-                raw = self._cache._cache.get(key)
-                if raw:
-                    return raw
-            except Exception:
-                pass
-        except Exception:
-            pass
-        return ""
-
-    async def set_graph_context(
-        self, *, user_id: str, session_id: str | None = None, context: str
-    ) -> None:
-        """Store (or overwrite) the graph knowledge snapshot for this session."""
+            return False
         if not self.is_available:
-            return
+            logger.debug("SessionManager: cache unavailable, skipping create_session_context_entry")
+            return False
+        try:
+            await self._cache.create_session_context_entry(user_id, session_id, entry_dump)
+            return True
+        except Exception as e:
+            logger.warning("SessionManager: create_session_context_entry failed: %s", e)
+            return False
+
+    async def get_session_context_entries(
+        self,
+        *,
+        user_id: str,
+        session_id: str | None = None,
+    ) -> list[dict]:
+        """
+        Return all stored session-context entries (both "context" and "feedback" kinds).
+
+        Fail-open: returns [] when cache unavailable or on any error, never raises.
+        """
         session_id = self._resolve_session_id(session_id)
-        key = self._graph_context_key(user_id, session_id)
         try:
-            await self._cache.set_value(key, context, ttl=self._cache.session_ttl_seconds)
-            return
-        except (NotImplementedError, AttributeError, TypeError):
-            # Adapter predates the KV interface (missing, non-async, or
-            # different-signature set_value), fall back to legacy duck-typing
-            pass
+            self._validate_session_params(user_id=user_id, session_id=session_id)
+        except Exception:
+            return []
+        if not self.is_available:
+            logger.debug("SessionManager: cache unavailable, returning empty session context")
+            return []
         try:
-            await self._cache.async_redis.set(key, context)
-            if self._cache.session_ttl_seconds:
-                await self._cache.async_redis.expire(key, self._cache.session_ttl_seconds)
-        except AttributeError:
-            try:
-                self._cache._cache.set(key, context)
-            except Exception:
-                pass
+            return await self._cache.get_session_context_entries(user_id, session_id)
+        except Exception as e:
+            logger.warning("SessionManager: get_session_context_entries failed: %s", e)
+            return []
+
+    async def update_session_context_entry(
+        self,
+        *,
+        user_id: str,
+        entry_id: str,
+        merge: dict,
+        session_id: str | None = None,
+    ) -> bool:
+        """
+        Shallow-merge updates into the session-context entry matching entry["id"].
+
+        Fail-open: returns False when cache unavailable or on any error, never raises.
+        """
+        session_id = self._resolve_session_id(session_id)
+        try:
+            self._validate_session_params(user_id=user_id, session_id=session_id)
+        except Exception:
+            return False
+        if not self.is_available:
+            logger.debug("SessionManager: cache unavailable, skipping update_session_context_entry")
+            return False
+        try:
+            return await self._cache.update_session_context_entry(
+                user_id, session_id, entry_id, merge
+            )
+        except Exception as e:
+            logger.warning("SessionManager: update_session_context_entry failed: %s", e)
+            return False
+
+    async def delete_session_context(
+        self,
+        *,
+        user_id: str,
+        session_id: str | None = None,
+    ) -> bool:
+        """
+        Delete the entire session-context list for the given session.
+
+        Fail-open: returns False when cache unavailable or on any error, never raises.
+        """
+        session_id = self._resolve_session_id(session_id)
+        try:
+            self._validate_session_params(user_id=user_id, session_id=session_id)
+        except Exception:
+            return False
+        if not self.is_available:
+            logger.debug("SessionManager: cache unavailable, skipping delete_session_context")
+            return False
+        try:
+            return await self._cache.delete_session_context(user_id, session_id)
+        except Exception as e:
+            logger.warning("SessionManager: delete_session_context failed: %s", e)
+            return False
 
     async def delete_session(self, *, user_id: str, session_id: str | None = None) -> bool:
         """
@@ -854,13 +837,14 @@ class SessionManager:
         Returns True if deleted, False if session did not exist or cache unavailable.
         """
         session_id = self._resolve_session_id(session_id)
-        _validate_session_params(user_id=user_id, session_id=session_id)
+        self._validate_session_params(user_id=user_id, session_id=session_id)
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, skipping delete_session")
             return False
 
-        # Also clean up the graph knowledge context key
-        graph_key = self._graph_context_key(user_id, session_id)
+        # One-release cleanup for graph snapshots written by the removed
+        # graph-to-session sync feature.
+        graph_key = f"graph_knowledge:{user_id}:{session_id}"
         try:
             await self._cache.delete_value(graph_key)
         except (NotImplementedError, AttributeError, TypeError):
@@ -878,7 +862,17 @@ class SessionManager:
         except Exception:
             pass
 
-        return await self._cache.delete_session(
+        # Also clear the active session-context list (fail-open; adapter.delete_session may also
+        # clear it, but this guarantees no leak if the adapter does not).
+        try:
+            await self._cache.delete_session_context(user_id, session_id)
+        except Exception:
+            pass
+
+        deleted = await self._cache.delete_session(
             user_id=user_id,
             session_id=session_id,
         )
+        if deleted:
+            await delete_session_qa_vectors(user_id=user_id, session_id=session_id)
+        return deleted

@@ -7,7 +7,7 @@ from collections import Counter
 
 import cognee
 from cognee.infrastructure.databases.graph import get_graph_engine
-from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.graph_completion_context_extension_retriever import (
@@ -40,9 +40,9 @@ async def _reset_engines_and_prune() -> None:
     """
     # Dispose of existing engines and clear caches to ensure fresh instances for each test
     try:
-        from cognee.infrastructure.databases.vector import get_vector_engine
+        from cognee.infrastructure.databases.vector import get_vector_engine_async
 
-        vector_engine = get_vector_engine()
+        vector_engine = await get_vector_engine_async()
         # Dispose SQLAlchemy engine connection pool if it exists
         if hasattr(vector_engine, "engine") and hasattr(vector_engine.engine, "dispose"):
             await vector_engine.engine.dispose(close=True)
@@ -102,6 +102,27 @@ def event_loop():
         loop.close()
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _disable_session_turn_gating():
+    """Disable session-turn gating (auto_feedback) so retrieval answers directly.
+
+    These tests exercise pure retrieval. The session-turn analysis runs on every non-only_context
+    search when caching + auto_feedback are enabled (both default True) and can intercept
+    multi-turn queries with a clarifying acknowledgement instead of an answer, making the
+    retrieval assertions non-deterministic. That layer has its own dedicated tests
+    (e.g. test_session_context_turn_flow.py), so it is turned off here.
+    """
+    prev = os.environ.get("AUTO_FEEDBACK")
+    os.environ["AUTO_FEEDBACK"] = "False"
+    try:
+        yield
+    finally:
+        if prev is None:
+            os.environ.pop("AUTO_FEEDBACK", None)
+        else:
+            os.environ["AUTO_FEEDBACK"] = prev
+
+
 async def setup_test_environment():
     """Helper function to set up test environment with data, cognify, and triplet embeddings."""
     # This test runs for multiple db settings, to run this locally set the corresponding db envs
@@ -118,7 +139,7 @@ async def setup_test_environment():
     await create_triplet_embeddings(user=user, dataset=dataset_name, triplets_batch_size=5)
 
     # Check if Triplet_text collection was created
-    vector_engine = get_vector_engine()
+    vector_engine = await get_vector_engine_async()
     has_collection = await vector_engine.has_collection(collection_name="Triplet_text")
     logger.info(f"Triplet_text collection exists after creation: {has_collection}")
 
@@ -139,7 +160,7 @@ async def _get_retriever_context(retriever, query: str):
 
 
 @pytest_asyncio.fixture(scope="session")
-async def e2e_state():
+async def e2e_state(_disable_session_turn_gating):
     """Compute E2E artifacts once; tests only assert.
 
     This avoids repeating expensive setup and LLM calls across multiple tests.
@@ -150,7 +171,7 @@ async def e2e_state():
     graph_engine = await get_graph_engine()
     _nodes, edges = await graph_engine.get_graph_data()
 
-    vector_engine = get_vector_engine()
+    vector_engine = await get_vector_engine_async()
     collection = await vector_engine.search(
         collection_name="Triplet_text",
         query_text="Test",

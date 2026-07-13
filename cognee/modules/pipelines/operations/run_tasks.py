@@ -67,6 +67,7 @@ async def run_tasks(
     rollback_handler: Optional[Callable[..., Awaitable[None]]] = None,
     llm_config: Optional[LLMConfig] = None,
     embedding_config: Optional[EmbeddingConfig] = None,
+    data_cache: bool = False,
 ):
     if not user:
         user = await get_default_user()
@@ -99,7 +100,7 @@ async def run_tasks(
             if not isinstance(data, list):
                 data = [data]
 
-            if incremental_loading:
+            if data_cache or incremental_loading:
                 data = await resolve_data_directories(data)
 
             # Semaphore-based concurrency: all items are scheduled at once,
@@ -125,11 +126,11 @@ async def run_tasks(
                         ),
                         user,
                         incremental_loading,
+                        data_cache,
                     )
 
             gathered = await asyncio.gather(
                 *[asyncio.create_task(_run_item(item)) for item in data],
-                return_exceptions=True,
             )
 
             # Separate successes from unhandled exceptions

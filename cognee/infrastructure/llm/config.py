@@ -11,6 +11,9 @@ try:
 except ImportError:
     ClientRegistry = None
 
+# Module-level constant (not a class attribute, to avoid pydantic field detection).
+_STAGE_NAMES = {"extraction", "summarization", "query"}
+
 
 class LLMConfig(BaseSettings):
     """
@@ -37,6 +40,7 @@ class LLMConfig(BaseSettings):
     Public methods include:
     - ensure_env_vars_for_ollama
     - to_dict
+    - stage_config
     """
 
     structured_output_framework: str = "instructor"
@@ -46,6 +50,26 @@ class LLMConfig(BaseSettings):
     llm_endpoint: str = ""
     llm_api_key: str | None = None
     llm_api_version: str | None = None
+
+    # Per-stage model routing (optional). Empty means fall back to the base llm_* values.
+    llm_extraction_model: str = ""
+    llm_extraction_provider: str = ""
+    llm_extraction_endpoint: str = ""
+    llm_extraction_api_key: str | None = None
+    llm_extraction_api_version: str | None = None
+
+    llm_summarization_model: str = ""
+    llm_summarization_provider: str = ""
+    llm_summarization_endpoint: str = ""
+    llm_summarization_api_key: str | None = None
+    llm_summarization_api_version: str | None = None
+
+    llm_query_model: str = ""
+    llm_query_provider: str = ""
+    llm_query_endpoint: str = ""
+    llm_query_api_key: str | None = None
+    llm_query_api_version: str | None = None
+
     llm_temperature: float = 0.0
     llm_streaming: bool = False
     llm_max_completion_tokens: int = 16384
@@ -208,14 +232,13 @@ class LLMConfig(BaseSettings):
             "EMBEDDING_PROVIDER": is_env_set("EMBEDDING_PROVIDER"),
             "EMBEDDING_MODEL": is_env_set("EMBEDDING_MODEL"),
             "EMBEDDING_DIMENSIONS": is_env_set("EMBEDDING_DIMENSIONS"),
-            "HUGGINGFACE_TOKENIZER": is_env_set("HUGGINGFACE_TOKENIZER"),
         }
         if any(embedding_env_vars.values()) and not all(embedding_env_vars.values()):
             missing_embed = [key for key, is_set in embedding_env_vars.items() if not is_set]
             raise ValueError(
                 "You have set some but not all of the required environment variables "
                 "for embeddings (EMBEDDING_PROVIDER, EMBEDDING_MODEL, "
-                "EMBEDDING_DIMENSIONS, HUGGINGFACE_TOKENIZER). Missing: "
+                "EMBEDDING_DIMENSIONS). Missing: "
                 f"{missing_embed}"
             )
 
@@ -258,6 +281,23 @@ class LLMConfig(BaseSettings):
             "llama_cpp_chat_format": self.llama_cpp_chat_format,
             "llm_args": self.llm_args,
         }
+
+    def stage_config(self, stage: str) -> "LLMConfig":
+        """Return a copy of this config with the base llm_* fields overridden by
+        any set llm_<stage>_* fields. Unset stage fields fall back to the base
+        values, so a config with no stage overrides returns an equivalent config
+        (single-model behavior preserved).
+        """
+        if stage not in _STAGE_NAMES:
+            return self
+        update: dict[str, Any] = {}
+        for field in ("model", "provider", "endpoint", "api_key", "api_version"):
+            value = getattr(self, f"llm_{stage}_{field}", None)
+            if value:  # treats "" and None as unset
+                update[f"llm_{field}"] = value
+        if not update:
+            return self
+        return self.model_copy(update=update)
 
 
 @lru_cache

@@ -12,6 +12,7 @@ from cognee.infrastructure.databases.cache.sql.SqlCacheAdapter import SqlCacheAd
 from cognee.infrastructure.databases.cache.sql.tables import (
     cache_kv,
     cache_qa_entries,
+    cache_session_context,
     cache_trace_entries,
     cache_usage_logs,
 )
@@ -117,6 +118,26 @@ async def test_create_qa_entry_with_used_graph_element_ids_round_trip(adapter):
     entries = await adapter.get_all_qa_entries("u1", "s1")
     assert len(entries) == 1
     assert entries[0].used_graph_element_ids == used_ids
+
+
+@pytest.mark.asyncio
+async def test_qa_entry_used_session_context_ids_round_trip(adapter):
+    """used_session_context_ids round-trips on create and can be set via update.
+
+    Guards the session-context guidance layer: SessionManager.add_qa always
+    forwards this kwarg, so the SQL adapter must accept and persist it.
+    """
+    await adapter.create_qa_entry(
+        "u1", "s1", "Q", "C", "A", qa_id="id1", used_session_context_ids=["ctx1", "ctx2"]
+    )
+    (entry,) = await adapter.get_all_qa_entries("u1", "s1")
+    assert entry.used_session_context_ids == ["ctx1", "ctx2"]
+
+    assert (
+        await adapter.update_qa_entry("u1", "s1", "id1", used_session_context_ids=["ctx3"]) is True
+    )
+    (entry,) = await adapter.get_all_qa_entries("u1", "s1")
+    assert entry.used_session_context_ids == ["ctx3"]
 
 
 @pytest.mark.asyncio
@@ -557,7 +578,7 @@ async def test_log_usage_and_get_usage_logs(adapter):
 @pytest.mark.asyncio
 async def test_kv_round_trip_and_overwrite(adapter):
     """set_value/get_value/delete_value round-trip; set is an upsert."""
-    key = "graph_knowledge:u1:s1"
+    key = "session_note:u1:s1"
     assert await adapter.get_value(key) is None
 
     await adapter.set_value(key, "snapshot-1")
@@ -576,7 +597,7 @@ async def test_kv_round_trip_and_overwrite(adapter):
 @pytest.mark.asyncio
 async def test_kv_ttl_expiry(adapter):
     """A keyed value with ttl becomes invisible once expires_at passes."""
-    key = "graph_sync_checkpoint:u1:d1:s1"
+    key = "checkpoint:test"
     await adapter.set_value(key, "checkpoint", ttl=3600)
     assert await adapter.get_value(key) == "checkpoint"
 
@@ -590,7 +611,7 @@ async def test_kv_ttl_expiry(adapter):
 @pytest.mark.asyncio
 async def test_kv_without_ttl_is_immortal(adapter):
     """ttl=None stores the value without expiry (expires_at stays NULL)."""
-    key = "graph_knowledge:u1:s1"
+    key = "session_note:u1:s1"
     await adapter.set_value(key, "forever")
 
     assert await _fetch_expirations(adapter, cache_kv, key=key) == [None]
@@ -610,7 +631,7 @@ async def test_prune_clears_only_the_four_cache_tables(adapter):
         "u1", "s1", trace_id="t1", origin_function="plan_trip", status="success"
     )
     await adapter.log_usage("u1", {"endpoint": "/add"})
-    await adapter.set_value("graph_knowledge:u1:s1", "snapshot")
+    await adapter.set_value("session_note:u1:s1", "note")
 
     async with adapter.engine.begin() as connection:
         await connection.execute(text("CREATE TABLE co_tenant (id INTEGER PRIMARY KEY, v TEXT)"))
@@ -621,7 +642,7 @@ async def test_prune_clears_only_the_four_cache_tables(adapter):
     assert await adapter.get_all_qa_entries("u1", "s1") == []
     assert await adapter.get_agent_trace_session("u1", "s1") == []
     assert await adapter.get_usage_logs("u1") == []
-    assert await adapter.get_value("graph_knowledge:u1:s1") is None
+    assert await adapter.get_value("session_note:u1:s1") is None
 
     async with adapter.engine.connect() as connection:
         survivors = (await connection.execute(text("SELECT v FROM co_tenant"))).scalars().all()
@@ -695,3 +716,126 @@ async def test_get_latest_qa_backward_compat(adapter):
     via_new = await adapter.get_latest_qa_entries("u1", "s1", last_n=2)
     assert via_legacy == via_new
     assert len(via_legacy) == 2
+
+
+@pytest.mark.asyncio
+async def test_get_qa_entries_by_ids_returns_matching_rows_in_chronological_order(adapter):
+    await adapter.create_qa_entry("u1", "s1", "Q1", "C1", "A1", qa_id="id1")
+    await adapter.create_qa_entry("u1", "s1", "Q2", "C2", "A2", qa_id="id2")
+    await adapter.create_qa_entry("u1", "s1", "Q3", "C3", "A3", qa_id="id3")
+
+    entries = await adapter.get_qa_entries_by_ids("u1", "s1", ["id3", "missing", "id1"])
+
+    assert [entry.qa_id for entry in entries] == ["id1", "id3"]
+
+
+# --------------------------------------------------------------------------- #
+# Session context (active guidance entries)
+# --------------------------------------------------------------------------- #
+
+
+def _ctx(entry_id, section="goals", content="x", kind="context"):
+    return {"id": entry_id, "kind": kind, "section": section, "content": content}
+
+
+@pytest.mark.asyncio
+async def test_create_and_get_session_context_entries_preserve_order(adapter):
+    """Entries round-trip as dicts in insertion order; both kinds are stored together."""
+    await adapter.create_session_context_entry("u1", "s1", _ctx("c1", content="first"))
+    await adapter.create_session_context_entry(
+        "u1", "s1", {"id": "f1", "kind": "feedback", "raw_text": "good"}
+    )
+    entries = await adapter.get_session_context_entries("u1", "s1")
+    assert [(e["id"], e["kind"]) for e in entries] == [("c1", "context"), ("f1", "feedback")]
+    assert entries[0]["content"] == "first"
+
+
+@pytest.mark.asyncio
+async def test_create_session_context_entry_without_id_is_stored(adapter):
+    """An id-less payload is stored (parity with Redis/FS); it is just never updatable."""
+    await adapter.create_session_context_entry("u1", "s1", {"kind": "context", "content": "x"})
+    entries = await adapter.get_session_context_entries("u1", "s1")
+    assert len(entries) == 1
+    assert entries[0]["content"] == "x"
+    assert "id" not in entries[0]  # payload is stored verbatim, no synthetic id injected
+
+
+@pytest.mark.asyncio
+async def test_get_session_context_entries_empty(adapter):
+    """An unknown session returns an empty list, not an error."""
+    assert await adapter.get_session_context_entries("u1", "nope") == []
+
+
+@pytest.mark.asyncio
+async def test_update_session_context_entry_shallow_merges(adapter):
+    """update shallow-merges into the matching entry and returns True."""
+    await adapter.create_session_context_entry("u1", "s1", _ctx("c1", content="draft"))
+    updated = await adapter.update_session_context_entry(
+        "u1", "s1", "c1", {"content": "final", "rating": "helpful"}
+    )
+    assert updated is True
+    (entry,) = await adapter.get_session_context_entries("u1", "s1")
+    assert entry["content"] == "final"
+    assert entry["rating"] == "helpful"
+    assert entry["section"] == "goals"  # untouched fields preserved
+
+
+@pytest.mark.asyncio
+async def test_update_session_context_entry_missing_returns_false(adapter):
+    """Updating an absent entry_id is a no-op that returns False."""
+    await adapter.create_session_context_entry("u1", "s1", _ctx("c1"))
+    assert await adapter.update_session_context_entry("u1", "s1", "ghost", {"x": 1}) is False
+
+
+@pytest.mark.asyncio
+async def test_delete_session_context_returns_existence(adapter):
+    """delete_session_context wipes the list; True only when live rows existed."""
+    await adapter.create_session_context_entry("u1", "s1", _ctx("c1"))
+    assert await adapter.delete_session_context("u1", "s1") is True
+    assert await adapter.get_session_context_entries("u1", "s1") == []
+    assert await adapter.delete_session_context("u1", "s1") is False
+
+
+@pytest.mark.asyncio
+async def test_delete_session_also_clears_session_context(adapter):
+    """delete_session drops session-context rows alongside QA and trace rows."""
+    await adapter.create_qa_entry("u1", "s1", "Q", "C", "A", qa_id="id1")
+    await adapter.create_session_context_entry("u1", "s1", _ctx("c1"))
+    assert await adapter.delete_session("u1", "s1") is True
+    assert await adapter.get_session_context_entries("u1", "s1") == []
+
+
+@pytest.mark.asyncio
+async def test_session_context_isolated_per_session(adapter):
+    """Context writes and deletes target only the given user+session."""
+    await adapter.create_session_context_entry("u1", "s1", _ctx("c1"))
+    await adapter.create_session_context_entry("u1", "s2", _ctx("c2"))
+    await adapter.create_session_context_entry("u2", "s1", _ctx("c3"))
+    await adapter.delete_session_context("u1", "s1")
+    assert await adapter.get_session_context_entries("u1", "s1") == []
+    assert len(await adapter.get_session_context_entries("u1", "s2")) == 1
+    assert len(await adapter.get_session_context_entries("u2", "s1")) == 1
+
+
+@pytest.mark.asyncio
+async def test_session_context_write_sets_and_refreshes_ttl(adapter):
+    """Context writes stamp expires_at and slide the whole session forward."""
+    await adapter.create_session_context_entry("u1", "s1", _ctx("c1"))
+    expirations = await _fetch_expirations(adapter, cache_session_context, user_id="u1")
+    assert len(expirations) == 1 and expirations[0] is not None
+
+    near_future = datetime.now(timezone.utc) + timedelta(seconds=30)
+    await _backdate_expirations(adapter, cache_session_context, near_future, entry_id="c1")
+    await adapter.create_session_context_entry("u1", "s1", _ctx("c2"))
+    refreshed = (await _fetch_expirations(adapter, cache_session_context, entry_id="c1"))[0]
+    if refreshed.tzinfo is None:
+        refreshed = refreshed.replace(tzinfo=timezone.utc)
+    assert refreshed > near_future + timedelta(seconds=60)
+
+
+@pytest.mark.asyncio
+async def test_session_context_reads_exclude_expired(adapter):
+    """An entry past its expires_at is invisible to reads."""
+    await adapter.create_session_context_entry("u1", "s1", _ctx("c1"))
+    await _backdate_expirations(adapter, cache_session_context, _past(), entry_id="c1")
+    assert await adapter.get_session_context_entries("u1", "s1") == []

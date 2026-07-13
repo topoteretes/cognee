@@ -40,7 +40,7 @@ class _FakeSession:
         self.last_form = None
         self.closed = False
 
-    def post(self, _url, data=None):
+    def post(self, _url, data=None, **kwargs):
         self.last_form = data
         return _FakeResponse()
 

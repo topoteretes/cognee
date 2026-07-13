@@ -95,6 +95,11 @@ class RedisAdapter(CacheDBInterface):
         return f"agent_traces:{user_id}:{session_id}"
 
     @staticmethod
+    def _session_context_key(user_id: str, session_id: str) -> str:
+        """Build the Redis key for session-context entries."""
+        return f"session_context:{user_id}:{session_id}"
+
+    @staticmethod
     def _build_qa_entry_dump(
         question: str,
         context: str,
@@ -104,6 +109,7 @@ class RedisAdapter(CacheDBInterface):
         feedback_score: int | None = None,
         used_graph_element_ids: dict | None = None,
         memify_metadata: dict | None = None,
+        used_session_context_ids: list | None = None,
     ) -> dict:
         """Serialize one QA entry into the normalized Redis payload shape."""
         entry = SessionQAEntry(
@@ -116,6 +122,7 @@ class RedisAdapter(CacheDBInterface):
             feedback_score=feedback_score,
             used_graph_element_ids=used_graph_element_ids,
             memify_metadata=memify_metadata,
+            used_session_context_ids=used_session_context_ids,
         )
         return entry.model_dump()
 
@@ -175,6 +182,7 @@ class RedisAdapter(CacheDBInterface):
         feedback_score: int | None = None,
         used_graph_element_ids: dict | None = None,
         memify_metadata: dict | None = None,
+        used_session_context_ids: list | None = None,
     ) -> dict:
         """Merge partial QA updates into an existing serialized entry."""
         merged = {**entry}
@@ -190,6 +198,8 @@ class RedisAdapter(CacheDBInterface):
             merged["feedback_score"] = feedback_score
         if used_graph_element_ids is not None:
             merged["used_graph_element_ids"] = used_graph_element_ids
+        if used_session_context_ids is not None:
+            merged["used_session_context_ids"] = used_session_context_ids
         if memify_metadata is not None:
             existing_metadata = merged.get("memify_metadata")
             if isinstance(existing_metadata, dict):
@@ -276,6 +286,7 @@ class RedisAdapter(CacheDBInterface):
         feedback_score: int | None = None,
         used_graph_element_ids: dict | None = None,
         memify_metadata: dict | None = None,
+        used_session_context_ids: list | None = None,
     ) -> None:
         """
         Add a Q/A/context triplet to a Redis list for this session.
@@ -292,6 +303,7 @@ class RedisAdapter(CacheDBInterface):
                 feedback_score,
                 used_graph_element_ids=used_graph_element_ids,
                 memify_metadata=memify_metadata,
+                used_session_context_ids=used_session_context_ids,
             )
             await self.async_redis.rpush(session_key, json.dumps(qa_entry))
             await self._apply_session_ttl(session_key)
@@ -324,6 +336,24 @@ class RedisAdapter(CacheDBInterface):
         session_key = self._session_key(user_id, session_id)
         return [SessionQAEntry(**entry) for entry in await self._load_entries(session_key)]
 
+    async def get_qa_entries_by_ids(
+        self,
+        user_id: str,
+        session_id: str,
+        qa_ids: list[str],
+    ) -> list[SessionQAEntry]:
+        """Return matching QA entries for the given session, oldest first."""
+        wanted_ids = set(qa_ids)
+        if not wanted_ids:
+            return []
+
+        session_key = self._session_key(user_id, session_id)
+        return [
+            SessionQAEntry(**entry)
+            for entry in await self._load_entries(session_key)
+            if entry.get("qa_id") in wanted_ids
+        ]
+
     async def update_qa_entry(
         self,
         user_id: str,
@@ -336,6 +366,7 @@ class RedisAdapter(CacheDBInterface):
         feedback_score: int | None = None,
         used_graph_element_ids: dict | None = None,
         memify_metadata: dict | None = None,
+        used_session_context_ids: list | None = None,
     ) -> bool:
         """
         Update a QA entry by qa_id. Same QA fields as create_qa_entry.
@@ -357,6 +388,7 @@ class RedisAdapter(CacheDBInterface):
                 feedback_score,
                 used_graph_element_ids=used_graph_element_ids,
                 memify_metadata=memify_metadata,
+                used_session_context_ids=used_session_context_ids,
             )
             entries[idx] = self._validate_entry_dict(merged)
             await self._write_entry_at(session_key, idx, entries[idx])
@@ -432,9 +464,11 @@ class RedisAdapter(CacheDBInterface):
         try:
             session_key = self._session_key(user_id, session_id)
             trace_key = self._agent_trace_key(user_id, session_id)
+            context_key = self._session_context_key(user_id, session_id)
             deleted_sessions = await self.async_redis.delete(session_key)
             deleted_traces = await self.async_redis.delete(trace_key)
-            return (deleted_sessions + deleted_traces) > 0
+            deleted_context = await self.async_redis.delete(context_key)
+            return (deleted_sessions + deleted_traces + deleted_context) > 0
 
         except (redis.ConnectionError, redis.TimeoutError) as e:
             error_msg = f"Redis connection error while deleting session: {str(e)}"
@@ -551,6 +585,65 @@ class RedisAdapter(CacheDBInterface):
         """Return the number of stored trace steps for the given session."""
         trace_key = self._agent_trace_key(user_id, session_id)
         return await self.async_redis.llen(trace_key)
+
+    async def create_session_context_entry(
+        self, user_id: str, session_id: str, entry_dump: dict
+    ) -> None:
+        """Append one session-context entry to the Redis list for this session."""
+        try:
+            context_key = self._session_context_key(user_id, session_id)
+            await self.async_redis.rpush(context_key, json.dumps(entry_dump))
+            await self._apply_session_ttl(context_key)
+        except (redis.ConnectionError, redis.TimeoutError) as e:
+            error_msg = f"Redis connection error while adding session context: {str(e)}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
+        except Exception as e:
+            error_msg = f"Unexpected error while adding session context to Redis: {str(e)}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
+
+    async def get_session_context_entries(self, user_id: str, session_id: str) -> list[dict]:
+        """Retrieve all stored session-context entries for the given session."""
+        context_key = self._session_context_key(user_id, session_id)
+        return await self._load_entries(context_key)
+
+    async def update_session_context_entry(
+        self, user_id: str, session_id: str, entry_id: str, merge: dict
+    ) -> bool:
+        """Shallow-merge updates into the session-context entry matching entry["id"]."""
+        try:
+            context_key = self._session_context_key(user_id, session_id)
+            entries = await self._load_entries(context_key)
+            for i, entry in enumerate(entries):
+                if entry.get("id") == entry_id:
+                    entries[i] = {**entry, **merge}
+                    await self._write_entry_at(context_key, i, entries[i])
+                    await self._apply_session_ttl(context_key)
+                    return True
+            return False
+        except (redis.ConnectionError, redis.TimeoutError) as e:
+            error_msg = f"Redis connection error while updating session context: {str(e)}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
+        except Exception as e:
+            error_msg = f"Unexpected error while updating session context in Redis: {str(e)}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
+
+    async def delete_session_context(self, user_id: str, session_id: str) -> bool:
+        """Delete the entire session-context list for the given session."""
+        try:
+            context_key = self._session_context_key(user_id, session_id)
+            return (await self.async_redis.delete(context_key)) > 0
+        except (redis.ConnectionError, redis.TimeoutError) as e:
+            error_msg = f"Redis connection error while deleting session context: {str(e)}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
+        except Exception as e:
+            error_msg = f"Unexpected error while deleting session context from Redis: {str(e)}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
 
     async def prune(self) -> None:
         """

@@ -8,6 +8,7 @@ from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingCo
 from cognee.infrastructure.llm.config import LLMConfig
 from cognee.modules.search.types import SearchResult, SearchType
 from cognee.modules.users.methods import get_default_user
+from cognee.base_config import get_base_config
 from cognee.modules.search.methods import search as search_function
 from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.data.exceptions import DatasetNotFoundError
@@ -43,7 +44,7 @@ async def search(
     session_id: Optional[str] = None,
     wide_search_top_k: Optional[int] = 100,
     triplet_distance_penalty: Optional[float] = 6.5,
-    feedback_influence: float = 0.0,
+    feedback_influence: float = get_base_config().default_feedback_influence,
     verbose: bool = False,
     retriever_specific_config: Optional[dict] = None,
     neighborhood_depth: Optional[int] = None,
@@ -286,7 +287,7 @@ async def search(
         await set_session_user_context_variable(user)
 
         # Transform string based datasets to UUID - String based datasets can only be found for current user
-        if datasets is not None and [all(isinstance(dataset, str) for dataset in datasets)]:
+        if datasets is not None and all(isinstance(dataset, str) for dataset in datasets):
             datasets = await get_authorized_existing_datasets(datasets, "read", user)
             datasets = [dataset.id for dataset in datasets]
             if not datasets:

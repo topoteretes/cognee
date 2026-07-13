@@ -5,7 +5,8 @@ from uuid import UUID, uuid4, uuid5
 import pytest
 
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
-from cognee.modules.engine.utils import generate_edge_id
+from cognee.infrastructure.session.session_manager import SessionTurnPreparation
+from cognee.modules.graph.models.EdgeType import EdgeType
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError, QueryValidationError
 from cognee.modules.retrieval.hybrid_retriever import HybridRetriever
 
@@ -1133,10 +1134,13 @@ async def test_session_path_calls_session_manager_with_used_node_ids():
             return_value=session_manager,
         ),
     ):
+        turn_preparation = SessionTurnPreparation(effective_query="prepared q")
         completion = await retriever.get_completion_from_context(
             query="q",
             retrieved_objects=retrieved_objects,
             context="context",
+            effective_query="prepared q",
+            turn_preparation=turn_preparation,
         )
 
     assert completion == ["answer"]
@@ -1145,6 +1149,8 @@ async def test_session_path_calls_session_manager_with_used_node_ids():
     assert call_kwargs["used_graph_element_ids"] == {
         "node_ids": ["chunk-1", "entity-1", "source-1", "target-1"]
     }
+    assert call_kwargs["effective_query"] == "prepared q"
+    assert call_kwargs["turn_preparation"] is turn_preparation
 
 
 @pytest.mark.asyncio
@@ -1180,7 +1186,7 @@ def _payload_text(chunk):
 
 
 def _edge_hit(text):
-    return _result(str(generate_edge_id(text)), {"text": text})
+    return _result(str(EdgeType.id_for(text)), {"text": text})
 
 
 def _graph(nodes=None, edges=None):

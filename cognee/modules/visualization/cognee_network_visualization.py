@@ -27,13 +27,43 @@ from cognee.infrastructure.files.storage.LocalFileStorage import LocalFileStorag
 from cognee.modules.visualization.preprocessor import preprocess
 from cognee.modules.visualization.views import (
     inspector,
+    memory_map,
     schema_view,
+    semantic_map,
     story_view,
     ui_chrome,
 )
-from cognee.modules.visualization.layouts import pipeline_layout
+from cognee.modules.visualization.layouts import pipeline_layout, semantic_layout
+from cognee.modules.visualization.embedding_join import fetch_node_embeddings, select_nodes
+from cognee.modules.visualization.semantic_clusters import compute_clusters
 
 logger = get_logger()
+
+
+async def _semantic_payload(pre) -> tuple[Optional[dict], Optional[dict]]:
+    """Best-effort semantic positions + clusters. Never blocks the classic render.
+
+    Returns ``(positions, clusters)`` or ``(None, None)`` when they can't be
+    computed — in which case the semantic tab shows a friendly empty state.
+    Bounded: the layout and clustering run on the same capped node sample as
+    the embedding fetch (``select_nodes``).
+    """
+    try:
+        nodes = select_nodes(pre.nodes)
+        embeddings = await fetch_node_embeddings(nodes)
+        if not embeddings:
+            return None, None
+        # PCA is the deterministic zero-dependency default; set
+        # SEMANTIC_MAP_PROJECTION=umap to opt in when umap-learn is installed
+        # (silently falls back to PCA when it isn't).
+        method = os.environ.get("SEMANTIC_MAP_PROJECTION", "pca").strip().lower()
+        positions = semantic_layout.compute_positions(nodes, pre.links, embeddings, method=method)
+        clusters = compute_clusters(nodes, embeddings)
+        return positions, clusters
+    except Exception as exc:
+        logger.warning("Semantic map: payload computation failed (%s); tab shows empty state.", exc)
+        return None, None
+
 
 _TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), "template.html")
 
@@ -53,6 +83,7 @@ async def cognee_network_visualization(
     graph_data,
     destination_file_path: Optional[str] = None,
     schema_data: Optional[dict] = None,
+    search_events: Optional[list] = None,
 ) -> str:
     """Render the graph to a self-contained HTML file and return the HTML.
 
@@ -63,11 +94,35 @@ async def cognee_network_visualization(
             ``~/graph_visualization.html``.
         schema_data: Optional pre-built schema payload.  When absent, the
             preprocessor derives a type-graph from the nodes/links it sees.
+        search_events: Optional list of operation events shown on the Memory
+            tab's timeline. Two kinds::
+
+                {"kind": "search", "time": "2026-06-10T10:31:02",
+                 "qa_id": "...", "question": "...", "answer": "...",
+                 "node_ids": ["uuid", ...], "edge_ids": ["uuid", ...]}
+
+                {"kind": "improve", "time": "...", "qa_id": "...",
+                 "question": "...", "rating": 5, "feedback_text": "...",
+                 "applied": true,
+                 "node_ids": ["uuid", ...], "edge_ids": ["uuid", ...]}
+
+            ``search`` renders a retrieval spotlight; ``improve`` renders a
+            reinforcement overlay (the elements whose feedback_weight the
+            rated answer updated — green for positive ratings, amber for
+            negative). Entries without ``kind`` default to ``search``.
+
+            No cache is read here — ``visualize_graph(include_session_events
+            =True)`` collects these automatically from the session layer via
+            ``cognee.modules.visualization.session_events``; pass them
+            explicitly only for custom pipelines.
 
     Returns:
         The full HTML as a string.
     """
     pre = preprocess(graph_data, schema_data=schema_data)
+
+    # Best-effort semantic layout; guarded so it never blocks the classic render.
+    semantic_positions, semantic_clusters = await _semantic_payload(pre)
 
     html = _read_template()
 
@@ -78,6 +133,9 @@ async def cognee_network_visualization(
     html = html.replace("__STORY_VIEW_JS__", story_view.emit_js(pre))
     html = html.replace("__PIPELINE_LAYOUT_JS__", pipeline_layout.emit_js(pre))
     html = html.replace("__INSPECTOR_JS__", inspector.emit_js(pre))
+    html = html.replace("__MEMORY_VIEW_JS__", memory_map.emit_js(pre))
+    html = html.replace("__SEMANTIC_LAYOUT_JS__", semantic_layout.emit_js(pre))
+    html = html.replace("__SEMANTIC_VIEW_JS__", semantic_map.emit_js(pre))
 
     # 2) Data tokens: substituted last so JSON-embedded ``__SCHEMA_GRAPH_DATA__``
     #    inside the schema JS chunk gets resolved correctly.
@@ -94,6 +152,20 @@ async def cognee_network_visualization(
     html = html.replace(
         "__SCHEMA_GRAPH_DATA__",
         _safe_json_embed(pre.schema_graph or {"nodes": [], "links": []}),
+    )
+    # Unconditional, JSON-fallback substitutions: a leaked __MEMORY_DATA__ /
+    # __SEARCH_EVENTS__ token would fail the no-placeholder assembly test.
+    html = html.replace("__MEMORY_DATA__", _safe_json_embed(pre.memory_map or {}))
+    html = html.replace("__SEARCH_EVENTS__", _safe_json_embed(search_events or []))
+    # Semantic tokens: null when there are no embeddings, so the tab renders a
+    # friendly empty state without leaving a placeholder behind.
+    html = html.replace(
+        "__SEMANTIC_POSITIONS__",
+        _safe_json_embed(semantic_positions) if semantic_positions else "null",
+    )
+    html = html.replace(
+        "__SEMANTIC_CLUSTERS__",
+        _safe_json_embed(semantic_clusters) if semantic_clusters else "null",
     )
 
     if not destination_file_path:

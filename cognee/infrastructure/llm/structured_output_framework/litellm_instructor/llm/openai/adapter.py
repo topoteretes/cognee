@@ -11,13 +11,19 @@ from tenacity import (
     before_sleep_log,
     retry,
     retry_if_not_exception_type,
-    stop_after_delay,
+    stop_after_attempt,
     wait_exponential_jitter,
+)
+
+from cognee.infrastructure.llm.retry_config import (
+    llm_retry_stop_condition,
 )
 
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.llm.exceptions import (
     ContentPolicyFilterError,
+    LLMPaymentRequiredError,
+    is_budget_exhausted_error,
 )
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.generic_llm_api.adapter import (
     GenericAPIAdapter,
@@ -56,7 +62,7 @@ class OpenAIAdapter(GenericAPIAdapter):
     """
 
     default_instructor_mode = "json_schema_mode"
-    MAX_RETRIES = 5
+    MAX_RETRIES = 2
 
     """Adapter for OpenAI's GPT-3, GPT=4 API"""
 
@@ -108,10 +114,14 @@ class OpenAIAdapter(GenericAPIAdapter):
 
     @observe(as_type="generation")
     @retry(
-        stop=stop_after_delay(128),
+        stop=llm_retry_stop_condition,
         wait=wait_exponential_jitter(8, 128),
         retry=retry_if_not_exception_type(
-            (litellm.exceptions.NotFoundError, litellm.exceptions.AuthenticationError)
+            (
+                litellm.exceptions.NotFoundError,
+                litellm.exceptions.AuthenticationError,
+                LLMPaymentRequiredError,
+            )
         ),
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
@@ -141,6 +151,11 @@ class OpenAIAdapter(GenericAPIAdapter):
         """
 
         merged_kwargs = {**self.llm_args, **kwargs}
+
+        # A plain string needs no schema — skip instructor (see acreate_str_output).
+        if response_model is str:
+            return await self.acreate_str_output(text_input, system_prompt, **merged_kwargs)
+
         try:
             async with llm_rate_limiter_context_manager():
                 return await self.aclient.chat.completions.create(
@@ -184,7 +199,7 @@ class OpenAIAdapter(GenericAPIAdapter):
                             },
                         ],
                         api_key=self.fallback_api_key,
-                        # api_base=self.fallback_endpoint,
+                        api_base=self.fallback_endpoint,
                         response_model=response_model,
                         max_retries=self.MAX_RETRIES,
                         **merged_kwargs,
@@ -203,10 +218,14 @@ class OpenAIAdapter(GenericAPIAdapter):
                     raise ContentPolicyFilterError(
                         f"The provided input contains content that is not aligned with our content policy: {text_input}"
                     ) from error
+        except Exception as e:
+            if is_budget_exhausted_error(e):
+                raise LLMPaymentRequiredError() from e
+            raise
 
     @observe(as_type="transcription")
     @retry(
-        stop=stop_after_delay(128),
+        stop=stop_after_attempt(3),
         wait=wait_exponential_jitter(2, 128),
         retry=retry_if_not_exception_type(
             (litellm.exceptions.NotFoundError, litellm.exceptions.AuthenticationError)

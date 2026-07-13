@@ -1,6 +1,6 @@
 from unittest.mock import MagicMock
 
-from cognee.modules.engine.utils import generate_edge_id
+from cognee.modules.graph.models.EdgeType import EdgeType
 from cognee.modules.retrieval.hybrid.facts import (
     connection_edge_type_id,
     edge_rank_by_id,
@@ -10,7 +10,7 @@ from cognee.modules.retrieval.hybrid.facts import (
 
 
 def _edge_id(text):
-    return str(generate_edge_id(text))
+    return str(EdgeType.id_for(text))
 
 
 def _hit(text):

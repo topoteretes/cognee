@@ -1,7 +1,7 @@
 from typing import Any, Dict, List, Optional, Type
 
 from cognee.shared.logging_utils import get_logger
-from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.modules.retrieval.utils.completion import generate_completion
 from cognee.infrastructure.session.get_session_manager import get_session_manager
 from cognee.modules.retrieval.base_retriever import BaseRetriever
@@ -40,7 +40,7 @@ class CompletionRetriever(BaseRetriever):
         self.include_references = include_references
 
     async def get_retrieved_objects(self, query: str) -> Any:
-        vector_engine = get_vector_engine()
+        vector_engine = await get_vector_engine_async()
 
         try:
             found_chunks = await vector_engine.search(
@@ -105,6 +105,8 @@ class CompletionRetriever(BaseRetriever):
         query: str,
         retrieved_objects: Any,
         context: Optional[Any] = None,
+        effective_query: Optional[str] = None,
+        turn_preparation=None,
     ) -> List[Any]:
         """
         Generates an LLM completion using the context.
@@ -146,6 +148,8 @@ class CompletionRetriever(BaseRetriever):
                 summarize_context=False,
                 used_graph_element_ids=used_graph_element_ids,
                 max_context_chars=getattr(self, "max_context_chars", None),
+                effective_query=effective_query,
+                turn_preparation=turn_preparation,
             )
             completions = [completion]
         else:

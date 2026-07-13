@@ -11,6 +11,7 @@ from cognee import __version__ as cognee_version
 from cognee.api.DTO import ErrorResponse, InDTO, OutDTO
 from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
+from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError
 from cognee.modules.search.operations import get_history
 from cognee.modules.search.types import SearchResult, SearchType
 from cognee.modules.users.exceptions.exceptions import PermissionDeniedError, UserNotFoundError
@@ -33,7 +34,7 @@ class SearchPayloadDTO(InDTO):
     )
     datasets: Optional[list[str]] = Field(
         default=None,
-        examples=[["main_dataset"]],
+        examples=[["default_dataset"]],
         description=(
             "Dataset names to search. Names only resolve to datasets owned by the caller;"
             " use dataset_ids for datasets shared with you."
@@ -41,7 +42,7 @@ class SearchPayloadDTO(InDTO):
     )
     dataset_ids: Optional[list[UUID]] = Field(
         default=None,
-        examples=[["a1b2c3d4-5678-40ab-8cde-1234567890ab"]],
+        examples=[None],
         description=(
             "Dataset UUIDs to search (required for datasets shared with you)."
             " When provided, the datasets name list is ignored."
@@ -53,7 +54,7 @@ class SearchPayloadDTO(InDTO):
     )
     node_name: Optional[list[str]] = Field(
         default=None,
-        examples=[["tech_docs"]],
+        examples=[None],
         description=(
             "Restrict results to nodes in these node_sets"
             " (the node_set values used during add/remember)."
@@ -250,6 +251,14 @@ def get_search_router() -> APIRouter:
                     detail=str(e),
                 ).model_dump(),
             )
+        except LLMPaymentRequiredError as error:
+            return JSONResponse(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                content=ErrorResponse(
+                    error="Token budget exhausted",
+                    detail=str(error),
+                ).model_dump(),
+            )
         except (DatabaseNotCreatedError, UserNotFoundError, CogneeValidationError) as e:
             status_code = getattr(e, "status_code", status.HTTP_422_UNPROCESSABLE_CONTENT)
             return JSONResponse(
@@ -260,7 +269,6 @@ def get_search_router() -> APIRouter:
                     # Previous hint not matching "Error Response" structure defined in cognee.api.DTO, included in error.
                 ).model_dump(),
             )
-
         except Exception as error:
             return JSONResponse(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
