@@ -1,4 +1,6 @@
-from typing import Optional
+from typing import Any, Optional
+
+from pydantic import Field
 
 from cognee.infrastructure.engine.models.DataPoint import DataPoint
 
@@ -15,10 +17,12 @@ class CodeGraphEntity(DataPoint):
     """Common shape of every enola fact mapped into the graph."""
 
     name: str
+    kind: str
     file_path: Optional[str] = None
     line: Optional[int] = None
     repo: Optional[str] = None
     description: Optional[str] = None
+    fact_properties: dict[str, Any] = Field(default_factory=dict)
     part_of: Optional[CodeRepository] = None
     metadata: dict = {"index_fields": ["name"]}
 
@@ -51,3 +55,11 @@ class ExternalDependency(CodeGraphEntity):
 
 class CodeService(CodeGraphEntity):
     """A deployable service (enola fact kind: service)."""
+
+
+class CodeTestReference(CodeGraphEntity):
+    """A test-to-symbol reference (enola fact kind: test_ref)."""
+
+
+class CodeFileReference(CodeGraphEntity):
+    """A file-level reference (enola fact kind: file_ref)."""

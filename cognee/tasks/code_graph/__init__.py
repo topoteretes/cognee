@@ -29,6 +29,8 @@ from .models import (
     CodeRepository,
     CodeService,
     CodeSymbol,
+    CodeTestReference,
+    CodeFileReference,
     ExternalDependency,
     StorageResource,
 )

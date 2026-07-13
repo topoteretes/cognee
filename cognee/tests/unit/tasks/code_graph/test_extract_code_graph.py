@@ -24,6 +24,8 @@ from cognee.tasks.code_graph.models import (
     CodeRepository,
     CodeService,
     CodeSymbol,
+    CodeTestReference,
+    CodeFileReference,
     ExternalDependency,
     StorageResource,
 )
@@ -57,6 +59,14 @@ def test_every_kind_maps_to_the_right_data_point_class():
     assert len(data_points) == 17
 
 
+def test_code_graph_tasks_default_to_graph_only_with_vector_opt_in():
+    default_tasks = get_code_graph_tasks("/tmp/shop", snapshot_dir=FIXTURES_DIR)
+    vector_tasks = get_code_graph_tasks("/tmp/shop", snapshot_dir=FIXTURES_DIR, index_vectors=True)
+
+    assert default_tasks[1].default_params["kwargs"]["graph_only"] is True
+    assert vector_tasks[1].default_params["kwargs"]["graph_only"] is False
+
+
 def test_symbol_kind_and_common_fields_are_mapped():
     data_points = map_facts_to_data_points(_fixture_facts(), repo_path="/tmp/shop")
     by_name = {data_point.name: data_point for data_point in data_points}
@@ -66,7 +76,13 @@ def test_symbol_kind_and_common_fields_are_mapped():
     assert main.file_path == "app/main.go"
     assert main.line == 12
     assert main.repo == "acme/shop"
+    assert main.kind == "symbol"
+    assert main.fact_properties == {"symbol_kind": "function"}
     assert main.part_of is by_name["acme/shop"]
+
+    route = by_name["GET /orders"]
+    assert route.kind == "route"
+    assert route.fact_properties == {"method": "GET", "path": "/orders"}
 
     symbol_kinds = {
         data_point.symbol_kind for data_point in data_points if isinstance(data_point, CodeSymbol)
@@ -150,6 +166,40 @@ def test_unknown_kind_and_missing_name_facts_are_skipped():
     names = {data_point.name for data_point in data_points}
     # Only the repository node and the valid module survive.
     assert names == {"acme/shop", "app"}
+
+
+def test_test_and_file_reference_facts_are_preserved_for_impact_analysis():
+    facts = [
+        {
+            "kind": "test_ref",
+            "name": "TestCheckout",
+            "file": "checkout_test.go",
+            "repo": "r",
+            "relations": [{"type": "calls", "target": "Checkout"}],
+        },
+        {
+            "kind": "file_ref",
+            "name": "cmd/main.go",
+            "file": "cmd/main.go",
+            "repo": "r",
+            "relations": [{"type": "calls", "target": "Checkout"}],
+        },
+        {
+            "kind": "symbol",
+            "name": "Checkout",
+            "repo": "r",
+            "props": {"symbol_kind": "function"},
+        },
+    ]
+
+    data_points = map_facts_to_data_points(facts)
+    by_name = {data_point.name: data_point for data_point in data_points}
+    edges, skipped = build_code_graph_edges(facts)
+
+    assert isinstance(by_name["TestCheckout"], CodeTestReference)
+    assert isinstance(by_name["cmd/main.go"], CodeFileReference)
+    assert skipped == 0
+    assert len([edge for edge in edges if edge[2] == "calls"]) == 2
 
 
 def test_malformed_field_types_are_skipped_not_fatal():
@@ -259,6 +309,110 @@ def test_duplicated_relation_emits_a_single_edge():
 
     assert skipped == 0
     assert len(edges) == 1
+
+
+def test_build_code_graph_edges_synthesizes_type_membership_without_duplicates():
+    facts = [
+        {
+            "kind": "symbol",
+            "name": "auth.AuthHandler",
+            "repo": "r",
+            "props": {"symbol_kind": "struct"},
+            "relations": [{"type": "has_method", "target": "auth.AuthHandler.Login"}],
+        },
+        {
+            "kind": "symbol",
+            "name": "auth.AuthHandler.Login",
+            "repo": "r",
+            "props": {"symbol_kind": "method"},
+        },
+        {
+            "kind": "symbol",
+            "name": "auth.AuthHandler.helper",
+            "repo": "r",
+            "props": {"symbol_kind": "function"},
+        },
+        {
+            "kind": "symbol",
+            "name": "auth.Sign",
+            "repo": "r",
+            "props": {"symbol_kind": "function"},
+        },
+    ]
+
+    edges, skipped = build_code_graph_edges(facts)
+    owner_id = fact_node_id("r", "symbol", "auth.AuthHandler")
+    membership = [edge for edge in edges if edge[2] == "has_method"]
+
+    assert skipped == 0
+    assert {(edge[0], edge[1]) for edge in membership} == {
+        (owner_id, fact_node_id("r", "symbol", "auth.AuthHandler.Login")),
+        (owner_id, fact_node_id("r", "symbol", "auth.AuthHandler.helper")),
+    }
+
+
+def test_build_code_graph_edges_synthesizes_module_import_bridge():
+    facts = [
+        {"kind": "module", "name": "internal/server", "repo": "r"},
+        {"kind": "module", "name": "internal/config", "repo": "r"},
+        {
+            "kind": "dependency",
+            "name": "config-import",
+            "file": "r/internal/server/server.go",
+            "repo": "r",
+            "relations": [{"type": "imports", "target": "internal/config/value"}],
+        },
+    ]
+
+    edges, skipped = build_code_graph_edges(facts)
+    imports = {(edge[0], edge[1]) for edge in edges if edge[2] == "imports"}
+
+    # The literal target is unresolved, but the nearest module ancestor still
+    # produces the architectural module-to-module import edge.
+    assert skipped == 1
+    assert imports == {
+        (
+            fact_node_id("r", "module", "internal/server"),
+            fact_node_id("r", "module", "internal/config"),
+        )
+    }
+
+
+def test_build_code_graph_edges_normalizes_cross_repo_go_call_targets():
+    facts = [
+        {
+            "kind": "module",
+            "name": ".",
+            "repo": "go-auth",
+            "props": {"modulePath": "github.com/dejo1307/go-auth"},
+        },
+        {
+            "kind": "symbol",
+            "name": "adapters.AuthHandler.Login",
+            "repo": "go-auth",
+            "props": {"symbol_kind": "method"},
+        },
+        {
+            "kind": "symbol",
+            "name": "handlers.Login",
+            "repo": "golf",
+            "props": {"symbol_kind": "function"},
+            "relations": [
+                {
+                    "type": "calls",
+                    "target": "github.com/dejo1307/go-auth/adapters.AuthHandler.Login",
+                }
+            ],
+        },
+    ]
+
+    edges, skipped = build_code_graph_edges(facts)
+    calls = [edge for edge in edges if edge[2] == "calls"]
+
+    assert skipped == 0
+    assert len(calls) == 1
+    assert calls[0][0] == fact_node_id("golf", "symbol", "handlers.Login")
+    assert calls[0][1] == fact_node_id("go-auth", "symbol", "adapters.AuthHandler.Login")
 
 
 def test_multi_repo_snapshot_creates_one_repository_per_repo():
@@ -442,6 +596,9 @@ async def test_public_code_graph_pipeline_accepts_repo_path_payload_with_access_
     assert len(result[0]) == 17
     graph_engine.add_nodes.assert_awaited_once()
     assert graph_engine.add_edges.await_count == 2
+    add_data_points_module.get_unified_engine.assert_not_awaited()
+    add_data_points_module.index_data_points.assert_not_awaited()
+    add_data_points_module.index_graph_edges.assert_not_awaited()
     storage_upsert_nodes.assert_not_awaited()
     storage_upsert_edges.assert_not_awaited()
     code_graph_upsert_edges.assert_not_awaited()

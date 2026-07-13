@@ -44,7 +44,7 @@ async def get_retriever_output(
     effective_query = query_text
     turn_preparation = None
 
-    if not only_context:
+    if not only_context and getattr(retriever_instance, "supports_session_turn_preparation", True):
         turn_preparation = await retriever_instance.prepare_session_turn_for_retrieval(query_text)
         if not turn_preparation.should_answer:
             return SearchResultPayload(
