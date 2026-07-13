@@ -67,4 +67,6 @@ class SearchResultItem(BaseModel):
     metadata: dict[str, Any] = {}
     raw: dict[str, Any] = {}
 
+    retrieved_subgraph: Any | None = None
+
     structured: Any | None = None

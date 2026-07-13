@@ -58,6 +58,7 @@ async def search(
     neighborhood_depth: Optional[int] = None,
     neighborhood_seed_top_k: Optional[int] = None,
     include_references: bool = False,
+    include_subgraph: bool = False,
     llm_config: Optional[LLMConfig] = None,
     embedding_config: Optional[EmbeddingConfig] = None,
 ) -> List[SearchResult]:
@@ -116,6 +117,7 @@ async def search(
             neighborhood_depth=neighborhood_depth,
             neighborhood_seed_top_k=neighborhood_seed_top_k,
             include_references=include_references,
+            include_subgraph=include_subgraph,
             llm_config=llm_config,
             embedding_config=embedding_config,
         )
@@ -147,7 +149,9 @@ async def search(
         user.id,
     )
 
-    return _backwards_compatible_search_results(search_results, verbose)
+    return _backwards_compatible_search_results(
+        search_results, verbose, include_subgraph=include_subgraph
+    )
 
 
 async def authorized_search(
@@ -170,6 +174,7 @@ async def authorized_search(
     neighborhood_depth: Optional[int] = None,
     neighborhood_seed_top_k: Optional[int] = None,
     include_references: bool = False,
+    include_subgraph: bool = False,
     llm_config: Optional[LLMConfig] = None,
     embedding_config: Optional[EmbeddingConfig] = None,
 ) -> List[SearchResultPayload]:
@@ -203,6 +208,7 @@ async def authorized_search(
         neighborhood_depth=neighborhood_depth,
         neighborhood_seed_top_k=neighborhood_seed_top_k,
         include_references=include_references,
+        include_subgraph=include_subgraph,
         llm_config=llm_config,
         embedding_config=embedding_config,
     )
@@ -230,6 +236,7 @@ async def search_in_datasets_context(
     neighborhood_depth: Optional[int] = None,
     neighborhood_seed_top_k: Optional[int] = None,
     include_references: bool = False,
+    include_subgraph: bool = False,
     llm_config: Optional[LLMConfig] = None,
     embedding_config: Optional[EmbeddingConfig] = None,
 ) -> List[Tuple[Any, Union[str, List[Edge]], List[Dataset]]]:
@@ -257,6 +264,7 @@ async def search_in_datasets_context(
         neighborhood_depth: Optional[int] = None,
         neighborhood_seed_top_k: Optional[int] = None,
         include_references: bool = False,
+        include_subgraph: bool = False,
     ) -> SearchResultPayload:
         with new_span("cognee.search.dataset") as span:
             span.set_attribute("cognee.search.dataset_name", dataset.name or "")
@@ -310,6 +318,7 @@ async def search_in_datasets_context(
                     neighborhood_depth=neighborhood_depth,
                     neighborhood_seed_top_k=neighborhood_seed_top_k,
                     include_references=include_references,
+                    include_subgraph=include_subgraph,
                 )
 
     # Search every dataset async based on query and appropriate database configuration
@@ -336,6 +345,7 @@ async def search_in_datasets_context(
                     neighborhood_depth=neighborhood_depth,
                     neighborhood_seed_top_k=neighborhood_seed_top_k,
                     include_references=include_references,
+                    include_subgraph=include_subgraph,
                 )
             )
     else:
@@ -362,6 +372,7 @@ async def search_in_datasets_context(
             neighborhood_depth=neighborhood_depth,
             neighborhood_seed_top_k=neighborhood_seed_top_k,
             include_references=include_references,
+            include_subgraph=include_subgraph,
         )
 
         async def _search_without_context() -> SearchResultPayload:
@@ -382,10 +393,26 @@ async def search_in_datasets_context(
     return await asyncio.gather(*tasks)
 
 
-def _backwards_compatible_search_results(search_results, verbose: bool):
+def _backwards_compatible_search_results(
+    search_results, verbose: bool, include_subgraph: bool = False
+):
     """
     Prepares search results in a format compatible with previous versions of the API.
     """
+
+    def _maybe_attach_subgraph(result_dict: dict, search_result) -> dict:
+        if include_subgraph:
+            result_dict["retrieved_subgraph"] = search_result.retrieved_subgraph
+        return result_dict
+
+    def _wrap_result_with_subgraph(search_result):
+        if not include_subgraph:
+            return search_result.result
+        return {
+            "search_result": search_result.result,
+            "retrieved_subgraph": search_result.retrieved_subgraph,
+        }
+
     # This is for maintaining backwards compatibility
     if backend_access_control_enabled():
         return_value = []
@@ -405,7 +432,7 @@ def _backwards_compatible_search_results(search_results, verbose: bool):
                 # Result attribute handles returning appropriate result based on set flags and outputs
                 search_result_dict["search_result"] = search_result.result
 
-            return_value.append(search_result_dict)
+            return_value.append(_maybe_attach_subgraph(search_result_dict, search_result))
         return return_value
     else:
         return_value = []
@@ -417,16 +444,17 @@ def _backwards_compatible_search_results(search_results, verbose: bool):
                     "context_result": search_result.context,
                     "objects_result": search_result.result_object,
                 }
-                return_value.append(search_result_dict)
+                return_value.append(_maybe_attach_subgraph(search_result_dict, search_result))
             return return_value
         else:
             for search_result in search_results:
-                # Result attribute handles returning appropriate result based on set flags and outputs
-                return_value.append(search_result.result)
+                return_value.append(_wrap_result_with_subgraph(search_result))
 
             # For maintaining backwards compatibility
-            if len(return_value) == 1 and isinstance(return_value[0], list):
+            if len(return_value) == 1 and not include_subgraph and isinstance(return_value[0], list):
                 # If a single element list return the element directly
+                return return_value[0]
+            if len(return_value) == 1 and include_subgraph:
                 return return_value[0]
             else:
                 # Otherwise return the list of results
