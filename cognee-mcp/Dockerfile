@@ -62,18 +62,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
+# Run as a non-root user. Create it BEFORE the COPY so --chown can resolve
+# the name and the tree lands owned by cognee within the COPY layer itself:
+# a separate `chown -R` afterwards makes overlayfs duplicate the whole ~9GB
+# /app into a second layer, doubling the image size.
+RUN groupadd --system --gid 1000 cognee \
+    && useradd --system --uid 1000 --gid cognee --no-create-home --shell /usr/sbin/nologin cognee \
+    && chown cognee:cognee /app
+# ^ non-recursive chown of the still-empty WORKDIR: /app doubles as HOME, so
+# the user must be able to write dotfiles/caches (e.g. Kuzu extensions) there.
+
 # Copy the virtual environment from the uv stage
 COPY --from=uv /usr/local /usr/local
-COPY --from=uv /app /app
+COPY --from=uv --chown=cognee:cognee /app /app
 
 # Strip Windows carriage returns (fixes "no such file" on Windows Docker)
 RUN sed -i 's/\r$//' /app/entrypoint.sh && chmod +x /app/entrypoint.sh
-
-# Run as a non-root user. Create the user before copying ownership so the
-# /app tree (which already exists from the COPY above) is readable.
-RUN groupadd --system --gid 1000 cognee \
-    && useradd --system --uid 1000 --gid cognee --no-create-home --shell /usr/sbin/nologin cognee \
-    && chown -R cognee:cognee /app
 
 # Place executables in the environment at the front of the path
 ENV PATH="/app/.venv/bin:$PATH"
