@@ -459,13 +459,7 @@ class SQLAlchemyAdapter:
                 await connection.run_sync(metadata.reflect)  # Reflect the entire database
                 table_names = list(metadata.tables.keys())  # Get table names
             else:
-                # When this adapter is pinned to a single schema (PGVector
-                # shared-database mode), only that schema's tables are ours —
-                # reflecting every schema would leak other datasets' tables into
-                # operations like remove_belongs_to_set_tags.
-                schema_list = (
-                    [self.schema] if getattr(self, "schema", "") else await self.get_schema_list()
-                )
+                schema_list = await self.get_schema_list()
                 metadata = MetaData()
                 for schema_name in schema_list:
                     await connection.run_sync(metadata.reflect, schema=schema_name)
@@ -660,14 +654,8 @@ class SQLAlchemyAdapter:
                 async with self.engine.begin() as connection:
                     # Create a MetaData instance to load table information
                     metadata = MetaData()
-                    # Drop all tables from the public schema (or, in PGVector
-                    # shared-database mode, only from this adapter's pinned
-                    # dataset schema so prune never touches other datasets).
-                    schema_list = (
-                        [self.schema]
-                        if getattr(self, "schema", "")
-                        else ["public", "public_staging"]
-                    )
+                    # Drop all tables from the public schema
+                    schema_list = ["public", "public_staging"]
                     for schema_name in schema_list:
                         # Load the schema information into the MetaData object
                         await connection.run_sync(metadata.reflect, schema=schema_name)

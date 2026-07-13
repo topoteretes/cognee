@@ -179,6 +179,44 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         """
         self._metadata = MetaData()
 
+    async def get_table_names(self) -> List[str]:
+        """List collection tables, scoped to this adapter's schema when pinned.
+
+        In shared-database mode this adapter's engine is pinned to a single
+        Postgres schema (``self.schema``); reflecting every schema (the base
+        adapter's behavior) would leak other datasets' collections into
+        schema-wide operations such as ``remove_belongs_to_set_tags``. Falls
+        back to the base (all non-system schemas) when not schema-pinned.
+        """
+        if not self.schema:
+            return await super().get_table_names()
+
+        table_names: List[str] = []
+        async with self.engine.begin() as connection:
+            metadata = MetaData()
+            await connection.run_sync(metadata.reflect, schema=self.schema)
+            table_names.extend(metadata.tables.keys())
+        return table_names
+
+    async def delete_database(self):
+        """Drop this dataset's tables, scoped to its schema when pinned.
+
+        In shared-database mode ``prune`` must only drop the pinned dataset
+        schema's tables — never ``public`` (which holds cognee's shared
+        relational tables) or other datasets' schemas. Falls back to the base
+        public-schema behavior when not schema-pinned.
+        """
+        if not self.schema:
+            return await super().delete_database()
+
+        async with self.engine.begin() as connection:
+            metadata = MetaData()
+            await connection.run_sync(metadata.reflect, schema=self.schema)
+            for table in metadata.sorted_tables:
+                await connection.execute(
+                    text(f'DROP TABLE IF EXISTS "{self.schema}"."{table.name}" CASCADE')
+                )
+
     async def close(self) -> None:
         """
         Release connection-pool resources held by this adapter.
