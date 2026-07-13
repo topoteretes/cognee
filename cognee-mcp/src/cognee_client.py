@@ -16,6 +16,11 @@ from cognee.shared.logging_utils import get_logger
 import json
 
 try:
+    from .auth_context import get_request_token
+except ImportError:
+    from auth_context import get_request_token
+
+try:
     from .server_utils import normalize_delete_mode
 except ImportError:
     from server_utils import normalize_delete_mode
@@ -72,16 +77,21 @@ class CogneeClient:
 
         Uses X-Api-Key + X-Tenant-Id for tenant APIs (cloud),
         falls back to Bearer token for local/self-hosted backends.
+
+        The token is resolved per request: the current caller's token (see
+        auth_context) takes precedence over the static api_token, so one
+        client instance can serve many users.
         """
         headers: Dict[str, str] = {}
         if include_content_type:
             headers["Content-Type"] = "application/json"
-        if self.api_token:
+        api_token = get_request_token() or self.api_token
+        if api_token:
             if self.tenant_id:
-                headers["X-Api-Key"] = self.api_token
+                headers["X-Api-Key"] = api_token
                 headers["X-Tenant-Id"] = self.tenant_id
             else:
-                headers["Authorization"] = f"Bearer {self.api_token}"
+                headers["Authorization"] = f"Bearer {api_token}"
         return headers
 
     @staticmethod
