@@ -370,6 +370,20 @@ class TestMemifyEndpoint:
 
 
 class TestUpdateEndpoint:
+    def test_update_missing_file_returns_422_without_calling_update(self, client, monkeypatch):
+        import cognee.api.v1.update as update_pkg
+
+        update = AsyncMock()
+        monkeypatch.setattr(update_pkg, "update", update)
+
+        resp = client.patch(
+            "/update",
+            params={"data_id": str(uuid4()), "dataset_id": str(uuid4())},
+        )
+
+        assert resp.status_code == 422
+        update.assert_not_awaited()
+
     def test_update_pipeline_errored_returns_500(self, client):
         import cognee.api.v1.update as update_pkg
 
