@@ -299,12 +299,16 @@ async def add_code_graph_edges(
         await graph_engine.add_edges(edges)
 
         # Register the edges in the relational rollback ledger (when a pipeline
-        # context is available) so pipeline rollback can clean them up.
+        # context with a persisted data item is available) so pipeline rollback
+        # can clean them up. Custom pipelines may use arbitrary payloads, such
+        # as the repository path used by the code graph example.
+        data_item = getattr(ctx, "data_item", None)
+        data_id = getattr(data_item, "id", None)
         if (
             ctx is not None
             and getattr(ctx, "user", None) is not None
             and getattr(ctx, "dataset", None) is not None
-            and getattr(ctx, "data_item", None) is not None
+            and data_id is not None
             and getattr(ctx, "pipeline_run_id", None) is not None
         ):
             from cognee.modules.graph.methods import upsert_edges
@@ -314,7 +318,7 @@ async def add_code_graph_edges(
                 tenant_id=ctx.user.tenant_id,
                 user_id=ctx.user.id,
                 dataset_id=ctx.dataset.id,
-                data_id=ctx.data_item.id,
+                data_id=data_id,
                 pipeline_run_id=ctx.pipeline_run_id,
             )
 

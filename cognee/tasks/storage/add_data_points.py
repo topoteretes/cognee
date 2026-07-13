@@ -46,6 +46,7 @@ async def add_data_points(
     """
     user = ctx.user if ctx else None
     data_item = ctx.data_item if ctx else None
+    data_id = getattr(data_item, "id", None)
     dataset = ctx.dataset if ctx else None
     pipeline_run_id = ctx.pipeline_run_id if ctx else None
 
@@ -91,7 +92,10 @@ async def add_data_points(
     vector_engine = unified.vector
     use_hybrid = unified.has_capability(EngineCapability.HYBRID_WRITE)
 
-    if user and dataset and data_item:
+    # Custom pipelines may use arbitrary payloads (for example a repository
+    # path). Only write rollback-ledger rows when that payload is a persisted
+    # data item with a stable identifier.
+    if user and dataset and data_id is not None:
         # Single session for all upserts: one transaction, one commit. The
         # rollback ledger is written BEFORE the graph/vector writes so a
         # failed write can always be swept by the rollback handler.
@@ -101,7 +105,7 @@ async def add_data_points(
                 tenant_id=user.tenant_id,
                 user_id=user.id,
                 dataset_id=dataset.id,
-                data_id=data_item.id,
+                data_id=data_id,
                 session=session,
                 pipeline_run_id=pipeline_run_id,
             )
@@ -110,7 +114,7 @@ async def add_data_points(
                 tenant_id=user.tenant_id,
                 user_id=user.id,
                 dataset_id=dataset.id,
-                data_id=data_item.id,
+                data_id=data_id,
                 session=session,
                 pipeline_run_id=pipeline_run_id,
             )
@@ -120,7 +124,7 @@ async def add_data_points(
                     tenant_id=user.tenant_id,
                     user_id=user.id,
                     dataset_id=dataset.id,
-                    data_id=data_item.id,
+                    data_id=data_id,
                     session=session,
                     pipeline_run_id=pipeline_run_id,
                 )

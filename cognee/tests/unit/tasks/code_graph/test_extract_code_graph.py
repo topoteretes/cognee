@@ -1,17 +1,21 @@
 import importlib
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
+import cognee
 import pytest
 
+from cognee.modules.pipelines.models import PipelineContext
+from cognee.modules.pipelines.operations.run_tasks_base import run_tasks_base
 from cognee.tasks.code_graph.enola import parse_enola_snapshot
 from cognee.tasks.code_graph.extract_code_graph import (
     add_code_graph_edges,
     build_code_graph_edges,
     extract_code_graph,
     fact_node_id,
+    get_code_graph_tasks,
     map_facts_to_data_points,
 )
 from cognee.tasks.code_graph.models import (
@@ -348,3 +352,94 @@ async def test_add_code_graph_edges_registers_edges_in_rollback_ledger(monkeypat
     assert call.kwargs["dataset_id"] == ctx.dataset.id
     assert call.kwargs["data_id"] == ctx.data_item.id
     assert call.kwargs["pipeline_run_id"] == ctx.pipeline_run_id
+
+
+@pytest.mark.asyncio
+async def test_public_code_graph_pipeline_accepts_repo_path_payload_with_access_control(
+    monkeypatch,
+):
+    custom_pipeline_module = importlib.import_module(
+        "cognee.modules.run_custom_pipeline.run_custom_pipeline"
+    )
+    add_data_points_module = importlib.import_module("cognee.tasks.storage.add_data_points")
+    graph_engine_module = importlib.import_module(
+        "cognee.infrastructure.databases.graph.get_graph_engine"
+    )
+    graph_methods_module = importlib.import_module("cognee.modules.graph.methods")
+
+    monkeypatch.setenv("ENABLE_BACKEND_ACCESS_CONTROL", "true")
+
+    graph_engine = AsyncMock()
+    vector_engine = MagicMock()
+    unified_engine = SimpleNamespace(
+        graph=graph_engine,
+        vector=vector_engine,
+        has_capability=MagicMock(return_value=False),
+    )
+
+    async def fake_get_graph_from_model(data_point, **_kwargs):
+        return [data_point], []
+
+    monkeypatch.setattr(
+        add_data_points_module,
+        "get_graph_from_model",
+        AsyncMock(side_effect=fake_get_graph_from_model),
+    )
+    monkeypatch.setattr(
+        add_data_points_module,
+        "deduplicate_nodes_and_edges",
+        lambda nodes, edges: (nodes, edges),
+    )
+    monkeypatch.setattr(
+        add_data_points_module,
+        "get_unified_engine",
+        AsyncMock(return_value=unified_engine),
+    )
+    monkeypatch.setattr(add_data_points_module, "index_data_points", AsyncMock())
+    monkeypatch.setattr(add_data_points_module, "index_graph_edges", AsyncMock())
+
+    storage_upsert_nodes = AsyncMock()
+    storage_upsert_edges = AsyncMock()
+    monkeypatch.setattr(add_data_points_module, "upsert_nodes", storage_upsert_nodes)
+    monkeypatch.setattr(add_data_points_module, "upsert_edges", storage_upsert_edges)
+    monkeypatch.setattr(
+        graph_engine_module, "get_graph_engine", AsyncMock(return_value=graph_engine)
+    )
+    code_graph_upsert_edges = AsyncMock()
+    monkeypatch.setattr(graph_methods_module, "upsert_edges", code_graph_upsert_edges)
+
+    async def execute_in_process(**kwargs):
+        user = SimpleNamespace(id=uuid4(), tenant_id=uuid4(), email="test@example.com")
+        ctx = PipelineContext(
+            user=user,
+            dataset=SimpleNamespace(id=uuid4(), name=kwargs["datasets"]),
+            data_item=kwargs["data"],
+            pipeline_run_id=uuid4(),
+            pipeline_name=kwargs["pipeline_name"],
+        )
+        results = []
+        async for result in run_tasks_base(kwargs["tasks"], [kwargs["data"]], user, ctx):
+            results.append(result)
+        return results
+
+    monkeypatch.setattr(
+        custom_pipeline_module,
+        "get_pipeline_executor",
+        lambda run_in_background: execute_in_process,
+    )
+
+    repo_path = "/tmp/shop"
+    result = await cognee.run_custom_pipeline(
+        tasks=get_code_graph_tasks(repo_path, snapshot_dir=FIXTURES_DIR),
+        data=repo_path,
+        dataset="code_graph_demo",
+        pipeline_name="code_graph_pipeline",
+    )
+
+    assert len(result) == 1
+    assert len(result[0]) == 17
+    graph_engine.add_nodes.assert_awaited_once()
+    assert graph_engine.add_edges.await_count == 2
+    storage_upsert_nodes.assert_not_awaited()
+    storage_upsert_edges.assert_not_awaited()
+    code_graph_upsert_edges.assert_not_awaited()
