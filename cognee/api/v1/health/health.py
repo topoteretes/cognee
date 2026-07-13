@@ -80,11 +80,13 @@ class HealthChecker:
         """Check vector database health."""
         start_time = time.time()
         try:
-            from cognee.infrastructure.databases.vector.get_vector_engine import get_vector_engine
+            from cognee.infrastructure.databases.vector.get_vector_engine import (
+                get_vector_engine_async,
+            )
             from cognee.infrastructure.databases.vector.config import get_vectordb_config
 
             config = get_vectordb_config()
-            engine = get_vector_engine()
+            engine = await get_vector_engine_async()
 
             # Test basic operation - just check if engine is accessible
             if hasattr(engine, "health_check"):

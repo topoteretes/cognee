@@ -7,6 +7,7 @@ from distributed.app import app
 from distributed.signal import QueueSignal
 from distributed.modal_image import image
 from distributed.queues import add_nodes_and_edges_queue
+from distributed.graph_write_batch import group_graph_writes, apply_grouped_graph_writes
 
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.graph import get_graph_engine
@@ -65,7 +66,7 @@ async def graph_saving_worker():
                 print("Remaining elements in queue:")
                 print(await add_nodes_and_edges_queue.len.aio())
 
-                all_nodes, all_edges = [], []
+                all_items = []
                 for _ in range(min(BATCH_SIZE, await add_nodes_and_edges_queue.len.aio())):
                     nodes_and_edges = await add_nodes_and_edges_queue.get.aio(block=False)
 
@@ -77,25 +78,38 @@ async def graph_saving_worker():
                         stop_seen = True
                         break
 
-                    if len(nodes_and_edges) == 2:
-                        nodes, edges = nodes_and_edges
-                        all_nodes.extend(nodes)
-                        all_edges.extend(edges)
+                    # Payload: (nodes, edges, source_ref_key, pipeline_run_id).
+                    if isinstance(nodes_and_edges, (list, tuple)) and len(nodes_and_edges) == 4:
+                        all_items.append(nodes_and_edges)
                     else:
-                        print("None Type detected.")
+                        print(f"Malformed queue item skipped: {type(nodes_and_edges)!r}")
 
-                if all_nodes or all_edges:
-                    print(f"Adding {len(all_nodes)} nodes and {len(all_edges)} edges.")
+                # Group by provenance key so each data item's source ref is folded
+                # onto its own artifacts; all nodes are still written before any
+                # edge (across groups) so cross-item edges find their endpoints.
+                groups = group_graph_writes(all_items)
+
+                if groups:
+                    total_nodes = sum(len(nodes) for nodes, _edges in groups.values())
+                    total_edges = sum(len(edges) for _nodes, edges in groups.values())
+                    print(
+                        f"Adding {total_nodes} nodes and {total_edges} edges "
+                        f"across {len(groups)} provenance group(s)."
+                    )
 
                     @retry(
                         retry=retry_if_exception_type(GraphDatabaseDeadlockError),
                         stop=stop_after_attempt(3),
                         wait=wait_exponential(multiplier=2, min=1, max=6),
                     )
-                    async def save_graph_nodes(new_nodes):
+                    async def save_graph_nodes(new_nodes, source_ref_key, pipeline_run_id):
                         try:
-                            await graph_engine.add_nodes(new_nodes, distributed=False)
-                            # await upsert_nodes(new_nodes, user_id=user.id, dataset_id=dataset.id, data_id=data.id)
+                            await graph_engine.add_nodes(
+                                new_nodes,
+                                source_ref_key=source_ref_key,
+                                pipeline_run_id=pipeline_run_id,
+                                distributed=False,
+                            )
                         except Exception as error:
                             if is_deadlock_error(error):
                                 raise GraphDatabaseDeadlockError()
@@ -105,19 +119,19 @@ async def graph_saving_worker():
                         stop=stop_after_attempt(3),
                         wait=wait_exponential(multiplier=2, min=1, max=6),
                     )
-                    async def save_graph_edges(new_edges):
+                    async def save_graph_edges(new_edges, source_ref_key, pipeline_run_id):
                         try:
-                            await graph_engine.add_edges(new_edges, distributed=False)
-                            # await upsert_edges(new_edges, user_id=user.id, dataset_id=dataset.id, data_id=data.id)
+                            await graph_engine.add_edges(
+                                new_edges,
+                                source_ref_key=source_ref_key,
+                                pipeline_run_id=pipeline_run_id,
+                                distributed=False,
+                            )
                         except Exception as error:
                             if is_deadlock_error(error):
                                 raise GraphDatabaseDeadlockError()
 
-                    if all_nodes:
-                        await save_graph_nodes(all_nodes)
-
-                    if all_edges:
-                        await save_graph_edges(all_edges)
+                    await apply_grouped_graph_writes(groups, save_graph_nodes, save_graph_edges)
 
                     print("Finished adding nodes and edges.")
 

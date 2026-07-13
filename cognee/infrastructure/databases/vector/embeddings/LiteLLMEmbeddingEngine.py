@@ -20,15 +20,7 @@ import httpx
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
 from cognee.infrastructure.databases.exceptions import EmbeddingException
 
-from cognee.infrastructure.llm.tokenizer.HuggingFace import (
-    HuggingFaceTokenizer,
-)
-from cognee.infrastructure.llm.tokenizer.Mistral import (
-    MistralTokenizer,
-)
-from cognee.infrastructure.llm.tokenizer.TikToken import (
-    TikTokenTokenizer,
-)
+from cognee.infrastructure.llm.tokenizer.resolver import resolve_embedding_tokenizer
 from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager
 from cognee.infrastructure.databases.vector.embeddings.utils import (
     sanitize_embedding_text_inputs,
@@ -315,46 +307,21 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         """
         Load and return the appropriate tokenizer for the specified model based on the provider.
 
+        Delegates to :func:`resolve_embedding_tokenizer` so the model to tokenizer
+        mapping (and mismatch warnings) live in one place (issue #3646).
+
         Returns:
         --------
 
             The tokenizer instance compatible with the model.
         """
         logger.debug(f"Loading tokenizer for model {self.model}...")
-        # If model also contains provider information, extract only model information
-        # Split only on the first "/" to preserve model names like "BAAI/bge-m3"
-        model = self.model.split("/", 1)[-1] if "/" in self.model else self.model
-
-        if "openai" in self.provider.lower():
-            tokenizer = TikTokenTokenizer(
-                model=model, max_completion_tokens=self.max_completion_tokens
-            )
-        elif "gemini" in self.provider.lower():
-            # Since Gemini tokenization needs to send an API request to get the token count we will use TikToken to
-            # count tokens as we calculate tokens word by word
-            tokenizer = TikTokenTokenizer(
-                model=None, max_completion_tokens=self.max_completion_tokens
-            )
-            # Note: Gemini Tokenizer expects an LLM model as input and not the embedding model
-            # tokenizer = GeminiTokenizer(
-            #     llm_model=llm_model, max_completion_tokens=self.max_completion_tokens
-            # )
-        elif "mistral" in self.provider.lower():
-            tokenizer = MistralTokenizer(
-                model=model, max_completion_tokens=self.max_completion_tokens
-            )
-        else:
-            try:
-                tokenizer = HuggingFaceTokenizer(
-                    model=self.model.replace("hosted_vllm/", ""),
-                    max_completion_tokens=self.max_completion_tokens,
-                )
-            except Exception as e:
-                logger.warning(f"Could not get tokenizer from HuggingFace due to: {e}")
-                logger.info("Switching to TikToken default tokenizer.")
-                tokenizer = TikTokenTokenizer(
-                    model=None, max_completion_tokens=self.max_completion_tokens
-                )
-
+        # Strip the vLLM routing prefix so the bare HuggingFace repo is resolvable.
+        model = self.model.replace("hosted_vllm/", "")
+        tokenizer = resolve_embedding_tokenizer(
+            provider=self.provider,
+            model=model,
+            max_completion_tokens=self.max_completion_tokens,
+        )
         logger.debug(f"Tokenizer loaded for model: {self.model}")
         return tokenizer
