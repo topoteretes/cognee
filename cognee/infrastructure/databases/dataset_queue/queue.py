@@ -127,6 +127,27 @@ class DatasetQueue:
         # don't register multiple cleanup handlers for a single task.
         self._registered_tasks: Set[int] = set()
 
+    # ------------------------------------------------------ active datasets
+    def active_dataset_ids(self) -> set:
+        """Dataset ids (as strings) currently holding at least one slot.
+
+        Read-only snapshot for engine-cache pinning: capacity eviction must
+        not close an engine whose dataset an admitted pipeline is still
+        using. Safe to call from any thread — iterates over ``list()``
+        snapshots, so concurrent slot changes on the event loop can't break
+        the iteration; the result is advisory-fresh by nature.
+        """
+        if not self._enabled:
+            return set()
+        active = set()
+        for slots in list(self._task_slots.values()):
+            for slot_key in list(slots):
+                # "ds:<none>" tracks dataset-less operations; it can never
+                # correspond to a database name, so don't report it.
+                if slot_key.startswith("ds:") and slot_key != "ds:<none>":
+                    active.add(slot_key[3:])
+        return active
+
     # ---------------------------------------------------- task cleanup setup
     def _ensure_task_cleanup_registered(self, task: asyncio.Task, task_id: int) -> None:
         """Idempotently register a done-callback that releases all of

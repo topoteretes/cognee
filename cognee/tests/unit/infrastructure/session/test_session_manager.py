@@ -16,31 +16,20 @@ class TestComposeSessionPrompt:
     inner completion method. These must stay byte-identical to the pre-extraction
     behavior, so changing them means deliberately changing every session prompt."""
 
-    GRAPH_PREFIX = "Background knowledge from the knowledge graph:\n"
-
-    def test_all_three_layers_order_and_joiners(self):
-        result = compose_session_prompt("BLOCK", "GRAPH", "HISTORY")
-        assert result == "BLOCK\n\n" + self.GRAPH_PREFIX + "GRAPH\n\nHISTORY"
+    def test_block_precedes_history(self):
+        result = compose_session_prompt("BLOCK", "HISTORY")
+        assert result == "BLOCK\n\nHISTORY"
 
     def test_history_only(self):
-        assert compose_session_prompt("", "", "HISTORY") == "HISTORY"
-
-    def test_graph_and_history(self):
-        assert compose_session_prompt("", "GRAPH", "HISTORY") == (
-            self.GRAPH_PREFIX + "GRAPH\n\nHISTORY"
-        )
-
-    def test_block_and_history(self):
-        assert compose_session_prompt("BLOCK", "", "HISTORY") == "BLOCK\n\nHISTORY"
+        assert compose_session_prompt("", "HISTORY") == "HISTORY"
 
     def test_empty_history_keeps_trailing_separators(self):
         # Pre-extraction behavior prepended onto a possibly-empty history, leaving a
         # trailing "\n\n" when history is empty. Preserved exactly.
-        assert compose_session_prompt("BLOCK", "", "") == "BLOCK\n\n"
-        assert compose_session_prompt("", "GRAPH", "") == self.GRAPH_PREFIX + "GRAPH\n\n"
+        assert compose_session_prompt("BLOCK", "") == "BLOCK\n\n"
 
     def test_all_empty(self):
-        assert compose_session_prompt("", "", "") == ""
+        assert compose_session_prompt("", "") == ""
 
 
 class TestValidateSessionParams:

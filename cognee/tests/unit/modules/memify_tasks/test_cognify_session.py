@@ -19,9 +19,12 @@ async def test_cognify_session_success():
         await cognify_session(session_data, dataset_id="123")
 
         mock_add.assert_called_once_with(
-            session_data, dataset_id="123", node_set=["user_sessions_from_cache"]
+            session_data,
+            dataset_id="123",
+            node_set=["user_sessions_from_cache"],
+            user=None,
         )
-        mock_cognify.assert_called_once()
+        mock_cognify.assert_called_once_with(datasets=["123"], user=None)
 
 
 @pytest.mark.asyncio
@@ -106,6 +109,32 @@ async def test_cognify_session_with_special_characters():
         await cognify_session(session_data, dataset_id="123")
 
         mock_add.assert_called_once_with(
-            session_data, dataset_id="123", node_set=["user_sessions_from_cache"]
+            session_data,
+            dataset_id="123",
+            node_set=["user_sessions_from_cache"],
+            user=None,
         )
-        mock_cognify.assert_called_once()
+        mock_cognify.assert_called_once_with(datasets=["123"], user=None)
+
+
+@pytest.mark.asyncio
+async def test_cognify_session_passes_user_to_add_and_cognify():
+    """Test user is forwarded to cognee.add/cognee.cognify."""
+    session_data = (
+        "Session ID: test_session\n\nQuestion: What is AI?\n\nAnswer: AI is artificial intelligence"
+    )
+    user = object()
+
+    with (
+        patch("cognee.add", new_callable=AsyncMock) as mock_add,
+        patch("cognee.cognify", new_callable=AsyncMock) as mock_cognify,
+    ):
+        await cognify_session(session_data, dataset_id="123", user=user)
+
+        mock_add.assert_called_once_with(
+            session_data,
+            dataset_id="123",
+            node_set=["user_sessions_from_cache"],
+            user=user,
+        )
+        mock_cognify.assert_called_once_with(datasets=["123"], user=user)

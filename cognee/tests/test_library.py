@@ -51,9 +51,9 @@ async def main():
 
     cognify_run_info = await cognee.cognify([dataset_name])
 
-    from cognee.infrastructure.databases.vector import get_vector_engine
+    from cognee.infrastructure.databases.vector import get_vector_engine_async
 
-    vector_engine = get_vector_engine()
+    vector_engine = await get_vector_engine_async()
     random_node = (await vector_engine.search("Entity_name", "AI", include_payload=True))[0]
     random_node_name = random_node.payload["text"]
 

@@ -2,7 +2,9 @@ import os
 from uuid import UUID
 from typing import Optional
 
-from cognee.infrastructure.databases.vector.create_vector_engine import create_vector_engine
+from cognee.infrastructure.databases.vector.create_vector_engine import (
+    aevict_vector_engines_for_database,
+)
 from cognee.modules.users.models import User
 from cognee.modules.users.models import DatasetDatabase
 from cognee.base_config import get_base_config
@@ -44,12 +46,17 @@ class LanceDBDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
 
     @classmethod
     async def delete_dataset(cls, dataset_database: DatasetDatabase):
-        vector_config = get_vectordb_config()
-        vector_engine = create_vector_engine(
-            vector_db_provider=dataset_database.vector_database_provider,
-            vector_db_url=dataset_database.vector_database_url,
-            vector_db_key=dataset_database.vector_database_key,
-            vector_db_name=dataset_database.vector_database_name,
-            vector_db_subprocess_enabled=vector_config.vector_db_subprocess_enabled,
-        )
-        await vector_engine.prune()
+        # Never open the database to drop it: opening spawns a fresh engine
+        # (in subprocess mode, a worker) that races the just-torn-down one.
+        # Evict every cached engine for this database, wait for their
+        # in-flight closes to finish (a close deferred behind an idle holder
+        # is not waited on; see aevict_vector_engines_for_database), then
+        # remove the on-disk store directly.
+        # Server-backed handlers (e.g. PGVector) are different on purpose:
+        # they drop the per-dataset database over a connection, so no file
+        # handling applies there.
+        await aevict_vector_engines_for_database(dataset_database.vector_database_name)
+
+        databases_directory_path = os.path.dirname(dataset_database.vector_database_url)
+        file_storage = get_file_storage(databases_directory_path)
+        await file_storage.remove_all(dataset_database.vector_database_name)
