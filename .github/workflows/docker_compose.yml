@@ -23,16 +23,84 @@ jobs:
       run: |
         docker compose -f docker-compose.yml build
 
+    - name: Create container .env
+      # docker-compose.yml bind-mounts ./.env into the container; CI has no
+      # checked-in .env, so provide the runtime credentials the server needs.
+      # Secrets flow through the env block so the script body never renders
+      # secret material (GitHub's log masking then only has exact values to hide).
+      env:
+        LLM_MODEL: ${{ secrets.LLM_MODEL }}
+        LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+        LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+        LLM_ARGS: ${{ secrets.LLM_ARGS }}
+        LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+        EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+        EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+      run: |
+        printenv | grep -E '^(LLM_|EMBEDDING_)' > .env
+        echo "EMBEDDING_DIMENSIONS=300" >> .env
+        echo "COGNEE_SKIP_CONNECTION_TEST=true" >> .env
+
     - name: Run Docker Compose
       env:
         ENV: dev
       run: |
         docker compose -f docker-compose.yml up -d
 
-    - name: Wait for services to be ready
+    - name: Wait for server health
       run: |
-        # Add any necessary health checks or wait commands
-        sleep 30
+        for attempt in $(seq 1 60); do
+          if curl -sf http://localhost:8000/health >/dev/null; then
+            echo "server healthy after ~$((attempt * 3))s"
+            exit 0
+          fi
+          if [ "$(docker inspect -f '{{.State.Running}}' cognee 2>/dev/null)" != "true" ]; then
+            echo "cognee container is not running"
+            docker compose -f docker-compose.yml logs cognee | tail -60
+            exit 1
+          fi
+          sleep 3
+        done
+        echo "server did not become healthy in time"
+        docker compose -f docker-compose.yml logs cognee | tail -60
+        exit 1
+
+    - name: Verify remember and recall round-trip
+      run: |
+        TOKEN=$(curl -sf -X POST http://localhost:8000/api/v1/auth/login \
+          -d "username=default_user@example.com&password=default_password" | jq -r .access_token)
+        [ -n "$TOKEN" ] && [ "$TOKEN" != "null" ] || { echo "login failed"; exit 1; }
+
+        FACT="The glassblower Odene Marsk crafted the twin cobalt lanterns of the Vellinge lighthouse in 1931."
+        echo "$FACT" > fact.txt
+        REMEMBERED=$(curl -sf -X POST http://localhost:8000/api/v1/remember \
+          -H "Authorization: Bearer $TOKEN" \
+          -F "datasetName=compose_smoke" \
+          -F "data=@fact.txt;type=text/plain")
+        echo "$REMEMBERED" | jq -e '.dataset_id != null' >/dev/null \
+          || { echo "remember returned no dataset_id"; echo "$REMEMBERED"; exit 1; }
+        echo "remember: ingested into $(echo "$REMEMBERED" | jq -r .dataset_id)"
+
+        # Deterministic check: CHUNKS recall returns the raw stored text, no
+        # LLM involved — the full stored fact must come back verbatim.
+        CHUNKS=$(curl -sf -X POST http://localhost:8000/api/v1/recall \
+          -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+          -d '{"query":"cobalt lanterns lighthouse","searchType":"CHUNKS","datasets":["compose_smoke"]}')
+        echo "$CHUNKS" | grep -qF "$FACT" || { echo "CHUNKS recall missing stored fact"; echo "$CHUNKS"; exit 1; }
+        echo "recall (CHUNKS): stored fact retrieved verbatim"
+
+        # End-to-end answer check: the graph-grounded completion must name the entity.
+        ANSWER=$(curl -sf -X POST http://localhost:8000/api/v1/recall \
+          -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+          -d '{"query":"Who crafted the twin cobalt lanterns of the Vellinge lighthouse, and in which year?","searchType":"GRAPH_COMPLETION","datasets":["compose_smoke"]}')
+        echo "recall (GRAPH_COMPLETION): $ANSWER"
+        echo "$ANSWER" | grep -qi "Marsk" || { echo "graph completion did not mention the remembered entity"; exit 1; }
+
+    - name: Show server logs on failure
+      if: failure()
+      # Filter key-shaped lines: GitHub masks exact secret values, but partial
+      # or transformed echoes (e.g. provider auth errors) would slip through.
+      run: docker compose -f docker-compose.yml logs cognee | grep -viE "api[-_]?key|authorization|bearer" | tail -100
 
     - name: Shut down Docker Compose
       if: always()
