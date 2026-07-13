@@ -184,7 +184,7 @@ def build_code_graph_edges(
             continue
 
         source_repo = _fact_repo(fact, fallback_repo)
-        source_id = str(fact_node_id(source_repo, kind, name))
+        source_id = fact_node_id(source_repo, kind, name)
 
         for relation in fact.get("relations") or []:
             normalized = normalize_relation(relation)
@@ -209,7 +209,7 @@ def build_code_graph_edges(
                 continue
 
             target_repo, target_kind = candidates[0]
-            target_id = str(fact_node_id(target_repo, target_kind, target_name))
+            target_id = fact_node_id(target_repo, target_kind, target_name)
 
             edge_key = (source_id, target_id, relationship_name)
             if edge_key in seen_edges:

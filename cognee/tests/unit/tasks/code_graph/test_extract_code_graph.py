@@ -2,7 +2,7 @@ import importlib
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import cognee
 import pytest
@@ -116,14 +116,14 @@ def test_build_code_graph_edges_resolves_and_skips():
         "injects",
     }
     assert len(edges) == 9
-    assert not any("ghost_function" in edge[1] for edge in edges)
+    assert not any("ghost_function" in str(edge[1]) for edge in edges)
 
 
 def test_edge_tuples_have_correct_source_relationship_target():
     edges, _skipped = build_code_graph_edges(_fixture_facts())
 
-    expected_source = str(fact_node_id("acme/shop", "symbol", "main"))
-    expected_target = str(fact_node_id("acme/shop", "symbol", "helper"))
+    expected_source = fact_node_id("acme/shop", "symbol", "main")
+    expected_target = fact_node_id("acme/shop", "symbol", "helper")
 
     calls_edges = [edge for edge in edges if edge[2] == "calls"]
     assert len(calls_edges) == 1
@@ -186,13 +186,13 @@ def test_node_and_edge_ids_agree_when_facts_have_no_repo_field():
     data_points = map_facts_to_data_points(facts, repo_path="/path/to/myrepo")
     edges, skipped = build_code_graph_edges(facts, repo_path="/path/to/myrepo")
 
-    node_ids = {str(data_point.id) for data_point in data_points}
+    node_ids = {data_point.id for data_point in data_points}
     assert skipped == 0
     assert len(edges) == 1
     source_id, target_id, _relationship_name, _properties = edges[0]
     assert source_id in node_ids
     assert target_id in node_ids
-    assert source_id == str(fact_node_id("myrepo", "symbol", "main"))
+    assert source_id == fact_node_id("myrepo", "symbol", "main")
 
 
 def test_duplicate_names_in_same_repo_resolve_to_the_single_shared_node():
@@ -211,7 +211,7 @@ def test_duplicate_names_in_same_repo_resolve_to_the_single_shared_node():
 
     assert skipped == 0
     assert len(edges) == 1
-    assert edges[0][1] == str(fact_node_id("r", "symbol", "init"))
+    assert edges[0][1] == fact_node_id("r", "symbol", "init")
 
 
 def test_ambiguous_target_prefers_same_repo_else_skips():
@@ -237,8 +237,8 @@ def test_ambiguous_target_prefers_same_repo_else_skips():
     # The repo-a relation resolves to repo-a's helper; the repo-c one stays ambiguous.
     assert skipped == 1
     assert len(edges) == 1
-    assert edges[0][0] == str(fact_node_id("a", "symbol", "main"))
-    assert edges[0][1] == str(fact_node_id("a", "symbol", "helper"))
+    assert edges[0][0] == fact_node_id("a", "symbol", "main")
+    assert edges[0][1] == fact_node_id("a", "symbol", "helper")
 
 
 def test_duplicated_relation_emits_a_single_edge():
@@ -347,6 +347,8 @@ async def test_add_code_graph_edges_registers_edges_in_rollback_ledger(monkeypat
     upsert_edges_mock.assert_awaited_once()
     call = upsert_edges_mock.await_args
     assert len(call.args[0]) == 9
+    assert all(isinstance(edge[0], UUID) for edge in call.args[0])
+    assert all(isinstance(edge[1], UUID) for edge in call.args[0])
     assert call.kwargs["tenant_id"] == ctx.user.tenant_id
     assert call.kwargs["user_id"] == ctx.user.id
     assert call.kwargs["dataset_id"] == ctx.dataset.id
