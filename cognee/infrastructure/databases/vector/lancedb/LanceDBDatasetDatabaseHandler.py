@@ -48,8 +48,10 @@ class LanceDBDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
     async def delete_dataset(cls, dataset_database: DatasetDatabase):
         # Never open the database to drop it: opening spawns a fresh engine
         # (in subprocess mode, a worker) that races the just-torn-down one.
-        # Evict every cached engine for this database, wait for their closes
-        # to fully finish, then remove the on-disk store directly.
+        # Evict every cached engine for this database, wait for their
+        # in-flight closes to finish (a close deferred behind an idle holder
+        # is not waited on; see aevict_vector_engines_for_database), then
+        # remove the on-disk store directly.
         # Server-backed handlers (e.g. PGVector) are different on purpose:
         # they drop the per-dataset database over a connection, so no file
         # handling applies there.
