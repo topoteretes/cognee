@@ -38,9 +38,20 @@ class PostgresAdapter(GraphDBInterface):
 
     _ALLOWED_FILTER_ATTRS = {"id", "name", "type"}
 
-    def __init__(self, connection_string: str) -> None:
-        """Create engine and sessionmaker from a Postgres connection string."""
+    def __init__(self, connection_string: str, schema: str = "") -> None:
+        """Create engine and sessionmaker from a Postgres connection string.
+
+        When ``schema`` is set (shared-database isolation mode) the connection's
+        ``search_path`` is pinned to that schema so the two fixed tables
+        (``graph_node``/``graph_edge``) and every unqualified query resolve
+        inside the dataset's own schema. This lets many datasets share one
+        database — no per-dataset database and no rewriting of the adapter's
+        SQL. The path is the dataset schema only (``pg_catalog`` is always
+        searched implicitly for built-ins), so neither reads nor
+        ``create_all(checkfirst=True)`` can ever fall through to ``public``.
+        """
         self.db_uri = connection_string
+        self.schema = schema or ""
 
         relational_config = get_relational_config()
         pool_args: dict = dict(relational_config.pool_args) if relational_config.pool_args else {}
@@ -52,6 +63,11 @@ class PostgresAdapter(GraphDBInterface):
             if relational_config.database_connect_args
             else {}
         )
+
+        if self.schema:
+            server_settings = dict(connect_args.get("server_settings") or {})
+            server_settings["search_path"] = self.schema
+            connect_args["server_settings"] = server_settings
 
         # Serialize JSONB columns once, at execute time, with the UUID/datetime-aware
         # encoder. This lets add_nodes/add_edges pass raw property dicts straight through

@@ -58,6 +58,10 @@ class GraphConfig(BaseSettings):
     graph_topology: object = KnowledgeGraph
     graph_dataset_database_handler: str = "ladybug"
     graph_database_subprocess_enabled: bool = True
+    # Postgres schema this graph adapter is pinned to (shared-database isolation
+    # mode). Empty string means "no schema pin" → the default search path.
+    # Set per-dataset by the postgres_graph_shared dataset handler.
+    graph_database_schema: str = ""
 
     # Kuzu tuning. 0 means "use Kuzu's default" (one thread per CPU).
     kuzu_num_threads: int = Field(0, env="KUZU_NUM_THREADS")
@@ -134,6 +138,7 @@ class GraphConfig(BaseSettings):
             "model_config": self.model_config,
             "graph_dataset_database_handler": self.graph_dataset_database_handler,
             "graph_database_subprocess_enabled": self.graph_database_subprocess_enabled,
+            "graph_database_schema": self.graph_database_schema,
             "kuzu_num_threads": self.kuzu_num_threads,
             "kuzu_buffer_pool_size": self.kuzu_buffer_pool_size,
             "kuzu_max_db_size": self.kuzu_max_db_size,
@@ -165,6 +170,7 @@ class GraphConfig(BaseSettings):
             "graph_file_path": self.graph_file_path,
             "graph_dataset_database_handler": self.graph_dataset_database_handler,
             "graph_database_subprocess_enabled": self.graph_database_subprocess_enabled,
+            "graph_database_schema": self.graph_database_schema,
             "kuzu_num_threads": self.kuzu_num_threads,
             "kuzu_buffer_pool_size": self.kuzu_buffer_pool_size,
             "kuzu_max_db_size": self.kuzu_max_db_size,

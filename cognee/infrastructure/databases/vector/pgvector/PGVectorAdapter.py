@@ -72,11 +72,24 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         connection_string: str,
         api_key: Optional[str],
         embedding_engine: EmbeddingEngine,
+        schema: str = "",
     ):
-        """Initialize the adapter and, when possible, reuse the relational engine."""
+        """Initialize the adapter and, when possible, reuse the relational engine.
+
+        When ``schema`` is set (shared-database isolation mode), this adapter is
+        pinned to a single Postgres schema via the connection ``search_path``:
+        every collection table is created and queried inside that schema, so
+        many datasets coexist in one database with no table-name collisions and
+        no per-dataset database. In that mode the adapter always owns a
+        dedicated engine (it must never mutate the search_path of the shared
+        relational engine, which has to stay on ``public``).
+        """
         self.api_key = api_key
         self.embedding_engine = embedding_engine
         self.db_uri: str = connection_string
+        # Postgres schema this adapter is pinned to ("" = default/public search path).
+        # Read by schema-scoped overrides of get_table_names()/delete_database().
+        self.schema: str = schema or ""
         self.VECTOR_DB_LOCK = asyncio.Lock()
         self._write_locks: dict[str, asyncio.Lock] = {}
         self._metadata = MetaData()
@@ -114,7 +127,24 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         # Reuse engine and sessionmaker if the relational engine is provided and is the same database as the one configured for pgvector
         db_name1 = make_url(relational_db.db_uri).database
         db_name2 = make_url(self.db_uri).database
-        if backend_access_control_enabled() and (db_name1 != db_name2):
+        if self.schema:
+            # Shared-database schema-isolation mode. Always a dedicated engine
+            # whose connections are pinned to this dataset's schema via
+            # search_path; ``public`` is kept on the path so the pgvector
+            # extension's ``vector`` type and operators (installed in public)
+            # resolve. Our collection tables are always created in the dataset
+            # schema (first on the path), so reads never fall through to public.
+            connect_args = dict(effective_connect_args) if effective_connect_args else {}
+            server_settings = dict(connect_args.get("server_settings") or {})
+            server_settings["search_path"] = f"{self.schema}, public"
+            connect_args["server_settings"] = server_settings
+            super().__init__(
+                connection_string=self.db_uri,
+                connect_args=connect_args,
+                pool_args=effective_pool_args,
+            )
+            self._owns_engine = True
+        elif backend_access_control_enabled() and (db_name1 != db_name2):
             # If backend access control create new instances of engine and sessionmaker
             super().__init__(
                 connection_string=self.db_uri,

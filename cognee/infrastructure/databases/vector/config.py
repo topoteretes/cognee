@@ -36,6 +36,11 @@ class VectorConfig(BaseSettings):
     vector_db_host: str = ""
     vector_db_subprocess_enabled: bool = True
     vector_pool_args: Union[str, None] = None
+    # Postgres schema this adapter is pinned to (shared-database isolation mode).
+    # Empty string means "no schema pin" → the default search path (public).
+    # Set per-dataset by the pgvector_shared dataset handler; never via env in
+    # single-tenant use.
+    vector_db_schema: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
@@ -105,6 +110,7 @@ class VectorConfig(BaseSettings):
             "vector_db_password": self.vector_db_password,
             "vector_db_host": self.vector_db_host,
             "vector_db_subprocess_enabled": self.vector_db_subprocess_enabled,
+            "vector_db_schema": self.vector_db_schema,
         }
 
 
