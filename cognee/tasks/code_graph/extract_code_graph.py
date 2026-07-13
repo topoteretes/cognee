@@ -270,6 +270,29 @@ async def extract_code_graph(
     return data_points
 
 
+def _pipeline_data_id(ctx: Optional["PipelineContext"] = None) -> Any:
+    """Return a stable id for a persisted pipeline item, if it has one."""
+    data_item = getattr(ctx, "data_item", None)
+    data_id = getattr(data_item, "id", None)
+    return data_id if data_id is not None else getattr(data_item, "data_id", None)
+
+
+async def add_code_graph_data_points(
+    data_points: List[DataPoint],
+    ctx: Optional["PipelineContext"] = None,
+) -> List[DataPoint]:
+    """Store code graph nodes while allowing a repository path payload.
+
+    A custom-pipeline payload may be any value, but the storage rollback ledger
+    requires a persisted data item id. Preserve the full context when one is
+    available and otherwise store without ledger provenance.
+    """
+    from cognee.tasks.storage.add_data_points import add_data_points
+
+    storage_ctx = ctx if _pipeline_data_id(ctx) is not None else None
+    return await add_data_points(data_points, ctx=storage_ctx)
+
+
 async def add_code_graph_edges(
     data_points: List[DataPoint],
     repo_path: Optional[Union[str, Path]] = None,
@@ -302,8 +325,7 @@ async def add_code_graph_edges(
         # context with a persisted data item is available) so pipeline rollback
         # can clean them up. Custom pipelines may use arbitrary payloads, such
         # as the repository path used by the code graph example.
-        data_item = getattr(ctx, "data_item", None)
-        data_id = getattr(data_item, "id", None)
+        data_id = _pipeline_data_id(ctx)
         if (
             ctx is not None
             and getattr(ctx, "user", None) is not None
@@ -331,8 +353,6 @@ def get_code_graph_tasks(
     timeout: float = 600.0,
 ) -> List[Task]:
     """Build the ordered task list for the enola code graph pipeline."""
-    from cognee.tasks.storage import add_data_points
-
     return [
         # EXTRACT: run enola and map its facts to DataPoints
         Task(
@@ -342,7 +362,7 @@ def get_code_graph_tasks(
             timeout=timeout,
         ),
         # LOAD: persist nodes and embeddings to graph/vector DBs
-        Task(add_data_points),
+        Task(add_code_graph_data_points),
         # LOAD: persist the typed relations as explicit graph edges
         Task(add_code_graph_edges, repo_path=repo_path, snapshot_dir=snapshot_dir),
     ]
