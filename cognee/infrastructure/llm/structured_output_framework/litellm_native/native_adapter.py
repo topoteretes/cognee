@@ -37,9 +37,6 @@ from cognee.infrastructure.llm.exceptions import (
     is_budget_exhausted_error,
 )
 from cognee.infrastructure.llm.retry_config import llm_retry_stop_condition
-from cognee.infrastructure.llm.structured_output_framework.litellm_native.llm_native_interface import (
-    LLMNativeInterface,
-)
 from cognee.modules.observability.get_observe import get_observe
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.rate_limiting import llm_rate_limiter_context_manager
@@ -90,7 +87,7 @@ def _enrich_llm_span(model: str, name: str) -> None:
         pass
 
 
-class NativeLiteLLMAdapter(LLMNativeInterface):
+class NativeLiteLLMAdapter:
     """Structured output via LiteLLM's native ``response_format`` (no instructor).
 
     One class handles every provider. The connection params for a given call are
@@ -111,8 +108,6 @@ class NativeLiteLLMAdapter(LLMNativeInterface):
         name: str = "LiteLLM-Native",
         endpoint: str | None = None,
         api_version: str | None = None,
-        instructor_mode: str | None = None,  # accepted for factory compat; unused
-        streaming: bool = False,  # accepted for factory compat; unused
         fallback_model: str | None = None,
         fallback_api_key: str | None = None,
         fallback_endpoint: str | None = None,
@@ -124,7 +119,6 @@ class NativeLiteLLMAdapter(LLMNativeInterface):
         self.api_version = api_version
         self.endpoint = endpoint
         self.max_completion_tokens = max_completion_tokens
-        self.streaming = streaming
         self.fallback_model = fallback_model
         self.fallback_api_key = fallback_api_key
         self.fallback_endpoint = fallback_endpoint
