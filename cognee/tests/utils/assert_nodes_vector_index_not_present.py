@@ -1,10 +1,10 @@
 from typing import List
-from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.engine.models.DataPoint import DataPoint
 
 
 async def assert_nodes_vector_index_not_present(data_points: List[DataPoint]):
-    vector_engine = get_vector_engine()
+    vector_engine = await get_vector_engine_async()
 
     data_points_by_vector_collection = {}
 
