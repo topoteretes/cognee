@@ -263,53 +263,24 @@ async def cognify(
         pipeline_executor_func = get_pipeline_executor(run_in_background=run_in_background)
 
         # DLT-source manifest items run the deterministic DLT pipeline; all
-        # other data items keep the standard flow. The split is per data item,
-        # so mixed datasets get both pipelines, each with its own item subset.
+        # other data items keep the standard flow (see _plan_cognify_runs).
         runs = await _plan_cognify_runs(datasets, user)
 
-        shared_run_kwargs = {
-            "pipeline": run_pipeline,
-            "user": user,
-            "vector_db_config": vector_db_config,
-            "graph_db_config": graph_db_config,
-            "incremental_loading": incremental_loading,
-            "use_pipeline_cache": False,
-            "data_per_batch": data_per_batch,
-            "rollback_handler": cognify_rollback_handler,
-            "llm_config": llm_config,
-            "embedding_config": embedding_config,
-            "data_cache": data_cache,
-        }
-
-        if not runs:
-            # Run the run_pipeline in the background or blocking based on executor
-            result = await pipeline_executor_func(
-                tasks=tasks,
-                datasets=datasets,
-                pipeline_name="cognify_pipeline",
-                **shared_run_kwargs,
-            )
-        else:
-            tasks_for = {
-                "dlt_cognify_pipeline": await get_dlt_tasks(
-                    chunk_size=chunk_size,
-                    chunks_per_batch=chunks_per_batch,
-                ),
-                "cognify_pipeline": tasks,
-            }
-            partial_results = []
-            for pipeline_name, dataset_ids, items in runs:
-                run_kwargs = {"data": items} if items is not None else {}
-                partial_results.append(
-                    await pipeline_executor_func(
-                        tasks=tasks_for[pipeline_name],
-                        datasets=dataset_ids,
-                        pipeline_name=pipeline_name,
-                        **run_kwargs,
-                        **shared_run_kwargs,
-                    )
-                )
-            result = _merge_pipeline_results(partial_results)
+        result = await _execute_cognify_runs(
+            runs,
+            executor=pipeline_executor_func,
+            cognify_tasks=tasks,
+            chunk_size=chunk_size,
+            chunks_per_batch=chunks_per_batch,
+            user=user,
+            vector_db_config=vector_db_config,
+            graph_db_config=graph_db_config,
+            incremental_loading=incremental_loading,
+            data_per_batch=data_per_batch,
+            llm_config=llm_config,
+            embedding_config=embedding_config,
+            data_cache=data_cache,
+        )
 
         dataset_desc = str(datasets) if datasets else "all datasets"
         span.set_attribute(
@@ -386,6 +357,57 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
     return default_tasks
 
 
+async def _execute_cognify_runs(
+    runs,
+    executor,
+    cognify_tasks,
+    chunk_size,
+    chunks_per_batch,
+    user,
+    vector_db_config,
+    graph_db_config,
+    incremental_loading,
+    data_per_batch,
+    llm_config,
+    embedding_config,
+    data_cache,
+):
+    """Execute the planned pipeline runs and merge their results.
+
+    Each run is (pipeline_name, datasets, items): items is an explicit data
+    subset for mixed datasets, or None to let the pipeline load the dataset
+    itself. The DLT task list is built lazily, only when a run needs it.
+    """
+    tasks_for = {"cognify_pipeline": cognify_tasks}
+    partial_results = []
+    for pipeline_name, run_datasets, items in runs:
+        if pipeline_name not in tasks_for:
+            tasks_for[pipeline_name] = await get_dlt_tasks(
+                chunk_size=chunk_size, chunks_per_batch=chunks_per_batch
+            )
+        data_kwargs = {"data": items} if items is not None else {}
+        partial_results.append(
+            await executor(
+                pipeline=run_pipeline,
+                tasks=tasks_for[pipeline_name],
+                datasets=run_datasets,
+                pipeline_name=pipeline_name,
+                user=user,
+                vector_db_config=vector_db_config,
+                graph_db_config=graph_db_config,
+                incremental_loading=incremental_loading,
+                use_pipeline_cache=False,
+                data_per_batch=data_per_batch,
+                rollback_handler=cognify_rollback_handler,
+                llm_config=llm_config,
+                embedding_config=embedding_config,
+                data_cache=data_cache,
+                **data_kwargs,
+            )
+        )
+    return _merge_pipeline_results(partial_results)
+
+
 async def _plan_cognify_runs(datasets, user) -> list[tuple[str, list, Optional[list]]]:
     """Plan pipeline runs for cognify routing.
 
@@ -401,8 +423,9 @@ async def _plan_cognify_runs(datasets, user) -> list[tuple[str, list, Optional[l
     - one ("cognify_pipeline", [ids...], None) entry for all datasets without
       manifests, items loaded by the pipeline itself (unchanged behavior)
 
-    Returns [] when no dataset contains a DLT manifest, in which case the
-    caller keeps the original single-call path untouched.
+    When no dataset contains a manifest, the plan is a single standard run
+    that passes the original ``datasets`` argument through unchanged (items
+    are loaded by the pipeline itself).
     """
     from sqlalchemy import select
 
@@ -420,7 +443,7 @@ async def _plan_cognify_runs(datasets, user) -> list[tuple[str, list, Optional[l
         datasets=dataset_list, permission_type="write", user=user
     )
     if not authorized_datasets:
-        return []
+        return [("cognify_pipeline", datasets, None)]
 
     # One filtered query to find which requested datasets contain a manifest,
     # instead of loading every dataset's data items.
@@ -443,7 +466,7 @@ async def _plan_cognify_runs(datasets, user) -> list[tuple[str, list, Optional[l
         )
 
     if not manifest_dataset_ids:
-        return []
+        return [("cognify_pipeline", datasets, None)]
 
     runs: list[tuple[str, list, Optional[list]]] = []
     regular_ids = []
