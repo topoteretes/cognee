@@ -12,6 +12,7 @@ core ``cognee`` install stays slim.  Install the matching extra to use one,
 e.g. ``pip install "cognee[gmail]"``.
 """
 
+from .confluence import confluence_source
 from .gmail import gmail_source
 
-__all__ = ["gmail_source"]
+__all__ = ["confluence_source", "gmail_source"]

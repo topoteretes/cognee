@@ -21,11 +21,6 @@ def is_csv_path(data: str) -> bool:
     return data.lower().endswith(".csv") and not data.startswith(("http://", "https://"))
 
 
-def is_confluence_config(data) -> bool:
-    """Check if data is a dict with Confluence connection parameters."""
-    return isinstance(data, dict) and all(k in data for k in ("confluence_url", "email", "api_token"))
-
-
 def create_dlt_source_from_connection_string(
     connection_string: str,
     query: Optional[str] = None,
@@ -74,17 +69,6 @@ def create_dlt_source_from_csv(csv_path: str):
             file_glob=filename,
         )
         | read_csv()
-    )
-
-
-def create_dlt_source_from_confluence(config: dict):
-    from cognee.tasks.ingestion.confluence_source import create_confluence_source
-
-    return create_confluence_source(
-        base_url=config["confluence_url"],
-        email=config["email"],
-        api_token=config["api_token"],
-        space_keys=config.get("space_keys"),
     )
 
 
