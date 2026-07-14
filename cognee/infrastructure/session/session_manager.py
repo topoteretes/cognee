@@ -830,69 +830,6 @@ class SessionManager:
             logger.warning("SessionManager: delete_session_context failed: %s", e)
             return False
 
-    # -- Graph knowledge context (separate from QA history) -----------------
-
-    @staticmethod
-    def _graph_context_key(user_id: str, session_id: str) -> str:
-        """Build the cache key used for session-scoped graph knowledge snapshots."""
-        return f"graph_knowledge:{user_id}:{session_id}"
-
-    async def get_graph_context(self, *, user_id: str, session_id: str | None = None) -> str:
-        """Return the graph knowledge snapshot for this session, or empty string."""
-        if not self.is_available:
-            return ""
-        session_id = self._resolve_session_id(session_id)
-        key = self._graph_context_key(user_id, session_id)
-        try:
-            raw = await self._cache.get_value(key)
-            return raw if raw else ""
-        except (NotImplementedError, AttributeError, TypeError):
-            # Adapter predates the KV interface (missing, non-async, or
-            # different-signature get_value), fall back to legacy duck-typing
-            pass
-        except Exception:
-            return ""
-        try:
-            raw = await self._cache.async_redis.get(key)
-            if raw:
-                return raw.decode() if isinstance(raw, bytes) else raw
-        except AttributeError:
-            # FsCacheAdapter
-            try:
-                raw = self._cache._cache.get(key)
-                if raw:
-                    return raw
-            except Exception:
-                pass
-        except Exception:
-            pass
-        return ""
-
-    async def set_graph_context(
-        self, *, user_id: str, session_id: str | None = None, context: str
-    ) -> None:
-        """Store (or overwrite) the graph knowledge snapshot for this session."""
-        if not self.is_available:
-            return
-        session_id = self._resolve_session_id(session_id)
-        key = self._graph_context_key(user_id, session_id)
-        try:
-            await self._cache.set_value(key, context, ttl=self._cache.session_ttl_seconds)
-            return
-        except (NotImplementedError, AttributeError, TypeError):
-            # Adapter predates the KV interface (missing, non-async, or
-            # different-signature set_value), fall back to legacy duck-typing
-            pass
-        try:
-            await self._cache.async_redis.set(key, context)
-            if self._cache.session_ttl_seconds:
-                await self._cache.async_redis.expire(key, self._cache.session_ttl_seconds)
-        except AttributeError:
-            try:
-                self._cache._cache.set(key, context)
-            except Exception:
-                pass
-
     async def delete_session(self, *, user_id: str, session_id: str | None = None) -> bool:
         """
         Delete the entire session and all its QA entries.
@@ -905,8 +842,9 @@ class SessionManager:
             logger.debug("SessionManager: cache unavailable, skipping delete_session")
             return False
 
-        # Also clean up the graph knowledge context key
-        graph_key = self._graph_context_key(user_id, session_id)
+        # One-release cleanup for graph snapshots written by the removed
+        # graph-to-session sync feature.
+        graph_key = f"graph_knowledge:{user_id}:{session_id}"
         try:
             await self._cache.delete_value(graph_key)
         except (NotImplementedError, AttributeError, TypeError):

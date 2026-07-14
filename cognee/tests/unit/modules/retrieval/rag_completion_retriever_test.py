@@ -27,7 +27,7 @@ async def test_get_context_success(mock_vector_engine):
     retriever = CompletionRetriever(top_k=2)
 
     with patch(
-        "cognee.modules.retrieval.completion_retriever.get_vector_engine",
+        "cognee.modules.retrieval.completion_retriever.get_vector_engine_async",
         return_value=mock_vector_engine,
     ):
         objects = await retriever.get_retrieved_objects("test query")
@@ -47,7 +47,7 @@ async def test_get_context_collection_not_found_error(mock_vector_engine):
     retriever = CompletionRetriever()
 
     with patch(
-        "cognee.modules.retrieval.completion_retriever.get_vector_engine",
+        "cognee.modules.retrieval.completion_retriever.get_vector_engine_async",
         return_value=mock_vector_engine,
     ):
         with pytest.raises(NoDataError, match="No data found"):
@@ -62,7 +62,7 @@ async def test_get_context_empty_results(mock_vector_engine):
     retriever = CompletionRetriever()
 
     with patch(
-        "cognee.modules.retrieval.completion_retriever.get_vector_engine",
+        "cognee.modules.retrieval.completion_retriever.get_vector_engine_async",
         return_value=mock_vector_engine,
     ):
         context = await retriever.get_context_from_objects("test query", [])
@@ -82,7 +82,7 @@ async def test_get_context_top_k_limit(mock_vector_engine):
     retriever = CompletionRetriever(top_k=2)
 
     with patch(
-        "cognee.modules.retrieval.completion_retriever.get_vector_engine",
+        "cognee.modules.retrieval.completion_retriever.get_vector_engine_async",
         return_value=mock_vector_engine,
     ):
         objects = await retriever.get_retrieved_objects("test query")
@@ -104,7 +104,7 @@ async def test_get_context_single_chunk(mock_vector_engine):
     retriever = CompletionRetriever()
 
     with patch(
-        "cognee.modules.retrieval.completion_retriever.get_vector_engine",
+        "cognee.modules.retrieval.completion_retriever.get_vector_engine_async",
         return_value=mock_vector_engine,
     ):
         objects = await retriever.get_retrieved_objects("test query")
@@ -124,7 +124,7 @@ async def test_get_completion_without_session(mock_vector_engine):
 
     with (
         patch(
-            "cognee.modules.retrieval.completion_retriever.get_vector_engine",
+            "cognee.modules.retrieval.completion_retriever.get_vector_engine_async",
             return_value=mock_vector_engine,
         ),
         patch(
@@ -183,7 +183,7 @@ async def test_get_completion_with_session(mock_vector_engine):
 
     with (
         patch(
-            "cognee.modules.retrieval.completion_retriever.get_vector_engine",
+            "cognee.modules.retrieval.completion_retriever.get_vector_engine_async",
             return_value=mock_vector_engine,
         ),
         patch(
@@ -223,7 +223,7 @@ async def test_get_completion_with_session_no_user_id(mock_vector_engine):
 
     with (
         patch(
-            "cognee.modules.retrieval.completion_retriever.get_vector_engine",
+            "cognee.modules.retrieval.completion_retriever.get_vector_engine_async",
             return_value=mock_vector_engine,
         ),
         patch(
@@ -260,7 +260,7 @@ async def test_get_completion_with_response_model(mock_vector_engine):
 
     with (
         patch(
-            "cognee.modules.retrieval.completion_retriever.get_vector_engine",
+            "cognee.modules.retrieval.completion_retriever.get_vector_engine_async",
             return_value=mock_vector_engine,
         ),
         patch(
@@ -318,7 +318,7 @@ async def test_get_context_missing_text_key(mock_vector_engine):
     retriever = CompletionRetriever()
 
     with patch(
-        "cognee.modules.retrieval.completion_retriever.get_vector_engine",
+        "cognee.modules.retrieval.completion_retriever.get_vector_engine_async",
         return_value=mock_vector_engine,
     ):
         with pytest.raises(KeyError):

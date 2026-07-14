@@ -1008,7 +1008,7 @@ class SqlCacheAdapter(CacheDBInterface):
             raise CacheConnectionError(error_msg) from error
 
     # --------------------------------------------------------------------- #
-    # Key/value storage (graph snapshots + sync checkpoints; keys kept verbatim)
+    # Key/value storage (small exact-key cache values)
     # --------------------------------------------------------------------- #
 
     async def get_value(self, key: str) -> Optional[str]:
