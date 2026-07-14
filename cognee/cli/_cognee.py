@@ -8,25 +8,6 @@ from typing import Any, Sequence, Dict, Type, cast, List
 import click
 
 
-# aiohttp closes its ClientSession asynchronously via __del__ during
-# interpreter shutdown; when the CLI exits between the last await and the
-# event-loop teardown the finalizer emits a "Unclosed client session"
-# ResourceWarning that panics first-time users into thinking the run
-# failed. The message is not actionable in the CLI context, so suppress it
-# at the process boundary. Debug mode leaves warnings alone so contributors
-# still see the trace when they need it.
-if not any(a in ("-x", "--debug") for a in sys.argv[1:]):
-    warnings.filterwarnings(
-        "ignore",
-        message="Unclosed client session",
-        category=ResourceWarning,
-    )
-    warnings.filterwarnings(
-        "ignore",
-        message="Unclosed connector",
-        category=ResourceWarning,
-    )
-
 try:
     import rich_argparse
     from rich.markdown import Markdown
@@ -228,10 +209,31 @@ def _create_parser() -> tuple[argparse.ArgumentParser, Dict[str, SupportsCliComm
     return parser, installed_commands
 
 
+def _silence_teardown_warnings() -> None:
+    """Hide aiohttp's shutdown-time ResourceWarnings from the CLI.
+
+    aiohttp finalises its ClientSession / connector / connection
+    asynchronously in ``__del__`` during interpreter shutdown; when the CLI
+    exits between the last await and event-loop teardown these emit
+    "Unclosed ..." ResourceWarnings that are not actionable here and read
+    like a failure to first-time users. Installed only for a real CLI run
+    (not as an import side effect) and skipped in debug mode so
+    contributors still see them.
+    """
+    warnings.filterwarnings(
+        "ignore",
+        message="Unclosed (client session|connector|connection)",
+        category=ResourceWarning,
+    )
+
+
 def main() -> int:
     """Main CLI entry point"""
     parser, installed_commands = _create_parser()
     args = parser.parse_args()
+
+    if not debug.is_debug_enabled():
+        _silence_teardown_warnings()
 
     # Handle UI flag
     if hasattr(args, "start_ui") and args.start_ui:
