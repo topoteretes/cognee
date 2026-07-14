@@ -236,8 +236,12 @@ def sync_pages(
             current_ids.add(page_id)
 
             when = _version_when(page)
-            if when <= last_when:
-                continue  # unchanged since last sync
+            # Skip only pages we have already ingested and that have not changed.
+            # A page absent from known_ids is fetched regardless of timestamp, so
+            # pages new to the corpus but with an old version.when (moved into a
+            # tracked space, restored, or tied at the cursor boundary) are not lost.
+            if page_id in known_ids and when <= last_when:
+                continue
             if when > newest_when:
                 newest_when = when
 
@@ -248,6 +252,22 @@ def sync_pages(
                     body = f"{body}\n\nComments:\n" + "\n\n".join(comments)
             yield _page_to_row(page, body, base_url)
             changed += 1
+
+    # Deletion detection relies on the sweep enumerating every current page. An
+    # empty sweep while pages were previously known almost always means a
+    # transient/failed listing (network blip, renamed/typo'd space key, momentary
+    # zero-space enumeration) rather than a genuine wipe — treating it as "all
+    # deleted" would purge the whole dataset and overwrite known_ids with [],
+    # making the loss permanent. Skip deletion and preserve state in that case.
+    if known_ids and not current_ids:
+        logger.warning(
+            "Confluence: page sweep returned 0 pages but %d were known; skipping "
+            "deletion this run to avoid a mass forget-on-delete on a transient sweep.",
+            len(known_ids),
+        )
+        state["last_when"] = newest_when
+        logger.info("Confluence: %d changed page(s), 0 deletion(s).", changed)
+        return
 
     deleted = known_ids - current_ids
     for page_id in sorted(deleted):

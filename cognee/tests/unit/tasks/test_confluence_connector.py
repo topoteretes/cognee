@@ -190,6 +190,35 @@ def test_deleted_page_emits_hard_delete_marker():
     assert state["known_ids"] == ["1"]  # sweep now reflects reality
 
 
+def test_empty_sweep_does_not_mass_delete_and_preserves_state():
+    # A sweep that returns zero pages while pages were known is treated as a
+    # transient failure, NOT "everything deleted" — otherwise a benign blip would
+    # wipe the whole dataset and overwrite known_ids permanently.
+    session = FakeConfluenceSession(spaces=[], pages_by_space={})
+    state = {"known_ids": ["1", "2"], "last_when": "2024-01-01T10:00:00.000Z"}
+    rows = list(sync_pages(session, BASE_URL, state, include_comments=False))
+
+    assert rows == []  # no hard-delete markers emitted
+    assert state["known_ids"] == ["1", "2"]  # prior id set preserved
+
+
+def test_new_page_below_cursor_is_still_ingested():
+    # A page new to the corpus is fetched regardless of its version timestamp
+    # (moved into a tracked space / restored / tied at the cursor boundary),
+    # while an already-known unchanged page at the same old timestamp is skipped.
+    session = _make_session(
+        [
+            _page("1", when="2024-01-01T10:00:00.000Z", body="<p>known</p>"),  # old + known
+            _page("3", when="2024-01-01T10:00:00.000Z", body="<p>moved-in</p>"),  # old + new
+            _page("4", when="2024-06-01T00:00:00.000Z", body="<p>tie</p>"),  # boundary tie + new
+        ]
+    )
+    state = {"known_ids": ["1"], "last_when": "2024-06-01T00:00:00.000Z"}
+    rows = list(sync_pages(session, BASE_URL, state, include_comments=False))
+
+    assert sorted(r["id"] for r in rows) == ["3", "4"]  # page "1" skipped, new pages ingested
+
+
 def test_comments_are_folded_into_page_body_when_requested():
     session = _make_session(
         [
