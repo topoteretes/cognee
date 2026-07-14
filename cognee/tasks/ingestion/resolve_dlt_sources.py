@@ -6,11 +6,15 @@ source). The manifest is a JSON document describing every unique row; rows
 are materialized as individual graph/vector nodes later by the dedicated
 DLT cognify pipeline (see extract_dlt_source_edges)."""
 
+import hashlib
 import json
 from typing import Any, Callable, List, Optional, Set
 from uuid import UUID
 
-from cognee.modules.data.methods.get_unique_data_id import get_unique_data_id
+from cognee.modules.data.methods.get_unique_data_id import (
+    get_unique_data_id,
+    get_unique_data_ids,
+)
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
 
@@ -44,7 +48,7 @@ async def resolve_dlt_sources(
     expanded) data — a single item, a list, or unchanged if nothing was DLT.
     ``orphan_cleanup`` is an async callable that deletes dlt rows no longer in
     the source, or ``None`` when there is nothing to clean up; the caller must
-    await it *after* the fresh rows are committed (see Phase 3).
+    await it *after* the fresh rows are committed.
     """
     # Lazy-import DLT types so the dlt package is not a hard dependency
     try:
@@ -105,7 +109,7 @@ async def resolve_dlt_sources(
         len(expanded_items),
     )
 
-    # --- Phase 3: prepare deferred orphan cleanup ---------------------------
+    # --- Prepare deferred orphan cleanup ------------------------------------
     # Deletion of orphaned dlt rows is deferred to *after* the fresh rows are
     # committed by the add pipeline, to avoid a data-loss window: if ingestion
     # failed between deletion and commit, the orphans would be gone and the
@@ -116,12 +120,17 @@ async def resolve_dlt_sources(
     # adds new rows, so prior batches should not be treated as orphans.
     orphan_cleanup: Optional[Callable[[], Any]] = None
     if write_disposition != "append":
-        # Fresh ids are the manifest ids; any legacy per-row Data records
-        # (source == "dlt") are treated as orphans and migrated away.
-        fresh_data_ids: Set[UUID] = set(manifest_data_ids)
+        # Cleanup is scoped to the sources ingested in THIS call: stale
+        # manifests of a re-ingested source are orphans, but manifests of
+        # other sources in the same dataset must survive. Legacy per-row
+        # records (source == "dlt") carry no source attribution and are
+        # migrated away on any manifest ingest.
+        ingested_source_names = {
+            item.external_metadata["source_name"] for item in expanded_items
+        }
 
         async def _cleanup() -> None:
-            await _delete_dlt_orphans(dataset_name, user, fresh_data_ids)
+            await _delete_dlt_orphans(dataset_name, user, manifest_data_ids, ingested_source_names)
 
         orphan_cleanup = _cleanup
 
@@ -146,33 +155,22 @@ async def _build_source_manifest_item(
     if not rows:
         return None
 
-    # Deduplicate rows by identity; the last occurrence wins, matching the
-    # previous FK-target behavior for duplicate keys.
-    unique_rows: dict[tuple[str, str, str], DltRowData] = {}
-    duplicates = 0
-    for row in rows:
-        key = (row.table_name, row.primary_key_value, row.content_hash)
-        if key in unique_rows:
-            duplicates += 1
-        unique_rows[key] = row
+    dlt_db_name = rows[0].dlt_db_name
+    unique_rows = _dedupe_rows(rows, source_name)
 
-    if duplicates:
-        logger.info(
-            "Source '%s': collapsed %d duplicate row(s) into %d unique row(s).",
-            source_name,
-            duplicates,
-            len(unique_rows),
-        )
+    # Stable per-row node ids, resolved in one batch query. FK lookup maps
+    # (table, pk_value) → node_id; when multiple rows share a PK value, the
+    # last one wins (best-effort).
+    row_identifiers = [
+        f"dlt:{row.table_name}:{row.primary_key_value}:{row.content_hash}"
+        for row in unique_rows.values()
+    ]
+    row_node_ids = await get_unique_data_ids(row_identifiers, user)
+    node_ids: dict[tuple[str, str, str], UUID] = dict(zip(unique_rows, row_node_ids))
 
-    # Stable per-row node ids. FK lookup maps (table, pk_value) → node_id;
-    # when multiple rows share a PK value, the last one wins (best-effort).
-    node_ids: dict[tuple[str, str, str], UUID] = {}
     fk_lookup: dict[tuple[str, str], UUID] = {}
     for key, row in unique_rows.items():
-        row_identifier = f"dlt:{row.table_name}:{row.primary_key_value}:{row.content_hash}"
-        node_id = await get_unique_data_id(row_identifier, user)
-        node_ids[key] = node_id
-
+        node_id = node_ids[key]
         fk_key = (row.table_name, row.primary_key_value)
         existing = fk_lookup.get(fk_key)
         if existing is not None and existing != node_id:
@@ -195,7 +193,6 @@ async def _build_source_manifest_item(
         if row.table_name not in tables:
             tables[row.table_name] = {
                 "schema_info": row.schema_info,
-                "schema_hash": row.schema_hash,
                 "foreign_keys": row.foreign_keys,
                 "dlt_db_name": row.dlt_db_name,
             }
@@ -208,9 +205,6 @@ async def _build_source_manifest_item(
                 "primary_key_value": row.primary_key_value,
                 "content_hash": row.content_hash,
                 "text": _build_schema_context_text(row),
-                # Target ids in fk_references are row node ids; the
-                # "target_data_id" key name is kept for compatibility with
-                # _resolve_fk_references.
                 "fk_references": _resolve_fk_references(row, fk_lookup, missing_fk_targets),
             }
         )
@@ -238,9 +232,18 @@ async def _build_source_manifest_item(
         "tables": tables,
         "rows": manifest_rows,
     }
-    manifest_text = json.dumps(manifest, indent=2, sort_keys=True, default=str)
+    manifest_text = json.dumps(manifest, sort_keys=True, separators=(",", ":"), default=str)
 
-    data_id = await get_unique_data_id(f"dlt_source:{dataset_name}:{source_name}", user)
+    # The data_id must be content-addressed (like all cognee data ids): the add
+    # pipeline's incremental check skips known ids before any content-hash
+    # comparison, so a stable id would make source changes invisible. A changed
+    # source gets a new id and a full reprocess, while the previous manifest
+    # becomes an orphan and _delete_dlt_orphans removes it together with its
+    # derived graph/vector nodes.
+    manifest_hash = hashlib.md5(manifest_text.encode()).hexdigest()
+    data_id = await get_unique_data_id(
+        f"dlt_source:{dataset_name}:{source_name}:{manifest_hash}", user
+    )
 
     return DataItem(
         data=manifest_text,
@@ -248,7 +251,7 @@ async def _build_source_manifest_item(
         external_metadata={
             "source": "dlt_source",
             "source_name": source_name,
-            "dlt_db_name": next(iter(tables.values()))["dlt_db_name"] if tables else "",
+            "dlt_db_name": dlt_db_name,
             "tables": sorted(tables),
             "row_count": len(manifest_rows),
         },
@@ -261,12 +264,39 @@ async def _build_source_manifest_item(
 # ---------------------------------------------------------------------------
 
 
+def _dedupe_rows(rows: List[DltRowData], source_name: str) -> dict[tuple, DltRowData]:
+    """Deduplicate rows by identity (table, pk_value, content_hash).
+
+    DLT child tables can contain rows that are byte-identical once dlt
+    bookkeeping columns are stripped. The last occurrence wins, matching the
+    previous FK-target behavior for duplicate keys.
+    """
+    unique_rows: dict[tuple[str, str, str], DltRowData] = {}
+    duplicates = 0
+    for row in rows:
+        key = (row.table_name, row.primary_key_value, row.content_hash)
+        if key in unique_rows:
+            duplicates += 1
+        unique_rows[key] = row
+
+    if duplicates:
+        logger.info(
+            "Source '%s': collapsed %d duplicate row(s) into %d unique row(s).",
+            source_name,
+            duplicates,
+            len(unique_rows),
+        )
+
+    return unique_rows
+
+
 def _build_schema_context_text(dlt_row: DltRowData) -> str:
     """Build a human-readable, schema-enriched text representation of a DLT row.
 
     This text is stored as the document content and used for vector search.
     DLT rows bypass LLM extraction — their graph is built deterministically
-    from the relational schema by ``extract_dlt_fk_edges``.
+    from the relational schema by ``extract_dlt_source_edges`` (or
+    ``extract_dlt_fk_edges`` for legacy per-row data).
     """
     lines = []
     lines.append(f"Table: {dlt_row.table_name}")
@@ -316,11 +346,11 @@ def _resolve_fk_references(
     row_id_lookup: dict,
     missing_targets: Optional[list] = None,
 ) -> list:
-    """Resolve foreign key columns to target data_ids for graph edge creation.
+    """Resolve foreign key columns to target row node ids for graph edge creation.
 
     Returns a list of dicts:
     [{"column": "dept_id", "target_table": "departments", "target_pk_value": "10",
-      "target_data_id": "uuid-string", "relationship_name": "dept_id_references_departments"}]
+      "target_node_id": "uuid-string", "relationship_name": "dept_id_references_departments"}]
 
     When ``missing_targets`` is provided, FK references whose target row was not
     loaded are appended to it as ``(source_table, column, ref_table, value)`` so
@@ -342,9 +372,9 @@ def _resolve_fk_references(
 
         fk_value_str = str(fk_value)
         target_key = (ref_table, fk_value_str)
-        target_data_id = row_id_lookup.get(target_key)
+        target_node_id = row_id_lookup.get(target_key)
 
-        if target_data_id is not None:
+        if target_node_id is not None:
             relationship_name = f"{fk_column}_references_{ref_table}"
             references.append(
                 {
@@ -352,7 +382,7 @@ def _resolve_fk_references(
                     "target_table": ref_table,
                     "target_column": ref_column,
                     "target_pk_value": fk_value_str,
-                    "target_data_id": str(target_data_id),
+                    "target_node_id": str(target_node_id),
                     "relationship_name": relationship_name,
                 }
             )
@@ -366,18 +396,23 @@ async def _delete_dlt_orphans(
     dataset_name: str,
     user: User,
     fresh_data_ids: Set[UUID],
+    ingested_source_names: Set[str],
 ) -> None:
     """Delete dlt-sourced Data records (and their graph/vector artifacts) that
-    are no longer present in the freshly-ingested dlt source.
+    are no longer present in the freshly-ingested dlt sources.
 
     This handles the case where rows are deleted from the upstream database
     and the user re-ingests.  dlt cleans its own staging DB, but cognee's
     relational, graph, and vector stores still hold stale data.
+
+    Only manifests belonging to ``ingested_source_names`` are candidates —
+    a dataset can hold several DLT sources, and re-ingesting one must not
+    delete the others. Legacy per-row records (source == "dlt") predate
+    source attribution and are always migrated away.
     """
     from cognee.modules.data.methods.get_dataset_data import get_dataset_data
     from cognee.modules.data.methods import get_authorized_existing_datasets
     from cognee.modules.data.methods.delete_data import delete_data
-    from cognee.modules.graph.methods.has_data_related_nodes import has_data_related_nodes
     from cognee.modules.graph.methods.delete_data_nodes_and_edges import (
         delete_data_nodes_and_edges,
     )
@@ -396,7 +431,12 @@ async def _delete_dlt_orphans(
     orphans = []
     for data_item in all_data:
         ext = data_item.external_metadata
-        if not isinstance(ext, dict) or ext.get("source") not in ("dlt", "dlt_source"):
+        if not isinstance(ext, dict):
+            continue
+        source = ext.get("source")
+        if source == "dlt_source" and ext.get("source_name") not in ingested_source_names:
+            continue
+        if source not in ("dlt", "dlt_source"):
             continue
         if data_item.id not in fresh_data_ids:
             orphans.append(data_item)
@@ -413,8 +453,11 @@ async def _delete_dlt_orphans(
     failed: list = []
     for orphan in orphans:
         try:
-            if await has_data_related_nodes(dataset.id, orphan.id):
-                await delete_data_nodes_and_edges(dataset.id, orphan.id, user.id)
+            # Called unconditionally: gating on has_data_related_nodes would
+            # skip graphs whose provenance is stamped in-graph instead of the
+            # relational ledger (the function handles both paths and no-ops
+            # when nothing is related).
+            await delete_data_nodes_and_edges(dataset.id, orphan.id, user.id)
             await delete_data(orphan, dataset.id)
         except Exception:
             failed.append(orphan.id)

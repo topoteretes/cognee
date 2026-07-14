@@ -132,6 +132,8 @@ async def classify_documents(data_documents: list[Data]) -> list[Document]:
         if is_dlt_source_manifest(data_item):
             doc_class = DltSourceDocument
         elif is_dlt_sourced(data_item):
+            # Legacy: pre-manifest per-row DLT records; superseded by
+            # DltSourceDocument manifests.
             doc_class = DltRowDocument
         else:
             extension = (data_item.extension or "").lower()

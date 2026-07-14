@@ -6,6 +6,7 @@ from uuid import uuid4
 import pytest
 
 import cognee.modules.graph.methods as graph_methods
+import cognee.tasks.ingestion.dlt_schema_graph as schema_graph_module
 import cognee.tasks.ingestion.extract_dlt_fk_edges as dlt_module
 from cognee.modules.pipelines.models import PipelineContext
 
@@ -38,9 +39,10 @@ def _wire_dlt_module(monkeypatch, graph, provenance_kwargs):
     """Patch extract_dlt_fk_edges' collaborators; return (upsert_nodes, upsert_edges)."""
     monkeypatch.setattr(dlt_module, "_is_dlt_data_point", lambda dp: True)
     monkeypatch.setattr(dlt_module, "parse_external_metadata", lambda doc: _ext_metadata())
-    monkeypatch.setattr(dlt_module, "index_data_points", AsyncMock())
+    # Graph writes are delegated to the shared emitter in dlt_schema_graph.
+    monkeypatch.setattr(schema_graph_module, "index_data_points", AsyncMock())
     monkeypatch.setattr(
-        dlt_module,
+        schema_graph_module,
         "graph_provenance_write_kwargs",
         AsyncMock(return_value=provenance_kwargs),
     )

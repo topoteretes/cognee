@@ -38,7 +38,7 @@ def test_resolved_fk_reference_is_returned_when_target_loaded():
     assert missing == []
     assert len(refs) == 1
     assert refs[0]["target_table"] == "customers"
-    assert refs[0]["target_data_id"] == str(target_id)
+    assert refs[0]["target_node_id"] == str(target_id)
 
 
 def test_missing_fk_target_is_recorded_not_silently_dropped():

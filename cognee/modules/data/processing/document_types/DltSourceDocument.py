@@ -1,4 +1,3 @@
-import json
 from os.path import basename
 from uuid import UUID
 
@@ -23,10 +22,9 @@ class DltSourceDocument(Document):
 
     async def read(self, chunker_cls: Chunker, max_chunk_size: int):
         from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
-        from cognee.infrastructure.files.utils.open_data_file import open_data_file
+        from cognee.tasks.ingestion.dlt_utils import load_dlt_manifest
 
-        async with open_data_file(self.raw_data_location, mode="r", encoding="utf-8") as file:
-            manifest = json.loads(file.read())
+        manifest = await load_dlt_manifest(self.raw_data_location)
 
         for chunk_index, row in enumerate(manifest.get("rows", [])):
             text = (row.get("text") or "").strip()
