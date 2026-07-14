@@ -6,7 +6,7 @@ from cognee.cli.reference import SupportsCliCommand
 from cognee.cli import DEFAULT_DOCS_URL
 import cognee.cli.echo as fmt
 from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
-from cognee.cli.hints import add_quiet_flag, forget_hint
+from cognee.cli.hints import hint_remember
 
 
 class ForgetCommand(SupportsCliCommand):
@@ -37,7 +37,6 @@ to delete a dataset, or dataset + --data-id to delete a single item.
             default=False,
             help="Delete all datasets and data",
         )
-        add_quiet_flag(parser)
 
     def execute(self, args: argparse.Namespace) -> None:
         try:
@@ -75,7 +74,7 @@ to delete a dataset, or dataset + --data-id to delete a single item.
             # graph again with remember; a placeholder is used when the user
             # wiped everything so no specific dataset name is meaningful.
             hint_dataset = dataset or "<dataset-name>"
-            forget_hint(args, hint_dataset)
+            hint_remember(hint_dataset)
 
         except Exception as e:
             if isinstance(e, CliCommandInnerException):
