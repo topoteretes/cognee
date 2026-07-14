@@ -226,7 +226,7 @@ async def _read_rows_from_tables(
     schema: dict,
     primary_key: Optional[str],
     relational_config,
-    max_rows_per_table: int = 50,
+    max_rows_per_table: int = 0,
 ) -> List[DltRowData]:
     """Read rows from the dlt database tables and return DltRowData objects."""
     if relational_config.db_provider == "sqlite":
@@ -284,7 +284,7 @@ async def _read_single_table(
     dataset_name: str,
     dlt_db_name: str,
     relational_config,
-    max_rows: int = 50,
+    max_rows: int = 0,
 ) -> List[DltRowData]:
     """Read rows from a single table and return DltRowData objects.
 
