@@ -1,58 +1,53 @@
-import os
+from __future__ import annotations
+
 import asyncio
+import os
 from typing import List
 
 from cognee import forget, remember, visualize_graph
 from cognee.low_level import DataPoint
 
 CUSTOM_PROMPT = (
-    "Extract a simple graph containing Programming Language and Fields that it is used in."
+    "Extract all people mentioned in the text. "
+    "For each person, extract ALL activities they like, including shared activities."
 )
 
 
-# Define a custom graph model for programming languages.
-class FieldType(DataPoint):
-    name: str = "Field"
-
-
-class Field(DataPoint):
+class Activity(DataPoint):
     name: str
-    is_type: FieldType
-    metadata: dict = {"index_fields": ["name"]}
+    metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
 
 
-class ProgrammingLanguageType(DataPoint):
-    name: str = "Programming Language"
-
-
-class ProgrammingLanguage(DataPoint):
+class Person(DataPoint):
     name: str
-    used_in: List[Field] = None
-    is_type: ProgrammingLanguageType
-    metadata: dict = {"index_fields": ["name"]}
+    likes: List[Activity] | None = None
+    metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
 
 
-async def visualize_data():
-    graph_file_path = os.path.join(
-        os.path.dirname(__file__), ".artifacts", "custom_graph_model_entity_schema_definition.html"
-    )
-    await visualize_graph(graph_file_path)
+class PeopleGraph(DataPoint):
+    people: List[Person]
 
 
 async def main():
-    # Prune data and system metadata before running, only if we want "fresh" state.
     await forget(everything=True)
 
-    text = "The Python programming language is widely used in data analysis, web development, and machine learning."
+    text = (
+        "Alice likes biking and swimming. Bob likes playing basketball. "
+        "Alice and Bob are friends. "
+        "Charlie likes skiing. "
+        "Alice and Bob like playing board games together."
+    )
 
     await remember(
         text,
-        graph_model=ProgrammingLanguage,
+        graph_model=PeopleGraph,
         custom_prompt=CUSTOM_PROMPT,
         self_improvement=False,
     )
 
-    await visualize_data()
+    graph_path = os.path.abspath("hobbies_graph.html")
+    await visualize_graph(graph_path)
+    print(f"Graph saved to: {graph_path}")
 
 
 if __name__ == "__main__":
