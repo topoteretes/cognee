@@ -10,9 +10,10 @@ import hashlib
 from datetime import datetime
 from typing import Union, List
 from urllib.parse import urlparse
-from uuid import uuid5, NAMESPACE_OID
+from uuid import uuid5, NAMESPACE_OID, NAMESPACE_URL
 
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.databases.provenance import graph_provenance_write_kwargs
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.storage.index_data_points import index_data_points
 from cognee.tasks.storage.index_graph_edges import index_graph_edges
@@ -50,6 +51,7 @@ async def cron_web_scraper_task(
     soup_crawler_config: DefaultCrawlerConfig = None,
     tavily_config: TavilyConfig = None,
     job_name: str = "scraping",
+    ctx=None,
 ):
     """Schedule or run a web scraping task.
 
@@ -92,6 +94,7 @@ async def cron_web_scraper_task(
                 "soup_crawler_config": soup_crawler_config,
                 "tavily_config": tavily_config,
                 "job_name": job_name,
+                "ctx": ctx,
             },
             trigger=trigger,
             id=job_name,
@@ -112,6 +115,7 @@ async def cron_web_scraper_task(
         soup_crawler_config=soup_crawler_config,
         tavily_config=tavily_config,
         job_name=job_name,
+        ctx=ctx,
     )
 
 
@@ -124,6 +128,7 @@ async def web_scraper_task(
     soup_crawler_config: DefaultCrawlerConfig = None,
     tavily_config: TavilyConfig = None,
     job_name: str = None,
+    ctx=None,
 ):
     """Scrape URLs and store data points in a Graph database.
 
@@ -160,6 +165,11 @@ async def web_scraper_task(
     )
     now = datetime.now()
     job_name = job_name or f"scrape_{now.strftime('%Y%m%d_%H%M%S')}"
+    provenance_kwargs = await graph_provenance_write_kwargs(
+        graph_db,
+        ctx,
+        fallback_data_id=uuid5(NAMESPACE_URL, f"cognee:web-scraper:{job_name}"),
+    )
     status = "active"
     trigger = CronTrigger.from_crontab(schedule) if schedule else None
     next_run = trigger.get_next_fire_time(None, now) if trigger else None
@@ -187,7 +197,9 @@ async def web_scraper_task(
     )
 
     if scraping_job_created:
-        await graph_db.add_node(scraping_job)  # Update existing scraping job
+        await graph_db.add_nodes(
+            [scraping_job], **provenance_kwargs
+        )  # Update existing scraping job
     websites_dict = {}
     webpages = []
 
@@ -231,7 +243,7 @@ async def web_scraper_task(
                 description=website_description,
             )
             if scraping_job_created:
-                await graph_db.add_node(websites_dict[base_url])
+                await graph_db.add_nodes([websites_dict[base_url]], **provenance_kwargs)
         else:
             websites_dict[base_url].page_count += 1
             # Update description for existing WebSite
@@ -245,7 +257,7 @@ async def web_scraper_task(
                 f"Crawl delay: {websites_dict[base_url].crawl_delay} seconds"
             )
             if scraping_job_created:
-                await graph_db.add_node(websites_dict[base_url])
+                await graph_db.add_nodes([websites_dict[base_url]], **provenance_kwargs)
 
         # Create WebPage
         content_str = content if isinstance(content, str) else str(content)
@@ -323,8 +335,8 @@ async def web_scraper_task(
             )
         )
 
-    await graph_db.add_nodes(list(node_mapping.values()))
-    await graph_db.add_edges(edge_mapping)
+    await graph_db.add_nodes(list(node_mapping.values()), **provenance_kwargs)
+    await graph_db.add_edges(edge_mapping, **provenance_kwargs)
     await index_data_points(list(node_mapping.values()))
     await index_graph_edges()
 

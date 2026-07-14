@@ -19,7 +19,7 @@ from uuid import UUID
 
 from cognee.context_global_variables import session_user, set_database_global_context_variables
 from cognee.exceptions import CogneeValidationError
-from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.infrastructure.session.get_session_manager import get_session_manager
@@ -324,7 +324,7 @@ async def accept_proposed_lessons(
 ) -> List[WrittenLesson]:
     entries_by_id = {entry.id: entry for entry in context_entries}
     async with set_database_global_context_variables(scope.dataset.id, scope.dataset.owner_id):
-        vector_engine = await get_vector_engine()
+        vector_engine = await get_vector_engine_async()
 
         def write_lesson(lesson: ProposedLesson):
             return lambda: evaluate_proposed_lesson(

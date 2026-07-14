@@ -4,7 +4,7 @@ from typing import Any, List, Optional
 
 from cognee.shared.logging_utils import get_logger, ERROR
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
-from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.modules.observability import new_span, COGNEE_VECTOR_COLLECTION
 
 logger = get_logger(level=ERROR)
@@ -15,7 +15,7 @@ class NodeEdgeVectorSearch:
 
     def __init__(self, edge_collection: str = "EdgeType_relationship_name", vector_engine=None):
         self.edge_collection = edge_collection
-        # ``get_vector_engine()`` is async, so this sync ``__init__`` can't
+        # ``get_vector_engine_async()`` is async, so this sync ``__init__`` can't
         # eagerly resolve it. Keep the (possibly-None) injected engine and
         # resolve lazily in the first async method via ``_get_vector_engine()``.
         self.vector_engine = vector_engine
@@ -27,7 +27,7 @@ class NodeEdgeVectorSearch:
     async def _get_vector_engine(self):
         if self.vector_engine is None:
             try:
-                self.vector_engine = await get_vector_engine()
+                self.vector_engine = await get_vector_engine_async()
             except Exception as e:
                 logger.error("Failed to initialize vector engine: %s", e)
                 raise RuntimeError("Initialization error") from e

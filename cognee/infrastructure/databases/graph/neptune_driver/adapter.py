@@ -239,7 +239,12 @@ class NeptuneGraphDB(GraphDBInterface):
             logger.error(f"Failed to add node {node.id}: {error_msg}")
             raise Exception(f"Failed to add node: {error_msg}") from e
 
-    async def add_nodes(self, nodes: List[DataPoint]) -> None:
+    async def add_nodes(
+        self,
+        nodes: List[DataPoint],
+        source_ref_key: Optional[str] = None,
+        pipeline_run_id: Optional[str] = None,
+    ) -> None:
         """
         Add multiple nodes to the graph in a single operation.
 
@@ -544,7 +549,12 @@ class NeptuneGraphDB(GraphDBInterface):
             logger.error(f"Failed to add edge {source_id} -> {target_id}: {error_msg}")
             raise Exception(f"Failed to add edge: {error_msg}") from e
 
-    async def add_edges(self, edges: List[Tuple[str, str, str, Optional[Dict[str, Any]]]]) -> None:
+    async def add_edges(
+        self,
+        edges: List[Tuple[str, str, str, Optional[Dict[str, Any]]]],
+        source_ref_key: Optional[str] = None,
+        pipeline_run_id: Optional[str] = None,
+    ) -> None:
         """
         Add multiple edges to the graph in a single operation.
 

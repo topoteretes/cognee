@@ -1,7 +1,7 @@
 export const dynamic = "force-dynamic";
 
-import OverviewPage from "./dashboard/OverviewPage";
+import DashboardEntryLoader from "./DashboardEntryLoader";
 
 export default function Page() {
-  return <OverviewPage />;
+  return <DashboardEntryLoader />;
 }

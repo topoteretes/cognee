@@ -45,6 +45,7 @@ class RememberKwargs(TypedDict, total=False):
     dataset_id: UUID
     preferred_loaders: list
     incremental_loading: bool
+    data_cache: bool
     data_per_batch: int
     chunks_per_batch: int
     user: object
@@ -83,6 +84,7 @@ _SHARED = frozenset(
         "vector_db_config",
         "graph_db_config",
         "incremental_loading",
+        "data_cache",
         "data_per_batch",
         "run_in_background",
         "llm_config",

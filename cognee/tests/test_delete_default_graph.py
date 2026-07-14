@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, patch
 import cognee
 from cognee.api.v1.datasets import datasets
 from cognee.context_global_variables import set_database_global_context_variables
-from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.llm import LLMGateway
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.modules.data.processing.document_types.TextDocument import TextDocument
@@ -133,7 +133,7 @@ async def main(mock_create_structured_output: AsyncMock):
 
     await set_database_global_context_variables("main_dataset", user.id)
 
-    vector_engine = await get_vector_engine()
+    vector_engine = await get_vector_engine_async()
 
     assert not await vector_engine.has_collection("Entity_name")
     assert not await vector_engine.has_collection("DocumentChunk_text")

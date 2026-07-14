@@ -25,6 +25,7 @@ hosts / NFS, for which Postgres metadata is required.
 """
 
 import asyncio
+import concurrent.futures
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -43,7 +44,7 @@ from cognee.context_global_variables import (
 )
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.databases.graph import get_graph_engine
-from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.modules.data.methods.get_dataset_databases import get_dataset_databases
 from cognee.modules.users.models import DatasetDatabase
 
@@ -119,18 +120,33 @@ async def _migration_lock(db_engine, key: int):
 
     from filelock import FileLock
 
-    # Acquire/release off the event loop. asyncio.to_thread may run acquire and
-    # release on DIFFERENT pool threads; FileLock is thread-local by default (its
-    # re-entrancy counter lives on the acquiring thread), so a release on another
-    # thread would no-op and leak the OS lock — deadlocking the next acquisition
-    # (e.g. run_migrations' failed-migration retry). thread_local=False
-    # shares the counter across threads; the OS lock itself is process/fd-scoped.
+    # Acquire and release MUST run on the same OS thread, off the event loop.
+    # filelock keeps two pieces of per-thread state that break if they don't:
+    # its deadlock-detection registry (a threading.local mapping lock path ->
+    # holder instance) is written by acquire and popped by release each on the
+    # thread they run on — a release on another thread leaves a ghost entry on
+    # the acquiring thread, and the NEXT acquisition landing there fails with a
+    # false "Deadlock: lock is already held by a different FileLock instance".
+    # asyncio.to_thread assigns pool threads arbitrarily, so instead run both
+    # calls on one dedicated short-lived thread. Each acquisition gets its own
+    # executor, so concurrent in-process acquisitions still block one another
+    # via the OS lock (each waiting on its own thread) — the same mutual
+    # exclusion the Postgres advisory-lock branch provides.
+    # thread_local=False keeps the instance's re-entrancy counter shared across
+    # threads so a release still works even if thread affinity ever regresses.
     lock = FileLock(lock_path, thread_local=False)
-    await asyncio.to_thread(lock.acquire)
+    loop = asyncio.get_running_loop()
+    executor = concurrent.futures.ThreadPoolExecutor(
+        max_workers=1, thread_name_prefix="cognee-migration-lock"
+    )
     try:
-        yield
+        await loop.run_in_executor(executor, lock.acquire)
+        try:
+            yield
+        finally:
+            await loop.run_in_executor(executor, lock.release)
     finally:
-        await asyncio.to_thread(lock.release)
+        executor.shutdown(wait=False)
 
 
 @asynccontextmanager
@@ -354,9 +370,9 @@ async def _run_global_migrations(
             await _stamp_global(db_engine, revision)
 
         # No context override: without access control, get_graph_engine /
-        # get_vector_engine resolve the global databases directly.
+        # get_vector_engine_async resolve the global databases directly.
         graph_engine = await get_graph_engine()
-        vector_engine = await get_vector_engine()
+        vector_engine = await get_vector_engine_async()
         migration_context = MigrationContext(
             graph_engine=graph_engine,
             vector_engine=vector_engine,
@@ -411,7 +427,7 @@ async def _migrate_dataset(
     # per-dataset context — the same way every other operation does.
     async with set_database_global_context_variables(row.dataset_id, row.owner_id):
         graph_engine = await get_graph_engine()
-        vector_engine = await get_vector_engine()
+        vector_engine = await get_vector_engine_async()
         migration_context = MigrationContext(
             graph_engine=graph_engine,
             vector_engine=vector_engine,
@@ -552,7 +568,7 @@ async def _downgrade_dataset(db_engine, row, target: Optional[str]) -> Optional[
 
     async with set_database_global_context_variables(row.dataset_id, row.owner_id):
         graph_engine = await get_graph_engine()
-        vector_engine = await get_vector_engine()
+        vector_engine = await get_vector_engine_async()
         migration_context = MigrationContext(
             graph_engine=graph_engine,
             vector_engine=vector_engine,
@@ -606,7 +622,7 @@ async def downgrade_database_migrations(
                 await _stamp_global(db_engine, revision)
 
             graph_engine = await get_graph_engine()
-            vector_engine = await get_vector_engine()
+            vector_engine = await get_vector_engine_async()
             migration_context = MigrationContext(
                 graph_engine=graph_engine,
                 vector_engine=vector_engine,

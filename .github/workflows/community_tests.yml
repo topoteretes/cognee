@@ -77,7 +77,7 @@ jobs:
           enable-cache: true
 
       - name: Install dependencies
-        # postgres is needed so the SQL cache adapter tests run instead of skipping
+        # postgres is needed so the SQL cache adapter tests run instead of skipping.
         run: uv sync --extra dev --extra postgres
 
       - name: Run mocked unit tests

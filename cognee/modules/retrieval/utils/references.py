@@ -352,9 +352,9 @@ async def append_answer_grounded_evidence(completions: List[Any], enabled: bool)
         return completions
 
     try:
-        from cognee.infrastructure.databases.vector import get_vector_engine
+        from cognee.infrastructure.databases.vector import get_vector_engine_async
 
-        vector_engine = await get_vector_engine()
+        vector_engine = await get_vector_engine_async()
     except Exception as error:
         logger.debug(f"Unable to obtain vector engine for references: {error}")
         return completions

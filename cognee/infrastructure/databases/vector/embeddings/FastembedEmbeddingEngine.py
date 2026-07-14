@@ -25,9 +25,7 @@ from tenacity import (
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
 from cognee.infrastructure.databases.exceptions import EmbeddingException
-from cognee.infrastructure.llm.tokenizer.TikToken import (
-    TikTokenTokenizer,
-)
+from cognee.infrastructure.llm.tokenizer.resolver import resolve_embedding_tokenizer
 from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager
 from cognee.infrastructure.databases.vector.embeddings.utils import (
     sanitize_embedding_text_inputs,
@@ -196,16 +194,19 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
         """
         Instantiate and return the tokenizer used for preparing text for embedding.
 
+        Resolves the fastembed model's own tokenizer (BGE/MiniLM are wordpiece)
+        instead of the OpenAI BPE tokenizer, which mis-counted them (issue #3646).
+
         Returns:
         --------
 
             A tokenizer object configured for the specified model and maximum token size.
         """
         logger.debug("Loading tokenizer for FastembedEmbeddingEngine...")
-
-        tokenizer = TikTokenTokenizer(
-            model="gpt-4o", max_completion_tokens=self.max_completion_tokens
+        tokenizer = resolve_embedding_tokenizer(
+            provider="fastembed",
+            model=self.model,
+            max_completion_tokens=self.max_completion_tokens,
         )
-
-        logger.debug("Tokenizer loaded for for FastembedEmbeddingEngine")
+        logger.debug("Tokenizer loaded for FastembedEmbeddingEngine")
         return tokenizer
