@@ -77,8 +77,21 @@ async def run_enola_generate(
     repo_path: Union[str, Path],
     timeout: float = 600.0,
 ) -> Path:
-    """Run `enola --generate` in repo_path and return the snapshot directory."""
-    binary = find_enola_binary()
+    """Run `enola --generate` in repo_path and return the snapshot directory.
+
+    When the binary is missing (and ENOLA_PATH is not explicitly set), the
+    pinned release is downloaded and installed automatically; see
+    install_enola.py. Disable with ENOLA_AUTO_INSTALL=false.
+    """
+    binary = None
+    try:
+        binary = find_enola_binary()
+    except EnolaNotInstalledError:
+        from cognee.tasks.code_graph.install_enola import auto_install_enabled, install_enola
+
+        if os.environ.get("ENOLA_PATH") or not auto_install_enabled():
+            raise
+        binary = await asyncio.to_thread(install_enola)
     repo_path = Path(repo_path)
 
     if not repo_path.is_dir():
