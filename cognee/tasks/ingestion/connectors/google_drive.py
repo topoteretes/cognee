@@ -469,13 +469,6 @@ def _file_to_row(service, file_meta: Dict[str, Any], config: _DriveConfig) -> Op
 # ---------------------------------------------------------------------------
 # Public factory
 # ---------------------------------------------------------------------------
-def _env_bool(name: str, default: bool) -> bool:
-    value = os.getenv(name)
-    if value is None:
-        return default
-    return value.strip().lower() in ("1", "true", "yes", "on")
-
-
 def google_drive_source(
     folder_id: Optional[str] = None,
     *,
@@ -515,16 +508,23 @@ def google_drive_source(
             "folder_id is required (pass it explicitly or set GOOGLE_DRIVE_FOLDER_ID)."
         )
 
+    if include_subfolders is None:
+        # Env-bool parsed inline, matching the codebase convention (e.g.
+        # migrations/startup.py) — default on, unset via false/0/no.
+        include_subfolders = os.getenv(
+            "GOOGLE_DRIVE_INCLUDE_SUBFOLDERS", "true"
+        ).strip().lower() not in (
+            "false",
+            "0",
+            "no",
+        )
+
     config = _DriveConfig(
         folder_id=resolved_folder_id,
         auth_mode=auth_mode or os.getenv("GOOGLE_DRIVE_AUTH_MODE", "service_account"),
         credentials_path=credentials_path or os.getenv("GOOGLE_DRIVE_CREDENTIALS_PATH"),
         token_path=token_path or os.getenv("GOOGLE_DRIVE_TOKEN_PATH"),
-        include_subfolders=(
-            _env_bool("GOOGLE_DRIVE_INCLUDE_SUBFOLDERS", True)
-            if include_subfolders is None
-            else include_subfolders
-        ),
+        include_subfolders=include_subfolders,
         max_file_size_mb=(
             max_file_size_mb
             if max_file_size_mb is not None
