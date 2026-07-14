@@ -195,6 +195,30 @@ class VectorDBInterface(Protocol):
         """
         return None
 
+    async def add_belongs_to_set_tags(
+        self,
+        tags: List[str],
+        node_ids: List[str],
+    ) -> None:
+        """
+        Add the given tag names to the `belongs_to_set` array of the rows
+        whose id appears in `node_ids`, in every vector collection that
+        stores the field (union semantics — existing tags are preserved,
+        duplicates are not created).
+
+        Counterpart of `remove_belongs_to_set_tags`, used when an
+        already-processed data item is linked to an additional dataset
+        (cross-dataset reuse) so its existing rows gain the new dataset's
+        NodeSet tag without re-embedding.
+
+        Unlike the remove side (where a missing implementation merely leaves
+        cosmetic stale tags), a silently skipped add would break nodeset
+        filtering for the linked data — so the default raises instead of
+        no-oping, letting callers detect unsupported adapters and fall back
+        to full processing.
+        """
+        raise NotImplementedError
+
     @abstractmethod
     async def prune(self):
         """

@@ -147,6 +147,32 @@ class GraphDBInterface(ABC):
         """
         return None
 
+    async def add_belongs_to_set_tags(
+        self,
+        tags: List[str],
+        node_ids: List[str],
+    ) -> None:
+        """
+        Add the given tag names to the `belongs_to_set` property array of the
+        nodes whose id appears in `node_ids` (union semantics — existing tags
+        are preserved, duplicates are not created).
+
+        Counterpart of `remove_belongs_to_set_tags`, used when an
+        already-processed data item is linked to an additional dataset
+        (cross-dataset reuse) so its existing nodes gain the new dataset's
+        NodeSet membership without re-running the processing pipeline. The
+        accompanying `belongs_to_set` edges to NodeSet nodes are created by
+        the caller through the regular `add_edges` API; this method only
+        reconciles the denormalized property array.
+
+        Unlike the remove side (where a missing implementation merely leaves
+        cosmetic stale tags), a silently skipped add would break dataset
+        scoping for the linked data — so the default raises instead of
+        no-oping, letting callers detect unsupported adapters and fall back
+        to full processing.
+        """
+        raise NotImplementedError
+
     async def attach_node_source_refs(
         self,
         node_ids: list[str],

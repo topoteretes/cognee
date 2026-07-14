@@ -1546,6 +1546,57 @@ class PostgresAdapter(GraphDBInterface):
                     await session.commit()
         return None
 
+    async def add_belongs_to_set_tags(
+        self,
+        tags: List[str],
+        node_ids: List[str],
+    ) -> None:
+        """Add ``tags`` to each listed node's ``belongs_to_set`` property array.
+
+        Counterpart of ``remove_belongs_to_set_tags``, used when linking an
+        already-processed data item to an additional dataset. Union semantics —
+        existing tags are preserved and duplicates are not created.
+        ``belongs_to_set`` lives inside the JSONB ``properties`` blob, so this
+        is a read-merge-write over that array, mirroring the remove side.
+        """
+        if not tags or not node_ids:
+            return None
+
+        tag_set = set(tags)
+        async with self._session() as session:
+            result = await session.execute(
+                text("SELECT id, properties FROM graph_node WHERE id = ANY(:ids)"),
+                {"ids": [str(node_id) for node_id in node_ids]},
+            )
+            rows = result.fetchall()
+
+        updates = []
+        for row in rows:
+            properties = self._props_dict(row[1])
+            current = properties.get("belongs_to_set")
+            if not isinstance(current, list):
+                current = []
+            if tag_set.issubset(current):
+                continue
+            properties["belongs_to_set"] = [tag for tag in current if tag not in tag_set] + list(
+                tags
+            )
+            updates.append({"id": row[0], "properties": json.dumps(properties, cls=JSONEncoder)})
+
+        if updates:
+            async with self._write_lock:
+                async with self._session() as session:
+                    for update in updates:
+                        await session.execute(
+                            text(
+                                "UPDATE graph_node SET properties = CAST(:p AS jsonb), "
+                                "updated_at = now() WHERE id = :id"
+                            ),
+                            {"id": update["id"], "p": update["properties"]},
+                        )
+                    await session.commit()
+        return None
+
     async def get_triplets_batch(self, offset: int, limit: int) -> List[Dict[str, Any]]:
         """Retrieve a batch of (source, relationship, target) triplets.
 

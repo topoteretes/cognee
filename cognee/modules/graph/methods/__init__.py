@@ -5,6 +5,8 @@ from .upsert_nodes import upsert_nodes
 
 from .has_data_related_nodes import has_data_related_nodes
 
+from .link_data_to_dataset import link_data_to_dataset
+
 from .get_data_related_nodes import get_data_related_nodes, get_global_data_related_nodes
 from .get_data_related_edges import get_data_related_edges, get_global_data_related_edges
 from .get_shared_slugs_losing_dataset_anchor import (

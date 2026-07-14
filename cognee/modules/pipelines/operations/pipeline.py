@@ -94,6 +94,7 @@ async def run_pipeline(
     llm_config: Optional[LLMConfig] = None,
     embedding_config: Optional[EmbeddingConfig] = None,
     data_cache: bool = False,
+    cross_dataset_reuse: bool = False,
 ):
     validate_pipeline_tasks(tasks)
     await setup_and_check_environment(vector_db_config, graph_db_config)
@@ -116,6 +117,7 @@ async def run_pipeline(
             llm_config=llm_config,
             embedding_config=embedding_config,
             data_cache=data_cache,
+            cross_dataset_reuse=cross_dataset_reuse,
         ):
             yield run_info
 
@@ -133,6 +135,7 @@ async def run_pipeline_per_dataset(
     llm_config: Optional[LLMConfig] = None,
     embedding_config: Optional[EmbeddingConfig] = None,
     data_cache=False,
+    cross_dataset_reuse: bool = False,
 ):
     # The actual work of a single run, factored out so it can run either under
     # the per-dataset lock (normal case) or directly (re-entrant case below).
@@ -163,6 +166,7 @@ async def run_pipeline_per_dataset(
             llm_config=llm_config,
             embedding_config=embedding_config,
             data_cache=data_cache,
+            cross_dataset_reuse=cross_dataset_reuse,
         )
 
         async for pipeline_run_info in pipeline_run:

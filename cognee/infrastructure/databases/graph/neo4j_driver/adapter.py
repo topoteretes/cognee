@@ -489,6 +489,40 @@ class Neo4jAdapter(GraphDBInterface):
         await self.query(query, params)
         return None
 
+    async def add_belongs_to_set_tags(
+        self,
+        tags: List[str],
+        node_ids: List[str],
+    ) -> None:
+        """
+        Add the given tag names to the `belongs_to_set` property array of the
+        nodes whose id is in `node_ids`, preserving existing tags and avoiding
+        duplicates (union semantics).
+
+        Counterpart of `remove_belongs_to_set_tags`, used when linking an
+        already-processed data item to an additional dataset. Only the
+        denormalized property array is touched here — the additive
+        `belongs_to_set` edges to NodeSet nodes are created by the caller
+        through `add_edges`, the same way the processing pipeline creates
+        them.
+        """
+        if not tags or not node_ids:
+            return None
+
+        # Filter-then-append keeps the array duplicate-free even when a node
+        # already carries some of the incoming tags (re-link, concurrent runs).
+        query = f"""
+        MATCH (n: `{BASE_LABEL}`)
+        WHERE n.id IN $node_ids
+        SET n.belongs_to_set = [x IN coalesce(n.belongs_to_set, []) WHERE NOT x IN $tags] + $tags
+        """
+        params: Dict[str, Any] = {
+            "tags": list(tags),
+            "node_ids": [str(node_id) for node_id in node_ids],
+        }
+        await self.query(query, params)
+        return None
+
     async def extract_node(self, node_id: str):
         """
         Retrieve a single node from the database by its ID.
