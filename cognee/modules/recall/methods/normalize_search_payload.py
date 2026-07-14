@@ -19,6 +19,11 @@ from cognee.modules.recall.types.SearchResultItem import (
     SearchResultKind,
 )
 from cognee.modules.retrieval.utils.citation_models import Citation, CitationKind
+from cognee.modules.retrieval.utils.used_graph_elements import (
+    extract_from_edges,
+    extract_from_scored_results,
+    is_edge_list,
+)
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
 from cognee.modules.search.types import SearchType
 
@@ -118,10 +123,12 @@ def _relevance_from(score: Optional[float]) -> Optional[float]:
 def _graph_citations_from(payload: SearchResultPayload) -> List[Citation]:
     """Extract structured graph Citations from a graph-completion payload.
 
-    ``payload.result_object`` for a graph-completion path is a list of
-    ``Edge`` objects (or a batched list of lists). We surface the
-    contributing node and edge identifiers so an agent can cite the
-    exact traversal that grounded the completion.
+    ``payload.result_object`` on the graph-completion path is a list of
+    ``Edge`` objects with attribute shape ``node1``/``node2``/``attributes``
+    (see ``CogneeGraphElements.Edge``). On the triplet-completion path it
+    is a list of ``ScoredResult`` from the vector search. Both shapes are
+    handled via the ``used_graph_elements`` helpers so the ids we emit
+    match what the retrievers actually produce at runtime.
 
     Returns an empty list for non-graph payloads or when no usable
     identifiers are present, so callers can compose it unconditionally.
@@ -129,45 +136,27 @@ def _graph_citations_from(payload: SearchResultPayload) -> List[Citation]:
     if payload.result_object is None:
         return []
 
-    edges = payload.result_object
-    if isinstance(edges, list) and edges and isinstance(edges[0], list):
+    objects = payload.result_object
+    if isinstance(objects, list) and objects and isinstance(objects[0], list):
         # Batched query path: flatten one layer.
-        edges = [edge for batch in edges for edge in batch]
+        objects = [item for batch in objects for item in batch]
 
-    if not isinstance(edges, list):
+    if not isinstance(objects, list) or not objects:
         return []
 
-    node_ids: List[str] = []
-    edge_ids: List[str] = []
-    seen_nodes: set[str] = set()
-    seen_edges: set[str] = set()
-
-    for edge in edges:
-        for attr_name in ("source_node_id", "target_node_id"):
-            node_value = getattr(edge, attr_name, None)
-            if node_value is None:
-                continue
-            node_str = str(node_value)
-            if node_str not in seen_nodes:
-                seen_nodes.add(node_str)
-                node_ids.append(node_str)
-
-        edge_value = getattr(edge, "id", None)
-        if edge_value is None:
-            continue
-        edge_str = str(edge_value)
-        if edge_str not in seen_edges:
-            seen_edges.add(edge_str)
-            edge_ids.append(edge_str)
-
-    if not node_ids and not edge_ids:
+    extracted = (
+        extract_from_edges(objects)
+        if is_edge_list(objects)
+        else extract_from_scored_results(objects)
+    )
+    if not extracted:
         return []
 
     return [
         Citation(
             kind=CitationKind.GRAPH,
-            node_ids=node_ids,
-            edge_ids=edge_ids,
+            node_ids=extracted.get("node_ids", []),
+            edge_ids=extracted.get("edge_ids", []),
             dataset_id=str(payload.dataset_id) if payload.dataset_id else None,
             dataset_name=payload.dataset_name,
         )

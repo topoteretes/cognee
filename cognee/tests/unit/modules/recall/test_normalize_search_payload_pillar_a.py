@@ -27,11 +27,16 @@ from cognee.modules.search.types import SearchType
 
 
 def _edge(source: str, target: str, edge_id: str) -> SimpleNamespace:
-    """Return a minimal Edge-shaped stand-in for the graph path."""
+    """Return a minimal Edge-shaped stand-in for the graph path.
+
+    Matches the duck-type ``used_graph_elements.is_edge_list`` checks for
+    on real ``CogneeGraphElements.Edge`` instances: ``node1`` and ``node2``
+    with ``.id``, and ``attributes["edge_object_id"]`` for the edge id.
+    """
     return SimpleNamespace(
-        source_node_id=source,
-        target_node_id=target,
-        id=edge_id,
+        node1=SimpleNamespace(id=source),
+        node2=SimpleNamespace(id=target),
+        attributes={"edge_object_id": edge_id},
     )
 
 
