@@ -23,8 +23,9 @@ to verify behaviour across the SDK.
 | [`configurations/`](configurations/) | Database & permissions configuration recipes | 8 |
 | [`custom_pipelines/`](custom_pipelines/) | Build your own pipeline / extend `cognify` | 7 |
 | [`database_examples/`](database_examples/) | Smoke tests per supported backend | 5 |
-| [`demos/`](demos/) | Feature demos — broadest coverage | 21 |
+| [`demos/`](demos/) | Feature demos — broadest coverage | 22 |
 | [`guides/`](guides/) | Short focused how-to guides | 13 |
+| [`integrations/`](integrations/) | Integrations Hub — first-class SaaS connectors (Gmail, …) | 1 |
 | [`pocs/`](pocs/) | Research-grade proofs of concept (entity disambiguation, canonicalization, prefetch) | 7 |
 
 Most runnable demos and backend examples use the v1.0 memory API (`remember`, `recall`, `forget`, `improve`). The lower-level `add`, `cognify`, `search`, and `prune` calls are intentionally kept in examples that demonstrate pipeline internals, permissions, relational migrations, or research POCs.
@@ -80,6 +81,7 @@ Most runnable demos and backend examples use the v1.0 memory API (`remember`, `r
 | [`session_feedback_example.py`](demos/session_feedback_example.py) | Capturing thumbs-up/down feedback on retrieval |
 | [`session_feedback_lifecycle_demo/backend/app.py`](demos/session_feedback_lifecycle_demo/backend/app.py) | Full feedback-loop backend (FastAPI + cognee) |
 | [`feedback_score_shifting_example.py`](demos/feedback_score_shifting_example.py) | How feedback nudges retrieval scores |
+| [`references_example.py`](demos/references_example.py) | Search answers with lightweight evidence references |
 | [`custom_graph_model_entity_schema_definition.py`](demos/custom_graph_model_entity_schema_definition.py) | Define your own entity schema for graph extraction |
 | [`custom_pipeline_single_object_example.py`](demos/custom_pipeline_single_object_example.py) | Run a custom pipeline on a single object |
 | [`dynamic_multiple_weighted_edges_example.py`](demos/dynamic_multiple_weighted_edges_example.py) | Many-to-many edges with per-edge weights |
@@ -88,10 +90,14 @@ Most runnable demos and backend examples use the v1.0 memory API (`remember`, `r
 | [`ontology_reference_vocabulary/ontology_as_reference_vocabulary_example.py`](demos/ontology_reference_vocabulary/ontology_as_reference_vocabulary_example.py) | Ontology as a constraining vocabulary for extraction |
 | [`web_url_content_ingestion_example.py`](demos/web_url_content_ingestion_example.py) | Crawl a URL and cognify the content |
 | [`dlt_ingestion_example.py`](demos/dlt_ingestion_example.py) | Ingest via [dlt](https://dlthub.com/) sources |
+| [`gmail_connector_example.py`](demos/gmail_connector_example.py) | "Ask my inbox" — Gmail connector (incremental + forget-on-delete) |
 | [`multimedia_processing/multimedia_audio_image_processing_example.py`](demos/multimedia_processing/multimedia_audio_image_processing_example.py) | Audio + image ingestion |
 | [`simple_document_qa/simple_document_qa_demo.py`](demos/simple_document_qa/simple_document_qa_demo.py) | Q&A over a single document |
 | [`simple_relational_database_migration_example/simple_relational_database_migration_example.py`](demos/simple_relational_database_migration_example/simple_relational_database_migration_example.py) | SQL → graph (small schema) |
 | [`complex_relational_database_migration_example/complex_relational_database_migration_example.py`](demos/complex_relational_database_migration_example/complex_relational_database_migration_example.py) | SQL → graph (richer schema) |
+| [`schema_inventory_demo.py`](demos/schema_inventory_demo.py) | Schema and entity inventory visualization |
+| [`memory_provenance_demo.py`](demos/memory_provenance_demo.py) | Memory provenance projection and visualization |
+| [`sync_local_to_cloud_example.py`](demos/sync_local_to_cloud_example.py) | Sync a local dataset to Cognee Cloud |
 | [`pipeline_api_proposal.py`](demos/pipeline_api_proposal.py) | Proposal-style API exploration |
 | [`start_local_ui_frontend_example.py`](demos/start_local_ui_frontend_example.py) | Spin up cognee UI + backend |
 
@@ -158,6 +164,10 @@ Same scripts, indexed by what they demonstrate.
 - [`demos/web_url_content_ingestion_example.py`](demos/web_url_content_ingestion_example.py)
 - [`demos/dlt_ingestion_example.py`](demos/dlt_ingestion_example.py)
 
+### Connectors / Integrations Hub
+- [`integrations/`](integrations/) — first-class SaaS connectors (DLT-based)
+- [`demos/gmail_connector_example.py`](demos/gmail_connector_example.py) — Gmail ("ask my inbox")
+
 ### SQL → knowledge graph
 - [`custom_pipelines/relational_database_to_knowledge_graph_migration_example.py`](custom_pipelines/relational_database_to_knowledge_graph_migration_example.py)
 - [`demos/simple_relational_database_migration_example/simple_relational_database_migration_example.py`](demos/simple_relational_database_migration_example/simple_relational_database_migration_example.py)
@@ -185,7 +195,12 @@ Same scripts, indexed by what they demonstrate.
 
 ### Visualization & UI
 - [`guides/graph_visualization.py`](guides/graph_visualization.py)
+- [`demos/schema_inventory_demo.py`](demos/schema_inventory_demo.py)
+- [`demos/memory_provenance_demo.py`](demos/memory_provenance_demo.py)
 - [`demos/start_local_ui_frontend_example.py`](demos/start_local_ui_frontend_example.py)
+
+### References / evidence
+- [`demos/references_example.py`](demos/references_example.py)
 
 ### Storage backends
 - [`guides/s3_storage.py`](guides/s3_storage.py)

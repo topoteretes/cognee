@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import os
 from typing import Optional
 
 from cognee.cli.reference import SupportsCliCommand
@@ -46,7 +47,9 @@ After successful cognify processing, use `cognee search` to query the knowledge 
             help="Maximum tokens per chunk. Auto-calculated based on LLM if not specified (~512-8192 tokens)",
         )
         parser.add_argument(
-            "--ontology-file", help="Path to RDF/OWL ontology file for domain-specific entity types"
+            "--ontology-file",
+            help="Path to RDF/OWL ontology file for domain-specific entity types. "
+            "Multiple files can be given as a comma-separated list.",
         )
         parser.add_argument(
             "--chunker",
@@ -73,6 +76,15 @@ After successful cognify processing, use `cognee search` to query the knowledge 
         try:
             # Import cognee here to avoid circular imports
             import cognee
+
+            if args.ontology_file:
+                missing = [
+                    path.strip()
+                    for path in args.ontology_file.split(",")
+                    if not os.path.isfile(path.strip())
+                ]
+                if missing:
+                    raise CliCommandInnerException(f"Ontology file not found: {', '.join(missing)}")
 
             # Prepare datasets parameter
             datasets = args.datasets if args.datasets else None
@@ -115,12 +127,31 @@ After successful cognify processing, use `cognee search` to query the knowledge 
                         except ImportError:
                             fmt.warning("CsvChunker not available, using TextChunker")
 
+                    # Translate --ontology-file into the canonical ontology Config
+                    # structure, built with the same factory cognify() uses for
+                    # its env-based fallback.
+                    config = None
+                    if args.ontology_file:
+                        from cognee.modules.ontology.get_default_ontology_resolver import (
+                            get_ontology_resolver_from_env,
+                        )
+
+                        config = {
+                            "ontology_config": {
+                                "ontology_resolver": get_ontology_resolver_from_env(
+                                    ontology_resolver="rdflib",
+                                    matching_strategy="fuzzy",
+                                    ontology_file_path=args.ontology_file,
+                                )
+                            }
+                        }
+
                     result = await cognee.cognify(
                         datasets=datasets,
                         user=user,
                         chunker=chunker_class,
                         chunk_size=args.chunk_size,
-                        ontology_file_path=args.ontology_file,
+                        config=config,
                         run_in_background=args.background,
                         chunks_per_batch=getattr(args, "chunks_per_batch", None),
                     )

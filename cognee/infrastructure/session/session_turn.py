@@ -13,7 +13,6 @@ from typing import Any
 from uuid import uuid4
 
 from cognee.context_global_variables import session_user
-from cognee.infrastructure.databases.cache.config import CacheConfig
 from cognee.infrastructure.session.feedback_detection import analyze_turn_for_session_context
 from cognee.infrastructure.session.feedback_models import SessionTurnAnalysis
 from cognee.infrastructure.session.session_context_builder import (
@@ -47,20 +46,14 @@ class SessionTurnPreparation:
 
 def compose_session_prompt(
     active_context_block: str,
-    graph_context: str,
     conversation_history: str,
 ) -> str:
-    """Assemble the session prompt from its three layers, top to bottom.
+    """Assemble the session prompt from active guidance and conversation history.
 
-    Order: the active session-context block first, then the graph-knowledge snapshot,
-    then the conversation history. Empty layers are skipped. ``graph_context`` is expected
-    to be already truncated by the caller (its char budget differs from the block's).
+    Empty layers are skipped. The active session-context block is placed before
+    the conversation history so durable user/session guidance remains prominent.
     """
     prompt = conversation_history
-    if graph_context:
-        prompt = (
-            "Background knowledge from the knowledge graph:\n" + graph_context + "\n\n" + prompt
-        )
     if active_context_block:
         prompt = active_context_block + "\n\n" + prompt
     return prompt
@@ -129,18 +122,6 @@ async def select_session_history(
     return history if isinstance(history, str) else ""
 
 
-def _truncate_graph_context(graph_context: str, max_context_chars: int | None) -> str:
-    """Truncate the graph snapshot to its char budget: explicit arg > config > unlimited."""
-    if not graph_context:
-        return graph_context
-    char_limit = max_context_chars
-    if char_limit is None:
-        char_limit = CacheConfig().max_session_context_chars
-    if char_limit is not None:
-        return graph_context[:char_limit]
-    return graph_context
-
-
 async def generate_session_answer(
     session_manager,
     *,
@@ -157,8 +138,7 @@ async def generate_session_answer(
 ) -> tuple[Any, str, list[str] | None]:
     """Recall history and context, compose the prompt, and generate one answer.
 
-    Returns ``(answer, context_to_store, served_context_ids)``. The active context block
-    and the graph snapshot keep separate char budgets, applied before composing.
+    Returns ``(answer, context_to_store, served_context_ids)``.
     """
     conversation_history = await select_session_history(
         session_manager,
@@ -177,14 +157,7 @@ async def generate_session_answer(
             query=answer_query,
         )
 
-    # Graph-knowledge snapshot from improve() sync; its budget is separate from the block's.
-    graph_context = _truncate_graph_context(
-        await session_manager.get_graph_context(user_id=user_id, session_id=session_id),
-        max_context_chars,
-    )
-    conversation_history = compose_session_prompt(
-        active_context_block, graph_context, conversation_history
-    )
+    conversation_history = compose_session_prompt(active_context_block, conversation_history)
 
     (
         answer,

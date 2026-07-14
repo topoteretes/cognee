@@ -399,6 +399,8 @@ def main() -> int:
 
             if raiseable_exception:
                 fmt.error(str(ex))
+            # Print exception
+            fmt.error(str(ex))
 
             fmt.note(f"Please refer to our docs at '{docs_url}' for further assistance.")
 

@@ -18,6 +18,7 @@ from cognee.modules.graph.utils import (
 )
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.infrastructure.llm.extraction import extract_content_graph
+from cognee.infrastructure.llm.pipeline_stage import pipeline_stage
 from cognee.infrastructure.engine import DataPoint
 from cognee.tasks.graph.exceptions import (
     InvalidGraphModelError,
@@ -150,10 +151,16 @@ async def extract_graph_from_data(
     # deterministically by extract_dlt_fk_edges from schema metadata.
     from cognee.modules.data.processing.document_types import DltRowDocument
 
-    dlt_chunks = [
-        c for c in data_chunks if isinstance(getattr(c, "is_part_of", None), DltRowDocument)
-    ]
-    non_dlt_chunks = [c for c in data_chunks if c not in dlt_chunks]
+    # Partition in a single pass: a list-membership check against dlt_chunks
+    # rescans the list for every chunk (O(n^2) with Pydantic __eq__ comparisons),
+    # which becomes a bottleneck on the extraction hot path for large DLT sources.
+    dlt_chunks = []
+    non_dlt_chunks = []
+    for c in data_chunks:
+        if isinstance(getattr(c, "is_part_of", None), DltRowDocument):
+            dlt_chunks.append(c)
+        else:
+            non_dlt_chunks.append(c)
 
     if not non_dlt_chunks:
         return data_chunks
@@ -163,14 +170,15 @@ async def extract_graph_from_data(
         extracted = calculate_chunk_graphs(non_dlt_chunks, graph_model, custom_prompt, **kwargs)
         chunk_graphs = await extracted if inspect.isawaitable(extracted) else extracted
     else:
-        chunk_graphs = await asyncio.gather(
-            *[
-                extract_content_graph(
-                    chunk.text, graph_model, custom_prompt=custom_prompt, **kwargs
-                )
-                for chunk in non_dlt_chunks
-            ]
-        )
+        with pipeline_stage("extraction"):
+            chunk_graphs = await asyncio.gather(
+                *[
+                    extract_content_graph(
+                        chunk.text, graph_model, custom_prompt=custom_prompt, **kwargs
+                    )
+                    for chunk in non_dlt_chunks
+                ]
+            )
     cache_entity_embeddings = kwargs.get("cache_entity_embeddings")
     if callable(cache_entity_embeddings):
         callback_result = cache_entity_embeddings(chunk_graphs, **kwargs)
