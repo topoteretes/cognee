@@ -68,6 +68,7 @@ async def run_tasks(
     llm_config: Optional[LLMConfig] = None,
     embedding_config: Optional[EmbeddingConfig] = None,
     data_cache: bool = False,
+    task_timeout: Optional[int] = None,
 ):
     if not user:
         user = await get_default_user()
@@ -109,28 +110,81 @@ async def run_tasks(
 
             async def _run_item(data_item):
                 async with semaphore:
-                    return await run_tasks_data_item(
-                        data_item,
-                        dataset,
-                        tasks,
-                        pipeline_name,
-                        pipeline_id,
-                        pipeline_run_id,
-                        PipelineContext(
-                            user=user,
-                            data_item=data_item,
-                            dataset=dataset,
-                            pipeline_run_id=pipeline_run_id,
-                            pipeline_name=pipeline_name,
-                            extras=extras if isinstance(extras, dict) else {},
-                        ),
-                        user,
-                        incremental_loading,
-                        data_cache,
-                    )
+                    try:
+                        # Apply timeout if specified
+                        if task_timeout is not None:
+                            return await asyncio.wait_for(
+                                run_tasks_data_item(
+                                    data_item,
+                                    dataset,
+                                    tasks,
+                                    pipeline_name,
+                                    pipeline_id,
+                                    pipeline_run_id,
+                                    PipelineContext(
+                                        user=user,
+                                        data_item=data_item,
+                                        dataset=dataset,
+                                        pipeline_run_id=pipeline_run_id,
+                                        pipeline_name=pipeline_name,
+                                        extras=extras if isinstance(extras, dict) else {},
+                                    ),
+                                    user,
+                                    incremental_loading,
+                                    data_cache,
+                                ),
+                                timeout=task_timeout,
+                            )
+                        else:
+                            return await run_tasks_data_item(
+                                data_item,
+                                dataset,
+                                tasks,
+                                pipeline_name,
+                                pipeline_id,
+                                pipeline_run_id,
+                                PipelineContext(
+                                    user=user,
+                                    data_item=data_item,
+                                    dataset=dataset,
+                                    pipeline_run_id=pipeline_run_id,
+                                    pipeline_name=pipeline_name,
+                                    extras=extras if isinstance(extras, dict) else {},
+                                ),
+                                user,
+                                incremental_loading,
+                                data_cache,
+                            )
+                    except asyncio.TimeoutError:
+                        logger.error(
+                            f"Task timed out after {task_timeout}s for data_item={data_item}"
+                        )
+                        return {
+                            "run_info": PipelineRunErrored(
+                                pipeline_run_id=pipeline_run_id,
+                                payload=f"TimeoutError: task exceeded {task_timeout}s limit",
+                                dataset_id=dataset.id,
+                                dataset_name=dataset.name,
+                            )
+                        }
+                    except asyncio.CancelledError:
+                        logger.warning(
+                            f"Task was cancelled for data_item={data_item}"
+                        )
+                        return {
+                            "run_info": PipelineRunErrored(
+                                pipeline_run_id=pipeline_run_id,
+                                payload="CancelledError: task was cancelled",
+                                dataset_id=dataset.id,
+                                dataset_name=dataset.name,
+                            )
+                        }
 
+            # Use return_exceptions=True to isolate failures and prevent cascading cancellations
+            # (addresses Issue #4049: CancelledError retry storm)
             gathered = await asyncio.gather(
                 *[asyncio.create_task(_run_item(item)) for item in data],
+                return_exceptions=True,
             )
 
             # Separate successes from unhandled exceptions
