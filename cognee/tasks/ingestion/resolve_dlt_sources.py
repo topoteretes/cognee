@@ -80,6 +80,16 @@ async def resolve_dlt_sources(
         # Nothing to expand — return original data unchanged
         return data, None
 
+    # A content-bearing connector (e.g. Google Drive) can advertise its content
+    # column on the resource, so document mode works from a plain remember()
+    # call without the caller passing dlt_content_column explicitly.
+    if content_column is None:
+        for item in dlt_items:
+            hint = getattr(item, "cognee_content_column", None)
+            if hint:
+                content_column = hint
+                break
+
     # --- Run DLT pipelines and collect rows ---------------------------------
     all_rows: List[DltRowData] = []
     for dlt_item in dlt_items:

@@ -58,9 +58,6 @@ async def main():
         # makes deletions propagate via orphan cleanup. The default
         # ("replace") would re-extract every file on every run instead.
         write_disposition="merge",
-        # Routes file content through normal chunking + LLM graph
-        # extraction instead of the relational-row treatment.
-        dlt_content_column="content",
         # The DLT ingestion default caps a table at 50 rows; Drive folders
         # commonly exceed that, so lift the cap.
         max_rows_per_table=0,
@@ -76,7 +73,6 @@ async def main():
         dataset_name="google_drive_demo",
         primary_key="file_id",
         write_disposition="merge",
-        dlt_content_column="content",
         max_rows_per_table=0,
     )
     print(result)

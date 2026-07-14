@@ -149,11 +149,13 @@ async def _dlt_sourced_data(dataset_name: str):
 
 async def _remember_drive(**overrides):
     source = google_drive_source(folder_id="root", auth_mode="service_account")
+    # No dlt_content_column here on purpose: the connector advertises its
+    # content column on the resource, so document-mode routing must work from a
+    # plain add()/remember() call (asserted via dlt_mode below).
     kwargs = dict(
         dataset_name=DATASET_NAME,
         primary_key="file_id",
         write_disposition="merge",
-        dlt_content_column="content",
         max_rows_per_table=0,
     )
     kwargs.update(overrides)

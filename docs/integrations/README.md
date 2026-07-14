@@ -19,9 +19,10 @@ same way across all of them.
    a dlt resource with incremental state, deletions surfaced as merge
    hard-delete rows), and export it from `connectors/__init__.py`.
 2. If the source yields unstructured content (documents, messages, pages)
-   rather than tabular rows, pass `dlt_content_column=...` to
-   `cognee.remember()` so rows get normal chunking + LLM graph extraction
-   instead of the relational-row treatment.
+   rather than tabular rows, set `resource.cognee_content_column = "<col>"` on
+   the returned resource (see Google Drive) so those rows get normal chunking +
+   LLM graph extraction instead of the relational-row treatment. Callers can
+   also override it per call with `dlt_content_column=...`.
 3. Add a runnable example under `examples/demos/`, mocked tests under
    `cognee/tests/unit/tasks/` and `cognee/tests/integration/tasks/`, and a
    row to the table above.
