@@ -17,6 +17,7 @@ all share the same guarantees instead of each reinventing ingestion:
 | Source | Extra | Factory | Example | Notes |
 |---|---|---|---|---|
 | **Gmail** | `cognee[gmail]` | `cognee.tasks.ingestion.connectors.gmail_source` | [`demos/gmail_connector_example.py`](../demos/gmail_connector_example.py) | Messages/threads, label & query scoped. Incremental via `historyId`; trashed/deleted mail forgotten on next sync. OAuth2 (read-only). |
+| **Confluence** | `cognee[confluence]` | `cognee.tasks.ingestion.connectors.confluence_source` | [`demos/confluence_ingestion_example.py`](../demos/confluence_ingestion_example.py) | Cloud spaces/pages + footer comments, space-key scoped. Incremental via `version.createdAt`; pages deleted upstream forgotten on next sync. API token (read-only). |
 
 ## Gmail quickstart
 
@@ -44,6 +45,38 @@ answer = await cognee.search(
 
 See the [example](../demos/gmail_connector_example.py) for OAuth setup,
 incremental re-sync, and the privacy / opt-in notes.
+
+## Confluence quickstart
+
+```bash
+pip install "cognee[confluence]"   # or: uv sync --extra confluence
+```
+
+```python
+import cognee
+from cognee.tasks.ingestion.connectors import confluence_source
+
+await cognee.remember(
+    confluence_source(
+        base_url="https://your-domain.atlassian.net",
+        email="you@example.com",
+        api_token="…",          # https://id.atlassian.com/manage-profile/security/api-tokens
+        space_keys=["ENG"],     # omit to sync every readable space
+    ),
+    dataset_name="confluence_wiki",
+    primary_key="id",
+    write_disposition="merge",
+    max_rows_per_table=0,   # 0 = no read cap, so forget-on-delete sees the whole space
+)
+
+answer = await cognee.search(
+    query_text="What is our incident response process?",
+    datasets=["confluence_wiki"],
+)
+```
+
+See the [example](../demos/confluence_ingestion_example.py) for token setup and
+incremental re-sync.
 
 ## Adding a new connector
 
