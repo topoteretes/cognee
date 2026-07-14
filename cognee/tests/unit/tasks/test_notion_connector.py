@@ -15,7 +15,7 @@ from uuid import NAMESPACE_OID, uuid5
 
 import pytest
 
-from cognee.tasks.ingestion.notion_source import (
+from cognee.tasks.ingestion.connectors.notion import (
     NOTION_SOURCE_NAME,
     _build_notion_data_item,
     _page_title,
@@ -176,7 +176,9 @@ async def test_expand_notion_rows_builds_items_and_fresh_ids(monkeypatch):
     async def fake_unique_id(identifier, user):
         return uuid5(NAMESPACE_OID, identifier)
 
-    monkeypatch.setattr("cognee.tasks.ingestion.notion_source.get_unique_data_id", fake_unique_id)
+    monkeypatch.setattr(
+        "cognee.tasks.ingestion.connectors.notion.get_unique_data_id", fake_unique_id
+    )
 
     rows = [
         SimpleNamespace(
@@ -216,7 +218,7 @@ def _run_sync(dlt, tmp_path, monkeypatch, pages, blocks):
     """Run notion_source through a dlt pipeline into a temp sqlite destination."""
     import notion_client
 
-    from cognee.tasks.ingestion.notion_source import notion_source
+    from cognee.tasks.ingestion.connectors.notion import notion_source
 
     monkeypatch.setattr(notion_client, "Client", lambda *a, **k: FakeNotionClient(pages, blocks))
 

@@ -21,7 +21,7 @@ from .create_dlt_source import (
 from .data_item import DataItem
 from .dlt_row_data import DltRowData
 from .ingest_dlt_source import ingest_dlt_source
-from .notion_source import NOTION_MAX_ROWS, NOTION_SOURCE_NAME, expand_notion_rows
+from .connectors.notion import NOTION_MAX_ROWS, NOTION_SOURCE_NAME, expand_notion_rows
 
 logger = get_logger("resolve_dlt_sources")
 

@@ -25,7 +25,7 @@ import asyncio
 import os
 
 import cognee
-from cognee.tasks.ingestion.notion_source import notion_source
+from cognee.tasks.ingestion.connectors import notion_source
 
 DATASET_NAME = "notion"
 

@@ -23,8 +23,8 @@ from uuid import UUID
 from cognee.modules.data.methods.get_unique_data_id import get_unique_data_id
 from cognee.modules.users.models import User
 
-from .data_item import DataItem
-from .dlt_row_data import DltRowData
+from ..data_item import DataItem
+from ..dlt_row_data import DltRowData
 
 # dlt resource / staging-table name for Notion pages. resolve_dlt_sources keys
 # off the source name to route Notion rows through the document path.

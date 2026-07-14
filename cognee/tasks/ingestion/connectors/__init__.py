@@ -13,5 +13,6 @@ e.g. ``pip install "cognee[gmail]"``.
 """
 
 from .gmail import gmail_source
+from .notion import notion_source
 
-__all__ = ["gmail_source"]
+__all__ = ["gmail_source", "notion_source"]
