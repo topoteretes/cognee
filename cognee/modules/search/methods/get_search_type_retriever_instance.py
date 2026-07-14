@@ -94,6 +94,8 @@ async def get_search_type_retriever_instance(
                 "session_id": session_id,
                 "response_model": retriever_specific_config.get("response_model", str),
                 "include_references": include_references,
+                "node_name": node_name,
+                "node_name_filter_operator": node_name_filter_operator,
             },
         ),
         SearchType.HYBRID_COMPLETION: (
@@ -131,6 +133,8 @@ async def get_search_type_retriever_instance(
                 "session_id": session_id,
                 "response_model": retriever_specific_config.get("response_model", str),
                 "include_references": include_references,
+                "node_name": node_name,
+                "node_name_filter_operator": node_name_filter_operator,
             },
         ),
         SearchType.GRAPH_COMPLETION: (
