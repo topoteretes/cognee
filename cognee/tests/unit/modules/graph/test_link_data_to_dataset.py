@@ -13,8 +13,10 @@ from uuid import uuid4
 
 import pytest
 
+from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
 from cognee.infrastructure.databases.provenance import make_source_ref_key
 from cognee.infrastructure.databases.provenance.delete_data import EdgeIdentity
+from cognee.infrastructure.databases.vector.vector_db_interface import VectorDBInterface
 from cognee.modules.data.models import Data
 from cognee.modules.graph.models import Edge, Node
 
@@ -94,6 +96,28 @@ class _SupportedVectorEngine:
 
 class _UnsupportedEngine:
     """No add_belongs_to_set_tags at all — must be detected as unsupported."""
+
+
+class _EngineHandle:
+    """Mimics the deployed engine handles: the adapter's methods never appear
+    on the handle's class — attribute access forwards to the live adapter via
+    ``__getattr__``, and callables come back wrapped in a plain closure (as the
+    leased-cache proxy does), hiding the bound method's ``__func__``."""
+
+    __slots__ = ("_engine",)
+
+    def __init__(self, engine):
+        self._engine = engine
+
+    def __getattr__(self, name):
+        attr = getattr(self._engine, name)
+        if not callable(attr):
+            return attr
+
+        def call_with_lease(*args, **kwargs):
+            return attr(*args, **kwargs)
+
+        return call_with_lease
 
 
 class _ProvenanceGraphEngine(_SupportedGraphEngine):
@@ -384,6 +408,60 @@ async def test_unsupported_adapter_disables_linking(monkeypatch, upsert_recorder
 
     assert linked is False
     assert relational_engine.sessions == [], "no store may be touched when unsupported"
+
+
+def test_supports_tag_add_resolves_through_engine_handles():
+    """Regression: deployed engines are __getattr__-forwarding handles, so the
+    adapter's methods never appear on the handle's class; class-level
+    inspection reported no tagging support and silently disabled reuse."""
+    assert link_module._supports_tag_add(
+        _EngineHandle(_SupportedGraphEngine()), _EngineHandle(_SupportedVectorEngine())
+    )
+
+
+def test_supports_tag_add_rejects_interface_defaults():
+    """An adapter that inherits the interface's raising default is provably
+    unsupported and must still be detected through the instance."""
+
+    class _DefaultTagGraphEngine:
+        add_belongs_to_set_tags = GraphDBInterface.add_belongs_to_set_tags
+
+    class _DefaultTagVectorEngine:
+        add_belongs_to_set_tags = VectorDBInterface.add_belongs_to_set_tags
+
+    assert not link_module._supports_tag_add(_DefaultTagGraphEngine(), _SupportedVectorEngine())
+    assert not link_module._supports_tag_add(_SupportedGraphEngine(), _DefaultTagVectorEngine())
+
+
+@pytest.mark.asyncio
+async def test_links_via_graph_provenance_through_engine_handles(monkeypatch, upsert_recorder):
+    """The full link path must work when the engines only expose their API
+    through __getattr__-forwarding handles (as get_graph_engine() returns)."""
+    case = _make_case()
+    doc_id = str(uuid4())
+    graph_engine = _ProvenanceGraphEngine(
+        [{"id": doc_id, "type": "TextDocument", "belongs_to_set": ["dataset_a"]}], []
+    )
+    vector_engine = _SupportedVectorEngine()
+    relational_engine = _FakeRelationalEngine([], [])
+    _setup(
+        monkeypatch,
+        _EngineHandle(graph_engine),
+        _EngineHandle(vector_engine),
+        relational_engine,
+        graph_provenance=True,
+    )
+
+    linked = await link_data_to_dataset(
+        data=case.data,
+        source_dataset_id=case.source_dataset_id,
+        target_dataset=case.target_dataset,
+        user=case.user,
+    )
+
+    assert linked is True
+    assert vector_engine.tag_calls[0][1] == [doc_id]
+    assert graph_engine.node_ref_attachments, "target refs must reach the adapter via the handle"
 
 
 @pytest.mark.asyncio

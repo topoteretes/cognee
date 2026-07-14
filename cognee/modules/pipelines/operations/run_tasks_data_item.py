@@ -164,6 +164,14 @@ async def run_tasks_data_item_incremental(
                 }
                 return
 
+            logger.info(
+                "Cross-dataset reuse unavailable for data %s "
+                "(dataset %s -> %s); running the full pipeline.",
+                data_id,
+                completed_dataset_id,
+                dataset.id,
+            )
+
     try:
         # Process data based on data_item and list of tasks
         async for result in run_tasks_with_telemetry(

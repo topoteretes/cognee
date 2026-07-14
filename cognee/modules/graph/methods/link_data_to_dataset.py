@@ -30,22 +30,39 @@ logger = get_logger("link_data_to_dataset")
 LEDGER_BATCH_SIZE = 1000
 
 
-def _supports_tag_add(graph_engine, vector_engine) -> bool:
-    """True when both engines override `add_belongs_to_set_tags`.
+def _overrides_tag_add(engine, interface_default) -> bool:
+    """Best-effort check that `engine` overrides `add_belongs_to_set_tags`.
 
-    The interface defaults raise NotImplementedError, so an adapter that
-    hasn't implemented tagging is detected up front — before any store has
-    been mutated — and the caller falls back to full processing.
+    Resolution goes through the *instance*, not the class: `get_graph_engine()`
+    and `get_vector_engine_async()` return handle objects that forward every
+    attribute access to the live adapter via `__getattr__`, so the adapter's
+    methods never appear on the handle's class. Bound methods are compared by
+    `__func__` identity against the interface default (which raises
+    NotImplementedError). A callable without `__func__` — e.g. the leased-cache
+    proxy wraps adapter methods in a plain closure — is inconclusive and counts
+    as supported; an adapter that then turns out not to implement tagging still
+    raises NotImplementedError, which the caller catches to fall back before
+    the link is treated as done (all link writes are additive and idempotent,
+    so the full-run fallback converges).
     """
-    graph_method = getattr(type(graph_engine), "add_belongs_to_set_tags", None)
-    vector_method = getattr(type(vector_engine), "add_belongs_to_set_tags", None)
-    graph_supported = (
-        graph_method is not None and graph_method is not GraphDBInterface.add_belongs_to_set_tags
-    )
-    vector_supported = (
-        vector_method is not None and vector_method is not VectorDBInterface.add_belongs_to_set_tags
-    )
-    return graph_supported and vector_supported
+    method = getattr(engine, "add_belongs_to_set_tags", None)
+    if method is None:
+        return False
+    func = getattr(method, "__func__", None)
+    if func is None:
+        return True
+    return func is not interface_default
+
+
+def _supports_tag_add(graph_engine, vector_engine) -> bool:
+    """True unless an engine provably lacks `add_belongs_to_set_tags`.
+
+    Detects missing tagging support up front — before any store has been
+    mutated — so the caller can fall back to full processing cheaply.
+    """
+    return _overrides_tag_add(
+        graph_engine, GraphDBInterface.add_belongs_to_set_tags
+    ) and _overrides_tag_add(vector_engine, VectorDBInterface.add_belongs_to_set_tags)
 
 
 def _data_node_set(data: Data) -> List[str]:
