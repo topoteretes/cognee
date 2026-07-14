@@ -54,7 +54,7 @@ def get_add_router() -> APIRouter:
                 "Providing dataset ID is mandatory for sharing a dataset between users. Datasets provided by name will only be resolvable by dataset owner."
             ),
         ),
-        node_set: Optional[List[str]] = Form(default=[""], example=[""]),
+        node_set: Optional[List[str]] = Form(default=[""], examples=[""]),
         run_in_background: Optional[bool] = Form(default=False),
         user: User = Depends(get_authenticated_user),
     ):
