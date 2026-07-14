@@ -17,6 +17,7 @@ import pytest
 
 from cognee.tasks.ingestion.connectors.notion import (
     NOTION_SOURCE_NAME,
+    _paginate,
     _page_title,
     _page_to_row,
     _render_block,
@@ -132,6 +133,41 @@ def test_render_blocks_recurses_into_children():
     assert "- nested" in rendered
 
 
+def test_render_block_unsupported_or_empty_returns_blank():
+    assert _render_block({"type": None}) == ""  # missing type
+    assert _render_block({"type": "divider", "divider": {}}) == ""  # no rich_text
+    assert _render_block({"type": "image", "image": {}}) == ""  # unsupported, no text
+
+
+def test_render_blocks_depth_guard_terminates():
+    # Past the recursion cap the renderer bails out instead of looping.
+    client = FakeNotionClient(pages=[], blocks={"x": [_block("paragraph", "deep")]})
+    assert _render_blocks(client, "x", depth=11) == ""
+
+
+def test_paginate_follows_cursor():
+    pages = {
+        None: {"results": [{"id": "a"}], "has_more": True, "next_cursor": "c1"},
+        "c1": {"results": [{"id": "b"}], "has_more": False, "next_cursor": None},
+    }
+    seen = []
+
+    def method(start_cursor=None, **kwargs):
+        seen.append(start_cursor)
+        return pages[start_cursor]
+
+    assert [item["id"] for item in _paginate(method)] == ["a", "b"]
+    assert seen == [None, "c1"]  # second call used the cursor from the first
+
+
+def test_paginate_stops_on_null_cursor():
+    # Contract violation (has_more=True but no next_cursor) must terminate, not spin.
+    def method(start_cursor=None, **kwargs):
+        return {"results": [{"id": "a"}], "has_more": True, "next_cursor": None}
+
+    assert [item["id"] for item in _paginate(method)] == ["a"]
+
+
 # ---------------------------------------------------------------------------
 # Page → row / DataItem (DB-free)
 # ---------------------------------------------------------------------------
@@ -139,6 +175,11 @@ def test_render_blocks_recurses_into_children():
 
 def test_page_title_reads_title_property():
     assert _page_title(_page("p1", "2024-01-01T00:00:00.000Z", "My Page")) == "My Page"
+
+
+def test_page_title_missing_returns_empty():
+    assert _page_title({"properties": {}}) == ""
+    assert _page_title({}) == ""
 
 
 def test_page_to_row_flattens_page():
