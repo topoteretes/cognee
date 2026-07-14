@@ -83,3 +83,12 @@ class SearchResultItem(BaseModel):
     # unset. Keep it additive to the existing text-based Evidence
     # blocks in cognee.modules.retrieval.utils.references.
     citations: List[Citation] = Field(default_factory=list)
+
+
+# Resolve the forward reference SearchResult has on this class. The
+# rebuild must run once SearchResultItem is defined; putting it here
+# rather than at the bottom of SearchResult.py avoids the reverse
+# circular (SearchResult loads first via search.types.__init__).
+from cognee.modules.search.types.SearchResult import _rebuild_search_result  # noqa: E402
+
+_rebuild_search_result()
