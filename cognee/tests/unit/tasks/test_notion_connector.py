@@ -141,18 +141,19 @@ def test_page_title_reads_title_property():
     assert _page_title(_page("p1", "2024-01-01T00:00:00.000Z", "My Page")) == "My Page"
 
 
-def test_page_to_row_flattens_page_and_flags_archive():
+def test_page_to_row_flattens_page():
     client = FakeNotionClient(pages=[], blocks={"p1": [_block("paragraph", "body text")]})
     page = _page("p1", "2024-01-01T00:00:00.000Z", "My Page")
-    page["in_trash"] = True  # newer trash flag should also mark it archived
 
     row = _page_to_row(client, page)
 
+    # Only identity/provenance + text are kept — no volatile last_edited_time,
+    # so a metadata-only edit does not churn the content-hash data_id.
     assert row["id"] == "p1"
     assert row["title"] == "My Page"
-    assert row["last_edited_time"] == "2024-01-01T00:00:00.000Z"
-    assert row["archived"] is True
+    assert row["url"] == "https://notion.so/p1"
     assert "body text" in row["content"]
+    assert "last_edited_time" not in row
 
 
 def test_build_document_data_item_tags_source():
@@ -190,17 +191,13 @@ def test_notion_source_declares_document_marker():
 
 
 # ---------------------------------------------------------------------------
-# dlt pipeline: incremental + hard_delete (needs dlt + notion-client)
+# dlt pipeline: full-snapshot sync + forget-on-delete (needs dlt + notion-client)
 # ---------------------------------------------------------------------------
 
 
 def _run_sync(dlt, tmp_path, monkeypatch, pages, blocks):
     """Run notion_source through a dlt pipeline into a temp sqlite destination."""
-    import notion_client
-
     from cognee.tasks.ingestion.connectors.notion import notion_source
-
-    monkeypatch.setattr(notion_client, "Client", lambda *a, **k: FakeNotionClient(pages, blocks))
 
     db_path = (tmp_path / "notion.db").as_posix()
     pipeline = dlt.pipeline(
@@ -209,7 +206,7 @@ def _run_sync(dlt, tmp_path, monkeypatch, pages, blocks):
         dataset_name="notion_ds",
         pipelines_dir=str(tmp_path / "state"),
     )
-    pipeline.run(notion_source(token="test-token"))
+    pipeline.run(notion_source(client=FakeNotionClient(pages, blocks)))
     return pipeline
 
 
@@ -220,14 +217,9 @@ def _read_pages(pipeline):
     sqlalchemy cursor exposes a SQLAlchemy Result without DB-API ``description``.
     """
     with pipeline.sql_client() as client:
-        with client.execute_query(
-            "SELECT id, title, content, archived FROM notion_pages"
-        ) as cursor:
+        with client.execute_query("SELECT id, title, content FROM notion_pages") as cursor:
             rows = cursor.fetchall()
-    return {
-        row[0]: {"id": row[0], "title": row[1], "content": row[2], "archived": row[3]}
-        for row in rows
-    }
+    return {row[0]: {"id": row[0], "title": row[1], "content": row[2]} for row in rows}
 
 
 @pytest.fixture

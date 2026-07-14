@@ -22,17 +22,29 @@ approach cannot see deletions — hence the Slack-style full-snapshot model.)
 """
 
 import os
+import time
 from typing import Any, Optional
 
+from cognee.shared.logging_utils import get_logger
+
 from ..dlt_utils import DOCUMENT_SOURCE_ATTR
+
+logger = get_logger("notion_connector")
 
 # dlt resource / staging-table name for Notion pages.
 NOTION_TABLE_NAME = "notion_pages"
 NOTION_SOURCE_NAME = "notion"
-_DEFAULT_NOTION_VERSION = "2022-06-28"
+# Pin the Notion API version so upstream changes can't silently alter parsing.
+_NOTION_VERSION = "2022-06-28"
 
-# Notion block types whose rich_text renders as a plain markdown paragraph.
-_TEXT_BLOCKS = {"paragraph", "quote", "callout", "toggle"}
+# Retry budget for rate-limited / transient Notion API responses.
+_MAX_RETRIES = 5
+
+_EXTRA_HINT = (
+    'The Notion connector requires the "notion" extra: pip install "cognee[notion]" '
+    "(provides dlt and notion-client)."
+)
+
 _HEADING_PREFIX = {"heading_1": "# ", "heading_2": "## ", "heading_3": "### "}
 
 
@@ -40,7 +52,7 @@ def notion_source(
     token: Optional[str] = None,
     page_ids: Optional[list[str]] = None,
     database_ids: Optional[list[str]] = None,
-    notion_version: Optional[str] = None,
+    client: Any = None,
 ):
     """Create a dlt source that yields Notion pages as markdown documents.
 
@@ -49,22 +61,29 @@ def notion_source(
         page_ids: Restrict ingestion to these page ids. When omitted (and no
             ``database_ids``), all pages the integration can see are searched.
         database_ids: Restrict ingestion to pages in these databases.
-        notion_version: Notion API version header. Defaults to ``2022-06-28``.
+        client: Pre-built ``notion_client.Client`` (mainly a test-injection
+            point); when omitted one is built from the token above.
 
     Returns:
-        A dlt source suitable for ``cognee.add(...)`` / ``resolve_dlt_sources``.
+        A dlt source suitable for ``cognee.add(...)`` / ``cognee.remember(...)``.
     """
-    import dlt
-    from notion_client import Client
+    try:
+        import dlt
+    except ImportError as exc:
+        raise ImportError(_EXTRA_HINT) from exc
 
-    resolved_token = token or os.environ.get("NOTION_API_KEY")
-    if not resolved_token:
-        raise ValueError("Notion integration token required: pass token= or set NOTION_API_KEY.")
+    if client is None:
+        try:
+            from notion_client import Client
+        except ImportError as exc:
+            raise ImportError(_EXTRA_HINT) from exc
 
-    client = Client(
-        auth=resolved_token,
-        notion_version=notion_version or _DEFAULT_NOTION_VERSION,
-    )
+        resolved_token = token or os.environ.get("NOTION_API_KEY")
+        if not resolved_token:
+            raise ValueError(
+                "Notion integration token required: pass token= or set NOTION_API_KEY."
+            )
+        client = Client(auth=resolved_token, notion_version=_NOTION_VERSION)
 
     @dlt.resource(name=NOTION_TABLE_NAME, primary_key="id", write_disposition="replace")
     def notion_pages():
@@ -72,16 +91,22 @@ def notion_source(
         # currently visible to the integration. Archived/trashed pages are
         # dropped from Notion's listings (and skipped below on the page_ids
         # path), so they fall out of staging and cognee's orphan_cleanup then
-        # forgets them from the graph + vector stores. This is how deletions
-        # propagate — Notion has no delete feed to drive dlt's hard_delete hint,
-        # and search/database queries silently omit trashed pages rather than
-        # returning them flagged. (Same full-snapshot model as the Slack
-        # connector.) Unchanged pages keep a stable content-hash data_id, so
-        # they are not re-ingested or re-cognified downstream.
+        # forgets them from the graph + vector stores. Unchanged pages keep a
+        # stable content-hash data_id, so they are not re-ingested/re-cognified.
+        count = 0
         for page in _iter_pages(client, page_ids, database_ids):
             if page.get("archived") or page.get("in_trash"):
                 continue
-            yield _page_to_row(client, page)
+            try:
+                row = _page_to_row(client, page)
+            except Exception as exc:
+                # Isolate a single bad page (permission/render error) instead of
+                # forfeiting the whole sync.
+                logger.warning("Notion: skipping page %s: %s", page.get("id"), exc)
+                continue
+            count += 1
+            yield row
+        logger.info("Notion: synced %d page(s).", count)
 
     @dlt.source(name=NOTION_SOURCE_NAME)
     def _notion():
@@ -99,11 +124,52 @@ def notion_source(
 # ---------------------------------------------------------------------------
 
 
+def _request(method, **kwargs):
+    """Call a Notion API method, retrying on rate-limit / transient errors.
+
+    notion-client does not retry or honor ``Retry-After`` itself, and Notion
+    enforces ~3 requests/second, so a page with many nested blocks would
+    otherwise 429 and abort the sync.
+    """
+    from notion_client.errors import APIResponseError
+
+    for attempt in range(_MAX_RETRIES):
+        try:
+            return method(**kwargs)
+        except APIResponseError as exc:
+            status = getattr(exc, "status", None)
+            retryable = status in (429, 502, 503, 504) or getattr(exc, "code", "") == "rate_limited"
+            if not retryable or attempt == _MAX_RETRIES - 1:
+                raise
+            delay = _retry_after(getattr(exc, "headers", None), attempt)
+            logger.warning(
+                "Notion: %s — retrying in %.1fs (%d/%d).",
+                status or exc,
+                delay,
+                attempt + 1,
+                _MAX_RETRIES,
+            )
+            time.sleep(delay)
+
+
+def _retry_after(headers, attempt: int) -> float:
+    """Seconds to wait before retrying: the Retry-After header, else backoff."""
+    header = (headers or {}).get("retry-after") or (headers or {}).get("Retry-After")
+    try:
+        return float(header)
+    except (TypeError, ValueError):
+        return float(2**attempt)
+
+
 def _iter_pages(client, page_ids, database_ids):
     """Yield raw Notion page objects for the configured scope."""
     if page_ids:
         for page_id in page_ids:
-            yield client.pages.retrieve(page_id=page_id)
+            try:
+                yield _request(client.pages.retrieve, page_id=page_id)
+            except Exception as exc:
+                # A single missing/inaccessible page must not abort the sync.
+                logger.warning("Notion: skipping page %s: %s", page_id, exc)
         return
 
     if database_ids:
@@ -112,33 +178,36 @@ def _iter_pages(client, page_ids, database_ids):
         return
 
     # No explicit scope: search every page the integration can see.
-    yield from _paginate(
-        client.search,
-        filter={"property": "object", "value": "page"},
-        sort={"timestamp": "last_edited_time", "direction": "ascending"},
-    )
+    yield from _paginate(client.search, filter={"property": "object", "value": "page"})
 
 
 def _paginate(method, **kwargs):
     """Yield results across Notion's cursor-based pagination."""
     cursor = None
     while True:
-        response = method(start_cursor=cursor, **kwargs) if cursor else method(**kwargs)
+        response = (
+            _request(method, start_cursor=cursor, **kwargs)
+            if cursor
+            else _request(method, **kwargs)
+        )
         for item in response.get("results", []):
             yield item
-        if not response.get("has_more"):
-            return
         cursor = response.get("next_cursor")
+        # Stop on the last page, or if Notion signals "more" without a cursor
+        # (contract violation) so we can't loop forever.
+        if not response.get("has_more") or not cursor:
+            return
 
 
 def _page_to_row(client, page: dict) -> dict:
-    """Flatten a Notion page + its block children into a dlt row."""
+    """Flatten a Notion page + its block children into a document row.
+
+    Only ``title``/``content`` (+ ``id``/``url`` for identity and provenance)
+    are kept, so a metadata-only edit that bumps ``last_edited_time`` without
+    changing the text does not churn the content-hash data_id.
+    """
     return {
         "id": page.get("id"),
-        "last_edited_time": page.get("last_edited_time"),
-        # in_trash is the newer flag; archived is the legacy one. Either means
-        # the page should be forgotten, so the hard_delete hint fires on both.
-        "archived": bool(page.get("archived") or page.get("in_trash")),
         "url": page.get("url"),
         "title": _page_title(page),
         "content": _render_blocks(client, page.get("id")),
@@ -194,9 +263,9 @@ def _render_block(block: dict) -> str:
     if block_type == "code":
         language = payload.get("language") or ""
         return f"```{language}\n{text}\n```" if text else ""
-    if block_type in _TEXT_BLOCKS:
-        return text
 
+    # Paragraph, quote, callout, toggle, and any other rich_text block render as
+    # their plain text.
     return text
 
 
