@@ -1,0 +1,22 @@
+Cognee has been deployed.
+
+Backend service:
+  {{ include "cognee.backendName" . }}:{{ .Values.cognee.service.port }}
+
+Port-forward locally:
+  kubectl port-forward svc/{{ include "cognee.backendName" . }} {{ .Values.cognee.service.port }}:{{ .Values.cognee.service.port }}
+
+Health check:
+  http://127.0.0.1:{{ .Values.cognee.service.port }}/health
+
+{{- if not .Values.cognee.secrets.existingSecret }}
+The chart rendered an empty LLM_API_KEY Secret placeholder.
+For production, set cognee.secrets.existingSecret and manage the key outside Helm values.
+{{- end }}
+
+{{- if not .Values.postgres.enabled }}
+Using external database host:
+  {{ .Values.externalDatabase.host }}:{{ .Values.externalDatabase.port }}
+{{- else }}
+Bundled Postgres is enabled. For production, prefer a managed Postgres service by setting postgres.enabled=false and externalDatabase.* values.
+{{- end }}

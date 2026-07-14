@@ -1,6 +1,7 @@
+---
 services:
   cognee:
-    image : cognee-backend:latest
+    image: cognee-backend:latest
     container_name: cognee-backend
     networks:
       - cognee-network
@@ -9,7 +10,7 @@ services:
       dockerfile: Dockerfile
     volumes:
       - .:/app
-      - /app/cognee-frontend/ # Ignore frontend code
+      - /app/cognee-frontend/  # Ignore frontend code
     environment:
       - ENV=local
       - PYTHONPATH=.

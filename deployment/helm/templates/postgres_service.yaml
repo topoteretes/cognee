@@ -1,13 +1,19 @@
+{{- if .Values.postgres.enabled }}
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ .Release.Name }}-postgres
+  name: {{ include "cognee.postgresName" . }}
   labels:
-    app: {{ .Release.Name }}-postgres
+    {{- include "cognee.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres
 spec:
-  type: ClusterIP
+  type: {{ .Values.postgres.service.type }}
   ports:
-    - port: {{ .Values.postgres.port }}
-      targetPort: {{ .Values.postgres.port }}
+    - name: postgres
+      port: {{ .Values.postgres.service.port }}
+      targetPort: postgres
+      protocol: TCP
   selector:
-    app: {{ .Release.Name }}-postgres
+    {{- include "cognee.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres
+{{- end }}

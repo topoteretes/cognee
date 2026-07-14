@@ -17,29 +17,25 @@ docs"
 
 # Set build argument
 ARG DEBUG
+ARG POETRY_VERSION=2.1.4
 
 # Set environment variable based on the build argument
 ENV DEBUG=${DEBUG}
 ENV PIP_NO_CACHE_DIR=true
-ENV PATH="${PATH}:/root/.poetry/bin"
 
-
-RUN apt-get install -y \
+# hadolint ignore=DL3008
+RUN apt-get update && apt-get install -y --no-install-recommends \
   gcc \
-  libpq-dev
+  libpq-dev \
+  && rm -rf /var/lib/apt/lists/*
 
 
 WORKDIR /app
 COPY pyproject.toml poetry.lock /app/
 
-
-RUN pip install poetry
-
-# Don't create virtualenv since docker is already isolated
-RUN poetry config virtualenvs.create false
-
-# Install the dependencies
-RUN poetry install --extras "${POETRY_EXTRAS}" --no-root --without dev
+RUN pip install "poetry==${POETRY_VERSION}" \
+  && poetry config virtualenvs.create false \
+  && poetry install --extras "${POETRY_EXTRAS}" --no-root --without dev
 
 
 # Set the PYTHONPATH environment variable to include the /app directory
@@ -52,8 +48,13 @@ COPY alembic.ini /app/alembic.ini
 COPY alembic/ /app/alembic
 
 COPY entrypoint.sh /app/entrypoint.sh
-RUN chmod +x /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh \
+  && sed -i 's/\r$//' /app/entrypoint.sh \
+  && addgroup --system cognee \
+  && mkdir -p /home/cognee \
+  && adduser --system --ingroup cognee --home /home/cognee cognee \
+  && chown -R cognee:cognee /app /home/cognee
 
-RUN sed -i 's/\r$//' /app/entrypoint.sh
+USER cognee
 
 ENTRYPOINT ["/app/entrypoint.sh"]

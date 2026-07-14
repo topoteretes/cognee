@@ -1,13 +1,17 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ .Release.Name }}-cognee
+  name: {{ include "cognee.backendName" . }}
   labels:
-    app: {{ .Release.Name }}-cognee
+    {{- include "cognee.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backend
 spec:
-  type: ClusterIP
+  type: {{ .Values.cognee.service.type }}
   ports:
-    - port: {{ .Values.cognee.port }}
-      targetPort: {{ .Values.cognee.port }}
+    - name: http
+      port: {{ .Values.cognee.service.port }}
+      targetPort: http
+      protocol: TCP
   selector:
-    app: {{ .Release.Name }}-cognee
+    {{- include "cognee.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: backend
