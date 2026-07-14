@@ -83,7 +83,12 @@ class FakeConfluenceSession:
         if url.endswith("/spaces"):
             spaces = self.spaces
             if params.get("keys"):
-                wanted = set(params["keys"].split(","))
+                # v2 `keys` is a repeated array param → requests passes a list.
+                # Model that contract (not comma-joining) so the fake fails loudly
+                # if the connector ever regresses to keys="ENG,DOCS".
+                keys = params["keys"]
+                assert isinstance(keys, list), f"keys must be a list, got {keys!r}"
+                wanted = set(keys)
                 spaces = [s for s in self.spaces if s["key"] in wanted]
             return _Resp({"results": spaces, "_links": {}})
 
@@ -244,19 +249,24 @@ def test_comments_are_folded_into_page_body_when_requested():
     assert rows_without[0]["body"] == "page"
 
 
-def test_space_keys_are_pushed_down_as_a_filter():
+def test_space_keys_are_pushed_down_as_a_repeated_array_param():
     session = FakeConfluenceSession(
-        spaces=[{"id": "1", "key": "ENG"}, {"id": "2", "key": "DOCS"}],
+        spaces=[{"id": "1", "key": "ENG"}, {"id": "2", "key": "DOCS"}, {"id": "3", "key": "OPS"}],
         pages_by_space={
             "1": [_page("1", when="2024-01-01T10:00:00.000Z")],
-            "2": [_page("9", when="x")],
+            "2": [_page("2", when="2024-01-02T10:00:00.000Z")],
+            "3": [_page("9", when="x")],
         },
     )
-    rows = list(sync_pages(session, BASE_URL, dict(), space_keys=["ENG"], include_comments=False))
+    # Multi-space filter must resolve BOTH requested spaces (comma-joining would
+    # match neither and silently sync nothing / mass-delete on re-run).
+    rows = list(
+        sync_pages(session, BASE_URL, dict(), space_keys=["ENG", "DOCS"], include_comments=False)
+    )
 
-    assert [r["id"] for r in rows] == ["1"]  # DOCS space excluded
+    assert sorted(r["id"] for r in rows) == ["1", "2"]  # OPS excluded, ENG+DOCS included
     spaces_call = next(params for url, params in session.calls if url.endswith("/spaces"))
-    assert spaces_call["keys"] == "ENG"
+    assert spaces_call["keys"] == ["ENG", "DOCS"]  # repeated array param, not "ENG,DOCS"
 
 
 # ---------------------------------------------------------------------------

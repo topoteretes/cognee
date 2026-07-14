@@ -174,7 +174,10 @@ def _resolve_space_ids(session: Any, base_url: str, space_keys: Optional[List[st
     """Resolve space keys to numeric v2 space ids (all accessible spaces if None)."""
     params: Dict[str, Any] = {"limit": 250}
     if space_keys:
-        params["keys"] = ",".join(space_keys)
+        # v2 `keys` is an array query param — requests repeats a list value
+        # (keys=ENG&keys=DOCS). A comma-joined string is read as one literal
+        # key and matches no space, so multi-space filters silently sync nothing.
+        params["keys"] = list(space_keys)
     return [
         str(space["id"]) for space in _paginate(session, base_url, f"{_API_BASE}/spaces", params)
     ]
