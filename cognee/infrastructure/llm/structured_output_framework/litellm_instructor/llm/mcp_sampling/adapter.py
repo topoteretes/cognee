@@ -88,8 +88,12 @@ class McpSamplingAdapter(LLMInterface):
         return _result_text(result)
 
     async def acreate_structured_output(
-        self, text_input: str, system_prompt: str, response_model: type
+        self, text_input: str, system_prompt: str, response_model: type, **kwargs: Any
     ) -> Any:
+        # Peer adapters accept provider-specific params via **kwargs, and
+        # LLMGateway forwards them (e.g. the LLM router passes request params),
+        # so accept them for drop-in parity. MCP sampling has no provider knobs
+        # (the host owns the model/params), so they are intentionally ignored.
         session = get_sampling_session()
         if session is None:
             raise MCPSamplingUnavailableError()

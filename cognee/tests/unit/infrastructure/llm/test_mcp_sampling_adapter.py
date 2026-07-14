@@ -130,6 +130,29 @@ async def test_gives_up_after_retries_exhausted():
 
 
 @pytest.mark.asyncio
+async def test_extra_kwargs_are_accepted_and_ignored():
+    # LLMGateway.acreate_structured_output forwards **kwargs to the client (peer
+    # adapters accept them, and callers like the LLM router pass request params).
+    # The adapter must accept them for drop-in parity, and ignore them since MCP
+    # sampling has no provider knobs.
+    session = _mock_session('{"name": "Edsger", "age": 72}')
+    token = set_sampling_session(session)
+    try:
+        adapter = McpSamplingAdapter(model="host-default", max_completion_tokens=128)
+        result = await adapter.acreate_structured_output(
+            text_input="Edsger Dijkstra, 72",
+            system_prompt="Extract.",
+            response_model=_Person,
+            temperature=0.1,
+            response_format={"type": "json_object"},
+        )
+    finally:
+        reset_sampling_session(token)
+
+    assert result.name == "Edsger" and result.age == 72
+
+
+@pytest.mark.asyncio
 async def test_raises_when_no_session_available():
     # No session bound and not running inside an MCP server.
     adapter = McpSamplingAdapter(model="host-default", max_completion_tokens=64)
