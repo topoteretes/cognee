@@ -108,7 +108,7 @@ Then the shell prompt. The user has no pointer to the next command in the flow (
 
 The dropped-thread pattern shows up in the code at `cognee/cli/commands/remember_command.py` around L110-L120 and mirrors in `recall_command.py`, `cognify_command.py`, and `forget_command.py`. All four write metadata via `fmt.echo` and stop.
 
-**What a user needs instead:** a single hint line at the end of each success block that names the next natural command with a copy-paste example. Suppressible via a `--quiet` flag for scripts.
+**What a user needs instead:** a single hint line at the end of each success block that names the next natural command with a copy-paste example.
 
 Sketch:
 
@@ -139,7 +139,7 @@ Two consequences:
 - Users who try cognee "just to see what it does" pay for it. Small dollar amount, but real, and unexpected.
 - Users without an OpenAI account cannot try cognee at all without signing up for a paid provider first.
 
-**What a user needs instead:** a `--sample-data` or `cognee-cli demo` path that runs a full remember-cognify-recall cycle against bundled fixtures with the LLM stubbed. This is complementary to the mocked-test harness from issue #3601; the harness is for CI, the sample-data path is for humans.
+**What a user needs instead:** two things, landing in stages. First (shipped here) a `--sample-data` flag that ingests a bundled fixture so a newcomer reaches a `recall` without composing input. Second (a follow-up, gated on the #3601 mocked harness) a fully offline variant that runs the cycle against a stubbed LLM with no API calls, so a user can see a result before committing a key at all.
 
 ## F6. No unified `cognee doctor` preflight
 
@@ -228,19 +228,19 @@ Cognee could not <action>: <plain-language cause>.
 Try: <concrete next command or fix>
 ```
 
-The helper reads `code`, `message`, and `remediation` from the exception object when they exist (which is what @ANAMASGARD's Pillar B work in #3604 lands) and falls back to a local remediation table for the four common first-run failures otherwise.
+The helper reads `code`, `message`, and `remediation` from the exception object when they exist (which is what @ANAMASGARD's Pillar B work in #3604 lands) and falls back to a local remediation table for the common first-run failures otherwise.
 
 **Where in code:** new module `cognee/cli/echo.py` extension or a sibling `cognee/cli/messaging.py`. Called from each command's outer `except CliCommandException` block (see `remember_command.py::execute` L112, and identical shape in the three sibling commands).
 
 **Also under this proposal:** suppress the aiohttp `Unclosed client session` warning at the CLI boundary. Wrap the async runner in `warnings.catch_warnings()` with a `ResourceWarning` filter so cleanup noise stays out of the user's terminal.
 
-**Effort:** Quick for the aiohttp suppression and the local-remediation table for the four common failures. **Follow-up** for full alignment with #3604 Pillar B (that PR has not merged yet). Local remediation stubs are the bridge.
+**Effort:** Quick for the aiohttp suppression and the local-remediation table for the common failures. **Follow-up** for full alignment with the actionable-error work in #3604 (that PR has not merged yet). Local remediation stubs are the bridge.
 
 **Risk:** low. Additive helper, existing except blocks call it; existing metadata (`Note: Please refer to our docs at 'https://docs.cognee.ai'...`) stays as the third line for anything not in the remediation table.
 
 ### P3. Next-step hints on every primary command (addresses F3)
 
-**Change:** each of the four primary commands appends a single line after its success block naming the next natural command with a copy-paste example. Suppressible with `--quiet`.
+**Change:** each of the four primary commands appends a single line after its success block naming the next natural command with a copy-paste example.
 
 **Where in code:** the success branch of `execute()` in `cognee/cli/commands/remember_command.py`, `recall_command.py`, `cognify_command.py`, `forget_command.py`. Copy-write per command:
 
@@ -251,11 +251,11 @@ The helper reads `code`, `message`, and `remediation` from the exception object 
 | `recall`   | `Next: cognee-cli remember <path-or-text> -d <dataset-name>` (if the result set was empty) or nothing (if it returned results) |
 | `forget`   | `Next: cognee-cli remember <path-or-text> -d <dataset-name> to start fresh` |
 
-`--quiet` flag is added at the parser level for each command; when set, the hint is suppressed for use in scripts and pipelines.
+No suppression flag ships: the issue asks for hints, not a new flag, and the hints are single calm lines. Machine consumers are already unaffected — `recall`'s hint is scoped to the empty pretty-output path, so `json` / `simple` output stays clean, and the other three commands' output is human-oriented metadata that a script does not parse line-for-line.
 
-**Effort:** Quick. Four files, ~5 lines of new logic in each, one shared constant for the hint format.
+**Effort:** Quick. Four files, ~2 lines of new logic in each, one shared `hints` module for the copy.
 
-**Risk:** low. Purely additive output. Scripts that grep for a specific line still work; the new line comes after everything else. `--quiet` gives scripts a clean opt-out.
+**Risk:** low. Purely additive output; the new line comes after everything else.
 
 ### P4. Extract Docker preflight pattern into a shared preflight module (addresses F4)
 
@@ -269,20 +269,19 @@ The primary commands call the relevant checks eagerly at the top of `execute()`;
 
 **Risk:** low functionally, medium in scope. Splitting keeps this PR reviewable.
 
-### P5. `--sample-data` offline path (addresses F5)
+### P5. `--sample-data` first-run smoke test (addresses F5)
 
-**Change:** new flag on `cognee-cli remember`, plus a new `cognee-cli demo` sub-command that wraps it. When `--sample-data` is set the command:
+**Change:** a `--sample-data` flag on `cognee-cli remember`. When set, the command ingests a small bundled text fixture (`cognee/cli/samples/quickstart.txt`, a short prose passage that names three entities and their relationships so cognify produces a meaningful graph) instead of user data, and prints the fixture path so the run is transparent.
 
-1. Ingests a small bundled text fixture (`cognee/data/samples/quickstart.txt`, ~500 tokens of clean prose).
-2. Runs cognify against a stubbed LLM that returns deterministic entity extractions (reuses the #3601 mocked harness).
-3. Runs a canned recall against the resulting graph.
-4. Prints the result plus a "You just ran remember → cognify → recall against bundled data with no API calls. Now set `LLM_API_KEY` and try it with your own text." message.
+This removes the "compose a valid dataset first" decision from the first run: a newcomer can go straight to `cognee-cli remember --sample-data` and then `recall`, without hunting for input.
 
-**Where in code:** new fixture file, small runner in `cognee/cli/commands/remember_command.py`, and the LLM stub reuses whatever pattern the #3601 mocked harness lands. If #3601 has not landed yet the stub is a minimal in-line helper we replace once it does.
+**Honesty note — this is what ships, and what does not.** The flag is a convenience over bundled input; it is **not** offline. It still requires `LLM_API_KEY` and still makes real cognify/embedding calls (W1 + W2 make the missing/invalid-key case fail fast with an actionable hint rather than hang). A truly keyless path — one that reaches a `recall` result with no API calls — needs a stubbed LLM, which is the scope of the mocked-test harness in #3601. That harness is not merged, so the keyless demo is **deferred** to a follow-up rather than shipped here with a bespoke, throwaway stub. The flag help text states the key requirement up front so the promise stays calm and honest.
 
-**Effort:** Quick for the fixture + runner, contingent on the mocked harness pattern being clear. If #3601 has not landed, we ship a small local stub and note the follow-up.
+**Where in code:** fixture at `cognee/cli/samples/quickstart.txt` (resolved via `importlib.resources` so it survives editable and wheel installs) and a small path-resolver + flag in `cognee/cli/commands/remember_command.py`. No `demo` sub-command and no LLM stub ship in this PR.
 
-**Risk:** medium. Introduces a new user-facing flag; needs a clean opt-out. Cognee entity extractors need to be threadsafe against the stub.
+**Effort:** Quick for the fixture + flag. The keyless variant is a follow-up gated on #3601.
+
+**Risk:** low. One additive, opt-in flag; the existing "no data supplied" path is preserved and now points at the flag.
 
 ### P6. `cognee doctor` preflight (addresses F6)
 
@@ -296,16 +295,17 @@ The primary commands call the relevant checks eagerly at the top of `execute()`;
 
 Landing here in Part 3:
 
-- **W1.** Fail fast on `AuthenticationError` in the tenacity retry policy (P1).
-- **W2.** Local remediation table for the four common first-run errors + aiohttp warning suppression at CLI boundary (P2 partial).
-- **W3.** Next-step hints on `remember`, `recall`, `cognify`, `forget` plus a `--quiet` flag (P3 in full).
-- **W4.** `--sample-data` offline path with bundled fixture (P5).
+- **W1.** Fail fast on `AuthenticationError` / `PermissionDeniedError` in the tenacity retry policy (P1).
+- **W2.** Local remediation table for the common first-run errors + aiohttp warning suppression at the CLI boundary (P2 partial).
+- **W3.** Next-step hints on `remember`, `recall`, `cognify`, `forget` (P3).
+- **W4.** `--sample-data` first-run smoke test with a bundled fixture (P5, online variant; the keyless variant is deferred).
 
 Deferred to follow-up issues (not in this PR):
 
+- Fully offline `--sample-data` (stubbed LLM, no API calls), gated on the #3601 mocked harness (P5, keyless variant).
 - Full `cognee doctor` preflight command (P6).
 - Extracting the preflight pattern into `cognee/cli/preflight.py` (P4 in full).
-- Replacing every "Please refer to our docs" instance with a remediation string once @ANAMASGARD's Pillar B (#3604) lands.
+- Stripping leaked HTTP internals (e.g. `(Status code: NNN)`) from CLI-surfaced errors and replacing every "Please refer to our docs" instance with a remediation string once the actionable-error work in #3604 lands (F2a/F2b; only partially covered here by the remediation hint).
 - Streamlined canonical README quickstart section rewrite. Kept out of scope so this PR is not entangled with a docs-review cycle. Follow-up.
 
 ### Non-goals
@@ -315,6 +315,6 @@ Explicit non-goals to prevent scope creep in review:
 - Not changing the SDK-level `remember` / `recall` / `forget` function signatures. Only the CLI wrapping around them.
 - Not touching the `-ui` launcher. Its Docker preflight is already good; extracting it is P4 (Follow-up).
 - Not changing the LLM provider defaults or the pricing table (F7, F8 are #3606's scope).
-- Not adding new configuration surface beyond one CLI flag (`--sample-data`) and one sub-command (`demo`). Everything else honors existing env-var conventions.
+- Not adding new configuration surface beyond one CLI flag (`--sample-data`). No new sub-command ships here. Everything else honors existing env-var conventions.
 
 Part 3 quick-win implementation lands as separate commits on this same PR.
