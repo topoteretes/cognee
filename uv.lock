@@ -1277,6 +1277,10 @@ codegraph = [
     { name = "tree-sitter" },
     { name = "tree-sitter-python" },
 ]
+confluence = [
+    { name = "dlt", extra = ["sqlalchemy"] },
+    { name = "requests" },
+]
 debug = [
     { name = "debugpy" },
 ]
@@ -1441,6 +1445,7 @@ requires-dist = [
     { name = "deepeval", marker = "extra == 'deepeval'", specifier = ">=3.0.1,<4" },
     { name = "deptry", marker = "extra == 'dev'", specifier = ">=0.20.0,<0.21" },
     { name = "diskcache", specifier = ">=5.6.3" },
+    { name = "dlt", extras = ["sqlalchemy"], marker = "extra == 'confluence'", specifier = ">=1.9.0,<2" },
     { name = "dlt", extras = ["sqlalchemy"], marker = "extra == 'dlt'", specifier = ">=1.9.0,<2" },
     { name = "dlt", extras = ["sqlalchemy"], marker = "extra == 'gmail'", specifier = ">=1.9.0,<2" },
     { name = "docling", marker = "extra == 'docling'", specifier = ">=2.54" },
@@ -1525,6 +1530,7 @@ requires-dist = [
     { name = "python-multipart", specifier = ">=0.0.22,<1.0.0" },
     { name = "rdflib", specifier = ">=7.1.4,<7.2.0" },
     { name = "redis", marker = "extra == 'redis'", specifier = ">=5.0.3,<6.0.0" },
+    { name = "requests", marker = "extra == 'confluence'", specifier = ">=2.31.0,<3" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.9.2,<=0.16.0" },
     { name = "s3fs", extras = ["boto3"], marker = "extra == 'aws'", specifier = "==2025.3.2" },
     { name = "scikit-learn", marker = "extra == 'evals'", specifier = ">=1.6.1,<2" },
@@ -1548,7 +1554,7 @@ requires-dist = [
     { name = "uvicorn", specifier = ">=0.34.0,<1.0.0" },
     { name = "websockets", specifier = ">=15.0.1,<16.0.0" },
 ]
-provides-extras = ["api", "distributed", "scraping", "fastembed", "neo4j", "neptune", "postgres", "postgres-binary", "notebook", "langchain", "llama-index", "huggingface", "ollama", "mistral", "anthropic", "azure", "deepeval", "posthog", "groq", "llama-cpp", "docs", "codegraph", "evals", "graphiti", "aws", "dlt", "gmail", "baml", "dev", "debug", "redis", "tracing", "docling"]
+provides-extras = ["api", "distributed", "scraping", "fastembed", "neo4j", "neptune", "postgres", "postgres-binary", "notebook", "langchain", "llama-index", "huggingface", "ollama", "mistral", "anthropic", "azure", "deepeval", "posthog", "groq", "llama-cpp", "docs", "codegraph", "evals", "graphiti", "aws", "dlt", "gmail", "confluence", "baml", "dev", "debug", "redis", "tracing", "docling"]
 
 [package.metadata.requires-dev]
 dev = [

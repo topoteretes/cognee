@@ -160,6 +160,10 @@ gmail = [
     "google-auth>=2.23.0,<3",
     "google-auth-oauthlib>=1.1.0,<2",
 ]
+confluence = [
+    "dlt[sqlalchemy]>=1.9.0,<2",
+    "requests>=2.31.0,<3",
+]
 baml = ["baml-py (==0.206.0)"]
 dev = [
     "pytest>=7.4.0,<8",
