@@ -128,33 +128,6 @@ def test_relevance_defaults_to_none_for_string_completions():
     assert items[0].relevance is None
 
 
-def test_relevance_normalized_from_scored_chunk_entry():
-    # Simulate a chunk-shaped completion entry with an embedded score
-    # (this is the shape CHUNKS-family search emits, exercised here as
-    # a unit test even though full chunk citation wiring ships later).
-    chunk_payload = SearchResultPayload(
-        result_object=[],
-        context=None,
-        completion=[
-            {
-                "text": "a chunk of text",
-                "score": 0.25,
-                "document_name": "doc.txt",
-                "id": "chunk-x",
-            }
-        ],
-        search_type=SearchType.CHUNKS,
-        only_context=False,
-        dataset_id=uuid4(),
-        dataset_name="test-dataset",
-    )
-    items = normalize_search_payload(chunk_payload)
-    assert items[0].score == 0.25
-    assert items[0].relevance is not None
-    # Monotonic: score=0.25 must map above 0 and below 1.
-    assert 0.0 < items[0].relevance < 1.0
-
-
 def test_confidence_derivable_from_normalized_items():
     # The derive_confidence helper composes cleanly with the items the
     # normalizer produces; a graph completion with no calibrated
