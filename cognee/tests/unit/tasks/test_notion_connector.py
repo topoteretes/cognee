@@ -3,11 +3,11 @@
 Two layers, all runnable in CI without a live Notion token:
 
 * DB-free tests for block→markdown rendering, page→row flattening, and the
-  document DataItem tagging (``source="notion"``) that routes pages through
-  normal cognify.
+  generic document DataItem tagging (``source="notion"``) that routes pages
+  through normal cognify.
 * dlt-pipeline tests (mocked notion-client, temp sqlite destination) covering
-  the acceptance criteria: incremental re-sync reflects edits, and archiving a
-  page removes it from staging (forget-on-delete) via the ``hard_delete`` hint.
+  the acceptance criteria: re-sync reflects edits, and archived/vanished pages
+  drop out of the full-snapshot load (forget-on-delete).
 """
 
 from types import SimpleNamespace
@@ -17,14 +17,16 @@ import pytest
 
 from cognee.tasks.ingestion.connectors.notion import (
     NOTION_SOURCE_NAME,
-    _build_notion_data_item,
     _page_title,
     _page_to_row,
     _render_block,
     _render_blocks,
     _rich_text,
-    expand_notion_rows,
 )
+
+# The row → document-DataItem mapping is generic and owned by the ingestion
+# layer (any document source uses it), not the connector.
+from cognee.tasks.ingestion.resolve_dlt_sources import _build_document_data_item
 
 
 # ---------------------------------------------------------------------------
@@ -153,66 +155,38 @@ def test_page_to_row_flattens_page_and_flags_archive():
     assert "body text" in row["content"]
 
 
-def test_build_notion_data_item_tags_source_notion():
+def test_build_document_data_item_tags_source():
     row = SimpleNamespace(
         row_data={
             "id": "p1",
             "url": "https://notion.so/p1",
             "title": "My Page",
-            "last_edited_time": "2024-01-01T00:00:00.000Z",
             "content": "body text",
         },
         content_hash="abc123",
     )
     data_id = uuid5(NAMESPACE_OID, "p1")
 
-    item = _build_notion_data_item(row, data_id)
+    item = _build_document_data_item(row, data_id, "notion")
 
     # source="notion" (not "dlt") is what routes the page through normal cognify.
     assert item.external_metadata["source"] == "notion"
-    assert item.external_metadata["notion_page_id"] == "p1"
-    assert item.external_metadata["notion_url"] == "https://notion.so/p1"
+    assert item.external_metadata["url"] == "https://notion.so/p1"
+    assert item.external_metadata["external_id"] == "p1"
     assert item.data_id == data_id
     assert item.data.startswith("# My Page")
     assert "body text" in item.data
 
 
-@pytest.mark.asyncio
-async def test_expand_notion_rows_builds_items_and_fresh_ids(monkeypatch):
-    async def fake_unique_id(identifier, user):
-        return uuid5(NAMESPACE_OID, identifier)
+def test_notion_source_declares_document_marker():
+    # resolve_dlt_sources routes on the document-source marker (not on this name),
+    # but the tag it carries is the source name; keep it stable.
+    from cognee.tasks.ingestion.connectors.notion import notion_source
+    from cognee.tasks.ingestion.dlt_utils import document_source_tag
 
-    monkeypatch.setattr(
-        "cognee.tasks.ingestion.connectors.notion.get_unique_data_id", fake_unique_id
-    )
-
-    rows = [
-        SimpleNamespace(
-            table_name="notion_pages",
-            primary_key_value="p1",
-            content_hash="h1",
-            row_data={"id": "p1", "title": "A", "content": "one", "url": "u1"},
-        ),
-        SimpleNamespace(
-            table_name="notion_pages",
-            primary_key_value="p2",
-            content_hash="h2",
-            row_data={"id": "p2", "title": "B", "content": "two", "url": "u2"},
-        ),
-    ]
-
-    items, fresh_ids = await expand_notion_rows(rows, user=SimpleNamespace(id="u"))
-
-    assert len(items) == 2
-    assert len(fresh_ids) == 2
-    assert all(i.external_metadata["source"] == "notion" for i in items)
-    # fresh_ids must match the items' data_ids so orphan cleanup keeps them.
-    assert {i.data_id for i in items} == fresh_ids
-
-
-def test_notion_source_name_constant():
-    # resolve_dlt_sources routes on this name; keep it stable.
+    source = notion_source(token="test-token")
     assert NOTION_SOURCE_NAME == "notion"
+    assert document_source_tag(source) == "notion"
 
 
 # ---------------------------------------------------------------------------

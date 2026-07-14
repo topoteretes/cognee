@@ -21,7 +21,7 @@ from .create_dlt_source import (
 from .data_item import DataItem
 from .dlt_row_data import DltRowData
 from .ingest_dlt_source import ingest_dlt_source
-from .connectors.notion import NOTION_SOURCE_NAME, expand_notion_rows
+from .dlt_utils import document_source_tag
 
 logger = get_logger("resolve_dlt_sources")
 
@@ -80,11 +80,11 @@ async def resolve_dlt_sources(
         # Nothing to expand — return original data unchanged
         return data, None
 
-    # Notion sources take the document path (each page → a text document that
-    # goes through normal cognify); every other dlt source takes the relational
-    # schema-context path below.
-    notion_items = [i for i in dlt_items if getattr(i, "name", None) == NOTION_SOURCE_NAME]
-    relational_items = [i for i in dlt_items if getattr(i, "name", None) != NOTION_SOURCE_NAME]
+    # A dlt source may opt into the document path (each row → a text document
+    # that goes through normal cognify) by declaring a document-source tag;
+    # every other dlt source takes the relational schema-context path below.
+    document_items = [i for i in dlt_items if document_source_tag(i)]
+    relational_items = [i for i in dlt_items if not document_source_tag(i)]
 
     # --- Run DLT pipelines and collect rows ---------------------------------
     all_rows: List[DltRowData] = []
@@ -98,12 +98,16 @@ async def resolve_dlt_sources(
         )
         all_rows.extend(rows)
 
-    # Notion is a full-snapshot source: each run replaces staging with exactly
-    # the pages currently visible, and the whole set is read back (no row cap,
-    # max_rows_per_table=0) so orphan cleanup can forget pages that dropped out
-    # (archived/deleted/unshared → absent from the replace load).
-    notion_rows: List[DltRowData] = []
-    for dlt_item in notion_items:
+    # Document sources are full snapshots: each run replaces staging with exactly
+    # the rows currently visible, and the whole set is read back (no row cap,
+    # max_rows_per_table=0) so orphan cleanup can forget rows that dropped out
+    # (deleted/unshared → absent from the replace load).
+    document_data_items: list[DataItem] = []
+    document_fresh_ids: Set[UUID] = set()
+    document_source_tags: set[str] = set()
+    for dlt_item in document_items:
+        source_tag = document_source_tag(dlt_item)
+        document_source_tags.add(source_tag)
         rows = await ingest_dlt_source(
             dlt_item,
             dataset_name,
@@ -111,7 +115,10 @@ async def resolve_dlt_sources(
             write_disposition="replace",
             max_rows_per_table=0,
         )
-        notion_rows.extend(rows)
+        for row in rows:
+            data_id = await get_unique_data_id(_dlt_row_identifier(row), user)
+            document_fresh_ids.add(data_id)
+            document_data_items.append(_build_document_data_item(row, data_id, source_tag))
 
     # --- Phase 1: compute stable data_ids for all rows (for FK resolution) --
     # Primary lookup uses content_hash for uniqueness (handles tables with
@@ -121,8 +128,7 @@ async def resolve_dlt_sources(
     # When multiple rows share a PK value, the last one wins (best-effort).
     fk_lookup: dict[tuple[str, str], UUID] = {}
     for row in all_rows:
-        row_identifier = f"dlt:{row.table_name}:{row.primary_key_value}:{row.content_hash}"
-        data_id = await get_unique_data_id(row_identifier, user)
+        data_id = await get_unique_data_id(_dlt_row_identifier(row), user)
         row_id_lookup[(row.table_name, row.primary_key_value, row.content_hash)] = data_id
 
         fk_key = (row.table_name, row.primary_key_value)
@@ -206,11 +212,9 @@ async def resolve_dlt_sources(
             sample,
         )
 
-    # --- Expand Notion rows into document DataItems -------------------------
-    # Notion pages skip the schema-context treatment above: each becomes a text
-    # document (source "notion") that flows through normal cognify.
-    notion_expanded, notion_fresh_ids = await expand_notion_rows(notion_rows, user)
-    expanded_items.extend(notion_expanded)
+    # Document rows (built above) skip the schema-context treatment: each is a
+    # text document (source == its document tag) that flows through normal cognify.
+    expanded_items.extend(document_data_items)
 
     # --- Phase 3: prepare deferred orphan cleanup ---------------------------
     # Deletion of orphaned dlt rows is deferred to *after* the fresh rows are
@@ -220,10 +224,10 @@ async def resolve_dlt_sources(
     # to await post-commit instead of deleting here.
     #
     # Relational sources skip cleanup for "append" (each run intentionally adds
-    # new rows). Notion reconciles the full current page set, so pages missing
-    # from it (archived/deleted) must be forgotten. The two paths are cleaned
-    # separately so an append relational run never treats Notion pages as
-    # orphans, or vice versa.
+    # new rows). Document sources reconcile the full current snapshot, so rows
+    # missing from it (deleted/unshared) must be forgotten. The two paths are
+    # cleaned separately so an append relational run never treats document rows
+    # as orphans, or vice versa.
     #
     # Both paths skip cleanup when their fresh set is empty: an empty read-back
     # cannot be distinguished from a failed/misconfigured sync, and treating it
@@ -231,16 +235,18 @@ async def resolve_dlt_sources(
     # rows for one cycle is the safe failure mode.
     relational_fresh: Set[UUID] = set(row_id_lookup.values())
     do_relational_cleanup = write_disposition != "append" and bool(relational_fresh)
-    do_notion_cleanup = bool(notion_fresh_ids)
+    do_document_cleanup = bool(document_fresh_ids)
 
     orphan_cleanup: Optional[Callable[[], Any]] = None
-    if do_relational_cleanup or do_notion_cleanup:
+    if do_relational_cleanup or do_document_cleanup:
 
         async def _cleanup() -> None:
             if do_relational_cleanup:
                 await _delete_dlt_orphans(dataset_name, user, relational_fresh, sources=("dlt",))
-            if do_notion_cleanup:
-                await _delete_dlt_orphans(dataset_name, user, notion_fresh_ids, sources=("notion",))
+            if do_document_cleanup:
+                await _delete_dlt_orphans(
+                    dataset_name, user, document_fresh_ids, sources=tuple(document_source_tags)
+                )
 
         orphan_cleanup = _cleanup
 
@@ -251,6 +257,47 @@ async def resolve_dlt_sources(
 # ---------------------------------------------------------------------------
 # Helpers (moved from ingest_data.py)
 # ---------------------------------------------------------------------------
+
+
+def _dlt_row_identifier(row: DltRowData) -> str:
+    """Stable identifier for a dlt row, used to derive a deterministic data_id.
+
+    Includes ``content_hash`` so that unchanged rows keep the same data_id
+    across runs (no re-ingest/re-cognify) while edited rows get a fresh one.
+    """
+    return f"dlt:{row.table_name}:{row.primary_key_value}:{row.content_hash}"
+
+
+def _build_document_data_item(row: DltRowData, data_id: UUID, source_tag: str) -> DataItem:
+    """Build a text-document DataItem from a document-source dlt row.
+
+    The row is expected to carry ``title``/``content`` columns (and optionally
+    ``url``/``id``). Tagging ``external_metadata["source"] = source_tag`` (not
+    ``"dlt"``) routes the document through normal cognify entity extraction
+    rather than the deterministic dlt-row path (see ``is_dlt_sourced``).
+    """
+    row_data = row.row_data
+    title = _clean(row_data.get("title"))
+    content = _clean(row_data.get("content"))
+    text = f"# {title}\n\n{content}".strip() if title else content
+
+    external_metadata = {"source": source_tag, "title": title or None}
+    if row_data.get("url"):
+        external_metadata["url"] = row_data["url"]
+    if row_data.get("id"):
+        external_metadata["external_id"] = str(row_data["id"])
+
+    return DataItem(
+        data=text,
+        label=title or str(row_data.get("id")),
+        external_metadata=external_metadata,
+        data_id=data_id,
+    )
+
+
+def _clean(value: Any) -> str:
+    """Coerce a possibly-None cell value to a stripped string."""
+    return str(value).strip() if value is not None else ""
 
 
 def _build_schema_context_text(dlt_row: DltRowData) -> str:
