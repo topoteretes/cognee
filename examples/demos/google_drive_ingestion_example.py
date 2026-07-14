@@ -1,16 +1,13 @@
 """Ingest a Google Drive folder into cognee memory, incrementally.
 
-Demonstrates the Google Drive DLT connector: Docs, Sheets, PDFs, plain text
-files, and uploaded Office documents (docx/xlsx/pptx/odt/ods/odp) in a
-folder (recursively, by default) are extracted, chunked, and cognified
-like any other document. Re-running this script only re-processes files
-that changed since the last run, and files removed from the folder
+Demonstrates the Google Drive DLT connector: Docs, Sheets, PDFs, and plain-text
+files in a folder (recursively, by default) are extracted, chunked, and
+cognified like any other document. Re-running this script only re-processes
+files that changed since the last run, and files removed from the folder
 (deleted or trashed) are forgotten automatically.
 
 Install:
-    pip install "cognee[dlt,google-drive]"
-    # Also add cognee[docs] if your folder contains uploaded Office files
-    # (.docx/.xlsx/.pptx/.odt/.ods/.odp) rather than native Google formats.
+    pip install "cognee[google-drive]"
 
 Auth setup — pick ONE of the two modes below.
 
@@ -36,7 +33,8 @@ Auth setup — pick ONE of the two modes below.
        GOOGLE_DRIVE_TOKEN_PATH=/path/to/cache-the-user-token.json
        GOOGLE_DRIVE_FOLDER_ID=<the folder's Drive ID, from its URL>
    - The first run opens a browser for one-time consent; subsequent runs
-     reuse the cached, auto-refreshed token.
+     reuse the cached, auto-refreshed token. For headless / CI use,
+     pre-authorize the token file once on a machine with a browser.
 
 Also set the usual cognee LLM_API_KEY (see .env.template) — this example
 calls cognee.recall(), which needs an LLM for the final completion.
@@ -45,11 +43,11 @@ calls cognee.recall(), which needs an LLM for the final completion.
 import asyncio
 
 import cognee
-from cognee.tasks.ingestion.connectors.google_drive import create_google_drive_source
+from cognee.tasks.ingestion.connectors import google_drive_source
 
 
 async def main():
-    drive_source = create_google_drive_source()  # reads GOOGLE_DRIVE_* env vars
+    drive_source = google_drive_source()  # reads GOOGLE_DRIVE_* env vars
 
     print("=== Initial sync ===")
     result = await cognee.remember(
@@ -74,7 +72,7 @@ async def main():
 
     print("\n=== Incremental re-sync (only changed/removed files are processed) ===")
     result = await cognee.remember(
-        create_google_drive_source(),
+        google_drive_source(),
         dataset_name="google_drive_demo",
         primary_key="file_id",
         write_disposition="merge",

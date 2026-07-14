@@ -18,7 +18,7 @@ from cognee.infrastructure.llm import LLMGateway
 from cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine import (
     LiteLLMEmbeddingEngine,
 )
-import cognee.tasks.ingestion.connectors.google_drive.source as gd_source
+from cognee.tasks.ingestion.connectors import google_drive as gd_source
 
 add_data_points_module = importlib.import_module("cognee.tasks.storage.add_data_points")
 
@@ -123,12 +123,6 @@ async def _mock_structured_output(
 async def clean_environment(tmp_path, monkeypatch):
     pytest.importorskip("dlt")
 
-    from cognee.tasks.ingestion.connectors.google_drive.config import get_google_drive_config
-
-    # GoogleDriveConfig is @lru_cache'd, so a value cached by an earlier
-    # test in this process would otherwise leak into this one.
-    get_google_drive_config.cache_clear()
-
     monkeypatch.setenv("COGNEE_SKIP_CONNECTION_TEST", "true")
     monkeypatch.setenv("GOOGLE_DRIVE_FOLDER_ID", "root")
     monkeypatch.setenv("GOOGLE_DRIVE_AUTH_MODE", "service_account")
@@ -152,7 +146,7 @@ async def clean_environment(tmp_path, monkeypatch):
 
     file_a = _file_meta("fileA")
     service = _FakeDriveService(files_by_folder={"root": [file_a]}, file_by_id={"fileA": file_a})
-    monkeypatch.setattr(gd_source, "build_drive_service", lambda config: service)
+    monkeypatch.setattr(gd_source, "build_drive_service", lambda **kwargs: service)
     monkeypatch.setattr(
         gd_source,
         "extract_file_content",
@@ -166,7 +160,6 @@ async def clean_environment(tmp_path, monkeypatch):
 
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
-    get_google_drive_config.cache_clear()
 
 
 @pytest.mark.asyncio
