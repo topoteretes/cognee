@@ -57,6 +57,9 @@ async def test_auth_error_bypasses_retry(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_permission_denied_bypasses_retry(monkeypatch):
+    # A 403 PermissionDeniedError is terminal (org/region/model access denied).
+    # Note: quota exhaustion surfaces as a 429 RateLimitError, which is
+    # transient and intentionally still retried — so it is not tested here.
     monkeypatch.setenv("MOCK_EMBEDDING", "false")
     engine = LiteLLMEmbeddingEngine(dimensions=4)
 
@@ -65,7 +68,7 @@ async def test_permission_denied_bypasses_retry(monkeypatch):
     async def _raise_perm(**kwargs):
         calls["count"] += 1
         raise litellm.exceptions.PermissionDeniedError(
-            message="quota exhausted",
+            message="You do not have access to model text-embedding-3-large",
             llm_provider="openai",
             model="text-embedding-3-large",
             response=_fake_response(403),
