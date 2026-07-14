@@ -1,4 +1,5 @@
 import os
+import base64
 from pathlib import Path
 from typing import Optional
 from functools import lru_cache
@@ -37,18 +38,19 @@ class BaseConfig(BaseSettings):
         self.system_root_directory = ensure_absolute_path(self.system_root_directory)
         self.logs_root_directory = ensure_absolute_path(self.logs_root_directory)
 
-        # Langfuse OTLP Ergonomic Configuration
+        # Langfuse rides the existing OTLP pipeline as just another destination.
+        # When LANGFUSE_* keys are set, derive the OTLP endpoint + Basic-auth header
+        # and turn tracing on. Fully opt-in: nothing changes unless a key is present.
         if self.langfuse_public_key or self.langfuse_secret_key:
             if not (self.langfuse_public_key and self.langfuse_secret_key):
                 raise ValueError(
                     "Both LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY must be provided together."
                 )
 
-            import base64
-
             auth_str = f"{self.langfuse_public_key}:{self.langfuse_secret_key}"
             auth_b64 = base64.b64encode(auth_str.encode("utf-8")).decode("utf-8")
 
+            # Respect an explicit OTLP endpoint/headers if the user already set one.
             if not self.otel_exporter_otlp_endpoint:
                 self.otel_exporter_otlp_endpoint = (
                     f"{self.langfuse_host.rstrip('/')}/api/public/otel/v1/traces"

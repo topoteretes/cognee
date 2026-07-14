@@ -5,6 +5,32 @@ from .observers import Observer
 from .exceptions import UnsupportedObserverError
 
 
+def _set_generation_attributes(span, adapter) -> None:
+    """Emit OTel-GenAI semantic conventions on a generation span so any OTLP
+    backend (Langfuse, Dash0, Datadog, ...) renders the LLM call as a generation.
+
+    ``langfuse.observation.type`` is set unconditionally so the span is still
+    classified as a generation when the model name is unavailable (e.g. llama.cpp
+    local mode leaves ``model=None``). ``gen_ai.request.model`` is the *requested*
+    model; provider names follow the lowercase GenAI convention.
+    """
+    from cognee.modules.observability.tracing import (
+        GEN_AI_REQUEST_MODEL,
+        GEN_AI_SYSTEM,
+        LANGFUSE_OBSERVATION_TYPE,
+    )
+
+    span.set_attribute(LANGFUSE_OBSERVATION_TYPE, "generation")
+
+    model = getattr(adapter, "model", None)
+    if model:
+        span.set_attribute(GEN_AI_REQUEST_MODEL, model)
+
+    provider = getattr(adapter, "name", None)
+    if provider:
+        span.set_attribute(GEN_AI_SYSTEM, provider.lower())
+
+
 def _wrap_with_otel(inner_decorator):
     """Compose OTEL span creation around an existing decorator.
 
@@ -33,8 +59,6 @@ def _wrap_with_otel(inner_decorator):
                     from cognee.modules.observability.tracing import (
                         get_tracer,
                         COGNEE_SPAN_CATEGORY,
-                        COGNEE_LLM_MODEL,
-                        COGNEE_LLM_PROVIDER,
                     )
 
                     tracer = get_tracer()
@@ -42,14 +66,12 @@ def _wrap_with_otel(inner_decorator):
                         return await wrapped(*args, **kwargs)
 
                     kind = SpanKind.CLIENT if category == "generation" else SpanKind.INTERNAL
-                    with tracer.start_as_current_span(f"cognee.observe.{func.__name__}", kind=kind) as span:
+                    with tracer.start_as_current_span(
+                        f"cognee.observe.{func.__name__}", kind=kind
+                    ) as span:
                         span.set_attribute(COGNEE_SPAN_CATEGORY, category)
-                        if category == "generation" and len(args) > 0:
-                            adapter = args[0]
-                            if hasattr(adapter, "model"):
-                                span.set_attribute(COGNEE_LLM_MODEL, adapter.model)
-                            if hasattr(adapter, "name"):
-                                span.set_attribute(COGNEE_LLM_PROVIDER, adapter.name.lower())
+                        if category == "generation" and args:
+                            _set_generation_attributes(span, args[0])
                         return await wrapped(*args, **kwargs)
 
                 @functools.wraps(func)
@@ -63,8 +85,6 @@ def _wrap_with_otel(inner_decorator):
                     from cognee.modules.observability.tracing import (
                         get_tracer,
                         COGNEE_SPAN_CATEGORY,
-                        COGNEE_LLM_MODEL,
-                        COGNEE_LLM_PROVIDER,
                     )
 
                     tracer = get_tracer()
@@ -72,14 +92,12 @@ def _wrap_with_otel(inner_decorator):
                         return wrapped(*args, **kwargs)
 
                     kind = SpanKind.CLIENT if category == "generation" else SpanKind.INTERNAL
-                    with tracer.start_as_current_span(f"cognee.observe.{func.__name__}", kind=kind) as span:
+                    with tracer.start_as_current_span(
+                        f"cognee.observe.{func.__name__}", kind=kind
+                    ) as span:
                         span.set_attribute(COGNEE_SPAN_CATEGORY, category)
-                        if category == "generation" and len(args) > 0:
-                            adapter = args[0]
-                            if hasattr(adapter, "model"):
-                                span.set_attribute(COGNEE_LLM_MODEL, adapter.model)
-                            if hasattr(adapter, "name"):
-                                span.set_attribute(COGNEE_LLM_PROVIDER, adapter.name.lower())
+                        if category == "generation" and args:
+                            _set_generation_attributes(span, args[0])
                         return wrapped(*args, **kwargs)
 
                 import asyncio

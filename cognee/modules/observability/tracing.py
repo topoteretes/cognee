@@ -45,6 +45,13 @@ COGNEE_RESULT_SUMMARY = "cognee.result.summary"
 COGNEE_RESULT_COUNT = "cognee.result.count"
 COGNEE_PIPELINE_NAME = "cognee.pipeline.name"
 
+# OTel-GenAI semantic conventions + the Langfuse observation-type hint. Emitted
+# on generation spans (see get_observe) so any OTLP backend — Langfuse included —
+# renders LLM calls as generations without a separate SDK or attribute rewrite.
+GEN_AI_REQUEST_MODEL = "gen_ai.request.model"
+GEN_AI_SYSTEM = "gen_ai.system"
+LANGFUSE_OBSERVATION_TYPE = "langfuse.observation.type"
+
 # V2 API attributes
 COGNEE_DATASET_NAME = "cognee.dataset.name"
 COGNEE_SESSION_ID = "cognee.session.id"
@@ -250,91 +257,62 @@ def _is_auto_instrumented() -> bool:
     return current is not None and type(current).__name__ != "ProxyTracerProvider"
 
 
-class LangfuseAttributeProcessor(SimpleSpanProcessor):
-    """Maps Cognee attributes to Langfuse/OTel-GenAI semantic conventions."""
-
-    def on_end(self, span: "ReadableSpan") -> None:
-        if hasattr(span, "_attributes") and span._attributes is not None:
-            attrs = span._attributes
-            
-            # OpenTelemetry freezes attributes on span end. We temporarily unfreeze them to map to Langfuse conventions.
-            was_immutable = getattr(attrs, "_immutable", False)
-            if was_immutable:
-                attrs._immutable = False
-                
-            if COGNEE_LLM_MODEL in attrs:
-                attrs["gen_ai.request.model"] = attrs[COGNEE_LLM_MODEL]
-            if COGNEE_LLM_PROVIDER in attrs:
-                attrs["gen_ai.system"] = attrs[COGNEE_LLM_PROVIDER]
-            
-            # Hard override to guarantee Langfuse parses it as a generation
-            if attrs.get(COGNEE_SPAN_CATEGORY) == "generation":
-                attrs["langfuse.observation.type"] = "generation"
-            
-            # Anticipating hackathon PR #3606 token metering
-            if "cognee.llm.input_tokens" in attrs:
-                attrs["gen_ai.usage.input_tokens"] = attrs["cognee.llm.input_tokens"]
-            if "cognee.llm.output_tokens" in attrs:
-                attrs["gen_ai.usage.output_tokens"] = attrs["cognee.llm.output_tokens"]
-            if "cognee.llm.cost" in attrs:
-                attrs["gen_ai.usage.cost"] = attrs["cognee.llm.cost"]
-
-            if was_immutable:
-                attrs._immutable = True
-
-        super().on_end(span)
+def _parse_otlp_headers(raw: Optional[str]) -> Optional[dict]:
+    """Parse an ``OTEL_EXPORTER_OTLP_HEADERS``-style ``key=value,key2=value2``
+    string into a dict. Splitting on the first ``=`` preserves base64 padding in
+    values (e.g. ``Authorization=Basic abc==``). Returns None when empty."""
+    if not raw:
+        return None
+    headers: dict[str, str] = {}
+    for pair in raw.split(","):
+        if "=" in pair:
+            key, value = pair.split("=", 1)
+            headers[key.strip()] = value.strip()
+    return headers or None
 
 
 def _try_add_otlp_exporter(provider: "TracerProvider") -> None:
     """If an OTLP endpoint is configured, add an OTLP span exporter.
 
-    Reads the endpoint from ``BaseConfig.otel_exporter_otlp_endpoint``.
-    The OTLP exporters also honour the standard ``OTEL_EXPORTER_OTLP_*``
-    env vars for headers, compression, etc.
+    Reads the endpoint and headers from ``BaseConfig``. The OTLP exporters also
+    honour the standard ``OTEL_EXPORTER_OTLP_*`` env vars for compression, etc.
+
+    Langfuse's OTLP endpoint (``/api/public/otel``) only accepts OTLP over HTTP,
+    so the HTTP exporter is forced for it — including self-hosted instances on a
+    custom domain. Every other endpoint prefers gRPC and falls back to HTTP.
     """
     from cognee.base_config import get_base_config
 
     config = get_base_config()
-    if not config.otel_exporter_otlp_endpoint:
+    endpoint = config.otel_exporter_otlp_endpoint
+    if not endpoint:
         return
 
-    is_langfuse = "langfuse" in config.otel_exporter_otlp_endpoint.lower()
+    headers = _parse_otlp_headers(config.otel_exporter_otlp_headers)
 
-    # Parse headers if present
-    headers = None
-    if config.otel_exporter_otlp_headers:
-        headers = {}
-        for pair in config.otel_exporter_otlp_headers.split(","):
-            if "=" in pair:
-                k, v = pair.split("=", 1)
-                headers[k.strip()] = v.strip()
-
-    def _add_http_exporter():
+    def _add_http_exporter() -> None:
         from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
             OTLPSpanExporter as OTLPHttpSpanExporter,
         )
 
-        kwargs = {"endpoint": config.otel_exporter_otlp_endpoint}
-        if headers:
-            kwargs["headers"] = headers
+        exporter = OTLPHttpSpanExporter(endpoint=endpoint, headers=headers)
+        provider.add_span_processor(SimpleSpanProcessor(exporter))
 
-        otlp_exporter = OTLPHttpSpanExporter(**kwargs)
-        if is_langfuse:
-            provider.add_span_processor(LangfuseAttributeProcessor(otlp_exporter))
-        else:
-            provider.add_span_processor(SimpleSpanProcessor(otlp_exporter))
+    def _warn_no_exporter() -> None:
+        import warnings
 
-    if is_langfuse:
-        # Langfuse only supports HTTP OTLP
+        warnings.warn(
+            "otel_exporter_otlp_endpoint is set but no OTLP exporter is installed. "
+            "Install with: pip install cognee[tracing]",
+            stacklevel=2,
+        )
+
+    # Langfuse ingests OTLP over HTTP only (no gRPC).
+    if "/api/public/otel" in endpoint:
         try:
             _add_http_exporter()
         except ImportError:
-            import warnings
-
-            warnings.warn(
-                "OTLP HTTP exporter is required for Langfuse. Install with: pip install cognee[tracing]",
-                stacklevel=2,
-            )
+            _warn_no_exporter()
         return
 
     try:
@@ -342,23 +320,13 @@ def _try_add_otlp_exporter(provider: "TracerProvider") -> None:
             OTLPSpanExporter,
         )
 
-        kwargs = {"endpoint": config.otel_exporter_otlp_endpoint}
-        if headers:
-            kwargs["headers"] = headers
-
-        otlp_exporter = OTLPSpanExporter(**kwargs)
-        provider.add_span_processor(SimpleSpanProcessor(otlp_exporter))
+        exporter = OTLPSpanExporter(endpoint=endpoint, headers=headers)
+        provider.add_span_processor(SimpleSpanProcessor(exporter))
     except ImportError:
         try:
             _add_http_exporter()
         except ImportError:
-            import warnings
-
-            warnings.warn(
-                "otel_exporter_otlp_endpoint is set but no OTLP exporter is installed. "
-                "Install with: pip install cognee[tracing]",
-                stacklevel=2,
-            )
+            _warn_no_exporter()
 
 
 def setup_tracing(console_output: bool = False) -> "trace.Tracer":
