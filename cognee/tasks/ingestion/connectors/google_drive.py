@@ -56,6 +56,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional, Set, Tuple
 
 from cognee.shared.logging_utils import get_logger
+from cognee.tasks.ingestion.dlt_utils import CONTENT_COLUMN_HINT_ATTR
 
 logger = get_logger("google_drive_connector")
 
@@ -210,9 +211,8 @@ def extract_file_content(service: Any, file_id: str, mime_type: str, name: str) 
         )
         return None
 
-    logger.warning(
-        "Skipping unsupported Drive file '%s' (%s): mime type '%s'.", name, file_id, mime_type
-    )
+    # No matching branch: unsupported type. The folder-sync caller (_file_to_row)
+    # guards with is_supported_mime_type and logs the skip, so don't log twice.
     return None
 
 
@@ -248,17 +248,23 @@ def _iter_rows(service, config: _DriveConfig, state: dict):
         # rather than missed. Re-processing such a file is idempotent under
         # write_disposition="merge".
         start_token = _get_start_page_token(service)
+        yielded = 0
         for file_meta in _list_files_in_scope(service, config):
             row = _file_to_row(service, file_meta, config)
             if row is not None:
+                yielded += 1
                 yield row
         state["page_token"] = start_token
+        logger.info("Google Drive: initial sync yielded %d file(s).", yielded)
         return
 
     changed_ids, deleted_ids, new_page_token = _list_changed_file_ids(service, page_token)
 
+    yielded = 0
+    tombstoned = 0
     for file_id in deleted_ids:
-        yield {"file_id": file_id, "deleted": True}
+        tombstoned += 1
+        yield {"file_id": file_id, "_deleted": True}
 
     # The scope set is only needed to check whether changed files are still in
     # the folder, so skip the subfolder walk entirely when nothing changed.
@@ -269,21 +275,29 @@ def _iter_rows(service, config: _DriveConfig, state: dict):
                 file_meta = service.files().get(fileId=file_id, fields=FILE_FIELDS).execute()
             except Exception as e:
                 if _is_not_found(e):
-                    yield {"file_id": file_id, "deleted": True}
+                    tombstoned += 1
+                    yield {"file_id": file_id, "_deleted": True}
                     continue
                 raise RuntimeError(
                     f"Google Drive: failed to fetch metadata for file '{file_id}': {e}"
                 ) from e
 
             if file_meta.get("trashed") or not _is_in_scope(file_meta, scope_folder_ids):
-                yield {"file_id": file_id, "deleted": True}
+                tombstoned += 1
+                yield {"file_id": file_id, "_deleted": True}
                 continue
 
             row = _file_to_row(service, file_meta, config)
             if row is not None:
+                yielded += 1
                 yield row
 
     state["page_token"] = new_page_token
+    logger.info(
+        "Google Drive: incremental sync yielded %d changed file(s), %d deletion(s).",
+        yielded,
+        tombstoned,
+    )
 
 
 def _get_scope_folder_ids(service, config: _DriveConfig) -> Set[str]:
@@ -448,7 +462,7 @@ def _file_to_row(service, file_meta: Dict[str, Any], config: _DriveConfig) -> Op
         "modified_time": file_meta.get("modifiedTime"),
         "parent_folder_id": (file_meta.get("parents") or [None])[0],
         "content": content,
-        "deleted": False,
+        "_deleted": False,
     }
 
 
@@ -522,10 +536,10 @@ def google_drive_source(
         name="google_drive_files",
         write_disposition="merge",
         primary_key="file_id",
-        # `deleted` is a boolean hard-delete marker: rows where it is True are
-        # removed from the dlt destination on merge, which propagates the
-        # deletion through cognee's orphan_cleanup.
-        columns={"deleted": {"data_type": "bool", "hard_delete": True}},
+        # `_deleted` is a boolean hard-delete marker (matching gmail.py): rows
+        # where it is True are removed from the dlt destination on merge, which
+        # propagates the deletion through cognee's orphan_cleanup.
+        columns={"_deleted": {"data_type": "bool", "hard_delete": True}},
     )
     def google_drive_files():
         client = service or build_drive_service(
@@ -539,5 +553,5 @@ def google_drive_source(
     # Self-describing: declare the column carrying file content so
     # resolve_dlt_sources routes rows through normal chunking + LLM graph
     # extraction (document mode) without the caller passing dlt_content_column.
-    resource.cognee_content_column = "content"
+    setattr(resource, CONTENT_COLUMN_HINT_ATTR, "content")
     return resource

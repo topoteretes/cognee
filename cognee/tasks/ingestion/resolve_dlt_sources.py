@@ -20,6 +20,7 @@ from .create_dlt_source import (
 )
 from .data_item import DataItem
 from .dlt_row_data import DltRowData
+from .dlt_utils import CONTENT_COLUMN_HINT_ATTR
 from .ingest_dlt_source import ingest_dlt_source
 
 logger = get_logger("resolve_dlt_sources")
@@ -85,7 +86,7 @@ async def resolve_dlt_sources(
     # call without the caller passing dlt_content_column explicitly.
     if content_column is None:
         for item in dlt_items:
-            hint = getattr(item, "cognee_content_column", None)
+            hint = getattr(item, CONTENT_COLUMN_HINT_ATTR, None)
             if hint:
                 content_column = hint
                 break

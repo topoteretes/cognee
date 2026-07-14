@@ -6,6 +6,12 @@ from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("dlt_utils")
 
+# Attribute a content-bearing connector sets on its returned dlt resource to
+# advertise the column holding document text. resolve_dlt_sources reads it so
+# those rows route through document mode without the caller passing
+# dlt_content_column explicitly.
+CONTENT_COLUMN_HINT_ATTR = "cognee_content_column"
+
 
 def is_dlt_sourced(metadata) -> bool:
     """Check whether external_metadata indicates a DLT source.

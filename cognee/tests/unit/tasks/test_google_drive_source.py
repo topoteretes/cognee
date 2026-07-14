@@ -15,7 +15,6 @@ import pytest
 from cognee.tasks.ingestion.connectors import google_drive as gd_source
 from cognee.tasks.ingestion.connectors.google_drive import _DriveConfig
 
-FOLDER_MIME = "application/vnd.google-apps.folder"
 DOC_MIME = "application/vnd.google-apps.document"
 PDF_MIME = "application/pdf"
 
@@ -146,7 +145,7 @@ def test_initial_sync_yields_all_files_and_advances_state(fake_content_extractio
     rows = list(gd_source._iter_rows(service, _config(), state))
 
     assert {row["file_id"] for row in rows} == {"fileA", "fileB"}
-    assert all(row["deleted"] is False for row in rows)
+    assert all(row["_deleted"] is False for row in rows)
     assert sorted(fake_content_extraction) == ["fileA", "fileB"]
     assert service.get_calls == []  # initial sync only lists, never GETs individually
     # The changes cursor is captured before listing, then persisted for the
@@ -189,7 +188,7 @@ def test_removed_file_yields_hard_delete_tombstone(fake_content_extraction):
 
     rows = list(gd_source._iter_rows(service, _config(), state))
 
-    assert rows == [{"file_id": "fileB", "deleted": True}]
+    assert rows == [{"file_id": "fileB", "_deleted": True}]
     assert service.get_calls == []  # "removed" changes need no metadata fetch
     assert fake_content_extraction == []
     assert state["page_token"] == "t2"
@@ -211,7 +210,7 @@ def test_file_moved_out_of_scope_yields_hard_delete_tombstone(fake_content_extra
 
     rows = list(gd_source._iter_rows(service, _config(), state))
 
-    assert rows == [{"file_id": "fileA", "deleted": True}]
+    assert rows == [{"file_id": "fileA", "_deleted": True}]
     assert fake_content_extraction == []
 
 
@@ -227,7 +226,7 @@ def test_deleted_file_returning_404_on_get_yields_tombstone(fake_content_extract
 
     rows = list(gd_source._iter_rows(service, _config(), state))
 
-    assert rows == [{"file_id": "fileA", "deleted": True}]
+    assert rows == [{"file_id": "fileA", "_deleted": True}]
 
 
 def test_only_deletions_skips_the_subfolder_scope_walk(fake_content_extraction):
@@ -243,7 +242,7 @@ def test_only_deletions_skips_the_subfolder_scope_walk(fake_content_extraction):
 
     rows = list(gd_source._iter_rows(service, _config(), state))
 
-    assert rows == [{"file_id": "fileB", "deleted": True}]
+    assert rows == [{"file_id": "fileB", "_deleted": True}]
     # No files().list() calls at all: deletions don't consult the scope set.
     assert service.list_calls == []
 
