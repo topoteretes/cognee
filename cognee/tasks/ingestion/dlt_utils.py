@@ -47,3 +47,21 @@ def parse_external_metadata(obj) -> dict | None:
             )
             return None
     return None
+
+
+def is_dlt_source_manifest(metadata) -> bool:
+    """Check whether external_metadata indicates a DLT source manifest.
+
+    Manifest items represent a whole DLT source as a single data item
+    (``source == "dlt_source"``), as opposed to legacy per-row items
+    (``source == "dlt"``).
+    """
+    ext = getattr(metadata, "external_metadata", metadata)
+    if isinstance(ext, dict):
+        return ext.get("source") == "dlt_source"
+    if isinstance(ext, str):
+        try:
+            return json.loads(ext).get("source") == "dlt_source"
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return False

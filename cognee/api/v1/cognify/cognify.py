@@ -262,23 +262,69 @@ async def cognify(
         # By calling get pipeline executor we get a function that will have the run_pipeline run in the background or a function that we will need to wait for
         pipeline_executor_func = get_pipeline_executor(run_in_background=run_in_background)
 
-        # Run the run_pipeline in the background or blocking based on executor
-        result = await pipeline_executor_func(
-            pipeline=run_pipeline,
-            tasks=tasks,
-            user=user,
-            datasets=datasets,
-            vector_db_config=vector_db_config,
-            graph_db_config=graph_db_config,
-            incremental_loading=incremental_loading,
-            use_pipeline_cache=False,
-            pipeline_name="cognify_pipeline",
-            data_per_batch=data_per_batch,
-            rollback_handler=cognify_rollback_handler,
-            llm_config=llm_config,
-            embedding_config=embedding_config,
-            data_cache=data_cache,
-        )
+        # DLT-source manifest items run the deterministic DLT pipeline; all
+        # other data items keep the standard flow. The split is per data item,
+        # so mixed datasets get both pipelines, each with its own item subset.
+        dlt_runs, mixed_regular_runs, pure_regular_ids = await _split_dlt_data(datasets, user)
+
+        shared_run_kwargs = {
+            "pipeline": run_pipeline,
+            "user": user,
+            "vector_db_config": vector_db_config,
+            "graph_db_config": graph_db_config,
+            "incremental_loading": incremental_loading,
+            "use_pipeline_cache": False,
+            "data_per_batch": data_per_batch,
+            "rollback_handler": cognify_rollback_handler,
+            "llm_config": llm_config,
+            "embedding_config": embedding_config,
+            "data_cache": data_cache,
+        }
+
+        if not dlt_runs:
+            # Run the run_pipeline in the background or blocking based on executor
+            result = await pipeline_executor_func(
+                tasks=tasks,
+                datasets=datasets,
+                pipeline_name="cognify_pipeline",
+                **shared_run_kwargs,
+            )
+        else:
+            dlt_tasks = await get_dlt_tasks(
+                chunk_size=chunk_size,
+                chunks_per_batch=chunks_per_batch,
+            )
+            partial_results = []
+            for dataset_id, manifest_items in dlt_runs:
+                partial_results.append(
+                    await pipeline_executor_func(
+                        tasks=dlt_tasks,
+                        datasets=[dataset_id],
+                        data=manifest_items,
+                        pipeline_name="dlt_cognify_pipeline",
+                        **shared_run_kwargs,
+                    )
+                )
+            for dataset_id, regular_items in mixed_regular_runs:
+                partial_results.append(
+                    await pipeline_executor_func(
+                        tasks=tasks,
+                        datasets=[dataset_id],
+                        data=regular_items,
+                        pipeline_name="cognify_pipeline",
+                        **shared_run_kwargs,
+                    )
+                )
+            if pure_regular_ids:
+                partial_results.append(
+                    await pipeline_executor_func(
+                        tasks=tasks,
+                        datasets=pure_regular_ids,
+                        pipeline_name="cognify_pipeline",
+                        **shared_run_kwargs,
+                    )
+                )
+            result = _merge_pipeline_results(partial_results)
 
         dataset_desc = str(datasets) if datasets else "all datasets"
         span.set_attribute(
@@ -353,6 +399,101 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
     ]
 
     return default_tasks
+
+
+async def _split_dlt_data(datasets, user):
+    """Partition requested datasets' data items for cognify routing.
+
+    DLT-source manifests (external_metadata.source == "dlt_source") run the
+    DLT pipeline; all other items run the standard cognify pipeline. The split
+    is per data item, so mixed datasets get both pipelines, each with its own
+    item subset.
+
+    Returns (dlt_runs, mixed_regular_runs, pure_regular_ids):
+    - dlt_runs: (dataset_id, manifest items) → dlt_cognify_pipeline
+    - mixed_regular_runs: (dataset_id, non-manifest items) for datasets that
+      also contain manifests → cognify_pipeline with an explicit item subset
+    - pure_regular_ids: dataset ids without any manifests → cognify_pipeline,
+      items loaded by the pipeline itself (unchanged behavior)
+    """
+    from cognee.modules.users.methods import get_default_user
+    from cognee.modules.data.methods import get_authorized_existing_datasets, get_dataset_data
+    from cognee.tasks.ingestion.dlt_utils import is_dlt_source_manifest
+
+    if user is None:
+        user = await get_default_user()
+
+    dataset_list = datasets if isinstance(datasets, list) or datasets is None else [datasets]
+    authorized_datasets = await get_authorized_existing_datasets(
+        datasets=dataset_list, permission_type="write", user=user
+    )
+
+    dlt_runs = []
+    mixed_regular_runs = []
+    pure_regular_ids = []
+    for dataset in authorized_datasets:
+        data_items = await get_dataset_data(dataset.id)
+        manifest_items = [item for item in data_items if is_dlt_source_manifest(item)]
+        regular_items = [item for item in data_items if not is_dlt_source_manifest(item)]
+
+        if not manifest_items:
+            pure_regular_ids.append(dataset.id)
+            continue
+
+        dlt_runs.append((dataset.id, manifest_items))
+        if regular_items:
+            mixed_regular_runs.append((dataset.id, regular_items))
+
+    return dlt_runs, mixed_regular_runs, pure_regular_ids
+
+
+def _merge_pipeline_results(partial_results: list):
+    """Merge results from multiple pipeline executor calls.
+
+    Both executor modes return dicts keyed by dataset_id. For a mixed dataset
+    (two runs on the same dataset id) the regular-pipeline run info wins, as
+    it runs after the DLT pipeline.
+    """
+    merged = {}
+    for partial in partial_results:
+        if not isinstance(partial, dict):
+            return partial_results
+        merged.update(partial)
+    return merged
+
+
+async def get_dlt_tasks(chunk_size: int = None, chunks_per_batch: int = None) -> list[Task]:
+    """Deterministic pipeline for DLT-source manifest datasets.
+
+    No LLM tasks: each manifest row becomes one DocumentChunk (vector-indexed
+    by add_data_points) and the graph structure comes from the relational
+    schema via extract_dlt_source_edges.
+    """
+    from cognee.tasks.ingestion.extract_dlt_source_edges import extract_dlt_source_edges
+
+    cognify_config = get_cognify_config()
+    if chunks_per_batch is None:
+        chunks_per_batch = (
+            cognify_config.chunks_per_batch if cognify_config.chunks_per_batch is not None else 100
+        )
+
+    return [
+        # EXTRACT: classify manifest Data items into DltSourceDocument objects
+        Task(classify_documents),
+        # EXTRACT: one DocumentChunk per manifest row (no text chunking)
+        Task(
+            extract_chunks_from_documents,
+            max_chunk_size=chunk_size or await get_max_chunk_tokens(),
+            chunker=TextChunker,
+        ),
+        # LOAD: persist row chunks and embeddings to graph/vector DBs
+        Task(
+            add_data_points,
+            task_config={"batch_size": chunks_per_batch},
+        ),
+        # LOAD: schema nodes and deterministic FK edges from the manifest
+        Task(extract_dlt_source_edges),
+    ]
 
 
 async def get_temporal_tasks(
