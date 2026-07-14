@@ -65,12 +65,18 @@ class FakeNotionClient:
         self.databases = SimpleNamespace(query=self._db_query)
 
     def search(self, **kwargs):
-        return {"results": self._pages, "has_more": False}
+        # The real Notion API omits archived/trashed pages from search results,
+        # so the connector detects deletion by their absence — mirror that here.
+        return {"results": self._live_pages(), "has_more": False}
 
     def _db_query(self, **kwargs):
-        return {"results": self._pages, "has_more": False}
+        return {"results": self._live_pages(), "has_more": False}
+
+    def _live_pages(self):
+        return [p for p in self._pages if not (p.get("archived") or p.get("in_trash"))]
 
     def _pages_retrieve(self, page_id=None):
+        # pages.retrieve DOES return a trashed page (flagged), unlike search.
         return next(p for p in self._pages if p["id"] == page_id)
 
     def _blocks_list(self, block_id=None, start_cursor=None, **kwargs):
@@ -294,7 +300,9 @@ def test_archived_page_is_removed_on_resync(dlt_mod, tmp_path, monkeypatch):
     blocks = {"p1": [_block("paragraph", "a")], "p2": [_block("paragraph", "b")]}
     _run_sync(dlt_mod, tmp_path, monkeypatch, pages, blocks)
 
-    # p1 archived (with a bumped timestamp so it comes through the window).
+    # p1 archived: the real API drops it from search results (the fake mirrors
+    # that), and the connector skips it on the page_ids path — either way it is
+    # absent from the replace load, so it falls out of staging.
     resync = [
         _page("p1", "2024-03-01T00:00:00.000Z", "Alpha", archived=True),
         _page("p2", "2024-01-01T00:00:00.000Z", "Beta"),
@@ -302,7 +310,28 @@ def test_archived_page_is_removed_on_resync(dlt_mod, tmp_path, monkeypatch):
     pipeline = _run_sync(dlt_mod, tmp_path, monkeypatch, resync, blocks)
 
     rows = _read_pages(pipeline)
-    # hard_delete drops the archived page from staging → orphan cleanup would
-    # then forget it downstream.
+    # Absent from staging → orphan cleanup forgets it downstream.
+    assert "p1" not in rows
+    assert "p2" in rows
+
+
+def test_vanished_page_is_removed_on_resync(dlt_mod, tmp_path, monkeypatch):
+    # A page that simply disappears from the listing (deleted, or unshared from
+    # the integration) must be forgotten too — not just explicitly-archived
+    # pages. This is the case merge + a hard_delete hint could never catch,
+    # because a vanished page is never yielded to flag it.
+    pages = [
+        _page("p1", "2024-01-01T00:00:00.000Z", "Alpha"),
+        _page("p2", "2024-01-01T00:00:00.000Z", "Beta"),
+    ]
+    blocks = {"p1": [_block("paragraph", "a")], "p2": [_block("paragraph", "b")]}
+    _run_sync(dlt_mod, tmp_path, monkeypatch, pages, blocks)
+
+    # p1 no longer returned by the API at all.
+    pipeline = _run_sync(
+        dlt_mod, tmp_path, monkeypatch, [_page("p2", "2024-01-01T00:00:00.000Z", "Beta")], blocks
+    )
+
+    rows = _read_pages(pipeline)
     assert "p1" not in rows
     assert "p2" in rows

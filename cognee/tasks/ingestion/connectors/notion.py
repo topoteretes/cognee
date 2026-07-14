@@ -32,11 +32,6 @@ NOTION_TABLE_NAME = "notion_pages"
 NOTION_SOURCE_NAME = "notion"
 _DEFAULT_NOTION_VERSION = "2022-06-28"
 
-# Notion rows are read back in full each sync so orphan cleanup can spot pages
-# that dropped out of staging (archived/deleted). Use a high cap so the default
-# per-table limit doesn't truncate the read and orphan live pages.
-NOTION_MAX_ROWS = 100_000
-
 # Notion block types whose rich_text renders as a plain markdown paragraph.
 _TEXT_BLOCKS = {"paragraph", "quote", "callout", "toggle"}
 _HEADING_PREFIX = {"heading_1": "# ", "heading_2": "## ", "heading_3": "### "}
@@ -72,19 +67,21 @@ def notion_source(
         notion_version=notion_version or _DEFAULT_NOTION_VERSION,
     )
 
-    @dlt.resource(
-        name=NOTION_TABLE_NAME,
-        primary_key="id",
-        write_disposition="merge",
-        # Archiving/trashing a page bumps last_edited_time, so it comes through
-        # the incremental window; the hard_delete hint then removes it from
-        # staging, making it an orphan that cognee's orphan_cleanup deletes.
-        columns={"archived": {"hard_delete": True}},
-    )
-    def notion_pages(
-        last_edited=dlt.sources.incremental("last_edited_time"),
-    ):
+    @dlt.resource(name=NOTION_TABLE_NAME, primary_key="id", write_disposition="replace")
+    def notion_pages():
+        # Full-snapshot sync: each run replaces staging with exactly the pages
+        # currently visible to the integration. Archived/trashed pages are
+        # dropped from Notion's listings (and skipped below on the page_ids
+        # path), so they fall out of staging and cognee's orphan_cleanup then
+        # forgets them from the graph + vector stores. This is how deletions
+        # propagate — Notion has no delete feed to drive dlt's hard_delete hint,
+        # and search/database queries silently omit trashed pages rather than
+        # returning them flagged. (Same full-snapshot model as the Slack
+        # connector.) Unchanged pages keep a stable content-hash data_id, so
+        # they are not re-ingested or re-cognified downstream.
         for page in _iter_pages(client, page_ids, database_ids):
+            if page.get("archived") or page.get("in_trash"):
+                continue
             yield _page_to_row(client, page)
 
     @dlt.source(name=NOTION_SOURCE_NAME)

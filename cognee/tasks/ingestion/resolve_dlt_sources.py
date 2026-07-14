@@ -21,7 +21,7 @@ from .create_dlt_source import (
 from .data_item import DataItem
 from .dlt_row_data import DltRowData
 from .ingest_dlt_source import ingest_dlt_source
-from .connectors.notion import NOTION_MAX_ROWS, NOTION_SOURCE_NAME, expand_notion_rows
+from .connectors.notion import NOTION_SOURCE_NAME, expand_notion_rows
 
 logger = get_logger("resolve_dlt_sources")
 
@@ -98,17 +98,18 @@ async def resolve_dlt_sources(
         )
         all_rows.extend(rows)
 
-    # Notion always merges on page id and reads the full current staging state
-    # back, so orphan cleanup can detect pages that were archived/deleted
-    # (dropped from staging via the resource's hard_delete hint).
+    # Notion is a full-snapshot source: each run replaces staging with exactly
+    # the pages currently visible, and the whole set is read back (no row cap,
+    # max_rows_per_table=0) so orphan cleanup can forget pages that dropped out
+    # (archived/deleted/unshared → absent from the replace load).
     notion_rows: List[DltRowData] = []
     for dlt_item in notion_items:
         rows = await ingest_dlt_source(
             dlt_item,
             dataset_name,
             primary_key="id",
-            write_disposition="merge",
-            max_rows_per_table=NOTION_MAX_ROWS,
+            write_disposition="replace",
+            max_rows_per_table=0,
         )
         notion_rows.extend(rows)
 
@@ -219,13 +220,18 @@ async def resolve_dlt_sources(
     # to await post-commit instead of deleting here.
     #
     # Relational sources skip cleanup for "append" (each run intentionally adds
-    # new rows). Notion always reconciles: it reads the full current page set
-    # back, so pages missing from it (archived/deleted) must be forgotten. The
-    # two paths are cleaned separately so an append relational run never treats
-    # Notion pages as orphans, or vice versa.
+    # new rows). Notion reconciles the full current page set, so pages missing
+    # from it (archived/deleted) must be forgotten. The two paths are cleaned
+    # separately so an append relational run never treats Notion pages as
+    # orphans, or vice versa.
+    #
+    # Both paths skip cleanup when their fresh set is empty: an empty read-back
+    # cannot be distinguished from a failed/misconfigured sync, and treating it
+    # as "everything is an orphan" would wipe the whole corpus. Leaving stale
+    # rows for one cycle is the safe failure mode.
     relational_fresh: Set[UUID] = set(row_id_lookup.values())
     do_relational_cleanup = write_disposition != "append" and bool(relational_fresh)
-    do_notion_cleanup = bool(notion_items)
+    do_notion_cleanup = bool(notion_fresh_ids)
 
     orphan_cleanup: Optional[Callable[[], Any]] = None
     if do_relational_cleanup or do_notion_cleanup:
