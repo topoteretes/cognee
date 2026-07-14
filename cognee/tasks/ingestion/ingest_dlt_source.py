@@ -89,27 +89,17 @@ async def ingest_dlt_source(
         )
 
     # Execute dlt pipeline with error handling.
-    # pipeline_name is scoped per dataset (not a shared constant) so that a
-    # failed/stuck load on one dataset can't block ingestion for any other
-    # dataset — each gets its own local working directory under
+    # pipeline_name is scoped per dataset (not a shared constant) because dlt
+    # keys the pipeline working directory — and the per-resource incremental
+    # state — by pipeline_name. A shared name would make two datasets ingesting
+    # the same resource (e.g. a Google Drive folder) collide on each other's
+    # incremental cursor. Per-dataset names give each its own state under
     # ~/.dlt/pipelines/.
     pipeline = dlt.pipeline(
         pipeline_name=f"ingest_dlt_source_{dataset_name}",
         destination=destination,
         dataset_name=dataset_name,
     )
-
-    # A previous run that failed mid-load leaves a pending package that dlt
-    # will otherwise keep retrying forever, silently ignoring any new data
-    # extracted on subsequent calls (cognee always re-extracts fresh data
-    # itself, so there's nothing worth preserving in a stale pending load).
-    if pipeline.has_pending_data:
-        logger.warning(
-            "Dropping pending/failed load package(s) from a previous run for dataset '%s' "
-            "before re-ingesting.",
-            original_dataset_name,
-        )
-        pipeline.drop_pending_packages()
 
     # Build run kwargs based on disposition
     run_kwargs = {
