@@ -1,6 +1,7 @@
 import sys
 import os
 import argparse
+import logging
 import signal
 import subprocess
 import warnings
@@ -209,22 +210,32 @@ def _create_parser() -> tuple[argparse.ArgumentParser, Dict[str, SupportsCliComm
     return parser, installed_commands
 
 
-def _silence_teardown_warnings() -> None:
-    """Hide aiohttp's shutdown-time ResourceWarnings from the CLI.
+class _DropUnclosedFilter(logging.Filter):
+    """Drop aiohttp's shutdown-time ``Unclosed ...`` records (keep the rest)."""
 
-    aiohttp finalises its ClientSession / connector / connection
-    asynchronously in ``__del__`` during interpreter shutdown; when the CLI
-    exits between the last await and event-loop teardown these emit
-    "Unclosed ..." ResourceWarnings that are not actionable here and read
-    like a failure to first-time users. Installed only for a real CLI run
-    (not as an import side effect) and skipped in debug mode so
-    contributors still see them.
+    def filter(self, record: logging.LogRecord) -> bool:
+        return not record.getMessage().startswith("Unclosed ")
+
+
+def _silence_teardown_warnings() -> None:
+    """Hide aiohttp's shutdown-time "Unclosed ..." noise from the CLI.
+
+    aiohttp finalises its ClientSession / connector / connection in
+    ``__del__`` during interpreter shutdown and reports the leak through two
+    channels: a ``ResourceWarning`` (usually hidden) and the asyncio event
+    loop's exception handler, which logs an ERROR on the ``asyncio`` logger —
+    that second one is the two-line "Unclosed client session ..." noise a
+    first-time user actually sees. Neither is actionable in the CLI, so
+    silence both, surgically (only the "Unclosed" records, so genuine asyncio
+    errors still surface). Installed only for a real CLI run (not as an import
+    side effect) and skipped in debug mode so contributors still see them.
     """
     warnings.filterwarnings(
         "ignore",
         message="Unclosed (client session|connector|connection)",
         category=ResourceWarning,
     )
+    logging.getLogger("asyncio").addFilter(_DropUnclosedFilter())
 
 
 def main() -> int:
