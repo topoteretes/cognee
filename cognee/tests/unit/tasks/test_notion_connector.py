@@ -288,7 +288,7 @@ def test_edit_is_reflected_on_resync(dlt_mod, tmp_path, monkeypatch):
     pages = [_page("p1", "2024-01-01T00:00:00.000Z", "Alpha")]
     _run_sync(dlt_mod, tmp_path, monkeypatch, pages, {"p1": [_block("paragraph", "v1")]})
 
-    # Edit bumps last_edited_time so the incremental cursor picks it up.
+    # Edited content is re-fetched and replaces the prior snapshot row.
     edited = [_page("p1", "2024-02-01T00:00:00.000Z", "Alpha")]
     pipeline = _run_sync(
         dlt_mod, tmp_path, monkeypatch, edited, {"p1": [_block("paragraph", "v2")]}
@@ -342,3 +342,75 @@ def test_vanished_page_is_removed_on_resync(dlt_mod, tmp_path, monkeypatch):
     rows = _read_pages(pipeline)
     assert "p1" not in rows
     assert "p2" in rows
+
+
+# ---------------------------------------------------------------------------
+# Error handling: under replace, a partial snapshot must not forget live pages
+# ---------------------------------------------------------------------------
+
+
+def _api_error(status, code):
+    import httpx
+    from notion_client.errors import APIResponseError
+
+    resp = httpx.Response(status, request=httpx.Request("GET", "https://api.notion.com/v1/x"))
+    return APIResponseError(resp, "err", code)
+
+
+def test_error_classification():
+    import httpx
+    from notion_client.errors import APIErrorCode
+
+    from cognee.tasks.ingestion.connectors.notion import _is_gone, _is_transient
+
+    # Retryable: rate-limit / server / timeout / network.
+    assert _is_transient(httpx.ReadTimeout("t")) is True
+    assert _is_transient(_api_error(503, APIErrorCode.InternalServerError)) is True
+    assert _is_transient(ValueError()) is False
+    # Permanently gone (forgetting is correct) — and NOT transient.
+    assert _is_gone(_api_error(404, APIErrorCode.ObjectNotFound)) is True
+    assert _is_transient(_api_error(404, APIErrorCode.ObjectNotFound)) is False
+    assert _is_gone(ValueError()) is False
+
+
+def test_page_ids_skips_gone_but_reraises_other():
+    from notion_client.errors import APIErrorCode
+
+    from cognee.tasks.ingestion.connectors.notion import _iter_pages
+
+    def retrieve(page_id=None):
+        if page_id == "gone":
+            raise _api_error(404, APIErrorCode.ObjectNotFound)
+        if page_id == "boom":
+            raise ValueError("not a gone-error")
+        return _page(page_id, "2024-01-01T00:00:00.000Z", "OK")
+
+    client = SimpleNamespace(pages=SimpleNamespace(retrieve=retrieve))
+
+    # A permanently-gone page is skipped; a live page still comes through.
+    assert [p["id"] for p in _iter_pages(client, ["gone", "ok"], None)] == ["ok"]
+    # A non-"gone" error must abort, not silently drop (would forget under replace).
+    with pytest.raises(ValueError):
+        list(_iter_pages(client, ["boom"], None))
+
+
+def test_render_error_aborts_sync(dlt_mod, tmp_path):
+    # A block-render failure must abort the run (leaving staging/memory intact),
+    # not commit a partial snapshot that orphan cleanup reconciles as a deletion.
+    from cognee.tasks.ingestion.connectors.notion import notion_source
+
+    def boom(**kwargs):
+        raise ValueError("render boom")
+
+    fake = FakeNotionClient(pages=[_page("p1", "2024-01-01T00:00:00.000Z", "Alpha")], blocks={})
+    fake.blocks = SimpleNamespace(children=SimpleNamespace(list=boom))
+
+    db_path = (tmp_path / "boom.db").as_posix()
+    pipeline = dlt_mod.pipeline(
+        pipeline_name="notion_boom",
+        destination=dlt_mod.destinations.sqlalchemy(f"sqlite:///{db_path}"),
+        dataset_name="notion_ds",
+        pipelines_dir=str(tmp_path / "state"),
+    )
+    with pytest.raises(Exception):
+        pipeline.run(notion_source(client=fake))

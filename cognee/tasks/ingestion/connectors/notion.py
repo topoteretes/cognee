@@ -93,19 +93,18 @@ def notion_source(
         # path), so they fall out of staging and cognee's orphan_cleanup then
         # forgets them from the graph + vector stores. Unchanged pages keep a
         # stable content-hash data_id, so they are not re-ingested/re-cognified.
+        #
+        # A render error is NOT swallowed: because staging is authoritative
+        # (replace), a page missing from a partial snapshot would be forgotten as
+        # if deleted. Letting the error abort the run leaves staging — and memory
+        # — untouched, which is the safe failure. Transient blips are already
+        # retried in _request; only a persistent failure reaches here.
         count = 0
         for page in _iter_pages(client, page_ids, database_ids):
             if page.get("archived") or page.get("in_trash"):
                 continue
-            try:
-                row = _page_to_row(client, page)
-            except Exception as exc:
-                # Isolate a single bad page (permission/render error) instead of
-                # forfeiting the whole sync.
-                logger.warning("Notion: skipping page %s: %s", page.get("id"), exc)
-                continue
             count += 1
-            yield row
+            yield _page_to_row(client, page)
         logger.info("Notion: synced %d page(s).", count)
 
     @dlt.source(name=NOTION_SOURCE_NAME)
@@ -125,31 +124,45 @@ def notion_source(
 
 
 def _request(method, **kwargs):
-    """Call a Notion API method, retrying on rate-limit / transient errors.
+    """Call a Notion API method, retrying rate-limit / transient errors.
 
     notion-client does not retry or honor ``Retry-After`` itself, and Notion
     enforces ~3 requests/second, so a page with many nested blocks would
-    otherwise 429 and abort the sync.
+    otherwise 429 and abort the sync. Rate-limit (429), server (5xx), timeout,
+    and network errors are retried with backoff; permanent errors (auth,
+    not-found) and exhausted retries propagate so the caller can decide.
     """
-    from notion_client.errors import APIResponseError
-
     for attempt in range(_MAX_RETRIES):
         try:
             return method(**kwargs)
-        except APIResponseError as exc:
-            status = getattr(exc, "status", None)
-            retryable = status in (429, 502, 503, 504) or getattr(exc, "code", "") == "rate_limited"
-            if not retryable or attempt == _MAX_RETRIES - 1:
+        except Exception as exc:
+            if attempt == _MAX_RETRIES - 1 or not _is_transient(exc):
                 raise
             delay = _retry_after(getattr(exc, "headers", None), attempt)
             logger.warning(
-                "Notion: %s — retrying in %.1fs (%d/%d).",
-                status or exc,
-                delay,
-                attempt + 1,
-                _MAX_RETRIES,
+                "Notion: %s — retrying in %.1fs (%d/%d).", exc, delay, attempt + 1, _MAX_RETRIES
             )
             time.sleep(delay)
+
+
+def _is_transient(exc: Exception) -> bool:
+    """True for rate-limit / server / timeout / network errors worth retrying."""
+    import httpx
+    from notion_client.errors import HTTPResponseError, RequestTimeoutError
+
+    if isinstance(exc, (RequestTimeoutError, httpx.TransportError)):
+        return True
+    # APIResponseError subclasses HTTPResponseError; both expose .status.
+    if isinstance(exc, HTTPResponseError):
+        return getattr(exc, "status", None) in (429, 500, 502, 503, 504)
+    return False
+
+
+def _is_gone(exc: Exception) -> bool:
+    """True when a page is permanently gone / not shared (forgetting is correct)."""
+    from notion_client.errors import APIResponseError
+
+    return isinstance(exc, APIResponseError) and getattr(exc, "status", None) in (403, 404)
 
 
 def _retry_after(headers, attempt: int) -> float:
@@ -168,8 +181,13 @@ def _iter_pages(client, page_ids, database_ids):
             try:
                 yield _request(client.pages.retrieve, page_id=page_id)
             except Exception as exc:
-                # A single missing/inaccessible page must not abort the sync.
-                logger.warning("Notion: skipping page %s: %s", page_id, exc)
+                # A permanently-gone page is skipped so it gets forgotten; a
+                # transient error re-raises (a partial snapshot must not drive
+                # deletions under replace).
+                if _is_gone(exc):
+                    logger.warning("Notion: page %s is gone, skipping: %s", page_id, exc)
+                    continue
+                raise
         return
 
     if database_ids:
