@@ -15,8 +15,10 @@ from cognee.shared.logging_utils import get_logger
 from .create_dlt_source import (
     is_connection_string,
     is_csv_path,
+    is_confluence_config,
     create_dlt_source_from_connection_string,
     create_dlt_source_from_csv,
+    create_dlt_source_from_confluence,
 )
 from .data_item import DataItem
 from .dlt_row_data import DltRowData
@@ -62,15 +64,25 @@ async def resolve_dlt_sources(
             data = create_dlt_source_from_csv(data)
         elif is_connection_string(data):
             data = create_dlt_source_from_connection_string(data, query=query)
+    elif isinstance(data, dict) and is_confluence_config(data):
+        data = create_dlt_source_from_confluence(data)
 
     # Normalise to list for uniform processing
     data_list = data if isinstance(data, list) else [data]
 
     dlt_items = []
     non_dlt_items = []
+    custom_sweep_ids = None
+
+    from .confluence_source import CogneeDltSourceWrapper
 
     for item in data_list:
-        if isinstance(item, (DltResource, DltSource, SourceFactory)):
+        if isinstance(item, CogneeDltSourceWrapper):
+            if custom_sweep_ids is None:
+                custom_sweep_ids = set()
+            custom_sweep_ids.update(item.get_all_current_page_ids())
+            dlt_items.append(item.source)
+        elif isinstance(item, (DltResource, DltSource, SourceFactory)):
             dlt_items.append(item)
         else:
             non_dlt_items.append(item)
@@ -195,12 +207,62 @@ async def resolve_dlt_sources(
     # adds new rows, so prior batches should not be treated as orphans.
     orphan_cleanup: Optional[Callable[[], Any]] = None
     if write_disposition != "append":
-        fresh_data_ids: Set[UUID] = set(row_id_lookup.values())
+        if custom_sweep_ids is not None:
+            async def _cleanup() -> None:
+                from cognee.modules.data.methods.get_dataset_data import get_dataset_data
+                from cognee.modules.data.methods import get_authorized_existing_datasets
+                from cognee.modules.data.methods.delete_data import delete_data
+                from cognee.modules.graph.methods.has_data_related_nodes import has_data_related_nodes
+                from cognee.modules.graph.methods.delete_data_nodes_and_edges import delete_data_nodes_and_edges
 
-        async def _cleanup() -> None:
-            await _delete_dlt_orphans(dataset_name, user, fresh_data_ids)
+                existing_datasets = await get_authorized_existing_datasets(
+                    user=user, permission_type="write", datasets=[dataset_name]
+                )
+                if not existing_datasets:
+                    return
 
-        orphan_cleanup = _cleanup
+                dataset = existing_datasets[0]
+                all_data: list = await get_dataset_data(dataset.id)
+
+                orphans = []
+                for data_item in all_data:
+                    ext = data_item.external_metadata
+                    if not isinstance(ext, dict) or ext.get("source") != "dlt":
+                        continue
+                        
+                    stored_source_id = str(ext.get("primary_key_value", ""))
+                    if stored_source_id and stored_source_id not in custom_sweep_ids:
+                        orphans.append(data_item)
+
+                if not orphans:
+                    return
+
+                logger.info("Deleting %d orphaned dlt row(s) (custom sweep) from dataset '%s'.", len(orphans), dataset_name)
+                
+                failed: list = []
+                for orphan in orphans:
+                    try:
+                        if await has_data_related_nodes(dataset.id, orphan.id):
+                            await delete_data_nodes_and_edges(dataset.id, orphan.id, user.id)
+                        await delete_data(orphan, dataset.id)
+                    except Exception:
+                        failed.append(orphan.id)
+                        logger.warning("Failed to delete orphaned dlt row data_id=%s", orphan.id, exc_info=True)
+
+                if failed:
+                    logger.error(
+                        "Failed to delete %d of %d orphaned dlt row(s) from dataset '%s'. "
+                        "Stale data remains. data_ids=%s",
+                        len(failed), len(orphans), dataset_name, ", ".join(str(i) for i in failed)
+                    )
+                
+            orphan_cleanup = _cleanup
+        else:
+            fresh_data_ids: Set[UUID] = set(row_id_lookup.values())
+            async def _cleanup() -> None:
+                await _delete_dlt_orphans(dataset_name, user, fresh_data_ids)
+
+            orphan_cleanup = _cleanup
 
     result = non_dlt_items + expanded_items
     return result, orphan_cleanup
