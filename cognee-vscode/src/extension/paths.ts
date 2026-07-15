@@ -5,14 +5,19 @@
  * planned JetBrains sidecar.
  */
 
-/** Normalize a workspace-relative path: forward slashes, no leading `./` or `/`, no trailing `/`. */
+/**
+ * Normalize a workspace-relative path to forward slashes with no empty, `.`, or
+ * `..` segments. Dropping `..` keeps a citation's server-provided `Source:` path
+ * from traversing outside the workspace (e.g. `../../etc/passwd` → `etc/passwd`),
+ * since the resolver joins the result onto a workspace folder and opens it.
+ */
 export function normalizeRelativePath(path: string): string {
   return path
     .trim()
     .replace(/\\/g, "/")
-    .replace(/^\.\//, "")
-    .replace(/^\/+/, "")
-    .replace(/\/+$/, "");
+    .split("/")
+    .filter((segment) => segment && segment !== "." && segment !== "..")
+    .join("/");
 }
 
 /** The final path segment (basename) of a path or document name. */

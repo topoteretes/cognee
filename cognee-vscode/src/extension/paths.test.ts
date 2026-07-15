@@ -10,6 +10,12 @@ describe("normalizeRelativePath", () => {
     expect(normalizeRelativePath("/a/b/")).toBe("a/b");
     expect(normalizeRelativePath("  x  ")).toBe("x");
   });
+
+  it("drops .. and . segments so a Source path cannot escape the workspace", () => {
+    expect(normalizeRelativePath("../../etc/passwd")).toBe("etc/passwd");
+    expect(normalizeRelativePath("a/../b/./c")).toBe("a/b/c");
+    expect(normalizeRelativePath("/../secret.txt")).toBe("secret.txt");
+  });
 });
 
 describe("basenameOf", () => {
