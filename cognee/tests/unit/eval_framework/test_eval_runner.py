@@ -132,6 +132,22 @@ def test_resolve_run_paths_namespaces_by_benchmark_and_engine(tmp_path):
         assert "HotPotQA_DirectLLM" in paths[key]
 
 
+def test_resolve_run_paths_absolute_override_escapes_namespace(tmp_path):
+    """Documented limitation: an absolute artifact-path override wins over the
+    namespaced run directory (os.path.join drops the prefix). resolve_run_paths
+    warns about it but preserves the override."""
+    escape = str(tmp_path / "escape" / "metrics.json")
+    config = EvalConfig(
+        benchmark="Dummy",
+        evaluation_engine="DirectLLM",
+        results_dir=str(tmp_path / "results"),
+        metrics_path=escape,
+    )
+    paths = resolve_run_paths(config)
+    assert paths["metrics_path"] == escape
+    assert "results" not in paths["metrics_path"]
+
+
 # --------------------------------------------------------------------------- #
 # CLI surface: flag -> EvalConfig mapping
 # --------------------------------------------------------------------------- #

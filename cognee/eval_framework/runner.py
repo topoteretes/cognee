@@ -82,7 +82,16 @@ def resolve_run_paths(config: EvalConfig) -> Dict[str, str]:
 
     run_id = f"{_slugify(config.benchmark)}_{_slugify(config.evaluation_engine)}"
     run_dir = os.path.join(config.results_dir, run_id)
-    return {key: os.path.join(run_dir, params[key]) for key in ARTIFACT_KEYS}
+    resolved = {}
+    for key in ARTIFACT_KEYS:
+        if os.path.isabs(params[key]):
+            # os.path.join discards run_dir for absolute paths; make the escape
+            # from the namespaced run directory visible instead of silent.
+            logger.warning(
+                "Absolute %s overrides the run directory %s: %s", key, run_dir, params[key]
+            )
+        resolved[key] = os.path.join(run_dir, params[key])
+    return resolved
 
 
 def _load_json(path: str) -> Dict[str, Any]:
