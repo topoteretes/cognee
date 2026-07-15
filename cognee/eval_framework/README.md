@@ -14,8 +14,10 @@ pip install "cognee[eval]"
 ```
 
 This one extra installs the analysis/dashboard dependencies plus the DeepEval
-engine. If you only use the `direct_llm` engine you can run without `deepeval`
-installed — it is imported lazily and only when the DeepEval engine is selected.
+engine — everything needed to run a benchmark end to end. Core cognee never
+imports the harness, so a plain `pip install cognee` is unaffected. Within the
+harness `deepeval` is imported lazily and only when the DeepEval engine is
+selected, so the `direct_llm` engine never pulls it in.
 
 ## Run a benchmark in one command
 
@@ -39,6 +41,7 @@ Key flags:
 | `--engine, -e` | `direct_llm` (uses the LLM from your `.env`) or `deepeval` (requires the `eval` extra). |
 | `--limit, -n` | Number of samples in the corpus. |
 | `--seed` | Seed for deterministic corpus sampling (default: `42`). |
+| `--qa-engine` | Retriever used to answer questions (default: `cognee_graph_completion`). |
 | `--output-dir, -o` | Directory for run artifacts, namespaced by benchmark/engine so runs stay comparable. |
 | `--dashboard / --no-dashboard` | Toggle HTML dashboard generation. |
 
