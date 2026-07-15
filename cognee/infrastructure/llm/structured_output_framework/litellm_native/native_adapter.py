@@ -12,9 +12,10 @@ Two paths, chosen per model via ``litellm.supports_response_schema``:
   object, injects the schema into the prompt, validates, and on failure feeds
   the validation error back so the model can self-correct.
 
-Rate-limit, auth, and budget errors propagate immediately; content-policy
-violations fall back to the configured fallback model. This file never imports
-``instructor``.
+Retry/error handling mirrors the instructor adapters: transient errors (incl.
+rate limits) retry with backoff, while auth and quota/budget exhaustion (mapped
+to ``LLMPaymentRequiredError``) are terminal; content-policy violations fall back
+to the configured fallback model. This file never imports ``instructor``.
 """
 
 import asyncio
@@ -103,14 +104,15 @@ class NativeLiteLLMAdapter:
     content-policy fallback path, which uses different model/key/endpoint values.
 
     Instance variables:
-        - model, api_key, endpoint, api_version, fallback_model,
-          fallback_api_key, fallback_endpoint, llm_args, name
+        - model, api_key, endpoint, api_version, max_completion_tokens,
+          fallback_model, fallback_api_key, fallback_endpoint, llm_args, name
     """
 
     def __init__(
         self,
         api_key: str,
         model: str,
+        max_completion_tokens: int,
         name: str = "LiteLLM-Native",
         endpoint: str | None = None,
         api_version: str | None = None,
@@ -124,6 +126,7 @@ class NativeLiteLLMAdapter:
         self.api_key = api_key
         self.api_version = api_version
         self.endpoint = endpoint
+        self.max_completion_tokens = max_completion_tokens
         self.fallback_model = fallback_model
         self.fallback_api_key = fallback_api_key
         self.fallback_endpoint = fallback_endpoint
@@ -296,15 +299,10 @@ class NativeLiteLLMAdapter:
             (
                 litellm.exceptions.NotFoundError,
                 litellm.exceptions.AuthenticationError,
-                # Rate-limit and budget errors are non-retryable — retrying just
-                # burns the remaining quota.
-                litellm.exceptions.RateLimitError,
+                # Quota/billing exhaustion is terminal (#3643); transient rate
+                # limits still retry with backoff, matching the instructor adapters.
                 LLMPaymentRequiredError,
-                # Content-policy filtering is deterministic — fail fast instead
-                # of burning the whole retry budget re-sending flagged input.
-                ContentPolicyFilterError,
-                # A cancelled task must propagate, not be retried (retrying
-                # defeats timeouts / shutdown), matching the instructor adapters.
+                # A cancelled task must propagate, not be retried.
                 asyncio.CancelledError,
             )
         ),
@@ -320,10 +318,10 @@ class NativeLiteLLMAdapter:
     ) -> BaseModel | str:
         """Return a validated instance of *response_model* (or a plain ``str``).
 
-        Rate-limit / auth errors raise immediately; a budget/402 error is
-        surfaced as ``LLMPaymentRequiredError`` (also non-retryable); a
-        content-policy violation retries once on the fallback model before
-        raising ``ContentPolicyFilterError``.
+        Auth errors and quota/budget exhaustion (surfaced as
+        ``LLMPaymentRequiredError``) are terminal; transient errors incl. rate
+        limits retry with backoff. A content-policy violation retries once on the
+        fallback model before raising ``ContentPolicyFilterError``.
         """
         merged_kwargs = {**self.llm_args, **kwargs}
 

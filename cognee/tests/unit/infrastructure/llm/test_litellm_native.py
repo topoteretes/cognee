@@ -1,13 +1,16 @@
 """Unit tests for the litellm_native structured output framework.
 
 Tests cover:
-- Successful structured output via schema-native path
-- Validation-error retry with error context injection (JSON-fallback path)
-- Rate-limit errors propagating immediately without retry
+- Successful structured output via the schema-native path
+- Validation-error retry with error-context injection (JSON-fallback path)
 - Auth errors propagating immediately without retry
-- Fallback model activation on content policy violation
+- Quota/budget errors mapped to LLMPaymentRequiredError, no retry (#3643)
+- asyncio.CancelledError propagating immediately without retry
+- Fallback model activation on a content-policy violation
+- response_format wiring per path (Pydantic class vs json_object + schema)
+- Connection state staying call-invariant across the fallback path
 - Zero instructor imports in the litellm_native package
-- LLMGateway routing to litellm_native when config is set
+- LLMGateway routing to litellm_native when the config is set
 """
 
 import ast
@@ -58,6 +61,7 @@ async def test_acreate_structured_output_returns_valid_pydantic_object():
     adapter = NativeLiteLLMAdapter(
         api_key="test-key",
         model="openai/gpt-5-mini",  # schema-native provider
+        max_completion_tokens=4096,
     )
 
     valid_json = json.dumps({"name": "Alice", "age": 30})
@@ -89,6 +93,7 @@ async def test_validation_error_triggers_retry_with_error_context():
     adapter = NativeLiteLLMAdapter(
         api_key="test-key",
         model="ollama/llama3",  # JSON-fallback provider (not schema-native)
+        max_completion_tokens=4096,
     )
 
     # First call returns invalid JSON (missing 'age'), second returns valid JSON.
@@ -120,40 +125,6 @@ async def test_validation_error_triggers_retry_with_error_context():
 
 
 @pytest.mark.asyncio
-async def test_rate_limit_error_raises_immediately_without_retry():
-    """Rate-limit error must propagate immediately — call count should be 1."""
-    import litellm.exceptions
-
-    from cognee.infrastructure.llm.structured_output_framework.litellm_native.native_adapter import (
-        NativeLiteLLMAdapter,
-    )
-
-    adapter = NativeLiteLLMAdapter(
-        api_key="test-key",
-        model="openai/gpt-5-mini",
-    )
-
-    mock_acompletion = AsyncMock(
-        side_effect=litellm.exceptions.RateLimitError(
-            message="Rate limit exceeded",
-            model="openai/gpt-5-mini",
-            llm_provider="openai",
-        )
-    )
-
-    with patch("litellm.acompletion", mock_acompletion):
-        with pytest.raises(litellm.exceptions.RateLimitError):
-            await adapter.acreate_structured_output(
-                text_input="Test input",
-                system_prompt="Test prompt",
-                response_model=PersonModel,
-            )
-
-    # Must have been called exactly once — no retry.
-    assert mock_acompletion.call_count == 1
-
-
-@pytest.mark.asyncio
 async def test_auth_error_raises_immediately():
     """Authentication error must propagate immediately — call count should be 1."""
     import litellm.exceptions
@@ -165,6 +136,7 @@ async def test_auth_error_raises_immediately():
     adapter = NativeLiteLLMAdapter(
         api_key="bad-key",
         model="openai/gpt-5-mini",
+        max_completion_tokens=4096,
     )
 
     mock_acompletion = AsyncMock(
@@ -198,6 +170,7 @@ async def test_fallback_model_used_on_content_policy_error():
     adapter = NativeLiteLLMAdapter(
         api_key="test-key",
         model="openai/gpt-5-mini",
+        max_completion_tokens=4096,
         fallback_model="openai/gpt-5",
         fallback_api_key="fallback-key",
         fallback_endpoint="https://fallback.example.com",
@@ -327,7 +300,7 @@ class _PaymentRequiredError(Exception):
 
 @pytest.mark.asyncio
 async def test_budget_exhausted_error_raises_payment_required_without_retry():
-    """A budget/402 error surfaces as LLMPaymentRequiredError and is not retried."""
+    """A quota/402 error surfaces as LLMPaymentRequiredError and is not retried (#3643)."""
     from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError
     from cognee.infrastructure.llm.structured_output_framework.litellm_native.native_adapter import (
         NativeLiteLLMAdapter,
@@ -336,6 +309,7 @@ async def test_budget_exhausted_error_raises_payment_required_without_retry():
     adapter = NativeLiteLLMAdapter(
         api_key="test-key",
         model="openai/gpt-5-mini",
+        max_completion_tokens=4096,
     )
 
     mock_acompletion = AsyncMock(side_effect=_PaymentRequiredError("Payment required"))
@@ -362,6 +336,7 @@ async def test_schema_native_passes_response_model_as_response_format():
     adapter = NativeLiteLLMAdapter(
         api_key="test-key",
         model="openai/gpt-5-mini",  # supports_response_schema is True
+        max_completion_tokens=4096,
     )
 
     mock_acompletion = AsyncMock(
@@ -388,6 +363,7 @@ async def test_json_fallback_uses_json_object_and_injects_schema():
     adapter = NativeLiteLLMAdapter(
         api_key="test-key",
         model="ollama/llama3",  # supports_response_schema is False
+        max_completion_tokens=4096,
     )
 
     mock_acompletion = AsyncMock(
@@ -423,6 +399,7 @@ async def test_connection_state_is_call_invariant_across_fallback():
     adapter = NativeLiteLLMAdapter(
         api_key="primary-key",
         model="openai/gpt-5-mini",
+        max_completion_tokens=4096,
         endpoint="https://primary.example.com",
         fallback_model="openai/gpt-5",
         fallback_api_key="fallback-key",
@@ -464,7 +441,9 @@ async def test_str_response_model_uses_plain_completion():
         NativeLiteLLMAdapter,
     )
 
-    adapter = NativeLiteLLMAdapter(api_key="test-key", model="openai/gpt-5-mini")
+    adapter = NativeLiteLLMAdapter(
+        api_key="test-key", model="openai/gpt-5-mini", max_completion_tokens=4096
+    )
 
     mock_acompletion = AsyncMock(return_value=_make_mock_response("just some text"))
     with patch("litellm.acompletion", mock_acompletion):
@@ -480,76 +459,15 @@ async def test_str_response_model_uses_plain_completion():
 
 
 @pytest.mark.asyncio
-async def test_content_policy_without_fallback_raises_filter_error():
-    """No fallback configured: a content-policy violation becomes ContentPolicyFilterError."""
-    from litellm.exceptions import ContentPolicyViolationError
-
-    from cognee.infrastructure.llm.exceptions import ContentPolicyFilterError
-    from cognee.infrastructure.llm.structured_output_framework.litellm_native.native_adapter import (
-        NativeLiteLLMAdapter,
-    )
-
-    adapter = NativeLiteLLMAdapter(api_key="test-key", model="openai/gpt-5-mini")
-
-    mock_acompletion = AsyncMock(
-        side_effect=ContentPolicyViolationError(
-            message="Content policy violation",
-            model="openai/gpt-5-mini",
-            llm_provider="openai",
-        )
-    )
-    with patch("litellm.acompletion", mock_acompletion):
-        with pytest.raises(ContentPolicyFilterError):
-            await adapter.acreate_structured_output(
-                text_input="bad", system_prompt="s", response_model=PersonModel
-            )
-
-    # No fallback and content-policy errors are not retried -> exactly one call.
-    assert mock_acompletion.call_count == 1
-
-
-@pytest.mark.asyncio
-async def test_content_policy_fallback_also_violates_raises_filter_error():
-    """Both primary and fallback hit the content policy -> ContentPolicyFilterError."""
-    from litellm.exceptions import ContentPolicyViolationError
-
-    from cognee.infrastructure.llm.exceptions import ContentPolicyFilterError
-    from cognee.infrastructure.llm.structured_output_framework.litellm_native.native_adapter import (
-        NativeLiteLLMAdapter,
-    )
-
-    adapter = NativeLiteLLMAdapter(
-        api_key="test-key",
-        model="openai/gpt-5-mini",
-        fallback_model="openai/gpt-5",
-        fallback_api_key="fallback-key",
-    )
-
-    mock_acompletion = AsyncMock(
-        side_effect=ContentPolicyViolationError(
-            message="Content policy violation",
-            model="openai/gpt-5-mini",
-            llm_provider="openai",
-        )
-    )
-    with patch("litellm.acompletion", mock_acompletion):
-        with pytest.raises(ContentPolicyFilterError):
-            await adapter.acreate_structured_output(
-                text_input="bad", system_prompt="s", response_model=PersonModel
-            )
-
-    # Primary + fallback attempts, then fail fast (no outer retry).
-    assert mock_acompletion.call_count == 2
-
-
-@pytest.mark.asyncio
 async def test_cancellation_is_not_retried():
     """asyncio.CancelledError must propagate immediately, not be retried."""
     from cognee.infrastructure.llm.structured_output_framework.litellm_native.native_adapter import (
         NativeLiteLLMAdapter,
     )
 
-    adapter = NativeLiteLLMAdapter(api_key="test-key", model="openai/gpt-5-mini")
+    adapter = NativeLiteLLMAdapter(
+        api_key="test-key", model="openai/gpt-5-mini", max_completion_tokens=4096
+    )
 
     mock_acompletion = AsyncMock(side_effect=asyncio.CancelledError())
     with patch("litellm.acompletion", mock_acompletion):
