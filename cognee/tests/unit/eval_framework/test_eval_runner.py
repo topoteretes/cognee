@@ -20,6 +20,7 @@ from cognee.eval_framework.eval_config import EvalConfig
 from cognee.eval_framework.evaluation.evaluator_adapters import EvaluatorAdapter
 from cognee.eval_framework.runner import (
     EvalResult,
+    _create_dashboard,
     add_eval_arguments,
     config_from_namespace,
     resolve_run_paths,
@@ -49,6 +50,23 @@ def test_importing_evaluator_registry_does_not_import_deepeval():
     assert "ok" in result.stdout
 
 
+def test_importing_runner_surface_does_not_import_optional_extras():
+    """Importing the one-command runner surface must keep both the optional
+    ``plotly`` (dashboard) and ``deepeval`` deps out of the import graph. Checked
+    in a clean subprocess so it holds even in CI where those extras ARE installed
+    — a bare ``--help`` returncode check would not catch a future eager hoist."""
+    code = (
+        "import sys;"
+        "import cognee.eval_framework.runner;"
+        "assert 'plotly' not in sys.modules, 'plotly was imported eagerly';"
+        "assert 'deepeval' not in sys.modules, 'deepeval was imported eagerly';"
+        "print('ok')"
+    )
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    assert "ok" in result.stdout
+
+
 def test_direct_llm_engine_loads_without_extra():
     """The DirectLLM engine resolves without needing the eval extra."""
     adapter_cls = EvaluatorAdapter("DirectLLM").load_adapter_class()
@@ -65,7 +83,10 @@ def test_missing_deepeval_raises_actionable_error():
         with pytest.raises(ImportError) as excinfo:
             EvaluatorAdapter.DEEPEVAL.load_adapter_class()
 
+    # The message names the engine and the extra, and chains the original error.
     assert "cognee[eval]" in str(excinfo.value)
+    assert "'DeepEval'" in str(excinfo.value)
+    assert isinstance(excinfo.value.__cause__, ImportError)
 
 
 # --------------------------------------------------------------------------- #
@@ -195,3 +216,58 @@ async def test_run_eval_orchestrates_pipeline_and_returns_result(tmp_path, monke
 
     # Summary is renderable.
     assert any("Dummy" in line for line in summarize_result(result))
+
+
+@pytest.mark.asyncio
+async def test_run_eval_runs_dashboard_step_when_enabled(tmp_path, monkeypatch):
+    """With the dashboard enabled, run_eval invokes the dashboard step and
+    surfaces its path on the result and in the summary."""
+
+    async def fake_noop(params):
+        return []
+
+    async def fake_evaluation(params):
+        with open(params["aggregate_metrics_path"], "w", encoding="utf-8") as f:
+            json.dump({"correctness": {"mean": 1.0}}, f)
+        return []
+
+    def fake_dashboard(params):
+        with open(params["dashboard_path"], "w", encoding="utf-8") as f:
+            f.write("<html></html>")
+        return params["dashboard_path"]
+
+    monkeypatch.setattr("cognee.eval_framework.runner._corpus_step", fake_noop)
+    monkeypatch.setattr("cognee.eval_framework.runner._answer_step", fake_noop)
+    monkeypatch.setattr("cognee.eval_framework.runner._evaluation_step", fake_evaluation)
+    monkeypatch.setattr("cognee.eval_framework.runner._create_dashboard", fake_dashboard)
+
+    config = EvalConfig(
+        benchmark="Dummy",
+        evaluation_engine="DirectLLM",
+        results_dir=str(tmp_path),
+        dashboard=True,
+    )
+    result = await run_eval(config)
+
+    assert result.dashboard_path is not None
+    assert "Dummy_DirectLLM" in result.dashboard_path
+    assert any("Dashboard" in line for line in summarize_result(result))
+
+
+def test_create_dashboard_missing_deps_is_actionable(monkeypatch):
+    """When the dashboard deps (plotly) are absent, _create_dashboard raises an
+    error pointing at both the eval extra and the --no-dashboard escape hatch."""
+    # Setting the module to None makes the in-function import raise ImportError,
+    # emulating a missing plotly even when the eval extra is installed in CI.
+    monkeypatch.setitem(sys.modules, "cognee.eval_framework.metrics_dashboard", None)
+    with pytest.raises(ImportError) as excinfo:
+        _create_dashboard(
+            {
+                "metrics_path": "m.json",
+                "aggregate_metrics_path": "a.json",
+                "dashboard_path": "d.html",
+                "benchmark": "Dummy",
+            }
+        )
+    assert "cognee[eval]" in str(excinfo.value)
+    assert "--no-dashboard" in str(excinfo.value)
