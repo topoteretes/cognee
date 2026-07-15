@@ -15,9 +15,12 @@ pip install "cognee[eval]"
 
 This one extra installs the analysis/dashboard dependencies plus the DeepEval
 engine — everything needed to run a benchmark end to end. Core cognee never
-imports the harness, so a plain `pip install cognee` is unaffected. Within the
-harness `deepeval` is imported lazily and only when the DeepEval engine is
-selected, so the `direct_llm` engine never pulls it in.
+imports the harness, so a plain `pip install cognee` is unaffected. The extra
+itself is only needed for the HTML dashboard (plotly), the DeepEval engine
+(deepeval), and downloading some benchmark datasets (e.g. Musique via gdown):
+a `--engine direct_llm --no-dashboard` run works without it. When the dashboard
+is enabled but its dependencies are missing, the runner fails fast before any
+pipeline work with an actionable error.
 
 ## Run a benchmark in one command
 
