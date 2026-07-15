@@ -194,6 +194,8 @@ class HybridRetriever(BaseRetriever):
             entity_hits,
             self.max_edges_per_entity,
             edge_rank_by_id(edge_hits),
+            node_name=self.node_name,
+            node_name_filter_operator=self.node_name_filter_operator,
         )
         return entities, self._select_facts(edge_hits, entities)
 

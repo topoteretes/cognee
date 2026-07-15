@@ -67,6 +67,11 @@ async def get_memory_fragment(
     node_properties_to_project = list(properties_to_project)
     edge_properties_to_project = ["relationship_name", "edge_text", "edge_object_id"]
 
+    if node_name and "belongs_to_set" not in node_properties_to_project:
+        # Scoped retrievals need node-set ownership downstream to decide whether a
+        # shared entity's description can be shown (see resolve_edges_to_text).
+        node_properties_to_project.append("belongs_to_set")
+
     if feedback_influence > 0.0:
         if "feedback_weight" not in node_properties_to_project:
             node_properties_to_project.append("feedback_weight")
