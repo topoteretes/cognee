@@ -19,7 +19,7 @@ violations fall back to the configured fallback model. This file never imports
 
 import json
 import logging
-from typing import Any, TypeVar
+from typing import Any, cast
 
 import litellm
 from litellm.exceptions import ContentPolicyViolationError
@@ -40,8 +40,6 @@ from cognee.infrastructure.llm.retry_config import llm_retry_stop_condition
 from cognee.modules.observability.get_observe import get_observe
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.rate_limiting import llm_rate_limiter_context_manager
-
-T = TypeVar("T", bound="BaseModel | str")
 
 logger = get_logger()
 observe = get_observe()
@@ -235,14 +233,18 @@ class NativeLiteLLMAdapter:
             except (ValidationError, json.JSONDecodeError) as exc:
                 last_error = exc
                 logger.warning(
-                    "litellm_native validation retry",
-                    attempt=attempt + 1,
-                    max_retries=_MAX_VALIDATION_RETRIES,
-                    error=str(exc),
+                    "litellm_native validation retry %s/%s: %s",
+                    attempt + 1,
+                    _MAX_VALIDATION_RETRIES,
+                    exc,
                 )
 
         # All self-correction attempts exhausted — surface the last error.
-        raise last_error  # type: ignore[misc]
+        raise (
+            last_error
+            if last_error is not None
+            else RuntimeError("litellm_native json fallback produced no result")
+        )
 
     async def _acreate_structured(
         self,
@@ -300,9 +302,9 @@ class NativeLiteLLMAdapter:
         self,
         text_input: str,
         system_prompt: str,
-        response_model: type[T],
+        response_model: type[BaseModel | str],
         **kwargs: Any,
-    ) -> T:
+    ) -> BaseModel | str:
         """Return a validated instance of *response_model* (or a plain ``str``).
 
         Rate-limit / auth errors raise immediately; a budget/402 error is
@@ -324,11 +326,12 @@ class NativeLiteLLMAdapter:
                 **merged_kwargs,
             )
 
+        structured_model = cast(type[BaseModel], response_model)
         try:
             result = await self._acreate_structured(
                 text_input,
                 system_prompt,
-                response_model,
+                structured_model,
                 model=self.model,
                 api_key=self.api_key,
                 endpoint=self.endpoint,
@@ -347,15 +350,15 @@ class NativeLiteLLMAdapter:
                 ) from error
 
             logger.warning(
-                "Primary model hit content policy; trying fallback",
-                primary_model=self.model,
-                fallback_model=self.fallback_model,
+                "Primary model %s hit content policy; trying fallback %s",
+                self.model,
+                self.fallback_model,
             )
             try:
                 return await self._acreate_structured(
                     text_input,
                     system_prompt,
-                    response_model,
+                    structured_model,
                     model=self.fallback_model,
                     api_key=self.fallback_api_key,
                     endpoint=self.fallback_endpoint,
