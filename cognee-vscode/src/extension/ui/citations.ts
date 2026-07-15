@@ -6,7 +6,7 @@ import type { PathIndex } from "../pathIndex";
 import {
   contentMatchesSnippet,
   extractSourcePath,
-  snippetSearchNeedles,
+  findSnippetRange,
   stripProvenanceHeader,
 } from "./resolve";
 
@@ -144,20 +144,16 @@ async function selectCitationTarget(
 }
 
 function revealSnippet(editor: vscode.TextEditor, snippet: string): void {
-  const haystack = editor.document.getText();
-  for (const needle of snippetSearchNeedles(snippet)) {
-    const index = haystack.indexOf(needle);
-    if (index === -1) {
-      continue;
-    }
-    const range = new vscode.Range(
-      editor.document.positionAt(index),
-      editor.document.positionAt(index + needle.length),
-    );
-    editor.selection = new vscode.Selection(range.start, range.end);
-    editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
+  const match = findSnippetRange(editor.document.getText(), snippet);
+  if (!match) {
     return;
   }
+  const range = new vscode.Range(
+    editor.document.positionAt(match[0]),
+    editor.document.positionAt(match[1]),
+  );
+  editor.selection = new vscode.Selection(range.start, range.end);
+  editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
 }
 
 function escapeGlob(name: string): string {

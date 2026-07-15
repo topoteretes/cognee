@@ -3,8 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   contentMatchesSnippet,
   extractSourcePath,
+  findSnippetRange,
   normalizeWhitespace,
-  snippetSearchNeedles,
   stripProvenanceHeader,
 } from "./resolve";
 
@@ -70,14 +70,29 @@ describe("contentMatchesSnippet", () => {
   });
 });
 
-describe("snippetSearchNeedles", () => {
-  it("returns the leading slice then a substantial first line", () => {
-    const needles = snippetSearchNeedles("Revenue grew twelve percent.\nMore detail here.");
-    expect(needles.length).toBeGreaterThan(0);
-    expect(needles[0]).toContain("Revenue grew twelve percent.");
+describe("findSnippetRange", () => {
+  it("locates a whitespace-collapsed snippet inside real (multi-line, indented) source", () => {
+    const doc = "export function foo() {\n  return bar;\n}\n";
+    // The server emits the snippet with whitespace collapsed to single spaces.
+    const range = findSnippetRange(doc, "export function foo() { return bar; }");
+    expect(range).toBeDefined();
+    expect(doc.slice(range![0], range![1])).toBe("export function foo() {\n  return bar;\n}");
   });
 
-  it("drops candidates that are too short", () => {
-    expect(snippetSearchNeedles("hi")).toEqual([]);
+  it("tolerates differing whitespace/indentation between snippet and file", () => {
+    const doc = "line one\n\n    indented    block\tend";
+    const range = findSnippetRange(doc, "indented block end")!;
+    expect(doc.slice(range[0], range[1])).toBe("indented    block\tend");
+  });
+
+  it("ignores the trailing ellipsis the server adds to truncated snippets", () => {
+    const doc = "Project note: the deployment canary token for the checkout service is SMOKE-1.";
+    const range = findSnippetRange(doc, "Project note: the deployment cana…")!;
+    expect(doc.slice(range[0], range[1])).toBe("Project note: the deployment cana");
+  });
+
+  it("returns undefined when the snippet is absent or too short to match", () => {
+    expect(findSnippetRange("some document text here", "nope not present anywhere")).toBeUndefined();
+    expect(findSnippetRange("whatever", "hi")).toBeUndefined();
   });
 });

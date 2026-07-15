@@ -64,20 +64,46 @@ export function contentMatchesSnippet(content: string, snippet: string): boolean
 }
 
 /**
- * Build the ordered list of literal needles to search for when revealing a
- * snippet in an already-open document: the leading slice first, then the first
- * substantial line as a fallback. Empty/too-short candidates are dropped.
+ * Locate the cited snippet inside a document and return the `[start, end)`
+ * character offsets of the match, or undefined when it can't be found.
+ *
+ * The server collapses each snippet's whitespace to single spaces and truncates
+ * it with a trailing "…" (references.py), so a literal search against the file's
+ * real text — with its newlines and indentation — would never match source code.
+ * We search a whitespace-normalized copy of the document and project the match
+ * back onto the raw text via an index map.
  */
-export function snippetSearchNeedles(snippet: string): string[] {
-  const leading = snippet.trim().slice(0, MAX_NEEDLE_LENGTH);
-  const firstLine = (snippet.split("\n").find((line) => line.trim().length > 12) ?? "").trim();
-  const seen = new Set<string>();
-  const needles: string[] = [];
-  for (const candidate of [leading, firstLine]) {
-    if (candidate.length >= MIN_MATCH_LENGTH && !seen.has(candidate)) {
-      seen.add(candidate);
-      needles.push(candidate);
-    }
+export function findSnippetRange(text: string, snippet: string): [number, number] | undefined {
+  const needle = normalizeWhitespace(snippet)
+    .replace(/…+$/, "")
+    .trim()
+    .slice(0, MAX_NEEDLE_LENGTH);
+  if (needle.length < MIN_MATCH_LENGTH) {
+    return undefined;
   }
-  return needles;
+
+  // Normalized document text plus, for each normalized character, the raw offset
+  // it came from — so a match in `normalized` maps back to a range in `text`.
+  let normalized = "";
+  const offsets: number[] = [];
+  let pendingSpace = false;
+  for (let i = 0; i < text.length; i += 1) {
+    if (/\s/.test(text[i])) {
+      pendingSpace = normalized.length > 0; // collapse runs; drop leading whitespace
+      continue;
+    }
+    if (pendingSpace) {
+      normalized += " ";
+      offsets.push(i);
+      pendingSpace = false;
+    }
+    normalized += text[i];
+    offsets.push(i);
+  }
+
+  const start = normalized.indexOf(needle);
+  if (start === -1) {
+    return undefined;
+  }
+  return [offsets[start], offsets[start + needle.length - 1] + 1];
 }
