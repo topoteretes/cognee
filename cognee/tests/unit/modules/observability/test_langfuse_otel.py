@@ -93,6 +93,46 @@ def test_langfuse_config_respects_explicit_endpoint():
         assert config.cognee_tracing_enabled is True
 
 
+def test_langfuse_host_falls_back_to_base_url():
+    """LANGFUSE_HOST is canonical, but LANGFUSE_BASE_URL is accepted as an alias."""
+    with patch.dict(
+        os.environ,
+        {
+            "LANGFUSE_PUBLIC_KEY": "pk-1",
+            "LANGFUSE_SECRET_KEY": "sk-2",
+            "LANGFUSE_BASE_URL": "https://us.cloud.langfuse.com",
+        },
+        clear=True,
+    ):
+        from cognee.base_config import get_base_config
+
+        config = get_base_config()
+        assert (
+            config.otel_exporter_otlp_endpoint
+            == "https://us.cloud.langfuse.com/api/public/otel/v1/traces"
+        )
+
+
+def test_langfuse_host_takes_precedence_over_base_url():
+    with patch.dict(
+        os.environ,
+        {
+            "LANGFUSE_PUBLIC_KEY": "pk-1",
+            "LANGFUSE_SECRET_KEY": "sk-2",
+            "LANGFUSE_HOST": "https://host.example.com",
+            "LANGFUSE_BASE_URL": "https://base-url.example.com",
+        },
+        clear=True,
+    ):
+        from cognee.base_config import get_base_config
+
+        config = get_base_config()
+        assert (
+            config.otel_exporter_otlp_endpoint
+            == "https://host.example.com/api/public/otel/v1/traces"
+        )
+
+
 # ---------------------------------------------------------------------------
 # Exporter wiring
 # ---------------------------------------------------------------------------
