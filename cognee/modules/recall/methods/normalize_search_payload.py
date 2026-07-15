@@ -34,6 +34,7 @@ _KIND_BY_SEARCH_TYPE: dict[SearchType, SearchResultKind] = {
     SearchType.CHUNKS: SearchResultKind.CHUNK,
     SearchType.CHUNKS_LEXICAL: SearchResultKind.CHUNK,
     SearchType.SUMMARIES: SearchResultKind.SUMMARY,
+    SearchType.CENTRALITY: SearchResultKind.STRUCTURED,
 }
 
 
