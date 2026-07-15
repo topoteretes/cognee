@@ -22,8 +22,9 @@ Examples:
   cognee eval --benchmark HotPotQA --engine direct_llm --limit 5
   cognee eval --benchmark Dummy --no-dashboard --output-dir eval_results
 
-The evaluation harness and the DeepEval engine are an optional addon. Install
-them with:  pip install "cognee[eval]"
+The cognee[eval] extra provides the HTML dashboard (on by default), the DeepEval
+engine, and some benchmark dataset downloads; a --engine direct_llm
+--no-dashboard run works without it. Install it with:  pip install "cognee[eval]"
 
 Once a LongMemEval adapter is registered in the benchmark registry, run it with:
   cognee eval --benchmark LongMemEval --engine direct_llm

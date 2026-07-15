@@ -4,8 +4,9 @@ Reproducible, one-command **memory-quality benchmarking** for cognee. The harnes
 chains four steps — **corpus building → question answering → evaluation →
 dashboard** — for a single deterministic config.
 
-The harness and the DeepEval engine are an **optional addon**. Core cognee never
-imports them; they are pulled in only when you actually run an eval.
+The harness ships with cognee, but its heavier dependencies — the HTML dashboard,
+the DeepEval engine, and some dataset downloads — live in the **optional `eval`
+extra**. Core cognee never imports the harness.
 
 ## Install
 
@@ -46,7 +47,7 @@ Key flags:
 | `--seed` | Seed for deterministic corpus sampling (default: `42`). |
 | `--qa-engine` | Retriever used to answer questions (default: `cognee_graph_completion`). |
 | `--output-dir, -o` | Directory for run artifacts, namespaced by benchmark/engine so runs stay comparable. |
-| `--dashboard / --no-dashboard` | Toggle HTML dashboard generation. |
+| `--dashboard / --no-dashboard` | Toggle HTML dashboard generation (on by default; requires the `eval` extra). |
 
 ## Programmatic use
 
