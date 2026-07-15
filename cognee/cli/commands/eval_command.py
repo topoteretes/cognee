@@ -35,9 +35,6 @@ Once a LongMemEval adapter is registered in the benchmark registry, run it with:
         from cognee.eval_framework.runner import add_eval_arguments
 
         add_eval_arguments(parser)
-        parser.add_argument(
-            "--verbose", "-v", action="store_true", help="Show detailed run information"
-        )
 
     def execute(self, args: argparse.Namespace) -> None:
         try:
@@ -54,9 +51,6 @@ Once a LongMemEval adapter is registered in the benchmark registry, run it with:
                 f"engine={config.evaluation_engine}, "
                 f"samples={config.number_of_samples_in_corpus}, seed={config.seed}"
             )
-            if getattr(args, "verbose", False):
-                fmt.note("This runs corpus building, question answering, and evaluation.")
-                fmt.note("Depending on the benchmark and LLM, this may take a while.")
 
             async def _run():
                 try:

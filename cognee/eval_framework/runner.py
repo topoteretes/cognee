@@ -274,9 +274,8 @@ def config_from_namespace(args: argparse.Namespace) -> EvalConfig:
 
     config = EvalConfig(**overrides)
 
-    # DirectLLM only scores 'correctness'; default to it when the engine is
-    # selected and the user hasn't overridden the metrics list.
-    if config.evaluation_engine == "DirectLLM" and "evaluation_metrics" not in overrides:
+    # DirectLLM only scores 'correctness', so pin the metrics list to it.
+    if config.evaluation_engine == "DirectLLM":
         config.evaluation_metrics = ["correctness"]
 
     return config
