@@ -594,25 +594,26 @@ def _create_graph_engine(
             graph_id=graph_identifier,
         )
     elif graph_database_provider == "turso":
-        if not graph_database_url:
-            raise EnvironmentError("Missing required Turso database URL.")
-
-        auth_token = graph_database_key if graph_database_key else ""
-
-        if auth_token:
-            raise NotImplementedError(
-                "Remote Turso support is not yet implemented. "
-                "Set GRAPH_DATABASE_KEY to an empty string to use local SQLite mode."
+        # Local libSQL file. A libSQL file is a SQLite file, so cognee talks to it
+        # through the same aiosqlite driver it uses for SQLite. Prefer an explicit
+        # GRAPH_DATABASE_URL (absolute path); otherwise fall back to the
+        # auto-derived graph_file_path so Turso works out of the box in
+        # single-user mode, like the other file-based backends.
+        if graph_database_key:
+            raise EnvironmentError(
+                "Remote Turso (embedded-replica sync) is not supported yet; "
+                "unset GRAPH_DATABASE_KEY to use the local libSQL backend."
             )
-        else:
-            # Local mode — graph_database_url must be an absolute path.
-            # sqlite+aioturso:/// + /abs/path => sqlite+aioturso:////abs/path (4 slashes = absolute)
-            # pyturso provides Rust-backed async via turso.aio worker thread (same model as aiosqlite).
-            connection_string: str = f"sqlite+aioturso:///{graph_database_url}"
-
+        db_path = graph_database_url or graph_file_path
+        if not db_path:
+            raise EnvironmentError(
+                "Missing Turso database path (set GRAPH_DATABASE_URL to an absolute libSQL "
+                "file path, or rely on the default graph_file_path)."
+            )
+        # sqlite+aiosqlite:/// + /abs/path => sqlite+aiosqlite:////abs/path.
         from .turso.adapter import TursoAdapter
 
-        return TursoAdapter(connection_string=connection_string)
+        return TursoAdapter(connection_string=f"sqlite+aiosqlite:///{db_path}")
 
     all_providers = list(supported_databases.keys()) + [
         "neo4j",

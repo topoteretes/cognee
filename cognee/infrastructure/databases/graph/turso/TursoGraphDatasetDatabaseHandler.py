@@ -12,11 +12,10 @@ from cognee.modules.users.models import User, DatasetDatabase
 
 
 class TursoGraphDatasetDatabaseHandler:
-    """Handler for per-dataset Turso/SQLite graph databases.
+    """Handler for per-dataset Turso/libSQL graph databases.
 
-    Local mode: each dataset gets its own SQLite file under the system databases directory.
-    Remote Turso: set GRAPH_DATABASE_URL to the remote libSQL URL and GRAPH_DATABASE_KEY
-    to the auth token; each dataset then uses a dataset-scoped URL path.
+    Each dataset gets its own libSQL file under the system databases directory, so
+    the existing multi-user permission system isolates datasets by file.
     """
 
     @classmethod
@@ -58,17 +57,12 @@ class TursoGraphDatasetDatabaseHandler:
     async def resolve_dataset_connection_info(
         cls, dataset_database: DatasetDatabase
     ) -> DatasetDatabase:
-        # No credentials to inject for local SQLite; remote Turso would pull key from config.
-        graph_config = get_graph_config()
-        if graph_config.graph_database_key:
-            dataset_database.graph_database_connection_info["graph_database_key"] = (
-                graph_config.graph_database_key
-            )
+        # A local libSQL file has no connection credentials to resolve.
         return dataset_database
 
     @classmethod
     async def delete_dataset(cls, dataset_database: DatasetDatabase) -> None:
-        dataset_url = dataset_database.graph_database_url
+        dataset_url = str(dataset_database.graph_database_url or "")
 
         evict_graph_engine(
             graph_database_provider="turso",
@@ -77,7 +71,6 @@ class TursoGraphDatasetDatabaseHandler:
             graph_database_key="",
         )
 
-        # Remove the SQLite file for local mode
-        # For remote Turso, file won't exist locally — that's fine.
-        if dataset_url and dataset_url.startswith("/") and os.path.exists(dataset_url):
+        # Remove the dataset's libSQL file.
+        if dataset_url.startswith("/") and os.path.exists(dataset_url):
             os.remove(dataset_url)
