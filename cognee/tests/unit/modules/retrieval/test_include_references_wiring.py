@@ -190,7 +190,7 @@ async def test_completion_references_skipped_for_non_str_response_model():
 
 def _patch_vector_engine(engine):
     return patch(
-        "cognee.infrastructure.databases.vector.get_vector_engine",
+        "cognee.infrastructure.databases.vector.get_vector_engine_async",
         return_value=engine,
     )
 

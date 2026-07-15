@@ -21,6 +21,7 @@ from cognee.infrastructure.llm.retry_config import (
 
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.llm.config import get_llm_config
+from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError, is_budget_exhausted_error
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.generic_llm_api.adapter import (
     GenericAPIAdapter,
 )
@@ -86,6 +87,7 @@ class MistralAdapter(GenericAPIAdapter):
                 litellm.exceptions.NotFoundError,
                 litellm.exceptions.AuthenticationError,
                 asyncio.CancelledError,
+                LLMPaymentRequiredError,
             )
         ),
         before_sleep=before_sleep_log(logger, logging.WARNING),
@@ -147,6 +149,10 @@ class MistralAdapter(GenericAPIAdapter):
             logger.error(f"Schema validation failed: {str(e)}")
             logger.debug(f"Raw response: {e.raw_response}")
             raise ValueError(f"Response failed schema validation: {str(e)}")
+        except Exception as e:
+            if is_budget_exhausted_error(e):
+                raise LLMPaymentRequiredError() from e
+            raise
 
     @observe(as_type="transcription")
     @retry(
