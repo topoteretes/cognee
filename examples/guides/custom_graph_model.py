@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import asyncio
 import os
 from typing import List
@@ -45,9 +43,8 @@ async def main():
         self_improvement=False,
     )
 
-    graph_path = os.path.abspath("hobbies_graph.html")
+    graph_path = os.path.join(os.path.dirname(__file__), ".artifacts", "hobbies_graph.html")
     await visualize_graph(graph_path)
-    print(f"Graph saved to: {graph_path}")
 
 
 if __name__ == "__main__":
