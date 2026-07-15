@@ -20,9 +20,15 @@ export async function rememberSelection(runtime: Runtime): Promise<void> {
   }
 
   const relativePath = vscode.workspace.asRelativePath(document.uri, false);
+  // A full-line selection ends at column 0 of the following line; that trailing
+  // line holds no selected text, so exclude it from the recorded range.
+  const lastLine =
+    selection.end.character === 0 && selection.end.line > selection.start.line
+      ? selection.end.line
+      : selection.end.line + 1;
   const lineRange = selection.isEmpty
     ? undefined
-    : `lines ${selection.start.line + 1}-${selection.end.line + 1}`;
+    : `lines ${selection.start.line + 1}-${lastLine}`;
 
   await ingest(
     runtime,
