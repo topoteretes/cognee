@@ -2,12 +2,11 @@ import { CogneeInstance } from "../instances/types";
 import { getPipelineSettingsFromStorage } from "../configuration/pipelineSettings";
 
 export type RecallScope =
-  | "auto"
   | "all"
   | "graph"
   | "session"
   | "trace"
-  | "session_context";
+  | "graph_context";
 
 export interface RecallRequest {
   query: string;
@@ -22,7 +21,7 @@ export interface RecallRequest {
 /**
  * Unified recall call. Hits POST /v1/recall (not /v1/search), so the
  * server's scope-aware fan-out applies: graph + session + trace +
- * session_context, tagged with _source.
+ * graph_context, tagged with _source.
  *
  * Pass ``searchType: null`` to opt into the server's auto-router.
  * Default is ``HYBRID_COMPLETION``.

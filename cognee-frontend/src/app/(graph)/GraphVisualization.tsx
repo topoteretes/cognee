@@ -54,7 +54,7 @@ export default function GraphVisualization({ ref, data, graphControls, className
     // Initial size calculation
     handleResize();
 
-    // ResizeObserver
+    // ResizeObserver 
     const resizeObserver = new ResizeObserver(() => {
       handleResize();
     });
@@ -220,7 +220,7 @@ export default function GraphVisualization({ ref, data, graphControls, className
   }, [data, graphRef]);
 
   const [graphShape, setGraphShape] = useState<string>();
-
+  
   useImperativeHandle(ref, () => ({
     zoomToFit: graphRef.current?.zoomToFit,
     setGraphShape: setGraphShape,

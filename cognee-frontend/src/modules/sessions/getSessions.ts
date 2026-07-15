@@ -65,7 +65,10 @@ function isSessionsAvailable(instance: CogneeInstance): Promise<boolean> {
   if (existing) return existing;
   const probe = instance.fetch("/v1/sessions?limit=1")
     .then((r) => r.ok)
-    .catch(() => false);
+    .catch((err) => {
+      console.warn("[getSessions] sessions-availability probe failed:", err instanceof Error ? err.message : err);
+      return false;
+    });
   _sessionsProbe.set(key, probe);
   return probe;
 }
@@ -73,6 +76,7 @@ function isSessionsAvailable(instance: CogneeInstance): Promise<boolean> {
 export async function listSessions(
   instance: CogneeInstance,
   params: { range?: TimeRange; limit?: number; offset?: number; status?: string } = {},
+  opts: { signal?: AbortSignal; timeoutMs?: number } = {},
 ): Promise<SessionsPage> {
   if (!(await isSessionsAvailable(instance))) return EMPTY_PAGE;
   const q = new URLSearchParams();
@@ -80,10 +84,14 @@ export async function listSessions(
   if (params.limit !== undefined) q.set("limit", String(params.limit));
   if (params.offset !== undefined) q.set("offset", String(params.offset));
   if (params.status) q.set("status", params.status);
+  const fetchInit: RequestInit & { timeoutMs?: number } = { signal: opts.signal, timeoutMs: opts.timeoutMs };
   return instance
-    .fetch(`/v1/sessions?${q.toString()}`)
+    .fetch(`/v1/sessions?${q.toString()}`, fetchInit)
     .then((r) => (r.ok ? r.json() : EMPTY_PAGE))
-    .catch(() => EMPTY_PAGE);
+    .catch((err) => {
+      console.warn("[getSessions] listSessions failed, returning empty page:", err instanceof Error ? err.message : err);
+      return EMPTY_PAGE;
+    });
 }
 
 export async function getSessionStats(
@@ -94,7 +102,10 @@ export async function getSessionStats(
   return instance
     .fetch(`/v1/sessions/stats?range=${range}`)
     .then((r) => (r.ok ? r.json() : null))
-    .catch(() => null);
+    .catch((err) => {
+      console.warn("[getSessions] getSessionStats failed:", err instanceof Error ? err.message : err);
+      return null;
+    });
 }
 
 export interface TraceEntry {
@@ -126,5 +137,8 @@ export async function getSessionDetail(
   return instance
     .fetch(`/v1/sessions/${encodeURIComponent(sessionId)}`)
     .then((r) => (r.ok ? r.json() : null))
-    .catch(() => null);
+    .catch((err) => {
+      console.warn("[getSessions] getSessionDetail failed:", err instanceof Error ? err.message : err);
+      return null;
+    });
 }
