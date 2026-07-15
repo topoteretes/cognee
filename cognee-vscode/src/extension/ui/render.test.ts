@@ -50,6 +50,18 @@ describe("dedupeByFile", () => {
     const b = citation("b.ts", "other code");
     expect(dedupeByFile([a, aAgain, b])).toEqual([a, b]);
   });
+
+  it("collapses a headerless later chunk into the header chunk of the same file", () => {
+    const chunk1 = citation("foo.ts", "Source: src/utils/foo.ts (lines 1-40) export const foo = 1;");
+    const chunk2 = citation("foo.ts", "more of the same file, no header on this chunk");
+    expect(dedupeByFile([chunk1, chunk2])).toEqual([chunk1]);
+  });
+
+  it("keeps distinct same-named files that each carry a Source header", () => {
+    const a = citation("README.md", "Source: a/README.md (lines 1-5) alpha");
+    const b = citation("README.md", "Source: b/README.md (lines 1-5) beta");
+    expect(dedupeByFile([a, b])).toEqual([a, b]);
+  });
 });
 
 describe("renderRecall", () => {

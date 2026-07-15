@@ -1,4 +1,5 @@
 import { parseAnswer, type Citation, type RecallResponseItem } from "../../core";
+import { basenameOf } from "../paths";
 import { extractSourcePath } from "./resolve";
 
 export interface RenderedRecall {
@@ -46,16 +47,31 @@ export function renderRecall(items: RecallResponseItem[]): RenderedRecall {
  * times (e.g. three chunks of the same README). Showing every unique *file* once
  * is the useful, honest unit for provenance — all sources, no repeats. Files are
  * keyed by their `Source: <path>` header when present, else the document name.
+ *
+ * Only the first chunk of an ingested file carries the `Source:` header, so a
+ * later chunk of that same file would key by its bare document name and slip
+ * through as a duplicate. To avoid that, a headerless chunk whose document name
+ * matches the basename of an already-kept `Source:` path is treated as the same
+ * file — without merging genuinely distinct files that share a basename, since
+ * those each carry their own distinct `Source:` path.
  */
 export function dedupeByFile(citations: Citation[]): Citation[] {
-  const seen = new Set<string>();
+  const seenKeys = new Set<string>();
+  const seenSourceBasenames = new Set<string>();
   const unique: Citation[] = [];
   for (const citation of citations) {
-    const key = (extractSourcePath(citation.snippet) ?? citation.documentName).toLowerCase();
-    if (seen.has(key)) {
+    const sourcePath = extractSourcePath(citation.snippet);
+    const key = (sourcePath ?? citation.documentName).toLowerCase();
+    if (seenKeys.has(key)) {
       continue;
     }
-    seen.add(key);
+    if (!sourcePath && seenSourceBasenames.has(citation.documentName.toLowerCase())) {
+      continue;
+    }
+    seenKeys.add(key);
+    if (sourcePath) {
+      seenSourceBasenames.add(basenameOf(sourcePath).toLowerCase());
+    }
     unique.push(citation);
   }
   return unique;
