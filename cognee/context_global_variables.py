@@ -30,9 +30,14 @@ graph_db_config = ContextVar("graph_db_config", default=None)
 current_dataset_id = ContextVar("current_dataset_id", default=None)
 # Note: same mechanism for LLM and embedding configs so that the LiteLLM client
 #       and the embedding engine can use per-context (e.g. per-request) configs.
-llm_config = ContextVar("llm_config", default=None)
+llm_config: ContextVar[Optional[LLMConfig]] = ContextVar("llm_config", default=None)
 embedding_config = ContextVar("embedding_config", default=None)
 session_user = ContextVar("session_user", default=None)
+# Labels the pipeline stage (extraction | summarization | query) whose LLM
+# config is currently active on `llm_config`, for tracing (see pipeline_stage).
+current_pipeline_stage: ContextVar[Optional[str]] = ContextVar(
+    "current_pipeline_stage", default=None
+)
 
 
 async def set_session_user_context_variable(user):
@@ -119,6 +124,8 @@ class DatabaseContextManager:
         "_embedding_config",
         "_applied",
         "_dataset_token",
+        "_llm_token",
+        "_embedding_token",
     )
 
     def __init__(
@@ -134,6 +141,8 @@ class DatabaseContextManager:
         self._embedding_config = embedding_config
         self._applied = False
         self._dataset_token = None
+        self._llm_token = None
+        self._embedding_token = None
 
     async def apply_database_context_variables(
         self, dataset: Union[str, UUID], user_id: UUID
@@ -144,9 +153,9 @@ class DatabaseContextManager:
         # are intentionally applied regardless of backend access control: callers
         # may want per-context LLM/embedding configs even in single-tenant mode.
         if self._llm_config is not None:
-            llm_config.set(self._llm_config)
+            self._llm_token = llm_config.set(self._llm_config)
         if self._embedding_config is not None:
-            embedding_config.set(self._embedding_config)
+            self._embedding_token = embedding_config.set(self._embedding_config)
 
         if not backend_access_control_enabled():
             return
@@ -236,7 +245,10 @@ class DatabaseContextManager:
         }
 
         # Use ContextVar to use these graph and vector configurations are used
-        # in the current async context across Cognee
+        # in the current async context across Cognee. Unlike the LLM/embedding
+        # overrides these intentionally persist after async-with exit: callers
+        # read the per-dataset databases right after a pipeline run, outside
+        # this context manager.
         graph_db_config.set(graph_config)
         vector_db_config.set(vector_config)
         file_storage_config.set(storage_config)
@@ -266,9 +278,19 @@ class DatabaseContextManager:
         return self
 
     async def __aexit__(self, exc_type, exc, tb) -> None:
-        if self._dataset_token is not None:
-            current_dataset_id.reset(self._dataset_token)
-            self._dataset_token = None
+        # Restore the caller-provided LLM/embedding overrides and the dataset id
+        # so they don't leak into the surrounding async context. The dataset
+        # graph/vector/file-storage configs are left in place on purpose (see
+        # apply_database_context_variables).
+        for context_var, token_attr in (
+            (embedding_config, "_embedding_token"),
+            (llm_config, "_llm_token"),
+            (current_dataset_id, "_dataset_token"),
+        ):
+            token = getattr(self, token_attr)
+            if token is not None:
+                context_var.reset(token)
+                setattr(self, token_attr, None)
 
         if not backend_access_control_enabled():
             return None
@@ -309,7 +331,10 @@ def set_database_global_context_variables(
     their respective ContextVars and picked up by ``get_llm_client`` (LiteLLM)
     and ``get_embedding_engine`` in the current async context. Unlike the
     graph/vector configs these are applied even when backend access control is
-    disabled, since they are an explicit caller-provided override.
+    disabled, since they are an explicit caller-provided override. In the
+    ``async with`` form they are restored to their prior values on exit, while
+    the per-dataset graph/vector/file-storage configs persist after exit so
+    callers can keep reading the dataset databases.
 
     Args:
         dataset: Cognee dataset name or id

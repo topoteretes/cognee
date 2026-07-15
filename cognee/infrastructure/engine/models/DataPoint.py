@@ -55,6 +55,12 @@ class DataPoint(BaseModel):
         default_factory=lambda: int(datetime.now(timezone.utc).timestamp() * 1000)
     )
     ontology_valid: bool = False
+    # Stable ontology IRI this node is grounded in, when it was matched to (or
+    # ingested from) an ontology. Preserved end-to-end so the persisted graph
+    # keeps the external identifier instead of collapsing it to a local label —
+    # this is what lets the memory graph be exported as RDF and linked out to
+    # other domains (open-world). None for nodes with no ontology grounding.
+    ontology_uri: str | None = None
     version: int = 1  # Default version
     topological_rank: int | None = 0
     metadata: MetaData = {"index_fields": []}
