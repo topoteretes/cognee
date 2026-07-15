@@ -7,7 +7,8 @@ from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from typing import AsyncIterator, Dict, Any, List, Union, Optional, Tuple, Type
 
-from sqlalchemy import text, insert
+from sqlalchemy import text, event
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
 from cognee.shared.logging_utils import get_logger
@@ -23,10 +24,26 @@ _WRITE_CHUNK_SIZE = 500
 
 
 def _in_params(prefix: str, values: List[str]) -> Tuple[str, Dict[str, str]]:
-    """Build named params for SQLite IN clause (SQLite has no ANY(:list) support)."""
+    """Build named params for a SQLite IN clause of small, bounded lists
+    (edge types, node names, filter values). SQLite has no ANY(:list) support.
+    """
     params = {f"{prefix}_{i}": v for i, v in enumerate(values)}
     placeholders = ", ".join(f":{prefix}_{i}" for i in range(len(values)))
     return placeholders, params
+
+
+def _id_subquery(prefix: str, ids: List[str]) -> Tuple[str, Dict[str, str]]:
+    """Build a ``(SELECT value FROM json_each(:prefix))`` subquery and a single
+    JSON-array param for an id list.
+
+    One bound parameter regardless of list size — mirrors Postgres's
+    ``= ANY(:ids)`` and stays under SQLite's per-statement variable cap, so bulk
+    deletes/reads of large id sets do not raise "too many SQL variables".
+    """
+    return (
+        f"(SELECT value FROM json_each(:{prefix}))",
+        {prefix: json.dumps([str(i) for i in ids])},
+    )
 
 
 class TursoAdapter(GraphDBInterface):
@@ -35,24 +52,35 @@ class TursoAdapter(GraphDBInterface):
     _ALLOWED_FILTER_ATTRS = {"id", "name", "type"}
 
     def __init__(self, connection_string: str) -> None:
-        """Create engine and sessionmaker from a Turso connection string."""
-        # pyturso 0.6.1 omits has_stop on AsyncAdapt_turso_dbapi.
-        # SQLAlchemy 2.0.51+ reads this flag in SQLiteDialect_aiosqlite.__init__
-        # to decide whether force-close via stop() is available.
-        # Setting False tells SQLAlchemy to skip force-close and use graceful
-        # close only — correct since turso.aio has no stop() method.
-        try:
-            import turso.sqlalchemy.dialect as _turso_dialect
-            if not hasattr(_turso_dialect.AsyncAdapt_turso_dbapi, "has_stop"):
-                _turso_dialect.AsyncAdapt_turso_dbapi.has_stop = False
-        except ImportError:
-            pass
+        """Create engine and sessionmaker for a local libSQL file.
 
+        A libSQL file is a SQLite file, so cognee talks to it through the same
+        aiosqlite driver it already uses for SQLite (``sqlite+aiosqlite:///``).
+        """
         self.db_uri = connection_string
-        self.engine = create_async_engine(
-            self.db_uri,
-            json_serializer=lambda obj: json.dumps(obj, cls=JSONEncoder),
-        )
+        # Properties are serialized to TEXT columns by _serialize_properties, so
+        # there is no JSON-typed column for SQLAlchemy to encode — hence no
+        # json_serializer, unlike the Postgres adapter with its JSONB columns.
+        self.engine = create_async_engine(self.db_uri)
+
+        # These PRAGMAs are connection-scoped and a no-op inside a transaction, so
+        # apply them on every new connection via the connect event, mirroring the
+        # relational SqlAlchemyAdapter (issue #2717):
+        #   - foreign_keys: SQLite disables FK enforcement by default; graph_edge's
+        #     ON DELETE CASCADE relies on it.
+        #   - journal_mode=WAL + busy_timeout: concurrent writers wait instead of
+        #     failing with "database is locked".
+        @event.listens_for(self.engine.sync_engine, "connect")
+        def _set_sqlite_pragmas(dbapi_connection, _record):
+            cursor = dbapi_connection.cursor()
+            try:
+                cursor.execute("PRAGMA foreign_keys=ON")
+                cursor.execute("PRAGMA journal_mode=WAL")
+                cursor.execute("PRAGMA synchronous=NORMAL")
+                cursor.execute("PRAGMA busy_timeout=120000")
+            finally:
+                cursor.close()
+
         self.sessionmaker = async_sessionmaker(bind=self.engine, expire_on_commit=False)
         self._write_lock = asyncio.Lock()
 
@@ -63,15 +91,12 @@ class TursoAdapter(GraphDBInterface):
     async def initialize(self) -> None:
         """Create tables and indexes if they do not exist."""
         async with self.engine.begin() as conn:
-            # SQLite disables FK enforcement by default; cascade deletes need this
-            await conn.execute(text("PRAGMA foreign_keys = ON"))
             await conn.run_sync(_meta.create_all, checkfirst=True)
 
     @asynccontextmanager
     async def _session(self) -> AsyncIterator[Any]:
         """Yield an async session from the underlying engine."""
         async with self.sessionmaker() as session:
-            await session.execute(text("PRAGMA foreign_keys = ON"))
             yield session
 
     def _serialize_properties(self, props: Dict[str, Any]) -> str:
@@ -119,8 +144,19 @@ class TursoAdapter(GraphDBInterface):
         else:
             await self.add_nodes([node])
 
-    async def add_nodes(self, nodes: Union[List[Tuple[str, Dict]], List[DataPoint]]) -> None:
-        """Add multiple nodes via batch upsert."""
+    async def add_nodes(
+        self,
+        nodes: Union[List[Tuple[str, Dict]], List[DataPoint]],
+        source_ref_key: Optional[str] = None,
+        pipeline_run_id: Optional[str] = None,
+    ) -> None:
+        """Add multiple nodes via batch upsert.
+
+        ``source_ref_key`` / ``pipeline_run_id`` are the graph-provenance stamp the
+        storage path always passes; Turso does not fold provenance into the graph
+        (it uses the relational-ledger delete path), so they are accepted and
+        ignored — the same contract as any non-graph-provenance backend.
+        """
         if not nodes:
             return
 
@@ -151,14 +187,25 @@ class TursoAdapter(GraphDBInterface):
         # Deduplicate by id (last wins)
         rows = list({r["id"]: r for r in rows}.values())
 
+        # Upsert with ON CONFLICT DO UPDATE (not INSERT OR REPLACE). REPLACE deletes
+        # the conflicting row first, which fires graph_edge's ON DELETE CASCADE and
+        # would wipe a node's edges every time it is re-added; DO UPDATE edits in
+        # place, preserving edges and created_at. Mirrors the Postgres adapter.
         async with self._write_lock:
             async with self._session() as session:
                 for i in range(0, len(rows), _WRITE_CHUNK_SIZE):
                     chunk = rows[i : i + _WRITE_CHUNK_SIZE]
-                    for row in chunk:
-                        # prefix_with("OR REPLACE") → INSERT OR REPLACE INTO ...
-                        stmt = insert(_node_table).prefix_with("OR REPLACE").values(row)
-                        await session.execute(stmt)
+                    stmt = sqlite_insert(_node_table).values(chunk)
+                    stmt = stmt.on_conflict_do_update(
+                        index_elements=["id"],
+                        set_={
+                            "name": stmt.excluded.name,
+                            "type": stmt.excluded.type,
+                            "properties": stmt.excluded.properties,
+                            "updated_at": stmt.excluded.updated_at,
+                        },
+                    )
+                    await session.execute(stmt)
                 await session.commit()
 
     async def delete_node(self, node_id: str) -> None:
@@ -169,11 +216,11 @@ class TursoAdapter(GraphDBInterface):
         """Delete multiple nodes by ID. Cascade-deletes connected edges."""
         if not node_ids:
             return
-        placeholders, params = _in_params("did", node_ids)
+        subquery, params = _id_subquery("did", node_ids)
         async with self._write_lock:
             async with self._session() as session:
                 await session.execute(
-                    text(f"DELETE FROM graph_node WHERE id IN ({placeholders})"), params
+                    text(f"DELETE FROM graph_node WHERE id IN {subquery}"), params
                 )
                 await session.commit()
 
@@ -186,12 +233,10 @@ class TursoAdapter(GraphDBInterface):
         """Retrieve multiple nodes by ID."""
         if not node_ids:
             return []
-        placeholders, params = _in_params("gid", node_ids)
+        subquery, params = _id_subquery("gid", node_ids)
         async with self._session() as session:
             result = await session.execute(
-                text(
-                    f"SELECT id, name, type, properties FROM graph_node WHERE id IN ({placeholders})"
-                ),
+                text(f"SELECT id, name, type, properties FROM graph_node WHERE id IN {subquery}"),
                 params,
             )
             return [self._parse_node_row(row) for row in result.fetchall()]
@@ -209,9 +254,16 @@ class TursoAdapter(GraphDBInterface):
         )
 
     async def add_edges(
-        self, edges: Union[List[Tuple[str, str, str, Optional[Dict[str, Any]]]], List]
+        self,
+        edges: Union[List[Tuple[str, str, str, Optional[Dict[str, Any]]]], List],
+        source_ref_key: Optional[str] = None,
+        pipeline_run_id: Optional[str] = None,
     ) -> None:
-        """Add multiple edges via batch upsert."""
+        """Add multiple edges via batch upsert.
+
+        ``source_ref_key`` / ``pipeline_run_id`` are accepted and ignored (see
+        ``add_nodes``).
+        """
         if not edges:
             return
 
@@ -236,13 +288,20 @@ class TursoAdapter(GraphDBInterface):
             {(r["source_id"], r["target_id"], r["relationship_name"]): r for r in rows}.values()
         )
 
+        # ON CONFLICT DO UPDATE, not INSERT OR REPLACE (see add_nodes for why).
         async with self._write_lock:
             async with self._session() as session:
                 for i in range(0, len(rows), _WRITE_CHUNK_SIZE):
                     chunk = rows[i : i + _WRITE_CHUNK_SIZE]
-                    for row in chunk:
-                        stmt = insert(_edge_table).prefix_with("OR REPLACE").values(row)
-                        await session.execute(stmt)
+                    stmt = sqlite_insert(_edge_table).values(chunk)
+                    stmt = stmt.on_conflict_do_update(
+                        index_elements=["source_id", "target_id", "relationship_name"],
+                        set_={
+                            "properties": stmt.excluded.properties,
+                            "updated_at": stmt.excluded.updated_at,
+                        },
+                    )
+                    await session.execute(stmt)
                 await session.commit()
 
     async def has_edge(self, source_id: str, target_id: str, relationship_name: str) -> bool:
@@ -251,27 +310,31 @@ class TursoAdapter(GraphDBInterface):
         return len(result) > 0
 
     async def has_edges(self, edges: List[Tuple[str, str, str]]) -> List[Tuple[str, str, str]]:
-        """Return subset of input edge tuples that exist in the database."""
+        """Return subset of input edge tuples that exist in the database.
+
+        Resolved with a single set-based query (candidates joined against
+        graph_edge via json_each) rather than one SELECT per edge — this runs on
+        the cognify dedup hot path with thousands of candidate edges per batch.
+        """
         if not edges:
             return []
 
-        found: List[Tuple[str, str, str]] = []
+        candidates = json.dumps([[str(s), str(t), str(r)] for s, t, r in edges])
         async with self._session() as session:
-            for source_id, target_id, relationship_name in edges:
-                result = await session.execute(
-                    text("""
-                        SELECT source_id, target_id, relationship_name
-                        FROM graph_edge
-                        WHERE source_id = :src
-                          AND target_id = :tgt
-                          AND relationship_name = :rel
-                    """),
-                    {"src": str(source_id), "tgt": str(target_id), "rel": relationship_name},
-                )
-                row = result.fetchone()
-                if row:
-                    found.append((row[0], row[1], row[2]))
-        return found
+            result = await session.execute(
+                text("""
+                    SELECT j.value ->> 0, j.value ->> 1, j.value ->> 2
+                    FROM json_each(:candidates) j
+                    WHERE EXISTS (
+                        SELECT 1 FROM graph_edge e
+                        WHERE e.source_id = j.value ->> 0
+                          AND e.target_id = j.value ->> 1
+                          AND e.relationship_name = j.value ->> 2
+                    )
+                """),
+                {"candidates": candidates},
+            )
+            return [(row[0], row[1], row[2]) for row in result.fetchall()]
 
     async def get_edges(self, node_id: str) -> List[Tuple[Dict[str, Any], str, Dict[str, Any]]]:
         """Retrieve all edges connected to a node as (source_dict, rel_name, target_dict)."""
@@ -391,15 +454,14 @@ class TursoAdapter(GraphDBInterface):
         """Retrieve subgraph for edges touching target_ids, plus their endpoint nodes."""
         if not target_ids:
             return [], []
-        ids = [str(i) for i in target_ids]
-        placeholders, params = _in_params("tid", ids)
+        subquery, params = _id_subquery("tid", target_ids)
 
         async with self._session() as session:
             edge_result = await session.execute(
                 text(f"""
                     SELECT source_id, target_id, relationship_name, properties
                     FROM graph_edge
-                    WHERE source_id IN ({placeholders}) OR target_id IN ({placeholders})
+                    WHERE source_id IN {subquery} OR target_id IN {subquery}
                 """),
                 params,
             )
@@ -415,10 +477,10 @@ class TursoAdapter(GraphDBInterface):
             if not endpoint_ids:
                 return [], []
 
-            ep_ph, ep_params = _in_params("ep", list(endpoint_ids))
+            ep_subquery, ep_params = _id_subquery("ep", list(endpoint_ids))
             node_result = await session.execute(
                 text(
-                    f"SELECT id, name, type, properties FROM graph_node WHERE id IN ({ep_ph})"
+                    f"SELECT id, name, type, properties FROM graph_node WHERE id IN {ep_subquery}"
                 ),
                 ep_params,
             )
@@ -444,6 +506,11 @@ class TursoAdapter(GraphDBInterface):
             for attr, filter_values in filter_dict.items():
                 if attr not in self._ALLOWED_FILTER_ATTRS:
                     raise ValueError(f"Invalid filter attribute: {attr!r}")
+                if not filter_values:
+                    # Empty value list matches nothing (SQLite has no "IN ()");
+                    # matches Postgres's "= ANY('{}')" semantics.
+                    where_parts.append("0 = 1")
+                    continue
                 ph, fp = _in_params(f"filt_{i}_{attr}", [str(v) for v in filter_values])
                 where_parts.append(f"n.{attr} IN ({ph})")
                 params.update(fp)
@@ -474,12 +541,12 @@ class TursoAdapter(GraphDBInterface):
                     data.update(row[3] if isinstance(row[3], dict) else json.loads(row[3]))
                 nodes.append((row[0], data))
 
-            fn_ph, fn_params = _in_params("fn", node_ids)
+            fn_subquery, fn_params = _id_subquery("fn", node_ids)
             edge_result = await session.execute(
                 text(f"""
                     SELECT source_id, target_id, relationship_name, properties
                     FROM graph_edge
-                    WHERE source_id IN ({fn_ph}) AND target_id IN ({fn_ph})
+                    WHERE source_id IN {fn_subquery} AND target_id IN {fn_subquery}
                 """),
                 fn_params,
             )
@@ -496,10 +563,12 @@ class TursoAdapter(GraphDBInterface):
         self, node_type: Type[Any], node_name: List[str], node_name_filter_operator: str = "OR"
     ) -> Tuple[List[Tuple[str, dict]], List[Tuple[str, str, str, dict]]]:
         """Retrieve subgraph of matching nodes, their neighbors, and interconnecting edges."""
+        if not node_name:
+            return [], []
         label = node_type.__name__
 
         name_ph, name_params = _in_params("nm", node_name)
-        name_params["label"] = label
+        params: Dict[str, Any] = {**name_params, "label": label}
 
         if node_name_filter_operator == "OR":
             neighbor_cte = """
@@ -560,10 +629,10 @@ class TursoAdapter(GraphDBInterface):
                 """
 
         if node_name_filter_operator != "OR":
-            name_params["primary_count"] = len(node_name)
+            params["primary_count"] = len(node_name)
 
         async with self._session() as session:
-            result = await session.execute(text(query_str), name_params)
+            result = await session.execute(text(query_str), params)
 
             nodes = []
             edges = []
@@ -661,15 +730,13 @@ class TursoAdapter(GraphDBInterface):
             et_ph, et_params = _in_params("et", edge_types)
             edge_filter = f"AND e.relationship_name IN ({et_ph})"
 
-        # SQLite has no unnest(); build seed rows via UNION ALL with named params
-        seed_selects = " UNION ALL ".join(
-            [f"SELECT :seed_{i} AS id, 0 AS hops" for i in range(len(node_ids))]
-        )
-        seed_params = {f"seed_{i}": nid for i, nid in enumerate(node_ids)}
+        # SQLite has no unnest(); seed the recursion from a JSON array (one bound
+        # param, no per-seed variable cap).
+        seed_subquery, seed_params = _id_subquery("seeds", node_ids)
 
         query_str = f"""
             WITH RECURSIVE neighborhood(id, hops) AS (
-                {seed_selects}
+                SELECT value AS id, 0 AS hops FROM json_each(:seeds)
               UNION
                 SELECT CASE WHEN e.source_id = n.id THEN e.target_id
                             ELSE e.source_id END,
@@ -778,3 +845,55 @@ class TursoAdapter(GraphDBInterface):
                     }
                 )
             return triplets
+
+    async def remove_belongs_to_set_tags(
+        self,
+        tags: List[str],
+        node_ids: Optional[List[str]] = None,
+    ) -> None:
+        """Strip ``tags`` from each node's ``belongs_to_set`` property array.
+
+        Keeps the denormalized membership list consistent with the additive
+        belongs_to_set edges after a NodeSet (or its dataset) is deleted.
+        ``belongs_to_set`` lives inside the JSON ``properties`` TEXT blob, so this
+        is a read-filter-write over that array. Mirrors the Postgres adapter.
+        """
+        if not tags:
+            return None
+        if node_ids is not None and not node_ids:
+            return None
+
+        tag_set = set(tags)
+        async with self._session() as session:
+            if node_ids is not None:
+                subquery, params = _id_subquery("bts", node_ids)
+                result = await session.execute(
+                    text(f"SELECT id, properties FROM graph_node WHERE id IN {subquery}"), params
+                )
+            else:
+                result = await session.execute(text("SELECT id, properties FROM graph_node"))
+            rows = result.fetchall()
+
+        updates = []
+        for row in rows:
+            properties = json.loads(row[1]) if row[1] else {}
+            current = properties.get("belongs_to_set")
+            if not isinstance(current, list) or not any(tag in tag_set for tag in current):
+                continue
+            properties["belongs_to_set"] = [tag for tag in current if tag not in tag_set]
+            updates.append({"id": row[0], "properties": self._serialize_properties(properties)})
+
+        if updates:
+            now = datetime.now(timezone.utc)
+            async with self._write_lock:
+                async with self._session() as session:
+                    for update in updates:
+                        await session.execute(
+                            text(
+                                "UPDATE graph_node SET properties = :p, updated_at = :now "
+                                "WHERE id = :id"
+                            ),
+                            {"id": update["id"], "p": update["properties"], "now": now},
+                        )
+                    await session.commit()
+        return None
