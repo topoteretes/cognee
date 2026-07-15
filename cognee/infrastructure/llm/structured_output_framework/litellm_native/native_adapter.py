@@ -17,6 +17,7 @@ violations fall back to the configured fallback model. This file never imports
 ``instructor``.
 """
 
+import asyncio
 import json
 import logging
 from typing import Any, cast
@@ -75,12 +76,20 @@ def _enrich_llm_span(model: str, name: str) -> None:
     try:
         from opentelemetry import trace as otel_trace  # ty:ignore[unresolved-import]
 
-        from cognee.modules.observability.tracing import COGNEE_LLM_MODEL, COGNEE_LLM_PROVIDER
+        from cognee.context_global_variables import current_pipeline_stage
+        from cognee.modules.observability.tracing import (
+            COGNEE_LLM_MODEL,
+            COGNEE_LLM_PROVIDER,
+            COGNEE_PIPELINE_STAGE,
+        )
 
         current_span = otel_trace.get_current_span()
         if current_span and current_span.is_recording():
             current_span.set_attribute(COGNEE_LLM_MODEL, model)
             current_span.set_attribute(COGNEE_LLM_PROVIDER, name)
+            stage = current_pipeline_stage.get()
+            if stage:
+                current_span.set_attribute(COGNEE_PIPELINE_STAGE, stage)
     except Exception:
         pass
 
@@ -94,15 +103,14 @@ class NativeLiteLLMAdapter:
     content-policy fallback path, which uses different model/key/endpoint values.
 
     Instance variables:
-        - model, api_key, endpoint, api_version, max_completion_tokens,
-          fallback_model, fallback_api_key, fallback_endpoint, llm_args, name
+        - model, api_key, endpoint, api_version, fallback_model,
+          fallback_api_key, fallback_endpoint, llm_args, name
     """
 
     def __init__(
         self,
         api_key: str,
         model: str,
-        max_completion_tokens: int,
         name: str = "LiteLLM-Native",
         endpoint: str | None = None,
         api_version: str | None = None,
@@ -116,7 +124,6 @@ class NativeLiteLLMAdapter:
         self.api_key = api_key
         self.api_version = api_version
         self.endpoint = endpoint
-        self.max_completion_tokens = max_completion_tokens
         self.fallback_model = fallback_model
         self.fallback_api_key = fallback_api_key
         self.fallback_endpoint = fallback_endpoint
@@ -293,6 +300,12 @@ class NativeLiteLLMAdapter:
                 # burns the remaining quota.
                 litellm.exceptions.RateLimitError,
                 LLMPaymentRequiredError,
+                # Content-policy filtering is deterministic — fail fast instead
+                # of burning the whole retry budget re-sending flagged input.
+                ContentPolicyFilterError,
+                # A cancelled task must propagate, not be retried (retrying
+                # defeats timeouts / shutdown), matching the instructor adapters.
+                asyncio.CancelledError,
             )
         ),
         before_sleep=before_sleep_log(logger, logging.WARNING),
