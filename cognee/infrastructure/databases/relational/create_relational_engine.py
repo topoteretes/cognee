@@ -73,8 +73,9 @@ def create_relational_engine(
 
     elif db_provider == "turso":
         try:
-            # pyturso registers the "sqlite+aioturso" SQLAlchemy dialect on import.
-            import turso  # noqa: F401
+            # libsql-experimental keeps the local replica in sync with a remote
+            # Turso database; the query path itself is plain aiosqlite.
+            import libsql_experimental  # noqa: F401
         except ImportError:
             raise ImportError(
                 "Turso/libSQL dependencies are not installed. Please install with 'pip install cognee\"[turso]\"' to use Turso functionality."
@@ -82,28 +83,18 @@ def create_relational_engine(
 
         from .sqlalchemy.TursoAdapter import TursoAdapter
 
-        if db_turso_url:
-            # Remote Turso: a local embedded replica bound to the remote primary.
-            # Reads/writes hit the fast local replica; a background task syncs it
-            # with the cloud. The replica file lives under db_path like the local DB.
-            return TursoAdapter(
-                turso_url=db_turso_url,
-                auth_token=db_turso_auth_token,
-                replica_path=f"{db_path}/{db_name}",
-                connect_args=database_connect_args,
-                pool_args=pool_args,
-            )
-
-        # Local / embedded libSQL, driven by the aioturso (Rust) async engine.
-        # A libSQL file is a SQLite file, so the adapter's existing sqlite-dialect
-        # behavior (PRAGMA foreign_keys, schema-less DROP, reflection) and the
-        # sqlite-dialect Alembic migrations apply unchanged.
-        connection_string = f"sqlite+aioturso:///{db_path}/{db_name}"
+        # A libSQL file is a SQLite file, so Turso is driven through the same
+        # aiosqlite dialect and migrations as the SQLite backend — a drop-in.
+        # For remote Turso the same file is a local replica kept in sync with
+        # the hosted primary (db_turso_url/db_turso_auth_token).
+        connection_string = f"sqlite+aiosqlite:///{db_path}/{db_name}"
 
         return TursoAdapter(
             connection_string,
             connect_args=database_connect_args,
             pool_args=pool_args,
+            sync_url=db_turso_url,
+            auth_token=db_turso_auth_token,
         )
 
     else:
