@@ -114,6 +114,18 @@ async def ingest_dlt_source(
             message=f"DLT pipeline execution failed for dataset '{original_dataset_name}': {e}"
         ) from e
 
+    # Scope the read-back to the tables this source actually loaded. The
+    # staging DB is shared per dataset, so it can still hold tables from other
+    # sources ingested earlier; reading those would leak rows across sources.
+    # The package's completed jobs name exactly the tables this load wrote;
+    # the schema can't be used here — dlt persists it in pipeline state, so it
+    # accumulates tables across runs and sources.
+    loaded_tables: set = set()
+    if load_info is not None:
+        for package in load_info.load_packages:
+            for job in package.jobs.get("completed_jobs", []):
+                loaded_tables.add(job.job_file_info.table_name)
+
     # Validate load_info for failed jobs
     if load_info is not None:
         for package in load_info.load_packages:
@@ -130,7 +142,9 @@ async def ingest_dlt_source(
 
     # Extract schema from the dlt database
     try:
-        _, filtered_schema = await _extract_dlt_schema(relational_config, dlt_db_name, dataset_name)
+        _, filtered_schema = await _extract_dlt_schema(
+            relational_config, dlt_db_name, dataset_name, loaded_tables
+        )
     except Exception as e:
         raise DLTIngestionError(
             message=f"Failed to extract schema from DLT database '{dlt_db_name}': {e}"
@@ -158,8 +172,15 @@ async def ingest_dlt_source(
     return row_data_list
 
 
-async def _extract_dlt_schema(relational_config, dlt_db_name: str, dataset_name: str):
-    """Extract and filter schema from the dlt-populated database."""
+async def _extract_dlt_schema(
+    relational_config, dlt_db_name: str, dataset_name: str, allowed_tables: set
+):
+    """Extract and filter schema from the dlt-populated database.
+
+    Only tables in ``allowed_tables`` (the tables loaded by the current dlt
+    run) are kept — the staging DB is shared per dataset and may contain
+    tables from other sources.
+    """
     from cognee.infrastructure.databases.relational.create_relational_engine import (
         create_relational_engine,
     )
@@ -185,8 +206,14 @@ async def _extract_dlt_schema(relational_config, dlt_db_name: str, dataset_name:
     )
     schema = await engine.extract_schema()
 
-    # Filter out dlt internal tables (those starting with _dlt_ or containing staging)
-    filtered_schema = {k: v for k, v in schema.items() if "_dlt_" not in k and "staging" not in k}
+    # Filter out dlt internal tables (those starting with _dlt_ or containing
+    # staging) and tables not loaded by the current source. Postgres keys are
+    # schema-qualified ("dataset.table"), so compare the last path component.
+    filtered_schema = {
+        k: v
+        for k, v in schema.items()
+        if "_dlt_" not in k and "staging" not in k and k.split(".")[-1] in allowed_tables
+    }
 
     return schema, filtered_schema
 
