@@ -59,13 +59,46 @@ class _DynamicDataPoint(DataPoint):
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="allow")
 
 
-_dynamic_models: Dict[str, Type[DataPoint]] = {}
+_dynamic_models: Dict[Any, Type[DataPoint]] = {}
 
 
-def _dynamic_model(type_name: str) -> Type[DataPoint]:
-    if type_name not in _dynamic_models:
-        _dynamic_models[type_name] = create_model(type_name, __base__=_DynamicDataPoint)
-    return _dynamic_models[type_name]
+def _dynamic_model(type_name: str, props: Optional[Dict[str, Any]] = None) -> Type[DataPoint]:
+    """Create (and cache) a DataPoint model for an unknown type, DECLARING the
+    record's properties as real fields.
+
+    Declared fields matter downstream: ``get_graph_from_model`` rebuilds every
+    node through a copy of the model CLASS (``copy_model``), which keeps only
+    declared fields — ``extra="allow"`` attributes are silently dropped there,
+    losing content fields like ``DocumentChunk.text`` on import. The record's
+    ``metadata`` (``index_fields``) is set as the model default for the same
+    reason: the rebuilt copy takes the class default, and an empty default
+    means the node is never vector-indexed.
+    """
+    props = props or {}
+    extra_fields = sorted(
+        key
+        for key in props
+        if key not in _BASE_FIELDS and key != "type" and key.isidentifier()
+    )
+    record_metadata = props.get("metadata")
+    index_fields = (
+        tuple(record_metadata.get("index_fields") or [])
+        if isinstance(record_metadata, dict)
+        else ()
+    )
+
+    cache_key = (type_name, tuple(extra_fields), index_fields)
+    if cache_key not in _dynamic_models:
+        field_definitions: Dict[str, Any] = {
+            key: (Optional[Any], None) for key in extra_fields
+        }
+        if isinstance(record_metadata, dict):
+            metadata_annotation = DataPoint.model_fields["metadata"].annotation
+            field_definitions["metadata"] = (metadata_annotation, dict(record_metadata))
+        _dynamic_models[cache_key] = create_model(
+            type_name, __base__=_DynamicDataPoint, **field_definitions
+        )
+    return _dynamic_models[cache_key]
 
 
 def _clean_properties(properties: Dict[str, Any]) -> Dict[str, Any]:
@@ -103,12 +136,12 @@ def rehydrate_node(
 
     try:
         # Created lazily: only when the registered class is absent or fails.
-        return _dynamic_model(type_name)(**props)
+        return _dynamic_model(type_name, props)(**props)
     except Exception:  # noqa: BLE001 — final fallback below
         pass
 
     base_safe = {key: value for key, value in props.items() if key in _BASE_FIELDS}
-    return _dynamic_model(type_name)(**base_safe)
+    return _dynamic_model(type_name, base_safe)(**base_safe)
 
 
 class GraphEdge(BaseModel):
