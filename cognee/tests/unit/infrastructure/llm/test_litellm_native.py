@@ -278,42 +278,41 @@ def test_no_instructor_import_in_litellm_native():
 
 @pytest.mark.asyncio
 async def test_gateway_routes_to_litellm_native_when_config_set():
-    """Patch config to litellm_native, call LLMGateway, assert get_native_client is called."""
-    from cognee.infrastructure.llm.LLMGateway import LLMGateway
+    """With the framework set to litellm_native, the gateway calls get_native_client.
+
+    Resolve the module objects via importlib and patch.object, not dotted strings:
+    the package __init__ binds the name ``cognee.infrastructure.llm.LLMGateway`` to
+    the *class*, so both a string patch target and ``import ... as`` (which resolves
+    by attribute access) can land on the class instead of the submodule depending on
+    import order — flaky across test shards. ``import_module`` returns the real module.
+    """
+    import importlib
+
+    gateway_module = importlib.import_module("cognee.infrastructure.llm.LLMGateway")
+    native_factory = importlib.import_module(
+        "cognee.infrastructure.llm.structured_output_framework.litellm_native.get_native_client"
+    )
 
     mock_adapter = AsyncMock()
     mock_adapter.acreate_structured_output = AsyncMock(
         return_value=PersonModel(name="Diana", age=28)
     )
-
     mock_get_native_client = MagicMock(return_value=mock_adapter)
 
-    with patch("cognee.infrastructure.llm.LLMGateway.get_llm_config") as mock_config:
-        config_instance = MagicMock()
-        config_instance.structured_output_framework = "litellm_native"
-        mock_config.return_value = config_instance
+    config_instance = MagicMock()
+    config_instance.structured_output_framework = "litellm_native"
 
-        with patch(
-            "cognee.infrastructure.llm.structured_output_framework.litellm_native.get_native_client.get_native_client",
-            mock_get_native_client,
-        ):
-            # We need to also patch the import inside LLMGateway
-            import cognee.infrastructure.llm.structured_output_framework.litellm_native.get_native_client as gnc_module
+    with (
+        patch.object(gateway_module, "get_llm_config", return_value=config_instance),
+        patch.object(native_factory, "get_native_client", mock_get_native_client),
+    ):
+        result = await gateway_module.LLMGateway.acreate_structured_output(
+            text_input="Tell me about Diana",
+            system_prompt="Extract person info.",
+            response_model=PersonModel,
+        )
 
-            original_func = gnc_module.get_native_client
-
-            gnc_module.get_native_client = mock_get_native_client
-
-            try:
-                result = await LLMGateway.acreate_structured_output(
-                    text_input="Tell me about Diana",
-                    system_prompt="Extract person info.",
-                    response_model=PersonModel,
-                )
-            finally:
-                gnc_module.get_native_client = original_func
-
-    # Verify get_native_client was called (not get_llm_client).
+    # Routed to get_native_client (not the instructor get_llm_client).
     mock_get_native_client.assert_called_once()
     mock_adapter.acreate_structured_output.assert_called_once()
     assert isinstance(result, PersonModel)
@@ -430,7 +429,7 @@ async def test_connection_state_is_call_invariant_across_fallback():
         fallback_endpoint="https://fallback.example.com",
     )
 
-    seen_models: list[str] = []
+    seen_models: list[str | None] = []
 
     async def side_effect(*args: Any, **kwargs: Any) -> MagicMock:
         seen_models.append(kwargs.get("model"))
