@@ -1306,6 +1306,7 @@ distributed = [
 ]
 dlt = [
     { name = "dlt", extra = ["sqlalchemy"] },
+    { name = "pandas" },
 ]
 docling = [
     { name = "docling" },
@@ -1339,6 +1340,7 @@ gmail = [
     { name = "google-api-python-client" },
     { name = "google-auth" },
     { name = "google-auth-oauthlib" },
+    { name = "pandas" },
 ]
 graphiti = [
     { name = "graphiti-core" },
@@ -1500,7 +1502,9 @@ requires-dist = [
     { name = "opentelemetry-exporter-otlp-proto-grpc", marker = "extra == 'tracing'", specifier = ">=1.20.0,<2" },
     { name = "opentelemetry-exporter-otlp-proto-http", marker = "extra == 'tracing'", specifier = ">=1.20.0,<2" },
     { name = "opentelemetry-sdk", marker = "extra == 'tracing'", specifier = ">=1.20.0,<2" },
+    { name = "pandas", marker = "extra == 'dlt'", specifier = ">=2.2.2,<3.0.0" },
     { name = "pandas", marker = "extra == 'evals'", specifier = ">=2.2.2,<3.0.0" },
+    { name = "pandas", marker = "extra == 'gmail'", specifier = ">=2.2.2,<3.0.0" },
     { name = "pgvector", marker = "extra == 'postgres'", specifier = ">=0.3.5,<0.4" },
     { name = "pgvector", marker = "extra == 'postgres-binary'", specifier = ">=0.3.5,<0.4" },
     { name = "playwright", marker = "extra == 'scraping'", specifier = ">=1.9.0" },

@@ -153,9 +153,14 @@ graphiti = ["graphiti-core>=0.28.0"]
 # Note: New s3fs and boto3 versions don't work well together
 # Always use comaptible fixed versions of these two dependencies
 aws = ["s3fs[boto3]==2025.3.2"]
-dlt = ["dlt[sqlalchemy]>=1.9.0,<2"]
+dlt = [
+    "dlt[sqlalchemy]>=1.9.0,<2",
+    # dlt's filesystem read_csv reader requires pandas but does not declare it
+    "pandas>=2.2.2,<3.0.0",
+]
 gmail = [
     "dlt[sqlalchemy]>=1.9.0,<2",
+    "pandas>=2.2.2,<3.0.0",
     "google-api-python-client>=2.100.0,<3",
     "google-auth>=2.23.0,<3",
     "google-auth-oauthlib>=1.1.0,<2",
