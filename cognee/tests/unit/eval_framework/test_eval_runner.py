@@ -67,6 +67,26 @@ def test_importing_runner_surface_does_not_import_optional_extras():
     assert "ok" in result.stdout
 
 
+def test_importing_pipeline_steps_does_not_import_optional_extras():
+    """Importing the pipeline step modules the runner chains must not pull in
+    any optional eval-extra dependency, so a direct_llm run works without the
+    extra. Guards against eager plotly/gdown/deepeval imports sneaking back in
+    (e.g. the dead dashboard import run_evaluation_module used to carry)."""
+    code = (
+        "import sys;"
+        "import cognee.eval_framework.corpus_builder.run_corpus_builder;"
+        "import cognee.eval_framework.answer_generation.run_question_answering_module;"
+        "import cognee.eval_framework.evaluation.run_evaluation_module;"
+        "assert 'plotly' not in sys.modules, 'plotly was imported eagerly';"
+        "assert 'gdown' not in sys.modules, 'gdown was imported eagerly';"
+        "assert 'deepeval' not in sys.modules, 'deepeval was imported eagerly';"
+        "print('ok')"
+    )
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    assert "ok" in result.stdout
+
+
 def test_direct_llm_engine_loads_without_extra():
     """The DirectLLM engine resolves without needing the eval extra."""
     adapter_cls = EvaluatorAdapter("DirectLLM").load_adapter_class()
