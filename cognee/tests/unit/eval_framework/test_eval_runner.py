@@ -10,6 +10,8 @@ They run under CI with no real API keys and without requiring the ``eval`` extra
 
 import argparse
 import json
+import logging
+import os
 import subprocess
 import sys
 from unittest.mock import patch
@@ -132,10 +134,10 @@ def test_resolve_run_paths_namespaces_by_benchmark_and_engine(tmp_path):
         assert "HotPotQA_DirectLLM" in paths[key]
 
 
-def test_resolve_run_paths_absolute_override_escapes_namespace(tmp_path):
+def test_resolve_run_paths_absolute_override_escapes_namespace(tmp_path, caplog):
     """Documented limitation: an absolute artifact-path override wins over the
     namespaced run directory (os.path.join drops the prefix). resolve_run_paths
-    warns about it but preserves the override."""
+    warns about the escape but preserves the override."""
     escape = str(tmp_path / "escape" / "metrics.json")
     config = EvalConfig(
         benchmark="Dummy",
@@ -143,9 +145,29 @@ def test_resolve_run_paths_absolute_override_escapes_namespace(tmp_path):
         results_dir=str(tmp_path / "results"),
         metrics_path=escape,
     )
-    paths = resolve_run_paths(config)
+    with caplog.at_level(logging.WARNING):
+        paths = resolve_run_paths(config)
     assert paths["metrics_path"] == escape
-    assert "results" not in paths["metrics_path"]
+    assert not paths["metrics_path"].startswith(str(tmp_path / "results"))
+    assert "metrics_path" in caplog.text
+    assert "escapes the run directory" in caplog.text
+
+
+def test_resolve_run_paths_warns_on_relative_escape(tmp_path, caplog):
+    """A relative override with parent components also leaves the run directory
+    and is warned about, while the joined value is preserved unchanged."""
+    config = EvalConfig(
+        benchmark="Dummy",
+        evaluation_engine="DirectLLM",
+        results_dir=str(tmp_path / "results"),
+        metrics_path="../shared/metrics.json",
+    )
+    with caplog.at_level(logging.WARNING):
+        paths = resolve_run_paths(config)
+    expected = os.path.join(str(tmp_path / "results"), "Dummy_DirectLLM", "../shared/metrics.json")
+    assert paths["metrics_path"] == expected
+    assert "metrics_path" in caplog.text
+    assert "escapes the run directory" in caplog.text
 
 
 # --------------------------------------------------------------------------- #

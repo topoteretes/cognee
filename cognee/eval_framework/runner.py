@@ -20,7 +20,7 @@ import argparse
 import json
 import os
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from cognee.shared.logging_utils import get_logger
 from cognee.eval_framework.eval_config import EvalConfig
@@ -84,13 +84,17 @@ def resolve_run_paths(config: EvalConfig) -> Dict[str, str]:
     run_dir = os.path.join(config.results_dir, run_id)
     resolved = {}
     for key in ARTIFACT_KEYS:
-        if os.path.isabs(params[key]):
-            # os.path.join discards run_dir for absolute paths; make the escape
-            # from the namespaced run directory visible instead of silent.
-            logger.warning(
-                "Absolute %s overrides the run directory %s: %s", key, run_dir, params[key]
-            )
-        resolved[key] = os.path.join(run_dir, params[key])
+        joined = os.path.join(run_dir, params[key])
+        # Absolute overrides discard run_dir entirely and ".." components walk
+        # out of it; make the escape from the run directory visible, not silent.
+        try:
+            abs_run_dir = os.path.abspath(run_dir)
+            escapes = os.path.commonpath([abs_run_dir, os.path.abspath(joined)]) != abs_run_dir
+        except ValueError:  # e.g. different drives on Windows — an escape as well
+            escapes = True
+        if escapes:
+            logger.warning("%s escapes the run directory %s: %s", key, run_dir, joined)
+        resolved[key] = joined
     return resolved
 
 
@@ -126,7 +130,7 @@ async def _evaluation_step(params: Dict[str, Any]) -> Any:
     return await run_evaluation(params)
 
 
-def _import_dashboard():
+def _import_dashboard() -> Callable[..., str]:
     """Import the dashboard generator lazily (it pulls in plotly), raising an
     actionable error when the optional deps are missing. Called before the
     pipeline runs so a costly LLM run is never wasted on a missing extra."""
@@ -262,7 +266,7 @@ def add_eval_arguments(parser: argparse.ArgumentParser) -> None:
         dest="dashboard",
         action="store_true",
         default=None,
-        help="Generate an HTML dashboard (requires the eval extra).",
+        help="Generate an HTML dashboard (default: on; requires the eval extra).",
     )
     dashboard_group.add_argument(
         "--no-dashboard",
