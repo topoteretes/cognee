@@ -240,8 +240,10 @@ async def test_run_eval_orchestrates_pipeline_and_returns_result(tmp_path, monke
 
 @pytest.mark.asyncio
 async def test_run_eval_runs_dashboard_step_when_enabled(tmp_path, monkeypatch):
-    """With the dashboard enabled, run_eval invokes the dashboard step and
-    surfaces its path on the result and in the summary."""
+    """With the dashboard enabled, run_eval preflights the dashboard deps, invokes
+    the dashboard step, and surfaces its path on the result and in the summary.
+    Patching _import_dashboard covers both the fail-fast call and the real
+    _create_dashboard plumbing without needing plotly installed."""
 
     async def fake_noop(params):
         return []
@@ -251,15 +253,16 @@ async def test_run_eval_runs_dashboard_step_when_enabled(tmp_path, monkeypatch):
             json.dump({"correctness": {"mean": 1.0}}, f)
         return []
 
-    def fake_dashboard(params):
-        with open(params["dashboard_path"], "w", encoding="utf-8") as f:
+    def fake_create_dashboard(metrics_path, aggregate_metrics_path, output_file, benchmark):
+        with open(output_file, "w", encoding="utf-8") as f:
             f.write("<html></html>")
-        return params["dashboard_path"]
 
     monkeypatch.setattr("cognee.eval_framework.runner._corpus_step", fake_noop)
     monkeypatch.setattr("cognee.eval_framework.runner._answer_step", fake_noop)
     monkeypatch.setattr("cognee.eval_framework.runner._evaluation_step", fake_evaluation)
-    monkeypatch.setattr("cognee.eval_framework.runner._create_dashboard", fake_dashboard)
+    monkeypatch.setattr(
+        "cognee.eval_framework.runner._import_dashboard", lambda: fake_create_dashboard
+    )
 
     config = EvalConfig(
         benchmark="Dummy",
@@ -271,7 +274,38 @@ async def test_run_eval_runs_dashboard_step_when_enabled(tmp_path, monkeypatch):
 
     assert result.dashboard_path is not None
     assert "Dummy_DirectLLM" in result.dashboard_path
+    # The real _create_dashboard plumbing routed output_file to the resolved path.
+    with open(result.dashboard_path, "r", encoding="utf-8") as f:
+        assert f.read() == "<html></html>"
     assert any("Dashboard" in line for line in summarize_result(result))
+
+
+@pytest.mark.asyncio
+async def test_run_eval_fails_fast_when_dashboard_deps_missing(tmp_path, monkeypatch):
+    """When the dashboard is enabled but its deps are missing, run_eval raises
+    before any pipeline step runs, so no LLM time or money is wasted."""
+    calls = []
+
+    async def spy_step(params):
+        calls.append("step")
+        return []
+
+    monkeypatch.setattr("cognee.eval_framework.runner._corpus_step", spy_step)
+    monkeypatch.setattr("cognee.eval_framework.runner._answer_step", spy_step)
+    monkeypatch.setattr("cognee.eval_framework.runner._evaluation_step", spy_step)
+    monkeypatch.setitem(sys.modules, "cognee.eval_framework.metrics_dashboard", None)
+
+    config = EvalConfig(
+        benchmark="Dummy",
+        evaluation_engine="DirectLLM",
+        results_dir=str(tmp_path),
+        dashboard=True,
+    )
+    with pytest.raises(ImportError) as excinfo:
+        await run_eval(config)
+
+    assert calls == []
+    assert "--no-dashboard" in str(excinfo.value)
 
 
 def test_create_dashboard_missing_deps_is_actionable(monkeypatch):

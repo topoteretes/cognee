@@ -117,9 +117,10 @@ async def _evaluation_step(params: Dict[str, Any]) -> Any:
     return await run_evaluation(params)
 
 
-def _create_dashboard(params: Dict[str, Any]) -> str:
-    """Generate the HTML dashboard, importing plotly lazily so core runs (and the
-    ``--no-dashboard`` path) never require the ``eval`` extra."""
+def _import_dashboard():
+    """Import the dashboard generator lazily (it pulls in plotly), raising an
+    actionable error when the optional deps are missing. Called before the
+    pipeline runs so a costly LLM run is never wasted on a missing extra."""
     try:
         from cognee.eval_framework.metrics_dashboard import create_dashboard
     except ImportError as error:
@@ -127,7 +128,12 @@ def _create_dashboard(params: Dict[str, Any]) -> str:
             "Dashboard generation requires optional dependencies. Install them with: "
             'pip install "cognee[eval]" (or pass --no-dashboard to skip it).'
         ) from error
+    return create_dashboard
 
+
+def _create_dashboard(params: Dict[str, Any]) -> str:
+    """Generate the HTML dashboard."""
+    create_dashboard = _import_dashboard()
     create_dashboard(
         metrics_path=params["metrics_path"],
         aggregate_metrics_path=params["aggregate_metrics_path"],
@@ -148,6 +154,10 @@ async def run_eval(config: Optional[EvalConfig] = None) -> EvalResult:
 
     resolved = resolve_run_paths(config)
     params.update(resolved)
+
+    if params.get("dashboard"):
+        # Fail fast if the dashboard deps are missing, before any pipeline work.
+        _import_dashboard()
 
     run_dir = os.path.dirname(resolved["metrics_path"])
     if run_dir:
