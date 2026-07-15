@@ -74,21 +74,43 @@ class TestCreateRelationalEngineConnectArgs:
 
 
 class TestCreateRelationalEngineTurso:
-    """Verify the DB_PROVIDER=turso branch builds the aioturso URL and returns a TursoAdapter."""
+    """Verify the DB_PROVIDER=turso branch builds the aiosqlite drop-in URL and returns a TursoAdapter."""
+
+    @pytest.fixture(autouse=True)
+    def _fake_libsql(self):
+        """Inject a fake libsql_experimental so the driver import inside the branch succeeds."""
+        fake = types.ModuleType("libsql_experimental")
+        with patch.dict(sys.modules, {"libsql_experimental": fake}):
+            yield
 
     @patch("cognee.infrastructure.databases.relational.sqlalchemy.TursoAdapter.TursoAdapter")
-    def test_turso_returns_turso_adapter_with_aioturso_url(self, mock_turso_adapter):
-        """turso provider builds a local sqlite+aioturso connection string and returns a TursoAdapter."""
+    def test_turso_returns_turso_adapter_with_aiosqlite_url(self, mock_turso_adapter):
+        """turso provider builds a local sqlite+aiosqlite connection string and returns a TursoAdapter."""
         engine = create_relational_engine(**TURSO_PARAMS)
 
         assert engine is mock_turso_adapter.return_value
         connection_string = mock_turso_adapter.call_args[0][0]
-        expected = f"sqlite+aioturso:///{TURSO_PARAMS['db_path']}/{TURSO_PARAMS['db_name']}"
+        expected = f"sqlite+aiosqlite:///{TURSO_PARAMS['db_path']}/{TURSO_PARAMS['db_name']}"
         assert connection_string == expected
 
+    @patch("cognee.infrastructure.databases.relational.sqlalchemy.TursoAdapter.TursoAdapter")
+    def test_turso_remote_forwards_sync_url_and_auth_token(self, mock_turso_adapter):
+        """A configured remote URL + auth token are forwarded to the adapter for replica sync."""
+        create_relational_engine(
+            **{
+                **TURSO_PARAMS,
+                "db_turso_url": "libsql://db.turso.io",
+                "db_turso_auth_token": "tok",
+            }
+        )
+
+        _, kwargs = mock_turso_adapter.call_args
+        assert kwargs.get("sync_url") == "libsql://db.turso.io"
+        assert kwargs.get("auth_token") == "tok"
+
     def test_turso_missing_driver_raises_actionable_import_error(self):
-        """When the pyturso driver is missing, raise a clear cognee[turso] install error."""
-        # Setting the module to None in sys.modules makes `import turso` raise ImportError.
-        with patch.dict(sys.modules, {"turso": None}):
+        """When the libSQL driver is missing, raise a clear cognee[turso] install error."""
+        # Setting the module to None in sys.modules makes `import libsql_experimental` raise ImportError.
+        with patch.dict(sys.modules, {"libsql_experimental": None}):
             with pytest.raises(ImportError, match="Turso/libSQL"):
                 create_relational_engine(**TURSO_PARAMS)

@@ -1,102 +1,156 @@
-"""Unit tests for TursoAdapter's write-conflict handling.
+"""Unit tests for TursoAdapter — the Turso (libSQL) relational backend.
 
-Turso/libSQL is single-writer, so the adapter serializes its own writes with an
-asyncio lock and retries transient busy errors with bounded backoff. These tests
-cover the busy-error classification and the retry policy deterministically, without
-a real driver or database (TursoAdapter is built via __new__ so __init__, which
-imports the driver and opens an engine, is not run).
+Turso is driven through aiosqlite (a libSQL file is a SQLite file), so the
+adapter is a drop-in for the SQLite backend. These tests exercise the local
+drop-in against a real temporary libSQL/SQLite file, and the remote
+embedded-replica wiring (seed-before-first-use + sync-after-write) with the
+libsql driver stubbed, so no network or real Turso database is needed.
 """
 
 import asyncio
+import sys
+import tempfile
+import types
+from pathlib import Path
 
 import pytest
-from sqlalchemy.exc import OperationalError
+from sqlalchemy import text
+from unittest.mock import patch
 
-from cognee.infrastructure.databases.relational.sqlalchemy.TursoAdapter import (
-    TursoAdapter,
-    _is_busy_error,
-)
+from cognee.infrastructure.databases.relational.sqlalchemy.TursoAdapter import TursoAdapter
 
 
-def _make_adapter(max_retries: int = 3) -> TursoAdapter:
-    """A TursoAdapter with just the write-lock machinery, no engine/driver."""
-    adapter = object.__new__(TursoAdapter)
-    adapter._write_lock = asyncio.Lock()
-    adapter._write_max_retries = max_retries
-    adapter._write_retry_base_delay = 0.0  # no real sleeping in tests
-    adapter._is_remote = False  # local mode: _run_write skips the remote sync flush
-    return adapter
+def _local_adapter() -> TursoAdapter:
+    """A local (embedded) TursoAdapter backed by a fresh temp libSQL/SQLite file."""
+    db_path = Path(tempfile.mkdtemp()) / "turso_test.db"
+    return TursoAdapter(f"sqlite+aiosqlite:///{db_path}")
 
 
-def _busy_error() -> OperationalError:
-    return OperationalError("UPDATE ...", {}, Exception("database is locked"))
+class TestTursoAdapterLocal:
+    """Local mode is a pure SQLite drop-in: inherit everything, add nothing."""
+
+    def test_is_local_and_uses_sqlite_dialect(self):
+        adapter = _local_adapter()
+        assert adapter.is_remote is False
+        # Inheriting the sqlite dialect is what makes every SQLAlchemyAdapter
+        # behavior (and the sqlite-dialect Alembic migrations) apply unchanged.
+        assert adapter.engine.dialect.name == "sqlite"
+
+    def test_roundtrip_through_inherited_engine(self):
+        adapter = _local_adapter()
+
+        async def scenario():
+            async with adapter.engine.begin() as conn:
+                await conn.execute(text("CREATE TABLE t (v TEXT)"))
+                await conn.execute(text("INSERT INTO t (v) VALUES ('x')"))
+            async with adapter.get_async_session() as session:
+                rows = (await session.execute(text("SELECT v FROM t"))).scalars().all()
+            await adapter.engine.dispose()
+            return rows
+
+        assert asyncio.run(scenario()) == ["x"]
+
+    def test_sync_and_write_wrapper_are_noops_locally(self):
+        adapter = _local_adapter()
+        calls = []
+
+        async def scenario():
+            await adapter.sync()  # no-op, must not import/require libsql
+
+            async def fake_write(_self, value):
+                calls.append(value)
+                return value
+
+            # The write wrapper still runs the underlying method locally; the
+            # seed/sync around it are simply no-ops.
+            return await adapter._write(fake_write, "written")
+
+        assert asyncio.run(scenario()) == "written"
+        assert calls == ["written"]
 
 
-def test_is_busy_error_classifies_contention():
-    assert _is_busy_error(Exception("database is locked"))
-    assert _is_busy_error(Exception("SQLITE_BUSY"))
-    assert _is_busy_error(Exception("write-write conflict"))
+class TestTursoAdapterRemote:
+    """Remote mode adds embedded-replica sync on top of the same aiosqlite engine."""
 
+    @pytest.fixture
+    def libsql_stub(self):
+        """Stub libsql_experimental so replica sync needs no network or real Turso."""
+        calls = {"connect": 0, "sync": 0, "close": 0, "last": None, "fail": False}
 
-def test_is_busy_error_ignores_other_errors():
-    assert not _is_busy_error(Exception("no such table: data"))
-    assert not _is_busy_error(Exception("UNIQUE constraint failed"))
+        class _Conn:
+            def sync(self):
+                if calls["fail"]:
+                    raise RuntimeError("primary unreachable")
+                calls["sync"] += 1
 
+            def close(self):
+                calls["close"] += 1
 
-def test_run_write_retries_busy_then_succeeds():
-    adapter = _make_adapter(max_retries=5)
-    calls = {"n": 0}
+        def _connect(database, sync_url=None, auth_token=None):
+            calls["connect"] += 1
+            calls["last"] = {
+                "database": database,
+                "sync_url": sync_url,
+                "auth_token": auth_token,
+            }
+            return _Conn()
 
-    async def flaky(_self):
-        calls["n"] += 1
-        if calls["n"] < 3:
-            raise _busy_error()
-        return "ok"
+        stub = types.ModuleType("libsql_experimental")
+        stub.connect = _connect
+        with patch.dict(sys.modules, {"libsql_experimental": stub}):
+            yield calls
 
-    result = asyncio.run(adapter._run_write(flaky))
-    assert result == "ok"
-    assert calls["n"] == 3  # failed twice, succeeded on the third
+    def _remote_adapter(self) -> TursoAdapter:
+        db_path = Path(tempfile.mkdtemp()) / "replica.db"
+        return TursoAdapter(
+            f"sqlite+aiosqlite:///{db_path}",
+            sync_url="libsql://db.turso.io",
+            auth_token="tok",
+        )
 
+    def test_no_network_in_constructor(self, libsql_stub):
+        # __init__ must not touch the network/driver (that would block the loop
+        # and hard-fail all DB access when the primary is unreachable).
+        adapter = self._remote_adapter()
+        assert adapter.is_remote is True
+        assert libsql_stub["connect"] == 0
 
-def test_run_write_gives_up_after_max_retries():
-    adapter = _make_adapter(max_retries=2)
-    calls = {"n": 0}
+    def test_seeds_replica_once_before_first_use(self, libsql_stub):
+        adapter = self._remote_adapter()
 
-    async def always_busy(_self):
-        calls["n"] += 1
-        raise _busy_error()
+        async def scenario():
+            async with adapter.get_async_session():
+                pass
+            async with adapter.get_async_session():
+                pass
 
-    with pytest.raises(OperationalError):
-        asyncio.run(adapter._run_write(always_busy))
-    assert calls["n"] == 3  # initial try + 2 retries
+        asyncio.run(scenario())
+        # Seeded exactly once (pull current remote state), passing the wiring through.
+        assert libsql_stub["sync"] == 1
+        assert libsql_stub["last"]["sync_url"] == "libsql://db.turso.io"
+        assert libsql_stub["last"]["auth_token"] == "tok"
 
+    def test_write_syncs_after_the_write(self, libsql_stub):
+        adapter = self._remote_adapter()
+        order = []
 
-def test_run_write_does_not_retry_non_busy_errors():
-    adapter = _make_adapter(max_retries=5)
-    calls = {"n": 0}
+        async def fake_write(_self):
+            order.append("write")
+            return "done"
 
-    async def hard_failure(_self):
-        calls["n"] += 1
-        raise OperationalError("INSERT ...", {}, Exception("no such table: data"))
+        async def scenario():
+            return await adapter._write(fake_write)
 
-    with pytest.raises(OperationalError):
-        asyncio.run(adapter._run_write(hard_failure))
-    assert calls["n"] == 1  # non-retryable, tried exactly once
+        result = asyncio.run(scenario())
+        assert result == "done"
+        # seed (before) + push (after) => two syncs, each its own open/close.
+        assert libsql_stub["sync"] == 2
+        assert libsql_stub["close"] == 2
+        assert order == ["write"]
 
-
-def test_run_write_serializes_concurrent_writers():
-    """Under the lock, overlapping writers never run their critical sections at once."""
-    adapter = _make_adapter()
-    active = {"now": 0, "max": 0}
-
-    async def writer(_self):
-        active["now"] += 1
-        active["max"] = max(active["max"], active["now"])
-        await asyncio.sleep(0)  # yield, so an unlocked version would interleave
-        active["now"] -= 1
-
-    async def scenario():
-        await asyncio.gather(*[adapter._run_write(writer) for _ in range(10)])
-
-    asyncio.run(scenario())
-    assert active["max"] == 1  # never two critical sections in flight at once
+    def test_sync_failure_is_non_fatal(self, libsql_stub):
+        adapter = self._remote_adapter()
+        libsql_stub["fail"] = True
+        # A transient sync failure must be swallowed so it never breaks a DB op.
+        asyncio.run(adapter.sync())
+        assert libsql_stub["close"] == 1  # connection still closed despite failure
