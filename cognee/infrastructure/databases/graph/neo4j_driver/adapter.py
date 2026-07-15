@@ -204,6 +204,11 @@ class Neo4jAdapter(GraphDBInterface):
         # add_nodes/add_edges does not need it).
         self._source_ref_change_lock = asyncio.Lock()
 
+    async def close(self) -> None:
+        """Close the underlying Neo4j driver connection pool."""
+        if hasattr(self, "driver") and self.driver is not None:
+            await self.driver.close()
+
     async def initialize(self) -> None:
         """
         Initializes the database: adds uniqueness constraint on id and performs indexing
