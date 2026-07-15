@@ -1,3 +1,5 @@
+import { randomBytes } from "node:crypto";
+
 import * as vscode from "vscode";
 
 import type { Citation } from "../../core";
@@ -228,11 +230,7 @@ export class AskPanel {
   }
 }
 
+/** A per-render, CSP-grade nonce authorizing the panel's single inline script. */
 function getNonce(): string {
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-  let text = "";
-  for (let i = 0; i < 32; i += 1) {
-    text += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return text;
+  return randomBytes(16).toString("base64");
 }
