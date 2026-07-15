@@ -12,7 +12,7 @@ what Cognee knows about the current repository, with links back to the source fi
 - **Remember Selection / Remember File / Remember Note** — store code, files, or a free-form note into per-repository memory.
 - **Ask My Project Memory** — a panel that answers questions about the repo, with ranked, clickable citations that open the exact source file.
 - **Recall** — a quick query from the command palette.
-- **Index Workspace** — opt-in bulk ingest, respecting `.gitignore`/`.cogneeignore`, with a preflight summary.
+- **Index Workspace** — opt-in bulk ingest, respecting `.gitignore`/`.cogneeignore` (and always skipping dependency/build directories), with a preflight summary.
 - **Forget Project Memory** — clear the graph (keep files) or delete the dataset.
 - **Per-repository isolation** — each repo maps to a stable `vscode_<hash>` dataset (from the git remote, or the workspace path as a fallback).
 
@@ -59,7 +59,7 @@ settings and secret storage.
 | `cognee.searchType` | `auto` | Recall strategy; `auto` lets Cognee route the query. |
 | `cognee.topK` | `15` | Max recall results. |
 | `cognee.includeReferences` | `true` | Attach source citations to answers. |
-| `cognee.ingestion.respectGitignore` | `true` | Skip ignored files when indexing. |
+| `cognee.ingestion.respectGitignore` | `true` | Skip `.gitignore`/`.cogneeignore` files when indexing (dependency/build dirs are always skipped). |
 | `cognee.ingestion.maxFileSizeKb` | `512` | Skip files larger than this when indexing. |
 | `cognee.requestTimeoutMs` | `300000` | HTTP request timeout. |
 

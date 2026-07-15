@@ -139,7 +139,7 @@
         "cognee.ingestion.respectGitignore": {
           "type": "boolean",
           "default": true,
-          "description": "When indexing the workspace, skip files ignored by .gitignore and .cogneeignore."
+          "markdownDescription": "When indexing the workspace, skip files matched by the project's `.gitignore` and `.cogneeignore`. Common dependency and build directories (`node_modules`, `.git`, `dist`, …) are always skipped regardless of this setting."
         },
         "cognee.ingestion.maxFileSizeKb": {
           "type": "number",
@@ -170,5 +170,8 @@
     "esbuild": "^0.21.5",
     "typescript": "^5.4.5",
     "vitest": "^1.6.0"
+  },
+  "dependencies": {
+    "ignore": "^5.3.2"
   }
 }

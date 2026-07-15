@@ -1,5 +1,9 @@
+import { promises as fs } from "node:fs";
+import * as path from "node:path";
+
 import * as vscode from "vscode";
 
+import { buildIgnoreFilter } from "../ignore";
 import { basenameOf } from "../paths";
 import type { Runtime } from "../runtime";
 
@@ -19,13 +23,23 @@ const MAX_FILES = 400;
  * cancellation. Opt-in by design — nothing is sent until the user confirms.
  */
 export async function indexWorkspace(runtime: Runtime): Promise<void> {
-  const exclude = runtime.config.respectGitignore ? EXCLUDE_GLOB : null;
-  const found = await vscode.workspace.findFiles(INCLUDE_GLOB, exclude, MAX_FILES);
+  // Dependency/build/VCS directories are never useful project memory, so they
+  // are always excluded — passing null here would disable VS Code's defaults too.
+  const found = await vscode.workspace.findFiles(INCLUDE_GLOB, EXCLUDE_GLOB, MAX_FILES);
+
+  // When enabled, honor the project's own ignore files so git-ignored (and
+  // .cogneeignore-listed) files — build output, secrets, envs — aren't uploaded.
+  const isIgnored = runtime.config.respectGitignore
+    ? await loadIgnoreFilter(runtime.workspaceRoot)
+    : undefined;
 
   const maxBytes = runtime.config.maxFileSizeKb * 1024;
   const eligible: { uri: vscode.Uri; size: number }[] = [];
   let totalBytes = 0;
   for (const uri of found) {
+    if (isIgnored?.(vscode.workspace.asRelativePath(uri, false))) {
+      continue;
+    }
     try {
       const stat = await vscode.workspace.fs.stat(uri);
       if (stat.size > 0 && stat.size <= maxBytes) {
@@ -110,6 +124,21 @@ async function runIndexing(
       }
     },
   );
+}
+
+/** Read the workspace's `.gitignore` and `.cogneeignore` into a path matcher. */
+async function loadIgnoreFilter(
+  workspaceRoot: string,
+): Promise<((relativePath: string) => boolean) | undefined> {
+  const read = async (name: string): Promise<string | undefined> => {
+    try {
+      return await fs.readFile(path.join(workspaceRoot, name), "utf8");
+    } catch {
+      return undefined; // absent or unreadable — nothing to add
+    }
+  };
+  const [gitignore, cogneeignore] = await Promise.all([read(".gitignore"), read(".cogneeignore")]);
+  return buildIgnoreFilter(gitignore, cogneeignore);
 }
 
 function formatBytes(bytes: number): string {
