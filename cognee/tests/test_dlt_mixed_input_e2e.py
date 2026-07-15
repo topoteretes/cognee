@@ -90,8 +90,7 @@ async def test_dlt_mixed_input():
 
     is_row_of_count = sum(1 for edge in edges if edge[2] == "is_row_of")
     assert is_row_of_count == UNIQUE_ROW_COUNT, (
-        f"Expected {UNIQUE_ROW_COUNT} is_row_of edges (one per unique row), "
-        f"got {is_row_of_count}"
+        f"Expected {UNIQUE_ROW_COUNT} is_row_of edges (one per unique row), got {is_row_of_count}"
     )
 
     summaries = [p for p in node_props if p.get("type") == "TextSummary"]
@@ -100,9 +99,7 @@ async def test_dlt_mixed_input():
     )
 
     entities = [p for p in node_props if p.get("type") == "Entity"]
-    assert entities, (
-        "No Entity nodes — LLM extraction did not run for the regular text item"
-    )
+    assert entities, "No Entity nodes — LLM extraction did not run for the regular text item"
 
     # --- Search: both the DLT rows and the text are retrievable -------------
     row_result = await cognee.search(

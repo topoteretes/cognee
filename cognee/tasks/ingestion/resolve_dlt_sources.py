@@ -125,9 +125,7 @@ async def resolve_dlt_sources(
         # other sources in the same dataset must survive. Legacy per-row
         # records (source == "dlt") carry no source attribution and are
         # migrated away on any manifest ingest.
-        ingested_source_names = {
-            item.external_metadata["source_name"] for item in expanded_items
-        }
+        ingested_source_names = {item.external_metadata["source_name"] for item in expanded_items}
 
         async def _cleanup() -> None:
             await _delete_dlt_orphans(dataset_name, user, manifest_data_ids, ingested_source_names)
