@@ -4,21 +4,32 @@ The retriever intentionally uses only the graph adapter.  It does not invoke an
 LLM, an embedding engine, or vector search.  ``query`` is the human-readable
 seed while ``config`` selects one exact graph operation and its arguments.
 
-For backend portability, each request loads the dataset-scoped code subgraph
-and builds transient indexes. Callers should select the narrowest dataset that
+For backend portability, the retriever loads the dataset-scoped code subgraph
+through the graph adapter. Parsed graph indexes are cached by dataset and graph
+database identity, with bounded LRU/TTL retention and explicit invalidation by
+the code-graph write pipeline. Callers should select the narrowest dataset that
 contains the repositories they want to traverse.
 """
 
 from __future__ import annotations
 
-from collections import defaultdict, deque
+import asyncio
+from collections import OrderedDict, defaultdict, deque
+from dataclasses import dataclass
+import hashlib
 import json
+import math
+import os
+from threading import RLock
+import time
 from types import SimpleNamespace
-from typing import Any, Iterable, Mapping, Optional
+from typing import Any, Awaitable, Callable, Iterable, Mapping, Optional
 from uuid import UUID
 
+from cognee.context_global_variables import current_dataset_id
 from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.databases.graph.config import get_graph_context_config
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 
 
@@ -78,6 +89,20 @@ _CODE_EXTENSIONS = {
     "tsx",
 }
 _MISSING = object()
+_CODE_GRAPH_SNAPSHOT_FORMAT_VERSION = 1
+_DEFAULT_CODE_GRAPH_CACHE_MAX_ENTRIES = 16
+_DEFAULT_CODE_GRAPH_CACHE_TTL_SECONDS = 60.0
+_GRAPH_IDENTITY_FIELDS = (
+    "graph_database_provider",
+    "graph_database_url",
+    "graph_database_name",
+    "graph_database_username",
+    "graph_database_host",
+    "graph_database_port",
+    "graph_database_key",
+    "graph_file_path",
+    "graph_dataset_database_handler",
+)
 _INTERNAL_EDGE_PROPERTIES = {
     "source_node_id",
     "target_node_id",
@@ -329,7 +354,7 @@ class _CodeGraphSnapshot:
             if key not in _INTERNAL_EDGE_PROPERTIES
         }
         if public_properties:
-            result["properties"] = public_properties
+            result["properties"] = _normalize_value(public_properties)
         return result
 
     def fact(
@@ -357,7 +382,9 @@ class _CodeGraphSnapshot:
         result.update({key: value for key, value in aliases.items() if value not in (None, "")})
         properties = self.properties_of(node)
         if properties:
-            result["properties"] = properties
+            # Results are caller-owned. Returning a nested mapping from the
+            # cached snapshot would let one response corrupt later queries.
+            result["properties"] = _normalize_value(properties)
         if include_relations:
             relations = []
             for edge in self.forward.get(node_id, []):
@@ -440,6 +467,239 @@ class _CodeGraphSnapshot:
         return best[0]
 
 
+@dataclass(frozen=True)
+class _CodeGraphSnapshotCacheKey:
+    """Non-secret identity for one dataset-scoped graph snapshot."""
+
+    format_version: int
+    dataset_id: str
+    database_fingerprint: str
+
+
+@dataclass
+class _CodeGraphSnapshotCacheEntry:
+    snapshot: _CodeGraphSnapshot
+    expires_at: float
+
+
+class _CodeGraphSnapshotCache:
+    """Bounded, concurrency-safe cache of parsed code-graph indexes.
+
+    Loads are single-flight per key and generation. Invalidation advances the
+    generation before dropping an entry, so a graph read which overlaps a write
+    cannot republish (or return) its stale snapshot after that write completes.
+    """
+
+    def __init__(
+        self,
+        *,
+        max_entries: int,
+        ttl_seconds: float,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        if max_entries < 1:
+            raise ValueError("CODE graph cache max_entries must be at least 1.")
+        if ttl_seconds <= 0:
+            raise ValueError("CODE graph cache ttl_seconds must be positive.")
+        self.max_entries = max_entries
+        self.ttl_seconds = ttl_seconds
+        self._clock = clock
+        self._entries: OrderedDict[_CodeGraphSnapshotCacheKey, _CodeGraphSnapshotCacheEntry] = (
+            OrderedDict()
+        )
+        self._epochs: dict[_CodeGraphSnapshotCacheKey, int] = {}
+        self._inflight: dict[
+            tuple[_CodeGraphSnapshotCacheKey, int],
+            asyncio.Task[tuple[_CodeGraphSnapshot, int]],
+        ] = {}
+        self._waiters: dict[tuple[_CodeGraphSnapshotCacheKey, int], int] = defaultdict(int)
+        self._lock = RLock()
+
+    async def get_or_load(
+        self,
+        key: _CodeGraphSnapshotCacheKey,
+        loader: Callable[[], Awaitable[_CodeGraphSnapshot]],
+    ) -> _CodeGraphSnapshot:
+        while True:
+            with self._lock:
+                entry = self._entries.get(key)
+                if entry is not None and entry.expires_at > self._clock():
+                    self._entries.move_to_end(key)
+                    return entry.snapshot
+                if entry is not None:
+                    self._entries.pop(key, None)
+
+                epoch = self._epochs.setdefault(key, 0)
+                flight_key = (key, epoch)
+                task = self._inflight.get(flight_key)
+                if task is None:
+                    task = asyncio.create_task(self._load_and_store(key, epoch, loader))
+                    self._inflight[flight_key] = task
+                self._waiters[flight_key] += 1
+
+            try:
+                snapshot, loaded_epoch = await asyncio.shield(task)
+            except asyncio.CancelledError:
+                self._remove_waiter(flight_key)
+                raise
+            except BaseException:
+                with self._lock:
+                    still_current = self._epochs.get(key, 0) == epoch
+                self._remove_waiter(flight_key)
+                if not still_current:
+                    continue
+                raise
+
+            with self._lock:
+                still_current = self._epochs.get(key, 0) == loaded_epoch
+            self._remove_waiter(flight_key)
+            if still_current:
+                return snapshot
+
+    async def _load_and_store(
+        self,
+        key: _CodeGraphSnapshotCacheKey,
+        epoch: int,
+        loader: Callable[[], Awaitable[_CodeGraphSnapshot]],
+    ) -> tuple[_CodeGraphSnapshot, int]:
+        flight_key = (key, epoch)
+        try:
+            snapshot = await loader()
+        except BaseException:
+            with self._lock:
+                self._inflight.pop(flight_key, None)
+                self._prune_epoch_if_idle(key)
+            raise
+
+        with self._lock:
+            self._inflight.pop(flight_key, None)
+            if self._epochs.get(key, 0) == epoch:
+                self._entries[key] = _CodeGraphSnapshotCacheEntry(
+                    snapshot=snapshot,
+                    expires_at=self._clock() + self.ttl_seconds,
+                )
+                self._entries.move_to_end(key)
+                self._evict_lru_entries()
+            self._prune_epoch_if_idle(key)
+        return snapshot, epoch
+
+    def invalidate(self, key: _CodeGraphSnapshotCacheKey) -> None:
+        with self._lock:
+            self._entries.pop(key, None)
+            self._epochs[key] = self._epochs.get(key, 0) + 1
+            self._prune_epoch_if_idle(key)
+
+    def clear(self) -> None:
+        """Invalidate all entries without cancelling in-progress graph reads."""
+        with self._lock:
+            keys = set(self._entries) | set(self._epochs)
+            keys.update(key for key, _epoch in self._inflight)
+            keys.update(key for key, _epoch in self._waiters)
+            self._entries.clear()
+            for key in keys:
+                self._epochs[key] = self._epochs.get(key, 0) + 1
+            for key in keys:
+                self._prune_epoch_if_idle(key)
+
+    def contains(self, key: _CodeGraphSnapshotCacheKey) -> bool:
+        with self._lock:
+            entry = self._entries.get(key)
+            return entry is not None and entry.expires_at > self._clock()
+
+    def __len__(self) -> int:
+        with self._lock:
+            return len(self._entries)
+
+    def _remove_waiter(self, flight_key: tuple[_CodeGraphSnapshotCacheKey, int]) -> None:
+        key, _epoch = flight_key
+        with self._lock:
+            remaining = self._waiters.get(flight_key, 0) - 1
+            if remaining > 0:
+                self._waiters[flight_key] = remaining
+            else:
+                self._waiters.pop(flight_key, None)
+            self._prune_epoch_if_idle(key)
+
+    def _evict_lru_entries(self) -> None:
+        while len(self._entries) > self.max_entries:
+            evicted_key, _entry = self._entries.popitem(last=False)
+            self._prune_epoch_if_idle(evicted_key)
+
+    def _prune_epoch_if_idle(self, key: _CodeGraphSnapshotCacheKey) -> None:
+        if key in self._entries:
+            return
+        if any(inflight_key == key for inflight_key, _epoch in self._inflight):
+            return
+        if any(waiter_key == key for waiter_key, _epoch in self._waiters):
+            return
+        self._epochs.pop(key, None)
+
+
+def _positive_float_env(name: str, default: float) -> float:
+    try:
+        value = float(os.getenv(name, str(default)))
+    except ValueError:
+        return default
+    return value if math.isfinite(value) and value > 0 else default
+
+
+def _positive_int_env(name: str, default: int) -> int:
+    try:
+        value = int(os.getenv(name, str(default)))
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+def _code_graph_snapshot_cache_key(
+    *,
+    dataset_id: Any = _MISSING,
+    graph_config: Optional[Mapping[str, Any]] = None,
+) -> _CodeGraphSnapshotCacheKey:
+    """Build a stable key without retaining database credentials in memory."""
+    if dataset_id is _MISSING:
+        dataset_id = current_dataset_id.get()
+    config = dict(get_graph_context_config() if graph_config is None else graph_config)
+    database_identity = {
+        field: _normalize_value(config.get(field)) for field in _GRAPH_IDENTITY_FIELDS
+    }
+    fingerprint = hashlib.sha256(_json_key(database_identity).encode("utf-8")).hexdigest()
+    return _CodeGraphSnapshotCacheKey(
+        format_version=_CODE_GRAPH_SNAPSHOT_FORMAT_VERSION,
+        dataset_id=str(dataset_id or ""),
+        database_fingerprint=fingerprint,
+    )
+
+
+_CODE_GRAPH_SNAPSHOT_CACHE = _CodeGraphSnapshotCache(
+    max_entries=_positive_int_env(
+        "CODE_GRAPH_CACHE_MAX_ENTRIES", _DEFAULT_CODE_GRAPH_CACHE_MAX_ENTRIES
+    ),
+    ttl_seconds=_positive_float_env(
+        "CODE_GRAPH_CACHE_TTL_SECONDS", _DEFAULT_CODE_GRAPH_CACHE_TTL_SECONDS
+    ),
+)
+
+
+def invalidate_code_graph_snapshot_cache(
+    *,
+    all_entries: bool = False,
+    dataset_id: Any = _MISSING,
+    graph_config: Optional[Mapping[str, Any]] = None,
+) -> None:
+    """Invalidate parsed CODE indexes after graph mutations.
+
+    The default invalidates only the current dataset/database identity. Use
+    ``all_entries=True`` for administrative teardown and tests.
+    """
+    if all_entries:
+        _CODE_GRAPH_SNAPSHOT_CACHE.clear()
+        return
+    _CODE_GRAPH_SNAPSHOT_CACHE.invalidate(
+        _code_graph_snapshot_cache_key(dataset_id=dataset_id, graph_config=graph_config)
+    )
+
+
 def _short_names(name: str) -> set[str]:
     lowered = name.casefold()
     forms = set()
@@ -505,9 +765,16 @@ class CodeRetriever(BaseRetriever):
         )
 
     async def _snapshot(self) -> _CodeGraphSnapshot:
-        graph_engine = await get_graph_engine()
-        nodes, edges = await graph_engine.get_filtered_graph_data([{"type": list(CODE_NODE_TYPES)}])
-        return _CodeGraphSnapshot(nodes, edges)
+        key = _code_graph_snapshot_cache_key()
+
+        async def load() -> _CodeGraphSnapshot:
+            graph_engine = await get_graph_engine()
+            nodes, edges = await graph_engine.get_filtered_graph_data(
+                [{"type": list(CODE_NODE_TYPES)}]
+            )
+            return _CodeGraphSnapshot(nodes, edges)
+
+        return await _CODE_GRAPH_SNAPSHOT_CACHE.get_or_load(key, load)
 
     async def get_retrieved_objects(self, query: Optional[str], query_batch=None) -> dict[str, Any]:
         if query_batch is not None:

@@ -1,4 +1,5 @@
 import json
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID
 
@@ -9,10 +10,21 @@ from cognee.modules.retrieval.code_retriever import (
     CodeRetriever,
     CodeSearchValidationError,
     _CodeGraphSnapshot,
+    _CodeGraphSnapshotCache,
+    _code_graph_snapshot_cache_key,
+    invalidate_code_graph_snapshot_cache,
 )
+from cognee.context_global_variables import current_dataset_id
 
 
 WIDGET_ID = UUID("00000000-0000-0000-0000-000000000001")
+
+
+@pytest.fixture(autouse=True)
+def clear_code_graph_snapshot_cache():
+    invalidate_code_graph_snapshot_cache(all_entries=True)
+    yield
+    invalidate_code_graph_snapshot_cache(all_entries=True)
 
 
 def _code_graph():
@@ -533,3 +545,226 @@ def test_invalid_operation_and_arguments_raise_clear_errors():
         CodeRetriever(config={"operation": "traverse", "direction": "sideways"})._traverse(
             MagicMock(), "seed"
         )
+
+
+@pytest.mark.asyncio
+async def test_graph_snapshot_indexes_are_reused_across_queries():
+    engine, graph_patch = _graph_patch()
+
+    with graph_patch:
+        facts = await CodeRetriever(
+            config={"operation": "query_facts", "kind": "symbol"}
+        ).get_retrieved_objects("")
+        explored = await CodeRetriever(
+            config={"operation": "explore", "repo": "repo-a"}
+        ).get_retrieved_objects("pkg.Widget")
+
+    assert facts["total"] == 7
+    assert explored["focus"]["name"] == "pkg.Widget"
+    engine.get_filtered_graph_data.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_cached_snapshot_results_cannot_mutate_later_queries():
+    engine, graph_patch = _graph_patch()
+
+    with graph_patch:
+        first = await CodeRetriever(
+            config={"operation": "query_facts", "name": "pkg.Widget"}
+        ).get_retrieved_objects("")
+        first["facts"][0]["properties"]["language"] = "mutated"
+        second = await CodeRetriever(
+            config={"operation": "query_facts", "name": "pkg.Widget"}
+        ).get_retrieved_objects("")
+
+    assert second["facts"][0]["properties"]["language"] == "python"
+    engine.get_filtered_graph_data.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_graph_snapshot_cache_isolated_by_dataset_and_database():
+    engine, graph_patch = _graph_patch()
+    graph_config = {
+        "graph_database_provider": "ladybug",
+        "graph_file_path": "/tmp/graph-a",
+        "graph_database_name": "graph-a",
+    }
+    dataset_token = current_dataset_id.set("dataset-a")
+
+    try:
+        with (
+            graph_patch,
+            patch(
+                "cognee.modules.retrieval.code_retriever.get_graph_context_config",
+                return_value=graph_config,
+            ) as config_mock,
+        ):
+            await CodeRetriever(config={"operation": "query_facts"}).get_retrieved_objects("")
+
+            current_dataset_id.set("dataset-b")
+            await CodeRetriever(config={"operation": "query_facts"}).get_retrieved_objects("")
+
+            current_dataset_id.set("dataset-a")
+            config_mock.return_value = {**graph_config, "graph_file_path": "/tmp/graph-b"}
+            await CodeRetriever(config={"operation": "query_facts"}).get_retrieved_objects("")
+
+            config_mock.return_value = graph_config
+            await CodeRetriever(config={"operation": "query_facts"}).get_retrieved_objects("")
+    finally:
+        current_dataset_id.reset(dataset_token)
+
+    assert engine.get_filtered_graph_data.await_count == 3
+
+
+@pytest.mark.asyncio
+async def test_graph_snapshot_cache_invalidation_reloads_indexes():
+    nodes, edges = _code_graph()
+    changed_nodes = [
+        *nodes,
+        (
+            "new-symbol",
+            {
+                "name": "pkg.new_symbol",
+                "type": "CodeSymbol",
+                "file_path": "pkg/new.py",
+                "repo": "repo-a",
+            },
+        ),
+    ]
+    engine = AsyncMock()
+    engine.get_filtered_graph_data = AsyncMock(side_effect=[(nodes, edges), (changed_nodes, edges)])
+
+    with patch(
+        "cognee.modules.retrieval.code_retriever.get_graph_engine",
+        AsyncMock(return_value=engine),
+    ):
+        initial = await CodeRetriever(
+            config={"operation": "query_facts", "kind": "symbol"}
+        ).get_retrieved_objects("")
+        cached = await CodeRetriever(
+            config={"operation": "query_facts", "kind": "symbol"}
+        ).get_retrieved_objects("")
+        invalidate_code_graph_snapshot_cache()
+        refreshed = await CodeRetriever(
+            config={"operation": "query_facts", "kind": "symbol"}
+        ).get_retrieved_objects("")
+
+    assert initial["total"] == cached["total"] == 7
+    assert refreshed["total"] == 8
+    assert engine.get_filtered_graph_data.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_graph_snapshot_cache_is_bounded_lru_and_expires():
+    now = [0.0]
+    cache = _CodeGraphSnapshotCache(max_entries=2, ttl_seconds=5.0, clock=lambda: now[0])
+    config = {"graph_database_provider": "ladybug"}
+    keys = [
+        _code_graph_snapshot_cache_key(dataset_id=f"dataset-{index}", graph_config=config)
+        for index in range(3)
+    ]
+    loads = 0
+
+    async def load():
+        nonlocal loads
+        loads += 1
+        return _CodeGraphSnapshot([], [])
+
+    first = await cache.get_or_load(keys[0], load)
+    await cache.get_or_load(keys[1], load)
+    assert await cache.get_or_load(keys[0], load) is first
+
+    await cache.get_or_load(keys[2], load)
+    assert len(cache) == 2
+    assert cache.contains(keys[0])
+    assert not cache.contains(keys[1])
+
+    now[0] = 6.0
+    assert await cache.get_or_load(keys[0], load) is not first
+    assert loads == 4
+
+
+@pytest.mark.asyncio
+async def test_graph_snapshot_load_is_single_flight_for_concurrent_queries():
+    nodes, edges = _code_graph()
+    load_started = asyncio.Event()
+    release_load = asyncio.Event()
+    calls = 0
+
+    async def load_graph(_filters):
+        nonlocal calls
+        calls += 1
+        load_started.set()
+        await release_load.wait()
+        return nodes, edges
+
+    engine = AsyncMock()
+    engine.get_filtered_graph_data = AsyncMock(side_effect=load_graph)
+
+    with patch(
+        "cognee.modules.retrieval.code_retriever.get_graph_engine",
+        AsyncMock(return_value=engine),
+    ):
+        first = asyncio.create_task(
+            CodeRetriever(config={"operation": "query_facts"}).get_retrieved_objects("")
+        )
+        await load_started.wait()
+        second = asyncio.create_task(
+            CodeRetriever(config={"operation": "query_facts"}).get_retrieved_objects("")
+        )
+        await asyncio.sleep(0)
+        release_load.set()
+        first_result, second_result = await asyncio.gather(first, second)
+
+    assert first_result == second_result
+    assert calls == 1
+
+
+@pytest.mark.asyncio
+async def test_invalidation_during_load_discards_stale_snapshot():
+    old_nodes, edges = _code_graph()
+    new_nodes = [
+        *old_nodes,
+        (
+            "new-symbol",
+            {"name": "new_symbol", "type": "CodeSymbol", "repo": "repo-a"},
+        ),
+    ]
+    first_load_started = asyncio.Event()
+    release_first_load = asyncio.Event()
+    calls = 0
+
+    async def load_graph(_filters):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            first_load_started.set()
+            await release_first_load.wait()
+            return old_nodes, edges
+        return new_nodes, edges
+
+    engine = AsyncMock()
+    engine.get_filtered_graph_data = AsyncMock(side_effect=load_graph)
+
+    with patch(
+        "cognee.modules.retrieval.code_retriever.get_graph_engine",
+        AsyncMock(return_value=engine),
+    ):
+        first = asyncio.create_task(
+            CodeRetriever(
+                config={"operation": "query_facts", "kind": "symbol"}
+            ).get_retrieved_objects("")
+        )
+        await first_load_started.wait()
+        invalidate_code_graph_snapshot_cache()
+        second = asyncio.create_task(
+            CodeRetriever(
+                config={"operation": "query_facts", "kind": "symbol"}
+            ).get_retrieved_objects("")
+        )
+        second_result = await second
+        release_first_load.set()
+        first_result = await first
+
+    assert first_result["total"] == second_result["total"] == 8
+    assert calls == 2

@@ -428,6 +428,18 @@ def _pipeline_data_id(ctx: Optional["PipelineContext"] = None) -> Any:
     return data_id if data_id is not None else getattr(data_item, "data_id", None)
 
 
+def _invalidate_code_graph_snapshot(ctx: Optional["PipelineContext"] = None) -> None:
+    """Invalidate the exact dataset cache even if a caller omitted DB context."""
+    from cognee.modules.retrieval.code_retriever import invalidate_code_graph_snapshot_cache
+
+    dataset = getattr(ctx, "dataset", None)
+    dataset_id = getattr(dataset, "id", None)
+    if dataset_id is None:
+        invalidate_code_graph_snapshot_cache()
+    else:
+        invalidate_code_graph_snapshot_cache(dataset_id=dataset_id)
+
+
 async def add_code_graph_data_points(
     data_points: List[DataPoint],
     ctx: Optional["PipelineContext"] = None,
@@ -444,7 +456,13 @@ async def add_code_graph_data_points(
     from cognee.tasks.storage.add_data_points import add_data_points
 
     storage_ctx = ctx if _pipeline_data_id(ctx) is not None else None
-    return await add_data_points(data_points, ctx=storage_ctx, graph_only=graph_only)
+    try:
+        result = await add_data_points(data_points, ctx=storage_ctx, graph_only=graph_only)
+    finally:
+        # Storage can fail after a partial graph write. Invalidate even on an
+        # exception so no pre-write snapshot survives that ambiguous outcome.
+        _invalidate_code_graph_snapshot(ctx)
+    return result
 
 
 async def add_code_graph_edges(
@@ -471,33 +489,36 @@ async def add_code_graph_edges(
     edges, skipped = build_code_graph_edges(facts, repo_path=repo_path)
     logger.info("Resolved %d code graph edge(s), skipped %d.", len(edges), skipped)
 
-    if edges:
-        graph_engine = await get_graph_engine()
-        await graph_engine.add_edges(edges)
+    try:
+        if edges:
+            graph_engine = await get_graph_engine()
+            await graph_engine.add_edges(edges)
 
-        # Register the edges in the relational rollback ledger (when a pipeline
-        # context with a persisted data item is available) so pipeline rollback
-        # can clean them up. Custom pipelines may use arbitrary payloads, such
-        # as the repository path used by the code graph example.
-        data_id = _pipeline_data_id(ctx)
-        if (
-            ctx is not None
-            and getattr(ctx, "user", None) is not None
-            and getattr(ctx, "dataset", None) is not None
-            and data_id is not None
-            and getattr(ctx, "pipeline_run_id", None) is not None
-        ):
-            from cognee.modules.graph.methods import upsert_edges
+            # Register the edges in the relational rollback ledger (when a pipeline
+            # context with a persisted data item is available) so pipeline rollback
+            # can clean them up. Custom pipelines may use arbitrary payloads, such
+            # as the repository path used by the code graph example.
+            data_id = _pipeline_data_id(ctx)
+            if (
+                ctx is not None
+                and getattr(ctx, "user", None) is not None
+                and getattr(ctx, "dataset", None) is not None
+                and data_id is not None
+                and getattr(ctx, "pipeline_run_id", None) is not None
+            ):
+                from cognee.modules.graph.methods import upsert_edges
 
-            await upsert_edges(
-                edges,
-                tenant_id=ctx.user.tenant_id,
-                user_id=ctx.user.id,
-                dataset_id=ctx.dataset.id,
-                data_id=data_id,
-                pipeline_run_id=ctx.pipeline_run_id,
-            )
-
+                await upsert_edges(
+                    edges,
+                    tenant_id=ctx.user.tenant_id,
+                    user_id=ctx.user.id,
+                    dataset_id=ctx.dataset.id,
+                    data_id=data_id,
+                    pipeline_run_id=ctx.pipeline_run_id,
+                )
+    finally:
+        # Direct edge writes and rollback-ledger writes may partially succeed.
+        _invalidate_code_graph_snapshot(ctx)
     return data_points
 
 

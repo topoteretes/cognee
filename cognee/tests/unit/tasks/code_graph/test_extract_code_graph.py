@@ -11,6 +11,7 @@ from cognee.modules.pipelines.models import PipelineContext
 from cognee.modules.pipelines.operations.run_tasks_base import run_tasks_base
 from cognee.tasks.code_graph.enola import parse_enola_snapshot
 from cognee.tasks.code_graph.extract_code_graph import (
+    add_code_graph_data_points,
     add_code_graph_edges,
     build_code_graph_edges,
     extract_code_graph,
@@ -454,14 +455,37 @@ async def test_extract_code_graph_without_repo_path_or_snapshot_dir_raises():
 
 
 @pytest.mark.asyncio
+async def test_add_code_graph_data_points_invalidates_cached_indexes(monkeypatch):
+    add_data_points_module = importlib.import_module("cognee.tasks.storage.add_data_points")
+    code_retriever_module = importlib.import_module("cognee.modules.retrieval.code_retriever")
+    add_data_points_mock = AsyncMock(return_value=["stored"])
+    invalidate_mock = MagicMock()
+    monkeypatch.setattr(add_data_points_module, "add_data_points", add_data_points_mock)
+    monkeypatch.setattr(
+        code_retriever_module, "invalidate_code_graph_snapshot_cache", invalidate_mock
+    )
+
+    result = await add_code_graph_data_points(["node"])
+
+    assert result == ["stored"]
+    add_data_points_mock.assert_awaited_once_with(["node"], ctx=None, graph_only=True)
+    invalidate_mock.assert_called_once_with()
+
+
+@pytest.mark.asyncio
 async def test_add_code_graph_edges_writes_edges_and_passes_data_points_through(monkeypatch):
     graph_engine_module = importlib.import_module(
         "cognee.infrastructure.databases.graph.get_graph_engine"
     )
+    code_retriever_module = importlib.import_module("cognee.modules.retrieval.code_retriever")
 
     graph_engine = AsyncMock()
+    invalidate_mock = MagicMock()
     monkeypatch.setattr(
         graph_engine_module, "get_graph_engine", AsyncMock(return_value=graph_engine)
+    )
+    monkeypatch.setattr(
+        code_retriever_module, "invalidate_code_graph_snapshot_cache", invalidate_mock
     )
 
     data_points = ["sentinel"]
@@ -473,6 +497,7 @@ async def test_add_code_graph_edges_writes_edges_and_passes_data_points_through(
     expected_edges, _skipped = build_code_graph_edges(_fixture_facts())
     assert len(edges) == 9
     assert [edge[:3] for edge in edges] == [edge[:3] for edge in expected_edges]
+    invalidate_mock.assert_called_once_with()
 
 
 @pytest.mark.asyncio
