@@ -13,6 +13,8 @@ Known approximations:
   transcription of audio/image items) and embedding costs are not included.
 - Input tokens use the real tokenizer, prompt templates, and response-model
   JSON schema; output tokens use fixed heuristics.
+- Reasoning models (gpt-5 / o-series) bill hidden reasoning tokens as output;
+  their output/cost is scaled by a rough allowance and flagged approximate.
 """
 
 import inspect
@@ -56,6 +58,22 @@ from cognee.tasks.ingestion.data_item import DataItem
 SUMMARY_OUTPUT_TOKENS_PER_CHUNK = 150
 GRAPH_OUTPUT_TOKEN_RATIO = 0.5
 MIN_GRAPH_OUTPUT_TOKENS_PER_CHUNK = 256
+
+# Reasoning models (gpt-5 / o-series and future reasoning families) emit hidden
+# reasoning tokens that are billed as output. On a real gpt-5-mini run the actual
+# completion tokens were ~20x the visible-output heuristics above (graph ~28x,
+# summary ~14x the base). Since the amount varies with reasoning effort and task,
+# we apply a single rough multiplier (calibrated to that run, biased slightly low
+# so it is a plausible central figure, not a hard bound) and flag the estimate as
+# approximate for these models rather than pretend to predict it precisely.
+REASONING_OUTPUT_MULTIPLIER = 20
+_REASONING_MODEL_PREFIXES = ("gpt-5", "o1", "o3", "o4")
+
+
+def _is_reasoning_model(model: str) -> bool:
+    key = model.split("/")[-1].lower()
+    return any(key.startswith(prefix) for prefix in _REASONING_MODEL_PREFIXES)
+
 
 # Formats whose bytes are not directly tokenizable text: images and audio would
 # need LLM transcription, PDF/Office formats a loader pass over stored files.
@@ -230,13 +248,17 @@ def estimate_chunks(
         read_query_prompt("summarize_content.txt") or "", tokenizer
     ) + _schema_tokens(summarization_model, tokenizer)
 
+    # Reasoning models spend most output on hidden reasoning tokens; scale the
+    # visible-output heuristics by a rough allowance for them (see constant).
+    output_multiplier = REASONING_OUTPUT_MULTIPLIER if _is_reasoning_model(model) else 1
+
     graph_input = sum(tokens + graph_overhead for tokens in chunk_token_counts)
-    graph_output = sum(
+    graph_output = output_multiplier * sum(
         max(MIN_GRAPH_OUTPUT_TOKENS_PER_CHUNK, int(tokens * GRAPH_OUTPUT_TOKEN_RATIO))
         for tokens in chunk_token_counts
     )
     summary_input = sum(tokens + summary_overhead for tokens in chunk_token_counts)
-    summary_output = len(llm_chunks) * SUMMARY_OUTPUT_TOKENS_PER_CHUNK
+    summary_output = output_multiplier * len(llm_chunks) * SUMMARY_OUTPUT_TOKENS_PER_CHUNK
 
     stages = [
         DryRunStageEstimate(
@@ -265,6 +287,12 @@ def estimate_chunks(
         warnings.append(
             f"Skipped {skipped_dlt_chunks} DLT row chunk(s) because they do not use "
             "LLM extraction or summarization."
+        )
+    if output_multiplier != 1:
+        warnings.append(
+            f"{model} is a reasoning model: output tokens and cost include a rough "
+            "reasoning-token allowance and can vary several-fold with reasoning effort — "
+            "treat the output/cost figures as approximate."
         )
     total_tokens = sum(stage.total_tokens for stage in stages)
     if total_tokens and not sum(stage.cost_usd for stage in stages):

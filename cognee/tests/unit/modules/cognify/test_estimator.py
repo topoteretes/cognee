@@ -105,6 +105,47 @@ def test_estimate_chunks_warns_when_model_has_no_pricing(offline_estimator, monk
     assert any("no pricing entry" in warning for warning in estimate.warnings)
 
 
+@pytest.mark.parametrize(
+    "model,expected",
+    [
+        ("openai/gpt-5-mini", True),
+        ("gpt-5", True),
+        ("gpt-5-nano", True),
+        ("gpt-5.4", True),
+        ("o1", True),
+        ("o3-mini", True),
+        ("openai/o4-mini", True),
+        ("gpt-4o", False),
+        ("gpt-4o-mini", False),
+        ("gpt-4.1", False),
+        ("anthropic/claude-opus-4-5", False),
+        ("gemini-2.5-pro", False),
+    ],
+)
+def test_is_reasoning_model(model, expected):
+    assert estimator._is_reasoning_model(model) is expected
+
+
+def test_reasoning_model_scales_output_and_warns(offline_estimator, monkeypatch):
+    # gpt-5/o-series bill hidden reasoning tokens as output; the estimator scales
+    # the visible-output heuristics by REASONING_OUTPUT_MULTIPLIER and warns.
+    chunks = [SimpleNamespace(text="alpha beta gamma delta")]
+
+    baseline = estimator.estimate_chunks(chunks, operation="cognify", graph_model=_TinyGraph)
+
+    monkeypatch.setattr(
+        estimator,
+        "get_llm_config",
+        lambda: SimpleNamespace(llm_model="openai/gpt-5-mini", graph_prompt_path="unused.txt"),
+    )
+    reasoning = estimator.estimate_chunks(chunks, operation="cognify", graph_model=_TinyGraph)
+
+    assert reasoning.input_tokens == baseline.input_tokens
+    assert reasoning.output_tokens == baseline.output_tokens * estimator.REASONING_OUTPUT_MULTIPLIER
+    assert any("reasoning model" in w for w in reasoning.warnings)
+    assert not any("reasoning model" in w for w in baseline.warnings)
+
+
 def test_estimate_chunks_skips_dlt_chunks(offline_estimator):
     dlt_document = estimator.DltRowDocument(
         name="table-row",
