@@ -11,7 +11,7 @@
 | **Fly.io** | Edge deployment, persistent volumes | `bash distributed/deploy/fly-deploy.sh` |
 | **Render** | Simple PaaS with managed Postgres | Deploy to Render button |
 | **Daytona** | Cloud sandboxes (SDK or CLI) | `python distributed/deploy/daytona_sandbox.py` |
-| **Islo** | Isolated cloud sandboxes for agents (CLI) | `python distributed/deploy/islo_sandbox.py` |
+| **Islo** | Isolated cloud sandboxes for agents (SDK) | `python distributed/deploy/islo_sandbox.py` |
 
 All platforms require setting `LLM_API_KEY` as a minimum.
 
@@ -139,20 +139,23 @@ Islo provides isolated cloud sandbox VMs for autonomous agents, built by the Inc
 
 ```bash
 curl -fsSL https://islo.dev/install.sh | bash
-islo login  # interactive use
+islo login
+islo api-key create cognee-deploy --expires 90 --show
 
-# CI alternative: create the key with the CLI, store it securely, and set ISLO_API_KEY
-islo api-key create cognee-ci --expires 90 --output-file /secure/path/islo-api-key
-
+pip install islo
+export ISLO_API_KEY=your-cli-created-key
 export LLM_API_KEY=sk-xxx
 python distributed/deploy/islo_sandbox.py
 ```
 
-The script drives the official Islo CLI: `islo use` creates the sandbox and runs the setup, while `islo share` exposes the API with a 24-hour URL. Credentials are loaded from a mode-0600 temporary env file that is removed immediately after setup. Stop or delete the sandbox with the CLI:
+The CLI is used only to create the access key. The deployment itself uses the official Python SDK to create the sandbox, install `cognee[api]`, start the API server, verify `/health`, and create a 24-hour share URL. Stop or delete the sandbox via the SDK:
 
-```bash
-islo stop cognee-api
-islo rm cognee-api --force
+```python
+from islo import Islo
+
+client = Islo()  # reads ISLO_API_KEY from the environment
+client.sandboxes.stop_sandbox("cognee-api")
+client.sandboxes.delete_sandbox("cognee-api")
 ```
 
 The sandbox name is fixed (`cognee-api`), so re-running the script while a previous deployment still exists fails with a name conflict — delete the old sandbox first (see above), then re-run.

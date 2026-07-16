@@ -1,20 +1,20 @@
 """
-Cognee on Islo — deploy Cognee API with the Islo CLI.
+Cognee on Islo — deploy Cognee API inside an Islo cloud sandbox.
 
 Islo (https://islo.dev) provides isolated cloud sandbox VMs for autonomous
-agents, built by the Incredibuild team. This script uses the official Islo CLI
-to create a sandbox, install Cognee, start the API server, and print a temporary
-public share URL.
+agents, built by the Incredibuild team. This script uses the official Islo
+Python SDK to create a sandbox, install Cognee, start the API server, and print
+a temporary public share URL.
 
 Prerequisites:
-    Install the Islo CLI:
-        curl -fsSL https://islo.dev/install.sh | bash
+    pip install islo
 
-    Authenticate once with ``islo login``. For CI, create a key with
-    ``islo api-key create cognee-ci --expires 90`` and set ``ISLO_API_KEY``.
+    Create an Islo key with the CLI:
+        islo api-key create cognee-deploy --expires 90 --show
 
-    Set your LLM provider API key:
-        export LLM_API_KEY=your-key
+    Set environment variables:
+        ISLO_API_KEY  — the key created by the Islo CLI
+        LLM_API_KEY   — your LLM provider API key
 
 Usage:
     python distributed/deploy/islo_sandbox.py
@@ -23,28 +23,28 @@ Note:
     The sandbox name is fixed ("cognee-api"). Re-running the script while a
     previous deployment still exists fails with a name conflict — delete the
     old sandbox first:
-        islo rm cognee-api --force
+        python -c "from islo import Islo; Islo().sandboxes.delete_sandbox('cognee-api')"
 """
 
-import json
 import os
-import shutil
-import subprocess
 import sys
-import tempfile
 import time
-from typing import Any
+
+from islo import Islo
+from islo.errors import ConflictError
+from islo.types import LifecyclePolicy
 
 DEFAULT_IMAGE = "ghcr.io/islo-labs/islo-runner:latest"
 SANDBOX_NAME = "cognee-api"
 API_PORT = 8000
+TERMINAL_EXEC_STATUSES = {"completed", "failed", "timeout"}
 
 # The islo-runner image ships Python without pip/ensurepip and marks the system
 # environment as PEP 668 "externally managed", so Cognee is installed into a
 # dedicated virtualenv (bootstrapped via apt) rather than the system interpreter.
 VENV_PATH = "/opt/cognee-venv"
 VENV_PYTHON = f"{VENV_PATH}/bin/python"
-_DEPLOY_SCRIPT = (
+_INSTALL_SCRIPT = (
     "set -e\n"
     "export DEBIAN_FRONTEND=noninteractive\n"
     "apt-get update -qq\n"
@@ -52,253 +52,230 @@ _DEPLOY_SCRIPT = (
     f"python3 -m venv {VENV_PATH}\n"
     f"{VENV_PATH}/bin/pip install --upgrade pip\n"
     f"{VENV_PATH}/bin/pip install 'cognee[api]'\n"
-    f"nohup {VENV_PYTHON} -m uvicorn cognee.api.client:app "
-    f"--host 0.0.0.0 --port {API_PORT} > /tmp/cognee-server.log 2>&1 &\n"
-    "echo started\n"
 )
 
 _HEALTHCHECK_SNIPPET = (
-    "import sys, urllib.request\n"
+    "import urllib.request\n"
     "try:\n"
     f"    urllib.request.urlopen('http://localhost:{API_PORT}/health', timeout=5)\n"
+    "    print('OK')\n"
     "except Exception:\n"
-    "    sys.exit(1)\n"
-    "print('OK')\n"
+    "    print('WAITING')\n"
 )
 
 
-def run_islo(
-    args: list[str],
+def run_command(
+    client,
+    sandbox_name: str,
+    command: list,
     *,
-    check: bool = True,
-    timeout: float | None = None,
-    echo: bool = True,
-) -> subprocess.CompletedProcess[str]:
-    """Run an Islo CLI command and return its completed process."""
-    command = ["islo", *args]
-    try:
-        result = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
-        )
-    except subprocess.TimeoutExpired as error:
-        raise RuntimeError(f"Islo command timed out after {timeout:.0f}s: {args!r}") from error
+    timeout_secs: int | None = None,
+    poll_interval: float = 2.0,
+    max_wait: float | None = None,
+    label: str = "",
+):
+    """Run a command in the sandbox and poll until it reaches a terminal status.
 
-    if echo:
-        if result.stdout:
-            print(result.stdout, end="" if result.stdout.endswith("\n") else "\n", flush=True)
-        if result.stderr:
-            print(
-                result.stderr,
-                end="" if result.stderr.endswith("\n") else "\n",
-                file=sys.stderr,
-                flush=True,
+    Islo exec is asynchronous: ``exec_in_sandbox`` starts the command and returns
+    an exec ID, then ``get_exec_result`` is polled until the status is one of
+    ``completed``, ``failed``, or ``timeout``. Returns the final ExecResultResponse.
+
+    ``timeout_secs`` is only a server-side hint, so polling is also bounded by a
+    client-side deadline: ``max_wait`` seconds if given, otherwise derived from
+    ``timeout_secs`` plus a margin (10 minutes when neither is set). Raises
+    RuntimeError if the exec never reaches a terminal status in time.
+    """
+    started = client.sandboxes.exec_in_sandbox(
+        sandbox_name,
+        command=command,
+        timeout_secs=timeout_secs,
+    )
+
+    if max_wait is None:
+        max_wait = timeout_secs + 60.0 if timeout_secs else 600.0
+    deadline = time.monotonic() + max_wait
+
+    while True:
+        result = client.sandboxes.get_exec_result(sandbox_name, started.exec_id)
+        if result.status in TERMINAL_EXEC_STATUSES:
+            break
+        if time.monotonic() >= deadline:
+            raise RuntimeError(
+                f"Command {command!r} did not reach a terminal status within {max_wait:.0f}s "
+                f"(last status: '{result.status}')"
             )
+        time.sleep(poll_interval)
 
-    if check and result.returncode != 0:
-        detail = (result.stderr or result.stdout).strip()
-        suffix = f": {detail}" if detail else ""
-        raise RuntimeError(f"Islo command failed (exit {result.returncode}){suffix}")
+    prefix = f"[{label}] " if label else ""
+    if result.stdout:
+        for line in result.stdout.splitlines():
+            print(f"{prefix}{line}", flush=True)
+    if result.stderr:
+        for line in result.stderr.splitlines():
+            print(f"{prefix}{line}", file=sys.stderr, flush=True)
+    if result.truncated:
+        print(f"{prefix}(output truncated)", flush=True)
 
     return result
 
 
-def _parse_json(result: subprocess.CompletedProcess[str], description: str) -> dict[str, Any]:
-    """Parse a JSON object returned by the CLI with an actionable error."""
-    try:
-        value = json.loads(result.stdout)
-    except (json.JSONDecodeError, TypeError) as error:
-        raise RuntimeError(f"Islo returned invalid JSON while reading {description}") from error
-    if not isinstance(value, dict):
-        raise RuntimeError(f"Islo returned an unexpected response while reading {description}")
-    return value
+def wait_for_sandbox_running(
+    client,
+    sandbox_name: str,
+    timeout: float = 300,
+    poll_interval: float = 3.0,
+):
+    """Poll the sandbox until it is running. Returns the SandboxResponse."""
+    deadline = time.monotonic() + timeout
+    while True:
+        sandbox = client.sandboxes.get_sandbox(sandbox_name)
+        if sandbox.status == "running":
+            return sandbox
+        if sandbox.status in {"failed", "stopped", "deleted"}:
+            raise RuntimeError(f"Sandbox '{sandbox_name}' entered state '{sandbox.status}'")
+        if time.monotonic() >= deadline:
+            raise RuntimeError(f"Sandbox '{sandbox_name}' not running after {timeout}s")
+        print(f"  Sandbox status: {sandbox.status}", flush=True)
+        time.sleep(poll_interval)
 
 
-def _write_env_file(values: dict[str, str]) -> str:
-    """Write sandbox variables to a mode-0600 temporary dotenv file."""
-    descriptor, path = tempfile.mkstemp(prefix="cognee-islo-", suffix=".env", text=True)
-    try:
-        with os.fdopen(descriptor, "w") as env_file:
-            for key, value in values.items():
-                env_file.write(f"{key}={json.dumps(value)}\n")
-        os.chmod(path, 0o600)
-    except Exception:
-        os.unlink(path)
-        raise
-    return path
-
-
-def _check_prerequisites() -> str:
-    """Validate the local CLI, authentication, and required provider key."""
-    if shutil.which("islo") is None:
-        raise RuntimeError(
-            "Islo CLI is required. Install it with: curl -fsSL https://islo.dev/install.sh | bash"
-        )
-
-    llm_api_key = os.environ.get("LLM_API_KEY")
-    if not llm_api_key:
-        raise ValueError("LLM_API_KEY environment variable is required")
-
-    status_result = run_islo(["status", "--output", "json"], check=False, echo=False)
-    if status_result.returncode != 0:
-        raise RuntimeError(
-            "Islo authentication failed. Run 'islo login' or create a CI key with "
-            "'islo api-key create cognee-ci --expires 90', then set ISLO_API_KEY."
-        )
-    status = _parse_json(status_result, "authentication status")
-    if not status.get("auth", {}).get("authenticated"):
-        raise RuntimeError(
-            "Islo is not authenticated. Run 'islo login' or create a CI key with "
-            "'islo api-key create cognee-ci --expires 90', then set ISLO_API_KEY."
-        )
-
-    return llm_api_key
-
-
-def _sandbox_exists() -> bool:
-    """Return whether the fixed deployment sandbox already exists."""
-    result = run_islo(
-        ["status", SANDBOX_NAME, "--output", "json"],
-        check=False,
-        echo=False,
-    )
-    return result.returncode == 0
-
-
-def wait_for_server_health(retries: int = 30, delay: float = 3.0) -> bool:
-    """Poll the Cognee API /health endpoint inside the sandbox."""
+def wait_for_server_health(
+    client,
+    sandbox_name: str,
+    retries: int = 30,
+    delay: float = 3.0,
+) -> bool:
+    """Poll the Cognee API /health endpoint inside the sandbox until it responds."""
     for attempt in range(retries):
-        result = run_islo(
-            [
-                "use",
-                SANDBOX_NAME,
-                "--no-config",
-                "--output",
-                "plain",
-                "--",
-                "python3",
-                "-c",
-                _HEALTHCHECK_SNIPPET,
-            ],
-            check=False,
-            timeout=30,
-            echo=False,
+        result = run_command(
+            client,
+            sandbox_name,
+            ["python3", "-c", _HEALTHCHECK_SNIPPET],
+            timeout_secs=30,
+            poll_interval=1.0,
+            label="health",
         )
-        if result.returncode == 0 and result.stdout.strip().splitlines()[-1:] == ["OK"]:
+        if (
+            result.status == "completed"
+            and result.exit_code in (0, None)
+            and result.stdout
+            and result.stdout.strip() == "OK"
+        ):
             print("Server is ready!")
             return True
         print(f"  ({attempt + 1}) waiting for server...", flush=True)
         time.sleep(delay)
 
-    run_islo(
-        [
-            "use",
-            SANDBOX_NAME,
-            "--no-config",
-            "--output",
-            "plain",
-            "--",
-            "bash",
-            "-lc",
-            "tail -n 30 /tmp/cognee-server.log",
-        ],
-        check=False,
-        timeout=30,
+    run_command(
+        client,
+        sandbox_name,
+        ["bash", "-lc", "tail -n 30 /tmp/cognee-server.log"],
+        timeout_secs=30,
+        label="server-log",
     )
     print("ERROR: Server did not become healthy.", file=sys.stderr)
     return False
 
 
-def deploy_cognee() -> dict[str, Any]:
-    """Create an Islo sandbox, start the Cognee API, and print a share URL."""
-    llm_api_key = _check_prerequisites()
+def deploy_cognee():
+    """Create an Islo sandbox, start the Cognee API server, and print a share URL."""
+    if not os.environ.get("ISLO_API_KEY"):
+        raise ValueError(
+            "ISLO_API_KEY is required. Create one with "
+            "'islo api-key create cognee-deploy --expires 90 --show'."
+        )
+    llm_api_key = os.environ.get("LLM_API_KEY")
+    if not llm_api_key:
+        raise ValueError("LLM_API_KEY environment variable is required")
 
-    if _sandbox_exists():
+    # The SDK picks up ISLO_API_KEY from the environment automatically.
+    client = Islo()
+
+    print("Creating Islo sandbox for Cognee...")
+    try:
+        sandbox = client.sandboxes.create_sandbox(
+            name=SANDBOX_NAME,
+            image=DEFAULT_IMAGE,
+            vcpus=2,
+            memory_mb=4096,
+            disk_gb=10,
+            env={
+                "LLM_API_KEY": llm_api_key,
+                "LLM_MODEL": os.environ.get("LLM_MODEL", "openai/gpt-4o-mini"),
+                "LLM_PROVIDER": os.environ.get("LLM_PROVIDER", "openai"),
+                "HOST": "0.0.0.0",
+            },
+            lifecycle=LifecyclePolicy(pause_after_idle=3600, auto_resume="on_activity"),
+        )
+    except ConflictError as error:
         raise RuntimeError(
             f"A sandbox named '{SANDBOX_NAME}' already exists (likely from a previous run). "
-            f"Delete it with 'islo rm {SANDBOX_NAME} --force', then re-run this script."
-        )
+            "Delete it first, then re-run this script:\n"
+            f'  python -c "from islo import Islo; '
+            f"Islo().sandboxes.delete_sandbox('{SANDBOX_NAME}')\""
+        ) from error
+    print(f"Sandbox created: {sandbox.id}\n")
 
-    env_path = _write_env_file(
-        {
-            "LLM_API_KEY": llm_api_key,
-            "LLM_MODEL": os.environ.get("LLM_MODEL", "openai/gpt-4o-mini"),
-            "LLM_PROVIDER": os.environ.get("LLM_PROVIDER", "openai"),
-            "HOST": "0.0.0.0",
-        }
+    print("Waiting for sandbox to start...")
+    wait_for_sandbox_running(client, SANDBOX_NAME)
+
+    print("=== Installing Cognee ===")
+    install = run_command(
+        client,
+        SANDBOX_NAME,
+        ["bash", "-lc", _INSTALL_SCRIPT],
+        timeout_secs=1800,
+        label="install",
     )
-    print("Creating Islo sandbox and installing Cognee...")
-    try:
-        run_islo(
-            [
-                "use",
-                SANDBOX_NAME,
-                "--no-config",
-                "--image",
-                DEFAULT_IMAGE,
-                "--cpu",
-                "2",
-                "--memory",
-                "4096",
-                "--disk",
-                "10",
-                "--pause-after-idle",
-                "3600",
-                "--auto-resume",
-                "on_activity",
-                "--run-as-user",
-                "root",
-                "--env-file",
-                env_path,
-                "--output",
-                "plain",
-                "--",
-                "bash",
-                "-lc",
-                _DEPLOY_SCRIPT,
-            ],
-            timeout=1860,
+    if install.status != "completed" or install.exit_code not in (0, None):
+        raise RuntimeError(
+            f"Failed to install cognee (status '{install.status}', exit {install.exit_code}): "
+            f"{install.stderr}"
         )
-    finally:
-        os.unlink(env_path)
+    print()
+
+    print("=== Starting Cognee API server ===")
+    server_start = run_command(
+        client,
+        SANDBOX_NAME,
+        [
+            "bash",
+            "-lc",
+            f"nohup {VENV_PYTHON} -m uvicorn cognee.api.client:app --host 0.0.0.0 --port {API_PORT} "
+            "> /tmp/cognee-server.log 2>&1 & echo started",
+        ],
+        timeout_secs=30,
+        label="server",
+    )
+    if server_start.status != "completed" or server_start.exit_code not in (0, None):
+        raise RuntimeError(
+            f"Failed to start cognee API server (status '{server_start.status}', "
+            f"exit {server_start.exit_code}): {server_start.stderr}"
+        )
 
     print("Waiting for server to start...", flush=True)
-    if not wait_for_server_health():
+    if not wait_for_server_health(client, SANDBOX_NAME):
         raise RuntimeError(
             "Cognee API server did not become healthy; see the server log printed above"
         )
 
-    share_result = run_islo(
-        ["share", SANDBOX_NAME, str(API_PORT), "--ttl", "24h", "--output", "json"],
-        echo=False,
-    )
-    share = _parse_json(share_result, "share URL")
-    share_url = share.get("url")
-    if not isinstance(share_url, str) or not share_url:
-        raise RuntimeError("Islo did not return a share URL")
-
-    sandbox_result = run_islo(
-        ["status", SANDBOX_NAME, "--output", "json"],
-        echo=False,
-    )
-    sandbox = _parse_json(sandbox_result, "sandbox status")
+    share = client.shares.create_share(SANDBOX_NAME, port=API_PORT, ttl_seconds=86400)
 
     print("\nCognee is running!")
-    print(f"  Sandbox: {SANDBOX_NAME}")
-    print(f"\n  API URL: {share_url}")
-    print(f"  Health:  {share_url}/health")
-    print(f"  Docs:    {share_url}/docs")
-    if share.get("expires_at"):
-        print(f"  (share URL expires at {share['expires_at']})")
+    print(f"  Sandbox: {SANDBOX_NAME} ({sandbox.id})")
+    print(f"\n  API URL: {share.url}")
+    print(f"  Health:  {share.url}/health")
+    print(f"  Docs:    {share.url}/docs")
+    if share.expires_at:
+        print(f"  (share URL expires at {share.expires_at})")
     else:
         print("  (share URL expires in 24 hours)")
     print("\nTo stop the sandbox:")
-    print(f"  islo stop {SANDBOX_NAME}")
+    print(f"  python -c \"from islo import Islo; Islo().sandboxes.stop_sandbox('{SANDBOX_NAME}')\"")
     print("To delete it:")
-    print(f"  islo rm {SANDBOX_NAME} --force")
+    print(
+        f"  python -c \"from islo import Islo; Islo().sandboxes.delete_sandbox('{SANDBOX_NAME}')\""
+    )
 
     return sandbox
 
