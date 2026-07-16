@@ -36,6 +36,21 @@ SANDBOX_NAME = "cognee-api"
 API_PORT = 8000
 TERMINAL_EXEC_STATUSES = {"completed", "failed", "timeout"}
 
+# The islo-runner image ships Python without pip/ensurepip and marks the system
+# environment as PEP 668 "externally managed", so Cognee is installed into a
+# dedicated virtualenv (bootstrapped via apt) rather than the system interpreter.
+VENV_PATH = "/opt/cognee-venv"
+VENV_PYTHON = f"{VENV_PATH}/bin/python"
+_INSTALL_SCRIPT = (
+    "set -e\n"
+    "export DEBIAN_FRONTEND=noninteractive\n"
+    "apt-get update -qq\n"
+    "apt-get install -y -qq python3-venv\n"
+    f"python3 -m venv {VENV_PATH}\n"
+    f"{VENV_PATH}/bin/pip install --upgrade pip\n"
+    f"{VENV_PATH}/bin/pip install 'cognee[api]'\n"
+)
+
 _HEALTHCHECK_SNIPPET = (
     "import urllib.request\n"
     "try:\n"
@@ -203,7 +218,7 @@ def deploy_cognee():
     install = run_command(
         client,
         SANDBOX_NAME,
-        ["bash", "-lc", "pip install 'cognee[api]'"],
+        ["bash", "-lc", _INSTALL_SCRIPT],
         timeout_secs=1800,
         label="install",
     )
@@ -222,7 +237,7 @@ def deploy_cognee():
         [
             "bash",
             "-lc",
-            f"nohup python3 -m uvicorn cognee.api.client:app --host 0.0.0.0 --port {API_PORT} "
+            f"nohup {VENV_PYTHON} -m uvicorn cognee.api.client:app --host 0.0.0.0 --port {API_PORT} "
             "> /tmp/cognee-server.log 2>&1 & echo started",
         ],
         timeout_secs=30,
