@@ -66,8 +66,6 @@ def run_command(
     sandbox_name: str,
     command: list,
     *,
-    env: dict = None,
-    workdir: str = None,
     timeout_secs: int = None,
     poll_interval: float = 2.0,
     max_wait: float = None,
@@ -87,8 +85,6 @@ def run_command(
     started = client.sandboxes.exec_in_sandbox(
         sandbox_name,
         command=command,
-        env=env,
-        workdir=workdir,
         timeout_secs=timeout_secs,
     )
 
