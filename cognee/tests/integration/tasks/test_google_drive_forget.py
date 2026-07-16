@@ -19,7 +19,6 @@ from cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine im
     LiteLLMEmbeddingEngine,
 )
 from cognee.infrastructure.databases.graph import get_graph_engine
-from cognee.tasks.ingestion.connectors import google_drive as gd_source
 from cognee.tasks.ingestion.connectors import google_drive_source
 
 add_data_points_module = importlib.import_module("cognee.tasks.storage.add_data_points")
