@@ -54,10 +54,12 @@ class TursoVectorDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
         """Remove the dataset's dedicated libSQL file (its embedded store)."""
         # Never re-open the DB to drop it: create_vector_engine would spawn and
         # cache a fresh engine whose connection then leaks, and DROP TABLE never
-        # removes the file. Evict every cached engine for this database (waiting
-        # for their closes to release the file handle), then delete the on-disk
-        # libSQL file. Turso's embedded store is a single file (unlike LanceDB's
-        # directory), so remove the file, not a tree. Mirrors the LanceDB handler.
+        # removes the file. Evict every cached engine for this database, wait
+        # for their in-flight closes to finish (a close deferred behind an idle
+        # holder is not waited on; see aevict_vector_engines_for_database), then
+        # delete the on-disk libSQL file. Turso's embedded store is a single
+        # file (unlike LanceDB's directory), so remove the file, not a tree.
+        # Mirrors the LanceDB handler.
         await aevict_vector_engines_for_database(dataset_database.vector_database_name)
 
         databases_directory_path = os.path.dirname(dataset_database.vector_database_url)

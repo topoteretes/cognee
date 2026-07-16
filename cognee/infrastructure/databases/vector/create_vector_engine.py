@@ -355,12 +355,16 @@ def _create_vector_engine(
 
     elif vector_db_provider.lower() == "turso":
         try:
-            from .turso.TursoVectorAdapter import TursoVectorAdapter
+            # Probe the driver itself: the adapter module imports it lazily, so
+            # importing the module alone would not catch a missing turso extra.
+            import libsql_experimental  # noqa: F401
         except ImportError:
             raise ImportError(
                 "Turso/libSQL dependencies are not installed. Please install with "
                 "'pip install cognee\"[turso]\"' to use Turso functionality."
             )
+
+        from .turso.TursoVectorAdapter import TursoVectorAdapter
 
         return TursoVectorAdapter(
             url=vector_db_url,

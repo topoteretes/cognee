@@ -93,10 +93,7 @@ class TursoVectorAdapter(VectorDBInterface):
         if self._connection is not None:
             return self._connection
 
-        try:
-            import libsql_experimental as libsql
-        except ImportError:
-            import libsql  # pragma: no cover - alternate package name
+        import libsql_experimental as libsql
 
         if _is_remote_url(self.url):
             self._connection = libsql.connect(
