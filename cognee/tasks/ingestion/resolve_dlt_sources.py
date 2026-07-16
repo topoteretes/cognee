@@ -365,7 +365,6 @@ async def _delete_dlt_orphans(
     from cognee.modules.data.methods.get_dataset_data import get_dataset_data
     from cognee.modules.data.methods import get_authorized_existing_datasets
     from cognee.modules.data.methods.delete_data import delete_data
-    from cognee.modules.graph.methods.has_data_related_nodes import has_data_related_nodes
     from cognee.modules.graph.methods.delete_data_nodes_and_edges import (
         delete_data_nodes_and_edges,
     )
@@ -401,8 +400,13 @@ async def _delete_dlt_orphans(
     failed: list = []
     for orphan in orphans:
         try:
-            if await has_data_related_nodes(dataset.id, orphan.id):
-                await delete_data_nodes_and_edges(dataset.id, orphan.id, user.id)
+            # Always attempt graph+vector cleanup. delete_data_nodes_and_edges
+            # already handles both provenance modes and no-ops when there is
+            # nothing to remove; gating on has_data_related_nodes (a
+            # relational-ledger-only check) wrongly skipped cleanup for
+            # graph-provenance graphs (the default), leaving a forgotten row's
+            # chunks/entities in the graph + vector stores and still retrievable.
+            await delete_data_nodes_and_edges(dataset.id, orphan.id, user.id)
             await delete_data(orphan, dataset.id)
         except Exception:
             failed.append(orphan.id)
