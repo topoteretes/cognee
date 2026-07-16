@@ -895,3 +895,61 @@ async def test_add_data_points_relational_upserts_happen_before_graph_and_vector
     )
     assert call_order[:3] == ["upsert_nodes", "upsert_edges", "upsert_edges"]
     assert first_graph_index >= 3
+
+
+@pytest.mark.asyncio
+@patch.object(adp_module, "resolve_temporal_contradictions")
+@patch.object(adp_module, "index_graph_edges")
+@patch.object(adp_module, "index_data_points")
+@patch.object(adp_module, "get_unified_engine")
+@patch.object(adp_module, "deduplicate_nodes_and_edges")
+@patch.object(adp_module, "get_graph_from_model")
+async def test_add_data_points_skips_resolution_by_default(
+    mock_get_graph, mock_dedup, mock_get_unified, mock_index_nodes, mock_index_edges, mock_resolve
+):
+    """Without functional_relationships the default path never invokes the
+    resolver — behaviour is identical to before the feature."""
+    dp1 = SimplePoint(text="first")
+    dp2 = SimplePoint(text="second")
+    edge1 = (str(dp1.id), str(dp2.id), "related_to", {"edge_text": "connects"})
+
+    mock_get_graph.side_effect = [([dp1], [edge1]), ([dp2], [])]
+    mock_dedup.side_effect = lambda n, e: (n, e)
+    unified, graph_engine, vector_engine = _make_unified_mock()
+    mock_get_unified.return_value = unified
+
+    await add_data_points([dp1, dp2])
+
+    mock_resolve.assert_not_called()
+
+
+@pytest.mark.asyncio
+@patch.object(adp_module, "index_graph_edges")
+@patch.object(adp_module, "index_data_points")
+@patch.object(adp_module, "get_unified_engine")
+@patch.object(adp_module, "deduplicate_nodes_and_edges")
+@patch.object(adp_module, "get_graph_from_model")
+async def test_add_data_points_resolves_functional_contradiction(
+    mock_get_graph, mock_dedup, mock_get_unified, mock_index_nodes, mock_index_edges
+):
+    """With functional_relationships, the older conflicting edge reaches the
+    graph tagged superseded and pointing at the current one."""
+    company = NamedPoint(name="Acme")
+    alice = NamedPoint(name="Alice")
+    bob = NamedPoint(name="Bob")
+    older = (str(company.id), str(alice.id), "ceo_of", {"updated_at": "2020-01-01 00:00:00"})
+    newer = (str(company.id), str(bob.id), "ceo_of", {"updated_at": "2024-01-01 00:00:00"})
+
+    mock_get_graph.side_effect = [([company, alice, bob], [older, newer])]
+    mock_dedup.side_effect = lambda n, e: (n, e)
+    unified, graph_engine, vector_engine = _make_unified_mock()
+    mock_get_unified.return_value = unified
+
+    await add_data_points([company], functional_relationships={"ceo_of"})
+
+    edges_written = graph_engine.add_edges.await_args_list[0].args[0]
+    by_target = {e[1]: e[3] for e in edges_written}
+
+    assert by_target[str(alice.id)]["superseded"] is True
+    assert by_target[str(alice.id)]["superseded_by"] == by_target[str(bob.id)]["edge_object_id"]
+    assert "superseded" not in by_target[str(bob.id)]
