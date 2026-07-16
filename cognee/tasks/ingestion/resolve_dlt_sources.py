@@ -98,10 +98,14 @@ async def resolve_dlt_sources(
         )
         all_rows.extend(rows)
 
-    # Document sources are full snapshots: each run replaces staging with exactly
-    # the rows currently visible, and the whole set is read back (no row cap,
-    # max_rows_per_table=0) so orphan cleanup can forget rows that dropped out
-    # (deleted/unshared → absent from the replace load).
+    # Document sources honour the caller's write_disposition so both sync models
+    # work: "replace" for delete-feed-less snapshot sources (Notion/Slack — each
+    # run rewrites staging with exactly the rows currently visible) and "merge"
+    # (+ a hard_delete tombstone column) for incremental sources with a real
+    # delete feed (Google Drive's Changes API). Either way the whole set is read
+    # back (max_rows_per_table=0) so orphan cleanup can forget rows that dropped
+    # out of the current corpus. write_disposition/primary_key default to
+    # "replace"/"id" (see the kwargs resolution above).
     document_data_items: list[DataItem] = []
     document_fresh_ids: Set[UUID] = set()
     document_source_tags: set[str] = set()
@@ -111,8 +115,8 @@ async def resolve_dlt_sources(
         rows = await ingest_dlt_source(
             dlt_item,
             dataset_name,
-            primary_key="id",
-            write_disposition="replace",
+            primary_key=primary_key or "id",
+            write_disposition=write_disposition,
             max_rows_per_table=0,
         )
         for row in rows:
@@ -422,7 +426,6 @@ async def _delete_dlt_orphans(
     from cognee.modules.data.methods.get_dataset_data import get_dataset_data
     from cognee.modules.data.methods import get_authorized_existing_datasets
     from cognee.modules.data.methods.delete_data import delete_data
-    from cognee.modules.graph.methods.has_data_related_nodes import has_data_related_nodes
     from cognee.modules.graph.methods.delete_data_nodes_and_edges import (
         delete_data_nodes_and_edges,
     )
@@ -458,8 +461,13 @@ async def _delete_dlt_orphans(
     failed: list = []
     for orphan in orphans:
         try:
-            if await has_data_related_nodes(dataset.id, orphan.id):
-                await delete_data_nodes_and_edges(dataset.id, orphan.id, user.id)
+            # Always attempt graph+vector cleanup. delete_data_nodes_and_edges
+            # handles both provenance modes and no-ops when there is nothing to
+            # remove; gating on has_data_related_nodes (a relational-ledger-only
+            # check) wrongly skipped cleanup for graph-provenance graphs (the
+            # default), leaving a forgotten row's chunks/entities in the graph +
+            # vector stores and still retrievable.
+            await delete_data_nodes_and_edges(dataset.id, orphan.id, user.id)
             await delete_data(orphan, dataset.id)
         except Exception:
             failed.append(orphan.id)
