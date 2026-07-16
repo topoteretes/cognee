@@ -1,150 +1,171 @@
-"""AST-based code parser for the code graph pipeline.
+"""AST-based Python parser for the code graph pipeline (issue #3668).
 
-Parses Python source files using tree-sitter (codegraph extra).
-Returns DataPoint instances ready for add_data_points(), with no LLM calls.
+Walks a Python source file with tree-sitter (the ``codegraph`` extra) and builds
+cognee's existing code-graph DataPoints from ``cognee.shared.CodeGraphEntities``:
+a :class:`CodeFile` wired to its :class:`ImportStatement` /
+:class:`ClassDefinition` / :class:`FunctionDefinition` children through the
+model's relationship fields. ``add_data_points`` then mints the graph edges
+natively — no LLM calls, no hand-rolled edges.
+
+Node ids are derived deterministically from stable identity (file path + symbol
+name) via ``DataPoint.id_for``, so re-ingesting the same tree upserts in place
+instead of duplicating.
 """
 
 from pathlib import Path
 from typing import Optional
 
-from .models import CodeClass, CodeFile, CodeFunction, CodeImport
+from cognee.shared.CodeGraphEntities import (
+    ClassDefinition,
+    CodeFile,
+    FunctionDefinition,
+    ImportStatement,
+    Repository,
+)
 
 try:
     import tree_sitter_python as _tspy
     from tree_sitter import Language, Parser
 
-    _PY_LANGUAGE = Language(_tspy.language())
-    _PY_PARSER = Parser(_PY_LANGUAGE)
-    _HAS_TREE_SITTER = True
-except ImportError:
-    _HAS_TREE_SITTER = False
+    _PARSER = Parser(Language(_tspy.language()))
+except ImportError:  # codegraph extra not installed
+    _PARSER = None
 
 
 def _text(node, src: bytes) -> str:
     return src[node.start_byte : node.end_byte].decode("utf-8", errors="replace")
 
 
-def _first_child_of_type(node, kind: str):
+def _child_of_type(node, kind: str):
     for child in node.children:
         if child.type == kind:
             return child
     return None
 
 
-def _extract_docstring(body_node, src: bytes) -> Optional[str]:
-    """Return the docstring from a function/class body if present."""
-    if not body_node:
-        return None
-    for child in body_node.children:
-        if child.type == "expression_statement":
-            inner = _first_child_of_type(child, "string")
-            if inner:
-                raw = _text(inner, src).strip("\"' \t\n").strip()
-                return raw[:500] if raw else None
-    return None
-
-
-def _make_edge(source_id, target_id, relation: str) -> tuple:
+def _points(node) -> tuple[tuple[int, int], tuple[int, int]]:
+    """Return 1-based (row, col) start/end points for a tree-sitter node."""
     return (
-        source_id,
-        target_id,
-        relation,
-        {
-            "relationship_name": relation,
-            "source_node_id": source_id,
-            "target_node_id": target_id,
-            "ontology_valid": False,
-        },
+        (node.start_point[0] + 1, node.start_point[1]),
+        (node.end_point[0] + 1, node.end_point[1]),
     )
 
 
-def _walk(node, src: bytes, file_path: str, file_node: CodeFile, nodes: list, edges: list, parent_class: Optional[CodeClass] = None) -> None:
-    """Recursively walk the AST and collect DataPoints and edges."""
-    if node.type == "class_definition":
-        name_node = _first_child_of_type(node, "identifier")
-        if name_node:
-            cls_name = _text(name_node, src)
-            body = _first_child_of_type(node, "block")
-            cls = CodeClass(
-                name=cls_name,
-                file_path=file_path,
-                start_line=node.start_point[0] + 1,
-                end_line=node.end_point[0] + 1,
-                docstring=_extract_docstring(body, src),
-            )
-            nodes.append(cls)
-            edges.append(_make_edge(file_node.id, cls.id, "defines_class"))
-            # recurse into class body looking for methods
-            if body:
-                for child in body.children:
-                    _walk(child, src, file_path, file_node, nodes, edges, parent_class=cls)
-        return  # don't fall through to generic children walk
-
-    if node.type == "function_definition":
-        name_node = _first_child_of_type(node, "identifier")
-        if name_node:
-            fn_name = _text(name_node, src)
-            # Qualify methods with class name to avoid collisions
-            qualified = f"{parent_class.name}.{fn_name}" if parent_class else fn_name
-            body = _first_child_of_type(node, "block")
-            fn = CodeFunction(
-                name=qualified,
-                file_path=file_path,
-                start_line=node.start_point[0] + 1,
-                end_line=node.end_point[0] + 1,
-                docstring=_extract_docstring(body, src),
-            )
-            nodes.append(fn)
-            if parent_class:
-                edges.append(_make_edge(parent_class.id, fn.id, "has_method"))
-            else:
-                edges.append(_make_edge(file_node.id, fn.id, "defines_function"))
-        return  # no deeper recursion needed for functions
-
-    if node.type in ("import_statement", "import_from_statement"):
-        _collect_import(node, src, file_path, file_node, nodes, edges)
-        return
-
-    for child in node.children:
-        _walk(child, src, file_path, file_node, nodes, edges, parent_class=parent_class)
+def _function(
+    node, src: bytes, file_path: str, class_name: Optional[str]
+) -> Optional[FunctionDefinition]:
+    name_node = _child_of_type(node, "identifier")
+    if not name_node:
+        return None
+    # Qualify methods with their class so names and ids don't collide within a file.
+    name = _text(name_node, src)
+    qualified = f"{class_name}.{name}" if class_name else name
+    start, end = _points(node)
+    return FunctionDefinition(
+        id=FunctionDefinition.id_for(file_path, qualified),
+        name=qualified,
+        start_point=start,
+        end_point=end,
+        source_code=_text(node, src),
+        file_path=file_path,
+    )
 
 
-def _collect_import(node, src: bytes, file_path: str, file_node: CodeFile, nodes: list, edges: list) -> None:
-    """Emit CodeImport nodes for import/import-from statements."""
-    if node.type == "import_statement":
-        for child in node.children:
-            if child.type in ("dotted_name", "aliased_import"):
-                module = _text(_first_child_of_type(child, "dotted_name") or child, src)
-                imp = CodeImport(importer_path=file_path, imported_module=module)
-                nodes.append(imp)
-                edges.append(_make_edge(file_node.id, imp.id, "imports"))
-    elif node.type == "import_from_statement":
-        # from X import Y  — capture the module (X part)
-        for child in node.children:
-            if child.type == "dotted_name":
-                module = _text(child, src)
-                imp = CodeImport(importer_path=file_path, imported_module=module)
-                nodes.append(imp)
-                edges.append(_make_edge(file_node.id, imp.id, "imports"))
-                break  # only capture the module once per from-import
+def _class(node, src: bytes, file_path: str) -> Optional[ClassDefinition]:
+    name_node = _child_of_type(node, "identifier")
+    if not name_node:
+        return None
+    name = _text(name_node, src)
+    start, end = _points(node)
+    return ClassDefinition(
+        id=ClassDefinition.id_for(file_path, name),
+        name=name,
+        start_point=start,
+        end_point=end,
+        source_code=_text(node, src),
+        file_path=file_path,
+    )
 
 
-def parse_file(file_path: str) -> tuple[list, list]:
-    """Parse a Python source file; return (datapoints, edges).
+def _imported_modules(node, src: bytes) -> list[str]:
+    """Return the module(s) an import / from-import statement depends on.
 
-    If tree-sitter is not installed (codegraph extra missing), returns empty lists.
+    Uses tree-sitter field names so ``from . import x`` / ``from .mod import y``
+    resolve to the package (``.`` / ``.mod``) rather than the imported symbol.
     """
-    if not _HAS_TREE_SITTER:
-        return [], []
+    if node.type == "import_from_statement":
+        module = node.child_by_field_name("module_name")
+        return [_text(module, src)] if module else []
+    if node.type == "import_statement":
+        modules = []
+        for target in node.children_by_field_name("name"):
+            dotted = (
+                target if target.type == "dotted_name" else _child_of_type(target, "dotted_name")
+            )
+            if dotted:
+                modules.append(_text(dotted, src))
+        return modules
+    return []
 
+
+def parse_file(file_path: str, repository: Optional[Repository] = None) -> Optional[CodeFile]:
+    """Parse a Python source file into a :class:`CodeFile` with its relationships.
+
+    Returns ``None`` when tree-sitter is unavailable or the file cannot be read,
+    so callers can skip it without special-casing.
+    """
+    if _PARSER is None:
+        return None
     try:
         src = Path(file_path).read_bytes()
     except OSError:
-        return [], []
+        return None
 
-    tree = _PY_PARSER.parse(src)
-    file_node = CodeFile(file_path=file_path)
-    nodes: list = [file_node]
-    edges: list = []
-    _walk(tree.root_node, src, file_path, file_node, nodes, edges)
-    return nodes, edges
+    classes: list[ClassDefinition] = []
+    functions: list[FunctionDefinition] = []
+    imports: list[ImportStatement] = []
+
+    def walk(node, class_name: Optional[str]) -> None:
+        for child in node.children:
+            if child.type == "class_definition":
+                cls = _class(child, src, file_path)
+                if cls:
+                    classes.append(cls)
+                    body = _child_of_type(child, "block")
+                    if body:
+                        walk(body, cls.name)
+            elif child.type == "function_definition":
+                fn = _function(child, src, file_path, class_name)
+                if fn:
+                    functions.append(fn)
+            elif child.type in ("import_statement", "import_from_statement"):
+                start, end = _points(child)
+                for module in _imported_modules(child, src):
+                    imports.append(
+                        ImportStatement(
+                            id=ImportStatement.id_for(file_path, module),
+                            name=module,
+                            module=module,
+                            start_point=start,
+                            end_point=end,
+                            source_code=_text(child, src),
+                            file_path=file_path,
+                        )
+                    )
+            else:
+                # decorated_definition, if/try wrappers, etc. — descend to reach
+                # the definitions inside while keeping the enclosing class context.
+                walk(child, class_name)
+
+    walk(_PARSER.parse(src).root_node, None)
+
+    return CodeFile(
+        id=CodeFile.id_for(file_path),
+        name=Path(file_path).name,
+        file_path=file_path,
+        language="python",
+        part_of=repository,
+        depends_on=imports,
+        provides_class_definition=classes,
+        provides_function_definition=functions,
+    )
