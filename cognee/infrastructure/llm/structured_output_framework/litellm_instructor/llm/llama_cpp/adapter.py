@@ -1,5 +1,6 @@
 """Adapter for Instructor-backed Structured Output Framework for Llama CPP"""
 
+import asyncio
 import logging
 import threading
 from typing import Any, cast
@@ -160,6 +161,7 @@ class LlamaCppAPIAdapter(LLMInterface):
             (
                 litellm.exceptions.NotFoundError,
                 litellm.exceptions.AuthenticationError,
+                asyncio.CancelledError,
                 LLMPaymentRequiredError,
             )
         ),
