@@ -1,20 +1,3 @@
-"""Minimal session-distillation demo: the answer flips after distillation.
-
-Run with:
-
-    uv run python examples/demos/snack_preference_distillation_demo.py
-
-Story:
-
-1. We know two snacks: Oreos (sweet) and Doritos (savory).
-2. Asked to recommend one with no context, the model picks arbitrarily.
-3. We then tell it the user prefers the OPPOSITE flavor of whatever it just picked.
-4. ``cognee.session.distill_session`` curates that preference and cognifies it into memory.
-5. In a fresh session the same question now flips to the other snack, citing the preference.
-
-Requires a configured LLM provider. Exact wording varies by model.
-"""
-
 import asyncio
 import os
 import sys
