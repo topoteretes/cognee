@@ -5,9 +5,14 @@ from .observers import Observer
 from .exceptions import UnsupportedObserverError
 
 
-def _set_generation_attributes(span, adapter) -> None:
-    """Emit OTel-GenAI semantic conventions on a generation span so any OTLP
-    backend (Langfuse, Dash0, Datadog, ...) renders the LLM call as a generation.
+# Cap span input/output like the DB adapters cap query text (redact_secrets(query[:500])).
+_MAX_OBSERVED_CHARS = 8000
+
+
+def _set_generation_attributes(span, adapter, func, args, kwargs) -> None:
+    """Emit OTel-GenAI + Langfuse attributes on a generation span so any OTLP backend
+    (Langfuse, Dash0, Datadog, ...) renders the LLM call as a generation with model
+    and input.
 
     ``langfuse.observation.type`` is set unconditionally so the span is still
     classified as a generation when the model name is unavailable (e.g. llama.cpp
@@ -18,6 +23,8 @@ def _set_generation_attributes(span, adapter) -> None:
         GEN_AI_REQUEST_MODEL,
         GEN_AI_SYSTEM,
         LANGFUSE_OBSERVATION_TYPE,
+        LANGFUSE_OBSERVATION_INPUT,
+        redact_secrets,
     )
 
     span.set_attribute(LANGFUSE_OBSERVATION_TYPE, "generation")
@@ -29,6 +36,54 @@ def _set_generation_attributes(span, adapter) -> None:
     provider = getattr(adapter, "name", None)
     if provider:
         span.set_attribute(GEN_AI_SYSTEM, provider.lower())
+
+    payload = _generation_input_payload(func, args, kwargs)
+    if payload:
+        span.set_attribute(
+            LANGFUSE_OBSERVATION_INPUT, redact_secrets(payload[:_MAX_OBSERVED_CHARS])
+        )
+
+
+def _generation_input_payload(func, args, kwargs):
+    """Bind the LLM-adapter call and record its string prompt arguments as a JSON string,
+    keyed by parameter name. Works for positional and keyword calls, and is name-agnostic
+    so it keeps capturing the prompt if the adapter parameters are renamed. Skips
+    ``self``/``response_model`` and non-string args (the response-model type, numeric
+    options, the ``**kwargs`` dict). Returns None if the call can't be interpreted."""
+    import json
+    import inspect
+
+    try:
+        bound = inspect.signature(func).bind(*args, **kwargs)
+        bound.apply_defaults()
+        payload = {
+            name: value
+            for name, value in bound.arguments.items()
+            if name not in ("self", "cls", "response_model") and isinstance(value, str) and value
+        }
+        return json.dumps(payload, default=str) if payload else None
+    except Exception:
+        return None
+
+
+def _set_generation_output(span, result) -> None:
+    """Record the LLM response as the Langfuse output (best effort; never raises)."""
+    import json
+
+    from cognee.modules.observability.tracing import LANGFUSE_OBSERVATION_OUTPUT, redact_secrets
+
+    try:
+        if hasattr(result, "model_dump_json"):  # a pydantic structured output
+            output = result.model_dump_json()
+        elif isinstance(result, str):
+            output = result
+        else:
+            output = json.dumps(result, default=str)
+        span.set_attribute(
+            LANGFUSE_OBSERVATION_OUTPUT, redact_secrets(output[:_MAX_OBSERVED_CHARS])
+        )
+    except Exception:
+        pass
 
 
 def _wrap_with_otel(inner_decorator):
@@ -70,9 +125,13 @@ def _wrap_with_otel(inner_decorator):
                         f"cognee.observe.{func.__name__}", kind=kind
                     ) as span:
                         span.set_attribute(COGNEE_SPAN_CATEGORY, category)
-                        if category == "generation" and args:
-                            _set_generation_attributes(span, args[0])
-                        return await wrapped(*args, **kwargs)
+                        is_generation = category == "generation" and bool(args)
+                        if is_generation:
+                            _set_generation_attributes(span, args[0], func, args, kwargs)
+                        result = await wrapped(*args, **kwargs)
+                        if is_generation:
+                            _set_generation_output(span, result)
+                        return result
 
                 @functools.wraps(func)
                 def sync_wrapper(*args, **kwargs):
@@ -96,9 +155,13 @@ def _wrap_with_otel(inner_decorator):
                         f"cognee.observe.{func.__name__}", kind=kind
                     ) as span:
                         span.set_attribute(COGNEE_SPAN_CATEGORY, category)
-                        if category == "generation" and args:
-                            _set_generation_attributes(span, args[0])
-                        return wrapped(*args, **kwargs)
+                        is_generation = category == "generation" and bool(args)
+                        if is_generation:
+                            _set_generation_attributes(span, args[0], func, args, kwargs)
+                        result = wrapped(*args, **kwargs)
+                        if is_generation:
+                            _set_generation_output(span, result)
+                        return result
 
                 import asyncio
 

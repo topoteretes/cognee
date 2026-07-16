@@ -202,8 +202,18 @@ def _tracer_with_collector():
     return collector, provider, provider.get_tracer("test")
 
 
-def _run_observed(monkeypatch, category, adapter_cls):
-    """Drive an @observe-decorated method with tracing pointed at a stub collector,
+def _run_observed(
+    monkeypatch,
+    category,
+    adapter_cls,
+    *,
+    text_input="what is cognee?",
+    system_prompt="be brief",
+    output="a graph memory",
+    positional=False,
+):
+    """Drive an @observe-decorated LLM-adapter method (mirrors the real
+    acreate_structured_output signature) with tracing pointed at a stub collector,
     and return the single exported span."""
     import cognee.modules.observability.tracing as tracing
     import cognee.modules.observability.trace_context as trace_context
@@ -217,10 +227,16 @@ def _run_observed(monkeypatch, category, adapter_cls):
 
     class _Decorated(adapter_cls):
         @observe(as_type=category)
-        async def run(self):
-            return "ok"
+        async def acreate_structured_output(self, text_input, system_prompt, response_model=None):
+            return output
 
-    assert asyncio.run(_Decorated().run()) == "ok"
+    inst = _Decorated()
+    if positional:
+        asyncio.run(inst.acreate_structured_output(text_input, system_prompt))
+    else:
+        asyncio.run(
+            inst.acreate_structured_output(text_input=text_input, system_prompt=system_prompt)
+        )
     provider.force_flush()
 
     spans = collector.get_finished_spans()
@@ -229,7 +245,8 @@ def _run_observed(monkeypatch, category, adapter_cls):
 
 
 @requires_otel
-def test_generation_span_exports_genai_attributes(monkeypatch):
+def test_generation_span_exports_genai_and_io(monkeypatch):
+    import json
     from opentelemetry.trace import SpanKind
 
     class OpenAILike:
@@ -244,12 +261,90 @@ def test_generation_span_exports_genai_attributes(monkeypatch):
     assert attrs["gen_ai.request.model"] == "gpt-4o-mini"
     assert attrs["gen_ai.system"] == "openai"  # lowercased per GenAI convention
     assert attrs["langfuse.observation.type"] == "generation"
+    # input/output populate the Langfuse observation fields (JSON-string values),
+    # keyed by the adapter's real parameter names.
+    assert json.loads(attrs["langfuse.observation.input"]) == {
+        "text_input": "what is cognee?",
+        "system_prompt": "be brief",
+    }
+    assert attrs["langfuse.observation.output"] == "a graph memory"
+
+
+@requires_otel
+def test_generation_input_captured_from_positional_args(monkeypatch):
+    import json
+
+    class OpenAILike:
+        model = "gpt-4o-mini"
+        name = "OpenAI"
+
+    span = _run_observed(
+        monkeypatch,
+        "generation",
+        OpenAILike,
+        text_input="q pos",
+        system_prompt="sys pos",
+        positional=True,
+    )
+    assert json.loads(dict(span.attributes)["langfuse.observation.input"]) == {
+        "text_input": "q pos",
+        "system_prompt": "sys pos",
+    }
+
+
+@requires_otel
+def test_generation_input_capture_is_name_agnostic(monkeypatch):
+    """Input capture records string prompt args by parameter name, so it keeps working
+    if cognee renames the adapter's prompt parameters in the future."""
+    import json
+    import cognee.modules.observability.tracing as tracing
+    import cognee.modules.observability.trace_context as trace_context
+    from cognee.modules.observability.get_observe import get_observe
+
+    collector, provider, tracer = _tracer_with_collector()
+    monkeypatch.setattr(tracing, "_tracer", tracer)
+    monkeypatch.setattr(trace_context, "_tracing_enabled", True)
+    observe = get_observe()
+
+    class RenamedAdapter:
+        model = "m"
+        name = "Prov"
+
+        @observe(as_type="generation")
+        async def acreate_structured_output(self, prompt, context, response_model=None):
+            return "ok"
+
+    asyncio.run(RenamedAdapter().acreate_structured_output(prompt="P", context="C"))
+    provider.force_flush()
+    span = collector.get_finished_spans()[0]
+    assert json.loads(dict(span.attributes)["langfuse.observation.input"]) == {
+        "prompt": "P",
+        "context": "C",
+    }
+
+
+def test_llm_generation_contract_keeps_string_prompt_params():
+    """Guard against silent Langfuse-input regressions: input capture records the string
+    arguments of the generation call, so the LLM interface must keep passing the prompt as
+    string parameters. If this contract changes (e.g. to a structured messages object),
+    _generation_input_payload must be updated to match. No opentelemetry needed."""
+    import inspect
+    from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.llm_interface import (
+        LLMInterface,
+    )
+
+    params = inspect.signature(LLMInterface.acreate_structured_output).parameters
+    for name in ("text_input", "system_prompt"):
+        assert name in params, f"LLM generation contract dropped {name!r}"
+        assert params[name].annotation in (str, "str"), (
+            f"{name} is no longer a string; Langfuse input capture needs updating"
+        )
 
 
 @requires_otel
 def test_generation_span_without_model_is_still_marked(monkeypatch):
     """llama.cpp local mode leaves model=None; the span must still classify as a
-    generation via the langfuse.observation.type marker."""
+    generation and still carry input/output."""
 
     class LocalLike:
         model = None
@@ -261,6 +356,8 @@ def test_generation_span_without_model_is_still_marked(monkeypatch):
     assert "gen_ai.request.model" not in attrs  # None is never written
     assert attrs["gen_ai.system"] == "llamacpp"
     assert attrs["langfuse.observation.type"] == "generation"
+    assert "langfuse.observation.input" in attrs
+    assert attrs["langfuse.observation.output"] == "a graph memory"
 
 
 @requires_otel
@@ -278,3 +375,5 @@ def test_non_generation_span_has_no_genai_attributes(monkeypatch):
     assert attrs["cognee.span.category"] == "transcription"
     assert "gen_ai.request.model" not in attrs
     assert "langfuse.observation.type" not in attrs
+    assert "langfuse.observation.input" not in attrs
+    assert "langfuse.observation.output" not in attrs

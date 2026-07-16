@@ -45,12 +45,15 @@ COGNEE_RESULT_SUMMARY = "cognee.result.summary"
 COGNEE_RESULT_COUNT = "cognee.result.count"
 COGNEE_PIPELINE_NAME = "cognee.pipeline.name"
 
-# OTel-GenAI semantic conventions + the Langfuse observation-type hint. Emitted
+# OTel-GenAI semantic conventions + the Langfuse observation attributes. Emitted
 # on generation spans (see get_observe) so any OTLP backend — Langfuse included —
-# renders LLM calls as generations without a separate SDK or attribute rewrite.
+# renders LLM calls as generations with model, input and output. langfuse.observation.*
+# are Langfuse's highest-priority input/output sources (JSON-string values).
 GEN_AI_REQUEST_MODEL = "gen_ai.request.model"
 GEN_AI_SYSTEM = "gen_ai.system"
 LANGFUSE_OBSERVATION_TYPE = "langfuse.observation.type"
+LANGFUSE_OBSERVATION_INPUT = "langfuse.observation.input"
+LANGFUSE_OBSERVATION_OUTPUT = "langfuse.observation.output"
 
 # V2 API attributes
 COGNEE_DATASET_NAME = "cognee.dataset.name"
