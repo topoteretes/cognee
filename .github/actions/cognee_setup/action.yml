@@ -69,8 +69,17 @@ runs:
       run: |
         # Persist for all subsequent steps so uv run uses /app/.venv
         echo "UV_PROJECT_ENVIRONMENT=/app/.venv" >> "$GITHUB_ENV"
-        # Install project into the pre-built venv; --inexact keeps pre-installed extras intact
-        uv sync --frozen --inexact
+        # Install project into the pre-built venv; --inexact keeps pre-installed extras intact.
+        # Extras not baked into the CI image (extra-dependencies input) are installed
+        # here from the lockfile, mirroring the bare-runner branch.
+        EXTRA_ARGS=""
+        if [ -n "${{ inputs.extra-dependencies }}" ]; then
+          IFS=' ' read -r -a deps <<< "${{ inputs.extra-dependencies }}"
+          for extra in "${deps[@]}"; do
+            EXTRA_ARGS="$EXTRA_ARGS --extra $extra"
+          done
+        fi
+        uv sync --frozen --inexact $EXTRA_ARGS
         # Prevent uv run from re-syncing and stripping extras
         echo "UV_NO_SYNC=true" >> "$GITHUB_ENV"
 

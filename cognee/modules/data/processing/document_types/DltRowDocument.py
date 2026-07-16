@@ -8,6 +8,9 @@ from .Document import Document
 class DltRowDocument(Document):
     """Document type for DLT-ingested relational rows.
 
+    Legacy: pre-manifest per-row DLT records; superseded by DltSourceDocument
+    manifests.
+
     Skips chunking entirely — yields a single DocumentChunk containing
     the enriched schema context text. The graph for DLT data is built
     deterministically by extract_dlt_fk_edges, so no LLM extraction

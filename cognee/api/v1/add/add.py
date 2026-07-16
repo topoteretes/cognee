@@ -250,7 +250,9 @@ async def add(
         data = await materialize_stream_for_background(data)
 
     await reset_dataset_pipeline_run_status(
-        authorized_dataset.id, user, pipeline_names=["add_pipeline", "cognify_pipeline"]
+        authorized_dataset.id,
+        user,
+        pipeline_names=["add_pipeline", "cognify_pipeline", "dlt_cognify_pipeline"],
     )
 
     pipeline_executor_func = get_pipeline_executor(run_in_background=run_in_background)
@@ -271,6 +273,11 @@ async def add(
         embedding_config=embedding_config,
         data_cache=data_cache,
     )
+
+    # Blocking runs commit before this point, so the deferred DLT orphan
+    # cleanup can now run safely (background runs already ran it up front).
+    if orphan_cleanup is not None:
+        await orphan_cleanup()
 
     # run_pipeline_blocking returns {dataset_id: PipelineRunInfo} but callers
     # expect a single PipelineRunInfo (add always processes one dataset).
