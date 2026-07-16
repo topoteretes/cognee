@@ -231,7 +231,7 @@ class VideoLoader(LoaderInterface):
             )
         except Exception as error:
             logger.debug(
-                "Segmented transcription unavailable (%s); using a plain transcript.",
+                "Segmented transcription request failed (%s); retrying without it.",
                 error,
             )
             result = await LLMGateway.create_transcript(audio_path)
@@ -239,4 +239,13 @@ class VideoLoader(LoaderInterface):
         if result is None:
             return ""
         timestamped = _build_timestamped_text(_extract_segments(result.payload))
-        return timestamped or (result.text or "")
+        if timestamped:
+            return timestamped
+        text = result.text or ""
+        if text:
+            logger.info(
+                "Transcription returned no timestamp segments; storing a plain transcript "
+                "without [HH:MM:SS] markers. Segment timestamps require a transcription model "
+                "that supports verbose_json output (e.g. whisper-1)."
+            )
+        return text
