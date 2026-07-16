@@ -11,6 +11,7 @@
 | **Fly.io** | Edge deployment, persistent volumes | `bash distributed/deploy/fly-deploy.sh` |
 | **Render** | Simple PaaS with managed Postgres | Deploy to Render button |
 | **Daytona** | Cloud sandboxes (SDK or CLI) | `python distributed/deploy/daytona_sandbox.py` |
+| **Islo** | Isolated cloud sandboxes for agents (SDK) | `python distributed/deploy/islo_sandbox.py` |
 
 All platforms require setting `LLM_API_KEY` as a minimum.
 
@@ -129,6 +130,32 @@ daytona create
 pip install 'cognee[api]'
 python -m uvicorn cognee.api.client:app --host 0.0.0.0 --port 8000
 ```
+
+---
+
+## Islo (Cloud Sandbox)
+
+Islo provides isolated cloud sandbox VMs for autonomous agents, built by the Incredibuild team. Cognee runs inside a sandbox and is exposed through a temporary public share URL. Docs: https://docs.islo.dev
+
+```bash
+pip install islo
+
+export ISLO_API_KEY=your-key   # from https://app.islo.dev/api-keys
+export LLM_API_KEY=sk-xxx
+python distributed/deploy/islo_sandbox.py
+```
+
+The script creates a sandbox, installs `cognee[api]`, starts the API server, and prints a temporary public share URL (24-hour TTL). Stop or delete the sandbox via the SDK:
+
+```python
+from islo import Islo
+
+client = Islo()  # reads ISLO_API_KEY from the environment
+client.sandboxes.stop_sandbox("cognee-api")
+client.sandboxes.delete_sandbox("cognee-api")
+```
+
+The sandbox name is fixed (`cognee-api`), so re-running the script while a previous deployment still exists fails with a name conflict — delete the old sandbox first (see above), then re-run.
 
 ---
 
