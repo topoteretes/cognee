@@ -1,123 +1,134 @@
 """Unit tests for the code graph pipeline (issue #3668).
 
-These tests are pure-Python and never call add_data_points or any DB;
-they validate only the AST parser output.
+Covers the tree-sitter parser output and an offline (no-LLM, no-DB) run of
+``ingest_code_graph`` that asserts the assembled graph and its native edges.
 """
 
-import importlib.util
-import sys
 import textwrap
-import types
 from pathlib import Path
 
 import pytest
 
-# Stub broken transitive dep so cognee modules can be imported (same fix as
-# test_temporal_awareness.py — see that file for the explanation).
-if "mistralai" not in sys.modules:
-    _spec = importlib.util.spec_from_loader("mistralai", loader=None)
-    _m = types.ModuleType("mistralai")
-    _m.__spec__ = _spec
-    _m.Mistral = object
-    sys.modules["mistralai"] = _m
-
-# Skip entire module if tree-sitter extras are not installed
+# Skip the whole module if the codegraph extra (tree-sitter) is not installed.
 pytest.importorskip("tree_sitter", reason="codegraph extra (tree-sitter) not installed")
-pytest.importorskip("tree_sitter_python", reason="codegraph extra (tree-sitter-python) not installed")
+pytest.importorskip(
+    "tree_sitter_python", reason="codegraph extra (tree-sitter-python) not installed"
+)
 
-from cognee.tasks.codegraph.models import CodeClass, CodeFile, CodeFunction, CodeImport
-from cognee.tasks.codegraph.parse import parse_file
+from cognee.modules.graph.utils import get_graph_from_model
+from cognee.shared.CodeGraphEntities import (
+    ClassDefinition,
+    CodeFile,
+    FunctionDefinition,
+    ImportStatement,
+)
+from cognee.tasks.codegraph import ingest_code_graph, parse_file
+
+
+SAMPLE = textwrap.dedent(
+    '''\
+    import os
+    from pathlib import Path
+    from . import config
+
+    class Greeter:
+        """A simple greeter."""
+
+        def greet(self, name: str) -> str:
+            return f"Hello, {name}"
+
+    def standalone(x: int) -> int:
+        return x * 2
+    '''
+)
 
 
 @pytest.fixture()
 def py_file(tmp_path: Path) -> Path:
-    src = textwrap.dedent("""\
-        import os
-        from pathlib import Path
-
-        class Greeter:
-            \"\"\"A simple greeter.\"\"\"
-
-            def greet(self, name: str) -> str:
-                \"\"\"Return a greeting.\"\"\"
-                return f"Hello, {name}"
-
-        def standalone(x: int) -> int:
-            return x * 2
-    """)
     f = tmp_path / "sample.py"
-    f.write_text(src, encoding="utf-8")
+    f.write_text(SAMPLE, encoding="utf-8")
     return f
 
 
-def _by_type(nodes, cls):
-    return [n for n in nodes if isinstance(n, cls)]
-
-
 def test_parse_returns_code_file(py_file):
-    nodes, _ = parse_file(str(py_file))
-    files = _by_type(nodes, CodeFile)
-    assert len(files) == 1
-    assert files[0].file_path == str(py_file)
+    code_file = parse_file(str(py_file))
+    assert isinstance(code_file, CodeFile)
+    assert code_file.file_path == str(py_file)
+    assert code_file.language == "python"
 
 
 def test_parse_detects_class(py_file):
-    nodes, _ = parse_file(str(py_file))
-    classes = _by_type(nodes, CodeClass)
+    classes = parse_file(str(py_file)).provides_class_definition
     assert any(c.name == "Greeter" for c in classes)
 
 
 def test_parse_detects_standalone_function(py_file):
-    nodes, _ = parse_file(str(py_file))
-    fns = _by_type(nodes, CodeFunction)
-    assert any(f.name == "standalone" for f in fns)
+    functions = parse_file(str(py_file)).provides_function_definition
+    assert any(f.name == "standalone" for f in functions)
 
 
 def test_parse_qualifies_method_with_class(py_file):
-    nodes, _ = parse_file(str(py_file))
-    fns = _by_type(nodes, CodeFunction)
-    assert any(f.name == "Greeter.greet" for f in fns)
+    functions = parse_file(str(py_file)).provides_function_definition
+    assert any(f.name == "Greeter.greet" for f in functions)
 
 
-def test_parse_detects_imports(py_file):
-    nodes, _ = parse_file(str(py_file))
-    imports = _by_type(nodes, CodeImport)
-    modules = {i.imported_module for i in imports}
-    assert "os" in modules
-    assert "pathlib" in modules
-
-
-def test_parse_emits_defines_class_edge(py_file):
-    nodes, edges = parse_file(str(py_file))
-    file_node = _by_type(nodes, CodeFile)[0]
-    class_node = next(c for c in _by_type(nodes, CodeClass) if c.name == "Greeter")
-    edge_relations = {(str(e[0]), e[2]) for e in edges}
-    assert (str(file_node.id), "defines_class") in edge_relations
-
-
-def test_parse_emits_has_method_edge(py_file):
-    nodes, edges = parse_file(str(py_file))
-    class_node = next(c for c in _by_type(nodes, CodeClass) if c.name == "Greeter")
-    method_node = next(f for f in _by_type(nodes, CodeFunction) if f.name == "Greeter.greet")
-    edge_relations = {(str(e[0]), e[2]) for e in edges}
-    assert (str(class_node.id), "has_method") in edge_relations
+def test_parse_captures_imports_including_relative(py_file):
+    modules = {i.module for i in parse_file(str(py_file)).depends_on}
+    # "." is the relative "from . import config" — the module, not the symbol.
+    assert {"os", "pathlib", "."} <= modules
 
 
 def test_stable_ids_across_parses(py_file):
-    nodes1, _ = parse_file(str(py_file))
-    nodes2, _ = parse_file(str(py_file))
-    ids1 = {str(n.id) for n in nodes1}
-    ids2 = {str(n.id) for n in nodes2}
-    assert ids1 == ids2, "Node IDs must be deterministic across runs"
+    def ids(code_file):
+        return {code_file.id} | {
+            n.id
+            for n in (
+                *code_file.depends_on,
+                *code_file.provides_class_definition,
+                *code_file.provides_function_definition,
+            )
+        }
+
+    assert ids(parse_file(str(py_file))) == ids(parse_file(str(py_file)))
 
 
-def test_missing_file_returns_empty():
-    nodes, edges = parse_file("/nonexistent/file.py")
-    assert nodes == []
-    assert edges == []
+def test_missing_file_returns_none():
+    assert parse_file("/nonexistent/file.py") is None
 
 
-def test_docstring_extracted(py_file):
-    nodes, _ = parse_file(str(py_file))
-    greeter = next(c for c in _by_type(nodes, CodeClass) if c.name == "Greeter")
-    assert greeter.docstring and "greeter" in greeter.docstring.lower()
+@pytest.mark.asyncio
+async def test_graph_from_model_emits_native_edges(py_file):
+    """The assembled CodeFile yields File->Class/Function/Import edges with no manual wiring."""
+    code_file = parse_file(str(py_file))
+    _, edges = await get_graph_from_model(
+        code_file, added_nodes={}, added_edges={}, visited_properties={}
+    )
+    relationships = {edge[2] for edge in edges}
+    assert {
+        "provides_class_definition",
+        "provides_function_definition",
+        "depends_on",
+    } <= relationships
+
+
+@pytest.mark.asyncio
+async def test_ingest_code_graph_stores_parsed_nodes(py_file, monkeypatch):
+    """ingest_code_graph parses a tree and persists it via a single add_data_points call."""
+    captured = {}
+
+    async def fake_add_data_points(data_points, *args, **kwargs):
+        captured["data_points"] = data_points
+        return data_points
+
+    monkeypatch.setattr("cognee.tasks.codegraph.pipeline.add_data_points", fake_add_data_points)
+
+    stored = await ingest_code_graph(py_file.parent)
+
+    assert len(captured["data_points"]) == 1
+    code_file = captured["data_points"][0]
+    assert isinstance(code_file, CodeFile)
+    assert any(isinstance(c, ClassDefinition) for c in code_file.provides_class_definition)
+    assert any(isinstance(f, FunctionDefinition) for f in code_file.provides_function_definition)
+    assert any(isinstance(i, ImportStatement) for i in code_file.depends_on)
+    assert code_file.part_of is not None  # directory ingestion attaches a Repository
+    assert stored == captured["data_points"]
