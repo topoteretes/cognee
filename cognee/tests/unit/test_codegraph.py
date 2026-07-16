@@ -120,6 +120,10 @@ async def test_ingest_code_graph_stores_parsed_nodes(py_file, monkeypatch):
         captured["data_points"] = data_points
         return data_points
 
+    async def noop_setup():
+        return None
+
+    monkeypatch.setattr("cognee.tasks.codegraph.pipeline.setup", noop_setup)
     monkeypatch.setattr("cognee.tasks.codegraph.pipeline.add_data_points", fake_add_data_points)
 
     stored = await ingest_code_graph(py_file.parent)

@@ -15,6 +15,7 @@ Once stored, the graph is searchable through the normal search types (e.g.
 from pathlib import Path
 from typing import Iterable, Optional, Union
 
+from cognee.modules.engine.operations.setup import setup
 from cognee.shared.CodeGraphEntities import CodeFile, Repository
 from cognee.tasks.storage import add_data_points
 
@@ -52,5 +53,6 @@ async def ingest_code_graph(
         if (code_file := parse_file(str(f), repository=repository)) is not None
     ]
     if code_files:
+        await setup()  # ensure the databases exist, like cognee.add()
         await add_data_points(code_files)
     return code_files
