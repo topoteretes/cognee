@@ -70,6 +70,25 @@ def test_add_edge_success(setup_graph):
     assert edge in node2.skeleton_edges
 
 
+def test_edge_stable_id_prefers_stored_edge_object_id():
+    """stable_id returns the stored edge_object_id when present."""
+    node1 = Node("node1")
+    node2 = Node("node2")
+    edge = Edge(node1, node2, attributes={"edge_object_id": "stored-edge-id"})
+    assert edge.stable_id() == "stored-edge-id"
+    # Repeated calls resolve to the same value.
+    assert edge.stable_id() == edge.stable_id()
+
+
+def test_edge_stable_id_falls_back_to_derived_id():
+    """stable_id derives a deterministic value when edge_object_id is missing."""
+    node1 = Node("node1")
+    node2 = Node("node2")
+    edge = Edge(node1, node2, attributes={"relationship_type": "related_to"})
+    assert edge.stable_id() == "node1:related_to:node2"
+    assert edge.stable_id() == edge.stable_id()
+
+
 def test_get_node_success(setup_graph):
     """Test retrieving an existing node."""
     graph = setup_graph

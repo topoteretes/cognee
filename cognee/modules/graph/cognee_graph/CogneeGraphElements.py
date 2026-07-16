@@ -214,6 +214,17 @@ class Edge(BaseModel):
     def get_attribute(self, key: str) -> Optional[Union[str, int, float]]:
         return self.attributes.get(key)
 
+    def stable_id(self) -> str:
+        """Stable identifier for this edge, usable as a deterministic sort/dedup key.
+
+        Prefers the stored ``edge_object_id`` attribute when present; otherwise falls
+        back to a value derived from the endpoint IDs and relationship type.
+        """
+        stored = self.attributes.get("edge_object_id")
+        if stored is not None:
+            return str(stored)
+        return f"{self.node1.id}:{self.attributes.get('relationship_type')}:{self.node2.id}"
+
     def get_source_node(self):
         return self.node1
 
