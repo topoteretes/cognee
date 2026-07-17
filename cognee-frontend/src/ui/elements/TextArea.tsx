@@ -34,8 +34,8 @@ export default function TextArea({
     // Cache maxHeight on first calculation
     if (maxHeightRef.current === null) {
       const computedStyle = getComputedStyle(textarea);
-      maxHeightRef.current = computedStyle.maxHeight === "none" 
-        ? Infinity 
+      maxHeightRef.current = computedStyle.maxHeight === "none"
+        ? Infinity
         : parseInt(computedStyle.maxHeight) || Infinity;
     }
 
