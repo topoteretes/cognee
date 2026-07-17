@@ -81,6 +81,11 @@ async def run_tasks(
     pipeline_run = await log_pipeline_run_start(pipeline_id, pipeline_name, dataset.id, data)
     pipeline_run_id = pipeline_run.pipeline_run_id
 
+    # Log the pipeline start once per run here. Per-data-item progress is logged
+    # separately in run_tasks_with_telemetry(); logging "started" there made a
+    # single multi-item run look like repeated pipeline starts (see #3724).
+    logger.info("Pipeline run started: `%s` (run_id: %s)", pipeline_name, pipeline_run_id)
+
     yield PipelineRunStarted(
         pipeline_run_id=pipeline_run_id,
         dataset_id=dataset.id,
@@ -177,6 +182,8 @@ async def run_tasks(
                 pipeline_run_id, pipeline_id, pipeline_name, dataset.id, data
             )
 
+            logger.info("Pipeline run completed: `%s` (run_id: %s)", pipeline_name, pipeline_run_id)
+
             yield PipelineRunCompleted(
                 pipeline_run_id=pipeline_run_id,
                 dataset_id=dataset.id,
@@ -203,6 +210,8 @@ async def run_tasks(
             await log_pipeline_run_error(
                 pipeline_run_id, pipeline_id, pipeline_name, dataset.id, data, error
             )
+
+            logger.error("Pipeline run errored: `%s` (run_id: %s)", pipeline_name, pipeline_run_id)
 
             yield PipelineRunErrored(
                 pipeline_run_id=pipeline_run_id,
