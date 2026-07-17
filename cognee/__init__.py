@@ -1,3 +1,18 @@
+"""Public Python API for Cognee.
+
+This module exposes the main functions and objects intended for direct use
+through ``import cognee``. It groups the stable V1 API, memory-oriented V2 API,
+visualization helpers, tracing utilities, migration helpers, and session models
+behind a single package-level entrypoint.
+
+Common entrypoints include:
+    add: Add data to a Cognee dataset.
+    cognify: Process ingested data into Cognee's knowledge representation.
+    search: Query processed data using the configured search type.
+    remember: Store memory-oriented entries using the V2 API.
+    recall: Retrieve information from memory-oriented entries.
+    delete: Remove data from Cognee-managed storage.
+"""
 # ruff: noqa: E402
 from cognee.version import get_cognee_version
 
