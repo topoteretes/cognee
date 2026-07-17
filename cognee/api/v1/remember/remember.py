@@ -944,6 +944,10 @@ async def _remember_inner(
                 dataset=kwargs.get("dataset_id") or dataset_name,
                 user=kwargs.get("user"),
                 pipeline_name="code_graph_pipeline",
+                # The default (graph-only) pipeline performs no LLM or embedding
+                # calls, so it must not demand an API key on first run. With
+                # index_vectors=True embeddings are used, so the checks stay on.
+                skip_connection_test=not bool(index_vectors),
             )
             result.items.append(
                 {"kind": "code_repository", "source": str(spec), "path": str(repo_path)}
