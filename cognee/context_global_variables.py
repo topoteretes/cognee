@@ -94,12 +94,9 @@ def multi_user_support_possible():
 
 
 def backend_access_control_enabled():
-    backend_access_control = os.environ.get("ENABLE_BACKEND_ACCESS_CONTROL", None)
-    if backend_access_control is None:
-        # If backend access control is not defined in environment variables,
-        # enable it by default if graph and vector DBs can support it, otherwise disable it
-        return multi_user_support_possible()
-    elif backend_access_control.lower() == "true":
+    # If backend access control is not defined in environment variables,
+    backend_access_control = os.environ.get("ENABLE_BACKEND_ACCESS_CONTROL", "true")
+    if backend_access_control.lower() == "true":
         # If enabled, ensure that the current graph and vector DBs can support it
         return multi_user_support_possible()
     return False
