@@ -22,7 +22,14 @@ def _entity(node_id):
 
 
 def _chunk(contains):
+    """A raw DocumentChunk-like item: entities live directly on ``contains``."""
     return SimpleNamespace(contains=contains)
+
+
+def _summary(contains):
+    """A TextSummary-like item: the real pipeline shape, wrapping its chunk in
+    ``made_from`` and carrying no ``contains`` of its own."""
+    return SimpleNamespace(made_from=_chunk(contains))
 
 
 # Alice was born in 1985 (stored) but the new data claims 1990.
@@ -44,7 +51,7 @@ EDGES = [
 
 def _mock_graph_engine():
     engine = MagicMock()
-    engine.get_graph_data = AsyncMock(return_value=(NODES, EDGES))
+    engine.get_neighborhood = AsyncMock(return_value=(NODES, EDGES))
     engine.add_edges = AsyncMock()
     return engine
 
@@ -55,6 +62,13 @@ def _mock_graph_engine():
 def test_collect_touched_node_ids_handles_entities_and_tuples():
     chunk = _chunk([_entity("alice"), (MagicMock(), _entity("1990"))])
     assert _collect_touched_node_ids([chunk]) == {"alice", "1990"}
+
+
+def test_collect_touched_node_ids_reads_through_made_from():
+    # Regression: the real pipeline passes TextSummary objects (entities live on
+    # ``made_from.contains``, not on the summary itself). Reading the top-level
+    # object only would collect nothing and make the whole task a silent no-op.
+    assert _collect_touched_node_ids([_summary([_entity("alice")])]) == {"alice"}
 
 
 def test_collect_touched_node_ids_ignores_missing_contains():

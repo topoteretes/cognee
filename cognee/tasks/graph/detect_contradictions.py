@@ -31,9 +31,9 @@ from typing import Dict, List, Optional, Set, Tuple
 from pydantic import BaseModel, Field
 
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.llm import LLMGateway
 from cognee.infrastructure.llm.prompts import read_query_prompt, render_prompt
-from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.modules.pipelines.tasks.task import task_summary
 from cognee.shared.logging_utils import get_logger
 
@@ -65,14 +65,20 @@ class ContradictionList(BaseModel):
     contradictions: List[Contradiction] = Field(default_factory=list)
 
 
-def _collect_touched_node_ids(data_chunks: List[DocumentChunk]) -> Set[str]:
-    """Collect the ids of the entity/event nodes produced by the current ingestion."""
+def _collect_touched_node_ids(items) -> Set[str]:
+    """Collect the ids of the entity/event nodes produced by the current ingestion.
+
+    The pipeline hands this task ``TextSummary`` objects, which wrap their source chunk in
+    ``made_from``; other callers may pass ``DocumentChunk`` objects directly. Either way the
+    extracted entities live on the chunk's ``contains``.
+    """
     touched_ids: Set[str] = set()
-    for chunk in data_chunks:
+    for item in items:
+        chunk = getattr(item, "made_from", None) or item
         contains = getattr(chunk, "contains", None) or []
-        for item in contains:
-            # ``contains`` items are Entity/Event data points or (Edge, Entity) tuples.
-            entity = item[1] if isinstance(item, tuple) else item
+        for entry in contains:
+            # ``contains`` entries are Entity/Event data points or (Edge, Entity) tuples.
+            entity = entry[1] if isinstance(entry, tuple) else entry
             node_id = getattr(entity, "id", None)
             if node_id is not None:
                 touched_ids.add(str(node_id))
@@ -161,34 +167,36 @@ def _contradiction_endpoints(
     return None
 
 
-@task_summary("Checked {n} chunk(s) for contradictions")
+@task_summary("Checked {n} item(s) for contradictions")
 async def detect_contradictions(
-    data_chunks: List[DocumentChunk],
+    data_points: List[DataPoint],
     confidence_threshold: float = 0.5,
     max_facts: int = 500,
     **kwargs,
-) -> List[DocumentChunk]:
+) -> List[DataPoint]:
     """Flag facts touched by the current ingestion that contradict each other.
 
     Args:
-        data_chunks: The document chunks processed by the current cognify run. Their
-            extracted entities identify which region of the graph to inspect.
+        data_points: The items produced by the current cognify run. Their extracted
+            entities identify which region of the graph to inspect.
         confidence_threshold: Minimum LLM confidence for a contradiction to be flagged.
         max_facts: Cap on the number of facts sent to the LLM in a single check.
 
     Returns:
-        The unchanged ``data_chunks`` list, so the task can be appended to a pipeline.
+        The unchanged ``data_points`` list, so the task can be appended to a pipeline.
     """
-    if not isinstance(data_chunks, list) or not data_chunks:
-        return data_chunks
+    if not isinstance(data_points, list) or not data_points:
+        return data_points
 
     try:
-        touched_node_ids = _collect_touched_node_ids(data_chunks)
+        touched_node_ids = _collect_touched_node_ids(data_points)
         if not touched_node_ids:
-            return data_chunks
+            return data_points
 
         graph_engine = await get_graph_engine()
-        nodes, edges = await graph_engine.get_graph_data()
+        # Only the region the ingestion touched: every fact one hop from a touched
+        # entity (new facts and pre-existing ones alike).
+        nodes, edges = await graph_engine.get_neighborhood(list(touched_node_ids), depth=1)
         node_names = _node_names(nodes)
 
         facts, edge_by_id = _build_candidate_facts(
@@ -197,7 +205,7 @@ async def detect_contradictions(
 
         # At least two facts are needed for a contradiction to be possible.
         if len(facts) < 2:
-            return data_chunks
+            return data_points
 
         user_prompt = render_prompt("detect_contradictions_user.txt", {"facts": "\n".join(facts)})
         system_prompt = read_query_prompt("detect_contradictions_system.txt")
@@ -257,4 +265,4 @@ async def detect_contradictions(
         # Contradiction detection is auxiliary and must never break ingestion.
         logger.warning("Contradiction detection skipped due to an error: %s", error)
 
-    return data_chunks
+    return data_points
