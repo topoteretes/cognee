@@ -8,7 +8,10 @@ import redis.asyncio as aioredis
 from pydantic import BaseModel, ValidationError
 
 from cognee.infrastructure.databases.cache.cache_db_interface import CacheDBInterface
-from cognee.infrastructure.databases.cache.models import SessionAgentTraceEntry, SessionQAEntry
+from cognee.infrastructure.databases.cache.models import (
+    SessionAgentTraceEntry,
+    SessionQAEntry,
+)
 from cognee.infrastructure.databases.exceptions import (
     CacheConnectionError,
     SessionQAEntryValidationError,
@@ -33,6 +36,7 @@ class RedisAdapter(CacheDBInterface):
         blocking_timeout=300,
         connection_timeout=30,
         session_ttl_seconds: int | None = 604800,
+        max_session_history_items: int | None = 1000,
     ):
         """Initialize sync/async Redis clients and validate connectivity up front."""
         super().__init__(host, port, lock_name, log_key)
@@ -41,6 +45,7 @@ class RedisAdapter(CacheDBInterface):
         self.port = port
         self.connection_timeout = connection_timeout
         self.session_ttl_seconds = session_ttl_seconds
+        self.max_session_history_items = max_session_history_items
 
         try:
             self.sync_redis = redis.Redis(
@@ -152,12 +157,33 @@ class RedisAdapter(CacheDBInterface):
         )
         return entry.model_dump()
 
-    async def _load_entries(self, session_key: str, start: int = 0, end: int = -1) -> list[dict]:
-        """Load and deserialize a Redis list slice for the given key."""
-        raw = await self.async_redis.lrange(session_key, start, end)
-        return [json.loads(e) for e in raw] if raw else []
+    async def _load_entries(
+        self, session_key: str, start: int = 0, end: int = -1
+    ) -> list[dict]:
+        """Load and deserialize a Redis list slice for the given key, using chunked reads for full list."""
+        # If requesting the full list, use chunked reads to avoid OOM on massive lists
+        if start == 0 and end == -1:
+            results = []
+            cursor = 0
+            chunk_size = 1000
+            while True:
+                raw_chunk = await self.async_redis.lrange(
+                    session_key, cursor, cursor + chunk_size - 1
+                )
+                if not raw_chunk:
+                    break
+                results.extend(json.loads(e) for e in raw_chunk)
+                if len(raw_chunk) < chunk_size:
+                    break
+                cursor += chunk_size
+            return results
+        else:
+            raw = await self.async_redis.lrange(session_key, start, end)
+            return [json.loads(e) for e in raw] if raw else []
 
-    async def _write_entry_at(self, session_key: str, index: int, entry_dump: dict) -> None:
+    async def _write_entry_at(
+        self, session_key: str, index: int, entry_dump: dict
+    ) -> None:
         """Overwrite a single serialized entry in-place within a Redis list."""
         await self.async_redis.lset(session_key, index, json.dumps(entry_dump))
 
@@ -306,6 +332,10 @@ class RedisAdapter(CacheDBInterface):
                 used_session_context_ids=used_session_context_ids,
             )
             await self.async_redis.rpush(session_key, json.dumps(qa_entry))
+            if self.max_session_history_items is not None:
+                await self.async_redis.ltrim(
+                    session_key, -self.max_session_history_items, -1
+                )
             await self._apply_session_ttl(session_key)
         except (redis.ConnectionError, redis.TimeoutError) as e:
             error_msg = f"Redis connection error while adding Q&A: {str(e)}"
@@ -329,12 +359,16 @@ class RedisAdapter(CacheDBInterface):
         data = await self.async_redis.lrange(session_key, -last_n, -1)
         return [SessionQAEntry.model_validate_json(d) for d in data] if data else []
 
-    async def get_all_qa_entries(self, user_id: str, session_id: str) -> list[SessionQAEntry]:
+    async def get_all_qa_entries(
+        self, user_id: str, session_id: str
+    ) -> list[SessionQAEntry]:
         """
         Retrieve all Q/A/context triplets for the given session.
         """
         session_key = self._session_key(user_id, session_id)
-        return [SessionQAEntry(**entry) for entry in await self._load_entries(session_key)]
+        return [
+            SessionQAEntry(**entry) for entry in await self._load_entries(session_key)
+        ]
 
     async def get_qa_entries_by_ids(
         self,
@@ -552,13 +586,21 @@ class RedisAdapter(CacheDBInterface):
                 session_feedback=session_feedback,
             )
             await self.async_redis.rpush(trace_key, json.dumps(trace_entry))
+            if self.max_session_history_items is not None:
+                await self.async_redis.ltrim(
+                    trace_key, -self.max_session_history_items, -1
+                )
             await self._apply_session_ttl(trace_key)
         except (redis.ConnectionError, redis.TimeoutError) as e:
-            error_msg = f"Redis connection error while appending agent trace step: {str(e)}"
+            error_msg = (
+                f"Redis connection error while appending agent trace step: {str(e)}"
+            )
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
         except Exception as e:
-            error_msg = f"Unexpected error while appending agent trace step to Redis: {str(e)}"
+            error_msg = (
+                f"Unexpected error while appending agent trace step to Redis: {str(e)}"
+            )
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
 
@@ -572,7 +614,10 @@ class RedisAdapter(CacheDBInterface):
                 SessionAgentTraceEntry(**entry)
                 for entry in await self._load_entries(trace_key, -last_n, -1)
             ]
-        return [SessionAgentTraceEntry(**entry) for entry in await self._load_entries(trace_key)]
+        return [
+            SessionAgentTraceEntry(**entry)
+            for entry in await self._load_entries(trace_key)
+        ]
 
     async def get_agent_trace_feedback(
         self, user_id: str, session_id: str, last_n: int | None = None
@@ -593,17 +638,25 @@ class RedisAdapter(CacheDBInterface):
         try:
             context_key = self._session_context_key(user_id, session_id)
             await self.async_redis.rpush(context_key, json.dumps(entry_dump))
+            if self.max_session_history_items is not None:
+                await self.async_redis.ltrim(
+                    context_key, -self.max_session_history_items, -1
+                )
             await self._apply_session_ttl(context_key)
         except (redis.ConnectionError, redis.TimeoutError) as e:
             error_msg = f"Redis connection error while adding session context: {str(e)}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
         except Exception as e:
-            error_msg = f"Unexpected error while adding session context to Redis: {str(e)}"
+            error_msg = (
+                f"Unexpected error while adding session context to Redis: {str(e)}"
+            )
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
 
-    async def get_session_context_entries(self, user_id: str, session_id: str) -> list[dict]:
+    async def get_session_context_entries(
+        self, user_id: str, session_id: str
+    ) -> list[dict]:
         """Retrieve all stored session-context entries for the given session."""
         context_key = self._session_context_key(user_id, session_id)
         return await self._load_entries(context_key)
@@ -623,11 +676,15 @@ class RedisAdapter(CacheDBInterface):
                     return True
             return False
         except (redis.ConnectionError, redis.TimeoutError) as e:
-            error_msg = f"Redis connection error while updating session context: {str(e)}"
+            error_msg = (
+                f"Redis connection error while updating session context: {str(e)}"
+            )
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
         except Exception as e:
-            error_msg = f"Unexpected error while updating session context in Redis: {str(e)}"
+            error_msg = (
+                f"Unexpected error while updating session context in Redis: {str(e)}"
+            )
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
 
@@ -637,11 +694,15 @@ class RedisAdapter(CacheDBInterface):
             context_key = self._session_context_key(user_id, session_id)
             return (await self.async_redis.delete(context_key)) > 0
         except (redis.ConnectionError, redis.TimeoutError) as e:
-            error_msg = f"Redis connection error while deleting session context: {str(e)}"
+            error_msg = (
+                f"Redis connection error while deleting session context: {str(e)}"
+            )
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
         except Exception as e:
-            error_msg = f"Unexpected error while deleting session context from Redis: {str(e)}"
+            error_msg = (
+                f"Unexpected error while deleting session context from Redis: {str(e)}"
+            )
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
 
@@ -715,7 +776,9 @@ class RedisAdapter(CacheDBInterface):
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
         except Exception as e:
-            error_msg = f"Unexpected error while retrieving usage logs from Redis: {str(e)}"
+            error_msg = (
+                f"Unexpected error while retrieving usage logs from Redis: {str(e)}"
+            )
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
 

@@ -31,6 +31,17 @@ class _InMemoryRedisList:
         e = (end + 1) if end >= 0 else len(lst) + end + 1
         return lst[s:e]
 
+    async def ltrim(self, key: str, start: int, end: int):
+        lst = self.data.get(key, [])
+        if not lst:
+            return
+        s = start if start >= 0 else max(0, len(lst) + start)
+        e = (end + 1) if end >= 0 else min(len(lst), len(lst) + end + 1)
+        if s >= e or s >= len(lst):
+            self.data[key] = []
+        else:
+            self.data[key] = lst[s:e]
+
     async def llen(self, key: str):
         return len(self.data.get(key, []))
 
@@ -73,7 +84,9 @@ def adapter(redis_store):
         patch(f"{patch_mod}.redis.Redis", return_value=MagicMock(ping=MagicMock())),
         patch(f"{patch_mod}.aioredis.Redis", return_value=redis_store),
     ):
-        from cognee.infrastructure.databases.cache.redis.RedisAdapter import RedisAdapter
+        from cognee.infrastructure.databases.cache.redis.RedisAdapter import (
+            RedisAdapter,
+        )
 
         yield RedisAdapter(host="localhost", port=6379)
 
@@ -102,7 +115,9 @@ def test_acquire_lock_returns_handle_and_disables_thread_local(redis_store):
         patch(f"{patch_mod}.redis.Redis", return_value=sync_redis),
         patch(f"{patch_mod}.aioredis.Redis", return_value=redis_store),
     ):
-        from cognee.infrastructure.databases.cache.redis.RedisAdapter import RedisAdapter
+        from cognee.infrastructure.databases.cache.redis.RedisAdapter import (
+            RedisAdapter,
+        )
 
         adapter = RedisAdapter(host="localhost", port=6379)
 
@@ -118,7 +133,9 @@ def test_acquire_lock_returns_handle_and_disables_thread_local(redis_store):
     )
 
 
-def test_release_lock_releases_passed_handle_without_clobbering_current_lock(redis_store):
+def test_release_lock_releases_passed_handle_without_clobbering_current_lock(
+    redis_store,
+):
     """Concurrent Kuzu queries must release their own lock, not whichever lock is latest."""
     first_lock = _FakeRedisLock()
     second_lock = _FakeRedisLock()
@@ -128,7 +145,9 @@ def test_release_lock_releases_passed_handle_without_clobbering_current_lock(red
         patch(f"{patch_mod}.redis.Redis", return_value=MagicMock(ping=MagicMock())),
         patch(f"{patch_mod}.aioredis.Redis", return_value=redis_store),
     ):
-        from cognee.infrastructure.databases.cache.redis.RedisAdapter import RedisAdapter
+        from cognee.infrastructure.databases.cache.redis.RedisAdapter import (
+            RedisAdapter,
+        )
 
         adapter = RedisAdapter(host="localhost", port=6379)
 
@@ -150,6 +169,30 @@ async def test_create_and_get(adapter):
 
 
 @pytest.mark.asyncio
+async def test_max_session_history_limit(redis_store):
+    """RedisAdapter trims session history if max_session_history_items is set."""
+    patch_mod = "cognee.infrastructure.databases.cache.redis.RedisAdapter"
+    with (
+        patch(f"{patch_mod}.redis.Redis", return_value=MagicMock(ping=MagicMock())),
+        patch(f"{patch_mod}.aioredis.Redis", return_value=redis_store),
+    ):
+        from cognee.infrastructure.databases.cache.redis.RedisAdapter import (
+            RedisAdapter,
+        )
+
+        adapter = RedisAdapter(host="localhost", port=6379, max_session_history_items=2)
+
+    await adapter.create_qa_entry("u1", "s1", "Q1", "C", "A", qa_id="id1")
+    await adapter.create_qa_entry("u1", "s1", "Q2", "C", "A", qa_id="id2")
+    await adapter.create_qa_entry("u1", "s1", "Q3", "C", "A", qa_id="id3")
+
+    entries = await adapter.get_all_qa_entries("u1", "s1")
+    assert len(entries) == 2
+    assert entries[0].qa_id == "id2"
+    assert entries[1].qa_id == "id3"
+
+
+@pytest.mark.asyncio
 async def test_create_qa_entry_sets_session_ttl_when_enabled(adapter, redis_store):
     """Session keys receive TTL on create when Redis session TTL is enabled."""
     await adapter.create_qa_entry("u1", "s1", "Q", "C", "A", qa_id="id1")
@@ -167,7 +210,9 @@ async def test_create_qa_entry_does_not_set_session_ttl_when_disabled(redis_stor
         patch(f"{patch_mod}.redis.Redis", return_value=MagicMock(ping=MagicMock())),
         patch(f"{patch_mod}.aioredis.Redis", return_value=redis_store),
     ):
-        from cognee.infrastructure.databases.cache.redis.RedisAdapter import RedisAdapter
+        from cognee.infrastructure.databases.cache.redis.RedisAdapter import (
+            RedisAdapter,
+        )
 
         adapter = RedisAdapter(host="localhost", port=6379, session_ttl_seconds=0)
 
@@ -238,7 +283,9 @@ async def test_append_agent_trace_step_and_get_session(adapter):
 
 
 @pytest.mark.asyncio
-async def test_append_agent_trace_step_sets_trace_ttl_when_enabled(adapter, redis_store):
+async def test_append_agent_trace_step_sets_trace_ttl_when_enabled(
+    adapter, redis_store
+):
     """Trace keys receive TTL on append when Redis session TTL is enabled."""
     await adapter.append_agent_trace_step(
         "u1",
@@ -445,7 +492,9 @@ async def test_update_invalid_raises(adapter):
 async def test_delete_feedback(adapter):
     """delete_feedback sets feedback_text and feedback_score to None."""
     await adapter.create_qa_entry("u1", "s1", "Q", "C", "A", qa_id="id1")
-    await adapter.update_qa_entry("u1", "s1", "id1", feedback_text="good", feedback_score=5)
+    await adapter.update_qa_entry(
+        "u1", "s1", "id1", feedback_text="good", feedback_score=5
+    )
     ok = await adapter.delete_feedback("u1", "s1", "id1")
     assert ok
     entries = await adapter.get_all_qa_entries("u1", "s1")
@@ -457,7 +506,9 @@ async def test_delete_feedback(adapter):
 async def test_delete_feedback_refreshes_session_ttl(adapter, redis_store):
     """Clearing feedback should refresh the session TTL."""
     await adapter.create_qa_entry("u1", "s1", "Q", "C", "A", qa_id="id1")
-    await adapter.update_qa_entry("u1", "s1", "id1", feedback_text="good", feedback_score=5)
+    await adapter.update_qa_entry(
+        "u1", "s1", "id1", feedback_text="good", feedback_score=5
+    )
     redis_store.expire_calls.clear()
 
     ok = await adapter.delete_feedback("u1", "s1", "id1")
@@ -576,7 +627,9 @@ async def test_get_latest_qa_backward_compat(adapter):
 
 
 @pytest.mark.asyncio
-async def test_get_qa_entries_by_ids_returns_matching_rows_in_chronological_order(adapter):
+async def test_get_qa_entries_by_ids_returns_matching_rows_in_chronological_order(
+    adapter,
+):
     await adapter.create_qa_entry("u1", "s1", "Q1", "C1", "A1", qa_id="id1")
     await adapter.create_qa_entry("u1", "s1", "Q2", "C2", "A2", qa_id="id2")
     await adapter.create_qa_entry("u1", "s1", "Q3", "C3", "A3", qa_id="id3")

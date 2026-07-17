@@ -31,6 +31,8 @@ class CacheConfig(BaseSettings):
     - auto_feedback: When caching is True, run automatic feedback detection and session-context
       guidance on each query (default True). Adds one structured-output LLM call per answered
       turn; set AUTO_FEEDBACK=false to disable.
+    - max_session_history_items: Maximum number of QA turns, agent traces, and session contexts
+      kept in fast-cache per session (default: 1000). Set to None to keep unbounded history.
     """
 
     cache_backend: Literal["redis", "fs", "tapes", "sqlite", "postgres"] = "sqlite"
@@ -47,6 +49,7 @@ class CacheConfig(BaseSettings):
     agentic_lock_expire: int = 240
     agentic_lock_timeout: int = 300
     session_ttl_seconds: Optional[int] = 604800
+    max_session_history_items: Optional[int] = 1000
     max_session_context_chars: Optional[int] = None
     usage_logging: bool = False
     usage_logging_ttl: int = 604800
@@ -80,6 +83,7 @@ class CacheConfig(BaseSettings):
             "agentic_lock_expire": self.agentic_lock_expire,
             "agentic_lock_timeout": self.agentic_lock_timeout,
             "session_ttl_seconds": self.session_ttl_seconds,
+            "max_session_history_items": self.max_session_history_items,
             "max_session_context_chars": self.max_session_context_chars,
             "usage_logging": self.usage_logging,
             "usage_logging_ttl": self.usage_logging_ttl,
