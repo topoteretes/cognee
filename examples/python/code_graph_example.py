@@ -45,6 +45,9 @@ async def main():
         data=repo_path,
         dataset="code_graph_demo",
         pipeline_name="code_graph_pipeline",
+        # This pipeline is deterministic (no LLM/embedding calls), so skip the
+        # first-run LLM/embedding connection checks and stay truly keyless.
+        skip_connection_test=True,
     )
 
     print("Listing the first indexed code facts")

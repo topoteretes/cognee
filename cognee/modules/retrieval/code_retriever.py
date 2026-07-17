@@ -121,6 +121,15 @@ class CodeSearchValidationError(CogneeValidationError):
         super().__init__(message=message, name="CodeSearchValidationError", log=False)
 
 
+class CodeSeedNotFoundError(CodeSearchValidationError):
+    """A seed name/id did not resolve (or was ambiguous) in this dataset's graph.
+
+    Distinct from argument-validation errors: in a multi-dataset search, a seed
+    that one dataset cannot resolve is a per-dataset miss, not a bad request,
+    so the search layer reports it per dataset instead of failing the call.
+    """
+
+
 def _json_key(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
@@ -426,11 +435,9 @@ class _CodeGraphSnapshot:
         if node_id:
             normalized_id = str(node_id)
             if normalized_id not in self.nodes:
-                raise CodeSearchValidationError(
-                    f"CODE could not resolve {role} id {normalized_id!r}."
-                )
+                raise CodeSeedNotFoundError(f"CODE could not resolve {role} id {normalized_id!r}.")
             if repo and self.nodes[normalized_id].get("repo") != repo:
-                raise CodeSearchValidationError(
+                raise CodeSeedNotFoundError(
                     f"CODE {role} id {normalized_id!r} is not in repo {repo!r}."
                 )
             return normalized_id
@@ -448,7 +455,7 @@ class _CodeGraphSnapshot:
             if tier >= 0:
                 ranked.append((tier, candidate_id))
         if not ranked:
-            raise CodeSearchValidationError(f"CODE could not resolve {role} name {term!r}.")
+            raise CodeSeedNotFoundError(f"CODE could not resolve {role} name {term!r}.")
         best_tier = max(tier for tier, _ in ranked)
         best = sorted(
             (candidate_id for tier, candidate_id in ranked if tier == best_tier),
@@ -460,7 +467,7 @@ class _CodeGraphSnapshot:
                 f"repo={self.nodes[item].get('repo') or '-'}, id={item}]"
                 for item in best[:10]
             )
-            raise CodeSearchValidationError(
+            raise CodeSeedNotFoundError(
                 f"CODE {role} name {term!r} is ambiguous; use an exact id or repo. "
                 f"Candidates: {choices}"
             )
@@ -831,7 +838,10 @@ class CodeRetriever(BaseRetriever):
         indexed_sets = []
         if type_filter:
             indexed_sets.append(set().union(*(graph.by_type[item] for item in type_filter)))
-        if files:
+        if files and not file_prefix:
+            # With file_prefix present the file condition is a union (exact
+            # file OR prefix), which the exact-file index cannot express;
+            # leave it to the post-filter below.
             indexed_sets.append(set().union(*(graph.by_file[item] for item in files)))
         if names and not substring:
             indexed_sets.append(set().union(*(graph.by_name[item] for item in names)))
@@ -896,22 +906,21 @@ class CodeRetriever(BaseRetriever):
     def _matches_property(
         node: Mapping[str, Any], property_name: str, expected: Any = _MISSING
     ) -> bool:
-        value: Any = node
-        found = True
-        for part in property_name.split("."):
-            if isinstance(value, Mapping) and part in value:
-                value = value[part]
-            else:
-                found = False
-                break
-        if not found:
-            value = _CodeGraphSnapshot.properties_of(node)
+        # A fact_properties key may be shadowed by an always-present top-level
+        # field (type, name, line, ...); both sources are indexed, so both
+        # must be able to satisfy the filter.
+        for source in (node, _CodeGraphSnapshot.properties_of(node)):
+            value: Any = source
+            found = True
             for part in property_name.split("."):
                 if isinstance(value, Mapping) and part in value:
                     value = value[part]
                 else:
-                    return False
-        return expected is _MISSING or _scalar_text(value) == _scalar_text(expected)
+                    found = False
+                    break
+            if found and (expected is _MISSING or _scalar_text(value) == _scalar_text(expected)):
+                return True
+        return False
 
     def _explore(self, graph: _CodeGraphSnapshot, query: str) -> dict[str, Any]:
         node_id = graph.resolve(
