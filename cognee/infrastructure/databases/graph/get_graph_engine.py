@@ -505,6 +505,15 @@ def _create_graph_engine(
 
         return PostgresAdapter(connection_string=connection_string)
 
+    elif graph_database_provider == "turso":
+        if not graph_file_path and not graph_database_url:
+            raise EnvironmentError("Missing required Turso database path or url.")
+
+        from .turso.adapter import TursoAdapter
+        
+        connection_string = graph_database_url or graph_file_path
+        return TursoAdapter(connection_string=connection_string)
+
     elif graph_database_provider in ("ladybug", "kuzu"):
         if not graph_file_path:
             raise EnvironmentError("Missing required Ladybug database path.")
@@ -603,6 +612,7 @@ def _create_graph_engine(
         "postgres",
         "neptune",
         "neptune_analytics",
+        "turso",
     ]
     raise EnvironmentError(
         f"Unsupported graph database provider: {graph_database_provider}. "
