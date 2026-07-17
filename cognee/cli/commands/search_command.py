@@ -111,6 +111,9 @@ Search Types & Use Cases:
                     return results
                 except Exception as e:
                     raise CliCommandInnerException(f"Failed to search: {str(e)}") from e
+                finally:
+                    from cognee.shared.utils import close_telemetry
+                    await close_telemetry()
 
             results = asyncio.run(run_search())
 

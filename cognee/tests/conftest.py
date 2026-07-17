@@ -7,3 +7,13 @@ from collection so pytest doesn't crash trying to run it.
 """
 
 collect_ignore = ["test_subprocess_rss.py"]
+
+
+import pytest
+
+@pytest.fixture(autouse=True)
+async def cleanup_telemetry_after_test():
+    yield
+    from cognee.shared.utils import close_telemetry
+    await close_telemetry()
+
