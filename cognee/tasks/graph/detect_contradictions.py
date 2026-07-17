@@ -1,29 +1,21 @@
-"""Contradiction detection task for the knowledge graph (the "brain").
+"""Opt-in contradiction detection for the knowledge graph (the "brain").
 
-As data accumulates, the graph can end up holding facts that conflict with one another with
-no built-in way to surface those conflicts. This task compares the facts that were just
-ingested during a cognify run — together with the facts already connected to the entities
-they touch — and asks an LLM to flag statements that directly contradict each other (for
-example a fact that negates or is incompatible with a stored one).
+Runs as the last cognify task. It looks at the entities/events the current
+ingestion touched, gathers the facts (edges) directly connected to them — both
+the newly added ones and any already stored — and asks an LLM which pairs
+directly contradict each other. Each contradiction is surfaced twice instead of
+silently coexisting: a warning is logged, and a ``contradicts`` edge (carrying
+both facts, the reason, and a confidence) is written so the conflict is
+queryable next to the data it concerns.
 
-Detected contradictions are surfaced in two ways rather than silently coexisting:
-  * a warning is logged for every contradiction, exposing both conflicting facts and the
-    reason they conflict;
-  * a ``contradicts`` edge (carrying the same information as properties) is written into
-    the graph, so the conflict is queryable and visible alongside the data it concerns.
+The task is non-destructive (it only adds edges, never rewrites/deletes),
+returns its input unchanged so it can be appended to any pipeline, and swallows
+its own errors so contradiction detection can never break ingestion.
 
-The task is intentionally non-destructive: it never removes or rewrites existing data and
-always returns its input unchanged so it can be appended to a pipeline without affecting
-downstream tasks. Any failure while detecting contradictions is logged and swallowed so it
-can never break ingestion.
-
-Why the "touched neighbourhood" is compared instead of a strict new-vs-existing split:
-entity node ids are deterministic (``Entity:<name>``), so when an entity is re-mentioned by
-new data its id is indistinguishable from the pre-existing one. A conflicting new fact and
-the stored fact it contradicts therefore share a subject that belongs to this ingestion.
-Collecting every fact connected to a newly touched entity guarantees both sides of such a
-contradiction are compared together, while still bounding the work to the region of the
-graph the ingestion actually affected.
+Cross-ingestion contradictions work because entity node ids are deterministic
+(``Entity:<name>``): a re-mentioned entity keeps the id it was first stored
+under, so a new fact and the stored fact it contradicts share a subject and land
+in the same 1-hop neighbourhood.
 """
 
 from typing import Dict, List, Optional, Set, Tuple
@@ -39,20 +31,18 @@ from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("detect_contradictions")
 
-# Relationship names that describe graph structure rather than semantic facts. Edges of
-# these types are skipped when building the list of facts to compare.
+# Relationship names that describe graph structure rather than a semantic fact.
+# Edges of these types are skipped when building the list of facts to compare.
 STRUCTURAL_RELATIONSHIPS = frozenset(
     {"contains", "is_part_of", "made_from", "exists_in", "contradicts"}
 )
 
 
 class Contradiction(BaseModel):
-    """A single contradiction between two facts in the graph."""
+    """One contradiction between two of the numbered facts sent to the LLM."""
 
-    first_fact_id: str = Field(description="Identifier of the first conflicting fact, e.g. 'F0'.")
-    second_fact_id: str = Field(description="Identifier of the second conflicting fact, e.g. 'F3'.")
-    first_fact: str = Field(description="Text of the first conflicting fact.")
-    second_fact: str = Field(description="Text of the second conflicting fact.")
+    first_fact_id: str = Field(description="Id of the first conflicting fact, e.g. 'F0'.")
+    second_fact_id: str = Field(description="Id of the second conflicting fact, e.g. 'F3'.")
     reason: str = Field(description="Why the two facts are incompatible.")
     confidence: float = Field(
         ge=0.0, le=1.0, description="Confidence that this is a genuine contradiction."
@@ -60,39 +50,33 @@ class Contradiction(BaseModel):
 
 
 class ContradictionList(BaseModel):
-    """LLM-structured output: the list of detected contradictions (possibly empty)."""
+    """Structured LLM output: the detected contradictions (possibly empty)."""
 
     contradictions: List[Contradiction] = Field(default_factory=list)
 
 
 def _collect_touched_node_ids(items) -> Set[str]:
-    """Collect the ids of the entity/event nodes produced by the current ingestion.
+    """Collect the ids of the entity/event nodes the current ingestion produced.
 
-    The pipeline hands this task ``TextSummary`` objects, which wrap their source chunk in
-    ``made_from``; other callers may pass ``DocumentChunk`` objects directly. Either way the
-    extracted entities live on the chunk's ``contains``.
+    The pipeline hands this task ``TextSummary`` objects, which wrap their source
+    chunk in ``made_from``; other callers may pass ``DocumentChunk`` objects
+    directly. Either way the extracted entities live on the chunk's ``contains``.
     """
-    touched_ids: Set[str] = set()
+    touched: Set[str] = set()
     for item in items:
         chunk = getattr(item, "made_from", None) or item
-        contains = getattr(chunk, "contains", None) or []
-        for entry in contains:
-            # ``contains`` entries are Entity/Event data points or (Edge, Entity) tuples.
+        for entry in getattr(chunk, "contains", None) or []:
+            # ``contains`` entries are Entity/Event nodes or (Edge, node) tuples.
             entity = entry[1] if isinstance(entry, tuple) else entry
             node_id = getattr(entity, "id", None)
             if node_id is not None:
-                touched_ids.add(str(node_id))
-    return touched_ids
+                touched.add(str(node_id))
+    return touched
 
 
 def _node_names(nodes) -> Dict[str, str]:
     """Map node id -> display name for nodes that carry a non-empty name."""
-    names: Dict[str, str] = {}
-    for node_id, properties in nodes:
-        name = (properties or {}).get("name") or ""
-        if name:
-            names[str(node_id)] = name
-    return names
+    return {str(node_id): props["name"] for node_id, props in nodes if (props or {}).get("name")}
 
 
 def _build_candidate_facts(
@@ -100,24 +84,18 @@ def _build_candidate_facts(
     node_names: Dict[str, str],
     touched_node_ids: Set[str],
     limit: int,
-) -> Tuple[List[str], Dict[str, Tuple[str, str]]]:
-    """Render the facts connected to the touched entities into readable statements.
+) -> Tuple[List[str], Dict[str, str], Dict[str, Tuple[str, str]]]:
+    """Render facts connected to the touched entities into ``[F#] a rel b`` lines.
 
-    Only edges that touch at least one newly ingested entity are considered, and both
-    endpoints must be named (which naturally excludes structural nodes such as chunks and
-    documents).
+    Only edges with at least one touched endpoint and two named endpoints are
+    kept (which excludes structural nodes such as chunks and documents).
 
-    Args:
-        edges: ``(source_id, target_id, relationship_name, properties)`` tuples.
-        node_names: Mapping of node id to display name.
-        touched_node_ids: Ids of nodes created or re-mentioned by the current ingestion.
-        limit: Maximum number of facts to emit.
-
-    Returns:
-        A tuple of (rendered fact lines, mapping of fact id -> (source_id, target_id)).
+    Returns the rendered lines, a fact id -> line text map, and a
+    fact id -> (source_id, target_id) map.
     """
     lines: List[str] = []
-    edge_by_id: Dict[str, Tuple[str, str]] = {}
+    fact_text: Dict[str, str] = {}
+    fact_edge: Dict[str, Tuple[str, str]] = {}
     index = 0
     for source_id, target_id, relationship_name, _ in edges:
         if relationship_name in STRUCTURAL_RELATIONSHIPS:
@@ -133,9 +111,10 @@ def _build_candidate_facts(
             continue
 
         fact_id = f"F{index}"
-        readable_relationship = str(relationship_name).replace("_", " ")
-        lines.append(f"[{fact_id}] {source_name} {readable_relationship} {target_name}")
-        edge_by_id[fact_id] = (source_id, target_id)
+        text = f"{source_name} {str(relationship_name).replace('_', ' ')} {target_name}"
+        lines.append(f"[{fact_id}] {text}")
+        fact_text[fact_id] = text
+        fact_edge[fact_id] = (source_id, target_id)
         index += 1
 
         if index >= limit:
@@ -146,7 +125,7 @@ def _build_candidate_facts(
             )
             break
 
-    return lines, edge_by_id
+    return lines, fact_text, fact_edge
 
 
 def _contradiction_endpoints(
@@ -154,9 +133,10 @@ def _contradiction_endpoints(
 ) -> Optional[Tuple[str, str]]:
     """Choose the two nodes to link with a ``contradicts`` edge.
 
-    Prefer connecting the differing subjects; when both facts share the same subject the
-    disagreement is between the objects, so connect those instead. Returns ``None`` when the
-    two facts reference exactly the same pair of nodes (nothing meaningful to link).
+    Prefer connecting the differing subjects; when both facts share the same
+    subject the disagreement is between the objects, so connect those instead.
+    Returns ``None`` when the two facts reference exactly the same pair of nodes
+    (nothing meaningful to link).
     """
     first_source, first_target = first_edge
     second_source, second_target = second_edge
@@ -177,8 +157,8 @@ async def detect_contradictions(
     """Flag facts touched by the current ingestion that contradict each other.
 
     Args:
-        data_points: The items produced by the current cognify run. Their extracted
-            entities identify which region of the graph to inspect.
+        data_points: The items produced by the current cognify run. Their
+            extracted entities identify which region of the graph to inspect.
         confidence_threshold: Minimum LLM confidence for a contradiction to be flagged.
         max_facts: Cap on the number of facts sent to the LLM in a single check.
 
@@ -194,12 +174,12 @@ async def detect_contradictions(
             return data_points
 
         graph_engine = await get_graph_engine()
-        # Only the region the ingestion touched: every fact one hop from a touched
-        # entity (new facts and pre-existing ones alike).
+        # Only the region the ingestion touched: every fact one hop from a
+        # touched entity (new facts and pre-existing ones alike).
         nodes, edges = await graph_engine.get_neighborhood(list(touched_node_ids), depth=1)
         node_names = _node_names(nodes)
 
-        facts, edge_by_id = _build_candidate_facts(
+        facts, fact_text, fact_edge = _build_candidate_facts(
             edges, node_names, touched_node_ids, limit=max_facts
         )
 
@@ -221,20 +201,22 @@ async def detect_contradictions(
             if contradiction.confidence < confidence_threshold:
                 continue
 
+            first_edge = fact_edge.get(contradiction.first_fact_id)
+            second_edge = fact_edge.get(contradiction.second_fact_id)
+            if first_edge is None or second_edge is None:
+                # The model referenced an id we did not provide; nothing to anchor.
+                continue
+
+            # Use our own rendered text so the stored facts always match the graph.
+            first_fact = fact_text[contradiction.first_fact_id]
+            second_fact = fact_text[contradiction.second_fact_id]
             logger.warning(
                 "Contradiction detected (confidence %.2f): '%s' contradicts '%s' — %s",
                 contradiction.confidence,
-                contradiction.first_fact,
-                contradiction.second_fact,
+                first_fact,
+                second_fact,
                 contradiction.reason,
             )
-
-            first_edge = edge_by_id.get(contradiction.first_fact_id)
-            second_edge = edge_by_id.get(contradiction.second_fact_id)
-            if first_edge is None or second_edge is None:
-                # The model referenced an id we did not provide; the warning above still
-                # surfaces the contradiction, we just cannot anchor it in the graph.
-                continue
 
             endpoints = _contradiction_endpoints(first_edge, second_edge)
             if endpoints is None:
@@ -250,8 +232,8 @@ async def detect_contradictions(
                         "relationship_name": "contradicts",
                         "source_node_id": source_id,
                         "target_node_id": target_id,
-                        "first_fact": contradiction.first_fact,
-                        "second_fact": contradiction.second_fact,
+                        "first_fact": first_fact,
+                        "second_fact": second_fact,
                         "reason": contradiction.reason,
                         "confidence": contradiction.confidence,
                     },

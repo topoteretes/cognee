@@ -83,18 +83,19 @@ def test_node_names_skips_unnamed_nodes():
 
 def test_build_candidate_facts_filters_to_touched_named_edges():
     names = _node_names(NODES)
-    lines, edge_by_id = _build_candidate_facts(EDGES, names, {"alice", "1990"}, limit=500)
+    lines, fact_text, fact_edge = _build_candidate_facts(EDGES, names, {"alice", "1990"}, limit=500)
 
     # Both Alice facts are kept; the Bob fact (untouched) and the structural edge are dropped.
     assert len(lines) == 2
-    assert edge_by_id["F0"] == ("alice", "1985")
-    assert edge_by_id["F1"] == ("alice", "1990")
+    assert fact_edge["F0"] == ("alice", "1985")
+    assert fact_edge["F1"] == ("alice", "1990")
+    assert fact_text["F0"] == "Alice born in 1985"
     assert "Alice born in 1985" in lines[0]
 
 
 def test_build_candidate_facts_respects_limit():
     names = _node_names(NODES)
-    lines, _ = _build_candidate_facts(EDGES, names, {"alice"}, limit=1)
+    lines, _, _ = _build_candidate_facts(EDGES, names, {"alice"}, limit=1)
     assert len(lines) == 1
 
 
@@ -129,7 +130,8 @@ async def test_returns_early_when_nothing_touched():
 
 @pytest.mark.asyncio
 async def test_flags_contradiction_as_graph_edge():
-    chunks = [_chunk([_entity("alice"), _entity("1990")])]
+    # Real pipeline shape: TextSummary objects wrapping their chunk in made_from.
+    chunks = [_summary([_entity("alice"), _entity("1990")])]
     engine = _mock_graph_engine()
 
     llm_result = ContradictionList(
@@ -137,8 +139,6 @@ async def test_flags_contradiction_as_graph_edge():
             Contradiction(
                 first_fact_id="F0",
                 second_fact_id="F1",
-                first_fact="Alice born in 1985",
-                second_fact="Alice born in 1990",
                 reason="A person has a single birth year.",
                 confidence=0.95,
             )
@@ -157,6 +157,11 @@ async def test_flags_contradiction_as_graph_edge():
         result = await detect_contradictions(chunks)
 
     assert result == chunks  # non-destructive pass-through
+    engine.get_neighborhood.assert_awaited_once()
+    # The touched entities (from made_from.contains) seed the neighbourhood fetch.
+    seeds = set(engine.get_neighborhood.await_args.args[0])
+    assert seeds == {"alice", "1990"}
+
     engine.add_edges.assert_awaited_once()
     added_edges = engine.add_edges.await_args.args[0]
     assert len(added_edges) == 1
@@ -165,12 +170,14 @@ async def test_flags_contradiction_as_graph_edge():
     assert {source, target} == {"1985", "1990"}
     assert relationship == "contradicts"
     assert properties["reason"] == "A person has a single birth year."
+    # Fact text is reconstructed locally from the graph, not echoed by the LLM.
     assert properties["first_fact"] == "Alice born in 1985"
+    assert properties["second_fact"] == "Alice born in 1990"
 
 
 @pytest.mark.asyncio
 async def test_low_confidence_contradiction_is_not_flagged():
-    chunks = [_chunk([_entity("alice"), _entity("1990")])]
+    chunks = [_summary([_entity("alice"), _entity("1990")])]
     engine = _mock_graph_engine()
 
     llm_result = ContradictionList(
@@ -178,8 +185,6 @@ async def test_low_confidence_contradiction_is_not_flagged():
             Contradiction(
                 first_fact_id="F0",
                 second_fact_id="F1",
-                first_fact="Alice born in 1985",
-                second_fact="Alice born in 1990",
                 reason="Maybe.",
                 confidence=0.2,
             )
@@ -202,7 +207,7 @@ async def test_low_confidence_contradiction_is_not_flagged():
 
 @pytest.mark.asyncio
 async def test_no_contradictions_does_not_write_edges():
-    chunks = [_chunk([_entity("alice"), _entity("1990")])]
+    chunks = [_summary([_entity("alice"), _entity("1990")])]
     engine = _mock_graph_engine()
 
     with (
@@ -221,7 +226,7 @@ async def test_no_contradictions_does_not_write_edges():
 
 @pytest.mark.asyncio
 async def test_errors_are_swallowed_and_input_returned():
-    chunks = [_chunk([_entity("alice"), _entity("1990")])]
+    chunks = [_summary([_entity("alice"), _entity("1990")])]
 
     with patch.object(
         dc_module,

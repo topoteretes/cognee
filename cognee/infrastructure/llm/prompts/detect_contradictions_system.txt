@@ -19,8 +19,6 @@ Do NOT report:
 For every genuine contradiction you find, report:
 - first_fact_id: the identifier of the first conflicting fact (for example "F0").
 - second_fact_id: the identifier of the second conflicting fact (for example "F3").
-- first_fact: the text of the first conflicting fact.
-- second_fact: the text of the second conflicting fact.
 - reason: a short explanation of why the two facts are incompatible.
 - confidence: your confidence that this is a genuine contradiction, from 0.0 to 1.0.
 
