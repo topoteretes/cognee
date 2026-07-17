@@ -10,8 +10,6 @@ class CognifyConfig(BaseSettings):
     summarization_model: object = SummarizedContent
     triplet_embedding: bool = False
     chunks_per_batch: Optional[int] = None
-    fuzzy_entity_dedup: bool = True
-    fuzzy_entity_dedup_threshold: float = 0.72
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
     def to_dict(self) -> dict:
@@ -20,8 +18,6 @@ class CognifyConfig(BaseSettings):
             "summarization_model": self.summarization_model,
             "triplet_embedding": self.triplet_embedding,
             "chunks_per_batch": self.chunks_per_batch,
-            "fuzzy_entity_dedup": self.fuzzy_entity_dedup,
-            "fuzzy_entity_dedup_threshold": self.fuzzy_entity_dedup_threshold,
         }
 
 

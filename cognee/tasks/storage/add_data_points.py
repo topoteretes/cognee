@@ -14,13 +14,13 @@ from cognee.infrastructure.databases.provenance.markers import (
     mark_graph_provenance_if_empty,
 )
 from cognee.infrastructure.databases.relational import get_async_session
-from cognee.modules.cognify.config import get_cognify_config
 from cognee.modules.graph.methods import upsert_edges, upsert_nodes
 from cognee.modules.graph.utils import (
-    cluster_fuzzy_duplicate_entities,
+    FUZZY_DEDUP_THRESHOLD,
     deduplicate_nodes_and_edges,
     ensure_default_edge_properties,
     get_graph_from_model,
+    resolve_fuzzy_duplicate_entities,
 )
 from .index_data_points import index_data_points
 from .index_graph_edges import index_graph_edges
@@ -43,6 +43,8 @@ async def add_data_points(
     custom_edges: Optional[List] = None,
     embed_triplets: bool = False,
     ctx: Optional["PipelineContext"] = None,
+    fuzzy_entity_dedup: bool = False,
+    fuzzy_entity_dedup_threshold: float = FUZZY_DEDUP_THRESHOLD,
 ) -> List[DataPoint]:
     """
     Add a batch of data points to the graph database by extracting nodes and edges,
@@ -53,6 +55,12 @@ async def add_data_points(
         custom_edges: Custom edges between datapoints.
         embed_triplets: If True, creates and indexes triplet embeddings.
         ctx: Pipeline runtime context (user, dataset, data_item).
+        fuzzy_entity_dedup: When True, Entity nodes whose names embed close
+            together in this batch (e.g. "OpenAI" / "OpenAI Inc.") are linked
+            with a ``merged_into`` edge (see resolve_fuzzy_duplicate_entities).
+            Off by default; most batches have no fuzzy duplicates.
+        fuzzy_entity_dedup_threshold: Minimum cosine similarity for a fuzzy
+            merge. Only used when ``fuzzy_entity_dedup`` is True.
     """
     user = ctx.user if ctx else None
     data_item = ctx.data_item if ctx else None
@@ -92,18 +100,20 @@ async def add_data_points(
     vector_engine = unified.vector
     use_hybrid = unified.has_capability(EngineCapability.HYBRID_WRITE)
 
-    cognify_config = get_cognify_config()
-    if cognify_config.fuzzy_entity_dedup:
-        # Must run before deduplicate_nodes_and_edges: it rewrites duplicate ids
-        # onto a canonical id so the exact-id dedup below collapses them for free.
-        nodes, edges, _fuzzy_merge_records = await cluster_fuzzy_duplicate_entities(
-            nodes,
-            edges,
-            vector_engine,
-            similarity_threshold=cognify_config.fuzzy_entity_dedup_threshold,
-        )
-
     nodes, edges = deduplicate_nodes_and_edges(nodes, edges)
+
+    # Approach B — opt-in embedding-similarity fuzzy dedup (issue #3628). When
+    # enabled, Entity nodes whose names embed close together in this batch (e.g.
+    # "OpenAI" / "OpenAI Inc.") are linked with a `merged_into` edge, so the
+    # duplication is recorded in the graph — non-destructively and reversibly.
+    # Off by default; most batches have no fuzzy duplicates and pay nothing.
+    if fuzzy_entity_dedup:
+        merge_edges = await resolve_fuzzy_duplicate_entities(
+            nodes, vector_engine, similarity_threshold=fuzzy_entity_dedup_threshold
+        )
+        if merge_edges:
+            edges = edges + merge_edges
+            logger.info("Fuzzy dedup: linked %d duplicate entity pair(s)", len(merge_edges))
 
     edges = ensure_default_edge_properties(edges, nodes=nodes)
     custom_edges = (
