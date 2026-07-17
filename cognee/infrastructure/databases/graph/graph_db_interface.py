@@ -666,6 +666,28 @@ class GraphDBInterface(ABC):
         """
         raise NotImplementedError("set_node_truth_state is not implemented for this adapter")
 
+    async def update_node(self, node_id: str, values: Dict[str, Any]) -> bool:
+        """
+        Merge *values* into an existing node's properties, leaving every field not
+        named in *values* untouched. Used to patch a single scalar (e.g. stamping
+        ``valid_to`` when a fact is superseded) without rewriting the whole node.
+
+        Optional extension — implemented by LadybugAdapter (the default backend).
+        Other adapters may not support partial node updates yet and raise here.
+
+        Parameters:
+        -----------
+
+            - node_id (str): Id of the node to patch.
+            - values (Dict[str, Any]): Property name -> new value to merge in.
+
+        Returns:
+        --------
+
+            - bool: True if the node existed and was updated, False if not found.
+        """
+        raise NotImplementedError("update_node is not implemented for this adapter")
+
     async def get_edge_feedback_weights(self, edge_object_ids: List[str]) -> Dict[str, float]:
         """
         Retrieve edge feedback weights for multiple edge_object_ids.
