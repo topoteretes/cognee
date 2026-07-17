@@ -7,13 +7,22 @@ same wire shape regardless of search type.
 """
 
 import json
-from typing import Any, Optional
+from typing import Any, List, Optional
 
 from pydantic import BaseModel
 
+from cognee.infrastructure.databases.vector.models.ScoredResult import (
+    normalize_distance_to_relevance,
+)
 from cognee.modules.recall.types.SearchResultItem import (
     SearchResultItem,
     SearchResultKind,
+)
+from cognee.modules.retrieval.utils.citation_models import Citation, CitationKind
+from cognee.modules.retrieval.utils.used_graph_elements import (
+    extract_from_edges,
+    extract_from_scored_results,
+    is_edge_list,
 )
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
 from cognee.modules.search.types import SearchType
@@ -97,12 +106,96 @@ def _provenance_metadata(raw: dict) -> dict:
     return metadata
 
 
+def _relevance_from(score: Optional[float]) -> Optional[float]:
+    """Compute normalized relevance from a raw distance score.
+
+    Distance-based backends (the built-in adapters) map through
+    :func:`normalize_distance_to_relevance`. Adapters that ship
+    higher-is-better scores should populate ``ScoredResult.relevance``
+    directly upstream; the normalizer only fires here when the value
+    reaching us is a plain float on a chunk-shaped entry.
+    """
+    if score is None:
+        return None
+    return normalize_distance_to_relevance(score)
+
+
+def _graph_citations_from(payload: SearchResultPayload) -> List[Citation]:
+    """Extract structured graph Citations from a graph-completion payload.
+
+    ``payload.result_object`` on the graph-completion path is a list of
+    ``Edge`` objects with attribute shape ``node1``/``node2``/``attributes``
+    (see ``CogneeGraphElements.Edge``). On the triplet-completion path it
+    is a list of ``ScoredResult`` from the vector search. Both shapes are
+    handled via the ``used_graph_elements`` helpers so the ids we emit
+    match what the retrievers actually produce at runtime.
+
+    Returns an empty list for non-graph payloads or when no usable
+    identifiers are present, so callers can compose it unconditionally.
+    """
+    if payload.result_object is None:
+        return []
+
+    objects = payload.result_object
+    if isinstance(objects, list) and objects and isinstance(objects[0], list):
+        # Batched query path: flatten one layer.
+        objects = [item for batch in objects for item in batch]
+
+    if not isinstance(objects, list) or not objects:
+        return []
+
+    extracted = (
+        extract_from_edges(objects)
+        if is_edge_list(objects)
+        else extract_from_scored_results(objects)
+    )
+    if not extracted:
+        return []
+
+    return [
+        Citation(
+            kind=CitationKind.GRAPH,
+            node_ids=extracted.get("node_ids", []),
+            edge_ids=extracted.get("edge_ids", []),
+            dataset_id=str(payload.dataset_id) if payload.dataset_id else None,
+            dataset_name=payload.dataset_name,
+        )
+    ]
+
+
+_GRAPH_COMPLETION_KINDS = frozenset(
+    {
+        SearchResultKind.GRAPH_COMPLETION,
+        SearchResultKind.TRIPLET_COMPLETION,
+    }
+)
+
+
+def _citations_for(kind: SearchResultKind, payload: SearchResultPayload) -> List[Citation]:
+    """Produce structured citations for the current item's kind.
+
+    Only graph-completion kinds emit citations today; the fan-out to
+    chunk-based retrievers ships in a follow-up so this PR stays
+    reviewable. Other kinds return ``[]``, which the SearchResultItem
+    treats as ``no citation surfaced`` rather than ``no source``.
+    """
+    if kind in _GRAPH_COMPLETION_KINDS:
+        return _graph_citations_from(payload)
+    return []
+
+
 def _build_item(
     entry: Any,
     payload: SearchResultPayload,
     kind: SearchResultKind,
+    citations: Optional[List[Citation]] = None,
 ) -> SearchResultItem:
-    """Build a single SearchResultItem from one retriever output element."""
+    """Build a single SearchResultItem from one retriever output element.
+
+    Citations are computed once per payload and passed in so every
+    item in the response shares the same provenance list without
+    re-walking ``payload.result_object`` per entry.
+    """
     if isinstance(entry, str):
         text = entry
         raw: dict = {"value": entry}
@@ -119,15 +212,19 @@ def _build_item(
         raw = _coerce_to_dict(entry)
         text = _text_from_dict(raw) if raw else str(entry)
 
+    score = _score_from(entry)
+
     return SearchResultItem(
         kind=kind,
         search_type=payload.search_type,
         text=text,
-        score=_score_from(entry),
+        score=score,
+        relevance=_relevance_from(score),
         dataset_id=str(payload.dataset_id) if payload.dataset_id else None,
         dataset_name=payload.dataset_name,
         metadata=_provenance_metadata(raw),
         raw=raw,
+        citations=list(citations) if citations else [],
     )
 
 
@@ -141,7 +238,14 @@ def _flatten(value: Any) -> list[Any]:
 
 
 def normalize_search_payload(payload: SearchResultPayload) -> list[SearchResultItem]:
-    """Normalize one dataset's retriever payload into SearchResultItems."""
+    """Normalize one dataset's retriever payload into SearchResultItems.
+
+    Each item carries the normalized ``relevance`` derived from the
+    entry's raw score, plus any structured ``citations`` we can pull
+    out of the payload. Citations are computed once per payload and
+    shared across items so downstream code can rank items by relevance
+    without re-walking the retrieved objects for every entry.
+    """
     kind = _KIND_BY_SEARCH_TYPE.get(payload.search_type, SearchResultKind.UNKNOWN)
 
     if payload.only_context:
@@ -153,4 +257,5 @@ def normalize_search_payload(payload: SearchResultPayload) -> list[SearchResultI
     else:
         entries = _flatten(payload.result_object)
 
-    return [_build_item(entry, payload, kind) for entry in entries]
+    citations = _citations_for(kind, payload)
+    return [_build_item(entry, payload, kind, citations) for entry in entries]
