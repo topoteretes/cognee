@@ -456,10 +456,15 @@ def get_remember_router() -> APIRouter:
             return jsonable_encoder(result.to_dict())
         except ValueError as error:
             # Known validation errors: missing session_id, user not found, etc.
-            return JSONResponse(status_code=400, content={"error": str(error)})
+            logger.warning("Remember entry validation failed: %s", error)
+            return JSONResponse(status_code=400, content={"error": "Invalid remember request."})
         except RuntimeError as error:
             # Session cache unavailable
-            return JSONResponse(status_code=503, content={"error": str(error)})
+            logger.error("Remember entry runtime failure: %s", error)
+            return JSONResponse(
+                status_code=503,
+                content={"error": "Remember service temporarily unavailable."},
+            )
         except Exception as error:
             logger.error("Remember entry endpoint error: %s", error, exc_info=True)
             return JSONResponse(

@@ -4,6 +4,9 @@ on:
   release:
     types: [published]
 
+permissions:
+  contents: read
+
 jobs:
   github-releases-to-discord:
     runs-on: ubuntu-22.04

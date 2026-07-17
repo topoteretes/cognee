@@ -475,7 +475,11 @@ def get_datasets_router() -> APIRouter:
 
             return datasets_statuses
         except Exception as error:
-            return JSONResponse(status_code=409, content={"error": str(error)})
+            logger.error("Error retrieving dataset statuses: %s", error)
+            return JSONResponse(
+                status_code=409,
+                content={"error": "Unable to retrieve dataset statuses."},
+            )
 
     @router.get("/{dataset_id}/data/{data_id}/raw", response_class=FileResponse)
     async def get_raw_data(

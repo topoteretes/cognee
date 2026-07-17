@@ -284,14 +284,7 @@ async def get_graph_from_model(
                 data_point.id, target_datapoint.id, relationship_name, edge_metadata
             )
             edges.append((data_point.id, target_datapoint.id, relationship_name, edge_properties))
-            logger.debug(
-                "Added edge to graph",
-                extra={
-                    "source_id": str(data_point.id),
-                    "target_id": str(target_datapoint.id),
-                    "relationship": relationship_name,
-                },
-            )
+            logger.debug("Added edge to graph")
 
             added_edges[edge_key] = True
 
@@ -305,13 +298,7 @@ async def get_graph_from_model(
         if str(target_datapoint.id) in added_nodes:
             continue
 
-        logger.debug(
-            "Recursing into target DataPoint",
-            extra={
-                "source_id": data_point_id,
-                "target_id": str(target_datapoint.id),
-            },
-        )
+        logger.debug("Recursing into target DataPoint")
 
         child_nodes, child_edges = await get_graph_from_model(
             target_datapoint,

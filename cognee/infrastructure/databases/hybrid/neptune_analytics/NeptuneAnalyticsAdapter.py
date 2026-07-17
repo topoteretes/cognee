@@ -97,9 +97,7 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
 
         # Add vector-specific attributes
         self.embedding_engine = embedding_engine
-        logger.info(
-            f'Initialized Neptune Analytics hybrid adapter for graph: "{graph_id}" in region: "{self.region}"'
-        )
+        logger.info('Initialized Neptune Analytics hybrid adapter in region: "%s"', self.region)
 
     # VectorDBInterface methods implementation
 
