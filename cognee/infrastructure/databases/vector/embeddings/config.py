@@ -101,9 +101,11 @@ class EmbeddingConfig(BaseSettings):
                 )
                 self.embedding_dimensions = _FALLBACK_DIMENSIONS
 
-        if not self.embedding_batch_size and self.embedding_provider.lower() == "openai":
-            self.embedding_batch_size = 36
-        elif not self.embedding_batch_size:
+        # A single, provider-agnostic default. Previously this was a dead
+        # if/elif where both branches set 36, and the OpenAI branch called
+        # self.embedding_provider.lower() unconditionally — crashing with an
+        # AttributeError when embedding_provider was None (it is Optional[str]).
+        if not self.embedding_batch_size:
             self.embedding_batch_size = 36
 
     def to_dict(self) -> dict:
@@ -123,6 +125,7 @@ class EmbeddingConfig(BaseSettings):
             "embedding_api_key": self.embedding_api_key,
             "embedding_api_version": self.embedding_api_version,
             "embedding_max_completion_tokens": self.embedding_max_completion_tokens,
+            "embedding_batch_size": self.embedding_batch_size,
             "huggingface_tokenizer": self.huggingface_tokenizer,
             "embedding_batch_size": self.embedding_batch_size,
         }
