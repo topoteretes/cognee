@@ -9,6 +9,8 @@ module-level ``_BACKGROUND_PIPELINE_TASKS`` set and discards it on completion.
 
 import gc
 import asyncio
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -60,3 +62,35 @@ async def test_background_pipeline_task_is_anchored_until_done(monkeypatch):
     await asyncio.sleep(0)  # allow the done-callback to run
     assert task not in pipeline_execution_mode._BACKGROUND_PIPELINE_TASKS
     assert len(pipeline_execution_mode._BACKGROUND_PIPELINE_TASKS) == 0
+
+
+@pytest.mark.asyncio
+async def test_user_provided_without_datasets_does_not_raise(monkeypatch):
+    # Regression: UnboundLocalError when user is supplied but datasets is omitted.
+    # `cognee-cli cognify --background` (no --datasets flag) hits this path.
+    monkeypatch.setattr(pipeline_execution_mode, "push_to_queue", lambda *a, **k: None)
+    monkeypatch.setattr(
+        pipeline_execution_mode,
+        "get_authorized_existing_datasets",
+        AsyncMock(return_value=[]),
+    )
+    # Ensure the provided user is used.
+    monkeypatch.setattr(
+        pipeline_execution_mode,
+        "get_default_user",
+        AsyncMock(
+            side_effect=AssertionError("get_default_user must not be called when user is in params")
+        ),
+    )
+
+    async def dummy_pipeline(**kwargs):
+        yield _FakeRunInfo(dataset_id="ds1")  # pragma: no cover
+
+    result = await run_pipeline_as_background_process(
+        dummy_pipeline,
+        user=SimpleNamespace(id="test-user-id"),
+        # datasets intentionally omitted → params.get("datasets") is None
+    )
+    await asyncio.sleep(0)  # flush any background no-op task
+
+    assert isinstance(result, dict)
