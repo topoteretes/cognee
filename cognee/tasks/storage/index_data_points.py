@@ -36,7 +36,7 @@ async def index_data_points(data_points: list[DataPoint], vector_engine=None):
         data_point_type = type(data_point)
         type_name = data_point_type.__name__
 
-        for field_name in data_point.metadata["index_fields"]:
+        for field_name in list(data_point.metadata["index_fields"]):
             if getattr(data_point, field_name, None) is None:
                 continue
 
@@ -48,6 +48,7 @@ async def index_data_points(data_points: list[DataPoint], vector_engine=None):
                 data_points_by_type[type_name][field_name] = []
 
             indexed_data_point = data_point.model_copy()
+            indexed_data_point.metadata = dict(data_point.metadata)
             indexed_data_point.metadata["index_fields"] = [field_name]
             data_points_by_type[type_name][field_name].append(indexed_data_point)
 
