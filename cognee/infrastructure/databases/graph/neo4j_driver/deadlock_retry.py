@@ -10,16 +10,10 @@ logger = get_logger("deadlock_retry")
 
 def deadlock_retry(max_retries=10):
     """
-    Decorator that automatically retries an asynchronous function when rate limit errors occur.
-
-    This decorator implements an exponential backoff strategy with jitter
-    to handle rate limit errors efficiently.
+    Decorator that automatically retries an asynchronous function on transient Neo4j errors or database unavailability.
 
     Args:
         max_retries: Maximum number of retry attempts.
-        initial_backoff: Initial backoff time in seconds.
-        backoff_factor: Multiplier for exponential backoff.
-        jitter: Jitter factor to avoid the thundering herd problem.
 
     Returns:
         The decorated async function.
@@ -35,8 +29,8 @@ def deadlock_retry(max_retries=10):
             async def wait():
                 backoff_time = calculate_backoff(attempt)
                 logger.warning(
-                    f"Neo4j rate limit hit, retrying in {backoff_time:.2f}s "
-                    f"Attempt {attempt}/{max_retries}"
+                    f"Neo4j transient error or database unavailable, retrying in {backoff_time:.2f}s "
+                    f"Attempt {attempt} of {max_retries}"
                 )
                 await asyncio.sleep(backoff_time)
 
@@ -54,7 +48,7 @@ def deadlock_retry(max_retries=10):
                     else:
                         raise  # Re-raise the original error
                 except DatabaseUnavailable:
-                    if attempt >= max_retries:
+                    if attempt > max_retries:
                         raise  # Re-raise the original error
 
                     await wait()
