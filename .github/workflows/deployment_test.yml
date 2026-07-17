@@ -1,0 +1,28 @@
+name: Deployment Test Harness
+
+on:
+  pull_request:
+    paths:
+      - "cognee/tests/deployment/**"
+
+jobs:
+  deployment-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+      
+      - name: Install dependencies
+        run: |
+          pip install -e ".[test]"
+          pip install pytest pytest-asyncio httpx docker uvicorn fastapi pydantic numpy
+      
+      - name: Pull Docker image
+        run: docker pull cognee/cognee:main
+      
+      - name: Run deployment tests
+        run: pytest cognee/tests/deployment/test_harness_selftest.py -m deployment -v
