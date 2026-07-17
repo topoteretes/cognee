@@ -7,6 +7,7 @@ within pipeline operations, supporting both incremental and regular processing m
 
 import os
 from typing import Any, Dict, AsyncGenerator, Optional
+from uuid import UUID
 from sqlalchemy import select
 
 import cognee.modules.ingestion as ingestion
@@ -39,6 +40,7 @@ async def run_tasks_data_item_incremental(
     pipeline_run_id: str,
     ctx: Optional[PipelineContext],
     user: User,
+    cross_dataset_reuse: bool = False,
 ) -> AsyncGenerator[Dict[str, Any], None]:
     """
     Process a single data item with incremental loading support.
@@ -46,6 +48,15 @@ async def run_tasks_data_item_incremental(
     This function handles incremental processing by checking if the data item
     has already been processed for the given pipeline and dataset. If it has,
     it skips processing and returns a completion status.
+
+    When `cross_dataset_reuse` is enabled and the data item already completed
+    this pipeline for a *different* dataset in the same graph/vector database,
+    the already-materialized artifacts are linked to this dataset (NodeSet
+    tags + provenance ledger rows) instead of re-running the pipeline, and the
+    item yields the same already-completed status as a within-dataset skip.
+    When linking is not possible (per-dataset databases, no provenance ledger
+    rows, unsupported adapters), processing falls through to the full
+    pipeline unchanged.
 
     Args:
         data_item: The data item to process
@@ -56,6 +67,8 @@ async def run_tasks_data_item_incremental(
         pipeline_run_id: Unique identifier for this pipeline run
         context: Optional context dictionary
         user: User performing the operation
+        cross_dataset_reuse: Whether to link artifacts already produced for
+            another dataset instead of re-processing this data item
 
     Yields:
         Dict containing run_info and data_id for each processing step
@@ -101,6 +114,63 @@ async def run_tasks_data_item_incremental(
                     "data_id": data_id,
                 }
                 return
+
+    # Cross-dataset reuse: the data item hasn't been processed for THIS
+    # dataset, but if it already completed the same pipeline for another
+    # dataset the artifacts exist in the shared graph/vector database —
+    # link them to this dataset instead of re-running the pipeline. On any
+    # unsupported configuration link_data_to_dataset returns False and the
+    # item falls through to full processing.
+    if cross_dataset_reuse and data_point is not None:
+        completed_dataset_id = next(
+            (
+                linked_dataset_id
+                for linked_dataset_id, status in data_point.pipeline_status.get(
+                    pipeline_name, {}
+                ).items()
+                if status == DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED
+            ),
+            None,
+        )
+        if completed_dataset_id:
+            from cognee.modules.graph.methods import link_data_to_dataset
+
+            linked = await link_data_to_dataset(
+                data=data_point,
+                source_dataset_id=UUID(completed_dataset_id),
+                target_dataset=dataset,
+                user=user,
+                pipeline_run_id=pipeline_run_id,
+            )
+            if linked:
+                async with db_engine.get_async_session() as session:
+                    data_point = (
+                        await session.execute(select(Data).filter(Data.id == data_id))
+                    ).scalar_one_or_none()
+                    status_for_pipeline = data_point.pipeline_status.setdefault(pipeline_name, {})
+                    status_for_pipeline[str(dataset.id)] = (
+                        DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED
+                    )
+                    await session.merge(data_point)
+                    await session.commit()
+
+                yield {
+                    "run_info": PipelineRunAlreadyCompleted(
+                        pipeline_run_id=pipeline_run_id,
+                        dataset_id=dataset.id,
+                        dataset_name=dataset.name,
+                    ),
+                    "data_id": data_id,
+                }
+                return
+
+            logger.info(
+                "Cross-dataset reuse unavailable for data %s "
+                "(dataset %s -> %s); running the full pipeline.",
+                data_id,
+                completed_dataset_id,
+                dataset.id,
+            )
 
     try:
         # Process data based on data_item and list of tasks
@@ -218,6 +288,7 @@ async def run_tasks_data_item(
     user: User,
     incremental_loading: bool,
     data_cache: bool,
+    cross_dataset_reuse: bool = False,
 ) -> Optional[Dict[str, Any]]:
     """
     Process a single data item, choosing between incremental and regular processing.
@@ -236,6 +307,8 @@ async def run_tasks_data_item(
         user: User performing the operation
         incremental_loading: Whether to use incremental processing
         data_cache: Whether to use incremental processing (data caching)
+        cross_dataset_reuse: Whether to link artifacts already produced for
+            another dataset instead of re-processing (incremental mode only)
 
     Returns:
         Dict containing the final processing result, or None if processing was skipped
@@ -253,6 +326,7 @@ async def run_tasks_data_item(
             pipeline_run_id=pipeline_run_id,
             ctx=ctx,
             user=user,
+            cross_dataset_reuse=cross_dataset_reuse,
         ):
             pass
     else:

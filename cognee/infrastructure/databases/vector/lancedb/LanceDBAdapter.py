@@ -1285,6 +1285,131 @@ class LanceDBAdapter(VectorDBInterface):
 
         return None
 
+    async def add_belongs_to_set_tags(
+        self,
+        tags: List[str],
+        node_ids: List[str],
+    ) -> None:
+        """
+        Add the given tag names to the `belongs_to_set` arrays of the rows
+        whose id is in `node_ids`, in every collection that stores the field.
+        Union semantics — existing tags are preserved and duplicates are not
+        created. Counterpart of `remove_belongs_to_set_tags`, used when
+        linking an already-processed data item to an additional dataset
+        without re-embedding.
+
+        LanceDB doesn't support in-place array mutation, so this mirrors the
+        remove side's update path: read the target rows, rewrite the payload
+        with the union, then delete + re-add through the collection's
+        declared payload schema.
+        """
+        if not tags or not node_ids:
+            return None
+
+        tag_list = list(tags)
+        tag_set = set(tag_list)
+        connection = await self.get_connection()
+        collection_names = await connection.table_names()
+
+        # Ids are UUID strings produced by cognee so no escaping is needed
+        # (mirrors the assumption in `retrieve()` and the remove side).
+        id_predicate = "id IN (" + ", ".join(f"'{str(nid)}'" for nid in node_ids) + ")"
+
+        for collection_name in collection_names:
+            try:
+                collection = await connection.open_table(collection_name)
+            except (ValueError, OSError, RuntimeError) as e:
+                logger.debug(
+                    "add_belongs_to_set_tags: could not open '%s': %s",
+                    collection_name,
+                    e,
+                )
+                continue
+
+            try:
+                arrow_schema = (await collection.to_arrow()).schema
+            except Exception as e:
+                logger.debug(
+                    "add_belongs_to_set_tags: schema read failed for '%s': %s",
+                    collection_name,
+                    e,
+                )
+                continue
+
+            payload_idx = arrow_schema.get_field_index("payload")
+            if payload_idx < 0:
+                continue
+
+            payload_type = arrow_schema.field(payload_idx).type
+            if not hasattr(payload_type, "num_fields"):
+                continue
+
+            payload_fields = {payload_type.field(i).name for i in range(payload_type.num_fields)}
+            if "belongs_to_set" not in payload_fields:
+                continue
+
+            # Resolve the DataPoint subclass that originally populated this
+            # collection so we can round-trip rows through its declared
+            # schema on re-add (see remove_belongs_to_set_tags for why).
+            resolved_payload_cls = self._resolve_collection_payload_schema(collection_name)
+
+            async with self.VECTOR_DB_LOCK:
+                try:
+                    rows = await collection.query().where(id_predicate).to_list()
+                except Exception as e:
+                    logger.debug(
+                        "add_belongs_to_set_tags: row scan failed for '%s': %s",
+                        collection_name,
+                        e,
+                    )
+                    continue
+
+                rows_to_update = []
+                for row in rows:
+                    payload = row.get("payload") or {}
+                    current = payload.get("belongs_to_set") or []
+                    if tag_set.issubset(current):
+                        continue
+                    # Filter-then-append keeps the array duplicate-free even
+                    # when a row already carries some of the incoming tags.
+                    payload["belongs_to_set"] = [
+                        tag for tag in current if tag not in tag_set
+                    ] + tag_list
+                    row["payload"] = payload
+                    rows_to_update.append(row)
+
+                if not rows_to_update:
+                    continue
+
+                # LanceDB merge_insert silently no-ops when given dicts whose
+                # nested payload shape doesn't match the struct schema, so
+                # delete + re-add is the reliable path (same as the remove
+                # side). If the re-add fails we've already deleted the
+                # originals — escalate with the affected ids and re-raise.
+                update_predicate = (
+                    "id IN (" + ", ".join(f"'{row['id']}'" for row in rows_to_update) + ")"
+                )
+                await collection.delete(update_predicate)
+
+                typed_rows = self._coerce_rows_to_typed_payload(
+                    rows_to_update, resolved_payload_cls
+                )
+                try:
+                    await collection.add(typed_rows)
+                except Exception as e:
+                    affected_ids = [row.get("id") for row in rows_to_update]
+                    logger.warning(
+                        "add_belongs_to_set_tags: re-add failed for '%s' "
+                        "after deleting %d row(s) (ids=%s): %s",
+                        collection_name,
+                        len(rows_to_update),
+                        affected_ids,
+                        e,
+                    )
+                    raise
+
+        return None
+
     async def create_vector_index(self, index_name: str, index_property_name: str):
         await self.create_collection(
             f"{index_name}_{index_property_name}", payload_schema=IndexSchema

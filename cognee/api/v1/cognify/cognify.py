@@ -58,6 +58,7 @@ async def cognify(
     llm_config: Optional[LLMConfig] = None,
     embedding_config: Optional[EmbeddingConfig] = None,
     data_cache: bool = True,
+    cross_dataset_reuse: bool = False,
     **kwargs,
 ):
     """
@@ -123,6 +124,15 @@ async def cognify(
                       If provided, this prompt will be used instead of the default prompts for
                       knowledge graph extraction. The prompt should guide the LLM on how to
                       extract entities and relationships from the text content.
+        cross_dataset_reuse: If True, a data item that already completed cognify for
+                      another dataset in the same graph/vector database is linked to the
+                      new dataset (NodeSet tags + provenance rows) instead of being
+                      re-processed — skipping the LLM and embedding passes entirely and
+                      keeping the graph identical across the datasets. Falls back to full
+                      processing automatically when linking isn't possible (per-dataset
+                      databases via ENABLE_BACKEND_ACCESS_CONTROL, data processed before
+                      the provenance ledger existed, or graph/vector adapters without
+                      belongs_to_set tagging support). Requires incremental_loading.
 
     Returns:
         Union[dict, list[PipelineRunInfo]]:
@@ -278,6 +288,7 @@ async def cognify(
             llm_config=llm_config,
             embedding_config=embedding_config,
             data_cache=data_cache,
+            cross_dataset_reuse=cross_dataset_reuse,
         )
 
         dataset_desc = str(datasets) if datasets else "all datasets"

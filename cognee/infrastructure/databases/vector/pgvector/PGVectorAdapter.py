@@ -745,6 +745,96 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
         return None
 
+    async def add_belongs_to_set_tags(
+        self,
+        tags: List[str],
+        node_ids: List[str],
+    ) -> None:
+        """
+        Add the given tag names to the `belongs_to_set` arrays of the rows
+        whose id is in `node_ids`, in every vector collection that stores the
+        field. Union semantics — existing tags are preserved and duplicates
+        are not created. Counterpart of `remove_belongs_to_set_tags`, used
+        when linking an already-processed data item to an additional dataset
+        without re-embedding.
+
+        Only rows that already carry a `belongs_to_set` key are touched, so
+        non-collection PascalCase tables without a payload column fail the
+        statement harmlessly (each table runs in its own transaction, same
+        as the remove side). Collection discovery mirrors the remove side:
+        cognee's vector collections are `{PascalCaseType}_{field}` tables
+        coexisting with snake_case relational tables.
+        """
+        if not tags or not node_ids:
+            return None
+
+        def _table_only(name: str) -> str:
+            """Strip any leading `schema.` prefix from a reflected table name."""
+            return name.rpartition(".")[2] if "." in name else name
+
+        candidate_tables: list[str] = []
+        for name in await self.get_table_names():
+            if not name:
+                continue
+            table_only = _table_only(name)
+            if table_only and table_only[0].isupper():
+                candidate_tables.append(table_only)
+
+        bind_params: Dict[str, Any] = {
+            "tags": list(tags),
+            "node_ids": [str(node_id) for node_id in node_ids],
+        }
+
+        for table_name in candidate_tables:
+            quoted_table = f'"{table_name}"'
+            # Filter-then-append: drop any incoming tag already present, then
+            # append the full incoming set — keeps the array duplicate-free
+            # and makes the statement idempotent (re-link, concurrent runs).
+            # `NULLIF(..., 'null')` folds a JSON-null `belongs_to_set` (a row
+            # serialized from a DataPoint that was never tagged) into an
+            # empty array so the append still produces a valid list.
+            update_sql = text(
+                f"""
+                UPDATE {quoted_table}
+                SET payload = jsonb_set(
+                    payload::jsonb,
+                    '{{belongs_to_set}}',
+                    (
+                        SELECT COALESCE(jsonb_agg(val), '[]'::jsonb)
+                        FROM jsonb_array_elements_text(
+                            COALESCE(
+                                NULLIF(payload::jsonb->'belongs_to_set', 'null'::jsonb),
+                                '[]'::jsonb
+                            )
+                        ) AS val
+                        WHERE val <> ALL(:tags)
+                    ) || (
+                        SELECT COALESCE(jsonb_agg(tag), '[]'::jsonb)
+                        FROM unnest(CAST(:tags AS text[])) AS tag
+                    )
+                )::json
+                WHERE id = ANY(:node_ids)
+                  AND payload::jsonb ? 'belongs_to_set'
+                """
+            )
+            # Run each table in its own transaction — a failure on one table
+            # (e.g. a PascalCase name that isn't a vector collection and has
+            # no `payload::jsonb` column) must not roll back updates already
+            # committed for other tables.
+            try:
+                async with self._get_write_lock(table_name):
+                    async with self.get_async_session() as session:
+                        await session.execute(update_sql, bind_params)
+                        await session.commit()
+            except exc.SQLAlchemyError as e:
+                logger.debug(
+                    "add_belongs_to_set_tags skipped '%s': %s",
+                    table_name,
+                    e,
+                )
+
+        return None
+
     async def prune(self):
         """Drop all vector collection tables and reset cached reflection metadata."""
         self._metadata.clear()
