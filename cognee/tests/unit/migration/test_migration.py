@@ -29,6 +29,7 @@ from cognee.modules.migration.loader import record_data_id, translate_records
 from cognee.modules.migration.sources import (
     COGXArchiveSource,
     GraphitiSource,
+    LangMemSource,
     LettaSource,
     Mem0Source,
 )
@@ -488,6 +489,118 @@ class TestFormatEmitters:
         assert "MERGE (a)-[r:`lives_in`]->(b)" in script
         # Non-scalar property serialized as JSON string, not raw repr.
         assert '"[\\"city\\", \\"capital\\"]"' in script
+
+
+class TestLangMemSource:
+    def test_plain_list(self):
+        records = collect(
+            LangMemSource(
+                [
+                    {
+                        "id": "lm-1",
+                        "content": "User prefers Python over JavaScript",
+                        "user_id": "u1",
+                        "categories": ["programming"],
+                        "created_at": "2024-03-01T10:00:00Z",
+                    }
+                ]
+            )
+        )
+        assert len(records) == 1
+        assert records[0].kind == "memory"
+        assert records[0].external_id == "lm-1"
+        assert records[0].scope.user_id == "u1"
+        assert "programming" in records[0].categories
+
+    def test_memories_wrapper_key(self):
+        records = collect(LangMemSource({"memories": [{"id": "1", "content": "likes tea"}]}))
+        assert len(records) == 1
+        assert records[0].content == "likes tea"
+
+    def test_results_wrapper_key(self):
+        records = collect(LangMemSource({"results": [{"id": "1", "text": "hates coffee"}]}))
+        assert len(records) == 1
+        assert records[0].content == "hates coffee"
+
+    def test_context_added_to_categories(self):
+        records = collect(
+            LangMemSource([{"id": "1", "content": "Alice leads the team", "context": "work"}])
+        )
+        assert "work" in records[0].categories
+
+    def test_thread_id_maps_to_session_id(self):
+        records = collect(
+            LangMemSource([{"id": "1", "content": "some memory", "thread_id": "thread-42"}])
+        )
+        assert records[0].scope.session_id == "thread-42"
+
+    def test_export_with_entities_and_relations(self):
+        export = {
+            "memories": [{"id": "m1", "content": "Alice leads the team"}],
+            "entities": [
+                {"id": "e1", "name": "Alice", "type": "Person", "description": "Team lead"},
+                {"id": "e2", "name": "Engineering Team", "type": "Team"},
+            ],
+            "relations": [
+                {
+                    "id": "r1",
+                    "source": "e1",
+                    "target": "e2",
+                    "relation": "leads",
+                    "description": "Alice leads the Engineering Team",
+                }
+            ],
+        }
+        records = collect(LangMemSource(export, mode="preserve"))
+        kinds = [r.kind for r in records]
+        assert kinds.count("memory") == 1
+        assert kinds.count("entity") == 2
+        assert kinds.count("fact") == 1
+
+        fact = next(r for r in records if r.kind == "fact")
+        assert fact.subject_ref == "e1"
+        assert fact.predicate == "leads"
+        assert fact.object_ref == "e2"
+        assert fact.fact_text == "Alice leads the Engineering Team"
+
+        entity = next(r for r in records if r.kind == "entity" and r.name == "Alice")
+        assert entity.entity_type == "Person"
+        assert entity.description == "Team lead"
+
+    def test_skips_memories_without_content(self):
+        records = collect(LangMemSource([{"id": "1"}, {"id": "2", "content": "kept"}]))
+        assert len(records) == 1
+        assert records[0].content == "kept"
+
+    def test_skips_relations_without_source_or_target(self):
+        export = {
+            "memories": [],
+            "entities": [{"id": "e1", "name": "Alice"}],
+            "relations": [
+                {"id": "r1", "relation": "knows"},  # missing source and target
+                {"id": "r2", "source": "e1", "target": "e2", "relation": "knows"},
+            ],
+        }
+        records = collect(LangMemSource(export, mode="preserve"))
+        facts = [r for r in records if r.kind == "fact"]
+        assert len(facts) == 1
+        assert facts[0].subject_ref == "e1"
+
+    def test_export_file(self, tmp_path):
+        export_file = tmp_path / "langmem.json"
+        export_file.write_text(json.dumps([{"id": "1", "content": "from file"}]))
+        records = collect(LangMemSource(export_file))
+        assert records[0].content == "from file"
+
+    def test_default_mode_is_re_derive(self):
+        assert LangMemSource([]).mode == "re-derive"
+
+    def test_invalid_shape_raises(self):
+        try:
+            collect(LangMemSource({"unknown_key": []}))
+            raise AssertionError("expected ValueError")
+        except ValueError as error:
+            assert "LangMem" in str(error)
 
 
 class TestImportModeValidation:
