@@ -45,6 +45,10 @@ class VectorConfig(BaseSettings):
         # dataset handler instead of the default lancedb one. This mirrors the same
         # pattern used in GraphConfig for postgres → postgres_graph.
         provider = self.vector_db_provider.lower()
+        # Accept ``postgres`` as a user-facing alias of the ``pgvector`` provider
+        # so the same provider string works across relational / vector / graph.
+        if provider == "postgres":
+            provider = "pgvector"
         self.vector_db_provider = provider
         vector_dataset_database_handler = self.vector_dataset_database_handler.lower()
         self.vector_dataset_database_handler = vector_dataset_database_handler
@@ -89,6 +93,17 @@ class VectorConfig(BaseSettings):
             if os.path.isabs(self.vector_db_url) and not self.vector_db_url.startswith("\\\\?\\"):
                 self.vector_db_url = "\\\\?\\" + os.path.normpath(self.vector_db_url)
 
+        return self
+
+    @pydantic.model_validator(mode="after")
+    def warn_on_unknown_db_env_vars(self):
+        # Surface typo'd ``VECTOR_DB_*`` env vars (extra="allow" otherwise swallows them).
+        # Imported lazily to avoid a circular import via the utils package __init__.
+        from cognee.infrastructure.databases.utils.resolve_postgres_connection import (
+            warn_unknown_db_env_vars,
+        )
+
+        warn_unknown_db_env_vars(self.model_extra, prefixes=["VECTOR_DB_"])
         return self
 
     def to_dict(self) -> dict:

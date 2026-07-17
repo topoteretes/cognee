@@ -242,6 +242,37 @@ All stored in `.venv` by default. Override with `DATA_ROOT_DIRECTORY` and `SYSTE
 
 ### Switching Databases
 
+#### Unified Postgres credential block
+
+The `DB_*` block is the single Postgres credential source. When a store's provider
+is set to Postgres, it reads these shared values — so one block configures the
+relational database, pgvector, and the postgres graph together, with no repetition:
+
+```bash
+DB_PROVIDER=postgres
+DB_HOST=localhost
+DB_PORT=5432
+DB_USERNAME=cognee
+DB_PASSWORD=cognee
+DB_NAME=cognee_db
+
+VECTOR_DB_PROVIDER=postgres   # alias of pgvector
+GRAPH_DATABASE_PROVIDER=postgres
+```
+
+Notes:
+- `VECTOR_DB_PROVIDER=postgres` is accepted as an alias of `pgvector`.
+- Reusing the shared `DB_*` block for pgvector / postgres-graph is the intended
+  default (it does not emit a warning). Set the per-store `VECTOR_DB_*` /
+  `GRAPH_DATABASE_*` credentials only to point a store at a different server;
+  when set, those per-store values win over `DB_*`.
+- A store-level `*_URL` with a `postgresql://` / `postgresql+asyncpg://` scheme is
+  authoritative and wins over the discrete parts. The default LanceDB/file path in
+  `VECTOR_DB_URL` is not treated as a connection URL.
+- Unknown `DB_` / `VECTOR_DB_` / `GRAPH_DATABASE_` keys in the `.env` file are
+  logged as a warning (typo guard). Typos in exported shell environment variables
+  are not caught (a `pydantic-settings` limitation).
+
 #### Relational Databases
 ```bash
 # PostgreSQL (requires postgres extra: pip install cognee[postgres])
@@ -260,6 +291,9 @@ Supported: lancedb (default), pgvector, chromadb, qdrant, weaviate, milvus
 VECTOR_DB_PROVIDER=chromadb
 
 # PGVector (requires postgres extra)
+# "postgres" is accepted as an alias of "pgvector". With only the shared DB_*
+# block set, pgvector reuses those credentials and the VECTOR_DB_* below is
+# optional. A postgresql:// VECTOR_DB_URL, if set, wins over the discrete parts.
 VECTOR_DB_PROVIDER=pgvector
 VECTOR_DB_URL=postgresql://cognee:cognee@localhost:5432/cognee_db
 ```
@@ -282,6 +316,9 @@ GRAPH_DATABASE_PASSWORD=your_password
 
 # Postgres (requires postgres extra: pip install cognee[postgres])
 # Does not support raw Cypher queries, natural language search, or Graphiti.
+# With only the shared DB_* block set, the postgres graph reuses those
+# credentials; GRAPH_DATABASE_URL below is optional and, when set with a
+# postgresql+asyncpg:// scheme, wins over the discrete DB_* parts.
 GRAPH_DATABASE_PROVIDER=postgres
 GRAPH_DATABASE_URL=postgresql+asyncpg://cognee:cognee@localhost:5432/cognee_db
 ```
