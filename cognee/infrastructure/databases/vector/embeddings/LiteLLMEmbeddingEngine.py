@@ -155,6 +155,15 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                         "api_base": self.endpoint,
                         "api_version": self.api_version,
                     }
+                    # Older LiteLLM releases serialize an omitted encoding format as null,
+                    # which OpenRouter rejects. Cognee consumes float vectors, so make the
+                    # valid format explicit without passing an OpenAI-only option to other
+                    # providers.
+                    if (self.provider or "").lower() == "openrouter" or (
+                        self.model or ""
+                    ).lower().startswith("openrouter/"):
+                        embedding_kwargs["encoding_format"] = "float"
+
                     # Pass through target embedding dimensions when supported
                     if self.dimensions is not None:
                         embedding_kwargs["dimensions"] = self.dimensions
