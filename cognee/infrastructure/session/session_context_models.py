@@ -345,13 +345,19 @@ AgentCandidateContextUpdateVariant = Annotated[
 
 
 class AgentContextExtraction(BaseModel):
-    """LLM output for the batch pass: agent-profile lessons drawn from trace evidence."""
+    """LLM output for the batch pass: agent-profile lessons drawn from trace evidence.
 
-    lessons: list[AgentCandidateContextUpdateVariant] = Field(
+    Small local models often omit or misname the discriminator in structured output,
+    rejecting the whole extraction. The base model enforces the same section rule
+    through ``section_valid``.
+    """
+
+    lessons: list[AgentCandidateContextUpdate] = Field(
         default_factory=list,
         description=(
-            "Reusable agent/tool lessons drawn from the traces. Each item must be one of the "
-            "section-specific agent candidate types."
+            "Reusable agent/tool lessons drawn from the traces. Each item's `section` must be "
+            "one of tool_rules, workflow_state, success_patterns, failure_lessons, or "
+            "environment_facts, matching the kind of tool/workflow lesson the content is."
         ),
     )
 
