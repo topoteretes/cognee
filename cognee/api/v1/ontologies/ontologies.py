@@ -39,13 +39,13 @@ class OntologyService:
     def _load_metadata(self, user_dir: Path) -> dict:
         metadata_path = self._get_metadata_path(user_dir)
         if metadata_path.exists():
-            with open(metadata_path, "r") as f:
+            with open(metadata_path, "r", encoding="utf-8") as f:
                 return json.load(f)
         return {}
 
     def _save_metadata(self, user_dir: Path, metadata: dict):
         metadata_path = self._get_metadata_path(user_dir)
-        with open(metadata_path, "w") as f:
+        with open(metadata_path, "w", encoding="utf-8") as f:
             json.dump(metadata, f, indent=2)
 
     async def upload_ontology(
