@@ -210,7 +210,7 @@ async def get_graph_from_model(
 
     nodes = []
     edges = []
-    visited_properties = visited_properties or {}
+    visited_properties = visited_properties if visited_properties is not None else {}
     data_point_id = str(data_point.id)
 
     logger.debug(
