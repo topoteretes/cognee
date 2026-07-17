@@ -64,7 +64,13 @@ class LLMInterface(ABC):
 
     # TODO: Implement a return type. Most adapters return a 'ModelResponse' while the Ollama adapter does something else.
     @abstractmethod
-    async def transcribe_image(self, input: str) -> Any:
+    async def transcribe_image(
+        self,
+        input: str,
+        prompt: str | None = None,
+        max_completion_tokens: int | None = None,
+        reasoning_effort: str | None = None,
+    ) -> Any:
         """
         Generate a transcription of an image from a user query.
 
@@ -74,6 +80,10 @@ class LLMInterface(ABC):
         Parameters:
         -----------
             - input: The path to the image file that needs to be transcribed.
+            - prompt: Optional extraction instruction; adapter default when omitted.
+            - max_completion_tokens: Optional length cap; adapter default when omitted.
+            - reasoning_effort: Optional reasoning-effort hint for reasoning models; ignored on
+              models that do not support it.
 
         Returns:
         --------

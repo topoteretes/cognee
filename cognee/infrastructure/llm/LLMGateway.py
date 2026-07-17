@@ -102,10 +102,20 @@ class LLMGateway:
         return llm_client.create_transcript(input=input)
 
     @staticmethod
-    def transcribe_image(input: str) -> Coroutine[Any, Any, Any]:
+    def transcribe_image(
+        input: str,
+        prompt: str | None = None,
+        max_completion_tokens: int | None = None,
+        reasoning_effort: str | None = None,
+    ) -> Coroutine[Any, Any, Any]:
         from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.get_llm_client import (
             get_llm_client,
         )
 
         llm_client = get_llm_client()
-        return llm_client.transcribe_image(input=input)
+        return llm_client.transcribe_image(
+            input=input,
+            prompt=prompt,
+            max_completion_tokens=max_completion_tokens,
+            reasoning_effort=reasoning_effort,
+        )
