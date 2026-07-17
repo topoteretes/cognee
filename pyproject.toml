@@ -60,7 +60,6 @@ dependencies = [
     "websockets>=15.0.1,<16.0.0",
     "tenacity>=9.0.0",
     "fakeredis[lua]>=2.32.0",
-    "diskcache>=5.6.3",
     "aiolimiter>=1.2.1",
     "urllib3>=2.6.0",
     "cbor2>=5.8.0",
