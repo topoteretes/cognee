@@ -405,17 +405,14 @@ function SessionDetailPanel({ detail }: { detail: SessionDetail }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       {/* Header */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-        <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 0 }}>
-          <span style={{ fontSize: 11, fontWeight: 700, color: "rgba(237,236,234,0.35)", letterSpacing: "0.08em", textTransform: "uppercase" }}>Session</span>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-            <span style={{ fontSize: 18, fontWeight: 700, color: "#EDECEA", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {detail.session_id}
-            </span>
-            <CopyableId value={detail.session_id} label="session id" />
-          </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 0 }}>
+        <span style={{ fontSize: 11, fontWeight: 700, color: "rgba(237,236,234,0.35)", letterSpacing: "0.08em", textTransform: "uppercase" }}>Session</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+          <span style={{ fontSize: 18, fontWeight: 700, color: "#EDECEA", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {detail.session_id}
+          </span>
+          <CopyableId value={detail.session_id} label="session id" />
         </div>
-        <StatusBadge status={statusLabel(detail)} />
       </div>
 
       {/* Stat cards */}
