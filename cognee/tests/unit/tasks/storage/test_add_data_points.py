@@ -7,7 +7,7 @@ from uuid import uuid4
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.modules.data.processing.document_types.Document import Document
-from cognee.modules.engine.models import Triplet
+from cognee.modules.engine.models import Entity, Triplet
 from cognee.modules.graph.utils import ensure_default_edge_properties
 from cognee.modules.pipelines.models import PipelineContext
 from cognee.tasks.storage.add_data_points import (
@@ -898,79 +898,88 @@ async def test_add_data_points_relational_upserts_happen_before_graph_and_vector
 
 
 @pytest.mark.asyncio
+@patch.object(adp_module, "resolve_fuzzy_duplicate_entities")
 @patch.object(adp_module, "index_graph_edges")
 @patch.object(adp_module, "index_data_points")
-@patch.object(adp_module, "get_cognify_config")
-@patch.object(adp_module, "cluster_fuzzy_duplicate_entities")
 @patch.object(adp_module, "get_unified_engine")
 @patch.object(adp_module, "deduplicate_nodes_and_edges")
 @patch.object(adp_module, "get_graph_from_model")
-async def test_add_data_points_runs_fuzzy_dedup_before_exact_dedup(
-    mock_get_graph,
-    mock_dedup,
-    mock_get_unified,
-    mock_fuzzy_dedup,
-    mock_get_config,
-    mock_index_nodes,
-    mock_index_edges,
+async def test_add_data_points_skips_fuzzy_dedup_by_default(
+    mock_get_graph, mock_dedup, mock_get_unified, mock_index_nodes, mock_index_edges, mock_resolve
 ):
-    """Wiring check: fuzzy dedup runs (enabled by default), feeding its output
-    into the existing exact-id dedup, with the unified engine's vector_engine."""
+    """Without fuzzy_entity_dedup=True the resolver is never invoked — behaviour
+    is identical to before the feature (no extra embedding/DB work)."""
     dp1 = SimplePoint(text="first")
     dp2 = SimplePoint(text="second")
     edge1 = (str(dp1.id), str(dp2.id), "related_to", {"edge_text": "connects"})
 
     mock_get_graph.side_effect = [([dp1], [edge1]), ([dp2], [])]
+    mock_dedup.side_effect = lambda n, e: (n, e)
     unified, graph_engine, vector_engine = _make_unified_mock()
     mock_get_unified.return_value = unified
-    mock_get_config.return_value = SimpleNamespace(
-        fuzzy_entity_dedup=True, fuzzy_entity_dedup_threshold=0.95
-    )
-
-    fuzzy_nodes = [dp1]  # simulate dp2 being merged away
-    fuzzy_edges = [edge1]
-    mock_fuzzy_dedup.return_value = (fuzzy_nodes, fuzzy_edges, [{"duplicate_id": str(dp2.id)}])
-    mock_dedup.side_effect = lambda n, e: (n, e)
 
     await add_data_points([dp1, dp2])
 
-    mock_fuzzy_dedup.assert_awaited_once()
-    call_args = mock_fuzzy_dedup.await_args
-    assert call_args.args[0] == [dp1, dp2]  # nodes, pre-fuzzy-merge
-    assert call_args.args[2] is vector_engine
-    assert call_args.kwargs["similarity_threshold"] == 0.95
-
-    # Exact dedup receives the fuzzy-merged output, not the raw pre-merge lists.
-    mock_dedup.assert_called_once_with(fuzzy_nodes, fuzzy_edges)
+    mock_resolve.assert_not_called()
 
 
 @pytest.mark.asyncio
 @patch.object(adp_module, "index_graph_edges")
 @patch.object(adp_module, "index_data_points")
-@patch.object(adp_module, "get_cognify_config")
-@patch.object(adp_module, "cluster_fuzzy_duplicate_entities")
 @patch.object(adp_module, "get_unified_engine")
 @patch.object(adp_module, "deduplicate_nodes_and_edges")
 @patch.object(adp_module, "get_graph_from_model")
-async def test_add_data_points_skips_fuzzy_dedup_when_disabled(
-    mock_get_graph,
-    mock_dedup,
-    mock_get_unified,
-    mock_fuzzy_dedup,
-    mock_get_config,
-    mock_index_nodes,
-    mock_index_edges,
+async def test_add_data_points_fuzzy_dedup_links_duplicates(
+    mock_get_graph, mock_dedup, mock_get_unified, mock_index_nodes, mock_index_edges
 ):
-    dp = SimplePoint(text="only")
-    mock_get_graph.side_effect = [([dp], [])]
-    unified, graph_engine, vector_engine = _make_unified_mock()
-    mock_get_unified.return_value = unified
-    mock_get_config.return_value = SimpleNamespace(
-        fuzzy_entity_dedup=False, fuzzy_entity_dedup_threshold=0.95
-    )
+    """With fuzzy_entity_dedup=True, entities whose names embed close together
+    are linked by a `merged_into` edge that reaches the graph write. The real
+    resolver runs (only the embeddings are faked)."""
+    openai = Entity(name="OpenAI", description="AI lab")
+    openai_inc = Entity(name="OpenAI Inc.", description="AI lab")
+
+    mock_get_graph.side_effect = [([openai, openai_inc], [])]
     mock_dedup.side_effect = lambda n, e: (n, e)
+    unified, graph_engine, vector_engine = _make_unified_mock()
+    vectors = {"OpenAI": [1.0, 0.0], "OpenAI Inc.": [0.96, 0.28]}  # cos ~ 0.96
+    vector_engine.embed_data = AsyncMock(side_effect=lambda names: [vectors[n] for n in names])
+    mock_get_unified.return_value = unified
 
-    await add_data_points([dp])
+    await add_data_points([openai], fuzzy_entity_dedup=True, fuzzy_entity_dedup_threshold=0.95)
 
-    mock_fuzzy_dedup.assert_not_called()
-    mock_dedup.assert_called_once_with([dp], [])
+    edges_written = graph_engine.add_edges.await_args_list[0].args[0]
+    merged = [e for e in edges_written if e[2] == "merged_into"]
+
+    assert len(merged) == 1
+    # duplicate -> canonical, and the first-appearing entity is the canonical.
+    assert merged[0][0] == openai_inc.id
+    assert merged[0][1] == openai.id
+    assert merged[0][3]["resolution"] == "embedding_similarity"
+    assert merged[0][3]["similarity_score"] >= 0.95
+
+
+@pytest.mark.asyncio
+@patch.object(adp_module, "index_graph_edges")
+@patch.object(adp_module, "index_data_points")
+@patch.object(adp_module, "get_unified_engine")
+@patch.object(adp_module, "deduplicate_nodes_and_edges")
+@patch.object(adp_module, "get_graph_from_model")
+async def test_add_data_points_fuzzy_dedup_leaves_distinct_nodes_untouched(
+    mock_get_graph, mock_dedup, mock_get_unified, mock_index_nodes, mock_index_edges
+):
+    """Distinct entity names add no `merged_into` edge; the enabled path is a
+    no-op when there is nothing to link."""
+    openai = Entity(name="OpenAI", description="AI lab")
+    google = Entity(name="Google", description="search")
+
+    mock_get_graph.side_effect = [([openai, google], [])]
+    mock_dedup.side_effect = lambda n, e: (n, e)
+    unified, graph_engine, vector_engine = _make_unified_mock()
+    vectors = {"OpenAI": [1.0, 0.0], "Google": [0.0, 1.0]}  # orthogonal, cos 0
+    vector_engine.embed_data = AsyncMock(side_effect=lambda names: [vectors[n] for n in names])
+    mock_get_unified.return_value = unified
+
+    await add_data_points([openai], fuzzy_entity_dedup=True, fuzzy_entity_dedup_threshold=0.95)
+
+    edges_written = graph_engine.add_edges.await_args_list[0].args[0]
+    assert [e for e in edges_written if e[2] == "merged_into"] == []
