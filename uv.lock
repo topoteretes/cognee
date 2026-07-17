@@ -1348,6 +1348,9 @@ langchain = [
     { name = "langchain-text-splitters" },
     { name = "langsmith" },
 ]
+langsmith = [
+    { name = "langsmith" },
+]
 llama-cpp = [
     { name = "llama-cpp-python", extra = ["server"] },
 ]
@@ -1457,7 +1460,7 @@ requires-dist = [
     { name = "langchain-core", marker = "extra == 'langchain'", specifier = ">=1.2.5" },
     { name = "langchain-text-splitters", marker = "extra == 'langchain'", specifier = ">=0.3.2,<1.0.0" },
     { name = "langdetect", specifier = ">=1.0.9" },
-    { name = "langsmith", marker = "extra == 'langchain'", specifier = ">=0.2.3,<1.0.0" },
+    { name = "langsmith", marker = "extra == 'langchain' or extra == 'langsmith'", specifier = ">=0.2.3,<1.0.0" },
     { name = "limits", specifier = ">=4.4.1,<5" },
     { name = "litellm", specifier = ">=1.83.7" },
     { name = "llama-cpp-python", extras = ["server"], marker = "extra == 'llama-cpp'", specifier = ">=0.3.0,<1.0.0" },
@@ -1538,7 +1541,7 @@ requires-dist = [
     { name = "uvicorn", specifier = ">=0.34.0,<1.0.0" },
     { name = "websockets", specifier = ">=15.0.1,<16.0.0" },
 ]
-provides-extras = ["api", "distributed", "scraping", "fastembed", "neo4j", "neptune", "postgres", "postgres-binary", "notebook", "langchain", "llama-index", "huggingface", "ollama", "mistral", "anthropic", "azure", "deepeval", "posthog", "groq", "llama-cpp", "docs", "codegraph", "evals", "graphiti", "aws", "dlt", "baml", "dev", "debug", "redis", "tracing", "docling"]
+provides-extras = ["api", "distributed", "scraping", "fastembed", "neo4j", "neptune", "postgres", "postgres-binary", "notebook", "langchain", "langsmith", "llama-index", "huggingface", "ollama", "mistral", "anthropic", "azure", "deepeval", "posthog", "groq", "llama-cpp", "docs", "codegraph", "evals", "graphiti", "aws", "dlt", "baml", "dev", "debug", "redis", "tracing", "docling"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -4677,6 +4680,7 @@ dependencies = [
     { name = "six" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/0e/72/a3add0e4eec4eb9e2569554f7c70f4a3c27712f40e3284d483e88094cc0e/langdetect-1.0.9.tar.gz", hash = "sha256:cbc1fef89f8d062739774bd51eda3da3274006b3661d199c2655f6b3f6d605a0", size = 981474, upload-time = "2021-05-07T07:54:13.562Z" }
+
 
 [[package]]
 name = "langsmith"
@@ -10647,6 +10651,11 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/ba/c8/b3c970a5b186722d276cd40a05b3254e03bccc0208560aff20f612e018e8/sentry_sdk-2.63.0.tar.gz", hash = "sha256:2a1502bf864769275dbc8c2c9fc7a0f7f5e18358180b615d262d13a31ffba216", size = 912449, upload-time = "2026-06-16T12:45:57.553Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/7b/57/cb205f7d93373120f666b9c5736dc0815524d96a9b278e7a728f018dc22a/sentry_sdk-2.63.0-py3-none-any.whl", hash = "sha256:3a9b5ddd403f79eb73bd670f75f04485819db53d28f76ced7bc09041cb0dfd6a", size = 495950, upload-time = "2026-06-16T12:45:55.819Z" },
+]
+
+[package.optional-dependencies]
+fastapi = [
+    { name = "fastapi" },
 ]
 
 [[package]]

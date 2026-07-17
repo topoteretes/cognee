@@ -111,6 +111,7 @@ postgres-binary = [
     "asyncpg>=0.30.0,<1.0.0",
 ]
 notebook = ["notebook>=7.1.0,<8"]
+langsmith = ["langsmith>=0.2.3,<1.0.0"]
 langchain = [
     "langsmith>=0.2.3,<1.0.0",
     "langchain_text_splitters>=0.3.2,<1.0.0",
