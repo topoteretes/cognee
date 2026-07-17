@@ -1,7 +1,10 @@
 import json
+import logging
 import os
 from functools import lru_cache
 from typing import Any, ClassVar
+
+logger = logging.getLogger(__name__)
 
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -145,6 +148,10 @@ class LLMConfig(BaseSettings):
             if isinstance(value, str) and len(value) >= 2:
                 if value[0] == value[-1] and value[0] in ("'", '"'):
                     setattr(self, field_name, value[1:-1])
+
+        # Warn if the chosen Ollama model is unvalidated or known-bad
+        from cognee.infrastructure.llm.ollama_models import check_ollama_model
+        check_ollama_model(self.llm_model)
 
         return self
 
