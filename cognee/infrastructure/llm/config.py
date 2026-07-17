@@ -98,6 +98,7 @@ class LLMConfig(BaseSettings):
     llama_cpp_n_ctx: int = 2048
     llama_cpp_n_gpu_layers: int = 0
     llama_cpp_chat_format: str = "chatml"
+    ollama_num_ctx: int = 4096
 
     fallback_api_key: str = ""
     fallback_endpoint: str = ""

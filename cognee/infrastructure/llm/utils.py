@@ -50,7 +50,7 @@ def get_model_max_completion_tokens(model_name: str) -> int | None:
 
     Checks if the provided model name is present in the predefined model cost dictionary. If
     found, it logs the maximum token count for that model and returns it. If the model name
-    is not recognized, it logs an informational message and returns None.
+    is not recognized, it falls back to provider-specific context sizes.
 
     Parameters:
     -----------
@@ -62,12 +62,11 @@ def get_model_max_completion_tokens(model_name: str) -> int | None:
 
         Number of max tokens of model, or None if model is unknown
     """
-    max_completion_tokens: int | None = None
-
     if model_name in litellm.model_cost:
         if "max_tokens" in litellm.model_cost[model_name]:
             max_completion_tokens = litellm.model_cost[model_name]["max_tokens"]
             logger.debug(f"Max input tokens for {model_name}: {max_completion_tokens}")
+            return max_completion_tokens
         else:
             logger.debug(
                 f"Model max_tokens not found in LiteLLM's model_cost for model {model_name}."
@@ -75,7 +74,17 @@ def get_model_max_completion_tokens(model_name: str) -> int | None:
     else:
         logger.debug("Model not found in LiteLLM's model_cost.")
 
-    return max_completion_tokens
+    # Provider-aware safe defaults when LiteLLM has no record
+    from cognee.infrastructure.llm.config import get_llm_config
+    llm_config = get_llm_config()
+    
+    provider = (llm_config.llm_provider or "").lower()
+    if provider == "ollama":
+        return llm_config.ollama_num_ctx
+    if provider in ("llama_cpp", "llama.cpp"):
+        return llm_config.llama_cpp_n_ctx
+
+    return None
 
 
 async def test_llm_connection() -> None:
