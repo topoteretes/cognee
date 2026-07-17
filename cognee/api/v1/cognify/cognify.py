@@ -27,6 +27,7 @@ from cognee.tasks.documents import (
     extract_chunks_from_documents,
 )
 from cognee.tasks.graph.extract_graph_and_summarize import extract_graph_and_summarize
+from cognee.tasks.graph import canonicalize_entities
 from cognee.tasks.storage import add_data_points
 from cognee.tasks.ingestion.extract_dlt_fk_edges import extract_dlt_fk_edges
 from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
@@ -318,6 +319,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
 
     cognify_config = get_cognify_config()
     embed_triplets = cognify_config.triplet_embedding
+    canonicalize = cognify_config.entity_canonicalization
 
     if chunks_per_batch is None:
         chunks_per_batch = (
@@ -342,6 +344,14 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
             custom_prompt=custom_prompt,
             task_config={"batch_size": chunks_per_batch},
             **kwargs,
+        ),
+        # COGNIFY (opt-in): LLM-judge canonicalization of duplicate entities.
+        # Default OFF — when the flag is off this spread is empty and the task
+        # list is identical to the pre-canonicalization pipeline.
+        *(
+            [Task(canonicalize_entities, task_config={"batch_size": chunks_per_batch})]
+            if canonicalize
+            else []
         ),
         # LOAD: persist nodes, edges, and embeddings to graph/vector DBs
         Task(
