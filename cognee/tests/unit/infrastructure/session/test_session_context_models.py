@@ -255,3 +255,34 @@ def test_agent_context_extraction_normalizes_lessons():
 def test_agent_context_extraction_defaults_to_empty():
     assert AgentContextExtraction().lessons == []
     assert AgentContextExtraction(lessons="not-a-list").lessons == []
+
+
+def test_agent_context_extraction_lessons_use_base_model_not_discriminated_union():
+    # AgentContextExtraction.lessons is intentionally typed as the plain base model, not the
+    # AgentCandidateContextUpdateVariant discriminated union -- see the class docstring for why
+    # (small local models via instructor are unreliable at picking a discriminator tag). Lock the
+    # resulting item type so a future edit doesn't silently reintroduce the union.
+    extraction = AgentContextExtraction(
+        lessons=[{"section": "tool_rules", "content": "Use uv run", "confidence": 0.9}]
+    )
+    assert type(extraction.lessons[0]) is AgentCandidateContextUpdate
+
+
+def test_agent_context_extraction_rejects_invalid_section():
+    # The base model's own field_validator must still enforce AGENT_VALID_SECTIONS even without
+    # a discriminator -- this is what makes dropping the union safe.
+    with pytest.raises(ValidationError):
+        AgentContextExtraction(
+            lessons=[{"section": "not_a_real_section", "content": "x", "confidence": 0.9}]
+        )
+
+
+def test_agent_context_extraction_all_valid_sections_parse():
+    extraction = AgentContextExtraction(
+        lessons=[
+            {"section": section, "content": "lesson", "confidence": 0.9}
+            for section in AGENT_VALID_SECTIONS
+        ]
+    )
+    assert {lesson.section for lesson in extraction.lessons} == AGENT_VALID_SECTIONS
+    assert all(isinstance(lesson, AgentCandidateContextUpdate) for lesson in extraction.lessons)
