@@ -9,6 +9,7 @@ from .exceptions import (
     EntityAlreadyExistsError,
     UnsupportedProvenanceCapability,
     DatabaseNotCreatedError,
+    EmbeddingContextWindowTooSmallError,
     EmbeddingException,
     MissingQueryParameterError,
     MutuallyExclusiveQueryParametersError,

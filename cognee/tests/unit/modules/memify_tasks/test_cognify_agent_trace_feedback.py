@@ -20,8 +20,30 @@ async def test_cognify_agent_trace_feedback_success():
         trace_content,
         dataset_id="123",
         node_set=["agent_trace_feedbacks"],
+        user=None,
     )
-    mock_cognify.assert_called_once_with(datasets=["123"])
+    mock_cognify.assert_called_once_with(datasets=["123"], user=None)
+
+
+@pytest.mark.asyncio
+async def test_cognify_agent_trace_feedback_forwards_user():
+    """Test user is forwarded to cognee.add/cognee.cognify."""
+    trace_content = "Session ID: trace_session\n\ndraft plan succeeded."
+    user = object()
+
+    with (
+        patch("cognee.add", new_callable=AsyncMock) as mock_add,
+        patch("cognee.cognify", new_callable=AsyncMock) as mock_cognify,
+    ):
+        await cognify_agent_trace_feedback(trace_content, dataset_id="123", user=user)
+
+    mock_add.assert_called_once_with(
+        trace_content,
+        dataset_id="123",
+        node_set=["agent_trace_feedbacks"],
+        user=user,
+    )
+    mock_cognify.assert_called_once_with(datasets=["123"], user=user)
 
 
 @pytest.mark.asyncio
@@ -42,6 +64,7 @@ async def test_cognify_agent_trace_feedback_custom_node_set_name():
         trace_content,
         dataset_id="123",
         node_set=["custom_trace_feedbacks"],
+        user=None,
     )
 
 
