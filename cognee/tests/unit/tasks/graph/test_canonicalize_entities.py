@@ -572,6 +572,31 @@ async def test_blank_reconciled_description_keeps_the_original():
     assert alice.description == "Senior engineer with 10 years of experience"
 
 
+@pytest.mark.asyncio
+async def test_judge_failure_falls_back_to_unmerged(caplog):
+    # A judge failure must NOT abort the task (which would discard the extracted
+    # graph for this batch); it falls back to returning the summaries unmerged.
+    alice = _entity("Alice", "engineer")
+    alicia = _entity("Alicia", "sw engineer")
+    original_ids = {str(alice.id), str(alicia.id)}
+    summary = _make_summary(
+        [
+            (Edge(relationship_type="contains"), alice),
+            (Edge(relationship_type="contains"), alicia),
+        ]
+    )
+    boom = AsyncMock(side_effect=RuntimeError("rate limit / timeout"))
+
+    with _patch_vector_engine(), patch.object(ce.LLMGateway, "acreate_structured_output", boom):
+        with caplog.at_level(logging.WARNING):
+            result = await canonicalize_entities([summary])
+
+    assert result == [summary]  # summaries pass through, no exception
+    assert str(alice.id) != str(alicia.id)  # not merged
+    assert {str(alice.id), str(alicia.id)} == original_ids
+    assert any("canonicalization skipped" in record.getMessage() for record in caplog.records)
+
+
 # ---------------------------------------------------------------------------
 # _select_winner determinism (order-independent)
 # ---------------------------------------------------------------------------

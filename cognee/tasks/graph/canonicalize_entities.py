@@ -343,8 +343,8 @@ async def canonicalize_entities(
     """Reconcile duplicate entities across a batch of TextSummary objects.
 
     Gathers candidate entities, blocks them into near-duplicate pairs, judges each
-    pair with an LLM, and merges confident duplicates in place (rename+mirror).
-    Returns the same ``summaries`` list; entities are mutated in place so
+    pair with an LLM, and collapses confident duplicates onto a canonical winner
+    in place. Returns the same ``summaries`` list; entities are mutated in place so
     ``add_data_points`` stores the reconciled graph. Spliced into the cognify
     pipeline by ``get_default_tasks`` when the ``entity_canonicalization`` config
     flag is on (default off).
@@ -354,11 +354,20 @@ async def canonicalize_entities(
         return summaries
 
     cfg = get_cognify_config()
-    pairs = await _block_candidate_pairs(entities, cfg)
-    if not pairs:
+    # Canonicalization is best-effort enrichment sitting between extraction and
+    # storage: if the embedder or judge fails (rate limit, timeout, malformed
+    # structured output), skip the merge rather than let the exception abort the
+    # pipeline run and discard the already-extracted graph for this batch.
+    try:
+        pairs = await _block_candidate_pairs(entities, cfg)
+        judgments = await _judge_pairs(pairs, cfg) if pairs else []
+    except Exception as error:
+        logger.warning(
+            "entity canonicalization skipped (blocking/judge failed)",
+            extra={"error": str(error)},
+        )
         return summaries
 
-    judgments = await _judge_pairs(pairs, cfg)
     if judgments:
         _apply_merges(entities, judgments, cfg, ctx)
 
