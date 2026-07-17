@@ -1122,6 +1122,12 @@ async def _remember_inner(
         if self_improvement:
             from cognee.api.v1.improve import improve
 
+            # Create/authorize the target dataset before launching the
+            # background improve. Otherwise it bridges into a dataset that was
+            # never created, and every bridge stage fails on write/read
+            # authorization. Mirrors the permanent path below.
+            user, _ = await resolve_authorized_user_datasets(dataset_name, user)
+
             async def _session_improve():
                 try:
                     await improve(
