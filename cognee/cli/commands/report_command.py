@@ -41,6 +41,7 @@ class ReportCommand(SupportsCliCommand):
 
     def execute(self, args: argparse.Namespace) -> None:
         try:
+
             async def _run() -> str:
                 try:
                     from cognee.api.v1.report import report
@@ -55,9 +56,7 @@ class ReportCommand(SupportsCliCommand):
                         user=user,
                     )
                 except Exception as exc:
-                    raise CliCommandInnerException(
-                        f"Failed to generate report: {exc}"
-                    ) from exc
+                    raise CliCommandInnerException(f"Failed to generate report: {exc}") from exc
 
             report_md = asyncio.run(_run())
 
