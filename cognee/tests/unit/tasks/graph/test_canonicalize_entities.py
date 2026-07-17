@@ -28,7 +28,7 @@ from cognee.tasks.graph.canonicalize_entities import (
     _block_candidate_pairs,
     _dedup_relations,
     _select_winner,
-    _mirror_loser_onto_winner,
+    _merge_component,
     _apply_merges,
     canonicalize_entities,
 )
@@ -405,25 +405,171 @@ def test_apply_merges_union_find_transitive_chain():
 
 
 # ---------------------------------------------------------------------------
-# _mirror_loser_onto_winner primitive
+# _merge_component primitive + order-independence regression tests
+#
+# get_graph_from_model materializes the surviving node from whichever component
+# member it reaches FIRST (extraction/contains order, independent of winner
+# selection). These pin that the collapse is lossless regardless of that order:
+# every member ends up identical, so no edge / provenance / type is dropped when
+# a loser is traversed first.
 # ---------------------------------------------------------------------------
-def test_mirror_shares_id_and_unions_relations():
+def test_merge_component_makes_all_members_identical():
     acme = _entity("Acme")
     globex = _entity("Globex")
     winner = _entity_with_relation("Alice", "works_at", acme)
     loser = _entity_with_relation("Alicia", "founded", globex)
 
-    _mirror_loser_onto_winner(winner, loser, "Alice", "merged")
+    _merge_component(winner, [loser], _judgment(0, True, "Alice", "merged", 0.9), ctx=None)
 
-    canonical_id = str(Entity.id_for("Alice"))
+    canonical_id = str(Entity.id_for("Alice"))  # the winner's own id
     assert str(winner.id) == canonical_id
-    assert str(loser.id) == canonical_id  # both share the canonical id
+    assert str(loser.id) == canonical_id  # loser collapsed onto the winner's id
     assert winner.description == loser.description == "merged"
-    # union of both entities' outbound relations, carried by BOTH objects
+    # union of both members' outbound relations, carried by BOTH objects
     winner_targets = {t.name for _e, t in winner.relations}
     loser_targets = {t.name for _e, t in loser.relations}
     assert winner_targets == {"Acme", "Globex"}
     assert loser_targets == {"Acme", "Globex"}
+    # provenance is mirrored onto the loser too, so it survives whichever member
+    # get_graph_from_model materializes into the canonical node.
+    assert loser.merged_aliases == winner.merged_aliases == ["Alicia"]
+    assert loser.merge_confidence == winner.merge_confidence == 0.9
+    assert loser.version == winner.version
+
+
+@pytest.mark.asyncio
+async def test_transitive_merge_preserves_every_members_edges_loser_first():
+    # 3 near-dup entities, each with a DISTINCT outbound edge, merged transitively.
+    # A LOSER is listed first in `contains`, so it is the object that materializes
+    # into the canonical node — the pre-fix stale-relations bug dropped the
+    # last-merged member's edge here.
+    company_a, company_b, company_c = _entity("CompanyA"), _entity("CompanyB"), _entity("CompanyC")
+    alice = _entity_with_relation("Alice", "works_at", company_a, "a")
+    alicia = _entity_with_relation("Alicia", "works_at", company_b, "b")
+    alyce = _entity_with_relation("Alyce", "works_at", company_c, "c")
+
+    summary = _make_summary(
+        [
+            (Edge(relationship_type="contains"), alicia),  # loser first
+            (Edge(relationship_type="contains"), alyce),  # loser second
+            (Edge(relationship_type="contains"), alice),  # winner last
+        ]
+    )
+    # Two confirmed pairs over three nodes → one transitive component of all three.
+    judgments = [
+        _judgment(0, True, "Alice", "merged", 0.95),
+        _judgment(1, True, "Alice", "merged", 0.95),
+    ]
+
+    with _patch_vector_engine(), _patch_llm(judgments):
+        await canonicalize_entities([summary])
+
+    nodes, edges = await _flatten([summary])
+    canonical_id = str(Entity.id_for("Alice"))
+    assert len([n for n in nodes if str(n.id) == canonical_id]) == 1
+    targets = {str(e[1]) for e in edges if str(e[0]) == canonical_id and e[2] == "works_at"}
+    # EVERY member's distinct outbound edge survives, regardless of traversal order.
+    assert {str(company_a.id), str(company_b.id), str(company_c.id)} <= targets
+
+
+@pytest.mark.asyncio
+async def test_merge_provenance_persists_on_node_when_loser_traversed_first():
+    alice = _entity("Alice", "engineer")
+    alicia = _entity("Alicia", "sw engineer")
+    # Loser (Alicia) listed first → it materializes into the canonical node.
+    summary = _make_summary(
+        [
+            (Edge(relationship_type="contains"), alicia),
+            (Edge(relationship_type="contains"), alice),
+        ]
+    )
+    judgments = [_judgment(0, True, "Alice", "merged desc", 0.93)]
+
+    with _patch_vector_engine(), _patch_llm(judgments):
+        await canonicalize_entities([summary])
+
+    nodes, _edges = await _flatten([summary])
+    canonical_id = str(Entity.id_for("Alice"))
+    survivors = [n for n in nodes if str(n.id) == canonical_id]
+    assert len(survivors) == 1
+    node = survivors[0]  # the PERSISTED node, not the in-memory winner
+    assert node.merged_aliases == ["Alicia"]
+    assert node.merge_confidence == 0.93
+    assert node.source_task == "canonicalize_entities"
+    assert node.version == 2
+
+
+@pytest.mark.asyncio
+async def test_merge_keeps_winners_type_even_when_loser_traversed_first():
+    person = EntityType(name="Person", description="a person")
+    developer = EntityType(name="Developer", description="a developer")
+    alice = Entity(name="Alice", description="engineer", is_a=person)
+    alicia = Entity(name="Alicia", description="sw engineer", is_a=developer)
+    # Loser (Alicia, is_a Developer) first; the survivor must still be a Person.
+    summary = _make_summary(
+        [
+            (Edge(relationship_type="contains"), alicia),
+            (Edge(relationship_type="contains"), alice),
+        ]
+    )
+    judgments = [_judgment(0, True, "Alice", "merged", 0.95)]
+
+    with _patch_vector_engine(), _patch_llm(judgments):
+        await canonicalize_entities([summary])
+
+    _nodes, edges = await _flatten([summary])
+    canonical_id = str(Entity.id_for("Alice"))
+    isa_targets = {str(e[1]) for e in edges if str(e[0]) == canonical_id and e[2] == "is_a"}
+    assert isa_targets == {str(EntityType.id_for("Person"))}
+
+
+@pytest.mark.asyncio
+async def test_merge_id_is_bounded_to_a_member_not_llm_canonical_name():
+    # A near-dup pair the judge merges, but the judge returns a canonical_name that
+    # collides with an UNRELATED entity. The merged id must stay one of the pair's
+    # own ids — never the unrelated entity's — so entities never compared are not
+    # silently conflated.
+    alice = _entity("Alice", "engineer")
+    alicia = _entity("Alicia", "sw engineer")
+    bob = _entity("Bob", "unrelated manager")  # orthogonal, never judged
+
+    summary = _make_summary(
+        [
+            (Edge(relationship_type="contains"), alice),
+            (Edge(relationship_type="contains"), alicia),
+            (Edge(relationship_type="contains"), bob),
+        ]
+    )
+    judgments = [_judgment(0, True, "Bob", "merged", 0.95)]  # adversarial canonical_name
+
+    with _patch_vector_engine(), _patch_llm(judgments):
+        await canonicalize_entities([summary])
+
+    bob_id = str(Entity.id_for("Bob"))
+    assert str(alice.id) == str(alicia.id)  # the near-dup pair collapsed
+    assert str(alice.id) != bob_id  # but NOT onto the unrelated entity
+    assert str(bob.id) == bob_id  # unrelated Bob untouched
+
+
+@pytest.mark.asyncio
+async def test_blank_reconciled_description_keeps_the_original():
+    # A confirmed merge whose judge returned a blank reconciled description must
+    # not wipe the survivor's description — keep the (richer) original instead.
+    alice = _entity("Alice", "Senior engineer with 10 years of experience")
+    alicia = _entity("Alicia", "sw engineer")
+    summary = _make_summary(
+        [
+            (Edge(relationship_type="contains"), alice),
+            (Edge(relationship_type="contains"), alicia),
+        ]
+    )
+    judgments = [_judgment(0, True, "Alice", "   ", 0.95)]  # blank/whitespace description
+
+    with _patch_vector_engine(), _patch_llm(judgments):
+        await canonicalize_entities([summary])
+
+    assert str(alice.id) == str(alicia.id)  # still merged
+    assert alice.description == "Senior engineer with 10 years of experience"
 
 
 # ---------------------------------------------------------------------------

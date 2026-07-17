@@ -16,10 +16,14 @@ Design notes (grounded in the extraction path):
 - Blocking embeds entity names transiently (no vector-index write) and keeps only
   pairs whose cosine similarity clears a threshold, so the LLM judge only ever
   sees genuine near-duplicates.
-- The merge is a rename+mirror primitive (see ``_merge_component``): no active
-  edge-reassignment or graph rewriting. Edges follow automatically because they
-  are stored as live object references and their endpoint ids are read at
-  ``get_graph_from_model`` time.
+- The merge collapses each confirmed-duplicate component onto a deterministic
+  winner (see ``_merge_component``): every member is made IDENTICAL to the winner
+  — same id, unioned relations, reconciled description, provenance — so
+  ``get_graph_from_model`` yields the same canonical node no matter which member it
+  reaches first (traversal order is extraction-driven, not tied to winner
+  selection), and the existing UUID5 dedup drops the rest. No active
+  edge-reassignment: edges follow automatically because they are live object
+  references whose endpoint ids are read at ``get_graph_from_model`` time.
 """
 
 import asyncio
@@ -41,21 +45,6 @@ if TYPE_CHECKING:
     from cognee.modules.pipelines.models import PipelineContext
 
 logger = get_logger("canonicalize_entities")
-
-
-def _safe_setattr(obj, name: str, value) -> None:
-    """Set ``obj.name = value``, falling back to ``object.__setattr__``.
-
-    Pydantic v2 rejects assignment to a name that is not a declared model field.
-    ``merged_aliases`` / ``merge_confidence`` are added to ``Entity`` in a later
-    commit; until then this keeps the value readable on the instance without
-    raising. Once the fields exist the normal setattr path is taken and the value
-    serializes into ``node.attributes``.
-    """
-    try:
-        setattr(obj, name, value)
-    except (ValueError, AttributeError):
-        object.__setattr__(obj, name, value)
 
 
 def _gather_entities(summaries: List) -> List[Entity]:
@@ -213,66 +202,68 @@ def _select_winner(members: List[Entity], canonical_name: str) -> Entity:
     return min(members, key=lambda m: Entity._normalize_identity_value(m.name))
 
 
-def _mirror_loser_onto_winner(
-    winner: Entity, loser: Entity, canonical_name: str, reconciled_description: str
-) -> None:
-    """The §0 merge primitive: make loser and winner one canonical entity.
+def _log_merge(winner: Entity, loser: Entity, judgment, ctx) -> None:
+    """Emit one structured audit record for a single loser→winner merge.
 
-    Sets the winner's canonical identity + reconciled description, unions the two
-    entities' outbound relations onto the winner, then mirrors that state onto the
-    loser so BOTH objects end up sharing the same id AND carrying the unioned
-    relations. This is what makes the downstream machinery collapse them:
-
-    - Sharing ``id = Entity.id_for(canonical_name)`` lets ``deduplicate_nodes_and_edges``
-      (which keys on ``str(node.id)``) drop the duplicate node. Renaming ``name``
-      alone would NOT work — ``Entity.id`` is derived once at construction.
-    - Carrying the same unioned relations on both objects means whichever object
-      ``get_graph_from_model`` traverses first emits every edge; the other is
-      skipped (already-visited id) without dropping any edge. Mutating ``id`` alone
-      would strip the loser's outbound edges.
+    Reads the loser's original name/description, so it must be called BEFORE the
+    winner is mirrored onto the loser.
     """
-    canonical_id = Entity.id_for(canonical_name)
-
-    winner.name = canonical_name
-    winner.id = canonical_id
-    winner.description = reconciled_description
-    winner.relations = _dedup_relations(list(winner.relations) + list(loser.relations))
-
-    loser.id = canonical_id
-    loser.name = canonical_name
-    loser.description = reconciled_description
-    loser.relations = winner.relations
-
-
-def _stamp_and_audit(winner: Entity, loser: Entity, judgment, ctx) -> None:
-    """Stamp merge provenance on the survivor and emit one structured audit log.
-
-    Captures the loser's original name/description BEFORE the mirror mutates them.
-    """
-    loser_name = loser.name
-    loser_description = loser.description
-
-    aliases = list(getattr(winner, "merged_aliases", None) or [])
-    if loser_name not in aliases:
-        aliases.append(loser_name)
-    _safe_setattr(winner, "merged_aliases", aliases)
-    _safe_setattr(winner, "merge_confidence", judgment.confidence)
-    winner.source_task = "canonicalize_entities"
-
     logger.info(
         "entity_canonicalization_merge",
         extra={
-            "canonical_id": str(Entity.id_for(judgment.canonical_name)),
-            "canonical_name": judgment.canonical_name,
+            "canonical_id": str(winner.id),
+            "canonical_name": winner.name,
             "merged_id": str(loser.id),
-            "merged_name": loser_name,
+            "merged_name": loser.name,
             "confidence": judgment.confidence,
             "rationale": judgment.rationale,
-            "property_diff": {"description": [loser_description, judgment.reconciled_description]},
+            "property_diff": {"description": [loser.description, winner.description]},
             "pipeline_run_id": str(getattr(ctx, "pipeline_run_id", None)),
             "dataset_id": str(getattr(getattr(ctx, "dataset", None), "id", None)),
         },
     )
+
+
+def _merge_component(winner: Entity, losers: List[Entity], judgment, ctx) -> None:
+    """Collapse a confirmed-duplicate component onto ``winner``, order-independently.
+
+    ``get_graph_from_model`` builds the single surviving node from whichever member
+    it reaches first (extraction/traversal order, unrelated to winner selection),
+    then skips the rest by shared id. So every member must end up IDENTICAL for the
+    collapse to be lossless: this unions all members' outbound relations, reconciles
+    the description, stamps the merge provenance on the winner, then mirrors the
+    finalized winner onto every loser field-for-field. Mirroring only some fields
+    (as a pairwise merge would) silently drops the others' edges / provenance / type
+    whenever a loser is the first member traversed.
+
+    The canonical id is the winner's own id (derived from its name), never a raw LLM
+    ``canonical_name`` — so the merged node cannot collide with an unrelated entity
+    that happens to share the judge's chosen surface form.
+    """
+    reconciled = (judgment.reconciled_description or "").strip()
+    if reconciled:
+        winner.description = reconciled
+
+    relations = list(winner.relations)
+    for loser in losers:
+        relations.extend(loser.relations)
+    winner.relations = _dedup_relations(relations)
+
+    aliases = list(winner.merged_aliases or [])
+    for loser in losers:
+        _log_merge(winner, loser, judgment, ctx)
+        if loser.name not in aliases:
+            aliases.append(loser.name)
+    winner.merged_aliases = aliases
+    winner.merge_confidence = judgment.confidence
+    winner.source_task = "canonicalize_entities"
+    winner.update_version()
+
+    # Mirror the finalized winner onto every loser so the collapsed node is the
+    # same regardless of which member get_graph_from_model reaches first.
+    for loser in losers:
+        for field_name in type(winner).model_fields:
+            setattr(loser, field_name, getattr(winner, field_name))
 
 
 def _apply_merges(
@@ -284,8 +275,9 @@ def _apply_merges(
     ``cfg.canonicalization_confidence_threshold`` are accepted. Accepted pairs are
     unioned into components (handles transitive chains A~B, B~C); each component
     uses its highest-confidence judgment (tie-break: smallest normalized
-    canonical_name) to pick the canonical name/description, selects a deterministic
-    winner, mirrors every loser onto it, and stamps the audit.
+    canonical_name) to pick the reconciled description and prefer a winner, selects
+    a deterministic winner, and collapses the whole component onto it (see
+    ``_merge_component``).
     """
     parent = {str(e.id): str(e.id) for e in entities}
 
@@ -340,14 +332,8 @@ def _apply_merges(
         if len(members) < 2:
             continue
         winner = _select_winner(members, judgment.canonical_name)
-        for loser in members:
-            if loser is winner:
-                continue
-            _stamp_and_audit(winner, loser, judgment, ctx)
-            _mirror_loser_onto_winner(
-                winner, loser, judgment.canonical_name, judgment.reconciled_description
-            )
-        winner.update_version()
+        losers = [member for member in members if member is not winner]
+        _merge_component(winner, losers, judgment, ctx)
 
 
 @task_summary("Canonicalized entities in {n} summary(ies)")
