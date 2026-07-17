@@ -26,6 +26,7 @@ from cognee.modules.pipelines.models.DataItemStatus import DataItemStatus
 from cognee.modules.pipelines.models import PipelineContext
 from cognee.modules.pipelines.operations.run_tasks_with_telemetry import run_tasks_with_telemetry
 from ..tasks.task import Task
+from cognee.modules.provenance.persistence import flush_context_provenance
 
 logger = get_logger("run_tasks_data_item")
 
@@ -243,28 +244,42 @@ async def run_tasks_data_item(
     # Go through async generator and return data item processing result. Result can be PipelineRunAlreadyCompleted when data item is skipped,
     # PipelineRunCompleted when processing was successful and PipelineRunErrored if there were issues
     result = None
-    if data_cache or incremental_loading:
-        async for result in run_tasks_data_item_incremental(
-            data_item=data_item,
-            dataset=dataset,
-            tasks=tasks,
-            pipeline_name=pipeline_name,
-            pipeline_id=pipeline_id,
-            pipeline_run_id=pipeline_run_id,
-            ctx=ctx,
-            user=user,
-        ):
-            pass
-    else:
-        async for result in run_tasks_data_item_regular(
-            data_item=data_item,
-            dataset=dataset,
-            tasks=tasks,
-            pipeline_id=pipeline_id,
-            pipeline_run_id=pipeline_run_id,
-            ctx=ctx,
-            user=user,
-        ):
-            pass
+    try:
+        if data_cache or incremental_loading:
+            async for result in run_tasks_data_item_incremental(
+                data_item=data_item,
+                dataset=dataset,
+                tasks=tasks,
+                pipeline_name=pipeline_name,
+                pipeline_id=pipeline_id,
+                pipeline_run_id=pipeline_run_id,
+                ctx=ctx,
+                user=user,
+            ):
+                pass
+        else:
+            async for result in run_tasks_data_item_regular(
+                data_item=data_item,
+                dataset=dataset,
+                tasks=tasks,
+                pipeline_id=pipeline_id,
+                pipeline_run_id=pipeline_run_id,
+                ctx=ctx,
+                user=user,
+            ):
+                pass
+    except Exception:
+        # Preserve the original pipeline exception if flushing already-written
+        # edge evidence also fails; rollback still has graph-native run refs.
+        try:
+            await flush_context_provenance(ctx)
+        except Exception as provenance_error:
+            logger.error(
+                "Failed to persist provenance for an errored data item: %s",
+                provenance_error,
+                exc_info=True,
+            )
+        raise
 
+    await flush_context_provenance(ctx)
     return result

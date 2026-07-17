@@ -1,7 +1,8 @@
 from uuid import UUID
 from typing import Optional, Any, List, Union
-from pydantic import BaseModel, ConfigDict, field_serializer
+from pydantic import BaseModel, ConfigDict, Field, field_serializer
 from pydantic.alias_generators import to_camel
+from cognee.modules.search.models.EvidenceReference import EvidenceReference
 from cognee.modules.search.types.SearchType import SearchType
 
 
@@ -19,6 +20,7 @@ class SearchResultPayload(BaseModel):
     # NOTE: dict must precede BaseModel in the union so a plain dict validates
     # as-is instead of being coerced into an empty bare BaseModel.
     completion: Optional[Union[str, List[str], List[dict], dict, BaseModel, List[BaseModel]]] = None
+    evidence: List[EvidenceReference] = Field(default_factory=list)
 
     # TODO: Add return_type info
     search_type: SearchType

@@ -1,3 +1,5 @@
+import asyncio
+from contextlib import suppress
 from inspect import Parameter, signature
 
 from cognee.infrastructure.databases.graph import get_graph_engine
@@ -13,6 +15,10 @@ from cognee.modules.search.methods.get_search_type_retriever_instance import (
 )
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
 from cognee.modules.search.types import SearchType
+from cognee.modules.retrieval.utils.evidence import (
+    append_source_evidence_text,
+    graph_source_evidence,
+)
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
@@ -88,6 +94,27 @@ async def get_retriever_output(
         elif isinstance(context, list):
             span.set_attribute("cognee.retrieval.context_items", len(context))
 
+    evidence = []
+    source_evidence_task = None
+    if kwargs.get("include_references", False):
+        evidence_method = getattr(retriever_instance, "get_context_evidence", None)
+        if callable(evidence_method):
+            dataset = kwargs.get("dataset")
+            try:
+                evidence = evidence_method(
+                    retrieved_objects,
+                    dataset_id=getattr(dataset, "id", None),
+                )
+            except Exception as error:
+                logger.warning("Unable to build structured context evidence: %s", error)
+        dataset = kwargs.get("dataset")
+        if any(reference.kind == "graph_edge" for reference in evidence) and dataset is not None:
+            # The indexed relational lookup runs beside the much slower LLM
+            # completion, so richer citations do not extend the answer path.
+            source_evidence_task = asyncio.create_task(
+                graph_source_evidence(evidence, getattr(dataset, "id", None))
+            )
+
     completion = None
     if not only_context:  # If only_context is True, skip completion. Performance optimization.
         # Handle raw result and context object to handle completion operation
@@ -103,7 +130,14 @@ async def get_retriever_output(
                 completion_kwargs["effective_query"] = effective_query
             if _method_accepts_kwarg(completion_method, "turn_preparation"):
                 completion_kwargs["turn_preparation"] = turn_preparation
-            completion = await completion_method(**completion_kwargs)
+            try:
+                completion = await completion_method(**completion_kwargs)
+            except Exception:
+                if source_evidence_task is not None:
+                    source_evidence_task.cancel()
+                    with suppress(asyncio.CancelledError, Exception):
+                        await source_evidence_task
+                raise
             if isinstance(completion, str):
                 span.set_attribute("cognee.retrieval.completion_length", len(completion))
             span.set_attribute(
@@ -111,10 +145,18 @@ async def get_retriever_output(
                 f"{retriever_class} generated completion",
             )
 
+    if source_evidence_task is not None:
+        try:
+            evidence.extend(await source_evidence_task)
+            completion = append_source_evidence_text(completion, evidence)
+        except Exception as error:
+            logger.warning("Unable to resolve graph source evidence: %s", error)
+
     search_result = SearchResultPayload(
         result_object=retrieved_objects,
         context=context,
         completion=completion,
+        evidence=evidence,
         search_type=query_type,
         only_context=only_context,
         dataset_name=kwargs.get("dataset").name if kwargs.get("dataset") else None,

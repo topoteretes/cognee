@@ -87,3 +87,4 @@ from cognee.modules.agent_memory import agent_memory
 # Relational DB models
 from cognee.modules.session_lifecycle.models import SessionModelUsage, SessionRecord
 import cognee.modules.migrations.models  # noqa: F401  (registers global_database_version)
+import cognee.modules.provenance.models  # noqa: F401  (registers provenance tables)

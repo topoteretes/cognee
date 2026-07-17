@@ -1,5 +1,8 @@
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
+
+if TYPE_CHECKING:
+    from cognee.modules.search.models.EvidenceReference import EvidenceReference
 
 
 class BaseRetriever(ABC):
@@ -78,6 +81,18 @@ class BaseRetriever(ABC):
         Only called when session is enabled.
         """
         return None
+
+    def get_context_evidence(
+        self,
+        retrieved_objects: Any,
+        dataset_id: Any = None,
+    ) -> List["EvidenceReference"]:
+        """Return structured identifiers for artifacts included in completion context.
+
+        Retrievers opt in by overriding this pure, synchronous hook. The default
+        intentionally returns no evidence so community retrievers remain compatible.
+        """
+        return []
 
     async def prepare_session_turn_for_retrieval(self, query: str):
         """Analyze a session turn before retrieval and fail open to the original query."""
