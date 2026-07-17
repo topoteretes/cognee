@@ -8,6 +8,7 @@ import BrainSelector from "@/ui/elements/BrainSelector";
 import PageLoading from "@/ui/elements/PageLoading";
 import { TrackPageView } from "@/modules/analytics";
 import type { DatasetProcessingStatus } from "@/modules/datasets/pollDatasetStatus";
+import { useDatasetStatuses } from "@/modules/datasets/useDatasetStatuses";
 
 type DisplayStatus = "pending" | "running" | "completed" | "failed" | "empty";
 
@@ -39,38 +40,20 @@ export default function KnowledgeGraphPage() {
   const [vizReady, setVizReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const blobRef = useRef<string | null>(null);
-  const [datasetStatus, setDatasetStatus] = useState<DisplayStatus>("empty");
-  const [pollKey, setPollKey] = useState(0);
   const [vizRefreshKey, setVizRefreshKey] = useState(0);
   const prevStatusRef = useRef<DisplayStatus>("empty");
 
   const activeDataset = selectedDataset ?? datasets[0] ?? null;
   const datasetId = activeDataset?.id ?? null;
 
-  // Reset on dataset change
+  const { statuses } = useDatasetStatuses(!!datasetId);
+  const datasetStatus = datasetId ? mapStatus(statuses[datasetId]) : "empty";
+
+  // Reset transition tracking on dataset change so switching brains doesn't
+  // spuriously trigger a viz-refresh based on the previous brain's status.
   useEffect(() => {
-    setDatasetStatus("empty");
     prevStatusRef.current = "empty";
   }, [datasetId]);
-
-  // Poll processing status
-  useEffect(() => {
-    if (!datasetId || !cogniInstance || isInitializing) return;
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout>;
-    async function check() {
-      try {
-        const resp = await cogniInstance!.fetch(`/v1/datasets/status?dataset=${datasetId}`);
-        if (!resp.ok || cancelled) return;
-        const data: Record<string, DatasetProcessingStatus> = await resp.json();
-        const status = mapStatus(data[datasetId!]);
-        if (!cancelled) setDatasetStatus(status);
-        if (!cancelled && (status === "pending" || status === "running")) timer = setTimeout(check, 5000);
-      } catch { /* ignore */ }
-    }
-    check();
-    return () => { cancelled = true; clearTimeout(timer); };
-  }, [datasetId, cogniInstance, isInitializing, pollKey]);
 
   // Reload viz when status transitions to completed
   useEffect(() => {
