@@ -1,3 +1,4 @@
+import math
 import time
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.graph.models.EdgeType import EdgeType
@@ -517,6 +518,15 @@ class CogneeGraph(CogneeAbstractGraph):
                     importance_weight = float(importance_weight)
                 except (TypeError, ValueError):
                     importance_weight = 0.5
+                # Guard the (2 - importance_weight) multiplier below: a weight >= 2.0
+                # would flip the ranking sign (making the least relevant triplet rank
+                # first), while NaN/inf corrupt heapq.nsmallest ordering. Treat
+                # non-finite values as neutral (weight 1.0) and clamp the rest to
+                # [0.0, 2.0] so the multiplier stays in [0.0, 2.0].
+                if not math.isfinite(importance_weight):
+                    importance_weight = 1.0
+                else:
+                    importance_weight = max(0.0, min(2.0, importance_weight))
                 if not isinstance(distances, list) or query_index >= len(distances):
                     raise ValueError(
                         f"{label}: vector_distance must be a list with length > {query_index} "
