@@ -9,6 +9,9 @@ on:
       - "cognee/tests/deployment/**"
       - ".github/workflows/test_deployment_mcp.yml"
 
+permissions:
+  contents: read
+
 env:
   COGNEE_SKIP_CONNECTION_TEST: "true"
   COGNEE_MCP_IMAGE: "cognee-mcp:local"
