@@ -478,6 +478,32 @@ class TestFormatEmitters:
         assert len(graph.findall(f"{namespace}node")) == 2
         assert len(graph.findall(f"{namespace}edge")) == 1
 
+    def test_graphml_data_keys_are_all_declared(self, tmp_path):
+        # Every <data key="..."> must reference a declared <key id="...">. The edge
+        # relationship_name datum was emitted without a matching <key> declaration,
+        # which strict GraphML readers reject even though the XML is well-formed.
+        destination = tmp_path / "graph.graphml"
+        write_graphml(self.NODES, self.EDGES, destination)
+        root = ET.parse(destination).getroot()
+        namespace = "{http://graphml.graphdrawing.org/xmlns}"
+        declared = {key.get("id") for key in root.findall(f"{namespace}key")}
+        used = {data.get("key") for data in root.iter(f"{namespace}data")}
+        assert used <= declared, f"undeclared data keys: {used - declared}"
+        assert "e_relationship_name" in declared
+
+    def test_graphml_round_trips_through_networkx(self, tmp_path):
+        import networkx as nx
+
+        destination = tmp_path / "graph.graphml"
+        write_graphml(self.NODES, self.EDGES, destination)
+        graph = nx.read_graphml(destination)
+        assert graph.number_of_nodes() == 2
+        assert graph.number_of_edges() == 1
+        source, target, data = next(iter(graph.edges(data=True)))
+        assert (source, target) == ("id-1", "id-2")
+        assert data["relationship_name"] == "lives_in"
+        assert data["edge_text"] == "Alice lives in Berlin"
+
     def test_cypher(self, tmp_path):
         destination = tmp_path / "graph.cypher"
         write_cypher(self.NODES, self.EDGES, destination)
