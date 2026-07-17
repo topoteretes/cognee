@@ -1,23 +1,120 @@
-# Configuration for the 'cognee' application service
-cognee:
-  # Image name (using the local image we’ll build in Minikube)
-  image: "cognee/cognee:main"
+replicaCount: 1
+
+nameOverride: ""
+fullnameOverride: ""
+
+image:
+  repository: cognee/cognee
+  tag: main
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
   port: 8000
-  env:
-    ENV: "local"
-    PYTHONPATH: "."
-    LLM_MODEL: "openai/gpt-4o-mini"
-    LLM_PROVIDER: "openai"
-  resources:
-    cpu: "4.0"
+
+cognee:
+  env: local
+  llmProvider: openai
+  llmModel: openai/gpt-4o-mini
+  vectorDbProvider: pgvector
+  enableBackendAccessControl: false
+
+# Name of an existing Secret containing LLM_API_KEY and DB_PASSWORD.
+# When empty the chart creates a dev Secret from postgres.auth.password.
+existingSecret: ""
+
+resources:
+  requests:
+    cpu: "500m"
+    memory: "512Mi"
+  limits:
+    cpu: "4000m"
     memory: "2Gi"
 
-# Configuration for the 'postgres' database service
+serviceAccount:
+  create: true
+  name: ""
+  automountServiceAccountToken: false
+
+podSecurityContext: {}
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+
+startupProbe:
+  enabled: true
+  httpGet:
+    path: /health
+    port: 8000
+  failureThreshold: 30
+  periodSeconds: 10
+
+readinessProbe:
+  enabled: true
+  httpGet:
+    path: /health
+    port: 8000
+  initialDelaySeconds: 10
+  periodSeconds: 10
+
+# /health verifies external dependencies (DB, vector store, graph store, filesystem).
+# Wiring it to liveness causes CrashLoopBackOff on transient dependency failures.
+# Enable only when the repository exposes a process-only health endpoint.
+livenessProbe:
+  enabled: false
+
 postgres:
-  image: "pgvector/pgvector:pg17"
+  enabled: true
+  image:
+    repository: pgvector/pgvector
+    tag: pg17
   port: 5432
-  env:
-    POSTGRES_USER: "cognee"
-    POSTGRES_PASSWORD: "cognee"
-    POSTGRES_DB: "cognee_db"
-  storage: "2Gi"
+  auth:
+    username: cognee
+    password: ""
+    database: cognee_db
+  storage: 2Gi
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "256Mi"
+    limits:
+      cpu: "1000m"
+      memory: "1Gi"
+
+networkPolicy:
+  enabled: false
+  ingress: []
+  egress: []
+
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 80
+
+podDisruptionBudget:
+  enabled: false
+  maxUnavailable: 1
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: cognee.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+# Used when postgres.enabled=false to point the application at a managed database.
+externalDatabase:
+  host: ""
+  port: "5432"
+  database: ""
+  username: ""
+  existingSecret: ""

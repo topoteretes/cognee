@@ -1,53 +1,74 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ .Release.Name }}-cognee
+  name: {{ include "cognee.fullname" . }}
   labels:
-    app: {{ .Release.Name }}-cognee
+    {{- include "cognee.labels" . | nindent 4 }}
 spec:
-  replicas: 1
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
   selector:
     matchLabels:
-      app: {{ .Release.Name }}-cognee
+      {{- include "cognee.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       labels:
-        app: {{ .Release.Name }}-cognee
+        {{- include "cognee.selectorLabels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secrets.yml") . | sha256sum }}
     spec:
+      serviceAccountName: {{ include "cognee.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: cognee
-          image: {{ .Values.cognee.image }}
+          image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
-            - containerPort: {{ .Values.cognee.port }}
+            - containerPort: {{ .Values.service.port }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "cognee.fullname" . }}-config
           env:
-            - name: ENABLE_BACKEND_ACCESS_CONTROL
-              value: "false"
-            - name: ENV
-              value: {{ .Values.cognee.env.ENV }}
-            - name: PYTHONPATH
-              value: {{ .Values.cognee.env.PYTHONPATH }}
-            - name: VECTOR_DB_PROVIDER
-              value: pgvector
-            - name: DB_HOST
-              value: {{ .Release.Name }}-postgres
-            - name: DB_PORT
-              value: "{{ .Values.postgres.port }}"
-            - name: DB_NAME
-              value: {{ .Values.postgres.env.POSTGRES_DB }}
-            - name: DB_USERNAME
-              value: {{ .Values.postgres.env.POSTGRES_USER }}
             - name: DB_PASSWORD
-              value: {{ .Values.postgres.env.POSTGRES_PASSWORD }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.existingSecret | default (printf "%s-secret" (include "cognee.fullname" .)) }}
+                  key: DB_PASSWORD
             - name: LLM_API_KEY
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Release.Name }}-llm-api-key
+                  name: {{ .Values.existingSecret | default (printf "%s-secret" (include "cognee.fullname" .)) }}
                   key: LLM_API_KEY
-            - name: LLM_MODEL
-              value: {{ .Values.cognee.env.LLM_MODEL }}
-            - name: LLM_PROVIDER
-              value: {{ .Values.cognee.env.LLM_PROVIDER }}
           resources:
+            requests:
+              cpu: {{ .Values.resources.requests.cpu | quote }}
+              memory: {{ .Values.resources.requests.memory | quote }}
             limits:
-              cpu: {{ .Values.cognee.resources.cpu }}
-              memory: {{ .Values.cognee.resources.memory }}
+              cpu: {{ .Values.resources.limits.cpu | quote }}
+              memory: {{ .Values.resources.limits.memory | quote }}
+          {{- if .Values.startupProbe.enabled }}
+          startupProbe:
+            httpGet:
+              path: {{ .Values.startupProbe.httpGet.path }}
+              port: {{ .Values.startupProbe.httpGet.port }}
+            failureThreshold: {{ .Values.startupProbe.failureThreshold }}
+            periodSeconds: {{ .Values.startupProbe.periodSeconds }}
+          {{- end }}
+          {{- if .Values.readinessProbe.enabled }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.readinessProbe.httpGet.path }}
+              port: {{ .Values.readinessProbe.httpGet.port }}
+            initialDelaySeconds: {{ .Values.readinessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.readinessProbe.periodSeconds }}
+          {{- end }}
