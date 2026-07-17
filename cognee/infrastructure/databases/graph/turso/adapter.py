@@ -10,6 +10,7 @@ from typing import AsyncIterator, Dict, Any, List, Union, Optional, Tuple, Type
 from sqlalchemy import text, event
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+from sqlalchemy.pool import NullPool
 
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.engine import DataPoint
@@ -61,7 +62,14 @@ class TursoAdapter(GraphDBInterface):
         # Properties are serialized to TEXT columns by _serialize_properties, so
         # there is no JSON-typed column for SQLAlchemy to encode — hence no
         # json_serializer, unlike the Postgres adapter with its JSONB columns.
-        self.engine = create_async_engine(self.db_uri)
+        #
+        # NullPool for on-disk files (matching the relational SqlAlchemyAdapter):
+        # per-dataset engines are cached and evicted, and pooling would keep
+        # connections/file handles open to a file that eviction may delete. An
+        # in-memory database must instead keep its single connection alive, or the
+        # schema vanishes between operations, so leave those on the default pool.
+        engine_kwargs = {} if ":memory:" in self.db_uri else {"poolclass": NullPool}
+        self.engine = create_async_engine(self.db_uri, **engine_kwargs)
 
         # These PRAGMAs are connection-scoped and a no-op inside a transaction, so
         # apply them on every new connection via the connect event, mirroring the
