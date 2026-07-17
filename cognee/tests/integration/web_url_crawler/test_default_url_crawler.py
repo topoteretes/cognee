@@ -11,3 +11,14 @@ async def test_fetch():
     assert isinstance(results, dict)
     html = results[url]
     assert isinstance(html, str)
+
+
+@pytest.mark.asyncio
+async def test_fetch_accepts_list():
+    crawler = DefaultUrlCrawler()
+    urls = ["http://example.com/"]
+    results = await crawler.fetch_urls(urls)
+    assert isinstance(results, dict)
+    assert len(results) == 1
+    html = results["http://example.com/"]
+    assert isinstance(html, str)

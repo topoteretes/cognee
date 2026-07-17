@@ -404,7 +404,7 @@ class DefaultUrlCrawler:
         """
         if isinstance(urls, str):
             urls = [urls]
-        else:
+        elif not isinstance(urls, list):
             raise ValueError(f"Invalid urls type: {type(urls)}")
 
         async def _task(url: str):
