@@ -146,6 +146,21 @@ class NeptuneGraphDB(GraphDBInterface):
                 message=f"Failed to initialize Neptune Analytics client: {format_neptune_error(e)}"
             ) from e
 
+    async def close(self) -> None:
+        """
+        Release resources held by the Neptune Analytics client.
+
+        Called automatically by ``closing_lru_cache`` when this adapter is
+        evicted from ``_create_graph_engine``'s cache. The underlying boto3
+        client is cleaned up if present.
+        """
+        if hasattr(self, "_client") and self._client is not None:
+            # NeptuneAnalyticsGraph wraps a boto3 client; close it if available
+            underlying = getattr(self._client, "client", None)
+            if underlying is not None and hasattr(underlying, "close"):
+                underlying.close()
+            self._client = None
+
     @staticmethod
     def _serialize_properties(properties: Dict[str, Any]) -> Dict[str, Any]:
         """
