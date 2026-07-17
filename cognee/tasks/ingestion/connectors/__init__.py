@@ -1,17 +1,20 @@
-"""First-class SaaS connectors for cognee, built on the DLT ingestion subsystem.
+"""SaaS data-source connectors for cognee.
 
-Each connector exposes a factory that returns a ``dlt`` resource/source which
-can be handed straight to ``cognee.remember(...)``.  Because they reuse the
-existing DLT path (``resolve_dlt_sources`` -> ``ingest_dlt_source`` ->
-``orphan_cleanup``), every connector gets incremental re-sync (``merge`` write
-disposition) and forget-on-source-deletion out of the box — no parallel
-ingestion path.
+Connectors that pull an external source (Gmail, Slack, Notion, Google Drive,
+Confluence, …) into cognee memory are distributed as **separate community
+packages** under https://github.com/topoteretes/cognee-community
+(``cognee-community-connector-<source>``), so core stays free of per-source SDKs.
 
-Connectors keep their third-party SDKs as *lazy*, *optional* imports so the
-core ``cognee`` install stays slim.  Install the matching extra to use one,
-e.g. ``pip install "cognee[gmail]"``.
+Each connector is a plain ``dlt`` source you hand to ``cognee.remember(...)``. It
+reuses core's DLT ingestion path (``resolve_dlt_sources`` -> ``ingest_dlt_source``
+-> ``orphan_cleanup``) for incremental re-sync and forget-on-source-deletion, and
+opts into the document ingestion path via ``dlt_utils.DOCUMENT_SOURCE_ATTR``. No
+connector is bundled in core::
+
+    pip install cognee-community-connector-gmail
+    from cognee_community_connector_gmail import gmail_source
+
+    await cognee.remember(gmail_source(...), dataset_name="gmail_inbox")
 """
 
-from .gmail import gmail_source
-
-__all__ = ["gmail_source"]
+__all__: list[str] = []

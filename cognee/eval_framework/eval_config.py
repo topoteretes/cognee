@@ -11,15 +11,18 @@ class EvalConfig(BaseSettings):
     task_getter_type: str = (
         "Default"  # Options: 'Default', 'CascadeGraph', 'NoSummaries', 'JustChunks'
     )
+    chunks_per_batch: Optional[int] = None  # Override chunks_per_batch for the cognify pipeline
 
     # Question answering params
     answering_questions: bool = True
-    qa_engine: str = "cognee_graph_completion"  # Options: 'cognee_completion', 'cognee_graph_completion', 'cognee_graph_completion_cot', 'cognee_graph_completion_context_extension', 'beam_router'
+    qa_engine: str = (
+        "cognee_graph_completion"  # See answer_generation.registry for supported strategies.
+    )
 
     # Evaluation params
     evaluating_answers: bool = True
     evaluating_contexts: bool = True
-    evaluation_engine: str = "DeepEval"  # Options: 'DeepEval' (uses deepeval_model), 'DirectLLM' (uses default llm from .env)
+    evaluation_engine: str = "DeepEval"  # Options: 'DeepEval', 'BeamEval', 'DirectLLM'
     evaluation_metrics: List[str] = [
         "correctness",
         "EM",
@@ -65,6 +68,7 @@ class EvalConfig(BaseSettings):
             "dashboard_path": self.dashboard_path,
             "deepeval_model": self.deepeval_model,
             "task_getter_type": self.task_getter_type,
+            "chunks_per_batch": self.chunks_per_batch,
             "direct_llm_system_prompt": self.direct_llm_system_prompt,
             "direct_llm_eval_prompt": self.direct_llm_eval_prompt,
             "instance_filter": self.instance_filter,
