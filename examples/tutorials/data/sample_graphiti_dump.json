@@ -1,0 +1,73 @@
+{
+  "episodes": [
+    {
+      "uuid": "ep-1",
+      "name": "Meeting 1",
+      "content": "Alice stated that Bob is the new CEO.",
+      "created_at": "2023-01-01T10:00:00Z"
+    },
+    {
+      "uuid": "ep-2",
+      "name": "Meeting 2",
+      "content": "Alice stated that Charlie replaced Bob as CEO.",
+      "created_at": "2024-01-01T10:00:00Z"
+    }
+  ],
+  "entities": [
+    {
+      "uuid": "ent-1",
+      "name": "Alice",
+      "labels": ["Person"]
+    },
+    {
+      "uuid": "ent-2",
+      "name": "Bob",
+      "labels": ["Person"]
+    },
+    {
+      "uuid": "ent-3",
+      "name": "Charlie",
+      "labels": ["Person"]
+    }
+  ],
+  "facts": [
+    {
+      "uuid": "fact-1",
+      "source_node_uuid": "ent-1",
+      "target_node_uuid": "ent-2",
+      "name": "knows",
+      "fact": "Alice knows Bob",
+      "valid_at": "2023-01-01T10:00:00Z",
+      "invalid_at": null
+    },
+    {
+      "uuid": "fact-2",
+      "source_node_uuid": "ent-2",
+      "target_node_uuid": "ent-3",
+      "name": "knows",
+      "fact": "Bob knows Charlie",
+      "valid_at": "2023-01-01T10:00:00Z",
+      "invalid_at": null
+    },
+    {
+      "uuid": "fact-3",
+      "source_node_uuid": "ent-1",
+      "target_node_uuid": "ent-2",
+      "name": "reports to",
+      "fact": "Alice reports to Bob",
+      "valid_at": "2023-01-01T10:00:00Z",
+      "invalid_at": "2024-01-01T10:00:00Z",
+      "episodes": ["ep-1"]
+    },
+    {
+      "uuid": "fact-4",
+      "source_node_uuid": "ent-1",
+      "target_node_uuid": "ent-3",
+      "name": "reports to",
+      "fact": "Alice reports to Charlie",
+      "valid_at": "2024-01-01T10:00:00Z",
+      "invalid_at": null,
+      "episodes": ["ep-2"]
+    }
+  ]
+}
