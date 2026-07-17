@@ -11,7 +11,7 @@ class CogneeApiError(Exception):
         self,
         message: str = "Service is unavailable.",
         name: str = "Cognee",
-        status_code=status.HTTP_418_IM_A_TEAPOT,
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         log=True,
         log_level="ERROR",
     ):
