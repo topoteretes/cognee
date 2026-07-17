@@ -16,26 +16,18 @@ Design notes (grounded in the extraction path):
 - Blocking embeds entity names transiently (no vector-index write) and keeps only
   pairs whose cosine similarity clears a threshold, so the LLM judge only ever
   sees genuine near-duplicates.
-- The merge is a rename+mirror primitive (see ``_mirror_loser_onto_winner``): no
-  active edge-reassignment or graph rewriting. Edges follow automatically because
-  they are stored as live object references and their endpoint ids are read at
+- The merge is a rename+mirror primitive (see ``_merge_component``): no active
+  edge-reassignment or graph rewriting. Edges follow automatically because they
+  are stored as live object references and their endpoint ids are read at
   ``get_graph_from_model`` time.
-
-Ordering note: ``merged_aliases`` / ``merge_confidence`` are stamped on the
-surviving entity through ``_safe_setattr`` so this task works before those
-optional fields are added to the ``Entity`` model (a later commit). Until then
-they live on the instance (readable, not serialized); the structured audit log
-carries the full, authoritative merge record regardless.
 """
 
 import asyncio
-from types import SimpleNamespace
-from typing import List, Optional, Tuple
+from typing import TYPE_CHECKING, List, Optional, Tuple
 
 import numpy as np
 
 from cognee.infrastructure.databases.vector import get_vector_engine
-from cognee.infrastructure.engine.models.Edge import Edge
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import render_prompt
 from cognee.modules.cognify.config import get_cognify_config
@@ -44,6 +36,9 @@ from cognee.modules.pipelines.tasks.task import task_summary
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.graph.models import CanonicalizationJudgment
 from cognee.tasks.summarization.models import TextSummary
+
+if TYPE_CHECKING:
+    from cognee.modules.pipelines.models import PipelineContext
 
 logger = get_logger("canonicalize_entities")
 
@@ -357,16 +352,16 @@ def _apply_merges(
 
 @task_summary("Canonicalized entities in {n} summary(ies)")
 async def canonicalize_entities(
-    summaries: List, ctx: Optional[SimpleNamespace] = None, **kwargs
+    summaries: List, ctx: Optional["PipelineContext"] = None, **kwargs
 ) -> List:
     """Reconcile duplicate entities across a batch of TextSummary objects.
 
     Gathers candidate entities, blocks them into near-duplicate pairs, judges each
     pair with an LLM, and merges confident duplicates in place (rename+mirror).
     Returns the same ``summaries`` list; entities are mutated in place so
-    ``add_data_points`` stores the reconciled graph. Not yet wired into the cognify
-    pipeline (that is gated behind the ``entity_canonicalization`` config flag in a
-    later commit).
+    ``add_data_points`` stores the reconciled graph. Spliced into the cognify
+    pipeline by ``get_default_tasks`` when the ``entity_canonicalization`` config
+    flag is on (default off).
     """
     entities = _gather_entities(summaries)
     if len(entities) < 2:
