@@ -2164,7 +2164,7 @@ class LadybugAdapter(GraphDBInterface):
             properties = {
                 k: v
                 for k, v in node.items()
-                if k not in {"id", "name", "type", "created_at", "updated_at"}
+                if k not in {"id", "name", "type"}
             }
             properties["feedback_weight"] = float(node_feedback_weights[node_id])
             updates.append(
@@ -2204,7 +2204,7 @@ class LadybugAdapter(GraphDBInterface):
             properties = {
                 k: v
                 for k, v in node.items()
-                if k not in {"id", "name", "type", "created_at", "updated_at"}
+                if k not in {"id", "name", "type"}
             }
             properties["truth_alignment"] = list(state.get("truth_alignment") or [])
             if state.get("truth_epoch") is not None:
