@@ -1,12 +1,15 @@
 """Audit-grade provenance ledger (append-only, tamper-evident).
 
-This module is the fourth — and only audit-grade — provenance system in cognee.
-It is deliberately distinct from the other three:
+This module is the fifth — and only audit-grade — provenance system in cognee.
+It is deliberately distinct from the other four:
 
 - ``cognee/infrastructure/databases/provenance/`` — graph source-refs used for
   delete/rollback ownership (``source_ref:v1:{dataset_id}:{data_id}`` keys).
 - ``source_*`` DataPoint stamping — write-time attribution on graph nodes.
 - the memory-provenance projection — actor-centric views over session memory.
+- ``cognee/modules/provenance/edge_evidence/`` — assertion-level edge→chunk
+  evidence sidecar (``provenance_edge_evidence``), linking graph edges to the
+  chunks, data revisions, and pipeline runs that produced them.
 
 None of those is an append-only, hash-chained audit ledger with tombstones,
 versioning, and W3C PROV-O agents/activities. This module adds exactly that:

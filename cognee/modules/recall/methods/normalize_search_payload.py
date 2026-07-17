@@ -131,6 +131,10 @@ def _build_item(
         raw = _coerce_to_dict(entry)
         text = _text_from_dict(raw) if raw else str(entry)
 
+    metadata = _provenance_metadata(raw)
+    if payload.evidence:
+        metadata["evidence"] = [reference.model_dump(mode="json") for reference in payload.evidence]
+
     return SearchResultItem(
         kind=kind,
         search_type=payload.search_type,
@@ -138,7 +142,7 @@ def _build_item(
         score=_score_from(entry),
         dataset_id=str(payload.dataset_id) if payload.dataset_id else None,
         dataset_name=payload.dataset_name,
-        metadata=_provenance_metadata(raw),
+        metadata=metadata,
         raw=raw,
         structured=structured,
     )

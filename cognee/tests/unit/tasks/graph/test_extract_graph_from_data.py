@@ -66,6 +66,28 @@ async def test_chunk_contains_entities_after_integration(mock_find_existing):
 
 @pytest.mark.asyncio
 @patch.object(egd_module, "find_existing_edge_identities", new_callable=AsyncMock)
+async def test_integration_forwards_pipeline_context_for_existing_edge_provenance(
+    mock_find_existing,
+):
+    mock_find_existing.return_value = set()
+    chunk = _make_chunk()
+    graph = _two_node_graph()
+    ctx = MagicMock()
+
+    await integrate_chunk_graphs(
+        [chunk],
+        [graph],
+        KnowledgeGraph,
+        _mock_resolver(),
+        ctx=ctx,
+    )
+
+    mock_find_existing.assert_awaited_once()
+    assert mock_find_existing.await_args.kwargs["ctx"] is ctx
+
+
+@pytest.mark.asyncio
+@patch.object(egd_module, "find_existing_edge_identities", new_callable=AsyncMock)
 async def test_entity_relations_populated_after_integration(mock_find_existing):
     mock_find_existing.return_value = set()
     chunk = _make_chunk()

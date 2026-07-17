@@ -1,5 +1,7 @@
 import importlib
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
+from uuid import uuid4
 
 import pytest
 
@@ -9,6 +11,7 @@ from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.retrieval.context_preview import ContextPreview
 from cognee.modules.retrieval.session_aware_completion import count_retrieved_objects
 from cognee.modules.search.methods.get_retriever_output import get_retriever_output
+from cognee.modules.search.models.EvidenceReference import EvidenceReference
 from cognee.modules.search.types import ContextFormat, SearchType
 
 # Resolve the module object explicitly. The package __init__ re-exports the
@@ -92,6 +95,35 @@ class _DeterministicRetriever:
 
     async def get_completion_from_context(self, query, retrieved_objects, context):
         return retrieved_objects
+
+
+class _EvidenceRetriever(_EffectiveQueryRetriever):
+    def get_context_evidence(self, retrieved_objects, dataset_id=None):
+        assert retrieved_objects == [{"id": "obj-1"}]
+        return [
+            EvidenceReference(
+                kind="segment",
+                artifact_id="obj-1",
+                dataset_id=str(dataset_id),
+                chunk_id="obj-1",
+                rank=0,
+            )
+        ]
+
+
+class _GraphEvidenceRetriever(_EffectiveQueryRetriever):
+    def __init__(self, edge_id):
+        super().__init__()
+        self.edge_id = edge_id
+
+    def get_context_evidence(self, retrieved_objects, dataset_id=None):
+        return [
+            EvidenceReference(
+                kind="graph_edge",
+                artifact_id=str(self.edge_id),
+                dataset_id=str(dataset_id),
+            )
+        ]
 
 
 @pytest.mark.asyncio
@@ -373,6 +405,114 @@ async def test_prompt_preview_receives_the_fan_outs_shared_history():
 
     assert preview.await_args.kwargs["session_id"] == "s1"
     assert preview.await_args.kwargs["shared_history"] is shared
+
+@pytest.mark.asyncio
+async def test_get_retriever_output_attaches_structured_context_evidence():
+    retriever = _EvidenceRetriever()
+    dataset_id = uuid4()
+    dataset = SimpleNamespace(id=dataset_id, name="reports", tenant_id=uuid4())
+    with (
+        patch.object(
+            get_retriever_output_module,
+            "get_graph_engine",
+            new_callable=AsyncMock,
+            return_value=_FakeGraphEngine(),
+        ),
+        patch.object(
+            get_retriever_output_module,
+            "get_search_type_retriever_instance",
+            new_callable=AsyncMock,
+            return_value=retriever,
+        ),
+    ):
+        result = await get_retriever_output(
+            SearchType.RAG_COMPLETION,
+            "That was wrong. What should I audit in Lisbon?",
+            dataset=dataset,
+            include_references=True,
+        )
+
+    assert len(result.evidence) == 1
+    assert result.evidence[0].artifact_id == "obj-1"
+    assert result.evidence[0].dataset_id == str(dataset_id)
+
+
+@pytest.mark.asyncio
+async def test_get_retriever_output_skips_evidence_hook_when_references_disabled():
+    retriever = _EvidenceRetriever()
+    retriever.get_context_evidence = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+        AssertionError("evidence hook should not be called")
+    )
+    with (
+        patch.object(
+            get_retriever_output_module,
+            "get_graph_engine",
+            new_callable=AsyncMock,
+            return_value=_FakeGraphEngine(),
+        ),
+        patch.object(
+            get_retriever_output_module,
+            "get_search_type_retriever_instance",
+            new_callable=AsyncMock,
+            return_value=retriever,
+        ),
+    ):
+        result = await get_retriever_output(
+            SearchType.RAG_COMPLETION,
+            "That was wrong. What should I audit in Lisbon?",
+            include_references=False,
+        )
+
+    assert result.evidence == []
+
+
+@pytest.mark.asyncio
+async def test_get_retriever_output_appends_graph_source_evidence():
+    edge_id = uuid4()
+    dataset_id = uuid4()
+    dataset = SimpleNamespace(id=dataset_id, name="reports", tenant_id=uuid4())
+    source_reference = EvidenceReference(
+        kind="segment",
+        artifact_id=str(uuid4()),
+        role="supports_assertion",
+        assertion_id=str(edge_id),
+        dataset_id=str(dataset_id),
+    )
+    retriever = _GraphEvidenceRetriever(edge_id)
+    with (
+        patch.object(
+            get_retriever_output_module,
+            "get_graph_engine",
+            new_callable=AsyncMock,
+            return_value=_FakeGraphEngine(),
+        ),
+        patch.object(
+            get_retriever_output_module,
+            "get_search_type_retriever_instance",
+            new_callable=AsyncMock,
+            return_value=retriever,
+        ),
+        patch.object(
+            get_retriever_output_module,
+            "graph_source_evidence",
+            new_callable=AsyncMock,
+            return_value=[source_reference],
+        ) as resolve_sources,
+    ):
+        result = await get_retriever_output(
+            SearchType.GRAPH_COMPLETION,
+            "That was wrong. What should I audit in Lisbon?",
+            dataset=dataset,
+            include_references=True,
+        )
+
+    resolve_sources.assert_awaited_once()
+    assert [reference.role for reference in result.evidence] == [
+        "used_as_context",
+        "supports_assertion",
+    ]
+    assert result.completion[0].endswith("Evidence:\n- chunk unknown of document unknown")
+
 
 
 def test_count_retrieved_objects_counts_structured_lists():
