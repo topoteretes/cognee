@@ -1,0 +1,74 @@
+name: Modal Serve E2E
+
+permissions:
+  contents: read
+
+# Nightly + manual only — this deploys real Modal infrastructure and must
+# never block PRs.
+on:
+  schedule:
+    - cron: '0 4 * * *'
+  workflow_dispatch:
+
+env:
+  COGNEE_SKIP_CONNECTION_TEST: 'true'
+
+jobs:
+  check-secrets:
+    name: Check Modal secrets
+    runs-on: ubuntu-22.04
+    outputs:
+      has-modal-secrets: ${{ steps.check.outputs.has-modal-secrets }}
+    steps:
+      # Secrets cannot be referenced in job-level `if`, so gate through an
+      # output. Forks without Modal secrets skip the e2e job cleanly.
+      - name: Check for Modal token
+        id: check
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+        run: |
+          if [ -n "$MODAL_TOKEN_ID" ]; then
+            echo "has-modal-secrets=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has-modal-secrets=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::MODAL_TOKEN_ID is not set; skipping Modal serve e2e."
+          fi
+
+  modal-serve-e2e:
+    name: Modal serve e2e (deploy + golden flow + teardown)
+    needs: check-secrets
+    if: needs.check-secrets.outputs.has-modal-secrets == 'true'
+    runs-on: ubuntu-22.04
+    env:
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+      # Unique per run so parallel/retried runs never collide, and the
+      # production cognee-api app is never touched.
+      MODAL_APP_NAME: cognee-api-e2e-${{ github.run_id }}
+      MODAL_VOLUME_NAME: cognee-data-e2e-${{ github.run_id }}
+      # Must match the default-user credentials in the cognee-secrets Modal
+      # secret group; the script falls back to cognee's defaults when unset.
+      DEFAULT_USER_EMAIL: ${{ secrets.DEFAULT_USER_EMAIL }}
+      DEFAULT_USER_PASSWORD: ${{ secrets.DEFAULT_USER_PASSWORD }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.13.x'
+          extra-dependencies: "distributed"
+
+      - name: Run Modal serve e2e
+        run: uv run python distributed/deploy/tests/test_modal_serve_e2e.py
+
+      # The script tears down in a finally block; this is a safety net for
+      # crashes before teardown runs (e.g. job cancellation).
+      - name: Teardown safety net
+        if: always()
+        run: |
+          uv run modal app stop "$MODAL_APP_NAME" --yes || true
+          uv run modal volume delete "$MODAL_VOLUME_NAME" --yes --allow-missing || true
