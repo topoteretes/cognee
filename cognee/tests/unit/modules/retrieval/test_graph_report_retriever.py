@@ -1,30 +1,52 @@
-"""Unit tests for GraphReportRetriever."""
+"""Unit tests for GraphReportRetriever.
+
+Fixtures mirror the real shape returned by ``get_graph_data()``:
+nodes are ``(id, props)`` with a ``type`` field; node_set membership is carried
+by ``belongs_to_set`` edges pointing at ``NodeSet`` container nodes; edges are
+``(src, tgt, relationship_name, props)``.
+"""
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import networkx as nx
 import pytest
 
 
 # ---------------------------------------------------------------------------
-# Fixtures
+# Fixtures — real get_graph_data() shape
 # ---------------------------------------------------------------------------
 
 
 @pytest.fixture()
 def sample_graph_data():
-    """Minimal (nodes, edges) covering hub detection and cross-set links."""
+    """Two node_sets, a bridge entity (``widget`` in both), and structural edges.
+
+    Exercises hub ranking, cross-set detection, and edge provenance.
+    """
     nodes = [
-        ("node_a", {"name": "Alpha", "node_set_name": "set_one"}),
-        ("node_b", {"name": "Beta", "node_set_name": "set_one"}),
-        ("node_c", {"name": "Gamma", "node_set_name": "set_two"}),
-        ("node_d", {"name": "Delta", "node_set_name": "set_two"}),
+        ("ns_biz", {"name": "business", "type": "NodeSet"}),
+        ("ns_eng", {"name": "engineering", "type": "NodeSet"}),
+        ("acme", {"name": "Acme", "type": "Entity"}),
+        ("widget", {"name": "Widget", "type": "Entity"}),
+        ("python", {"name": "Python", "type": "Entity"}),
+        ("company", {"name": "Company", "type": "EntityType"}),
+        ("chunk1", {"type": "DocumentChunk"}),  # no name -> fallback label
     ]
     edges = [
-        ("node_a", "node_b", "relates_to", {"confidence": "EXTRACTED"}),
-        ("node_a", "node_c", "links_to", {"confidence": "INFERRED"}),   # cross-set
-        ("node_b", "node_d", "connects", {"confidence": "EXTRACTED"}),  # cross-set
-        ("node_c", "node_d", "follows", {}),
+        # Membership scaffolding (belongs_to_set -> NodeSet container).
+        ("acme", "ns_biz", "belongs_to_set", {}),
+        ("widget", "ns_biz", "belongs_to_set", {}),
+        ("widget", "ns_eng", "belongs_to_set", {}),  # widget bridges both sets
+        ("python", "ns_eng", "belongs_to_set", {}),
+        ("chunk1", "ns_biz", "belongs_to_set", {}),
+        # Entity-to-entity knowledge (EXTRACTED) — these cross node sets.
+        ("acme", "widget", "produces", {}),
+        ("widget", "python", "built_with", {}),
+        # Structural scaffolding (DERIVED).
+        ("chunk1", "acme", "contains", {}),
+        ("acme", "company", "is_a", {}),
     ]
     return nodes, edges
 
@@ -66,22 +88,20 @@ async def test_get_retrieved_objects_delegates_to_graph_engine(sample_graph_data
 async def test_context_contains_all_three_sections(sample_graph_data):
     from cognee.modules.retrieval.graph_report_retriever import GraphReportRetriever
 
-    retriever = GraphReportRetriever(top_n=3)
-    ctx = await retriever.get_context_from_objects(
+    ctx = await GraphReportRetriever(top_n=5).get_context_from_objects(
         query="", retrieved_objects=sample_graph_data
     )
 
     assert "Hub Nodes" in ctx
     assert "Surprising Cross-Set Connections" in ctx
-    assert "Confidence Tags" in ctx
+    assert "Edge Provenance" in ctx
 
 
 @pytest.mark.asyncio
 async def test_empty_graph_returns_empty_message(empty_graph_data):
     from cognee.modules.retrieval.graph_report_retriever import GraphReportRetriever
 
-    retriever = GraphReportRetriever(top_n=5)
-    ctx = await retriever.get_context_from_objects(
+    ctx = await GraphReportRetriever(top_n=5).get_context_from_objects(
         query="", retrieved_objects=empty_graph_data
     )
 
@@ -89,27 +109,91 @@ async def test_empty_graph_returns_empty_message(empty_graph_data):
 
 
 @pytest.mark.asyncio
-async def test_cross_set_connections_are_detected(sample_graph_data):
+async def test_hub_nodes_exclude_containers_and_resolve_names(sample_graph_data):
     from cognee.modules.retrieval.graph_report_retriever import GraphReportRetriever
 
-    retriever = GraphReportRetriever(top_n=10)
-    ctx = await retriever.get_context_from_objects(
+    ctx = await GraphReportRetriever(top_n=5).get_context_from_objects(
         query="", retrieved_objects=sample_graph_data
     )
-    # node_a (set_one) → node_c (set_two) must appear
-    assert "set_one" in ctx and "set_two" in ctx
+    hub_section = ctx.split("Hub Nodes")[1].split("Surprising")[0]
+    # Real entities are surfaced by name...
+    assert "**Acme**" in hub_section and "**Widget**" in hub_section
+    # ...NodeSet containers are never listed as "god nodes" (they may still
+    # appear as a `set:` label, but never as a ranked hub entry).
+    assert "**business**" not in hub_section and "**engineering**" not in hub_section
 
 
 @pytest.mark.asyncio
-async def test_confidence_tags_appear_in_context(sample_graph_data):
+async def test_cross_set_connections_are_detected(sample_graph_data):
     from cognee.modules.retrieval.graph_report_retriever import GraphReportRetriever
 
-    retriever = GraphReportRetriever(top_n=5)
-    ctx = await retriever.get_context_from_objects(
+    ctx = await GraphReportRetriever(top_n=10).get_context_from_objects(
         query="", retrieved_objects=sample_graph_data
     )
-    assert "EXTRACTED" in ctx
-    assert "INFERRED" in ctx
+    xset = ctx.split("Surprising Cross-Set Connections")[1].split("Edge Provenance")[0]
+    # widget bridges business+engineering, so its links are cross-set.
+    assert "Widget" in xset
+    assert "business" in xset and "engineering" in xset
+    assert "No cross-node_set connections" not in xset
+
+
+@pytest.mark.asyncio
+async def test_edge_provenance_extracted_vs_derived(sample_graph_data):
+    from cognee.modules.retrieval.graph_report_retriever import GraphReportRetriever
+
+    ctx = await GraphReportRetriever(top_n=5).get_context_from_objects(
+        query="", retrieved_objects=sample_graph_data
+    )
+    prov = ctx.split("Edge Provenance")[1]
+    assert "EXTRACTED" in prov and "DERIVED" in prov
+    # Regression guard: relationship names must never masquerade as provenance.
+    assert "CONTAINS" not in prov and "UNKNOWN" not in prov
+
+
+# ---------------------------------------------------------------------------
+# Deterministic helpers
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_node_sets_reads_belongs_to_set_edges(sample_graph_data):
+    from cognee.modules.retrieval.graph_report_retriever import _resolve_node_sets
+
+    nodes, edges = sample_graph_data
+    node_type = {nid: p.get("type") for nid, p in nodes}
+    node_sets = _resolve_node_sets(nodes, edges, node_type)
+
+    assert node_sets["acme"] == {"business"}
+    assert node_sets["widget"] == {"business", "engineering"}  # bridge entity
+    assert node_sets["python"] == {"engineering"}
+
+
+def test_edge_provenance_counts(sample_graph_data):
+    from cognee.modules.retrieval.graph_report_retriever import _edge_provenance
+
+    nodes, edges = sample_graph_data
+    node_type = {nid: p.get("type") for nid, p in nodes}
+    graph = nx.DiGraph()
+    for src, tgt, rel, _ in edges:
+        if rel != "belongs_to_set":
+            graph.add_edge(src, tgt, relationship=rel)
+
+    counts = _edge_provenance(graph, node_type)
+    # produces + built_with are entity<->entity; contains + is_a are structural.
+    assert counts == {"EXTRACTED": 2, "DERIVED": 2}
+
+
+def test_rank_hubs_falls_back_to_degree_without_pagerank():
+    from cognee.modules.retrieval.graph_report_retriever import _rank_hubs
+
+    graph = nx.DiGraph()
+    graph.add_edge("a", "b")
+    graph.add_edge("a", "c")
+    node_type = {"a": "Entity", "b": "Entity", "c": "Entity"}
+    degree = dict(graph.degree())
+
+    # Empty pagerank simulates scipy-unavailable fallback.
+    hubs = _rank_hubs(graph, node_type, degree, {}, top_n=1)
+    assert hubs == ["a"]  # highest degree still wins
 
 
 # ---------------------------------------------------------------------------
@@ -122,12 +206,10 @@ async def test_completion_includes_suggested_questions(sample_graph_data):
     from cognee.modules.retrieval.graph_report_retriever import GraphReportRetriever
 
     retriever = GraphReportRetriever(top_n=3)
-    ctx = await retriever.get_context_from_objects(
-        query="", retrieved_objects=sample_graph_data
-    )
+    ctx = await retriever.get_context_from_objects(query="", retrieved_objects=sample_graph_data)
 
     mock_resp = MagicMock()
-    mock_resp.questions = ["What connects Alpha and Gamma?", "What is Beta's role?"]
+    mock_resp.questions = ["What connects Acme and Python?", "What is Widget's role?"]
 
     with patch(
         "cognee.modules.retrieval.graph_report_retriever.LLMGateway.acreate_structured_output",
@@ -137,10 +219,9 @@ async def test_completion_includes_suggested_questions(sample_graph_data):
             query="test", retrieved_objects=sample_graph_data, context=ctx
         )
 
-    assert isinstance(completion, list)
-    assert len(completion) == 1
+    assert isinstance(completion, list) and len(completion) == 1
     assert "Suggested Questions" in completion[0]
-    assert "What connects Alpha and Gamma?" in completion[0]
+    assert "What connects Acme and Python?" in completion[0]
 
 
 @pytest.mark.asyncio
@@ -148,9 +229,7 @@ async def test_llm_failure_falls_back_to_default_question(sample_graph_data):
     from cognee.modules.retrieval.graph_report_retriever import GraphReportRetriever
 
     retriever = GraphReportRetriever(top_n=3)
-    ctx = await retriever.get_context_from_objects(
-        query="", retrieved_objects=sample_graph_data
-    )
+    ctx = await retriever.get_context_from_objects(query="", retrieved_objects=sample_graph_data)
 
     with patch(
         "cognee.modules.retrieval.graph_report_retriever.LLMGateway.acreate_structured_output",
@@ -184,7 +263,6 @@ async def test_registry_maps_graph_report_to_retriever():
     )
     from cognee.modules.search.types import SearchType
 
-    # Patch graph engine so the retriever can be instantiated without a live DB
     mock_engine = AsyncMock()
     mock_engine.get_graph_data.return_value = ([], [])
 
@@ -192,8 +270,6 @@ async def test_registry_maps_graph_report_to_retriever():
         "cognee.modules.retrieval.graph_report_retriever.get_graph_engine",
         return_value=mock_engine,
     ):
-        retriever = await get_search_type_retriever_instance(
-            SearchType.GRAPH_REPORT, query_text=""
-        )
+        retriever = await get_search_type_retriever_instance(SearchType.GRAPH_REPORT, query_text="")
 
     assert isinstance(retriever, GraphReportRetriever)

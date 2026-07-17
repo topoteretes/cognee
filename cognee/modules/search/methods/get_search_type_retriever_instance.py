@@ -310,10 +310,7 @@ async def get_search_type_retriever_instance(
             },
         ),
         SearchType.CHUNKS_LEXICAL: (BM25ChunksRetriever, {"top_k": top_k}),
-        SearchType.GRAPH_REPORT: (
-            GraphReportRetriever,
-            {"top_n": top_k, "node_name": node_name},
-        ),
+        SearchType.GRAPH_REPORT: (GraphReportRetriever, {"top_n": top_k}),
         SearchType.CODING_RULES: (
             CodingRulesRetriever,
             {"rules_nodeset_name": node_name},

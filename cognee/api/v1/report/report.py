@@ -12,20 +12,19 @@ logger = get_logger("report")
 
 async def report(
     datasets: Optional[Union[str, List[str]]] = "main_dataset",
-    node_name: Optional[List[str]] = None,
-    output_path: str = "graph_report.md",
+    output_path: Optional[str] = "graph_report.md",
     top_n: int = 10,
     user: Optional[User] = None,
 ) -> str:
     """Generate a Graph Insight Report from the knowledge graph.
 
     Writes a Markdown report describing hub nodes (god nodes), surprising
-    cross-node_set connections, confidence tags on edges, and LLM-suggested
-    questions. No storage changes — reads solely via ``get_graph_data()``.
+    cross-node_set connections, edge provenance, and LLM-suggested questions.
+    No storage changes — reads solely via ``get_graph_data()``.
 
     Args:
         datasets: Dataset name(s) to analyse. Defaults to ``"main_dataset"``.
-        node_name: Optional node-name filter forwarded to the retriever.
+            The first accessible dataset determines which graph is read.
         output_path: File path for the generated ``.md`` report. Pass
             ``None`` to skip writing and only return the content string.
         top_n: Number of hub nodes and surprising connections to surface.
@@ -53,7 +52,7 @@ async def report(
         # Lazy import keeps the top-level import chain clean
         from cognee.modules.retrieval.graph_report_retriever import GraphReportRetriever
 
-        retriever = GraphReportRetriever(top_n=top_n, node_name=node_name)
+        retriever = GraphReportRetriever(top_n=top_n)
         retrieved_objects = await retriever.get_retrieved_objects(query="")
         context = await retriever.get_context_from_objects(
             query="", retrieved_objects=retrieved_objects
