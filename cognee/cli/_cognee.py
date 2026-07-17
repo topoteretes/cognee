@@ -3,8 +3,29 @@ import os
 import argparse
 import signal
 import subprocess
+import warnings
 from typing import Any, Sequence, Dict, Type, cast, List
 import click
+
+
+# aiohttp closes its ClientSession asynchronously via __del__ during
+# interpreter shutdown; when the CLI exits between the last await and the
+# event-loop teardown the finalizer emits a "Unclosed client session"
+# ResourceWarning that panics first-time users into thinking the run
+# failed. The message is not actionable in the CLI context, so suppress it
+# at the process boundary. Debug mode leaves warnings alone so contributors
+# still see the trace when they need it.
+if not any(a in ("-x", "--debug") for a in sys.argv[1:]):
+    warnings.filterwarnings(
+        "ignore",
+        message="Unclosed client session",
+        category=ResourceWarning,
+    )
+    warnings.filterwarnings(
+        "ignore",
+        message="Unclosed connector",
+        category=ResourceWarning,
+    )
 
 try:
     import rich_argparse
@@ -19,6 +40,7 @@ from cognee.cli.config import CLI_DESCRIPTION
 from cognee.cli import debug
 import cognee.cli.echo as fmt
 from cognee.cli.exceptions import CliCommandException
+from cognee.cli.remediation import find_remediation
 
 
 ACTION_EXECUTED = False
@@ -380,6 +402,13 @@ def main() -> int:
 
             # Print exception
             fmt.error(str(ex))
+
+            # Surface a prescriptive next step for known first-run failure
+            # modes between the error line and the generic docs pointer, so
+            # the actionable fix sits directly under the error it addresses.
+            hint = find_remediation(str(ex))
+            if hint:
+                fmt.note(hint)
 
             fmt.note(f"Please refer to our docs at '{docs_url}' for further assistance.")
 
