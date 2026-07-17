@@ -20,7 +20,7 @@ class LoaderInterface(ABC):
         List of file extensions this loader supports.
 
         Returns:
-            List of extensions including the dot (e.g., ['.txt', '.md'])
+            List of extensions without the leading dot (e.g., ['txt', 'md'])
         """
         pass
 

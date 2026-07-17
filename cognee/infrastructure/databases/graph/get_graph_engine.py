@@ -4,6 +4,7 @@ import inspect
 import os
 from numbers import Number
 
+from cognee.infrastructure.databases.dataset_queue.pinning import dataset_queue_pin_predicate
 from cognee.infrastructure.databases.utils.closing_lru_cache import closing_lru_cache
 from cognee.shared.lru_cache import DATABASE_MAX_LRU_CACHE_SIZE
 from cognee.shared.logging_utils import get_logger
@@ -78,19 +79,102 @@ class _GraphEngineHandle:
     For adapters that expose ``initialize()`` (Postgres, Neo4j), the handle
     tracks which engine proxy was last initialized and re-runs the idempotent
     schema setup when the underlying engine changes.
+
+    Known limitation (subprocess + exclusive file lock, e.g. Ladybug): the cache
+    leases a single shared proxy per entry, so two concurrently-held handles for
+    the same DB path pin the *same* proxy. If that entry is evicted while an
+    idle second handle keeps holding the proxy, the old worker's close stays
+    deferred (it does not release the file lock) until that holder lets go or
+    is garbage-collected. Creators for the same path deliberately do NOT wait
+    for such a deferred close — an idle holder can pin it indefinitely, and
+    waiting on it from a handle's own re-resolution self-deadlocks (this hung
+    CI) — so a fresh engine relies on the worker's open-retry
+    (``SUBPROCESS_OPEN_LOCK_RETRIES``) for the overlap. Once a close is
+    actually in flight, creators wait for it deterministically; the primary
+    multi-tenant teardown path (``dataset_queue._teardown_subprocess_engines``)
+    also ``await``s ``engine.close()`` to completion before any re-creation.
     """
 
-    __slots__ = ("_config", "_last_initialized_id")
+    __slots__ = ("_config", "_last_initialized_id", "_pinned")
 
     def __init__(self, config: dict):
         object.__setattr__(self, "_config", config)
         object.__setattr__(self, "_last_initialized_id", None)
+        # Pinned leased engine proxy. Holding it avoids re-entering the cache on
+        # every attribute access (and the create-vs-close race that re-entry
+        # caused). It is dropped + re-resolved once the pin is no longer the
+        # live cache entry (see ``_pin_is_live``) so prune/delete eviction still
+        # recovers a fresh engine instead of keeping an evicted DB worker alive.
+        object.__setattr__(self, "_pinned", None)
+
+    @staticmethod
+    def _pin_is_live(engine) -> bool:
+        """Whether a pinned engine is still the live cached value and safe to
+        reuse. A leased proxy whose entry was evicted must be released so its
+        deferred close can run (otherwise a pinned handle would keep an evicted
+        Ladybug worker alive holding the file lock, blocking a new worker)."""
+        active = getattr(engine, "_leased_entry_active", None)
+        if active is not None:
+            try:
+                if not active():
+                    return False
+            except Exception:
+                # ``_leased_entry_active`` is two attribute reads and should
+                # never raise; if it does, surface it — then treat the pin as
+                # stale, which safely re-resolves through the cache.
+                logger.warning(
+                    "Unexpected error while checking pinned engine liveness", exc_info=True
+                )
+                return False
+        # Subprocess adapters latch ``_permanently_closed`` on close.
+        if getattr(engine, "_permanently_closed", False):
+            return False
+        return True
+
+    def _release_stale_pin(self, pinned) -> None:
+        """Drop the stale pinned proxy BEFORE re-resolving a replacement.
+
+        Critical for the lock race: the pinned proxy is (typically) the last
+        reference keeping an evicted adapter alive. Releasing it lets the
+        deferred close start — and a subprocess adapter's close runs off-loop,
+        releasing the on-disk file lock — *before* a new worker opens the same
+        path. Holding the pin across the re-resolution would keep the old worker
+        alive and the new one would fail to take the lock.
+        """
+        object.__setattr__(self, "_pinned", None)
+        del pinned
 
     def _engine(self):
-        return create_graph_engine(**self._config)
+        """Synchronous resolution used on the hot attribute-access path. Reuses
+        the pin when live; otherwise drops it and re-resolves through the (sync)
+        cache. A mid-flow re-resolution can't await an in-flight close — the
+        off-loop close + worker open-retry backstop cover that residual race."""
+        pinned = self._pinned
+        if pinned is not None and self._pin_is_live(pinned):
+            return pinned
+        if pinned is not None:
+            self._release_stale_pin(pinned)
+            pinned = None
+        engine = create_graph_engine(**self._config)
+        object.__setattr__(self, "_pinned", engine)
+        return engine
+
+    async def _aengine(self):
+        """Async resolution used at initialization. Goes through the cache's
+        async acquisition path so it waits for any in-flight close of the same
+        key before constructing a new engine + pinning it."""
+        pinned = self._pinned
+        if pinned is not None and self._pin_is_live(pinned):
+            return pinned
+        if pinned is not None:
+            self._release_stale_pin(pinned)
+            pinned = None
+        engine = await acreate_graph_engine(**self._config)
+        object.__setattr__(self, "_pinned", engine)
+        return engine
 
     async def _ensure_initialized(self):
-        engine = self._engine()
+        engine = await self._aengine()
         engine_id = id(engine)
         if engine_id != self._last_initialized_id and hasattr(engine, "initialize"):
             await engine.initialize()
@@ -115,6 +199,47 @@ async def get_graph_engine() -> GraphDBInterface:
     return handle
 
 
+# def _make_pghybrid_adapter():
+#     """Build the uncached Postgres hybrid adapter used when
+#     ``USE_UNIFIED_PROVIDER=pghybrid``. Not cached — the caller owns it, matching
+#     the original inline behavior."""
+#     from .postgres.adapter import PostgresAdapter
+#     from cognee.infrastructure.databases.relational.get_relational_engine import (
+#         get_relational_engine,
+#     )
+#
+#     return PostgresAdapter(connection_string=get_relational_engine().db_uri)
+
+
+def _resolve_graph_engine_args(params: dict) -> tuple:
+    """Normalize the engine parameters and return the positional argument tuple
+    passed to ``_create_graph_engine``.
+
+    Shared by the sync (:func:`create_graph_engine`) and async
+    (:func:`acreate_graph_engine`) entry points so both produce the *identical*
+    cache key (the positional tuple) — and so it matches the key built by
+    ``evict_graph_engine`` / ``is_graph_engine_cached``.
+    """
+    normalized = _normalize_optional_create_graph_engine_params(params)
+    return (
+        _normalize_graph_database_provider(params.get("graph_database_provider")),
+        params.get("graph_file_path"),
+        normalized["graph_database_url"],
+        normalized["graph_database_name"],
+        normalized["graph_database_username"],
+        normalized["graph_database_password"],
+        normalized["graph_database_host"],
+        normalized["graph_database_allow_anonymous"],
+        normalized["graph_database_port"],
+        normalized["graph_database_key"],
+        normalized["graph_dataset_database_handler"],
+        normalized["graph_database_subprocess_enabled"],
+        normalized["kuzu_num_threads"],
+        normalized["kuzu_buffer_pool_size"],
+        normalized["kuzu_max_db_size"],
+    )
+
+
 def create_graph_engine(
     graph_database_provider,
     graph_file_path,
@@ -136,55 +261,25 @@ def create_graph_engine(
     Wrapper function to call create graph engine with caching.
     For a detailed description, see _create_graph_engine.
     """
-
-    normalized_optional_params = _normalize_optional_create_graph_engine_params(locals())
-    graph_database_url = normalized_optional_params["graph_database_url"]
-    graph_database_provider = _normalize_graph_database_provider(graph_database_provider)
-    graph_database_name = normalized_optional_params["graph_database_name"]
-    graph_database_username = normalized_optional_params["graph_database_username"]
-    graph_database_password = normalized_optional_params["graph_database_password"]
-    graph_database_host = normalized_optional_params["graph_database_host"]
-    graph_database_allow_anonymous = normalized_optional_params["graph_database_allow_anonymous"]
-    graph_database_port = normalized_optional_params["graph_database_port"]
-    graph_database_key = normalized_optional_params["graph_database_key"]
-    graph_dataset_database_handler = normalized_optional_params["graph_dataset_database_handler"]
-    # The Kuzu/subprocess params also went through ``_normalize_optional_*``;
-    # reassign so callers passing ``None`` see the function-default applied
-    # (otherwise ``None`` would flow into the cache key and the factory).
-    graph_database_subprocess_enabled = normalized_optional_params[
-        "graph_database_subprocess_enabled"
-    ]
-    kuzu_num_threads = normalized_optional_params["kuzu_num_threads"]
-    kuzu_buffer_pool_size = normalized_optional_params["kuzu_buffer_pool_size"]
-    kuzu_max_db_size = normalized_optional_params["kuzu_max_db_size"]
-
     # Check USE_UNIFIED_PROVIDER outside the cache so it's always re-read
-    unified_provider = os.environ.get("USE_UNIFIED_PROVIDER", "")
-    if unified_provider == "pghybrid":
-        from .postgres.adapter import PostgresAdapter
-        from cognee.infrastructure.databases.relational.get_relational_engine import (
-            get_relational_engine,
-        )
+    # if os.environ.get("USE_UNIFIED_PROVIDER", "") == "pghybrid":
+    #     return _make_pghybrid_adapter()
 
-        return PostgresAdapter(connection_string=get_relational_engine().db_uri)
+    return _create_graph_engine(*_resolve_graph_engine_args(locals()))
 
-    return _create_graph_engine(
-        graph_database_provider,
-        graph_file_path,
-        graph_database_url,
-        graph_database_name,
-        graph_database_username,
-        graph_database_password,
-        graph_database_host,
-        graph_database_allow_anonymous,
-        graph_database_port,
-        graph_database_key,
-        graph_dataset_database_handler,
-        graph_database_subprocess_enabled,
-        kuzu_num_threads,
-        kuzu_buffer_pool_size,
-        kuzu_max_db_size,
-    )
+
+async def acreate_graph_engine(**kwargs):
+    """Async counterpart of :func:`create_graph_engine` that waits for any
+    in-flight close of the same cache key before constructing a new engine.
+
+    Used by ``get_graph_engine``'s handle at initialization so a freshly evicted
+    subprocess engine's worker has fully exited (releasing its file lock) before
+    a new worker opens the same DB path.
+    """
+    # if os.environ.get("USE_UNIFIED_PROVIDER", "") == "pghybrid":
+    #     return _make_pghybrid_adapter()
+
+    return await _create_graph_engine.acall(*_resolve_graph_engine_args(kwargs))
 
 
 def evict_graph_engine(**kwargs) -> bool:
@@ -218,6 +313,43 @@ def evict_graph_engine(**kwargs) -> bool:
     )
 
 
+def evict_graph_engines_for_database(graph_database_name: str) -> int:
+    """Evict every cached graph engine bound to *graph_database_name*.
+
+    The same per-dataset database can be cached under multiple keys: the
+    dataset-handler creation key and the pipeline's context-config key differ
+    in ``graph_file_path`` and ``graph_dataset_database_handler``, so key-exact
+    ``evict_graph_engine`` misses the pipeline's entry and leaves an engine
+    whose connection pool died with the dropped database. Per-dataset database
+    names are dataset UUIDs, so matching the name against key fields cannot
+    collide with other entries.
+
+    Returns the number of evicted entries.
+    """
+    if not graph_database_name:
+        raise ValueError("graph_database_name must be a non-empty database name")
+    return _create_graph_engine.cache_evict_matching(graph_database_name=graph_database_name)
+
+
+async def aevict_graph_engines_for_database(graph_database_name: str) -> int:
+    """Evict every cached graph engine bound to *graph_database_name* and wait
+    until their IN-FLIGHT closes have completed (workers exited, file locks
+    released). Use before removing the database's files so a teardown that is
+    already running cannot race the removal.
+
+    A close still deferred behind a live caller proxy (an idle engine handle)
+    is NOT waited on — see the ``closing_lru_cache`` module docstring. In that
+    case files are removed under an engine that closes later; on POSIX the
+    unlinked files stay valid for the holder and the eventual close writes to
+    nowhere, which is acceptable for a dataset being deleted.
+
+    Returns the number of evicted entries.
+    """
+    evicted = evict_graph_engines_for_database(graph_database_name)
+    await _create_graph_engine.cache_await_closed(graph_database_name=graph_database_name)
+    return evicted
+
+
 def is_graph_engine_cached(**kwargs) -> bool:
     """Check whether a graph engine entry exists in the cache without creating."""
     normalized = _normalize_optional_create_graph_engine_params(kwargs)
@@ -241,7 +373,10 @@ def is_graph_engine_cached(**kwargs) -> bool:
     )
 
 
-@closing_lru_cache(maxsize=DATABASE_MAX_LRU_CACHE_SIZE)
+@closing_lru_cache(
+    maxsize=DATABASE_MAX_LRU_CACHE_SIZE,
+    pinned_predicate=dataset_queue_pin_predicate("graph_database_name"),
+)
 def _create_graph_engine(
     graph_database_provider,
     graph_file_path,

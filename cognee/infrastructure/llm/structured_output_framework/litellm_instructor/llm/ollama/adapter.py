@@ -20,6 +20,7 @@ from cognee.infrastructure.llm.retry_config import (
 )
 
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
+from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError, is_budget_exhausted_error
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.llm_interface import (
     LLMInterface,
 )
@@ -94,6 +95,7 @@ class OllamaAPIAdapter(LLMInterface):
                 litellm.exceptions.NotFoundError,
                 litellm.exceptions.AuthenticationError,
                 asyncio.CancelledError,
+                LLMPaymentRequiredError,
             )
         ),
         before_sleep=before_sleep_log(logger, logging.WARNING),
@@ -138,25 +140,30 @@ class OllamaAPIAdapter(LLMInterface):
                 )
             return response.choices[0].message.content or ""
 
-        async with llm_rate_limiter_context_manager():
-            response = await self.aclient.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": system_prompt,
-                    },
-                    {
-                        "role": "user",
-                        "content": f"{text_input}",
-                    },
-                ],
-                max_retries=2,
-                response_model=response_model,
-                **merged_kwargs,
-            )
+        try:
+            async with llm_rate_limiter_context_manager():
+                response = await self.aclient.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": system_prompt,
+                        },
+                        {
+                            "role": "user",
+                            "content": f"{text_input}",
+                        },
+                    ],
+                    max_retries=2,
+                    response_model=response_model,
+                    **merged_kwargs,
+                )
 
-        return response
+            return response
+        except Exception as e:
+            if is_budget_exhausted_error(e):
+                raise LLMPaymentRequiredError() from e
+            raise
 
     @observe(as_type="transcription")
     @retry(
@@ -255,7 +262,7 @@ class OllamaAPIAdapter(LLMInterface):
                 }
             ],
             max_completion_tokens=300,
-        )  # ty:ignore[no-matching-overload]
+        )
 
         # Ensure response is valid before accessing .choices[0].message.content
         if (
@@ -265,4 +272,8 @@ class OllamaAPIAdapter(LLMInterface):
         ):
             raise ValueError("Image transcription failed. No response received.")
 
-        return response.choices[0].message.content
+        content = response.choices[0].message.content
+        if content is None:
+            raise ValueError("Image transcription failed. No content returned.")
+
+        return content
