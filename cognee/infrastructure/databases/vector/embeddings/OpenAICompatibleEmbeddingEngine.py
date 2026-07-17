@@ -113,7 +113,7 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
     @retry(
         stop=stop_after_delay(128),
         wait=wait_exponential_jitter(2, 128),
-        retry=retry_if_not_exception_type((ValueError, asyncio.CancelledError)),
+        retry=retry_if_not_exception_type((ValueError, EmbeddingException, asyncio.CancelledError)),
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
