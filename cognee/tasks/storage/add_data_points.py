@@ -22,6 +22,7 @@ from cognee.modules.graph.utils import (
 )
 from .index_data_points import index_data_points
 from .index_graph_edges import index_graph_edges
+from .provenance_lineage import build_provenance_lineage
 from cognee.modules.engine.models import Triplet
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.storage.exceptions import (
@@ -86,6 +87,14 @@ async def add_data_points(
         edges.extend(result_edges)
 
     nodes, edges = deduplicate_nodes_and_edges(nodes, edges)
+
+    # Add provenance lineage edges so every node is traceable to its source
+    # Document and up to its Dataset. This runs before ensure_default_edge_properties
+    # so the new edges get the same default properties, and before the upsert block
+    # so they are written and tracked for deletion through the existing ledger path.
+    lineage_nodes, lineage_edges = build_provenance_lineage(nodes, dataset, data_item)
+    nodes.extend(lineage_nodes)
+    edges.extend(lineage_edges)
 
     edges = ensure_default_edge_properties(edges, nodes=nodes)
     custom_edges = (

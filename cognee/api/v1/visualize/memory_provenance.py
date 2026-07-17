@@ -100,6 +100,10 @@ class MemoryPayload(TypedDict, total=False):
     nodes: List[Tuple[str, Dict[str, Any]]]
     edges: List[Tuple[str, str, str, Dict[str, Any]]]
     links: List[Dict[str, Any]]
+    # Maps a memory node id to an actor node id it should collapse onto. Used to
+    # fold the lineage DatasetNode onto its actor "dataset:<id>" node so the
+    # provenance lineage attaches to the ownership graph instead of duplicating it.
+    aliases: Dict[str, str]
 
 
 def build_provenance_graph(
@@ -210,13 +214,19 @@ def build_provenance_graph(
 
     # ── Optional memory layer ────────────────────────────────────────
     if memory:
+        aliases = memory.get("aliases") or {}
         for node_id, props in memory.get("nodes") or []:
             nid = str(node_id)
+            # An aliased node collapses onto an existing actor node, so it is not
+            # added as its own memory node.
+            if nid in aliases:
+                continue
             if nid not in nodes:
                 nodes[nid] = Node(nid, dict(props))
         for source, target, relation, eprops in memory.get("edges") or []:
-            s, t = str(source), str(target)
-            if s in nodes and t in nodes:
+            s = aliases.get(str(source), str(source))
+            t = aliases.get(str(target), str(target))
+            if s in nodes and t in nodes and s != t:
                 key = (s, t, relation)
                 if key not in seen_edges:
                     seen_edges.add(key)
@@ -337,6 +347,7 @@ async def _read_memory_relational(
     nodes: List[Tuple[str, Dict[str, Any]]] = []
     edges: List[Tuple[str, str, str, Dict[str, Any]]] = []
     links: List[Dict[str, Any]] = []
+    aliases: Dict[str, str] = {}
     node_ids: set = set()
     try:
         db_engine = get_relational_engine()
@@ -352,6 +363,13 @@ async def _read_memory_relational(
                 nodes.append(
                     Node(node_id, {"type": row.type or "Node", "name": row.label or str(row.slug)})
                 )
+                # The lineage DatasetNode represents the same dataset as the actor
+                # "dataset:<id>" node, so collapse it onto that node. It stays in
+                # node_ids above so its in_dataset edge survives the scope filter,
+                # and it has no source file, so no "mentions" link is emitted.
+                if row.type == "DatasetNode" and row.dataset_id is not None:
+                    aliases[node_id] = f"dataset:{row.dataset_id}"
+                    continue
                 if row.data_id is not None:
                     links.append(
                         {
@@ -374,7 +392,7 @@ async def _read_memory_relational(
 
     if not nodes:
         return None
-    return {"nodes": nodes, "edges": edges, "links": links}
+    return {"nodes": nodes, "edges": edges, "links": links, "aliases": aliases}
 
 
 async def _read_memory_graph_provenance(
