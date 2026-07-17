@@ -3452,7 +3452,11 @@ class LadybugAdapter(GraphDBInterface):
             return [{"events": events}]
 
         for node in result[0][0]:
-            props = json.loads(node["properties"])
+            # ``properties`` is a raw JSON string that can be None/empty; guard
+            # the parse so a single Event node without properties doesn't crash
+            # the whole TEMPORAL search (every other site here guards it too).
+            raw_properties = node.get("properties")
+            props = json.loads(raw_properties) if raw_properties else {}
 
             event = {
                 "id": node["id"],
