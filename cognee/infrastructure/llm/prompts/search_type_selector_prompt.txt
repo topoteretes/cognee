@@ -88,6 +88,14 @@ Here are the available `SearchType` tools and their specific functions:
   - Performing advanced graph operations like filtering and aggregating data using natural language.
   - Asking precise, database-style questions without needing to write Cypher.
 
+* **`GRAPH_AGGREGATION`**: The `GRAPH_AGGREGATION` search type answers analytical questions over the graph structure (counting, grouping and ranking) without raw Cypher.
+
+  **Best for:**
+
+  - Counting entities of a given type ("how many open issues are there?").
+  - Grouping counts by entity type ("count entities by type").
+  - Ranking entities by connectivity ("which entity is most connected?").
+
 **Examples:**
 
 Query: "Summarize the key findings from these research papers"
@@ -119,6 +127,15 @@ Response: `CYPHER`
 
 Query: "Get all nodes connected to John"
 Response: `NATURAL_LANGUAGE`
+
+Query: "How many open issues are there?"
+Response: `GRAPH_AGGREGATION`
+
+Query: "Count entities by type"
+Response: `GRAPH_AGGREGATION`
+
+Query: "Which entity is the most connected?"
+Response: `GRAPH_AGGREGATION`
 
 
 
