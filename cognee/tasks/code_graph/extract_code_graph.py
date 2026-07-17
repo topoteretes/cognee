@@ -154,6 +154,20 @@ def map_facts_to_data_points(
     return list(repositories.values()) + entities
 
 
+def _short_target_names(name: str) -> set:
+    """Unqualified forms of a fact name, e.g. 'app/db.Database' -> {'Database', 'db.Database'}.
+
+    enola may reference a relation target by its bare name (e.g. an
+    ``instantiates`` relation targeting ``Database`` while the symbol fact is
+    named ``app/db.Database``), so edge resolution needs a suffix index.
+    """
+    forms = set()
+    for form in (name.rsplit(".", 1)[-1], name.rsplit("/", 1)[-1]):
+        if form and form != name:
+            forms.add(form)
+    return forms
+
+
 def build_code_graph_edges(
     facts: List[dict],
     repo_path: Optional[Union[str, Path]] = None,
@@ -174,6 +188,7 @@ def build_code_graph_edges(
 
     valid_facts = []
     name_index: Dict[str, set] = {}
+    short_name_index: Dict[str, set] = {}
     fact_index: Dict[Tuple[str, str, str], dict] = {}
     module_index: Dict[Tuple[str, str], dict] = {}
     module_path_repos: Dict[str, set[str]] = {}
@@ -185,6 +200,8 @@ def build_code_graph_edges(
         repo = _fact_repo(fact, fallback_repo)
         valid_facts.append((fact, repo))
         name_index.setdefault(name, set()).add((repo, kind))
+        for short_form in _short_target_names(name):
+            short_name_index.setdefault(short_form, set()).add((repo, kind, name))
         fact_index.setdefault((repo, kind, name), fact)
         if kind == "module":
             module_index.setdefault((repo, name), fact)
@@ -202,16 +219,19 @@ def build_code_graph_edges(
         source_repo: str,
         allowed_repos: Optional[set[str]] = None,
     ) -> Optional[Tuple[str, str, str]]:
-        candidates = set(name_index.get(target_name, ()))
+        candidates = {(repo, kind, target_name) for repo, kind in name_index.get(target_name, ())}
+        if not candidates:
+            # No fact carries this exact name; fall back to unambiguous
+            # suffix matches so bare-name targets (e.g. 'Database' for
+            # 'app/db.Database') still resolve.
+            candidates = set(short_name_index.get(target_name, ()))
         if allowed_repos is not None:
             candidates = {candidate for candidate in candidates if candidate[0] in allowed_repos}
         same_repo = {candidate for candidate in candidates if candidate[0] == source_repo}
         if len(same_repo) == 1:
-            repo, kind = next(iter(same_repo))
-            return repo, kind, target_name
+            return next(iter(same_repo))
         if len(candidates) == 1:
-            repo, kind = next(iter(candidates))
-            return repo, kind, target_name
+            return next(iter(candidates))
         return None
 
     def _add_edge(
