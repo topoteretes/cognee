@@ -51,6 +51,7 @@ class GraphCompletionRetriever(BaseRetriever):
         node_name: Optional[List[str]] = None,
         node_name_filter_operator: str = "OR",
         wide_search_top_k: Optional[int] = 100,
+        wide_search_max_distance: Optional[float] = 1.5,
         triplet_distance_penalty: Optional[float] = 6.5,
         feedback_influence: float = get_base_config().default_feedback_influence,
         session_id: Optional[str] = None,
@@ -67,6 +68,7 @@ class GraphCompletionRetriever(BaseRetriever):
         self.system_prompt = system_prompt
         self.top_k = top_k if top_k is not None else 5
         self.wide_search_top_k = wide_search_top_k
+        self.wide_search_max_distance = wide_search_max_distance
         self.node_type = node_type
         self.node_name = node_name
         self.node_name_filter_operator = node_name_filter_operator
@@ -184,6 +186,7 @@ class GraphCompletionRetriever(BaseRetriever):
             node_name=self.node_name,
             node_name_filter_operator=self.node_name_filter_operator,
             wide_search_top_k=self.wide_search_top_k,
+            wide_search_max_distance=self.wide_search_max_distance,
             triplet_distance_penalty=self.triplet_distance_penalty,
             feedback_influence=self.feedback_influence,
             unified_engine=unified_engine,

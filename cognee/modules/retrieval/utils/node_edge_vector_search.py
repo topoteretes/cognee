@@ -99,13 +99,21 @@ class NodeEdgeVectorSearch:
             for collection_results in self.node_distances.values()
         )
 
-    def extract_relevant_node_ids(self) -> List[str]:
-        """Extracts unique node IDs from search results."""
+    def extract_relevant_node_ids(self, max_distance: Optional[float] = None) -> List[str]:
+        """Extracts unique node IDs from search results.
+
+        Args:
+            max_distance: If set, only include nodes whose distance is within this threshold.
+        """
         if self.query_list_length is not None:
             return []
         relevant_node_ids = set()
         for scored_results in self.node_distances.values():
             for scored_node in scored_results:
+                if max_distance is not None:
+                    distance = getattr(scored_node, "distance", None)
+                    if distance is not None and distance > max_distance:
+                        continue
                 node_id = getattr(scored_node, "id", None)
                 if node_id:
                     relevant_node_ids.add(str(node_id))
