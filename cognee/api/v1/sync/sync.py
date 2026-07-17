@@ -607,7 +607,7 @@ async def _check_hashes_diff(
         ssl_context = create_secure_ssl_context()
         connector = aiohttp.TCPConnector(ssl=ssl_context)
         async with aiohttp.ClientSession(connector=connector) as session:
-            async with session.post(url, json=payload.dict(), headers=headers) as response:
+            async with session.post(url, json=payload.model_dump(), headers=headers) as response:
                 if response.status == 200:
                     data = await response.json()
                     missing_response = CheckHashesDiffResponse(**data)
@@ -839,7 +839,7 @@ async def _prune_cloud_dataset(
         ssl_context = create_secure_ssl_context()
         connector = aiohttp.TCPConnector(ssl=ssl_context)
         async with aiohttp.ClientSession(connector=connector) as session:
-            async with session.put(url, json=payload.dict(), headers=headers) as response:
+            async with session.put(url, json=payload.model_dump(), headers=headers) as response:
                 if response.status == 200:
                     data = await response.json()
                     deleted_entries = data.get("deleted_database_entries", 0)

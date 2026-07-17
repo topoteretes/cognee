@@ -7,6 +7,6 @@ class PipelineRunFailedError(CogneeSystemError):
         self,
         message: str = "Pipeline run failed.",
         name: str = "PipelineRunFailedError",
-        status_code: int = status.HTTP_422_UNPROCESSABLE_CONTENT,
+        status_code: int = status.HTTP_422_UNPROCESSABLE_ENTITY,
     ):
         super().__init__(message, name, status_code)
