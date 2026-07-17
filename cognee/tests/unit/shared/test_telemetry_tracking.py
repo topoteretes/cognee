@@ -1,7 +1,10 @@
 """Unit tests for telemetry identity helpers."""
 
+import asyncio
 from collections.abc import Coroutine
 from typing import Any
+
+import pytest
 
 from cognee.shared import utils
 from cognee.shared.utils import _get_api_key_tracking_id, send_telemetry
@@ -46,9 +49,14 @@ def test_send_telemetry_includes_api_key_tracking_id(monkeypatch):
 
         return noop()
 
+    class FakeTask:
+        def add_done_callback(self, callback) -> None:
+            callback(self)
+
     class CapturingLoop:
-        def create_task(self, coroutine: Coroutine[Any, Any, None]) -> None:
+        def create_task(self, coroutine: Coroutine[Any, Any, None]) -> "FakeTask":
             coroutine.close()
+            return FakeTask()
 
     monkeypatch.setenv("ENV", "prod")
     monkeypatch.delenv("TELEMETRY_DISABLED", raising=False)
@@ -70,3 +78,39 @@ def test_send_telemetry_includes_api_key_tracking_id(monkeypatch):
     assert payload["user_properties"]["api_key_hash"] == tracking_id
     assert "12345" not in str(payload)
     assert "provider-prefix-secret" not in str(payload)
+
+
+@pytest.mark.asyncio
+async def test_send_telemetry_anchors_task_against_gc(monkeypatch):
+    """The fire-and-forget telemetry task must be strongly referenced until
+    it completes, otherwise asyncio's weak reference lets the gc collect it
+    mid-run (#3231)."""
+    monkeypatch.setenv("ENV", "prod")
+    monkeypatch.delenv("TELEMETRY_DISABLED", raising=False)
+    monkeypatch.setattr(utils, "get_anonymous_id", lambda: "anonymous-test-id")
+    monkeypatch.setattr(utils, "get_persistent_id", lambda: "persistent-test-id")
+
+    async def slow_send(payload: dict[str, Any]) -> None:
+        await asyncio.sleep(0.01)
+
+    monkeypatch.setattr(utils, "_send_telemetry_request", slow_send)
+
+    loop = asyncio.get_running_loop()
+    real_create_task = loop.create_task
+    captured: dict[str, asyncio.Task] = {}
+
+    def spy_create_task(coro, *args, **kwargs):
+        task = real_create_task(coro, *args, **kwargs)
+        captured["task"] = task
+        return task
+
+    monkeypatch.setattr(loop, "create_task", spy_create_task)
+
+    send_telemetry("test_event", "user-123")
+
+    task = captured["task"]
+    assert task in utils._TELEMETRY_TASKS
+
+    await task
+
+    assert task not in utils._TELEMETRY_TASKS
