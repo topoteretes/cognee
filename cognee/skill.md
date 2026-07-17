@@ -561,7 +561,26 @@ await cognee.search(
 Use visualization when the user wants to inspect or present the graph.
 
 ```python
+# Default: bounded subgraph (session seeds, else highest-degree nodes)
 await cognee.visualize_graph("/path/to/output.html")
+
+# Query-seeded subgraph
+await cognee.visualize_graph("/path/to/output.html", query="What relates to Python?")
+
+# Explicit seeds
+await cognee.visualize_graph("/path/to/output.html", seed_node_ids=["node-id-1"])
+
+# Legacy full-graph opt-in
+await cognee.visualize_graph("/path/to/output.html", full=True)
+
+# Subgraph behind a recall/search result
+await cognee.visualize_search_subgraph(recall_results, "/path/to/output.html")
+```
+
+Default caps: `neighborhood_depth=2`, `neighborhood_seed_top_k=10`, `max_nodes=500`.
+See `examples/python/subgraph_visualization_demo.py` for a deterministic offline demo.
+
+```python
 await cognee.start_visualization_server(port=8080)
 await cognee.start_ui()
 ```

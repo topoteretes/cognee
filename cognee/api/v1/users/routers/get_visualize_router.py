@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -45,18 +45,49 @@ def get_visualize_router() -> APIRouter:
             ),
             examples=[""],
         ),
+        full: bool = Query(
+            False,
+            description="When true, render the entire graph instead of a bounded subgraph.",
+        ),
+        query: Optional[str] = Query(
+            None,
+            description="Optional query string; vector hits seed the bounded subgraph.",
+        ),
+        seed_node_ids: Optional[List[str]] = Query(
+            None,
+            description="Explicit seed node IDs for subgraph neighborhood expansion.",
+        ),
+        neighborhood_depth: int = Query(
+            2,
+            ge=1,
+            description="k-hop neighborhood depth for subgraph expansion (default: 2).",
+        ),
+        neighborhood_seed_top_k: int = Query(
+            10,
+            ge=1,
+            description="Maximum number of seed nodes (default: 10).",
+        ),
+        max_nodes: int = Query(
+            500,
+            ge=1,
+            description="Hard cap on rendered nodes after expansion (default: 500).",
+        ),
         user: User = Depends(get_authenticated_user),
     ):
         """
         Generate an HTML visualization of the dataset's knowledge graph.
 
-        This endpoint creates an interactive HTML visualization of the knowledge graph
-        for a specific dataset. The visualization displays nodes and edges representing
-        entities and their relationships, allowing users to explore the graph structure
-        visually.
+        By default renders a bounded subgraph around relevant seed nodes. Pass
+        ``full=true`` to render the entire graph (legacy behavior).
 
         ## Query Parameters
         - **dataset_id** (UUID): The unique identifier of the dataset to visualize
+        - **full** (bool): Render the full graph when true
+        - **query** (str): Query string to seed the subgraph via vector search
+        - **seed_node_ids** (list[str]): Explicit seed node IDs
+        - **neighborhood_depth** (int): k-hop expansion depth (default 2)
+        - **neighborhood_seed_top_k** (int): Max seeds (default 10)
+        - **max_nodes** (int): Node cap after expansion (default 500)
 
         ## Response
         Returns an HTML page containing the interactive graph visualization.
@@ -75,6 +106,7 @@ def get_visualize_router() -> APIRouter:
             additional_properties={
                 "endpoint": "GET /v1/visualize",
                 "dataset_id": str(dataset_id),
+                "full": full,
                 "cognee_version": cognee_version,
             },
         )
@@ -85,7 +117,16 @@ def get_visualize_router() -> APIRouter:
             # Verify user has permission to read dataset
             dataset = await get_authorized_existing_datasets([dataset_id], "read", user)
 
-            html_visualization = await visualize_graph(dataset=dataset[0].id, user=user)
+            html_visualization = await visualize_graph(
+                dataset=dataset[0].id,
+                user=user,
+                full=full,
+                query=query,
+                seed_node_ids=seed_node_ids,
+                neighborhood_depth=neighborhood_depth,
+                neighborhood_seed_top_k=neighborhood_seed_top_k,
+                max_nodes=max_nodes,
+            )
             return HTMLResponse(html_visualization)
 
         except Exception as error:

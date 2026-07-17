@@ -96,6 +96,47 @@ async def _list_recent_session_ids(user_uuid, limit: int) -> List[str]:
     return [str(row.session_id) for row in rows]
 
 
+async def get_latest_session_seed_node_ids(
+    user=None,
+    session_ids: Optional[List[str]] = None,
+    max_sessions: int = MAX_SESSIONS_SCANNED,
+) -> List[str]:
+    """Return node IDs from the most recent QA entry that has graph provenance."""
+    try:
+        from cognee.infrastructure.session.get_session_manager import get_session_manager
+        from cognee.modules.users.methods import get_default_user
+
+        if user is None:
+            user = await get_default_user()
+        user_id = str(user.id)
+
+        session_manager = get_session_manager()
+        if not session_manager.is_available:
+            return []
+
+        if session_ids is None:
+            try:
+                session_ids = await _list_recent_session_ids(user.id, max_sessions)
+            except Exception:  # noqa: BLE001 — lifecycle table may not exist
+                return []
+
+        latest_ids: List[str] = []
+        for session_id in session_ids[:max_sessions]:
+            entries = await session_manager.get_session(user_id=user_id, session_id=session_id)
+            if not isinstance(entries, list):
+                continue
+            for entry in reversed(entries):
+                used = getattr(entry, "used_graph_element_ids", None) or {}
+                node_ids = list(used.get("node_ids") or [])
+                if node_ids:
+                    latest_ids = [str(node_id) for node_id in node_ids]
+                    return latest_ids
+        return latest_ids
+    except Exception as error:  # noqa: BLE001 — seed lookup must not break visualization
+        logger.debug("Session seed lookup failed: %s", error)
+        return []
+
+
 async def collect_session_events(
     user=None,
     session_ids: Optional[List[str]] = None,
