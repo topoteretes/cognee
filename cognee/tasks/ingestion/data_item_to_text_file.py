@@ -1,8 +1,6 @@
 import os
 from urllib.parse import urlparse
-from typing import Any, List, Tuple
-from pathlib import Path
-import tempfile
+from typing import Any, Tuple
 
 from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface
 from cognee.modules.ingestion.exceptions import IngestionError
@@ -24,15 +22,6 @@ class SaveDataSettings(BaseSettings):
 settings = SaveDataSettings()
 
 
-async def pull_from_s3(file_path, destination_file) -> None:
-    async with open_data_file(file_path) as file:
-        while True:
-            chunk = file.read(8192)
-            if not chunk:
-                break
-            destination_file.write(chunk)
-
-
 async def data_item_to_text_file(
     data_item_path: str,
     preferred_loaders: dict[str, dict[str, Any]] = None,
@@ -42,16 +31,9 @@ async def data_item_to_text_file(
 
         # data is s3 file path
         if parsed_url.scheme == "s3":
-            # TODO: Rework this to work with file streams and not saving data to temp storage
-            # Note: proper suffix information is needed for OpenAI to handle mp3 files
-            path_info = Path(parsed_url.path)
-            with tempfile.NamedTemporaryFile(mode="wb", suffix=path_info.suffix) as temp_file:
-                await pull_from_s3(data_item_path, temp_file)
-                temp_file.flush()  # Data needs to be saved to local storage
-                loader = get_loader_engine()
-                return await loader.load_file(temp_file.name, preferred_loaders), loader.get_loader(
-                    temp_file.name, preferred_loaders
-                )
+            loader = get_loader_engine()
+            async with open_data_file(data_item_path, mode="rb") as file:
+                return await loader.load_file_stream(file, data_item_path, preferred_loaders)
 
         # data is local file path
         elif parsed_url.scheme == "file":

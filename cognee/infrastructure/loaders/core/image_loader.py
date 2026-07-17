@@ -1,5 +1,5 @@
 import os
-from typing import Any
+from typing import Any, BinaryIO
 
 from cognee.infrastructure.files.storage import get_file_storage, get_storage_config
 from cognee.infrastructure.files.utils.get_file_metadata import get_file_metadata
@@ -77,7 +77,12 @@ class ImageLoader(LoaderInterface):
 
         return False
 
-    async def load(self, file_path: str, **kwargs: Any) -> str:
+    async def load(
+        self,
+        file_path: str,
+        file_stream: BinaryIO | None = None,
+        **kwargs: Any,
+    ) -> str:
         """
         Load and process the image file.
 
@@ -93,11 +98,14 @@ class ImageLoader(LoaderInterface):
             UnicodeDecodeError: If file cannot be decoded with specified encoding
             OSError: If file cannot be read
         """
-        if not os.path.exists(file_path):
+        if file_stream is None and not os.path.exists(file_path):
             raise FileNotFoundError(f"File not found: {file_path}")
 
-        with open(file_path, "rb") as f:
-            file_metadata = await get_file_metadata(f)
+        if file_stream is None:
+            with open(file_path, "rb") as f:
+                file_metadata = await get_file_metadata(f)
+        else:
+            file_metadata = await get_file_metadata(file_stream, file_path)
         # Name ingested file of current loader based on original file content hash
         storage_file_name = "text_" + file_metadata["content_hash"] + ".txt"
 
