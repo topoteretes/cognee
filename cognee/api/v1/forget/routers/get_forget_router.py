@@ -5,6 +5,7 @@ from fastapi import Depends, APIRouter
 from fastapi.responses import JSONResponse
 
 from cognee.api.DTO import InDTO
+from cognee.modules.data.exceptions import DatasetProcessingInProgressError
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.shared.utils import send_telemetry
@@ -83,6 +84,8 @@ def get_forget_router() -> APIRouter:
         accepted.
 
         ## Error Codes
+        - **409 Conflict**: Dataset is currently being processed (cognify pipeline
+          running) — retry once processing completes
         - **422 Unprocessable Entity**: Invalid parameter combination (e.g. both `dataset`
           and `datasetId`, `dataId` without a dataset, or `memoryOnly` without a dataset)
         - **500 Internal Server Error**: Error during deletion
@@ -114,6 +117,13 @@ def get_forget_router() -> APIRouter:
                 content={
                     "error": "Invalid request parameters. Specify dataset or dataset_id, data_id+dataset, or everything=True."
                 },
+            )
+        except DatasetProcessingInProgressError as error:
+            # Deletion raced a running cognify pipeline — tell the client to
+            # retry later instead of masking it as an opaque 500.
+            return JSONResponse(
+                status_code=error.status_code,
+                content={"error": error.message},
             )
         except Exception as error:
             logger = get_logger()

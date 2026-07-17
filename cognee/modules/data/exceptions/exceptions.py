@@ -53,3 +53,21 @@ class InvalidTableAttributeError(CogneeValidationError):
         status_code: int = status.HTTP_400_BAD_REQUEST,
     ):
         super().__init__(message, name, status_code)
+
+
+class DatasetProcessingInProgressError(CogneeValidationError):
+    """
+    Raised when a mutating operation (e.g. data deletion) is attempted while the
+    dataset's pipeline is still running (DATASET_PROCESSING_STARTED).
+
+    Maps to HTTP 409 Conflict so clients can distinguish "retry once processing
+    completes" from a genuine server fault.
+    """
+
+    def __init__(
+        self,
+        message: str = "Dataset is currently being processed. Retry once processing completes.",
+        name: str = "DatasetProcessingInProgressError",
+        status_code: int = status.HTTP_409_CONFLICT,
+    ):
+        super().__init__(message, name, status_code)

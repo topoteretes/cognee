@@ -8,7 +8,10 @@ from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.modules.data.methods import get_dataset_data, has_dataset_data
 from cognee.modules.data.methods import get_authorized_dataset, get_authorized_existing_datasets
-from cognee.modules.data.exceptions.exceptions import UnauthorizedDataAccessError
+from cognee.modules.data.exceptions.exceptions import (
+    DatasetProcessingInProgressError,
+    UnauthorizedDataAccessError,
+)
 from cognee.modules.graph.methods import (
     delete_data_nodes_and_edges,
     delete_dataset_nodes_and_edges,
@@ -17,6 +20,7 @@ from cognee.modules.graph.methods import (
     try_delete_data_by_graph_provenance,
 )
 from cognee.modules.ingestion import discover_directory_datasets
+from cognee.modules.pipelines.models import PipelineRunStatus
 from cognee.modules.pipelines.operations.get_pipeline_status import get_pipeline_status
 from cognee.shared.logging_utils import get_logger
 
@@ -160,6 +164,17 @@ class datasets:
 
         if not dataset:
             raise UnauthorizedDataAccessError(f"Dataset {dataset_id} not accessible.")
+
+        # Deleting data while the dataset's cognify pipeline is running races the
+        # in-flight pipeline (relational/graph/vector state is mid-write) and used
+        # to surface as an opaque 500. Fail fast with a self-explanatory 409 so
+        # clients know to retry once processing completes.
+        task_status = await get_pipeline_status([dataset.id], "cognify_pipeline")
+        if task_status.get(str(dataset.id)) == PipelineRunStatus.DATASET_PROCESSING_STARTED:
+            raise DatasetProcessingInProgressError(
+                f"Dataset {dataset_id} is currently being processed. "
+                "Retry once processing completes."
+            )
 
         dataset_data = [data for data in await get_dataset_data(dataset.id) if data.id == data_id]
 

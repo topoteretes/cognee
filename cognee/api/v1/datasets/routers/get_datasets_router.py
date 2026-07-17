@@ -267,6 +267,8 @@ def get_datasets_router() -> APIRouter:
 
         ## Error Codes
         - **401 Unauthorized**: Dataset doesn't exist or user lacks delete permission
+        - **409 Conflict**: Dataset is currently being processed (cognify pipeline
+          running) — retry once processing completes
         - **500 Internal Server Error**: Error during deletion
 
         ## Notes
