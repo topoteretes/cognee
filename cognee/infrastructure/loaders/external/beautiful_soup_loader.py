@@ -198,7 +198,10 @@ class BeautifulSoupLoader(LoaderInterface):
             if text:
                 pieces.append(text)
 
-        full_content = " ".join(pieces).strip()
+        #updated function
+        pieces = self._deduplicate_content(pieces)
+
+        full_content = "\n\n".join(pieces).strip()
 
         # remove after defaults for extraction rules
         # Fallback: If no content extracted, check if the file is plain text (not HTML)
@@ -254,6 +257,23 @@ class BeautifulSoupLoader(LoaderInterface):
                 join_with=rule.get("join_with", " "),
             )
         raise ValueError(f"Invalid extraction rule: {rule}")
+
+    def _deduplicate_content(self, pieces: list[str]) -> list[str]:
+        """
+        Remove duplicate extracted content while preserving order.
+
+        Content is normalized before comparison to avoid duplicates
+        caused by whitespace or casing differences.
+        """
+        seen = set()
+        unique = []
+
+        for piece in pieces:
+            normalized = " ".join(piece.split()).lower()
+            if normalized not in seen:
+                seen.add(normalized)
+                unique.append(piece)
+        return unique
 
     def _extract_from_html(self, html: bytes, rule: ExtractionRule) -> str:
         """Extract content from HTML using BeautifulSoup or lxml XPath.
