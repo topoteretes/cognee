@@ -67,6 +67,17 @@ def get_activity_router() -> APIRouter:
             result = await session.execute(stmt)
             rows = result.all()
 
+        def run_error(run) -> Optional[str]:
+            # Errored runs store the exception text in run_info["error"]
+            # (log_pipeline_run_error) — surface it so clients can say why a
+            # run failed. Bounded because run_info is caller-controlled JSON.
+            if not isinstance(run.run_info, dict):
+                return None
+            error = run.run_info.get("error")
+            if not isinstance(error, str) or not error.strip():
+                return None
+            return error.strip()[:500]
+
         return [
             {
                 "id": str(run.id),
@@ -78,6 +89,7 @@ def get_activity_router() -> APIRouter:
                 "owner_email": owner_email,
                 "created_at": run.created_at.isoformat() if run.created_at else None,
                 "pipeline_run_id": str(run.pipeline_run_id) if run.pipeline_run_id else None,
+                "error": run_error(run),
             }
             for run, ds_name, owner_id, owner_email in rows
         ]
