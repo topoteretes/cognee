@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 from uuid import UUID
 
 MAX_SERIALIZED_VALUE_LENGTH = 1000
 MAX_TRACE_CONTAINER_ITEMS = 20
+
+logger = logging.getLogger(__name__)
 
 
 def truncate_text(value: str, limit: int) -> str:
@@ -29,7 +32,19 @@ def sanitize_value(value: Any) -> Any:
     if isinstance(value, dict):
         sanitized: dict[str, Any] = {}
         for key, item in list(value.items())[:MAX_TRACE_CONTAINER_ITEMS]:
-            sanitized[str(key)] = sanitize_value(item)
+            str_key = str(key) if not isinstance(key, str) else key
+            if str_key in sanitized:
+                logger.warning(
+                    "sanitize_value: dict key collision after str() conversion — "
+                    "key %r collides with an earlier key; appending suffix to avoid "
+                    "silent data loss",
+                    key,
+                )
+                suffix = 2
+                while f"{str_key}_{suffix}" in sanitized:
+                    suffix += 1
+                str_key = f"{str_key}_{suffix}"
+            sanitized[str_key] = sanitize_value(item)
         return sanitized
     if hasattr(value, "id") and hasattr(value, "__class__"):
         return {
