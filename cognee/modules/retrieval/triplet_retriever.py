@@ -1,7 +1,7 @@
 from typing import Any, Dict, List, Optional, Type, Union
 
 from cognee.shared.logging_utils import get_logger
-from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.modules.retrieval.utils.completion import generate_completion
 from cognee.infrastructure.session.get_session_manager import get_session_manager
 from cognee.modules.retrieval.base_retriever import BaseRetriever
@@ -32,6 +32,8 @@ class TripletRetriever(BaseRetriever):
         session_id: Optional[str] = None,
         response_model: Type = str,
         include_references: bool = False,
+        node_name: Optional[List[str]] = None,
+        node_name_filter_operator: str = "OR",
     ):
         """Initialize retriever with optional custom prompt paths."""
         self.user_prompt_path = user_prompt_path
@@ -41,6 +43,8 @@ class TripletRetriever(BaseRetriever):
         self.session_id = session_id
         self.response_model = response_model
         self.include_references = include_references
+        self.node_name = node_name
+        self.node_name_filter_operator = node_name_filter_operator
 
     async def get_retrieved_objects(self, query: str) -> Any:
         """
@@ -60,7 +64,7 @@ class TripletRetriever(BaseRetriever):
 
             - Any: A list containing the retrieved triplets, or an empty list if none are found.
         """
-        vector_engine = await get_vector_engine()
+        vector_engine = await get_vector_engine_async()
 
         try:
             if not await vector_engine.has_collection(collection_name="Triplet_text"):
@@ -70,7 +74,12 @@ class TripletRetriever(BaseRetriever):
                 )
 
             found_triplets = await vector_engine.search(
-                "Triplet_text", query, limit=self.top_k, include_payload=True
+                "Triplet_text",
+                query,
+                limit=self.top_k,
+                include_payload=True,
+                node_name=self.node_name,
+                node_name_filter_operator=self.node_name_filter_operator,
             )
 
             if len(found_triplets) == 0:

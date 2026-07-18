@@ -960,8 +960,16 @@ class LanceDBAdapter(VectorDBInterface):
             coerced.append(new_row)
         return coerced
 
-    async def retrieve(self, collection_name: str, data_point_ids: list[str]):
-        """Return rows from `collection_name` whose id is in `data_point_ids`."""
+    async def retrieve(
+        self, collection_name: str, data_point_ids: list[str], *, include_vector: bool = False
+    ):
+        """Return rows from `collection_name` whose id is in `data_point_ids`.
+
+        ``include_vector`` is a LanceDB-only extension (the shared interface is
+        unchanged): when True, the stored embedding is attached to each result
+        under ``payload["vector"]``. The semantic memory map is the consumer;
+        it needs the raw vectors the plain retrieve path drops.
+        """
         if not data_point_ids:
             # No ids requested. Avoid building an "id IN ()" filter, which lance
             # rejects as a parse error; pgvector/chromadb return [] here too.
@@ -983,7 +991,11 @@ class LanceDBAdapter(VectorDBInterface):
         return [
             ScoredResult(
                 id=parse_id(result["id"]),
-                payload=result["payload"],
+                # The copy keeps the stored row untouched; the default path is
+                # byte-for-byte the previous behavior.
+                payload={**result["payload"], "vector": result["vector"]}
+                if include_vector
+                else result["payload"],
                 score=0,
             )
             for result in results_list
@@ -1104,15 +1116,21 @@ class LanceDBAdapter(VectorDBInterface):
         )
 
     async def delete_data_points(self, collection_name: str, data_point_ids: list[UUID]):
-        # Skip deletion if collection doesn't exist
+        # Idempotent: a missing collection (or empty id list) is a no-op.
         if not await self.has_collection(collection_name):
+            return
+        if not data_point_ids:
             return
 
         collection = await self.get_collection(collection_name)
 
-        # Delete one at a time to avoid commit conflicts
+        # ids may be UUIDs or graph-computed deterministic strings; the stored
+        # `id` column is a str, so match by string and escape single quotes to
+        # keep the predicate injection-safe (mirrors create_data_points). One
+        # delete per id to avoid commit conflicts; a non-existent id no-ops.
         for data_point_id in data_point_ids:
-            await collection.delete(f"id = '{data_point_id}'")
+            escaped_id = str(data_point_id).replace("'", "''")
+            await collection.delete(f"id = '{escaped_id}'")
 
     async def remove_belongs_to_set_tags(
         self,

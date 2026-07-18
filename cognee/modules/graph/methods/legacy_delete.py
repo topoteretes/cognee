@@ -7,7 +7,7 @@ from cognee.modules.data.models import Data
 from cognee.modules.graph.models.EdgeType import EdgeType
 from cognee.modules.graph.utils.prepare_edges_for_storage import get_edge_retrieval_text
 from cognee.shared.logging_utils import get_logger
-from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses
 
 
@@ -30,7 +30,7 @@ async def legacy_delete(data: Data, mode: str = "soft"):
     deleted_node_ids = await delete_document_subgraph(data.id, mode)
 
     # Delete from vector database
-    vector_engine = await get_vector_engine()
+    vector_engine = await get_vector_engine_async()
 
     # Determine vector collections dynamically
     subclasses = get_all_subclasses(DataPoint)

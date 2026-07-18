@@ -23,8 +23,9 @@ to verify behaviour across the SDK.
 | [`configurations/`](configurations/) | Database & permissions configuration recipes | 8 |
 | [`custom_pipelines/`](custom_pipelines/) | Build your own pipeline / extend `cognify` | 7 |
 | [`database_examples/`](database_examples/) | Smoke tests per supported backend | 5 |
-| [`demos/`](demos/) | Feature demos — broadest coverage | 25 |
+| [`demos/`](demos/) | Feature demos — broadest coverage | 22 |
 | [`guides/`](guides/) | Short focused how-to guides | 13 |
+| [`integrations/`](integrations/) | Data-source connectors — installed from cognee-community | 1 |
 | [`pocs/`](pocs/) | Research-grade proofs of concept (entity disambiguation, canonicalization, prefetch) | 7 |
 
 Most runnable demos and backend examples use the v1.0 memory API (`remember`, `recall`, `forget`, `improve`). The lower-level `add`, `cognify`, `search`, and `prune` calls are intentionally kept in examples that demonstrate pipeline internals, permissions, relational migrations, or research POCs.
@@ -161,6 +162,9 @@ Same scripts, indexed by what they demonstrate.
 - [`demos/multimedia_processing/multimedia_audio_image_processing_example.py`](demos/multimedia_processing/multimedia_audio_image_processing_example.py)
 - [`demos/web_url_content_ingestion_example.py`](demos/web_url_content_ingestion_example.py)
 - [`demos/dlt_ingestion_example.py`](demos/dlt_ingestion_example.py)
+
+### Connectors / Integrations
+- [`integrations/`](integrations/) — data-source connectors (installed from cognee-community)
 
 ### SQL → knowledge graph
 - [`custom_pipelines/relational_database_to_knowledge_graph_migration_example.py`](custom_pipelines/relational_database_to_knowledge_graph_migration_example.py)

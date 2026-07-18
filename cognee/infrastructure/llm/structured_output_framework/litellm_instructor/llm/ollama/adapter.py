@@ -16,10 +16,12 @@ from tenacity import (
 )
 
 from cognee.infrastructure.llm.retry_config import (
+    llm_retry_condition,
     llm_retry_stop_condition,
 )
 
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
+from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError, is_budget_exhausted_error
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.llm_interface import (
     LLMInterface,
 )
@@ -89,13 +91,7 @@ class OllamaAPIAdapter(LLMInterface):
     @retry(
         stop=llm_retry_stop_condition,
         wait=wait_exponential_jitter(8, 128),
-        retry=retry_if_not_exception_type(
-            (
-                litellm.exceptions.NotFoundError,
-                litellm.exceptions.AuthenticationError,
-                asyncio.CancelledError,
-            )
-        ),
+        retry=llm_retry_condition,
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
@@ -138,25 +134,30 @@ class OllamaAPIAdapter(LLMInterface):
                 )
             return response.choices[0].message.content or ""
 
-        async with llm_rate_limiter_context_manager():
-            response = await self.aclient.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": system_prompt,
-                    },
-                    {
-                        "role": "user",
-                        "content": f"{text_input}",
-                    },
-                ],
-                max_retries=2,
-                response_model=response_model,
-                **merged_kwargs,
-            )
+        try:
+            async with llm_rate_limiter_context_manager():
+                response = await self.aclient.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": system_prompt,
+                        },
+                        {
+                            "role": "user",
+                            "content": f"{text_input}",
+                        },
+                    ],
+                    max_retries=2,
+                    response_model=response_model,
+                    **merged_kwargs,
+                )
 
-        return response
+            return response
+        except Exception as e:
+            if is_budget_exhausted_error(e):
+                raise LLMPaymentRequiredError() from e
+            raise
 
     @observe(as_type="transcription")
     @retry(

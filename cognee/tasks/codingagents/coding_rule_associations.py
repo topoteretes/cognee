@@ -1,7 +1,8 @@
 from uuid import NAMESPACE_OID, uuid5
 
 from cognee.infrastructure.databases.graph import get_graph_engine
-from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.infrastructure.databases.provenance import graph_provenance_write_kwargs
+from cognee.infrastructure.databases.vector import get_vector_engine_async
 
 from cognee.low_level import DataPoint
 from cognee.infrastructure.llm.prompts import render_prompt
@@ -52,7 +53,7 @@ async def get_existing_rules(rules_nodeset_name: str) -> List[str]:
 
 
 async def get_origin_edges(data: str, rules: List[Rule]) -> list[Any]:
-    vector_engine = await get_vector_engine()
+    vector_engine = await get_vector_engine_async()
 
     origin_chunk = await vector_engine.search("DocumentChunk_text", data, limit=1)
 
@@ -122,17 +123,29 @@ async def add_rule_associations(
 
     edges_to_save = await get_origin_edges(data=data, rules=rule_list.rules)
 
-    await add_data_points(data_points=rule_list.rules)
+    await add_data_points(data_points=rule_list.rules, ctx=ctx)
 
     if len(edges_to_save) > 0:
-        await graph_engine.add_edges(edges_to_save)
+        provenance_kwargs = await graph_provenance_write_kwargs(graph_engine, ctx)
+        await graph_engine.add_edges(edges_to_save, **provenance_kwargs)
 
-        if ctx and ctx.user and ctx.data_item and hasattr(ctx.data_item, "id"):
+        # When the edges were stamped in-graph, provenance lives in the graph and
+        # the relational rollback ledger is skipped (mirrors add_data_points).
+        # On a ledger graph the fold is a no-op, so the ledger is written instead.
+        stamped_in_graph = provenance_kwargs["source_ref_key"] is not None
+        if (
+            not stamped_in_graph
+            and ctx
+            and ctx.user
+            and ctx.data_item
+            and hasattr(ctx.data_item, "id")
+        ):
             await upsert_edges(
                 edges_to_save,
                 tenant_id=ctx.user.tenant_id,
                 user_id=ctx.user.id,
                 dataset_id=ctx.dataset.id,
                 data_id=ctx.data_item.id,
+                pipeline_run_id=getattr(ctx, "pipeline_run_id", None),
             )
         await index_graph_edges(edges_to_save)

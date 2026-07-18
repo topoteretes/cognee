@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 import cognee
 from cognee.api.v1.datasets import datasets
 from cognee.context_global_variables import set_database_global_context_variables
-from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.llm import LLMGateway
 from cognee.modules.engine.operations.setup import setup
@@ -108,7 +108,7 @@ async def test_delete_dataset_ladybug(mock_create_structured_output: AsyncMock):
 
     mock_create_structured_output.side_effect = mock_llm_output
 
-    vector_engine = await get_vector_engine()
+    vector_engine = await get_vector_engine_async()
 
     assert not await vector_engine.has_collection("EdgeType_relationship_name")
     assert not await vector_engine.has_collection("Entity_name")
@@ -182,7 +182,7 @@ async def test_delete_dataset_ladybug(mock_create_structured_output: AsyncMock):
     nodes, edges = await graph_engine.get_graph_data()
     assert len(nodes) == 0 and len(edges) == 0, "Nodes and edges are not deleted."
 
-    vector_engine = await get_vector_engine()
+    vector_engine = await get_vector_engine_async()
 
     for collection_name, initial_nodes in johns_initial_nodes_by_collection.items():
         query_node_ids = [

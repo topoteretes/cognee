@@ -19,6 +19,7 @@ from fastapi.testclient import TestClient
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.pipelines.models import PipelineRunErrored, PipelineRunCompleted
 from cognee.modules.users.exceptions.exceptions import PermissionDeniedError
+from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError
 from cognee.api.v1.add.routers.get_add_router import get_add_router
 from cognee.api.v1.cognify.routers.get_cognify_router import get_cognify_router
 from cognee.api.v1.memify.routers.get_memify_router import get_memify_router
@@ -228,6 +229,18 @@ class TestCognifyEndpoint:
         assert resp.status_code == 500
         assert resp.json()["error"] == "Internal server error"
 
+    def test_cognify_llm_payment_required_returns_402(self, client):
+        import cognee.api.v1.cognify as cognify_pkg
+
+        cognify_pkg.cognify = AsyncMock(side_effect=LLMPaymentRequiredError())
+
+        resp = client.post(
+            "/cognify",
+            json={"datasets": ["test_dataset"]},
+        )
+        assert resp.status_code == 402
+        assert resp.json()["error"] == "Token budget exhausted"
+
 
 # ---------------------------------------------------------------------------
 # Search endpoint
@@ -287,6 +300,18 @@ class TestSearchEndpoint:
         )
         assert resp.status_code == 500
         assert resp.json()["error"] == "Internal server error"
+
+    def test_search_llm_payment_required_returns_402(self, client):
+        import cognee.api.v1.search as search_pkg
+
+        search_pkg.search = AsyncMock(side_effect=LLMPaymentRequiredError())
+
+        resp = client.post(
+            "/search",
+            json={"search_type": "GRAPH_COMPLETION", "query": "test"},
+        )
+        assert resp.status_code == 402
+        assert resp.json()["error"] == "Token budget exhausted"
 
 
 # ---------------------------------------------------------------------------

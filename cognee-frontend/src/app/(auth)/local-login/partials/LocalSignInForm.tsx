@@ -32,7 +32,10 @@ export default function LocalSignInForm() {
       });
 
       if (!response.ok) {
-        const data = await response.json().catch(() => null);
+        const data = await response.json().catch((err) => {
+          console.warn("Failed to parse login error response:", err);
+          return null;
+        });
         const detail = data?.detail;
         if (detail === "LOGIN_BAD_CREDENTIALS") {
           setError("Invalid email or password.");
@@ -61,7 +64,7 @@ export default function LocalSignInForm() {
   return (
     <Flex className="flex-col gap-[1.5rem] items-center w-full max-w-[22rem]">
       <Flex className="flex-col gap-[0.5rem] items-center">
-        <Title order={2} className="!text-[1.75rem] !font-semibold">
+        <Title order={2} className="!text-[1.75rem] !font-bold">
           Local instance
         </Title>
         <Text size="sm" className="!text-cognee-muted">
@@ -74,7 +77,7 @@ export default function LocalSignInForm() {
           className="w-full px-4 py-3 rounded-lg gap-2 items-start"
           style={{ backgroundColor: "#FEF2F2", border: "1px solid #FECACA" }}
         >
-          <Text size="sm" style={{ color: "#991B1B", lineHeight: 1.5 }}>
+          <Text size="sm" style={{ color: "#991B1B" }}>
             {error}
           </Text>
         </Flex>

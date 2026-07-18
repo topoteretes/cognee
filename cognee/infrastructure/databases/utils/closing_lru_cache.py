@@ -1,4 +1,87 @@
-"""LRU cache that closes entries after they leave the cache and caller scope."""
+"""LRU cache that closes entries after they leave the cache and caller scope.
+
+Cached values are live database engines (in subprocess mode: a worker process
+holding an exclusive on-disk file lock), so removal from the cache and death
+of the engine are separate events. This module is the single owner of that
+lifecycle; the walkthrough below is the end-to-end contract that the engine
+handles, the dataset queue, and the delete flows rely on::
+
+    cached --(evict / clear / capacity)--> detached --(last proxy drops)--> closing --> closed
+       |                                                                       |          |
+       |                                                             pending-close     future
+    leased proxies stay usable                                       future            resolves;
+                                                                     registered HERE   creators proceed
+
+1. Acquisition. ``get_graph_engine()`` / vector equivalents resolve through
+   ``closing_lru_cache``-decorated factories. A cache hit returns the entry's
+   single shared lease proxy; engine handles pin that proxy so hot paths skip
+   the cache (see ``_GraphEngineHandle`` in ``graph/get_graph_engine.py``).
+
+2. Detach. An entry leaves the cache by capacity eviction (LRU order,
+   skipping entries pinned via ``pinned_predicate`` — when every entry is
+   pinned, the cache temporarily overflows ``maxsize`` instead of closing an
+   engine in use, bounded by the dataset queue's slot count and converging
+   once pins lift), by explicit eviction (delete-dataset, queue teardown), or
+   by ``cache_clear`` (prune). Explicit eviction and clear ignore pins: those
+   are intentional lifecycle events. A detached entry vanishes from lookups
+   immediately, but proxies already held stay usable.
+
+3. The close fork at detach:
+
+   - No live proxy: the close starts immediately and registers a fresh
+     pending-close future for its key at that moment.
+   - Proxy still held: the close is DEFERRED and deliberately NOT registered.
+     It starts (and registers itself) only when the last holder drops the
+     proxy and the finalizer runs. Nobody ever waits for a close that has not
+     started: idle references (a second engine handle, a suspended coroutine
+     frame) can hold a proxy indefinitely and can even belong to the would-be
+     waiter itself — waiting on that is unbounded and self-deadlocks (this
+     once hung CI for the better part of an hour per job).
+
+4. The pending-close registry maps key -> set of IN-FLIGHT close futures.
+   Overlapping closes of one key (a deferred close finally firing while its
+   successor's close is already running) each get their own future — sharing
+   one would wake waiters when the FIRST close finishes while the other still
+   holds the resource. A future resolves when its close fully completes; for
+   subprocess adapters that means the worker exited and the lock is free.
+
+5. Creating over a closing key. A cache-miss creator checks the registry:
+
+   - ``aget_or_create`` awaits each in-flight close, suspending without
+     blocking the loop (the close may run as a task on this same loop).
+   - ``get_or_create`` in a thread with no running event loop blocks on them.
+   - ``get_or_create`` ON a running loop never waits — the close may need
+     this very loop to progress; the worker open-retry is the backstop.
+
+   Every wait is bounded by ``PENDING_CLOSE_WAIT_SECONDS``. On timeout it
+   warns with the cache key, drops that future from the registry so later
+   lookups for the key are not taxed again, and proceeds behind the worker
+   open-retry backstop.
+
+6. Delete flows (``aevict_*_for_database`` + the dataset database handlers)
+   evict every engine for a database, await the in-flight closes via
+   ``cache_await_closed``, then remove the files directly — never opening a
+   DB just to drop it. A close still deferred behind an idle holder is not
+   waited on; on POSIX removing files under such an engine is safe (the
+   holder keeps the unlinked inodes and its eventual close writes to
+   nowhere), which is acceptable for a dataset being deleted.
+
+7. Failure policy. Expected events — bounded-wait timeouts, close tasks
+   cancelled at event loop teardown, thread-pool rejection at interpreter
+   shutdown — are handled with an explicit reason (timeouts log a WARNING:
+   operational, worth watching). Broken invariants — a registry future
+   carrying an exception or cancelled (disambiguated from genuine caller
+   cancellation, which always propagates) — log at ERROR level with the full
+   traceback: an entry there is a defect to root-cause immediately, never
+   operational noise. Close failures on any execution path and pool-thread
+   ``BaseException``s that would otherwise vanish are logged with tracebacks
+   as well. Callers still proceed in every case, because the waits are
+   best-effort by design: the system must stay correct even when a wait never
+   happens (the sync-on-loop path never waits at all), so an error in wait
+   bookkeeping can never justify failing a user operation. No creator, sweep,
+   or eviction ever fails over close bookkeeping — and none of it is ever
+   silent.
+"""
 
 import asyncio
 import concurrent.futures
@@ -33,6 +116,15 @@ class CacheInfo(dict):
 _PENDING_CLOSE_TASKS: set = set()
 
 
+# Upper bound on waiting for an in-flight close before proceeding anyway.
+# Real closes finish in milliseconds to a few seconds, so this ceiling is
+# generous on purpose: reaching it means the close is wedged or its completion
+# signal was lost. Proceeding restores the pre-registry behavior for that one
+# case — guarded by the adapters' own open-retry — instead of hanging the
+# caller (and CI) forever.
+PENDING_CLOSE_WAIT_SECONDS = 300.0
+
+
 # Dedicated threads for closing subprocess-backed adapters off the caller's
 # event loop. Such adapters hold an OS file lock via a worker process; a
 # *synchronous* re-resolution for the same DB path (e.g. the engine handle's
@@ -48,9 +140,12 @@ _CLOSE_THREAD_POOL = concurrent.futures.ThreadPoolExecutor(
 
 
 def _run_close_coro_blocking(coro, value_type) -> None:
+    # ``BaseException``: this runs on a pool thread whose future's exception
+    # is never retrieved, so anything that escapes here would vanish without
+    # a trace — log everything.
     try:
         asyncio.run(coro)
-    except Exception:
+    except BaseException:
         logger.warning(
             "Failed to run async close() for %s during eviction",
             value_type,
@@ -155,19 +250,34 @@ def _start_close(value) -> Optional[concurrent.futures.Future]:
         # ``logger.warning`` channel as the ``asyncio.run()`` branch. Without
         # this, an async ``close()`` that raises only surfaces as Python's
         # "Task exception was never retrieved" warning at GC time.
+        #
+        # The mirror future MUST resolve on every path (hence ``finally``),
+        # including cancellation: ``asyncio.run()`` cancels tasks still
+        # pending at loop teardown, and ``result()`` then raises
+        # ``CancelledError`` — a ``BaseException`` that ``except Exception``
+        # misses. Skipping the resolution leaves the pending-close registry
+        # entry unresolvable, and the next creation for the same key waits
+        # on it forever.
         try:
             done_task.result()
-        except Exception:
+        except asyncio.CancelledError:
+            logger.debug(
+                "Async close() for %s was cancelled before completing "
+                "(typically the event loop shutting down); native resources "
+                "are reaped by atexit/OS cleanup",
+                _value_type,
+            )
+        except BaseException:
             logger.warning(
                 "Failed to run async close() for %s during eviction",
                 _value_type,
                 exc_info=True,
             )
-        # Always resolve the mirror future as done (never propagate the close
-        # failure to waiters — a creator should proceed regardless; the worker
-        # open-retry covers a still-held lock).
-        if not _cf.done():
-            _cf.set_result(None)
+        finally:
+            # Never propagate close failures to waiters — a creator should
+            # proceed regardless; the worker open-retry covers a held lock.
+            if not _cf.done():
+                _cf.set_result(None)
 
     task.add_done_callback(_on_close_done)
     return cf
@@ -231,6 +341,13 @@ class _LeasedCacheEntry:
                 self.closed = True
                 value_to_close = self.value
 
+        # When the close stays deferred behind live caller proxies, it is
+        # deliberately NOT registered as pending: idle holders can keep a
+        # proxy alive indefinitely (and may include a would-be waiter itself),
+        # so there is no bounded moment to wait for. The close registers
+        # itself once it actually starts (``proxy_released`` -> ``_close`` ->
+        # ``_track_close``); until then creators proceed and the adapters'
+        # open-retry covers the overlap with the old value.
         if value_to_close is not None:
             self._close(value_to_close)
         # Keep ``proxy_to_drop`` alive until after ``self._lock`` is released.
@@ -286,7 +403,7 @@ class _LeasedValueProxy:
                 async def await_with_lease(_self=self):
                     # The closure keeps ``self`` alive until the awaitable
                     # completes, which matters for one-liners like
-                    # ``await get_vector_engine().search(...)``.
+                    # ``await get_vector_engine_async().search(...)``.
                     return await result
 
                 return await_with_lease()
@@ -312,7 +429,7 @@ class ClosingLRUCache:
     still cleaning up detached entries once they are genuinely unused.
     """
 
-    def __init__(self, maxsize: Optional[int] = 128, lease: bool = True):
+    def __init__(self, maxsize: Optional[int] = 128, lease: bool = True, pinned_predicate=None):
         """``maxsize`` semantics mirror ``functools.lru_cache``:
 
         - ``int > 0`` — bounded LRU. The least-recently-used entry is evicted
@@ -327,6 +444,15 @@ class ClosingLRUCache:
         ``lease=True`` (default) returns a stable proxy per cached entry and
         defers close until cache ownership and caller references are gone.
         ``lease=False`` preserves the old immediate-close-on-eviction mode.
+
+        ``pinned_predicate`` (key -> bool), when given, protects entries from
+        capacity eviction while it returns True — e.g. engines of datasets
+        that are actively being processed. Pinned entries are skipped in LRU
+        order; when every entry is pinned the cache temporarily overflows
+        ``maxsize`` rather than closing a value that is still in use.
+        Explicit eviction (``evict``, ``evict_where``, ``cache_clear``)
+        ignores pins — those are intentional lifecycle events. The predicate
+        runs under the cache lock and must not re-enter the cache.
         """
         if isinstance(maxsize, int):
             if maxsize < 0:
@@ -336,37 +462,179 @@ class ClosingLRUCache:
         self._cache: OrderedDict = OrderedDict()
         self._maxsize = maxsize
         self._lease = lease
+        self._pinned_predicate = pinned_predicate
         self._lock = Lock()
-        # Keyed registry of in-flight closes. A key is present here from the
-        # moment its value's ``close()`` actually starts until that close
-        # (including async worker-process teardown) completes. ``aget_or_create``
-        # waits on the matching future before constructing a new value, so a new
-        # DB worker never opens a file path whose previous worker is still
-        # releasing its lock. Guarded by ``self._lock``.
+        # Keyed registry of pending closes. A key is present here from the
+        # moment its ``close()`` STARTS until the close (including async
+        # worker-process teardown) completes. Creators wait on the matching
+        # futures before constructing a new value, so a new DB worker never
+        # opens a file path whose previous worker still holds the on-disk
+        # lock. A set per key: two closes of the same key can overlap (a
+        # deferred close finally firing while its successor's close is
+        # already in flight), and each must be waited on independently —
+        # sharing one future would wake waiters when the FIRST close
+        # finishes, while the other still holds the underlying resource.
+        # Guarded by ``self._lock``.
         self._closing: dict = {}
 
-    def _track_close(self, key, value) -> None:
-        """Close ``value`` and, if the close is async/in-flight, record it under
-        ``key`` so a concurrent ``aget_or_create`` for the same key waits for it.
+    def _register_pending_close(self, key) -> concurrent.futures.Future:
+        """Record that a close for ``key``'s value is starting and return the
+        fresh future that resolves once that close has fully completed. One
+        future per close — see the ``_closing`` comment for why overlapping
+        closes of the same key must not share one."""
+        with self._lock:
+            pending = concurrent.futures.Future()
+            self._closing.setdefault(key, set()).add(pending)
+            return pending
 
-        The completion future clears itself from ``self._closing`` on done. A
-        ``None`` / already-resolved future means the close finished
-        synchronously, so there is nothing to register.
+    def _resolve_pending_close(self, key, pending) -> None:
+        """Mark one of ``key``'s pending closes as finished and wake its waiters."""
+        self._drop_pending_close(key, pending)
+        # Resolve outside the lock: done-callbacks run synchronously in the
+        # resolving thread and may re-enter the cache.
+        if not pending.done():
+            pending.set_result(None)
+
+    def _drop_pending_close(self, key, pending) -> None:
+        """Forget a pending close without resolving it. Used on bounded-wait
+        timeout: the close may still be running, but a signal that already
+        overran its budget must not tax every future lookup for this key
+        another full wait. Waiters already attached keep their reference."""
+        with self._lock:
+            futures = self._closing.get(key)
+            if futures is not None:
+                futures.discard(pending)
+                if not futures:
+                    self._closing.pop(key, None)
+
+    def _snapshot_pending_closes(self, key) -> tuple:
+        """Snapshot the not-yet-done in-flight closes for ``key``.
+        Caller must hold ``self._lock``."""
+        return tuple(future for future in self._closing.get(key, ()) if not future.done())
+
+    def _block_on_pending_close(self, key, pending) -> None:
+        """Sync counterpart of ``_wait_for_pending_close`` for threads with no
+        running event loop: block, bounded, and never fail the caller over
+        close bookkeeping. Expected exceptions are handled explicitly;
+        anything unexpected is surfaced with its traceback."""
+        try:
+            pending.result(timeout=PENDING_CLOSE_WAIT_SECONDS)
+        except concurrent.futures.TimeoutError:
+            logger.warning(
+                "Pending close for cache key %r did not finish within %ss; "
+                "proceeding to create a new value",
+                key,
+                PENDING_CLOSE_WAIT_SECONDS,
+            )
+            # Do not keep taxing every later lookup for this key with another
+            # full wait on a signal that already overran its budget.
+            self._drop_pending_close(key, pending)
+        except concurrent.futures.CancelledError:
+            # Nothing in this module cancels registry futures, so a cancelled
+            # one means an invariant broke — surface it, then proceed with
+            # creation as usual.
+            logger.error(
+                "BUG: pending close for cache key %r was cancelled unexpectedly — nothing in "
+                "cognee cancels registry futures, so the closing-registry contract was "
+                "violated and must be root-caused (the operation itself continues safely)",
+                key,
+            )
+        except Exception:
+            # By construction nothing lands here: close futures resolve with
+            # a result, never an exception (see _start_close). Getting here
+            # means that invariant broke — surface it loudly, but still
+            # proceed: a creator must not fail over close bookkeeping.
+            logger.error(
+                "BUG: unexpected error while waiting for pending close of cache key %r — "
+                "registry futures must only ever resolve with None (see _start_close), so "
+                "the closing-registry contract was violated and must be root-caused "
+                "(the operation itself continues safely)",
+                key,
+                exc_info=True,
+            )
+
+    def _track_close(self, key, value) -> None:
+        """Close ``value`` and resolve ``key``'s pending-close future once the
+        close (including async worker-process teardown) has fully completed.
+
+        This is the single point where a close enters the registry: the close
+        STARTS here, so the registered future is always backed by an in-flight
+        close that will resolve it.
         """
+        pending = self._register_pending_close(key)
         cf = _start_close(value)
         if cf is None or cf.done():
+            self._resolve_pending_close(key, pending)
             return
+
+        def _on_close_complete(_done_future, _key=key, _pending=pending):
+            self._resolve_pending_close(_key, _pending)
+
+        cf.add_done_callback(_on_close_complete)
+
+    async def await_pending_closes(self, predicate=None) -> None:
+        """Wait until every pending close whose key satisfies ``predicate``
+        (all pending closes when ``None``) has fully completed. Each wait is
+        bounded by ``PENDING_CLOSE_WAIT_SECONDS`` so one close whose completion
+        signal was lost cannot wedge the caller forever."""
         with self._lock:
-            self._closing[key] = cf
+            pendings = [
+                (key, future)
+                for key, futures in self._closing.items()
+                if predicate is None or predicate(key)
+                for future in futures
+                if not future.done()
+            ]
+        for key, future in pendings:
+            await self._wait_for_pending_close(key, future, "giving up the wait")
 
-        def _cleanup(done_future, _key=key):
-            with self._lock:
-                # Only clear if we are still the registered future — a newer
-                # close for the same key may have superseded us.
-                if self._closing.get(_key) is done_future:
-                    self._closing.pop(_key, None)
-
-        cf.add_done_callback(_cleanup)
+    async def _wait_for_pending_close(self, key, future, timeout_action: str) -> None:
+        """Await one in-flight close, bounded and without ever failing the
+        caller over close bookkeeping. Expected exceptions are handled
+        explicitly; anything unexpected is surfaced with its traceback."""
+        try:
+            # ``shield`` so a timeout cancels only this wait, never the
+            # registry future other waiters may be watching.
+            await asyncio.wait_for(
+                asyncio.shield(asyncio.wrap_future(future)),
+                timeout=PENDING_CLOSE_WAIT_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "Pending close for cache key %r did not finish within %ss; %s",
+                key,
+                PENDING_CLOSE_WAIT_SECONDS,
+                timeout_action,
+            )
+            # Do not keep taxing every later lookup for this key with another
+            # full wait on a signal that already overran its budget.
+            self._drop_pending_close(key, future)
+        except asyncio.CancelledError:
+            # Two distinct cases share this exception. A cancelled REGISTRY
+            # future is a broken invariant (nothing in this module cancels
+            # them) — surface it and move on. Anything else is the caller's
+            # own task being cancelled, which must propagate.
+            if not future.cancelled():
+                raise
+            logger.error(
+                "BUG: pending close for cache key %r was cancelled unexpectedly — nothing in "
+                "cognee cancels registry futures, so the closing-registry contract was "
+                "violated and must be root-caused (the operation itself continues safely)",
+                key,
+            )
+        except Exception:
+            # By construction nothing lands here: close futures resolve with
+            # a result, never an exception (see _start_close). Getting here
+            # means that invariant broke — surface it loudly, but let the
+            # caller proceed: failing it over close bookkeeping is worse.
+            logger.error(
+                "BUG: unexpected error while waiting for pending close of cache key %r — "
+                "registry futures must only ever resolve with None (see _start_close), so "
+                "the closing-registry contract was violated and must be root-caused "
+                "(the operation itself continues safely)",
+                key,
+                exc_info=True,
+            )
 
     def _wrap_cached_value(self, entry):
         if self._lease:
@@ -392,6 +660,21 @@ class ClosingLRUCache:
             if key in self._cache:
                 self._cache.move_to_end(key)
                 return self._wrap_cached_value(self._cache[key])
+            pending_closes = self._snapshot_pending_closes(key)
+
+        if pending_closes:
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:
+                # No loop in this thread: block until the previous values for
+                # this key have fully closed (workers exited, locks released),
+                # bounded so a wedged close can't hang the caller forever.
+                for pending_close in pending_closes:
+                    self._block_on_pending_close(key, pending_close)
+            # With a running loop we must not block it — the close may be a
+            # task scheduled on this very loop. Async callers go through
+            # ``aget_or_create``; this residual sync-on-loop window keeps the
+            # worker open-retry as its backstop.
 
         value = factory()
         entry = self._make_entry(key, value)
@@ -403,7 +686,7 @@ class ClosingLRUCache:
         # close paths — running it under ``self._lock`` would either
         # stall every cache user or deadlock outright.
         loser_value = None
-        evicted_value = None
+        evicted_values = []
         with self._lock:
             # Re-check after releasing lock — another thread may have created it.
             if key in self._cache:
@@ -412,14 +695,28 @@ class ClosingLRUCache:
                 cached = self._wrap_cached_value(self._cache[key])
             else:
                 # ``None`` means unbounded — skip the eviction check entirely.
-                if self._maxsize is not None and len(self._cache) >= self._maxsize:
-                    _, evicted_value = self._cache.popitem(last=False)
+                while self._maxsize is not None and len(self._cache) >= self._maxsize:
+                    # Evict the least-recently-used entry that is not pinned.
+                    # When every entry is pinned, overflow ``maxsize`` instead
+                    # of closing a value that is still actively in use.
+                    eviction_key = next(
+                        (
+                            candidate
+                            for candidate in self._cache
+                            if self._pinned_predicate is None
+                            or not self._pinned_predicate(candidate)
+                        ),
+                        None,
+                    )
+                    if eviction_key is None:
+                        break
+                    evicted_values.append(self._cache.pop(eviction_key))
                 self._cache[key] = entry
                 cached = self._wrap_cached_value(entry)
 
         if loser_value is not None:
             self._track_close(key, loser_value)
-        if evicted_value is not None:
+        for evicted_value in evicted_values:
             self._detach_entry(evicted_value)
         return cached
 
@@ -447,15 +744,12 @@ class ClosingLRUCache:
             if key in self._cache:
                 self._cache.move_to_end(key)
                 return self._wrap_cached_value(self._cache[key])
-            pending_close = self._closing.get(key)
+            pending_closes = self._snapshot_pending_closes(key)
 
-        if pending_close is not None and not pending_close.done():
-            try:
-                await asyncio.wrap_future(pending_close)
-            except Exception:
-                # The close future never propagates failures (see _start_close);
-                # this guard is belt-and-suspenders so a creator always proceeds.
-                pass
+        for pending_close in pending_closes:
+            await self._wait_for_pending_close(
+                key, pending_close, "proceeding to create a new value"
+            )
 
         return self.get_or_create(key, factory)
 
@@ -485,6 +779,20 @@ class ClosingLRUCache:
         self._detach_entry(entry)
         return True
 
+    def evict_where(self, predicate) -> int:
+        """Remove every entry whose key satisfies *predicate* and request close.
+
+        Returns the number of entries evicted. Uses the same
+        defer-close-after-lock pattern as ``evict``. The predicate runs under
+        the cache lock, so it must be a pure function of the key.
+        """
+        with self._lock:
+            matched_keys = [key for key in self._cache if predicate(key)]
+            entries = [self._cache.pop(key) for key in matched_keys]
+        for entry in entries:
+            self._detach_entry(entry)
+        return len(entries)
+
     def contains(self, key) -> bool:
         """Check whether *key* is currently in the cache without creating."""
         with self._lock:
@@ -496,13 +804,19 @@ class ClosingLRUCache:
             return CacheInfo(size=len(self._cache), maxsize=self._maxsize)
 
 
-def closing_lru_cache(maxsize: Optional[int] = 128, lease: bool = True):
+def closing_lru_cache(maxsize: Optional[int] = 128, lease: bool = True, pinned_predicate=None):
     """Decorator that caches return values in a :class:`ClosingLRUCache`.
 
     Drop-in replacement for ``@functools.lru_cache`` that closes values once
     they are both removed from the cache and no longer held by caller code.
     ``maxsize`` semantics match ``functools.lru_cache``: positive int =
     bounded; ``0`` (or negative) = disabled; ``None`` = unbounded.
+    ``pinned_predicate`` protects matching keys from capacity eviction (see
+    :class:`ClosingLRUCache`). A predicate that exposes ``bind_signature`` is
+    bound to the cached function's parameter-name -> position map at
+    decoration time, so it can address key fields by parameter name and fail
+    loudly on a name that doesn't exist (e.g.
+    ``dataset_queue_pin_predicate("graph_database_name")``).
 
     The decorated function gains ``cache_clear()`` and ``cache_info()``
     attributes, matching the ``lru_cache`` API, as well as a ``__wrapped__``
@@ -510,7 +824,18 @@ def closing_lru_cache(maxsize: Optional[int] = 128, lease: bool = True):
     """
 
     def decorator(fn):
-        cache = ClosingLRUCache(maxsize=maxsize, lease=lease)
+        # Parameter-name -> positional index of ``fn``, so key-scanning helpers
+        # (``cache_evict_matching``) and name-bound pin predicates can resolve
+        # named criteria against the positional part of a cache key.
+        _param_positions = {
+            name: index for index, name in enumerate(inspect.signature(fn).parameters)
+        }
+
+        bind_signature = getattr(pinned_predicate, "bind_signature", None)
+        if callable(bind_signature):
+            bind_signature(_param_positions)
+
+        cache = ClosingLRUCache(maxsize=maxsize, lease=lease, pinned_predicate=pinned_predicate)
 
         def _key(args, kwargs):
             # ``_KW_MARK`` separates positional from keyword args so
@@ -539,12 +864,82 @@ def closing_lru_cache(maxsize: Optional[int] = 128, lease: bool = True):
             """
             return cache.evict(_key(args, kwargs))
 
+        def cache_evict_where(predicate) -> int:
+            """Evict every cached entry whose key satisfies *predicate*.
+
+            The predicate receives the raw cache key: the positional-args
+            tuple, extended with ``(_KW_MARK, *sorted kwarg items)`` when the
+            cached call used keyword arguments. Returns the number of
+            evicted entries.
+            """
+            return cache.evict_where(predicate)
+
+        def cache_evict_matching(**criteria) -> int:
+            """Evict every cached entry created with ALL the given argument values.
+
+            Criteria are matched by *parameter name* against the cached call's
+            arguments, whether they were passed positionally or by keyword —
+            e.g. ``cache_evict_matching(graph_database_name="<uuid>")`` evicts
+            only entries whose ``graph_database_name`` argument equals that
+            value, never entries where the value happens to appear in some
+            other field. Callers evicting by a shared identity field (e.g. a
+            database name cached under several differently-keyed entries) use
+            this instead of reconstructing exact keys.
+
+            Raises ``ValueError`` on no criteria (it would evict the whole
+            cache) or on parameter names not in the wrapped function's
+            signature (typo protection). Entries whose key does not record a
+            criterion's parameter (the call omitted an optional argument) do
+            not match. Returns the number of evicted entries.
+            """
+            return cache.evict_where(_build_matcher(criteria))
+
+        def _build_matcher(criteria):
+            if not criteria:
+                raise ValueError("cache_evict_matching requires at least one criterion")
+            unknown = set(criteria) - set(_param_positions)
+            if unknown:
+                raise ValueError(f"Unknown parameter name(s) for {fn.__name__}: {sorted(unknown)}")
+
+            def matches(key) -> bool:
+                if _KW_MARK in key:
+                    marker_index = key.index(_KW_MARK)
+                    positional = key[:marker_index]
+                    kwarg_values = dict(key[marker_index + 1 :])
+                else:
+                    positional = key
+                    kwarg_values = {}
+                for name, expected in criteria.items():
+                    if name in kwarg_values:
+                        actual = kwarg_values[name]
+                    else:
+                        position = _param_positions[name]
+                        if position >= len(positional):
+                            return False
+                        actual = positional[position]
+                    if actual != expected:
+                        return False
+                return True
+
+            return matches
+
+        async def cache_await_closed(**criteria) -> None:
+            """Wait until every pending close whose cached call matches
+            ``criteria`` has fully completed (workers exited, locks released).
+            With no criteria, waits for every pending close in this cache.
+            """
+            predicate = _build_matcher(criteria) if criteria else None
+            await cache.await_pending_closes(predicate)
+
         def cache_contains(*args, **kwargs) -> bool:
             """Return True if the key is cached, without creating."""
             return cache.contains(_key(args, kwargs))
 
         wrapper.cache_clear = cache.cache_clear
         wrapper.cache_evict = cache_evict
+        wrapper.cache_evict_where = cache_evict_where
+        wrapper.cache_evict_matching = cache_evict_matching
+        wrapper.cache_await_closed = cache_await_closed
         wrapper.cache_contains = cache_contains
         wrapper.cache_info = cache.cache_info
         wrapper.acall = acall

@@ -4,7 +4,7 @@ from typing import Optional
 from cognee.infrastructure.databases.graph.config import get_graph_config
 from cognee.infrastructure.databases.graph.get_graph_engine import (
     create_graph_engine,
-    evict_graph_engine,
+    evict_graph_engines_for_database,
 )
 from cognee.infrastructure.databases.postgres import (
     create_pg_database_if_not_exists,
@@ -84,16 +84,6 @@ class PostgresGraphDatasetDatabaseHandler:
         password = info.get("graph_database_password", "")
         db_name = dataset_database.graph_database_name
 
-        evict_graph_engine(
-            graph_database_provider="postgres",
-            graph_file_path="",
-            graph_database_name=db_name,
-            graph_database_username=username,
-            graph_database_password=password,
-            graph_database_host=host,
-            graph_database_port=port,
-        )
-
         await drop_pg_database_if_exists(
             db_name,
             host=host,
@@ -101,3 +91,13 @@ class PostgresGraphDatasetDatabaseHandler:
             username=username,
             password=password,
         )
+
+        # The pipeline caches its engine for this database under a context-config
+        # key (per-dataset graph_file_path, postgres_graph handler) that differs
+        # from this handler's creation key, so evict by database name. Evict AFTER
+        # the drop: an engine resolved concurrently during the drop's awaits would
+        # be re-cached and survive a pre-drop eviction. Post-drop nothing stale can
+        # persist — engines connect lazily, so an entry cached even after this
+        # eviction holds no dead connections and either reaches the recreated
+        # database or fails fast on a nonexistent one.
+        evict_graph_engines_for_database(db_name)

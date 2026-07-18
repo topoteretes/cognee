@@ -71,9 +71,9 @@ async def test_getting_of_documents(dataset_id_1):
 async def test_vector_engine_search_none_limit():
     query_text = "Tell me about Quantum computers"
 
-    from cognee.infrastructure.databases.vector import get_vector_engine
+    from cognee.infrastructure.databases.vector import get_vector_engine_async
 
-    vector_engine = await get_vector_engine()
+    vector_engine = await get_vector_engine_async()
 
     collection_name = "Entity_name"
 
@@ -111,9 +111,9 @@ async def test_vector_engine_search_with_nodeset_filtering():
     node_set = ["NLP", "Quantum"]
     query_text = "Tell me about NLP"
 
-    from cognee.infrastructure.databases.vector import get_vector_engine
+    from cognee.infrastructure.databases.vector import get_vector_engine_async
 
-    vector_engine = await get_vector_engine()
+    vector_engine = await get_vector_engine_async()
     query_vector = (await vector_engine.embedding_engine.embed_text([query_text]))[0]
 
     # Search with "OR" operator
@@ -266,14 +266,14 @@ async def main():
 
     await cognee.cognify([dataset_name_2, dataset_name_1])
 
-    from cognee.infrastructure.databases.vector import get_vector_engine
+    from cognee.infrastructure.databases.vector import get_vector_engine_async
     from cognee.modules.data.methods import get_datasets_by_name
 
     user = await get_default_user()
     dataset_1 = (await get_datasets_by_name([dataset_name_1], user.id))[0]
     await test_getting_of_documents(dataset_1.id)
 
-    vector_engine = await get_vector_engine()
+    vector_engine = await get_vector_engine_async()
     random_node = (
         await vector_engine.search("Entity_name", "Quantum computer", include_payload=True)
     )[0]
