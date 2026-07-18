@@ -237,6 +237,7 @@ def _resolve_graph_engine_args(params: dict) -> tuple:
         normalized["kuzu_num_threads"],
         normalized["kuzu_buffer_pool_size"],
         normalized["kuzu_max_db_size"],
+        normalized["graph_database_schema"],
     )
 
 
@@ -256,6 +257,7 @@ def create_graph_engine(
     kuzu_num_threads=0,
     kuzu_buffer_pool_size=DEFAULT_KUZU_BUFFER_POOL_SIZE,
     kuzu_max_db_size=DEFAULT_KUZU_MAX_DB_SIZE,
+    graph_database_schema="",
 ):
     """
     Wrapper function to call create graph engine with caching.
@@ -310,6 +312,7 @@ def evict_graph_engine(**kwargs) -> bool:
         normalized["kuzu_num_threads"],
         normalized["kuzu_buffer_pool_size"],
         normalized["kuzu_max_db_size"],
+        normalized["graph_database_schema"],
     )
 
 
@@ -370,6 +373,7 @@ def is_graph_engine_cached(**kwargs) -> bool:
         normalized["kuzu_num_threads"],
         normalized["kuzu_buffer_pool_size"],
         normalized["kuzu_max_db_size"],
+        normalized["graph_database_schema"],
     )
 
 
@@ -393,6 +397,7 @@ def _create_graph_engine(
     kuzu_num_threads=0,
     kuzu_buffer_pool_size=DEFAULT_KUZU_BUFFER_POOL_SIZE,
     kuzu_max_db_size=DEFAULT_KUZU_MAX_DB_SIZE,
+    graph_database_schema="",
 ):
     """
     Create a graph engine based on the specified provider type.
@@ -503,7 +508,7 @@ def _create_graph_engine(
 
         from .postgres.adapter import PostgresAdapter
 
-        return PostgresAdapter(connection_string=connection_string)
+        return PostgresAdapter(connection_string=connection_string, schema=graph_database_schema)
 
     elif graph_database_provider in ("ladybug", "kuzu"):
         if not graph_file_path:

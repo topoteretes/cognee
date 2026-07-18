@@ -60,6 +60,7 @@ def create_vector_engine(
     vector_db_password: str = "",
     vector_db_host: str = "",
     vector_db_subprocess_enabled: bool = True,
+    vector_db_schema: str = "",
 ):
     """
     Wrapper function to call create vector engine with caching.
@@ -77,6 +78,7 @@ def create_vector_engine(
     # reassign so callers passing ``None`` see the function-default applied
     # instead of having ``None`` flow into the cache key + factory.
     vector_db_subprocess_enabled = normalized_optional_params["vector_db_subprocess_enabled"]
+    vector_db_schema = normalized_optional_params["vector_db_schema"]
 
     # Check USE_UNIFIED_PROVIDER outside the cache so it's always re-read
     # unified_provider = os.environ.get("USE_UNIFIED_PROVIDER", "")
@@ -110,6 +112,7 @@ def create_vector_engine(
         vector_db_password,
         vector_db_host,
         vector_db_subprocess_enabled,
+        vector_db_schema,
     )
 
 
@@ -131,6 +134,7 @@ def evict_vector_engine(**kwargs) -> bool:
         normalized["vector_db_password"],
         normalized["vector_db_host"],
         normalized["vector_db_subprocess_enabled"],
+        normalized["vector_db_schema"],
     )
 
 
@@ -185,6 +189,7 @@ def is_vector_engine_cached(**kwargs) -> bool:
         normalized["vector_db_password"],
         normalized["vector_db_host"],
         normalized["vector_db_subprocess_enabled"],
+        normalized["vector_db_schema"],
     )
 
 
@@ -203,6 +208,7 @@ def _create_vector_engine(
     vector_db_password: str,
     vector_db_host: str,
     vector_db_subprocess_enabled: bool,
+    vector_db_schema: str = "",
 ):
     """
     Create a vector database engine based on the specified provider.
@@ -307,6 +313,7 @@ def _create_vector_engine(
             connection_string,
             vector_db_key,
             embedding_engine,
+            schema=vector_db_schema,
         )
 
     elif vector_db_provider.lower() == "neptune_analytics":

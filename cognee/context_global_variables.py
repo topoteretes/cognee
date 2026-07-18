@@ -202,6 +202,10 @@ class DatabaseContextManager:
             "vector_db_password": dataset_database.vector_database_connection_info.get(
                 "password", ""
             ),
+            # Shared-database isolation: when the pgvector_shared handler is used
+            # this pins the per-dataset vector engine to a dedicated Postgres
+            # schema; "" (database-per-dataset / single-tenant) means default path.
+            "vector_db_schema": dataset_database.vector_database_connection_info.get("schema", ""),
             # Inherit subprocess mode from the global config so that per-dataset DB wrappers
             # are also spawned as subprocesses when the feature is enabled.
             "vector_db_subprocess_enabled": get_vectordb_config().vector_db_subprocess_enabled,
@@ -231,6 +235,12 @@ class DatabaseContextManager:
             "graph_dataset_database_handler": dataset_database.graph_dataset_database_handler,
             "graph_database_port": dataset_database.graph_database_connection_info.get(
                 "graph_database_port", ""
+            ),
+            # Shared-database isolation: when the postgres_graph_shared handler is
+            # used this pins the per-dataset graph engine to a dedicated Postgres
+            # schema; "" means database-per-dataset / single-tenant (default path).
+            "graph_database_schema": dataset_database.graph_database_connection_info.get(
+                "graph_database_schema", ""
             ),
             # Inherit subprocess mode and Kuzu tuning from the global config so that
             # per-dataset DB wrappers are spawned with matching settings.

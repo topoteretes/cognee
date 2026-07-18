@@ -13,8 +13,14 @@ from cognee.infrastructure.databases.graph.ladybug.LadybugDatasetDatabaseHandler
 from cognee.infrastructure.databases.vector.pgvector.PGVectorDatasetDatabaseHandler import (
     PGVectorDatasetDatabaseHandler,
 )
+from cognee.infrastructure.databases.vector.pgvector.PGVectorSharedDatasetDatabaseHandler import (
+    PGVectorSharedDatasetDatabaseHandler,
+)
 from cognee.infrastructure.databases.graph.postgres.PostgresGraphDatasetDatabaseHandler import (
     PostgresGraphDatasetDatabaseHandler,
+)
+from cognee.infrastructure.databases.graph.postgres.PostgresGraphSharedDatasetDatabaseHandler import (
+    PostgresGraphSharedDatasetDatabaseHandler,
 )
 
 supported_dataset_database_handlers = {
@@ -31,8 +37,16 @@ supported_dataset_database_handlers = {
         "handler_instance": PGVectorDatasetDatabaseHandler,
         "handler_provider": "pgvector",
     },
+    "pgvector_shared": {
+        "handler_instance": PGVectorSharedDatasetDatabaseHandler,
+        "handler_provider": "pgvector",
+    },
     "postgres_graph": {
         "handler_instance": PostgresGraphDatasetDatabaseHandler,
+        "handler_provider": "postgres",
+    },
+    "postgres_graph_shared": {
+        "handler_instance": PostgresGraphSharedDatasetDatabaseHandler,
         "handler_provider": "postgres",
     },
     "ladybug": {
