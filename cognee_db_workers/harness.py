@@ -312,6 +312,118 @@ def start_parent_liveness_watchdog(poll_interval: float = 1.0) -> None:
     t.start()
 
 
+def start_windows_parent_death_watchdog(original_ppid: int) -> bool:
+    """Windows-correct replacement trigger for ``start_parent_liveness_watchdog``.
+
+    Windows never reparents an orphaned child (unlike POSIX, where death of
+    the parent causes reparenting to init/launchd and a ppid change is a
+    reliable signal) — ``os.getppid()`` on Windows returns the ORIGINAL
+    parent's PID forever, dead or alive, so the polling-ppid-change trigger
+    ``start_parent_liveness_watchdog`` relies on can structurally never fire
+    on Windows. In practice this orphans every worker spawned under this
+    harness the instant its parent is killed anything other than gracefully
+    (a hard ``TerminateProcess``/``taskkill /F``/``Stop-Process -Force``,
+    exactly how a hung parent gets recovered from in the field) — the worker
+    just sits there holding whatever exclusive resource lock it opened
+    (e.g. a Kuzu/LanceDB database file lock) with no self-termination path,
+    until a human manually finds and kills it.
+
+    Opens a Windows HANDLE to the original parent PID once, at worker
+    startup (called from ``run_worker_loop`` within milliseconds of this
+    process's own creation, while the parent is provably still alive — it's
+    the one that just called ``Process.start()``). Then blocks on that
+    HANDLE with ``WaitForSingleObject``, not on the numeric PID.
+
+    This survives PID reuse (a real risk on any long-running system): a
+    Windows HANDLE refers to one specific kernel process object for its
+    entire life. If the PID number is later reused by an unrelated process,
+    the handle is untouched — it keeps pointing at the ORIGINAL process
+    object, and ``WaitForSingleObject`` only signals when THAT object
+    terminates. This is an OS guarantee, not a heuristic, and is strictly
+    stronger than a ``getppid()``-based check even on platforms where
+    ``getppid()`` works correctly.
+
+    Returns ``True`` once armed (Windows only, and only if the parent could
+    actually be opened). Returns ``False`` on any other platform, or if
+    ``OpenProcess`` failed for a reason OTHER than "the PID is genuinely
+    gone" (e.g. access denied in some hardened environment) — falling back
+    to the portable polling watchdog in that case rather than assuming the
+    parent is dead and killing a worker whose parent may well be alive.
+    Only a confirmed-gone PID (``ERROR_INVALID_PARAMETER``, what
+    ``OpenProcess`` returns for a nonexistent PID) exits immediately, since
+    there is then genuinely nothing left to watch.
+
+    ``restype``/``argtypes`` are set explicitly on every kernel32 call (audit
+    finding, 2026-07-18): left unconfigured, ctypes defaults ``restype`` to a
+    32-bit ``int`` and marshals arguments as ``c_int``, which is a
+    technically-incorrect (if empirically harmless on this target, since
+    Windows guarantees kernel handles fit in 32 bits) type for a
+    pointer-sized ``HANDLE``. Configuring them removes the ambiguity rather
+    than relying on that guarantee.
+    """
+    if sys.platform != "win32":
+        return False
+    try:
+        from ctypes import wintypes
+
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        SYNCHRONIZE = 0x00100000
+        ERROR_INVALID_PARAMETER = 87
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+        kernel32.WaitForSingleObject.restype = wintypes.DWORD
+        kernel32.WaitForSingleObject.argtypes = (wintypes.HANDLE, wintypes.DWORD)
+        kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+
+        handle = kernel32.OpenProcess(
+            PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, False, original_ppid
+        )
+    except Exception:
+        return False
+    if not handle:
+        if ctypes.get_last_error() == ERROR_INVALID_PARAMETER:
+            # The PID genuinely doesn't correspond to a live process -- parent is
+            # already gone (or the PID was never valid). Exit fast, same rationale
+            # as the ppid-change branch in start_parent_liveness_watchdog above.
+            os._exit(0)
+        # OpenProcess failed for some OTHER reason (e.g. access denied) -- the
+        # parent may well still be alive; do not assume it's dead. Fall back to
+        # the portable watchdog rather than arming nothing.
+        return False
+
+    def _watch() -> None:
+        WAIT_OBJECT_0 = 0
+        INFINITE = 0xFFFFFFFF
+        try:
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            result = kernel32.WaitForSingleObject(handle, INFINITE)
+            kernel32.CloseHandle(handle)
+        except Exception:
+            # Couldn't even complete the wait call -- nothing left to safely
+            # decide from; exit fast, mirroring the POSIX watchdog's own
+            # any-error-means-gone posture.
+            os._exit(0)
+        if result == WAIT_OBJECT_0:
+            # The parent's process object was signaled -- it exited, by any
+            # means (clean shutdown, TerminateProcess, taskkill /F,
+            # Stop-Process -Force). Exit fast without running atexit handlers,
+            # mirroring the POSIX watchdog above.
+            os._exit(0)
+        # Any other return (WAIT_FAILED, or an unexpected code) means we
+        # couldn't get a reliable signal from this handle -- rather than
+        # blindly exiting a worker whose parent might still be alive (audit
+        # finding: the original unconditional-exit version could kill a
+        # healthy-parent worker here), fall back to the portable polling
+        # watchdog so there's still SOME protection.
+        start_parent_liveness_watchdog()
+
+    t = threading.Thread(target=_watch, name="win32-parent-death-watchdog", daemon=True)
+    t.start()
+    return True
+
+
 # Serializes all ``spawn_without_main`` enter/exit transitions. The
 # mutation is on a single, process-global object (``sys.modules["__main__"]``),
 # so two threads entering concurrently would race: thread B would capture
@@ -420,13 +532,16 @@ def run_worker_loop(
     """
     _enable_faulthandler()
     # pdeathsig is the authoritative parent-death signal on Linux. Only fall
-    # back to the portable polling watchdog when the kernel hook is
-    # unavailable (macOS, Windows) or failed to arm — that watchdog has no
-    # way to distinguish "legitimate parent happens to be pid 1" from
-    # "reparented to init", so we avoid running it whenever pdeathsig has
-    # us covered.
+    # back to a portable watchdog when the kernel hook is unavailable (macOS,
+    # Windows) or failed to arm — that watchdog has no way to distinguish
+    # "legitimate parent happens to be pid 1" from "reparented to init", so
+    # we avoid running it whenever pdeathsig has us covered. On Windows,
+    # prefer the HANDLE-based watchdog (event-driven, immune to PID reuse)
+    # over the portable ppid-polling one, which can never actually fire on
+    # Windows — see start_windows_parent_death_watchdog's docstring.
     if not set_pdeathsig():
-        start_parent_liveness_watchdog()
+        if not start_windows_parent_death_watchdog(os.getppid()):
+            start_parent_liveness_watchdog()
 
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
