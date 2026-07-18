@@ -94,3 +94,22 @@ class MissingSystemPromptPathError(CogneeValidationError):
     ) -> None:
         message = "No system prompt path provided."
         super().__init__(message, name)
+
+
+class MCPSamplingUnavailableError(CogneeValidationError):
+    """
+    Raised when `LLM_PROVIDER=mcp-sampling` is selected but no host MCP sampling
+    session is available (cognee is not running inside an MCP server, or the host
+    did not grant the `sampling` capability).
+    """
+
+    def __init__(
+        self,
+        message: str = (
+            "No MCP sampling session is available. LLM_PROVIDER=mcp-sampling only works while "
+            "cognee runs as an MCP server inside a host that grants the `sampling` capability "
+            "(support varies by host). Set LLM_PROVIDER to a provider with credentials, or "
+            "run inside such a host."
+        ),
+    ) -> None:
+        super().__init__(message=message, name="MCPSamplingUnavailableError")
