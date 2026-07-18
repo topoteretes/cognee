@@ -5,6 +5,7 @@ from pydantic import BaseModel
 
 from cognee.infrastructure.llm import get_llm_config
 from cognee.infrastructure.llm.config import get_llm_context_config
+from cognee.infrastructure.llm.retry_config import raise_if_quota_error
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.types import (
     TranscriptionReturnType,
 )
@@ -48,6 +49,19 @@ async def _record_session_usage_after(
     except Exception:
         pass
     return result
+
+
+async def _fail_fast_on_quota(coro: Coroutine) -> T:
+    """Convert provider quota/billing exhaustion into ``LLMQuotaExceededError``.
+
+    Runs at the single choke point every structured-output call flows through,
+    so it is provider- and framework-agnostic.
+    """
+    try:
+        return await coro
+    except Exception as error:
+        raise_if_quota_error(error)
+        raise
 
 
 class LLMGateway:
@@ -102,7 +116,7 @@ class LLMGateway:
 
         # Wrap so usage is recorded against any active session tracker.
         # No-op when no tracker is installed.
-        return _record_session_usage_after(inner, text_input=text_input)
+        return _fail_fast_on_quota(_record_session_usage_after(inner, text_input=text_input))
 
     @staticmethod
     def create_transcript(input, **kwargs) -> Coroutine[Any, Any, TranscriptionReturnType | None]:
