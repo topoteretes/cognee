@@ -21,6 +21,7 @@ from .create_dlt_source import (
 from .data_item import DataItem
 from .dlt_row_data import DltRowData
 from .ingest_dlt_source import ingest_dlt_source
+from .dlt_utils import document_source_tag
 
 logger = get_logger("resolve_dlt_sources")
 
@@ -79,9 +80,15 @@ async def resolve_dlt_sources(
         # Nothing to expand — return original data unchanged
         return data, None
 
+    # A dlt source may opt into the document path (each row → a text document
+    # that goes through normal cognify) by declaring a document-source tag;
+    # every other dlt source takes the relational schema-context path below.
+    document_items = [i for i in dlt_items if document_source_tag(i)]
+    relational_items = [i for i in dlt_items if not document_source_tag(i)]
+
     # --- Run DLT pipelines and collect rows ---------------------------------
     all_rows: List[DltRowData] = []
-    for dlt_item in dlt_items:
+    for dlt_item in relational_items:
         rows = await ingest_dlt_source(
             dlt_item,
             dataset_name,
@@ -91,6 +98,32 @@ async def resolve_dlt_sources(
         )
         all_rows.extend(rows)
 
+    # Document sources honour the caller's write_disposition so both sync models
+    # work: "replace" for delete-feed-less snapshot sources (Notion/Slack — each
+    # run rewrites staging with exactly the rows currently visible) and "merge"
+    # (+ a hard_delete tombstone column) for incremental sources with a real
+    # delete feed (Google Drive's Changes API). Either way the whole set is read
+    # back (max_rows_per_table=0) so orphan cleanup can forget rows that dropped
+    # out of the current corpus. write_disposition/primary_key default to
+    # "replace"/"id" (see the kwargs resolution above).
+    document_data_items: list[DataItem] = []
+    document_fresh_ids: Set[UUID] = set()
+    document_source_tags: set[str] = set()
+    for dlt_item in document_items:
+        source_tag = document_source_tag(dlt_item)
+        document_source_tags.add(source_tag)
+        rows = await ingest_dlt_source(
+            dlt_item,
+            dataset_name,
+            primary_key=primary_key or "id",
+            write_disposition=write_disposition,
+            max_rows_per_table=0,
+        )
+        for row in rows:
+            data_id = await get_unique_data_id(_dlt_row_identifier(row), user)
+            document_fresh_ids.add(data_id)
+            document_data_items.append(_build_document_data_item(row, data_id, source_tag))
+
     # --- Phase 1: compute stable data_ids for all rows (for FK resolution) --
     # Primary lookup uses content_hash for uniqueness (handles tables with
     # non-unique fallback PKs like junction tables).
@@ -99,8 +132,7 @@ async def resolve_dlt_sources(
     # When multiple rows share a PK value, the last one wins (best-effort).
     fk_lookup: dict[tuple[str, str], UUID] = {}
     for row in all_rows:
-        row_identifier = f"dlt:{row.table_name}:{row.primary_key_value}:{row.content_hash}"
-        data_id = await get_unique_data_id(row_identifier, user)
+        data_id = await get_unique_data_id(_dlt_row_identifier(row), user)
         row_id_lookup[(row.table_name, row.primary_key_value, row.content_hash)] = data_id
 
         fk_key = (row.table_name, row.primary_key_value)
@@ -184,6 +216,10 @@ async def resolve_dlt_sources(
             sample,
         )
 
+    # Document rows (built above) skip the schema-context treatment: each is a
+    # text document (source == its document tag) that flows through normal cognify.
+    expanded_items.extend(document_data_items)
+
     # --- Phase 3: prepare deferred orphan cleanup ---------------------------
     # Deletion of orphaned dlt rows is deferred to *after* the fresh rows are
     # committed by the add pipeline, to avoid a data-loss window: if ingestion
@@ -191,14 +227,30 @@ async def resolve_dlt_sources(
     # replacements never stored. We return a cleanup coroutine for the caller
     # to await post-commit instead of deleting here.
     #
-    # Skip orphan deletion for "append" disposition — each run intentionally
-    # adds new rows, so prior batches should not be treated as orphans.
+    # Relational sources skip cleanup for "append" (each run intentionally adds
+    # new rows). Document sources reconcile the full current snapshot, so rows
+    # missing from it (deleted/unshared) must be forgotten. The two paths are
+    # cleaned separately so an append relational run never treats document rows
+    # as orphans, or vice versa.
+    #
+    # Both paths skip cleanup when their fresh set is empty: an empty read-back
+    # cannot be distinguished from a failed/misconfigured sync, and treating it
+    # as "everything is an orphan" would wipe the whole corpus. Leaving stale
+    # rows for one cycle is the safe failure mode.
+    relational_fresh: Set[UUID] = set(row_id_lookup.values())
+    do_relational_cleanup = write_disposition != "append" and bool(relational_fresh)
+    do_document_cleanup = bool(document_fresh_ids)
+
     orphan_cleanup: Optional[Callable[[], Any]] = None
-    if write_disposition != "append":
-        fresh_data_ids: Set[UUID] = set(row_id_lookup.values())
+    if do_relational_cleanup or do_document_cleanup:
 
         async def _cleanup() -> None:
-            await _delete_dlt_orphans(dataset_name, user, fresh_data_ids)
+            if do_relational_cleanup:
+                await _delete_dlt_orphans(dataset_name, user, relational_fresh, sources=("dlt",))
+            if do_document_cleanup:
+                await _delete_dlt_orphans(
+                    dataset_name, user, document_fresh_ids, sources=tuple(document_source_tags)
+                )
 
         orphan_cleanup = _cleanup
 
@@ -209,6 +261,47 @@ async def resolve_dlt_sources(
 # ---------------------------------------------------------------------------
 # Helpers (moved from ingest_data.py)
 # ---------------------------------------------------------------------------
+
+
+def _dlt_row_identifier(row: DltRowData) -> str:
+    """Stable identifier for a dlt row, used to derive a deterministic data_id.
+
+    Includes ``content_hash`` so that unchanged rows keep the same data_id
+    across runs (no re-ingest/re-cognify) while edited rows get a fresh one.
+    """
+    return f"dlt:{row.table_name}:{row.primary_key_value}:{row.content_hash}"
+
+
+def _build_document_data_item(row: DltRowData, data_id: UUID, source_tag: str) -> DataItem:
+    """Build a text-document DataItem from a document-source dlt row.
+
+    The row is expected to carry ``title``/``content`` columns (and optionally
+    ``url``/``id``). Tagging ``external_metadata["source"] = source_tag`` (not
+    ``"dlt"``) routes the document through normal cognify entity extraction
+    rather than the deterministic dlt-row path (see ``is_dlt_sourced``).
+    """
+    row_data = row.row_data
+    title = _clean(row_data.get("title"))
+    content = _clean(row_data.get("content"))
+    text = f"# {title}\n\n{content}".strip() if title else content
+
+    external_metadata = {"source": source_tag, "title": title or None}
+    if row_data.get("url"):
+        external_metadata["url"] = row_data["url"]
+    if row_data.get("id"):
+        external_metadata["external_id"] = str(row_data["id"])
+
+    return DataItem(
+        data=text,
+        label=title or str(row_data.get("id")),
+        external_metadata=external_metadata,
+        data_id=data_id,
+    )
+
+
+def _clean(value: Any) -> str:
+    """Coerce a possibly-None cell value to a stripped string."""
+    return str(value).strip() if value is not None else ""
 
 
 def _build_schema_context_text(dlt_row: DltRowData) -> str:
@@ -316,6 +409,7 @@ async def _delete_dlt_orphans(
     dataset_name: str,
     user: User,
     fresh_data_ids: Set[UUID],
+    sources: tuple[str, ...] = ("dlt",),
 ) -> None:
     """Delete dlt-sourced Data records (and their graph/vector artifacts) that
     are no longer present in the freshly-ingested dlt source.
@@ -323,11 +417,15 @@ async def _delete_dlt_orphans(
     This handles the case where rows are deleted from the upstream database
     and the user re-ingests.  dlt cleans its own staging DB, but cognee's
     relational, graph, and vector stores still hold stale data.
+
+    ``sources`` restricts cleanup to Data whose ``external_metadata["source"]``
+    is one of the given tags (e.g. ``("dlt",)`` for relational rows or
+    ``("notion",)`` for Notion pages), so reconciling one source never removes
+    the other's records.
     """
     from cognee.modules.data.methods.get_dataset_data import get_dataset_data
     from cognee.modules.data.methods import get_authorized_existing_datasets
     from cognee.modules.data.methods.delete_data import delete_data
-    from cognee.modules.graph.methods.has_data_related_nodes import has_data_related_nodes
     from cognee.modules.graph.methods.delete_data_nodes_and_edges import (
         delete_data_nodes_and_edges,
     )
@@ -346,7 +444,7 @@ async def _delete_dlt_orphans(
     orphans = []
     for data_item in all_data:
         ext = data_item.external_metadata
-        if not isinstance(ext, dict) or ext.get("source") != "dlt":
+        if not isinstance(ext, dict) or ext.get("source") not in sources:
             continue
         if data_item.id not in fresh_data_ids:
             orphans.append(data_item)
@@ -363,8 +461,13 @@ async def _delete_dlt_orphans(
     failed: list = []
     for orphan in orphans:
         try:
-            if await has_data_related_nodes(dataset.id, orphan.id):
-                await delete_data_nodes_and_edges(dataset.id, orphan.id, user.id)
+            # Always attempt graph+vector cleanup. delete_data_nodes_and_edges
+            # handles both provenance modes and no-ops when there is nothing to
+            # remove; gating on has_data_related_nodes (a relational-ledger-only
+            # check) wrongly skipped cleanup for graph-provenance graphs (the
+            # default), leaving a forgotten row's chunks/entities in the graph +
+            # vector stores and still retrievable.
+            await delete_data_nodes_and_edges(dataset.id, orphan.id, user.id)
             await delete_data(orphan, dataset.id)
         except Exception:
             failed.append(orphan.id)

@@ -39,6 +39,16 @@ is inaccessible:
 
 Completion searches are still exercised afterwards as a smoke check (must not
 raise), just not used as the accessibility gate.
+
+* sessions — the current branch must take over the legacy session cache that
+  Phase 1 seeded, without re-ingesting: improve() on the untouched session
+  ingests nothing new (the full window is byte-identical to the legacy
+  snapshot, content-hash dedup absorbs it) and writes the persist watermark;
+  after growing the session, the next improve() ingests exactly one document
+  containing ONLY the new entry; every session fact ends up stored exactly
+  once across both versions. A missing legacy session is a hard failure — the
+  CI pin never goes below v1.2.0 (the earliest release with the SQL session
+  cache), so absence means Phase 1's seeding broke.
 """
 
 import asyncio
@@ -52,11 +62,15 @@ from cognee.api.v1.search import SearchType
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.infrastructure.session.get_session_manager import get_session_manager
+from cognee.infrastructure.session.session_persist_watermark import get_persisted_qa_count
+from cognee.modules.data.methods import get_dataset_data, get_datasets_by_name
 from cognee.modules.data.methods.get_dataset_databases import get_dataset_databases
 from cognee.modules.data.models import DatasetData
 from cognee.modules.engine.models import Entity, EntityType
 from cognee.modules.graph.models import Edge, Node
 from cognee.modules.migrations.versions.namespace_entity_type_node_ids import build_id_remap
+from cognee.modules.users.methods import get_default_user
 
 _LEDGER_ENTITY_TYPES = (Entity.__name__, EntityType.__name__)
 
@@ -76,6 +90,13 @@ Loren Ipsum Dolor sit amet, Lorem ipsum.
 
 DATASET = "lorem_ipsum"
 SEARCH_QUERY = "What is Lorem Ipsum and where does it come from?"
+
+# Session takeover checks — markers must stay in sync with phase1_seed.py.
+COMPAT_SESSION_ID = "compat_session"
+SESSION_FACT_1_MARKER = "Anton Zorman"
+SESSION_FACT_2_MARKER = "Ilka Matova"
+SESSION_FACT_3 = "The glazier Pavle Rossi fired amber panes for the Karst chapel windows."
+SESSION_FACT_3_MARKER = "Pavle Rossi"
 
 
 def _fail(message: str) -> None:
@@ -321,6 +342,91 @@ async def _ledger_expectations(data_id, dataset_id, scope_to_dataset: bool):
     return doc_nodes - other_nodes, doc_edges - other_edges
 
 
+async def _session_data_items(user):
+    datasets = await get_datasets_by_name([DATASET], user.id)
+    return await get_dataset_data(datasets[0].id)
+
+
+def _read_raw_document(item) -> str:
+    with open(item.raw_data_location.replace("file://", ""), "r") as f:
+        return f.read()
+
+
+async def _verify_session_takeover(stage: str) -> None:
+    """Verify the current branch takes over the legacy session cache incrementally.
+
+    A. improve() on the untouched legacy session must ingest NOTHING new — the
+       full window is byte-identical to the legacy whole-session snapshot, so
+       content-hash dedup absorbs it — and must write the persist watermark.
+    B. After the session grows by one entry, improve() must ingest exactly ONE
+       new document containing ONLY the new entry (legacy entries are never
+       re-ingested), and every session fact must be stored exactly once across
+       both versions.
+    """
+    print(f"\n[{stage}] Verifying session persistence takeover")
+
+    user = await get_default_user()
+    user_id = str(user.id)
+    session_manager = get_session_manager()
+
+    entries = await session_manager.get_session(
+        user_id=user_id, session_id=COMPAT_SESSION_ID, formatted=False
+    )
+    if not entries:
+        _fail(
+            f"[{stage}] legacy session '{COMPAT_SESSION_ID}' not found — Phase 1's session "
+            "seeding broke (the CI pin never goes below v1.2.0, which has session memory)."
+        )
+
+    if len(entries) != 2:
+        _fail(f"[{stage}] expected 2 legacy session entries, found {len(entries)}.")
+
+    # A: unchanged legacy session -> dedup no-op + watermark heals.
+    before = await _session_data_items(user)
+    await cognee.improve(DATASET, session_ids=[COMPAT_SESSION_ID])
+    after_unchanged = await _session_data_items(user)
+    new_items = {item.id for item in after_unchanged} - {item.id for item in before}
+    if new_items:
+        _fail(
+            f"[{stage}] improve() re-ingested an unchanged legacy session "
+            f"({len(new_items)} new document(s)) — expected content-hash dedup no-op."
+        )
+    watermark = await get_persisted_qa_count(session_manager, user_id, COMPAT_SESSION_ID)
+    if watermark != 2:
+        _fail(f"[{stage}] persist watermark should heal to 2, got {watermark}.")
+    print("  [session] unchanged legacy session: 0 new documents, watermark healed to 2 — OK")
+
+    # B: grow the legacy session with the current branch -> only the new entry.
+    await cognee.remember(SESSION_FACT_3, session_id=COMPAT_SESSION_ID, self_improvement=False)
+    await cognee.improve(DATASET, session_ids=[COMPAT_SESSION_ID])
+    after_grown = await _session_data_items(user)
+    new_items = [item for item in after_grown if item.id not in {x.id for x in after_unchanged}]
+    if len(new_items) != 1:
+        _fail(f"[{stage}] expected exactly 1 new document after growth, got {len(new_items)}.")
+    window_text = _read_raw_document(new_items[0])
+    if SESSION_FACT_3_MARKER not in window_text:
+        _fail(f"[{stage}] new session window is missing the new entry: {window_text!r}")
+    if SESSION_FACT_1_MARKER in window_text or SESSION_FACT_2_MARKER in window_text:
+        _fail(f"[{stage}] new session window re-ingested legacy entries: {window_text!r}")
+    watermark = await get_persisted_qa_count(session_manager, user_id, COMPAT_SESSION_ID)
+    if watermark != 3:
+        _fail(f"[{stage}] persist watermark should advance to 3, got {watermark}.")
+
+    # Exactly-once across versions: each fact appears in exactly one document.
+    all_texts = [_read_raw_document(item) for item in after_grown]
+    for marker in (SESSION_FACT_1_MARKER, SESSION_FACT_2_MARKER, SESSION_FACT_3_MARKER):
+        occurrences = sum(text.count(marker) for text in all_texts)
+        if occurrences != 1:
+            _fail(
+                f"[{stage}] session fact {marker!r} stored {occurrences} times — "
+                "must be exactly once across legacy + current ingestion."
+            )
+    print(
+        "  [session] grown session: 1 new document with ONLY the new entry, "
+        "watermark 3, all facts stored exactly once — OK"
+    )
+
+
 async def _verify_delete(stage: str) -> None:
     """Hard-delete documents one by one, checking the graph after each.
 
@@ -467,9 +573,13 @@ async def main():
     # ── Step 3: data must still be accessible after re-cognify ────────────────
     await _verify_access("Step 3 — after re-cognify")
 
-    # ── Step 4: migrated data must be deletable (ledger-driven hard delete) ───
+    # ── Step 4: legacy session cache must be taken over incrementally ─────────
+    # A missing legacy session hard-fails: the pin never goes below v1.2.0.
+    await _verify_session_takeover("Step 4 — session persistence takeover")
+
+    # ── Step 5: migrated data must be deletable (ledger-driven hard delete) ───
     # Destructive on purpose, so it runs last.
-    await _verify_delete("Step 4 — delete migrated data")
+    await _verify_delete("Step 5 — delete migrated data")
 
     print("\nAll Phase 2 checks passed.")
 
