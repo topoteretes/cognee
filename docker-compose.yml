@@ -18,6 +18,8 @@ services:
       - LOG_LEVEL=INFO
       # CAUTION: Default '*' allows all origins. Override with specific domains in production.
       - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-*}
+      - COGNEE_TEST_PIPELINE_DELAY_SECONDS=${COGNEE_TEST_PIPELINE_DELAY_SECONDS:-0}
+      - COGNEE_STALE_RUN_RECOVERY_MIN_AGE_SECONDS=${COGNEE_STALE_RUN_RECOVERY_MIN_AGE_SECONDS:-3600}
     extra_hosts:
       # Allows the container to reach your local machine using "host.docker.internal" instead of "localhost"
       - "host.docker.internal:host-gateway"
@@ -126,7 +128,8 @@ services:
       POSTGRES_USER: cognee
       POSTGRES_PASSWORD: cognee
       POSTGRES_DB: cognee_db
-      # - postgres_data:/var/lib/postgresql/data
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
     ports:
       - 5432:5432
     networks:

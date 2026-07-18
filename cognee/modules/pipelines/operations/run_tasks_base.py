@@ -1,3 +1,5 @@
+import asyncio
+import os
 from typing import Optional
 
 from cognee.modules.observability import OtelStatusCode as StatusCode
@@ -266,6 +268,7 @@ async def run_tasks_base(
     ctx: Optional[PipelineContext] = None,
 ):
     """Base function to execute tasks in a pipeline, handling task type detection and execution."""
+
     if len(tasks) == 0:
         yield data
         return
