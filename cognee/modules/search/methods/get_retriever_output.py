@@ -12,6 +12,7 @@ from cognee.modules.search.methods.get_search_type_retriever_instance import (
     get_search_type_retriever_instance,
 )
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
+from cognee.modules.search.operations import select_search_type
 from cognee.modules.search.types import SearchType
 from cognee.shared.logging_utils import get_logger
 
@@ -35,8 +36,12 @@ async def get_retriever_output(
     if is_empty:
         logger.warning("Search attempt on an empty knowledge graph")
 
+    effective_search_type = query_type
+    if query_type is SearchType.FEELING_LUCKY:
+        effective_search_type = await select_search_type(query_text)
+
     retriever_instance = await get_search_type_retriever_instance(
-        query_type=query_type, query_text=query_text, **kwargs
+        query_type=effective_search_type, query_text=query_text, **kwargs
     )
 
     retriever_class = type(retriever_instance).__name__
@@ -51,7 +56,7 @@ async def get_retriever_output(
                 result_object=None,
                 context=None,
                 completion=[turn_preparation.response_to_user or "Got it."],
-                search_type=query_type,
+                search_type=effective_search_type,
                 only_context=False,
                 dataset_name=kwargs.get("dataset").name if kwargs.get("dataset") else None,
                 dataset_id=kwargs.get("dataset").id if kwargs.get("dataset") else None,
@@ -64,7 +69,7 @@ async def get_retriever_output(
     # Get raw result objects from retriever and forward to context and completion methods to avoid duplicate retrievals.
     with new_span("cognee.retrieval.get_objects") as span:
         span.set_attribute("cognee.retrieval.retriever", retriever_class)
-        span.set_attribute(COGNEE_SEARCH_TYPE, query_type.value)
+        span.set_attribute(COGNEE_SEARCH_TYPE, effective_search_type.value)
         retrieved_objects = await retriever_instance.get_retrieved_objects(query=effective_query)
         obj_count = _count_retrieved_objects(retrieved_objects)
         span.set_attribute(COGNEE_RESULT_COUNT, obj_count)
@@ -115,7 +120,7 @@ async def get_retriever_output(
         result_object=retrieved_objects,
         context=context,
         completion=completion,
-        search_type=query_type,
+        search_type=effective_search_type,
         only_context=only_context,
         dataset_name=kwargs.get("dataset").name if kwargs.get("dataset") else None,
         dataset_id=kwargs.get("dataset").id if kwargs.get("dataset") else None,

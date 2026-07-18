@@ -1,7 +1,14 @@
+from pydantic import BaseModel
+
 from cognee.modules.recall.methods.normalize_search_payload import normalize_search_payload
 from cognee.modules.recall.types.SearchResultItem import SearchResultKind
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
 from cognee.modules.search.types import SearchType
+
+
+class Answer(BaseModel):
+    answer: str
+    confidence: float
 
 
 def test_hybrid_completion_normalizes_as_graph_completion():
@@ -14,6 +21,33 @@ def test_hybrid_completion_normalizes_as_graph_completion():
 
     assert len(items) == 1
     assert items[0].kind == SearchResultKind.GRAPH_COMPLETION
+
+
+def test_agentic_completion_normalizes_as_graph_completion():
+    payload = SearchResultPayload(
+        completion=["agent answer"],
+        search_type=SearchType.AGENTIC_COMPLETION,
+    )
+
+    items = normalize_search_payload(payload)
+
+    assert len(items) == 1
+    assert items[0].kind == SearchResultKind.GRAPH_COMPLETION
+
+
+def test_pydantic_completion_populates_structured_result():
+    payload = SearchResultPayload(
+        completion=Answer(answer="Revenue grew.", confidence=0.91),
+        search_type=SearchType.GRAPH_COMPLETION,
+    )
+
+    items = normalize_search_payload(payload)
+
+    assert len(items) == 1
+    assert items[0].kind == SearchResultKind.STRUCTURED
+    assert items[0].text == "Revenue grew."
+    assert items[0].structured == {"answer": "Revenue grew.", "confidence": 0.91}
+    assert items[0].raw == {"answer": "Revenue grew.", "confidence": 0.91}
 
 
 def test_chunk_result_exposes_provenance_metadata():
