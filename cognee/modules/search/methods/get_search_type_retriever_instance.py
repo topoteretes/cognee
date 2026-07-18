@@ -32,6 +32,7 @@ from cognee.modules.retrieval.graph_completion_context_extension_retriever impor
 from cognee.modules.retrieval.cypher_search_retriever import CypherSearchRetriever
 from cognee.modules.retrieval.natural_language_retriever import NaturalLanguageRetriever
 from cognee.modules.retrieval.agentic_retriever import AgenticRetriever
+from cognee.modules.retrieval.neighborhood_retriever import NeighborhoodRetriever
 from cognee.context_global_variables import session_user
 
 
@@ -307,6 +308,20 @@ async def get_search_type_retriever_instance(
         SearchType.CODING_RULES: (
             CodingRulesRetriever,
             {"rules_nodeset_name": node_name},
+        ),
+        SearchType.NEIGHBORHOOD: (
+            NeighborhoodRetriever,
+            {
+                "depth": retriever_specific_config.get("depth", 2),
+                "edge_types": retriever_specific_config.get("edge_types"),
+                "seed_top_k": (
+                    neighborhood_seed_top_k
+                    if neighborhood_seed_top_k is not None
+                    else retriever_specific_config.get("seed_top_k", 5)
+                ),
+                "max_nodes": retriever_specific_config.get("max_nodes", 100),
+                "seed_collections": retriever_specific_config.get("seed_collections"),
+            },
         ),
     }
 

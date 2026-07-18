@@ -287,12 +287,45 @@ Use these defaults:
 - `GRAPH_SUMMARY_COMPLETION`: graph + summary-based answers
 - `GRAPH_COMPLETION_COT`: deeper reasoning over graph context
 - `GRAPH_COMPLETION_CONTEXT_EXTENSION`: broader graph context retrieval
+- `NEIGHBORHOOD`: structural N-hop subgraph around mentioned entities (no LLM; see notes below)
 - `CYPHER`: raw Cypher queries when enabled
 - `NATURAL_LANGUAGE`: natural language to graph query
 - `TEMPORAL`: time-aware graph search
 - `CODING_RULES`: code rules and patterns
 - `FEELING_LUCKY`: let Cognee choose automatically
 - `FEEDBACK`: apply feedback to improve later retrieval behavior
+
+### `NEIGHBORHOOD` (structural neighborhood search)
+
+Returns the N-hop neighborhood (ego-graph) around the entities a query mentions, as
+structured subgraph data (`seeds`, `nodes`, `edges`, `truncated`, `depth`). It resolves
+seed nodes via vector search, then expands the graph structurally — there is no LLM step.
+
+Parameters (set via `retriever_specific_config`, except `seed_top_k`):
+
+- `depth` (default `2`): number of hops to expand from each seed.
+- `seed_top_k` (default `5`): maximum number of seed nodes resolved from the query.
+- `max_nodes` (default `100`): cap on returned nodes; truncation keeps the closest hops
+  first, and seeds are always retained.
+- `edge_types` (optional): allow-list of relationship types — see the limitation below.
+
+Scope and limitations:
+
+- **Structural and LLM-free.** No LLM generation and no vector re-ranking of expanded
+  nodes; the vector engine is used once, only to resolve seeds.
+- **Undirected traversal.** Expansion is undirected from each seed (matching the
+  underlying `get_neighborhood` primitive on every backend). `edge_types` is a *symmetric
+  type filter*, not a direction control. Directional traversal is not supported and is
+  intentional future work.
+- **`edge_types` is not supported on the default backend (Ladybug/Kuzu).** Passing
+  `edge_types` currently raises `RuntimeError` (`Assertion failed in file
+  ".../parsed_parameter_expression.h" on line 21: UNREACHABLE_CODE`) because of an
+  upstream `get_neighborhood` limitation. Edge-type filtering is supported on Neo4j and
+  Postgres. Unfiltered neighborhood queries work on all backends. (tracked in #3585)
+- **Backend test coverage is extras-gated.** Structural correctness is verified on
+  Ladybug by default; Neo4j and Postgres are covered by extras-gated tests that require
+  live services.
+- **LLM-summarized variant is out of scope** and planned as a separate change.
 
 ## Agentic workflows and feedback-driven improvement
 
