@@ -25,6 +25,7 @@ _KIND_BY_SEARCH_TYPE: dict[SearchType, SearchResultKind] = {
     SearchType.GRAPH_COMPLETION_CONTEXT_EXTENSION: SearchResultKind.GRAPH_COMPLETION,
     SearchType.GRAPH_SUMMARY_COMPLETION: SearchResultKind.GRAPH_COMPLETION,
     SearchType.HYBRID_COMPLETION: SearchResultKind.GRAPH_COMPLETION,
+    SearchType.AGENTIC_COMPLETION: SearchResultKind.GRAPH_COMPLETION,
     SearchType.RAG_COMPLETION: SearchResultKind.RAG_COMPLETION,
     SearchType.TRIPLET_COMPLETION: SearchResultKind.TRIPLET_COMPLETION,
     SearchType.CYPHER: SearchResultKind.CYPHER,
@@ -101,14 +102,19 @@ def _build_item(
     entry: Any,
     payload: SearchResultPayload,
     kind: SearchResultKind,
+    structured_completion: bool = False,
 ) -> SearchResultItem:
     """Build a single SearchResultItem from one retriever output element."""
+    structured = None
     if isinstance(entry, str):
         text = entry
         raw: dict = {"value": entry}
     elif isinstance(entry, BaseModel):
         raw = entry.model_dump(mode="json")
         text = _text_from_dict(raw)
+        if structured_completion:
+            kind = SearchResultKind.STRUCTURED
+            structured = raw
     elif isinstance(entry, dict):
         raw = entry
         text = _text_from_dict(entry)
@@ -128,6 +134,7 @@ def _build_item(
         dataset_name=payload.dataset_name,
         metadata=_provenance_metadata(raw),
         raw=raw,
+        structured=structured,
     )
 
 
@@ -143,14 +150,19 @@ def _flatten(value: Any) -> list[Any]:
 def normalize_search_payload(payload: SearchResultPayload) -> list[SearchResultItem]:
     """Normalize one dataset's retriever payload into SearchResultItems."""
     kind = _KIND_BY_SEARCH_TYPE.get(payload.search_type, SearchResultKind.UNKNOWN)
+    structured_completion = False
 
     if payload.only_context:
         entries = _flatten(payload.context)
     elif payload.completion is not None:
         entries = _flatten(payload.completion)
+        structured_completion = True
     elif payload.context is not None:
         entries = _flatten(payload.context)
     else:
         entries = _flatten(payload.result_object)
 
-    return [_build_item(entry, payload, kind) for entry in entries]
+    return [
+        _build_item(entry, payload, kind, structured_completion=structured_completion)
+        for entry in entries
+    ]

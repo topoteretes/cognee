@@ -133,6 +133,45 @@ async def test_get_retriever_output_skips_retrieval_for_no_answer_turn():
     assert result.completion == ["Thanks, I noted that."]
 
 
+@pytest.mark.asyncio
+async def test_get_retriever_output_stores_resolved_feeling_lucky_type():
+    retriever = _EffectiveQueryRetriever()
+
+    async def _fake_select_search_type(query_text: str):
+        assert query_text == "That was wrong. What should I audit in Lisbon?"
+        return SearchType.CHUNKS
+
+    async def _fake_get_retriever_instance(query_type, query_text, **kwargs):
+        assert query_type is SearchType.CHUNKS
+        return retriever
+
+    with (
+        patch.object(
+            get_retriever_output_module,
+            "get_graph_engine",
+            new_callable=AsyncMock,
+            return_value=_FakeGraphEngine(),
+        ),
+        patch.object(
+            get_retriever_output_module,
+            "select_search_type",
+            side_effect=_fake_select_search_type,
+        ),
+        patch.object(
+            get_retriever_output_module,
+            "get_search_type_retriever_instance",
+            side_effect=_fake_get_retriever_instance,
+        ),
+    ):
+        result = await get_retriever_output(
+            SearchType.FEELING_LUCKY,
+            "That was wrong. What should I audit in Lisbon?",
+        )
+
+    assert result.search_type is SearchType.CHUNKS
+    assert result.completion == ["answer"]
+
+
 def test_count_retrieved_objects_counts_structured_lists():
     assert _count_retrieved_objects({"chunks": [1, 2], "entities": [3]}) == 3
 
