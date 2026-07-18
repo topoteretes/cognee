@@ -1,0 +1,51 @@
+{
+  "name": "research_assistant",
+  "core_memory": [
+    {
+      "id": "block-001",
+      "label": "human",
+      "value": "The user is a graduate student studying computational neuroscience at MIT. They are working on a thesis about neural network architectures inspired by biological circuits.",
+      "limit": 5000
+    },
+    {
+      "id": "block-002",
+      "label": "persona",
+      "value": "I am a research assistant that helps find relevant papers and synthesize information about computational neuroscience and machine learning.",
+      "limit": 5000
+    }
+  ],
+  "messages": [
+    {
+      "role": "user",
+      "content": "Can you explain the difference between feedforward and recurrent neural networks in the context of biological plausibility?",
+      "created_at": "2025-03-15T10:30:00Z"
+    },
+    {
+      "role": "assistant",
+      "content": "Feedforward networks pass signals in one direction, from input to output. Recurrent networks have feedback loops that allow information to persist, which is closer to how biological neurons work. The brain has many recurrent connections, particularly in the cortex, where neurons form feedback loops that are critical for working memory and temporal processing.",
+      "created_at": "2025-03-15T10:30:45Z"
+    },
+    {
+      "role": "user",
+      "content": "What about Hopfield networks? I read that John Hopfield won the Nobel Prize in Physics in 2024 for his work on them.",
+      "created_at": "2025-03-15T10:32:00Z"
+    },
+    {
+      "role": "assistant",
+      "content": "Yes, John Hopfield shared the 2024 Nobel Prize in Physics with Geoffrey Hinton. Hopfield networks are a type of recurrent network that can store and recall patterns, similar to associative memory in the brain. They use an energy function that decreases as the network settles into a stored pattern. This work laid the groundwork for modern deep learning.",
+      "created_at": "2025-03-15T10:33:00Z"
+    }
+  ],
+  "archival_memory": [
+    {
+      "id": "passage-001",
+      "text": "Backpropagation through time (BPTT) is the standard algorithm for training recurrent neural networks. However, it requires storing all intermediate activations, making it biologically implausible. Alternatives like e-prop (eligibility propagation) have been proposed as more biologically realistic learning rules.",
+      "created_at": "2025-03-10T08:00:00Z"
+    },
+    {
+      "id": "passage-002",
+      "text": "The prefrontal cortex maintains working memory through sustained neural activity in recurrent circuits. Computational models of this process often use gated recurrent units (GRUs) or LSTMs, which have explicit gating mechanisms that control information flow.",
+      "created_at": "2025-03-12T14:20:00Z"
+    }
+  ]
+}
