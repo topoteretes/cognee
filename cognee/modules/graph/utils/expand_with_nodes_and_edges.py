@@ -304,7 +304,11 @@ def _process_graph_nodes(
 
 
 def _process_graph_edges(
-    graph: KnowledgeGraph, name_mapping: dict, existing_edges_map: dict, relationships: list
+    data_chunk: DocumentChunk,
+    graph: KnowledgeGraph,
+    name_mapping: dict,
+    existing_edges_map: dict,
+    relationships: list,
 ) -> None:
     """Process edges in a knowledge graph"""
     for edge in graph.edges:
@@ -317,6 +321,21 @@ def _process_graph_edges(
         relationship_name = generate_edge_name(edge.relationship_name)
         edge_key = _create_edge_key(source_node_id, target_node_id, relationship_name)
         edge_text = _strip_nonblank_text(edge.description)
+        properties = {
+            "relationship_name": relationship_name,
+            "source_node_id": source_node_id,
+            "target_node_id": target_node_id,
+            "ontology_valid": False,
+            "edge_text": edge_text,
+        }
+
+        # Capture after ontology/name remapping but before the existing-edge
+        # filter. Thus every chunk keeps its exact support link even when the
+        # graph assertion was written by an earlier source. PrivateAttr storage
+        # keeps this transient tuple out of graph/vector payloads.
+        data_chunk._provenance_edges.append(
+            (source_node_id, target_node_id, relationship_name, properties)
+        )
 
         if edge_key not in existing_edges_map:
             relationships.append(
@@ -324,13 +343,7 @@ def _process_graph_edges(
                     source_node_id,
                     target_node_id,
                     relationship_name,
-                    {
-                        "relationship_name": relationship_name,
-                        "source_node_id": source_node_id,
-                        "target_node_id": target_node_id,
-                        "ontology_valid": False,
-                        "edge_text": edge_text,
-                    },
+                    properties,
                 )
             )
             existing_edges_map[edge_key] = True
@@ -444,7 +457,13 @@ def expand_with_nodes_and_edges(
         )
 
         # Then process edges
-        _process_graph_edges(graph, name_mapping, existing_edges_map, relationships)
+        _process_graph_edges(
+            data_chunk,
+            graph,
+            name_mapping,
+            existing_edges_map,
+            relationships,
+        )
 
     all_nodes = {**added_nodes_map, **added_ontology_nodes_map}
     all_relationships = relationships + ontology_relationships

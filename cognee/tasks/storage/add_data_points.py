@@ -27,6 +27,7 @@ from cognee.shared.logging_utils import get_logger
 from cognee.tasks.storage.exceptions import (
     InvalidDataPointsInAddDataPointsError,
 )
+from cognee.modules.provenance.capture import capture_graph_provenance
 from ...modules.engine.utils import generate_node_id
 
 if TYPE_CHECKING:
@@ -233,6 +234,11 @@ async def add_data_points(
         if triplets:
             await index_data_points(triplets, vector_engine=vector_engine)
             logger.info(f"Created and indexed {len(triplets)} triplets from graph structure")
+
+    # Capture only after graph/vector writes succeeded. This is memory-only for
+    # normal documents and is flushed once at data-item completion; very large
+    # documents use a bounded bulk flush configured by PROVENANCE_FLUSH_THRESHOLD.
+    await capture_graph_provenance(data_points, edges, ctx)
 
     return data_points
 

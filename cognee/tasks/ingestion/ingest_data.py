@@ -1,5 +1,7 @@
 import json
 import inspect
+from pathlib import Path
+from urllib.parse import urlparse
 from uuid import UUID
 from typing import Union, BinaryIO, Any, List, Optional
 
@@ -23,6 +25,42 @@ from cognee.modules.data.methods import (
 from .save_data_item_to_storage import save_data_item_to_storage
 from .data_item_to_text_file import data_item_to_text_file
 from .data_item import DataItem
+
+
+def _source_uri_from_input(data_item: Any) -> Optional[str]:
+    """Return an origin locator without ever treating raw text as a URI.
+
+    HTTP content is materialized into Cognee storage before metadata is read, so
+    its original URL would otherwise be lost. File and object-storage locators
+    are preserved as well; ordinary text input deliberately returns ``None``.
+    """
+    if isinstance(data_item, DataItem):
+        metadata = data_item.external_metadata
+        if isinstance(metadata, dict):
+            explicit = metadata.get("source_uri")
+            if isinstance(explicit, str) and explicit.strip():
+                return explicit.strip()
+        data_item = data_item.data
+
+    if isinstance(data_item, str):
+        parsed = urlparse(data_item)
+        if parsed.scheme.lower() in {"http", "https", "s3", "file"}:
+            return data_item
+        try:
+            path = Path(data_item)
+            if path.is_absolute() or path.is_file():
+                return path.resolve().as_uri()
+        except (OSError, ValueError):
+            return None
+        return None
+
+    filename = getattr(data_item, "filename", None) or getattr(data_item, "name", None)
+    if isinstance(filename, str) and filename and not filename.startswith("<"):
+        try:
+            return Path(filename).resolve().as_uri()
+        except (OSError, ValueError):
+            return None
+    return None
 
 
 async def ingest_data(
@@ -90,6 +128,7 @@ async def ingest_data(
         for data_item in data:
             underlying_data = data_item.data if isinstance(data_item, DataItem) else data_item
             item_data_id = data_item.data_id if isinstance(data_item, DataItem) else None
+            source_uri = _source_uri_from_input(data_item)
 
             original_file_path = await save_data_item_to_storage(underlying_data)
             actual_file_path = get_data_file_path(original_file_path)
@@ -106,6 +145,7 @@ async def ingest_data(
                 "original_file_path": original_file_path,
                 "actual_file_path": actual_file_path,
                 "data_id": data_id,
+                "source_uri": source_uri,
             }
 
         existing_data_map: dict = {}
@@ -164,6 +204,14 @@ async def ingest_data(
             # Merge DataItem.external_metadata if present
             if item_external_metadata:
                 ext_metadata.update(item_external_metadata)
+
+            source_uri = cached.get("source_uri")
+            if source_uri:
+                cognee_metadata = ext_metadata.get("_cognee")
+                if not isinstance(cognee_metadata, dict):
+                    cognee_metadata = {}
+                    ext_metadata["_cognee"] = cognee_metadata
+                cognee_metadata.setdefault("source_uri", source_uri)
 
             if node_set:
                 ext_metadata["node_set"] = node_set

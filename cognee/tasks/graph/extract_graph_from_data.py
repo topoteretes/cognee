@@ -61,6 +61,7 @@ async def integrate_chunk_graphs(
     ontology_resolver: BaseOntologyResolver,
     pipeline_name: str = None,
     task_name: str = None,
+    ctx=None,
     **kwargs,
 ) -> List[DocumentChunk]:
     """Integrate chunk graphs with ontology validation and store in databases.
@@ -106,6 +107,7 @@ async def integrate_chunk_graphs(
     existing_edges_map = await retrieve_existing_edges(
         data_chunks,
         chunk_graphs,
+        ctx=ctx,
     )
 
     data_chunks, entity_nodes = expand_with_nodes_and_edges(
@@ -224,6 +226,7 @@ async def extract_graph_from_data(
         ontology_resolver,
         pipeline_name=pipeline_name,
         task_name=task_name,
+        ctx=ctx,
         **kwargs,
     )
 

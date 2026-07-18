@@ -1,5 +1,7 @@
 from typing import List, Union, Optional
 
+from pydantic import PrivateAttr
+
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.models.Edge import Edge
 from cognee.modules.data.processing.document_types import Document
@@ -43,3 +45,7 @@ class DocumentChunk(DataPoint):
     truth_alignment: Optional[list[float]] = None
     truth_epoch: Optional[int] = None
     metadata: dict = {"index_fields": ["text"]}
+
+    # Per-chunk semantic graph identities used by the provenance sidecar. A
+    # PrivateAttr keeps this transient capture data out of graph/vector payloads.
+    _provenance_edges: list = PrivateAttr(default_factory=list)
