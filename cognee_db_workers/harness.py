@@ -354,12 +354,17 @@ def start_windows_parent_death_watchdog(original_ppid: int) -> bool:
     there is then genuinely nothing left to watch.
 
     ``restype``/``argtypes`` are set explicitly on every kernel32 call (audit
-    finding, 2026-07-18): left unconfigured, ctypes defaults ``restype`` to a
-    32-bit ``int`` and marshals arguments as ``c_int``, which is a
-    technically-incorrect (if empirically harmless on this target, since
-    Windows guarantees kernel handles fit in 32 bits) type for a
-    pointer-sized ``HANDLE``. Configuring them removes the ambiguity rather
-    than relying on that guarantee.
+    finding, 2026-07-18, corrected the same day by an adversarial-test pass that
+    found the nested ``_watch()`` thread body created its OWN fresh
+    ``ctypes.WinDLL("kernel32")`` instance whose ``WaitForSingleObject``/
+    ``CloseHandle`` were left unconfigured -- ctypes prototype configuration is
+    per-instance, not global to the DLL, so setting it on the outer function's
+    ``kernel32`` local does not carry over to a separately-constructed one):
+    left unconfigured, ctypes defaults ``restype`` to a 32-bit ``int`` and
+    marshals arguments as ``c_int``, which is a technically-incorrect (if
+    empirically harmless on this target, since Windows guarantees kernel
+    handles fit in 32 bits) type for a pointer-sized ``HANDLE``. Configuring
+    them removes the ambiguity rather than relying on that guarantee.
     """
     if sys.platform != "win32":
         return False
@@ -397,7 +402,14 @@ def start_windows_parent_death_watchdog(original_ppid: int) -> bool:
         WAIT_OBJECT_0 = 0
         INFINITE = 0xFFFFFFFF
         try:
+            from ctypes import wintypes as _wintypes
+
+            # A fresh WinDLL instance -- ctypes prototype config (restype/argtypes) is
+            # per-instance, so this needs its own, not a reuse of the outer function's.
             kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel32.WaitForSingleObject.restype = _wintypes.DWORD
+            kernel32.WaitForSingleObject.argtypes = (_wintypes.HANDLE, _wintypes.DWORD)
+            kernel32.CloseHandle.argtypes = (_wintypes.HANDLE,)
             result = kernel32.WaitForSingleObject(handle, INFINITE)
             kernel32.CloseHandle(handle)
         except Exception:
