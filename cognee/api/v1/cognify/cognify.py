@@ -57,6 +57,7 @@ async def cognify(
     data_per_batch: int = 20,
     llm_config: Optional[LLMConfig] = None,
     embedding_config: Optional[EmbeddingConfig] = None,
+    data_cache: bool = True,
     **kwargs,
 ):
     """
@@ -276,6 +277,7 @@ async def cognify(
             rollback_handler=cognify_rollback_handler,
             llm_config=llm_config,
             embedding_config=embedding_config,
+            data_cache=data_cache,
         )
 
         dataset_desc = str(datasets) if datasets else "all datasets"
@@ -328,7 +330,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
         # EXTRACT: split Documents into semantic text chunks
         Task(
             extract_chunks_from_documents,
-            max_chunk_size=chunk_size or get_max_chunk_tokens(),
+            max_chunk_size=chunk_size or await get_max_chunk_tokens(),
             chunker=chunker,
         ),
         # COGNIFY: LLM-extract entities and relationships into a knowledge graph
@@ -387,7 +389,7 @@ async def get_temporal_tasks(
         # EXTRACT: split Documents into semantic text chunks
         Task(
             extract_chunks_from_documents,
-            max_chunk_size=chunk_size or get_max_chunk_tokens(),
+            max_chunk_size=chunk_size or await get_max_chunk_tokens(),
             chunker=chunker,
         ),
         # COGNIFY: extract temporal events and timestamps from chunks

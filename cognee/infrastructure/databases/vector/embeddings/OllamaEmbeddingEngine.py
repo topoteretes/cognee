@@ -18,9 +18,7 @@ from tenacity import (
 
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
 from cognee.infrastructure.databases.exceptions import EmbeddingException
-from cognee.infrastructure.llm.tokenizer.HuggingFace import (
-    HuggingFaceTokenizer,
-)
+from cognee.infrastructure.llm.tokenizer.resolver import resolve_embedding_tokenizer
 from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager
 from cognee.shared.utils import create_secure_ssl_context
 from cognee.infrastructure.databases.vector.embeddings.utils import (
@@ -225,16 +223,23 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
 
     def get_tokenizer(self):
         """
-        Load and return a HuggingFace tokenizer for the embedding engine.
+        Load and return the tokenizer for the embedding engine.
+
+        An Ollama model id is not a HuggingFace repo, so the configured
+        HUGGINGFACE_TOKENIZER override selects the tokenizer; resolution warns on
+        mismatch and falls back safely to TikToken (issue #3646).
 
         Returns:
         --------
 
-            The instantiated HuggingFace tokenizer used by the embedding engine.
+            The tokenizer used by the embedding engine.
         """
-        logger.debug("Loading HuggingfaceTokenizer for OllamaEmbeddingEngine...")
-        tokenizer = HuggingFaceTokenizer(
-            model=self.huggingface_tokenizer_name, max_completion_tokens=self.max_completion_tokens
+        logger.debug("Loading tokenizer for OllamaEmbeddingEngine...")
+        tokenizer = resolve_embedding_tokenizer(
+            provider="ollama",
+            model=self.model,
+            max_completion_tokens=self.max_completion_tokens,
+            huggingface_tokenizer=self.huggingface_tokenizer_name,
         )
         logger.debug("Tokenizer loaded for OllamaEmbeddingEngine")
         return tokenizer

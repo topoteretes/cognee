@@ -28,7 +28,6 @@ from cognee.modules.observability import (
 from cognee.modules.recall.types.RecallResponse import (
     RecallResponse,
     ResponseAgentTraceEntry,
-    ResponseGraphContextEntry,
     ResponseGraphEntry,
     ResponseQAEntry,
     ResponseSessionContextEntry,
@@ -285,36 +284,6 @@ async def _search_trace(
     return results
 
 
-async def _fetch_graph_context(
-    session_id: str, user: str | None = None
-) -> list[ResponseGraphContextEntry]:
-    """Return the graph-context snapshot for the session as a one-item list.
-
-    ``improve()`` writes a distilled summary of graph knowledge into
-    ``graph_knowledge:{user}:{session}`` — this surfaces it as a recall
-    result tagged with ``_source: "graph_context"`` (or an empty list
-    when nothing has been synced yet).
-    """
-    from cognee.infrastructure.session.get_session_manager import get_session_manager
-
-    caller_user_id = await _resolve_user_id(user)
-    if not caller_user_id:
-        return []
-    cache_user_id = await _resolve_session_cache_user_id(session_id, caller_user_id)
-    if not cache_user_id:
-        return []
-
-    sm = get_session_manager()
-    if not sm.is_available:
-        return []
-
-    snapshot = await sm.get_graph_context(user_id=cache_user_id, session_id=session_id)
-    if not snapshot:
-        return []
-
-    return [ResponseGraphContextEntry(content=snapshot, source="graph_context")]
-
-
 async def _fetch_session_context(
     query_text: str,
     session_id: str,
@@ -356,6 +325,12 @@ async def _fetch_session_context(
             content=block, context_profile=context_profile, source="session_context"
         )
     ]
+
+
+def _scope_should_forward_resolved(scope: str | list[str] | None) -> bool:
+    if isinstance(scope, str):
+        return scope in {"all", "graph_context"}
+    return bool(scope and {"all", "graph_context"}.intersection(scope))
 
 
 async def recall(
@@ -475,6 +450,8 @@ async def recall(
 
         from cognee.api.v1.serve.state import get_remote_client
 
+        forward_scope = sources if _scope_should_forward_resolved(scope) else scope
+
         client = get_remote_client()
         if client is not None:
             results = await client.recall(
@@ -483,7 +460,7 @@ async def recall(
                 datasets=datasets,
                 dataset_ids=dataset_ids,
                 top_k=top_k,
-                scope=scope,
+                scope=forward_scope,
                 system_prompt=system_prompt,
                 node_name=node_name,
                 only_context=only_context,
@@ -521,11 +498,6 @@ async def recall(
                     user=user,
                 )
             )
-
-        async def _run_graph_context() -> list[RecallResponse]:
-            if not session_id:
-                return []
-            return list(await _fetch_graph_context(session_id=session_id, user=user))
 
         async def _run_session_context() -> list[RecallResponse]:
             if not session_id:
@@ -628,7 +600,6 @@ async def recall(
         runners = {
             "session": _run_session,
             "trace": _run_trace,
-            "graph_context": _run_graph_context,
             "session_context": _run_session_context,
             "graph": _run_graph,
         }
