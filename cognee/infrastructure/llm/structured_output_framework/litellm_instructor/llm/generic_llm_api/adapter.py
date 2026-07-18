@@ -293,7 +293,7 @@ class GenericAPIAdapter(LLMInterface):
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
-    async def create_transcript(self, input: str) -> TranscriptionReturnType:
+    async def create_transcript(self, input: str, **kwargs: Any) -> TranscriptionReturnType:
         """
         Generate an audio transcript from a user query.
 
