@@ -32,7 +32,10 @@ export default function LocalSignInForm() {
       });
 
       if (!response.ok) {
-        const data = await response.json().catch(() => null);
+        const data = await response.json().catch((err) => {
+          console.warn("Failed to parse login error response:", err);
+          return null;
+        });
         const detail = data?.detail;
         if (detail === "LOGIN_BAD_CREDENTIALS") {
           setError("Invalid email or password.");

@@ -18,6 +18,8 @@ def test_cache_config_defaults(monkeypatch):
         "CACHE_PORT",
         "CACHE_USERNAME",
         "CACHE_PASSWORD",
+        "CACHE_SSL",
+        "CACHE_SSL_CERT_REQS",
         "AGENTIC_LOCK_EXPIRE",
         "AGENTIC_LOCK_TIMEOUT",
         "SESSION_TTL_SECONDS",
@@ -37,6 +39,8 @@ def test_cache_config_defaults(monkeypatch):
     assert config.shared_kuzu_lock is False
     assert config.cache_host == "localhost"
     assert config.cache_port == 6379
+    assert config.cache_ssl is False
+    assert config.cache_ssl_cert_reqs == "required"
     assert config.agentic_lock_expire == 240
     assert config.agentic_lock_timeout == 300
     assert config.session_ttl_seconds == 604800
@@ -92,6 +96,8 @@ def test_cache_config_to_dict():
         "cache_port": 7000,
         "cache_username": None,
         "cache_password": None,
+        "cache_ssl": False,
+        "cache_ssl_cert_reqs": "required",
         "agentic_lock_expire": 100,
         "agentic_lock_timeout": 200,
         "session_ttl_seconds": 0,
@@ -112,6 +118,19 @@ def test_cache_config_session_ttl_none():
 
     assert config.session_ttl_seconds is None
     assert config.to_dict()["session_ttl_seconds"] is None
+
+
+def test_cache_config_ssl_from_env(monkeypatch):
+    """CACHE_SSL / CACHE_SSL_CERT_REQS enable TLS for managed Redis."""
+    monkeypatch.setenv("CACHE_SSL", "true")
+    monkeypatch.setenv("CACHE_SSL_CERT_REQS", "none")
+
+    config = CacheConfig(_env_file=None)
+
+    assert config.cache_ssl is True
+    assert config.cache_ssl_cert_reqs == "none"
+    assert config.to_dict()["cache_ssl"] is True
+    assert config.to_dict()["cache_ssl_cert_reqs"] == "none"
 
 
 def test_get_cache_config_singleton():

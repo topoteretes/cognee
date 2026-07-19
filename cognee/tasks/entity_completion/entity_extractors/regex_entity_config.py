@@ -40,7 +40,7 @@ class RegexEntityConfig:
     def _load_config(self) -> None:
         """Load and process the configuration from the JSON file."""
         try:
-            with open(self.config_path, "r") as f:
+            with open(self.config_path, "r", encoding="utf-8") as f:
                 config_list = json.load(f)
         except FileNotFoundError:
             logger.error(f"Config file not found: {self.config_path}")

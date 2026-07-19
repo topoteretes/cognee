@@ -1,9 +1,12 @@
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import numpy as np
 import pytest
 
-from cognee.infrastructure.databases.exceptions import EmbeddingException
+from cognee.infrastructure.databases.exceptions import (
+    EmbeddingContextWindowTooSmallError,
+    EmbeddingException,
+)
 
 
 @pytest.mark.asyncio
@@ -134,3 +137,55 @@ async def test_fastembed_raises_when_short_text_still_exceeds_context_window():
 
         with pytest.raises(EmbeddingException, match="too short to split further"):
             await engine.embed_text(["ab"])
+
+        assert embedding_model.embed.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_litellm_embedding_does_not_retry_unsplittable_context_window_error():
+    import litellm
+
+    with patch(
+        "cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine."
+        "LiteLLMEmbeddingEngine.get_tokenizer",
+        return_value=Mock(),
+    ):
+        from cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine import (
+            LiteLLMEmbeddingEngine,
+        )
+
+        engine = LiteLLMEmbeddingEngine(model="test-model", dimensions=2)
+
+    context_error = litellm.exceptions.BadRequestError(
+        message="maximum input length exceeded",
+        model="test-model",
+        llm_provider="openai",
+    )
+
+    with patch("litellm.aembedding", AsyncMock(side_effect=context_error)) as embed_mock:
+        with pytest.raises(EmbeddingContextWindowTooSmallError):
+            await engine.embed_text(["ab"])
+
+        assert embed_mock.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_openai_compatible_embedding_does_not_retry_unsplittable_context_window_error():
+    with patch(
+        "cognee.infrastructure.databases.vector.embeddings.OpenAICompatibleEmbeddingEngine."
+        "OpenAICompatibleEmbeddingEngine.get_tokenizer",
+        return_value=Mock(),
+    ):
+        from cognee.infrastructure.databases.vector.embeddings.OpenAICompatibleEmbeddingEngine import (
+            OpenAICompatibleEmbeddingEngine,
+        )
+
+        engine = OpenAICompatibleEmbeddingEngine(model="test-model", dimensions=2)
+
+    create_mock = AsyncMock(side_effect=RuntimeError("context window exceeded"))
+    engine._client.embeddings.create = create_mock
+
+    with pytest.raises(EmbeddingContextWindowTooSmallError):
+        await engine.embed_text(["ab"])
+
+    assert create_mock.await_count == 1

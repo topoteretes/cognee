@@ -28,10 +28,13 @@ def render_prompt(filename: str, context: dict, base_directory: str | None = Non
     if base_directory is None:
         base_directory = get_absolute_path("./infrastructure/llm/prompts")
 
-    # Initialize the Jinja2 environment to load templates from the filesystem
+    # Initialize the Jinja2 environment to load templates from the filesystem.
+    # Autoescape only markup templates: the .txt prompt templates must render
+    # interpolated content verbatim — HTML-escaping them corrupts every LLM
+    # prompt on the wire (`'` -> `&#39;`, `-->` -> `--&gt;`, ...).
     env = Environment(
         loader=FileSystemLoader(base_directory),
-        autoescape=select_autoescape(["html", "xml", "txt"]),
+        autoescape=select_autoescape(["html", "xml"]),
     )
 
     # Load the template by name
