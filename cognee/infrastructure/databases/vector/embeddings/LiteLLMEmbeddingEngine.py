@@ -18,7 +18,10 @@ import os
 from urllib.parse import urlparse
 import httpx
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
-from cognee.infrastructure.databases.exceptions import EmbeddingException
+from cognee.infrastructure.databases.exceptions import (
+    EmbeddingContextWindowTooSmallError,
+    EmbeddingException,
+)
 
 from cognee.infrastructure.llm.tokenizer.resolver import resolve_embedding_tokenizer
 from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager
@@ -106,7 +109,11 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         stop=stop_after_delay(128),
         wait=wait_exponential_jitter(2, 128),
         retry=retry_if_not_exception_type(
-            (litellm.exceptions.NotFoundError, asyncio.CancelledError)
+            (
+                EmbeddingContextWindowTooSmallError,
+                litellm.exceptions.NotFoundError,
+                asyncio.CancelledError,
+            )
         ),
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
@@ -187,6 +194,8 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                 logger.debug(f"Pooling embeddings of text string with size: {len(text[0])}")
                 s = text[0]
                 third = len(s) // 3
+                if third == 0:
+                    raise EmbeddingContextWindowTooSmallError from error
                 # We are using thirds to intentionally have overlap between split parts
                 # for better embedding calculation
                 left_part, right_part = s[: third * 2], s[third:]
