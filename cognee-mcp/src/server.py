@@ -1967,10 +1967,15 @@ async def main():
 
         logger.info("Running database migrations...")
 
-        await setup()
-        # Full startup migrations (relational schema + graph/vector revision
-        # chains) — MCP writes new-scheme data, so it must migrate like the API.
-        await run_migrations()
+        # Database setup and migrations print progress and "table already
+        # exists" notices to stdout. In stdio transport stdout is the JSON-RPC
+        # channel, so route that output to stderr — the same guard every tool
+        # applies around its cognee calls.
+        with redirect_stdout(sys.stderr):
+            await setup()
+            # Full startup migrations (relational schema + graph/vector revision
+            # chains) — MCP writes new-scheme data, so it must migrate like the API.
+            await run_migrations()
 
         logger.info("Database migrations done.")
     elif not is_remote:
