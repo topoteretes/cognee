@@ -108,10 +108,18 @@ class NaturalLanguageRetriever(BaseRetriever):
         graph_engine = await get_graph_engine()
 
         # Postgres backends do not support Cypher generation/execution
-        from cognee.infrastructure.databases.graph.postgres.adapter import PostgresAdapter
-        from cognee.infrastructure.databases.hybrid.postgres.adapter import PostgresHybridAdapter
+        # The postgres driver is optional; without it the engine cannot be Postgres.
+        try:
+            from cognee.infrastructure.databases.graph.postgres.adapter import PostgresAdapter
+            from cognee.infrastructure.databases.hybrid.postgres.adapter import (
+                PostgresHybridAdapter,
+            )
 
-        if isinstance(graph_engine, (PostgresAdapter, PostgresHybridAdapter)):
+            unsupported_backends: tuple = (PostgresAdapter, PostgresHybridAdapter)
+        except ImportError:
+            unsupported_backends = ()
+
+        if isinstance(graph_engine, unsupported_backends):
             raise SearchTypeNotSupported(
                 "Natural language search is not supported with the Postgres graph backend. "
                 "This retriever generates and executes Cypher queries, which require a "
