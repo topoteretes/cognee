@@ -381,7 +381,7 @@ Prefer something other than Python? Cognee also ships official clients for Rust 
 Use the [cognee-rs](https://github.com/topoteretes/cognee-rs) crate to add, cognify, and search from Rust.
 
 ```bash
-cargo add cognee
+cargo add cognee-lib
 ```
 
 See the [cognee-rs repository](https://github.com/topoteretes/cognee-rs) for full setup and examples.
