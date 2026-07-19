@@ -1,0 +1,45 @@
+name: test | deployment mcp http e2e
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [dev]
+    paths:
+      - "cognee-mcp/**"
+      - "cognee/tests/deployment/**"
+      - ".github/workflows/test_deployment_mcp.yml"
+
+permissions:
+  contents: read
+
+env:
+  COGNEE_SKIP_CONNECTION_TEST: "true"
+  COGNEE_MCP_IMAGE: "cognee-mcp:local"
+
+jobs:
+  mcp-http-e2e:
+    name: MCP Docker HTTP e2e (direct mode)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build cognee-mcp image
+        run: docker build -f cognee-mcp/Dockerfile -t cognee-mcp:local .
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install -e .
+          pip install "pytest>=7.4,<8" "pytest-asyncio>=0.21,<0.22" "httpx" "mcp>=1.12,<2.0"
+
+      - name: Run MCP HTTP e2e (mock LLM, no secrets)
+        run: pytest cognee/tests/deployment/test_mcp_http_direct.py -m deployment -v
