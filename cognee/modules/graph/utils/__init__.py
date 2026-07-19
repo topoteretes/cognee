@@ -8,3 +8,4 @@ from .deduplicate_nodes_and_edges import deduplicate_nodes_and_edges
 from .resolve_edges_to_text import resolve_edges_to_text
 from .get_entity_nodes_from_triplets import get_entity_nodes_from_triplets
 from .canonicalization import canonicalize_entity_name
+from .deterministic_dedup import resolve_deterministic_duplicates
