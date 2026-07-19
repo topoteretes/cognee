@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from cognee.cli import api_dispatch
 from cognee.cli.api_dispatch import can_dispatch, dispatch, SUPPORTED_COMMANDS
 
 
@@ -148,3 +149,37 @@ class TestUserIdHeader:
         call_kwargs = MockClient.call_args
         headers = call_kwargs.kwargs.get("headers") or call_kwargs[1].get("headers", {})
         assert "X-User-Id" not in headers
+
+
+class TestFirstRunApiDispatch:
+    @patch("cognee.cli.first_run.fmt.note")
+    def test_add_dispatch_prints_next_step(self, mock_note):
+        client = MagicMock()
+        client.add.return_value = {"status": "ok"}
+        args = argparse.Namespace(data=["first note"], dataset_name="first_run")
+
+        api_dispatch._dispatch_add(client, args)
+
+        note_text = mock_note.call_args.args[0]
+        assert "cognee-cli cognify --datasets first_run" in note_text
+        assert 'cognee-cli recall "What should I remember?" --datasets first_run' in note_text
+
+    @patch("cognee.cli.first_run.fmt.note")
+    def test_recall_dispatch_empty_results_prints_first_run_hint(self, mock_note):
+        client = MagicMock()
+        client.recall.return_value = []
+        args = argparse.Namespace(
+            query_text="What does Cognee do?",
+            query_type="GRAPH_COMPLETION",
+            datasets=None,
+            top_k=10,
+            system_prompt=None,
+            session_id=None,
+            output_format="pretty",
+        )
+
+        api_dispatch._dispatch_recall(client, args)
+
+        note_text = mock_note.call_args.args[0]
+        assert 'cognee-cli remember "Cognee turns documents into AI memory."' in note_text
+        assert 'retry `cognee-cli recall "What should I remember?"`' in note_text

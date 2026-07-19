@@ -7,12 +7,15 @@ import pytest
 import sys
 import argparse
 import asyncio
+from types import SimpleNamespace
 from uuid import uuid4
 from unittest.mock import patch, MagicMock, AsyncMock, ANY
 import cognee
 from cognee.cli.commands.add_command import AddCommand
 from cognee.cli.commands.search_command import SearchCommand
 from cognee.cli.commands.cognify_command import CognifyCommand
+from cognee.cli.commands.remember_command import RememberCommand
+from cognee.cli.commands.recall_command import RecallCommand
 from cognee.cli.commands.delete_command import DeleteCommand
 from cognee.cli.commands.config_command import ConfigCommand
 from cognee.cli.exceptions import CliCommandException
@@ -400,6 +403,101 @@ class TestCognifyCommand:
 
         with pytest.raises(CliCommandException):
             command.execute(args)
+
+
+class TestFirstRunGuidance:
+    @patch("cognee.cli.first_run.fmt.note")
+    @patch(_RESOLVE_USER_PATCH, new_callable=lambda: AsyncMock(return_value=_mock_user()))
+    @patch("cognee.cli.commands.add_command.asyncio.run", side_effect=_mock_run)
+    def test_add_prints_cognify_and_recall_next_step(
+        self, _mock_asyncio_run, _mock_resolve, mock_note
+    ):
+        mock_cognee = MagicMock()
+        mock_cognee.add = AsyncMock()
+
+        with patch.dict(sys.modules, {"cognee": mock_cognee}):
+            command = AddCommand()
+            args = argparse.Namespace(data=["first note"], dataset_name="first_run")
+            command.execute(args)
+
+        note_text = mock_note.call_args.args[0]
+        assert "cognee-cli cognify --datasets first_run" in note_text
+        assert 'cognee-cli recall "What should I remember?" --datasets first_run' in note_text
+
+    @patch("cognee.cli.first_run.fmt.note")
+    @patch("cognee.cli.commands.remember_command.asyncio.run", side_effect=_mock_run)
+    def test_remember_prints_recall_next_step(self, _mock_asyncio_run, mock_note):
+        mock_cognee = MagicMock()
+        mock_cognee.remember = AsyncMock(
+            return_value=SimpleNamespace(
+                dataset_id=uuid4(),
+                items_processed=1,
+                content_hash=None,
+                elapsed_seconds=1.2,
+            )
+        )
+
+        with patch.dict(sys.modules, {"cognee": mock_cognee}):
+            command = RememberCommand()
+            args = argparse.Namespace(
+                data=["Cognee turns documents into AI memory."],
+                dataset_name="main_dataset",
+                chunk_size=None,
+                chunker="TextChunker",
+                background=False,
+                chunks_per_batch=None,
+            )
+            command.execute(args)
+
+        note_text = mock_note.call_args.args[0]
+        assert note_text == (
+            'Next: run `cognee-cli recall "What should I remember?" --datasets main_dataset`.'
+        )
+
+    @patch("cognee.cli.commands.remember_command.asyncio.run", side_effect=_mock_run)
+    def test_remember_missing_key_error_is_actionable(self, _mock_asyncio_run):
+        mock_cognee = MagicMock()
+        mock_cognee.remember = AsyncMock(side_effect=RuntimeError("LLM_API_KEY is not set"))
+
+        with patch.dict(sys.modules, {"cognee": mock_cognee}):
+            command = RememberCommand()
+            args = argparse.Namespace(
+                data=["first note"],
+                dataset_name="main_dataset",
+                chunk_size=None,
+                chunker="TextChunker",
+                background=False,
+                chunks_per_batch=None,
+            )
+            with pytest.raises(CliCommandException) as exc:
+                command.execute(args)
+
+        message = str(exc.value)
+        assert "LLM_API_KEY is not set" in message
+        assert 'export LLM_API_KEY="..."' in message
+
+    @patch("cognee.cli.first_run.fmt.note")
+    @patch("cognee.cli.commands.recall_command.asyncio.run", side_effect=_mock_run)
+    def test_recall_empty_results_prints_first_run_hint(self, _mock_asyncio_run, mock_note):
+        mock_cognee = MagicMock()
+        mock_cognee.recall = AsyncMock(return_value=[])
+
+        with patch.dict(sys.modules, {"cognee": mock_cognee}):
+            command = RecallCommand()
+            args = argparse.Namespace(
+                query_text="What does Cognee do?",
+                query_type="GRAPH_COMPLETION",
+                datasets=None,
+                top_k=10,
+                system_prompt=None,
+                session_id=None,
+                output_format="pretty",
+            )
+            command.execute(args)
+
+        note_text = mock_note.call_args.args[0]
+        assert 'cognee-cli remember "Cognee turns documents into AI memory."' in note_text
+        assert 'retry `cognee-cli recall "What should I remember?"`' in note_text
 
 
 class TestDeleteCommand:

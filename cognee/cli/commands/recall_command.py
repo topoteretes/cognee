@@ -7,6 +7,7 @@ from cognee.cli import DEFAULT_DOCS_URL
 from cognee.cli.config import SEARCH_TYPE_CHOICES, OUTPUT_FORMAT_CHOICES
 import cognee.cli.echo as fmt
 from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
+from cognee.cli.first_run import echo_empty_query_hint, with_first_run_error_hint
 
 
 class RecallCommand(SupportsCliCommand):
@@ -117,7 +118,8 @@ Otherwise, this is a memory-oriented alias for `cognee search`.
                         results = await cognee.recall(**recall_kwargs)
                     return results
                 except Exception as e:
-                    raise CliCommandInnerException(f"Failed to recall: {str(e)}") from e
+                    message = with_first_run_error_hint(f"Failed to recall: {str(e)}")
+                    raise CliCommandInnerException(message) from e
 
             results = asyncio.run(run_recall())
 
@@ -129,6 +131,7 @@ Otherwise, this is a memory-oriented alias for `cognee search`.
             else:
                 if not results:
                     fmt.warning("No results found for your query.")
+                    echo_empty_query_hint("recall")
                     return
 
                 # Detect session results by _source tag
@@ -169,4 +172,5 @@ Otherwise, this is a memory-oriented alias for `cognee search`.
         except Exception as e:
             if isinstance(e, CliCommandInnerException):
                 raise CliCommandException(str(e), error_code=1) from e
-            raise CliCommandException(f"Error recalling: {str(e)}", error_code=1) from e
+            message = with_first_run_error_hint(f"Error recalling: {str(e)}")
+            raise CliCommandException(message, error_code=1) from e
