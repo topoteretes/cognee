@@ -14,6 +14,7 @@ DEFAULT_TOOLS = [
                     "type": "string",
                     "description": "Type of search to perform",
                     "enum": [
+                        "HYBRID_COMPLETION",
                         "CODE",
                         "GRAPH_COMPLETION",
                         "NATURAL_LANGUAGE",

@@ -30,7 +30,7 @@ logger = get_logger()
 
 async def search(
     query_text: str,
-    query_type: SearchType = SearchType.GRAPH_COMPLETION,
+    query_type: SearchType = SearchType.HYBRID_COMPLETION,
     user: Optional[User] = None,
     datasets: Optional[Union[list[str], str]] = None,
     dataset_ids: Optional[Union[list[UUID], UUID]] = None,
@@ -91,7 +91,13 @@ async def search(
 
     Search Types & Use Cases:
 
-        **GRAPH_COMPLETION** (Default - Recommended):
+        **HYBRID_COMPLETION** (Default - Recommended):
+            Natural language Q&A blending chunk, entity, and optional global graph
+            context with LLM reasoning. Runs chunk and entity retrieval concurrently.
+            Best for: General-purpose questions needing both passages and graph structure.
+            Returns: Conversational AI responses backed by hybrid context.
+
+        **GRAPH_COMPLETION**:
             Natural language Q&A using full graph context and LLM reasoning.
             Best for: Complex questions, analysis, summaries, insights.
             Returns: Conversational AI responses with graph-backed context.
@@ -139,7 +145,7 @@ async def search(
             - "What functions handle user authentication?"
 
         query_type: SearchType enum specifying the search mode.
-                   Defaults to GRAPH_COMPLETION for conversational AI responses.
+                   Defaults to HYBRID_COMPLETION for conversational AI responses.
 
         user: User context for data access permissions. Uses default if None.
 

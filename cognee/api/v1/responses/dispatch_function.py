@@ -55,16 +55,16 @@ async def handle_search(arguments: Dict[str, Any], user) -> list:
     if not query and "search_query" in required_params:
         return "Error: Missing required 'search_query' parameter"
 
-    search_type_str = arguments.get("search_type", "GRAPH_COMPLETION")
+    search_type_str = arguments.get("search_type", "HYBRID_COMPLETION")
     valid_search_types = (
         search_tool["parameters"]["properties"]["search_type"]["enum"]
         if search_tool
-        else ["CODE", "GRAPH_COMPLETION", "NATURAL_LANGUAGE"]
+        else ["HYBRID_COMPLETION", "CODE", "GRAPH_COMPLETION", "NATURAL_LANGUAGE"]
     )
 
     if search_type_str not in valid_search_types:
-        logger.warning(f"Invalid search_type: {search_type_str}, defaulting to GRAPH_COMPLETION")
-        search_type_str = "GRAPH_COMPLETION"
+        logger.warning(f"Invalid search_type: {search_type_str}, defaulting to HYBRID_COMPLETION")
+        search_type_str = "HYBRID_COMPLETION"
 
     query_type = SearchType[search_type_str]
 
