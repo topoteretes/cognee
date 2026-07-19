@@ -103,7 +103,14 @@ class HybridRetriever(BaseRetriever):
                 truth_state_by_id=truth_state_by_id,
                 current_truth_epoch=current_truth_epoch,
             ),
-            self._retrieve_entities_and_facts(query, query_vector),
+            self._retrieve_entities_and_facts(
+                query,
+                query_vector,
+                use_truth_weight = self.use_truth_weight,
+                q_coords = q_coords,
+                truth_state_by_id = truth_state_by_id,
+                current_truth_epoch = current_truth_epoch,
+            ),
         )
         return {**chunk_objects, "entities": entities, "facts": facts}
 
@@ -164,16 +171,34 @@ class HybridRetriever(BaseRetriever):
                 ids.append(str(chunk_id))
         return ids
 
-    async def _retrieve_entities_and_facts(self, query: str, query_vector: list[float]) -> tuple:
+    async def _retrieve_entities_and_facts(
+        self,
+        query: str,
+        query_vector: list[float],
+        use_truth_weight: bool = False,
+        q_coords: Optional[list[float]] = None,
+        truth_state_by_id: Optional[dict] = None,
+        current_truth_epoch: Optional[int] = None,
+    ) -> tuple:
         """Entity lane, run concurrently with the chunk lane so the graph round trip for
         edge bullets overlaps the chunk pipeline's ranking and summary loading."""
         max_ranked_bullets = self.entities_top_k * max(0, self.max_edges_per_entity)
+        entity_limit = self.entities_top_k
+        edge_limit = max_ranked_bullets + self.facts_top_k
+
+        if use_truth_weight and q_coords and current_truth_epoch is not None:
+            entity_candidate_limit = max(0, entity_limit * 2)
+            edge_candidate_limit = max(0, edge_limit * 2)
+        else:
+            entity_candidate_limit = entity_limit
+            edge_candidate_limit = edge_limit
+
         entity_hits, edge_hits = await asyncio.gather(
             search_collection(
                 self._unified_engine.vector,
                 "Entity_name",
                 query,
-                self.entities_top_k,
+                entity_candidate_limit,
                 self.node_name,
                 self.node_name_filter_operator,
                 query_vector=query_vector,
@@ -182,13 +207,57 @@ class HybridRetriever(BaseRetriever):
                 self._unified_engine.vector,
                 "EdgeType_relationship_name",
                 query,
-                max_ranked_bullets + self.facts_top_k,
+                edge_candidate_limit,
                 self.node_name,
                 self.node_name_filter_operator,
                 apply_node_filter=False,
                 query_vector=query_vector,
             ),
         )
+
+        if use_truth_weight and q_coords and current_truth_epoch is not None:
+            # 1. Fetch truth states for candidate entity and edge hits from graph
+            candidate_ids = [result_id(hit) for hit in entity_hits + edge_hits if result_id(hit)]
+            if candidate_ids:
+                try:
+                    truth_state_by_id = await self._unified_engine.graph.get_node_truth_state(
+                        candidate_ids
+                    )
+                except Exception as error:
+                    logger.debug("Truth-subspace lookup for entities/edges failed: %s", error)
+                    truth_state_by_id = {}
+            else:
+                truth_state_by_id = {}
+
+            # 2. Rerank entity_hits
+            entity_ranked = []
+            for index, hit in enumerate(entity_hits):
+                hit_id = result_id(hit)
+                original_score = 1.0 / (index + 1)
+                final_score = original_score
+                truth_state = (truth_state_by_id or {}).get(hit_id, {})
+                if truth_state.get("truth_epoch") == current_truth_epoch:
+                    final_score *= align.truth_factor(truth_state.get("truth_alignment", []), q_coords)
+                entity_ranked.append((final_score, hit))
+            entity_ranked.sort(key=lambda x: -x[0])
+            entity_hits = [hit for _, hit in entity_ranked[:entity_limit]]
+
+            # 3. Rerank edge_hits
+            edge_ranked = []
+            for index, hit in enumerate(edge_hits):
+                hit_id = result_id(hit)
+                original_score = 1.0 / (index + 1)
+                final_score = original_score
+                truth_state = (truth_state_by_id or {}).get(hit_id, {})
+                if truth_state.get("truth_epoch") == current_truth_epoch:
+                    final_score *= align.truth_factor(truth_state.get("truth_alignment", []), q_coords)
+                edge_ranked.append((final_score, hit))
+            edge_ranked.sort(key=lambda x: -x[0])
+            edge_hits = [hit for _, hit in edge_ranked[:edge_limit]]
+        else:
+            entity_hits = entity_hits[:entity_limit]
+            edge_hits = edge_hits[:edge_limit]
+
         entities = await build_entities(
             self._unified_engine.graph,
             entity_hits,

@@ -34,6 +34,8 @@ _KIND_BY_SEARCH_TYPE: dict[SearchType, SearchResultKind] = {
     SearchType.CHUNKS: SearchResultKind.CHUNK,
     SearchType.CHUNKS_LEXICAL: SearchResultKind.CHUNK,
     SearchType.SUMMARIES: SearchResultKind.SUMMARY,
+    SearchType.AGENTIC_COMPLETION: SearchResultKind.GRAPH_COMPLETION,
+    SearchType.FEELING_LUCKY: SearchResultKind.GRAPH_COMPLETION,
 }
 
 
@@ -103,12 +105,15 @@ def _build_item(
     kind: SearchResultKind,
 ) -> SearchResultItem:
     """Build a single SearchResultItem from one retriever output element."""
+    structured = None
     if isinstance(entry, str):
         text = entry
         raw: dict = {"value": entry}
     elif isinstance(entry, BaseModel):
         raw = entry.model_dump(mode="json")
         text = _text_from_dict(raw)
+        structured = entry
+        kind = SearchResultKind.STRUCTURED
     elif isinstance(entry, dict):
         raw = entry
         text = _text_from_dict(entry)
@@ -128,6 +133,7 @@ def _build_item(
         dataset_name=payload.dataset_name,
         metadata=_provenance_metadata(raw),
         raw=raw,
+        structured=structured,
     )
 
 

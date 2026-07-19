@@ -193,7 +193,7 @@ async def exception_handler(_: Request, exc: CogneeApiError) -> JSONResponse:
         logger.error("Improperly defined exception: %s", exc)
         # Provide a default error response
         detail["message"] = "An unexpected error occurred."
-        status_code = status.HTTP_418_IM_A_TEAPOT
+        status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
 
     # log the stack trace for easier serverside debugging
     logger.error(format_exc())
