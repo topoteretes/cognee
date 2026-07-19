@@ -57,6 +57,17 @@ def test_completion_result_has_no_provenance_metadata():
     assert items[0].metadata == {}
 
 
+def test_code_result_preserves_structured_operation_payload():
+    result = {"operation": "find_path", "found": True, "path": [{"name": "main"}]}
+    payload = SearchResultPayload(completion=result, search_type=SearchType.CODE)
+
+    items = normalize_search_payload(payload)
+
+    assert len(items) == 1
+    assert items[0].kind == SearchResultKind.CODE
+    assert items[0].raw == result
+
+
 def test_agentic_completion_normalizes_as_graph_completion():
     payload = SearchResultPayload(
         completion=["Agentic answer"],

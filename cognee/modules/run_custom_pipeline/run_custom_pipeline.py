@@ -24,6 +24,7 @@ async def run_custom_pipeline(
     run_in_background: bool = False,
     pipeline_name: str = "custom_pipeline",
     data_cache: bool = False,
+    skip_connection_test: bool = False,
 ):
     """
     Custom pipeline in Cognee, can work with already built graphs. Data needs to be provided which can be processed
@@ -54,6 +55,9 @@ async def run_custom_pipeline(
                           If False, waits for completion before returning.
                           Background mode recommended for large datasets (>100MB).
                           Use pipeline_run_id from return value to monitor progress.
+        skip_connection_test: If True, skip the first-run LLM/embedding connection checks
+                          for this pipeline. Use for pipelines whose tasks perform no LLM
+                          or embedding calls (e.g. the deterministic code graph pipeline).
     """
 
     custom_tasks = [
@@ -77,4 +81,5 @@ async def run_custom_pipeline(
         data_per_batch=data_per_batch,
         pipeline_name=pipeline_name,
         data_cache=data_cache,
+        skip_connection_test=skip_connection_test,
     )

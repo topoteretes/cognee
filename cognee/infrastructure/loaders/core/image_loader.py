@@ -134,7 +134,9 @@ class ImageLoader(LoaderInterface):
                 # Basic in-memory dedup check
                 if self._is_duplicate(image_hash):
                     # Still return the content but flag it
-                    content_parts.append("[Duplicate: visually similar to a previously ingested image]")
+                    content_parts.append(
+                        "[Duplicate: visually similar to a previously ingested image]"
+                    )
 
         combined_content = "".join(content_parts)
 
@@ -148,7 +150,10 @@ class ImageLoader(LoaderInterface):
         full_file_path = await storage.store(storage_file_name, combined_content)
 
         # If dedup is enabled, store the hash for future comparison
-        if os.environ.get("IMAGE_PERCEPTUAL_HASH_ENABLED", "false").lower() == "true" and image_hash is not None:
+        if (
+            os.environ.get("IMAGE_PERCEPTUAL_HASH_ENABLED", "false").lower() == "true"
+            and image_hash is not None
+        ):
             self._store_hash(image_hash)
 
         return full_file_path
@@ -259,11 +264,14 @@ class ImageLoader(LoaderInterface):
 #  Module-level helpers (no Pillow/exif dep needed at import time)
 # ------------------------------------------------------------------
 
+
 def _dhash(image, hash_size: int = 8) -> str:
     """
     Difference hash: resize to (hash_size+1 x hash_size), convert to
     grayscale, compare adjacent columns, and pack bits into a hex string.
     """
+    from PIL import Image
+
     image = image.convert("L").resize((hash_size + 1, hash_size), Image.LANCZOS)
     pixels = list(image.getdata())
     # pixels now has (hash_size+1) * hash_size entries, row-major
