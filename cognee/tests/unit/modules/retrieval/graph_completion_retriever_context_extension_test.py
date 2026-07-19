@@ -14,6 +14,19 @@ def mock_edge():
     return edge
 
 
+def make_semantic_mock_edge():
+    """A mock edge carrying real triplet identity (node ids + relationship).
+
+    Each call returns a distinct instance, mirroring production where every
+    retrieval round re-projects the graph into fresh Edge objects.
+    """
+    edge = MagicMock()
+    edge.node1.id = "node-a"
+    edge.node2.id = "node-b"
+    edge.attributes = {"relationship_name": "related_to"}
+    return edge
+
+
 @pytest.mark.asyncio
 async def test_get_triplets_inherited(mock_edge):
     """Test that get_triplets is inherited from parent class."""
@@ -239,7 +252,10 @@ async def test_get_completion_context_extension_stops_early(mock_edge):
         patch(
             "cognee.modules.retrieval.graph_completion_retriever.brute_force_triplet_search",
             new_callable=AsyncMock,
-            side_effect=[[mock_edge], [mock_edge]],
+            # Distinct instances of the same logical triplet, as produced by
+            # re-projecting the graph each round — dedupe must be semantic,
+            # not object-identity based.
+            side_effect=[[make_semantic_mock_edge()], [make_semantic_mock_edge()]],
         ) as mock_brute_force_triplet_search,
         patch(
             "cognee.modules.retrieval.graph_completion_retriever.resolve_edges_to_text",
@@ -707,7 +723,11 @@ async def test_get_completion_batch_queries_context_extension_stops_early(mock_e
         patch(
             "cognee.modules.retrieval.graph_completion_retriever.brute_force_triplet_search",
             new_callable=AsyncMock,
-            side_effect=[[[mock_edge], [mock_edge]], [[mock_edge], [mock_edge]]],
+            # Fresh same-identity instances per round (see make_semantic_mock_edge).
+            side_effect=[
+                [[make_semantic_mock_edge()], [make_semantic_mock_edge()]],
+                [[make_semantic_mock_edge()], [make_semantic_mock_edge()]],
+            ],
         ) as mock_brute_force_triplet_search,
         patch(
             "cognee.modules.retrieval.graph_completion_retriever.resolve_edges_to_text",
