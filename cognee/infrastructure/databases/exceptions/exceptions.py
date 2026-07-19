@@ -121,6 +121,18 @@ class EmbeddingException(CogneeConfigurationError):
         super().__init__(message, name, status_code)
 
 
+class EmbeddingContextWindowTooSmallError(EmbeddingException):
+    """Raised when over-length embedding input cannot be split any further."""
+
+    def __init__(
+        self,
+        message: str = "Text is too short to split further but exceeds context window.",
+        name: str = "EmbeddingContextWindowTooSmallError",
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+    ):
+        super().__init__(message, name, status_code)
+
+
 class MissingQueryParameterError(CogneeValidationError):
     """
     Raised when neither 'query_text' nor 'query_vector' is provided,

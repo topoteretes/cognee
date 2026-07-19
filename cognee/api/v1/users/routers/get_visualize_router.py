@@ -1,10 +1,15 @@
-from typing import List
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 from uuid import UUID
 from cognee.shared.logging_utils import get_logger
+from cognee.modules.visualization.subgraph_data import (
+    DEFAULT_MAX_NODES,
+    DEFAULT_NEIGHBORHOOD_DEPTH,
+    DEFAULT_SEED_TOP_K,
+)
 from cognee.modules.users.methods import get_authenticated_user, get_user
 from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.users.models import User
@@ -45,18 +50,54 @@ def get_visualize_router() -> APIRouter:
             ),
             examples=[""],
         ),
+        full: bool = Query(
+            False,
+            description="Render the entire graph instead of a bounded subgraph.",
+        ),
+        query: Optional[str] = Query(
+            None,
+            description="Query string whose nearest vector hits seed the subgraph.",
+        ),
+        seed_node_ids: Optional[List[str]] = Query(
+            None,
+            description="Explicit seed node ids for subgraph neighborhood expansion.",
+        ),
+        neighborhood_depth: int = Query(
+            DEFAULT_NEIGHBORHOOD_DEPTH,
+            ge=1,
+            le=10,
+            description="k-hop neighborhood depth for subgraph expansion.",
+        ),
+        neighborhood_seed_top_k: int = Query(
+            DEFAULT_SEED_TOP_K,
+            ge=1,
+            le=100,
+            description="Maximum number of seed nodes.",
+        ),
+        max_nodes: int = Query(
+            DEFAULT_MAX_NODES,
+            ge=1,
+            le=5000,
+            description="Hard cap on rendered nodes after expansion.",
+        ),
         user: User = Depends(get_authenticated_user),
     ):
         """
         Generate an HTML visualization of the dataset's knowledge graph.
 
-        This endpoint creates an interactive HTML visualization of the knowledge graph
-        for a specific dataset. The visualization displays nodes and edges representing
-        entities and their relationships, allowing users to explore the graph structure
-        visually.
+        By default renders a bounded subgraph around relevant seed nodes; pass
+        ``full=true`` to render the entire graph (legacy behavior). Seeds come
+        from ``query`` or ``seed_node_ids`` when given, otherwise the graph's
+        highest-degree nodes.
 
         ## Query Parameters
         - **dataset_id** (UUID): The unique identifier of the dataset to visualize
+        - **full** (bool): Render the full graph when true
+        - **query** (str): Query string to seed the subgraph via vector search
+        - **seed_node_ids** (list[str]): Explicit seed node ids
+        - **neighborhood_depth** (int): k-hop expansion depth (default 2)
+        - **neighborhood_seed_top_k** (int): Max seeds (default 10)
+        - **max_nodes** (int): Node cap after expansion (default 500)
 
         ## Response
         Returns an HTML page containing the interactive graph visualization.
@@ -75,6 +116,7 @@ def get_visualize_router() -> APIRouter:
             additional_properties={
                 "endpoint": "GET /v1/visualize",
                 "dataset_id": str(dataset_id),
+                "full": full,
                 "cognee_version": cognee_version,
             },
         )
@@ -85,10 +127,20 @@ def get_visualize_router() -> APIRouter:
             # Verify user has permission to read dataset
             dataset = await get_authorized_existing_datasets([dataset_id], "read", user)
 
-            html_visualization = await visualize_graph(dataset=dataset[0].id, user=user)
+            html_visualization = await visualize_graph(
+                dataset=dataset[0].id,
+                user=user,
+                full=full,
+                query=query,
+                seed_node_ids=seed_node_ids,
+                neighborhood_depth=neighborhood_depth,
+                neighborhood_seed_top_k=neighborhood_seed_top_k,
+                max_nodes=max_nodes,
+            )
             return HTMLResponse(html_visualization)
 
         except Exception as error:
+            logger.exception("Visualization failed for dataset %s", dataset_id)
             return JSONResponse(status_code=409, content={"error": str(error)})
 
     @router.post("/multi", response_model=None)

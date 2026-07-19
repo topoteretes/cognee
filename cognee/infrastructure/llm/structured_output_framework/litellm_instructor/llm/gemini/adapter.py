@@ -1,6 +1,5 @@
 """Adapter for Gemini API LLM provider"""
 
-import asyncio
 import logging
 from typing import Any
 
@@ -13,7 +12,6 @@ from pydantic import BaseModel
 from tenacity import (
     before_sleep_log,
     retry,
-    retry_if_not_exception_type,
     wait_exponential_jitter,
 )
 
@@ -23,6 +21,7 @@ from cognee.infrastructure.llm.exceptions import (
     is_budget_exhausted_error,
 )
 from cognee.infrastructure.llm.retry_config import (
+    llm_retry_condition,
     llm_retry_stop_condition,
 )
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.generic_llm_api.adapter import (
@@ -90,14 +89,7 @@ class GeminiAdapter(GenericAPIAdapter):
     @retry(
         stop=llm_retry_stop_condition,
         wait=wait_exponential_jitter(8, 128),
-        retry=retry_if_not_exception_type(
-            (
-                litellm.exceptions.NotFoundError,
-                litellm.exceptions.AuthenticationError,
-                asyncio.CancelledError,
-                LLMPaymentRequiredError,
-            )
-        ),
+        retry=llm_retry_condition,
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )

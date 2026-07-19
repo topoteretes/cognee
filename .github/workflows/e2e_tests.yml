@@ -1822,7 +1822,12 @@ jobs:
     runs-on: ubuntu-22.04
 
     env:
-      COGNEE_COMPATIBILITY_TEST_VERSION: v0.5.6
+      # Earliest version whose session mechanism is testable against the
+      # current branch: improve() exists from v1.0, but the SQL session cache
+      # (cache.db) only shipped in v1.2.0 — older tags stored sessions in
+      # Redis, which this job neither runs nor reads. v1.2.0 exercises both
+      # the data migrations and the session persistence watermark takeover.
+      COGNEE_COMPATIBILITY_TEST_VERSION: v1.2.0
 
       ENV: dev
       LLM_PROVIDER: ${{ secrets.LLM_PROVIDER }}
@@ -1903,7 +1908,8 @@ jobs:
           - 5432:5432
 
     env:
-      COGNEE_COMPATIBILITY_TEST_VERSION: v0.5.6
+      # Same pin as the sqlite job — see the comment there.
+      COGNEE_COMPATIBILITY_TEST_VERSION: v1.2.0
 
       # Relational DB — PostgreSQL
       DB_PROVIDER: postgres
