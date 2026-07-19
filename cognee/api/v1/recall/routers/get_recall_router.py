@@ -1,11 +1,11 @@
 from datetime import datetime
-from typing import List, Optional, Union
+from typing import Any, List, Optional, Union
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from cognee import __version__ as cognee_version
 from cognee.api.DTO import InDTO, OutDTO
@@ -50,6 +50,36 @@ class RecallPayloadDTO(InDTO):
             "when both are provided. Leave empty to resolve by name."
         ),
     )
+    dataset_name: Optional[str] = Field(
+        default=None,
+        description="Optional singular dataset name to search. Added to datasets list.",
+    )
+    dataset_id: Optional[UUID] = Field(
+        default=None,
+        description="Optional singular dataset UUID to search. Added to dataset_ids list.",
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def map_singular_dataset_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            dataset_name = data.get("dataset_name")
+            if dataset_name is not None:
+                datasets = data.get("datasets")
+                if datasets is None:
+                    data["datasets"] = [dataset_name]
+                elif isinstance(datasets, list) and dataset_name not in datasets:
+                    data["datasets"].append(dataset_name)
+
+            dataset_id = data.get("dataset_id")
+            if dataset_id is not None:
+                dataset_ids = data.get("dataset_ids")
+                if dataset_ids is None:
+                    data["dataset_ids"] = [dataset_id]
+                elif isinstance(dataset_ids, list) and dataset_id not in dataset_ids:
+                    data["dataset_ids"].append(dataset_id)
+        return data
+
     query: str = Field(default="What is in the document?")
     system_prompt: Optional[str] = Field(
         default="Answer the question using the provided context. Be as brief as possible."

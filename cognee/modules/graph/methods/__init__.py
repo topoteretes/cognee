@@ -24,5 +24,7 @@ from .get_dataset_related_edges import get_dataset_related_edges, get_global_dat
 from .delete_dataset_related_nodes import delete_dataset_related_nodes
 from .delete_dataset_related_edges import delete_dataset_related_edges
 from .delete_dataset_nodes_and_edges import delete_dataset_nodes_and_edges
+from .get_dataset_node_ids import get_dataset_node_ids
 
 from .legacy_delete import legacy_delete
+
