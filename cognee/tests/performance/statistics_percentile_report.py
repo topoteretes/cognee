@@ -337,6 +337,16 @@ def main():
     parser.add_argument(
         "--mock-memories", type=Path, default=None, help="Forward to bench_cognee.py"
     )
+    parser.add_argument(
+        "--tenant-url",
+        default=None,
+        help="Cognee Cloud tenant URL; benchmark runs remotely via cognee.serve()",
+    )
+    parser.add_argument(
+        "--tenant-api-key",
+        default=None,
+        help="API key for the cloud tenant (or set COGNEE_API_KEY)",
+    )
     args = parser.parse_args()
 
     extra_args = []
@@ -358,8 +368,12 @@ def main():
         extra_args += ["--mock-llm"]
     if args.mock_memories:
         extra_args += ["--mock-memories", str(args.mock_memories)]
+    if args.tenant_url:
+        extra_args += ["--tenant-url", args.tenant_url]
+    if args.tenant_api_key:
+        extra_args += ["--tenant-api-key", args.tenant_api_key]
 
-    mode = " [MOCK LLM]" if args.mock_llm else ""
+    mode = " [MOCK LLM]" if args.mock_llm else " [CLOUD]" if args.tenant_url else ""
     print(f"Starting {args.runs} sequential run(s) of bench_cognee.py...{mode}")
 
     runs = []

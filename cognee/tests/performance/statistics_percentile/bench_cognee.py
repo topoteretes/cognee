@@ -8,6 +8,8 @@ Usage:
     python bench_cognee.py                     # default settings
     python bench_cognee.py --memories data.json # custom memories file
     python bench_cognee.py --llm-model gpt-4o  # override LLM model
+    python bench_cognee.py --tenant-url https://tenant-x.aws.cognee.ai --tenant-api-key ck_...
+                                               # run against a Cognee Cloud tenant
 
 The memories file should be a JSON array of objects with "title" and "content"
 keys (see the bundled memories.json).
@@ -74,6 +76,22 @@ def _resolve_config(args: argparse.Namespace) -> dict:
         "embedding_model": pick(args.embedding_model, "EMBEDDING_MODEL", DEFAULT_EMBEDDING_MODEL),
         "embedding_dims": pick(args.embedding_dims, "EMBEDDING_DIMENSIONS", DEFAULT_EMBEDDING_DIMS),
         "mock_llm": mock_llm,
+    }
+
+
+def _resolve_cloud_config(args: argparse.Namespace) -> dict:
+    """Resolve config for cloud mode (--tenant-url): all processing is server-side."""
+    if args.mock_llm:
+        sys.exit("Error: --mock-llm is not supported with --tenant-url (LLM runs server-side)")
+    api_key = args.tenant_api_key or os.environ.get("COGNEE_API_KEY", "")
+    if not api_key:
+        sys.exit(
+            "Error: --tenant-api-key (or COGNEE_API_KEY env var) is required with --tenant-url"
+        )
+    return {
+        "tenant_url": args.tenant_url.rstrip("/"),
+        "tenant_api_key": api_key,
+        "mock_llm": False,
     }
 
 
@@ -323,6 +341,121 @@ async def run_benchmark(
     return results
 
 
+async def run_benchmark_cloud(
+    memories: list[dict],
+    *,
+    config: dict,
+) -> dict:
+    """Run the same phases against a remote Cognee tenant via cognee.serve().
+
+    Timings include network latency; LLM/embedding config lives server-side.
+    """
+    import cognee
+
+    client = await cognee.serve(url=config["tenant_url"], api_key=config["tenant_api_key"])
+
+    n = len(memories)
+    status = {
+        "prune": "success",
+        "db_setup": "success",  # server-side, nothing to set up from the client
+        "add": "success",
+        "cognify": "success",
+        "search": "success",
+    }
+    t_prune = 0.0
+    t_add = 0.0
+    t_cognify = 0.0
+    t_search = 0.0
+
+    # ── Prune (clean slate on the tenant) ────────────────────────────────
+    print("Pruning previous data on tenant...")
+    t_prune_start = time.time()
+    try:
+        await client.forget(everything=True)
+        t_prune = time.time() - t_prune_start
+        print(f"  Prune completed in {t_prune:.2f}s")
+    except Exception as e:
+        t_prune = time.time() - t_prune_start
+        status["prune"] = f"failed: {e}"
+        print(f"  Prune FAILED: {e}")
+
+    # ── Phase 1: add ─────────────────────────────────────────────────────
+    print(f"\nPhase 1: Adding {n} memories via remote add...")
+    text_list = [memory_to_text(mem) for mem in memories]
+    t_add_start = time.time()
+    try:
+        await client.add(text_list, dataset_name=DATASET_NAME)
+        t_add = time.time() - t_add_start
+    except Exception as e:
+        t_add = time.time() - t_add_start
+        status["add"] = f"failed: {e}"
+        print(f"  Add FAILED: {e}")
+
+    # ── Phase 2: cognify ─────────────────────────────────────────────────
+    print("\nPhase 2: Running remote cognify (knowledge graph build)...")
+    t_cognify_start = time.time()
+    try:
+        await client.cognify(datasets=[DATASET_NAME])
+        t_cognify = time.time() - t_cognify_start
+    except Exception as e:
+        t_cognify = time.time() - t_cognify_start
+        status["cognify"] = f"failed: {e}"
+        print(f"  Cognify FAILED: {e}")
+
+    t_total = t_add + t_cognify
+
+    # ── Phase 3: search ──────────────────────────────────────────────────
+    print("\nPhase 3: Running remote search query...")
+    t_q_start = time.time()
+    try:
+        await client.search("What is in the document", only_context=True)
+        t_search = time.time() - t_q_start
+    except Exception as e:
+        t_search = time.time() - t_q_start
+        status["search"] = f"failed: {e}"
+        print(f"  Search FAILED: {e}")
+
+    await client.close()
+
+    all_ok = all(v == "success" for v in status.values())
+
+    # ── Report ───────────────────────────────────────────────────────────
+    results = {
+        "memories_count": n,
+        "add_time_s": round(t_add, 3),
+        "cognify_time_s": round(t_cognify, 3),
+        "total_ingest_time_s": round(t_total, 3),
+        "prune_time_s": round(t_prune, 3),
+        "db_setup_time_s": 0.0,
+        "search_time": t_search,
+        "status": status,
+        "success": all_ok,
+        "config": {
+            "llm_model": "cloud (server-side)",
+            "embedding_model": "cloud (server-side)",
+            "embedding_dimensions": "server",
+            "dataset_name": DATASET_NAME,
+            "mock_llm": False,
+            "tenant_url": config["tenant_url"],
+        },
+    }
+
+    print("\n" + "=" * 60)
+    print("RESULTS (cloud)")
+    print("=" * 60)
+    print(f"  Tenant            : {config['tenant_url']}")
+    print(f"  Memories inserted : {n}")
+    print(f"  add time          : {t_add:.2f}s  ({t_add / n:.2f}s per memory)  [{status['add']}]")
+    print(f"  cognify time      : {t_cognify:.2f}s  [{status['cognify']}]")
+    print(f"  Total ingest time : {t_total:.2f}s  ({t_total / n:.2f}s per memory)")
+    print(f"  Search total      : {t_search:.2f}s  [{status['search']}]")
+    print(f"  Prune time        : {t_prune:.2f}s  [{status['prune']}]")
+    print(f"  Overall           : {'ALL OK' if all_ok else 'SOME FAILURES'}")
+    print("=" * 60)
+
+    return results
+
+
 # ── CLI ──────────────────────────────────────────────────────────────────────
 
 
@@ -381,6 +514,16 @@ def main():
         help=f"Mock responses JSON file (default: {DEFAULT_MOCK_MEMORIES_FILE.name})",
     )
     parser.add_argument(
+        "--tenant-url",
+        default=None,
+        help="Cognee Cloud tenant URL; runs all operations remotely via cognee.serve()",
+    )
+    parser.add_argument(
+        "--tenant-api-key",
+        default=None,
+        help="API key for the cloud tenant (or set COGNEE_API_KEY)",
+    )
+    parser.add_argument(
         "--output",
         "-o",
         type=Path,
@@ -389,20 +532,27 @@ def main():
     )
     args = parser.parse_args()
 
-    config = _resolve_config(args)
-    if config["mock_llm"]:
-        config["mock_memories_file"] = args.mock_memories
+    if args.tenant_url:
+        config = _resolve_cloud_config(args)
+    else:
+        config = _resolve_config(args)
+        if config["mock_llm"]:
+            config["mock_memories_file"] = args.mock_memories
 
     memories = load_memories(args.memories)
     if args.num_memories is not None:
         memories = memories[: args.num_memories]
     print(f"Loaded {len(memories)} memories from {args.memories}")
-    mock_label = " [MOCK]" if config["mock_llm"] else ""
-    print(
-        f"Config: llm={config['llm_model']}, embeddings={config['embedding_model']} ({config['embedding_dims']}d){mock_label}\n"
-    )
 
-    results = asyncio.run(run_benchmark(memories, config=config))
+    if args.tenant_url:
+        print(f"Config: cloud tenant {config['tenant_url']}\n")
+        results = asyncio.run(run_benchmark_cloud(memories, config=config))
+    else:
+        mock_label = " [MOCK]" if config["mock_llm"] else ""
+        print(
+            f"Config: llm={config['llm_model']}, embeddings={config['embedding_model']} ({config['embedding_dims']}d){mock_label}\n"
+        )
+        results = asyncio.run(run_benchmark(memories, config=config))
 
     if args.output:
         with open(args.output, "w") as f:
