@@ -78,19 +78,34 @@ def _parse(path: Path) -> ast.Module:
     return ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
 
 
+def _base_names(class_node: ast.ClassDef) -> set:
+    """Names of a class's bases, covering both ``Base`` and ``module.Base`` forms."""
+    names = set()
+    for base in class_node.bases:
+        if isinstance(base, ast.Name):
+            names.add(base.id)
+        elif isinstance(base, ast.Attribute):
+            names.add(base.attr)
+    return names
+
+
 def _family_classes_in_repo():
-    """Statically discover every class in the family and where it is defined.
+    """Statically discover the family and where each class is defined.
 
     Resolution is by base-class *name* and iterated to a fixpoint, so multi-level
     subclasses (a class extending an intermediate subclass defined elsewhere) are
-    picked up too — no imports required.
+    picked up too — no imports required. Both ``Base`` and dotted ``module.Base``
+    references are recognised.
+
+    Returns ``(classes, family_names)`` where ``classes`` is a list of
+    ``(path, ClassDef)`` and ``family_names`` is the resolved set of every class
+    name in the hierarchy (used to validate base ``__init__`` calls precisely).
     """
-    # (module_path, ClassDef, {base names})
-    definitions = []
+    definitions = []  # (module_path, ClassDef, {base names})
     for path in _iter_source_files():
         for node in ast.walk(_parse(path)):
             if isinstance(node, ast.ClassDef):
-                base_names = {b.id for b in node.bases if isinstance(b, ast.Name)}
+                base_names = _base_names(node)
                 if base_names:
                     definitions.append((path, node, base_names))
 
@@ -103,14 +118,21 @@ def _family_classes_in_repo():
                 family_names.add(node.name)
                 changed = True
 
-    return [(path, node) for path, node, base_names in definitions if (base_names & family_names)]
+    classes = [
+        (path, node) for path, node, base_names in definitions if (base_names & family_names)
+    ]
+    return classes, family_names
 
 
-def _defines_init_without_base_call(class_node: ast.ClassDef) -> bool:
-    """True if the class overrides ``__init__`` but never calls a base ``__init__``.
+def _defines_init_without_base_call(class_node: ast.ClassDef, family_names: set) -> bool:
+    """True if the class overrides ``__init__`` but never calls a *family* base ``__init__``.
 
-    Accepts both ``super().__init__(...)`` and an explicit ``Base.__init__(self, ...)``.
-    A class that does not override ``__init__`` at all inherits the base and is fine.
+    A call only counts when its target is ``super()`` or a class in the Cognee error
+    hierarchy (``FamilyBase.__init__`` / ``module.FamilyBase.__init__``). Calling an
+    unrelated ``__init__`` — e.g. the grandparent ``Exception.__init__`` or a mixin's —
+    does NOT satisfy the contract, because it skips ``CogneeApiError.__init__`` (centralized
+    logging + status defaults). A class that does not override ``__init__`` inherits the
+    base and is fine.
     """
     init = next(
         (n for n in class_node.body if isinstance(n, ast.FunctionDef) and n.name == "__init__"),
@@ -119,18 +141,31 @@ def _defines_init_without_base_call(class_node: ast.ClassDef) -> bool:
     if init is None:
         return False
     for node in ast.walk(init):
-        if (
+        if not (
             isinstance(node, ast.Call)
             and isinstance(node.func, ast.Attribute)
             and node.func.attr == "__init__"
         ):
+            continue
+        target = node.func.value
+        # super().__init__(...)
+        if (
+            isinstance(target, ast.Call)
+            and isinstance(target.func, ast.Name)
+            and target.func.id == "super"
+        ):
+            return False
+        # FamilyBase.__init__(self, ...) or module.FamilyBase.__init__(self, ...)
+        if isinstance(target, ast.Name) and target.id in family_names:
+            return False
+        if isinstance(target, ast.Attribute) and target.attr in family_names:
             return False
     return True
 
 
 def test_no_cognee_error_subclass_bypasses_base_init():
-    """Static guard: no error subclass may skip its base ``__init__``."""
-    family = _family_classes_in_repo()
+    """Static guard: no error subclass may skip its ``CogneeApiError`` base ``__init__``."""
+    family, family_names = _family_classes_in_repo()
     # Sanity: the sweep actually found the hierarchy (guards against a silently
     # empty match, e.g. if discovery ever breaks).
     assert len(family) > 20, f"Only found {len(family)} family classes; discovery likely broke."
@@ -138,7 +173,7 @@ def test_no_cognee_error_subclass_bypasses_base_init():
     offenders = [
         f"{path.relative_to(PACKAGE_ROOT.parent)}:{node.lineno} {node.name}"
         for path, node in family
-        if _defines_init_without_base_call(node)
+        if _defines_init_without_base_call(node, family_names)
     ]
     assert not offenders, "CogneeError subclasses missing super().__init__():\n" + "\n".join(
         offenders
@@ -147,7 +182,8 @@ def test_no_cognee_error_subclass_bypasses_base_init():
 
 def _import_family_modules():
     """Import every module that defines a family class, tolerating optional extras."""
-    module_paths = {path for path, _node in _family_classes_in_repo()}
+    classes, _family_names = _family_classes_in_repo()
+    module_paths = {path for path, _node in classes}
     for path in module_paths:
         try:
             importlib.import_module(_module_name(path))
@@ -198,8 +234,13 @@ def test_cognee_error_subclasses_preserve_args_and_chaining():
     for cls in classes:
         exc = cls(**_build_kwargs(cls))
 
-        # super().__init__ ran -> Exception.args is populated.
-        assert exc.args, f"{cls.__name__}.args is empty; super().__init__ was not called."
+        # CogneeApiError.__init__ ran -> it forwards (message, name) to
+        # Exception.__init__, so args must be exactly that pair. An empty args
+        # (the original #3749 bug) or a differently-shaped args both fail here.
+        assert exc.args == (exc.message, exc.name), (
+            f"{cls.__name__}.args must be (message, name) from CogneeApiError.__init__; "
+            f"got {exc.args!r}."
+        )
         assert str(exc), f"{cls.__name__} has an empty str()."
         assert getattr(exc, "message", None), f"{cls.__name__} did not set .message."
 
