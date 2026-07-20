@@ -60,10 +60,11 @@ class EntityNotFoundError(CogneeValidationError):
         name: str = "EntityNotFoundError",
         status_code=status.HTTP_404_NOT_FOUND,
     ):
-        self.message = message
-        self.name = name
-        self.status_code = status_code
-        # super().__init__(message, name, status_code) :TODO: This is not an error anymore with the dynamic exception handling therefore we shouldn't log error
+        # log=False: this is raised in routine control flow (caught in user
+        # resolution, migrations, pruning, graph projection, etc.), so logging
+        # every occurrence at ERROR would be noise. super() still populates
+        # Exception.args and preserves chaining.
+        super().__init__(message, name, status_code, log=False)
 
 
 class EntityAlreadyExistsError(CogneeValidationError):
@@ -98,9 +99,9 @@ class NodesetFilterNotSupportedError(CogneeConfigurationError):
         name: str = "NodeSetFilterNotSupportedError",
         status_code=status.HTTP_404_NOT_FOUND,
     ):
-        self.message = message
-        self.name = name
-        self.status_code = status_code
+        # log=False: a missing nodeset filter is a capability difference between
+        # backends, not an application error worth logging on every raise.
+        super().__init__(message, name, status_code, log=False)
 
 
 class EmbeddingException(CogneeConfigurationError):
