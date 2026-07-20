@@ -14,7 +14,11 @@ def classify(
         return TextData(data)
 
     if isinstance(data, BufferedReader) or isinstance(data, SpooledTemporaryFile):
-        return BinaryData(data, filename if filename else str(data.name).split("/")[-1])
+        # Normalize Windows ("\") and POSIX ("/") separators before taking the
+        # basename; on Windows `data.name` is a backslash path, so splitting on
+        # "/" alone would keep the full path as the file name.
+        derived_name = str(data.name).replace("\\", "/").split("/")[-1]
+        return BinaryData(data, filename if filename else derived_name)
 
     try:
         from s3fs import S3File
