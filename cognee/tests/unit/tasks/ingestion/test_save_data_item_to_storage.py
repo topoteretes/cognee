@@ -88,6 +88,39 @@ async def test_existing_absolute_file_rejected_when_gate_disabled(tmp_path, monk
 
 
 @pytest.mark.asyncio
+async def test_nonexistent_absolute_path_is_text_even_when_gate_disabled(monkeypatch):
+    # The ACCEPT_LOCAL_FILE_PATH gate rejects existing *local files*; a
+    # non-existent absolute-looking string is not a local file, so it is still
+    # ingested as text even with the gate off (the reject branch is only reached
+    # once is_file() is true). Mirrors the estimator's gate-off behavior.
+    save_mock = AsyncMock(return_value="text-file-path")
+    monkeypatch.setattr(mod, "save_data_to_file", save_mock)
+    monkeypatch.setattr(mod.settings, "accept_local_file_path", False)
+
+    result = await save_data_item_to_storage("/no/such/file.txt")
+
+    assert result == "text-file-path"
+    save_mock.assert_awaited_once_with("/no/such/file.txt")
+
+
+@pytest.mark.asyncio
+async def test_existing_directory_is_ingested_as_text(tmp_path, monkeypatch):
+    # An existing directory is not a file (is_file() is False), so it falls
+    # through to text ingestion rather than becoming a file:// URI. (In the
+    # normal add() flow directories are expanded upstream by
+    # resolve_data_directories.) The dry-run estimator deliberately diverges
+    # here — it rejects directories with a clearer message; see
+    # test_estimator.test_directories_are_rejected.
+    save_mock = AsyncMock(return_value="text-file-path")
+    monkeypatch.setattr(mod, "save_data_to_file", save_mock)
+
+    result = await save_data_item_to_storage(str(tmp_path))
+
+    assert result == "text-file-path"
+    save_mock.assert_awaited_once_with(str(tmp_path))
+
+
+@pytest.mark.asyncio
 @pytest.mark.skipif(os.name != "nt", reason="Windows absolute-path semantics")
 async def test_genuine_windows_absolute_path_returns_file_uri(tmp_path):
     # A real Windows absolute path (C:\...) to an existing file still converts
