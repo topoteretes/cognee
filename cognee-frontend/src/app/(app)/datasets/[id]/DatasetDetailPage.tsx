@@ -9,6 +9,7 @@ import getDatasetData from "@/modules/datasets/getDatasetData";
 import deleteDatasetData from "@/modules/datasets/deleteDatasetData";
 import deleteDataset from "@/modules/datasets/deleteDataset";
 import rememberData from "@/modules/ingestion/rememberData";
+import { MAX_FILES_PER_UPLOAD } from "@/modules/ingestion/uploadLimits";
 import cognifyDataset from "@/modules/datasets/cognifyDataset";
 import pollDatasetStatus from "@/modules/datasets/pollDatasetStatus";
 import { useDatasetStatuses } from "@/modules/datasets/useDatasetStatuses";
@@ -510,6 +511,16 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
   async function handleUpload(newFiles: FileList | File[]) {
     if (!cogniInstance) return;
     const filesArray = Array.from(newFiles);
+
+    if (filesArray.length > MAX_FILES_PER_UPLOAD) {
+      notifications.show({
+        title: "Too many files",
+        message: `You selected ${filesArray.length} files. Please upload ${MAX_FILES_PER_UPLOAD} or fewer at a time.`,
+        color: "red",
+      });
+      return;
+    }
+
     const totalBytes = filesArray.reduce((sum, f) => sum + f.size, 0);
     const fileTypes = filesArray.map((f) => f.type || "unknown");
     const uploadStartedAt = Date.now();
@@ -527,28 +538,10 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
     });
 
     try {
-      // Kick off ingestion in the background so the upload POST returns immediately,
-      // then poll the dataset status until the pipeline finishes. This avoids holding
-      // one HTTP request open for the full (multi-minute) build, which the client
-      // would abort at the rememberData timeout — and which is also exposed to
-      // gateway/LB idle timeouts — while the backend kept processing.
+      // Kick off ingestion in the background so the upload POST returns immediately.
+      // The add itself is done once this call returns — anything that fails after
+      // this point (status polling) must not be reported as an upload failure.
       await rememberData({ id: datasetId }, filesArray, cogniInstance, { ...getCognifyOptions(), runInBackground: true });
-      await pollDatasetStatus(datasetId, cogniInstance, { intervalMs: 5000 });
-      await loadFiles();
-      setUploading(false);
-      setLastSynced(new Date().toISOString());
-
-      trackEvent({
-        pageName: "Dataset Detail",
-        eventName: "dataset_files_uploaded",
-        additionalProperties: {
-          dataset_id: datasetId,
-          file_count: String(filesArray.length),
-          total_bytes: String(totalBytes),
-          duration_ms: String(Date.now() - uploadStartedAt),
-        },
-      });
-      recordUploadSuccess(Date.now() - uploadStartedAt, totalBytes, filesArray.length);
     } catch (err) {
       setUploading(false);
 
@@ -586,6 +579,52 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
           color: "red",
         });
       }
+      return;
+    }
+
+    try {
+      // Files were already added successfully by this point — this only tracks
+      // knowledge-graph build progress, so its failure is reported separately.
+      await pollDatasetStatus(datasetId, cogniInstance, { intervalMs: 5000 });
+      await loadFiles();
+      setUploading(false);
+      setLastSynced(new Date().toISOString());
+
+      trackEvent({
+        pageName: "Dataset Detail",
+        eventName: "dataset_files_uploaded",
+        additionalProperties: {
+          dataset_id: datasetId,
+          file_count: String(filesArray.length),
+          total_bytes: String(totalBytes),
+          duration_ms: String(Date.now() - uploadStartedAt),
+        },
+      });
+      recordUploadSuccess(Date.now() - uploadStartedAt, totalBytes, filesArray.length);
+    } catch (err) {
+      setUploading(false);
+      await loadFiles();
+
+      const durationMs = Date.now() - uploadStartedAt;
+      const errorMessage = err instanceof Error ? err.message : String(err);
+
+      captureException(err, { datasetId, fileCount: filesArray.length, totalBytes, durationMs, stage: "processing" });
+      trackEvent({
+        pageName: "Dataset Detail",
+        eventName: "dataset_processing_failed",
+        additionalProperties: {
+          dataset_id: datasetId,
+          file_count: String(filesArray.length),
+          total_bytes: String(totalBytes),
+          duration_ms: String(durationMs),
+          error_message: errorMessage,
+        },
+      });
+      notifications.show({
+        title: "Knowledge graph build failed",
+        message: `Files were added, but building the knowledge graph failed: ${errorMessage}`,
+        color: "red",
+      });
     }
   }
 
