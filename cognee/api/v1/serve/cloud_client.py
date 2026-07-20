@@ -194,6 +194,8 @@ class CloudClient:
             payload["session_id"] = kwargs["session_id"]
         if kwargs.get("scope") is not None:
             payload["scope"] = kwargs["scope"]
+        if kwargs.get("context_profile") is not None:
+            payload["context_profile"] = kwargs["context_profile"]
         if kwargs.get("include_references") is not None:
             payload["include_references"] = kwargs["include_references"]
 
@@ -329,6 +331,8 @@ class CloudClient:
             payload["maxIter"] = kwargs["max_iter"]
         if kwargs.get("include_references") is not None:
             payload["includeReferences"] = kwargs["include_references"]
+        if kwargs.get("code_query") is not None:
+            payload["codeQuery"] = kwargs["code_query"]
 
         async with session.post(
             f"{self.service_url}/api/v1/search",

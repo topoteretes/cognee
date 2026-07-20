@@ -1,6 +1,6 @@
 # Implementation Plan: Postgres-backed Session Store (CacheDBInterface adapter)
 
-**Goal:** store cognee session data (QA entries, agent traces, graph-knowledge snapshots, sync checkpoints, usage logs) in Postgres via a new `CacheDBInterface` adapter, removing the Redis requirement for session memory. Default backend stays `fs`; Redis and Tapes keep working unchanged. The design keeps a clean seam for a future Turbopuffer backend.
+**Goal:** store cognee session data (QA entries, agent traces, usage logs, and small string KV values) in Postgres via a new `CacheDBInterface` adapter, removing the Redis requirement for session memory. Default backend stays `fs`; Redis and Tapes keep working unchanged. The design keeps a clean seam for a future Turbopuffer backend.
 
 **Design stance:** minimal-surface adapter that slots into the existing backend plug point (like `FSCacheAdapter`), follows the graph Postgres adapter's engine/schema patterns, and adds **zero new dependencies** (SQLAlchemy is core; asyncpg/psycopg2 ship in the existing `postgres` extra). Where the minimal approach was naive (TTL purging, multi-worker RMW, lock semantics, prune scope), the robust alternatives are grafted in below — each divergence from the minimal design is justified inline.
 
@@ -10,7 +10,7 @@
 
 - Add `CACHE_BACKEND=postgres` as a fourth cache backend alongside `redis`, `fs`, `tapes`.
 - Implement `PostgresCacheAdapter(CacheDBInterface)` with full behavioral parity to `RedisAdapter`/`FSCacheAdapter` (TTL semantics, merge semantics, error contracts), improving on known Redis races where doing so is observably identical (atomic deletes, `FOR UPDATE` updates).
-- Support the **hidden KV contract** (graph-knowledge snapshots + sync checkpoints) that `SessionManager` and `sync_graph_to_session` access via `adapter.async_redis` duck-typing — via a shim in the core PR, formalized on the interface in a follow-up.
+- Support the formal string KV methods on `CacheDBInterface` (`get_value`/`set_value`/`delete_value`) for small cache values. The old graph-to-session sync contract is removed; new backends should not add an `async_redis` shim for it.
 - Non-goals (v1): data migration tooling (cache is 7-day-TTL ephemeral), per-dataset DB isolation (sessions are per-user), distributed `SHARED_LADYBUG_LOCK` support on Postgres (Phase 6), multi-worker `improve()` mutex.
 
 ---
@@ -23,7 +23,7 @@
 
 **Factory** — `cache/get_cache_engine.py`: `@lru_cache`'d `create_cache_engine(...)` branches on `CacheConfig.cache_backend` (`Literal["redis","fs","tapes"]`, default `"fs"`, in `cache/config.py`); returns `None` when `caching` and `usage_logging` are both off; `close_cache_engine()` closes + `cache_clear()`s. **Verified gotcha:** `from ...RedisAdapter import RedisAdapter` executes unconditionally inside the caching-on block, *before* the backend dispatch — it only works because the unused core dep `fakeredis[lua]` transitively installs `redis`.
 
-**Session manager** — `cognee/infrastructure/session/session_manager.py` (built by `get_session_manager.py`): wraps every interface method, no-ops when `cache_engine is None`. **Verified hidden contract:** `get_graph_context`/`set_graph_context`/`delete_session` (lines ~792–862) and `cognee/tasks/memify/sync_graph_to_session.py::_load_checkpoint/_save_checkpoint` (lines ~42–71) call `cache_engine.async_redis.get/set/expire/delete` directly, with an `AttributeError` fallback to `cache_engine._cache` — which is **wrong for FSCacheAdapter** (its attribute is `self.cache`, line 33), so graph-knowledge snapshots and sync checkpoints silently no-op on fs/tapes today. `set_graph_context` also reads `self._cache.session_ttl_seconds`, so any adapter must expose that attribute.
+**Session manager** — `cognee/infrastructure/session/session_manager.py` (built by `get_session_manager.py`): wraps every interface method, no-ops when `cache_engine is None`. It no longer stores graph snapshots in session prompts. For one release, `delete_session` still deletes the legacy `graph_knowledge:{user_id}:{session_id}` key via `delete_value` so old cache rows do not linger.
 
 **Locks** — two unrelated systems: (1) `cognee/infrastructure/locks/session_lock.py`: pure in-process asyncio locks (per-`(session_id, op)` dict + improve-lock set), explicitly single-worker scope, **no Redis dependency, no change required**; (2) `CacheDBInterface.acquire_lock`/`release_lock`: **sync** methods used only by the Ladybug graph adapter (`graph/ladybug/adapter.py` ~line 187, via `asyncio.to_thread`) when `SHARED_LADYBUG_LOCK=true` — Redis-only today.
 
@@ -36,7 +36,7 @@
 ## 3. Target architecture
 
 ```
-SessionManager / usage_logger / forget / prune_system / sync_graph_to_session / memify tasks
+SessionManager / usage_logger / forget / prune_system / memify tasks
         │  (unchanged call sites)
         ▼
 get_cache_engine()  ──reads──  CacheConfig (.env: CACHE_BACKEND, CACHE_DB_URL, ...)
@@ -52,8 +52,8 @@ get_cache_engine()  ──reads──  CacheConfig (.env: CACHE_BACKEND, CACHE_D
                             │     cache_qa_entries   ← agent_sessions:{u}:{s} lists
                             │     cache_trace_entries← agent_traces:{u}:{s} lists
                             │     cache_usage_logs   ← {log_key}:{u} lists
-                            │     cache_kv           ← graph_knowledge:* / graph_sync_checkpoint:*
-                            └── self.async_redis = _PostgresKVShim(self)   # hidden-contract duck-type
+                            │     cache_kv           ← generic small string KV values
+                            └── get_value/set_value/delete_value over cache_kv
 ```
 
 ---
@@ -87,7 +87,7 @@ class PostgresCacheAdapter(CacheDBInterface):
     ):
         super().__init__(host="", port=0, lock_key=lock_key, log_key=log_key)
         self.db_uri = connection_string
-        self.session_ttl_seconds = session_ttl_seconds   # read by SessionManager.set_graph_context
+        self.session_ttl_seconds = session_ttl_seconds
         pool_args = dict(get_relational_config().pool_args or {})
         self.engine = create_async_engine(
             connection_string,
@@ -98,7 +98,6 @@ class PostgresCacheAdapter(CacheDBInterface):
         self._initialized = False
         self._init_lock = asyncio.Lock()
         self._last_purge = 0.0
-        self.async_redis = _PostgresKVShim(self)         # §4.6
 ```
 
 Notes:
@@ -151,7 +150,7 @@ CREATE TABLE cache_usage_logs (
 );
 CREATE INDEX idx_cache_usage ON cache_usage_logs (log_key, user_id, seq);
 
--- String KV: graph_knowledge:{u}:{s}, graph_sync_checkpoint:{u}:{d}:{s} — keys kept verbatim
+-- String KV for small cache values; legacy graph_knowledge:{u}:{s} keys may be deleted by SessionManager
 CREATE TABLE cache_kv (
     key         TEXT PRIMARY KEY,
     value       TEXT NOT NULL,
@@ -176,7 +175,7 @@ Every public async method: `await self._ensure_initialized()` first (once-flag u
 | `update_qa_entry(u, s, qa_id, ...)` | One transaction: `SELECT payload ... WHERE user_id/session_id/qa_id ... FOR UPDATE` (`with_for_update()`; no-op on the sqlite test variant, fine). No row → `False`. Merge in Python with exact existing semantics: `None` preserves every field; `memify_metadata = {**existing, **new}` (MERGE not replace — `apply_feedback_weights`/`apply_frequency_weights` idempotency flags depend on it); re-validate via `SessionQAEntry.model_validate`, letting `SessionQAEntryValidationError` propagate; `UPDATE payload`; TTL refresh; `True`. `FOR UPDATE` makes this RMW multi-worker-safe — strictly better than Redis's load/LSET race, observably identical. |
 | `delete_feedback(u, s, qa_id)` | Same `FOR UPDATE` pattern; set `feedback_text`/`feedback_score` to `None` in payload; TTL refresh; bool. (This is the only way to clear feedback — `update_qa_entry(feedback_score=None)` preserves.) |
 | `delete_qa_entry(u, s, qa_id)` | Single atomic `DELETE ... WHERE user_id/session_id/qa_id` (replaces Redis's non-atomic DEL+RPUSH-loop rewrite — crash-safe improvement); TTL refresh on remaining rows (Redis re-applies TTL after rewrite); return `rowcount > 0`. No "drop key when empty" step — empty session ≡ zero rows. |
-| `delete_session(u, s)` | One transaction: `DELETE FROM cache_qa_entries` + `DELETE FROM cache_trace_entries` for `(u, s)`; `True` if either rowcount > 0. (`SessionManager.delete_session` separately deletes the `graph_knowledge:` key via the KV shim — keep that division.) |
+| `delete_session(u, s)` | One transaction: `DELETE FROM cache_qa_entries` + `DELETE FROM cache_trace_entries` for `(u, s)`; `True` if either rowcount > 0. (`SessionManager.delete_session` separately deletes the legacy `graph_knowledge:` key via `delete_value` — keep that division for one release.) |
 | `append_agent_trace_step(u, s, trace_id, origin_function, status, ...)` | Build `SessionAgentTraceEntry` (`method_params or {}`; model validators do sanitization/truncation for free; blank `trace_id`/`origin_function` → `CacheConnectionError`); INSERT; trace-session TTL refresh. |
 | `get_agent_trace_session(u, s, last_n=None)` | `ORDER BY seq ASC`; when `last_n is not None`, `DESC LIMIT` + reverse. Reads do NOT refresh TTL. |
 | `get_agent_trace_feedback(u, s, last_n=None)` | `[e.session_feedback for e in await self.get_agent_trace_session(...)]` — exactly the delegation both adapters use. |
@@ -197,25 +196,19 @@ Replicates Redis sliding whole-key TTL exactly:
 - **Write refresh:** every mutating op runs, inside its transaction, `UPDATE <table> SET expires_at = now() + :ttl WHERE user_id=:u AND session_id=:s` (skipped when `session_ttl_seconds` is `None`/`<= 0` — `expires_at` stays NULL, expiry disabled). Whole-session refresh matches `EXPIRE session_key`. Sessions are small (tens–hundreds of rows); cheap.
 - **Read filter:** every SELECT adds `AND (expires_at IS NULL OR expires_at > now())`. Reads never refresh TTL (tested Redis behavior). Correctness never depends on purging.
 - **Purge** ("purge on init only" would leak rows in long-lived processes): (a) scoped `DELETE ... WHERE user_id=:u AND session_id=:s AND expires_at <= now()` opportunistically on writes to that session; (b) a throttled global sweep `DELETE FROM <each table> WHERE expires_at <= now()` at most once per `purge_interval_seconds` (default 900) per process, guarded by `pg_try_advisory_lock` on Postgres (skip the guard on the sqlite test variant) so concurrent workers don't stampede. No external cron. Precedents: `FSCacheAdapter.cache.expire()` on init; `session_lifecycle` computing "abandoned" at read time.
-- **KV parity quirks preserved:** `graph_knowledge` gets TTL only when `set_graph_context` calls `expire()` (SessionManager drives it); `graph_sync_checkpoint` keys are written without TTL → immortal, exactly as today.
+- **KV behavior:** string KV values are exact-key values with optional TTL support where the adapter exposes it. No graph-to-session checkpoint keys are written anymore.
 
-### 4.6 The hidden contract: `_PostgresKVShim` (`async_redis` duck-type)
+### 4.6 String KV methods
 
-Core PR ships a shim, not an interface change — zero edits to `session_manager.py`/`sync_graph_to_session.py` keeps the core PR's blast radius to new files + factory wiring. The ABC-level `get_value/set_value/delete_value` (which also fixes the live FS `_cache`-vs-`cache` bug) is preserved as its own follow-up phase (P6), because it touches Redis, FS, and two consumer files and deserves separate review.
+The old hidden `async_redis` duck-type contract is gone with graph-to-session sync. Implement the formal `CacheDBInterface` string KV methods directly:
 
 ```python
-class _PostgresKVShim:
-    """async get/set/expire/delete over cache_kv, signature-compatible with the subset of
-    redis.asyncio.Redis used by SessionManager and sync_graph_to_session."""
-    def __init__(self, adapter): self._adapter = adapter
-    async def get(self, key) -> str | None:   # SELECT value WHERE key AND not-expired
-    async def set(self, key, value) -> None:  # pg_insert(cache_kv).on_conflict_do_update(index_elements=["key"], ...)
-                                              # (plain upsert emulation on the sqlite variant)
-    async def expire(self, key, ttl) -> None: # UPDATE expires_at = now() + ttl WHERE key
-    async def delete(self, key) -> None:      # DELETE WHERE key
+async def get_value(self, key: str) -> str | None: ...
+async def set_value(self, key: str, value: str, ttl: int | None = None) -> None: ...
+async def delete_value(self, key: str) -> None: ...
 ```
 
-`self.async_redis = _PostgresKVShim(self)` makes the Postgres backend the first non-Redis backend where graph-knowledge snapshots and sync checkpoints actually work. `get` returns `str` (the consumers handle both bytes and str — verified `raw.decode() if isinstance(raw, bytes) else raw`).
+`get_value` returns `str | None`. `set_value` should upsert by key and set `expires_at` when a TTL is supplied. `delete_value` should be idempotent.
 
 ---
 
@@ -285,7 +278,7 @@ Graph-adapter style, **not alembic**:
 - TTL: `expires_at` set/refreshed on create/update/delete_feedback/after-delete; NOT refreshed on reads; disabled when `session_ttl_seconds in (0, None)`; expired rows invisible to reads (assert via direct SQL with backdated `expires_at`)
 - `prune()` clears only the four cache tables; `close()` idempotent; legacy `add_qa`/`get_latest_qa`/`get_all_qas` shims
 - `acquire_lock`/`release_lock` raise `SharedLadybugLockRequiresRedisError`
-- KV shim get/set/expire/delete round-trips (new coverage no other backend has), checkpoint key without TTL stays readable
+- KV `get_value`/`set_value`/`delete_value` round-trips, including one legacy `graph_knowledge:{u}:{s}` deletion path through `SessionManager.delete_session`
 
 **Integration** — add `"postgres"` to the `params=["fs", "redis"]` fixtures in `cognee/tests/integration/infrastructure/session/test_session_sdk_integration.py`, `test_session_persistence_memify_integration.py`, `test_feedback_weights_memify_integration.py` (aiosqlite URL, no server); new `test_session_manager_postgres.py` mirroring `test_session_manager_redis.py` (LLM mocked via `AsyncMock` on `LLMGateway.acreate_structured_output`).
 
@@ -293,7 +286,7 @@ Graph-adapter style, **not alembic**:
 
 **CI e2e (real Postgres)** — third twin job `run_conversation_sessions_test_postgres` in `.github/workflows/e2e_tests.yml`, copying `run_conversation_sessions_test_redis` minus the redis service (the pgvector/pg17 service is already provisioned there): env `CACHING=true AUTO_FEEDBACK=true CACHE_BACKEND=postgres DB_PROVIDER=postgres` (relying on the DB_* fallback, which also exercises it) or explicit `CACHE_DB_URL`; extras `"postgres"` only; runs `cognee/tests/test_conversation_history.py` unmodified. Phase 6 adds a `SHARED_LADYBUG_LOCK=true CACHE_BACKEND=postgres` variant of the concurrent-subprocess job running `test_concurrent_subprocess_access.py`, plus real-Postgres-gated advisory-lock unit tests (acquire/release of the *passed* handle, contention timeout → `RuntimeError`, cross-connection mutual exclusion).
 
-**Phase 6 regression (KV formalization)** — FS test proving `graph_knowledge`/checkpoint round-trips work on fs (they silently no-op today); Redis test proving key byte-parity.
+**Regression coverage** — FS/Redis/Postgres tests proving generic string KV round-trips and the legacy `graph_knowledge:` cleanup path work consistently.
 
 ---
 
@@ -312,11 +305,11 @@ Graph-adapter style, **not alembic**:
 | Phase | Scope | Size |
 |---|---|---|
 | **P1 — Adapter core** | `cache/postgres/tables.py` + `PostgresCacheAdapter.py`: engine, `_ensure_initialized`, QA CRUD (`FOR UPDATE` updates, atomic deletes), TTL refresh + read filter + scoped/throttled purge, prune, close | **L** (~1.5–2 days, ~450 LOC) |
-| **P2 — Traces, usage logs, locks-raise, KV shim** | `append_agent_trace_step`/trace reads, `log_usage`/`get_usage_logs` (whole-list TTL refresh), lock methods raising `SharedLadybugLockRequiresRedisError`, `_PostgresKVShim` | **M** (~0.5–1 day, ~150 LOC) |
+| **P2 — Traces, usage logs, locks-raise, string KV** | `append_agent_trace_step`/trace reads, `log_usage`/`get_usage_logs` (whole-list TTL refresh), lock methods raising `SharedLadybugLockRequiresRedisError`, `get_value`/`set_value`/`delete_value` | **M** (~0.5–1 day, ~150 LOC) |
 | **P3 — Wiring** | `config.py` Literal + `cache_db_url` + `cache_purge_interval_seconds` + `to_dict` + docstring; `get_cache_engine.py` branch + `_resolve_cache_db_url` fallback + error msg + RedisAdapter import moved into its branch; config-test fixes | **S** (~0.5 day) |
 | **P4 — Tests** | Unit CRUD suite (aiosqlite), `test_session_manager_postgres.py`, `"postgres"` params in 3 integration files, factory/config tests | **M** (~1 day, ~500 LOC tests) |
 | **P5 — CI + docs** | `run_conversation_sessions_test_postgres` e2e twin job, `.env.template`, `CLAUDE.md`, docs.cognee.ai task | **S** (~0.5 day) |
-| **P6 — Follow-up PR: KV formalization + advisory locks** | (a) `get_value/set_value/delete_value` on `CacheDBInterface` + Redis/FS impls (fixes the live FS `_cache` bug); rewrite `session_manager.py` ~792–862 and `sync_graph_to_session.py` ~42–71 to use them with a `hasattr`-guarded fallback for one release; regression tests. (b) psycopg2 `pg_try_advisory_lock` sync lock impl lifting the `SHARED_LADYBUG_LOCK` restriction + concurrent-subprocess CI variant | **M–L** (~2 days) |
+| **P6 — Follow-up PR: advisory locks** | psycopg2 `pg_try_advisory_lock` sync lock impl lifting the `SHARED_LADYBUG_LOCK` restriction + concurrent-subprocess CI variant | **M** (~1 day) |
 
 Core (P1–P5): **~4 days**, one reviewable PR (or two: adapter+tests, then wiring+CI). P6 ships separately.
 
@@ -329,7 +322,7 @@ Turbopuffer is a namespaced object/vector store with upsert-by-id, delete-by-id,
 - **Namespaces:** today's key strings verbatim (`agent_sessions:{user_id}:{session_id}`, `agent_traces:{...}`, `usage_logs:{user_id}`) — key-prefix tenancy carries over unchanged.
 - **Rows:** id = `qa_id` / trace uuid; attributes = entry fields plus a client-stamped monotonic `seq`/`created_at` for ordering (no serial column); vector optional (zero/1-dim placeholder if mandatory — or embed `question+answer` for free semantic recall later, a genuine upside).
 - **Operations:** create/append → upsert; `get_latest/get_all` → seq-ordered query (tail = desc + limit + reverse); `update_qa_entry`/`delete_feedback` → read-merge-upsert by id (back to Redis-grade RMW races — no `FOR UPDATE`; acceptable for a cache tier, flag in docs); `delete_session` → namespace delete; `prune()` → enumerate + delete `cognee-*` namespaces by prefix; KV → a `cache_kv` namespace with key-as-id rows; TTL → `expires_at` attribute + query filter + periodic GC (no native TTL — the Postgres TTL design transfers directly); locks → raise `SharedLadybugLockRequiresRedisError` (precedent).
-- **Seam requirements this plan satisfies:** (1) all storage details stay behind `CacheDBInterface` — after P6's KV formalization no caller touches adapter internals (the `async_redis` shim is the one soft spot, explicitly retired in P6, which is the prerequisite for a clean Turbopuffer backend); (2) entries cross the boundary only as pydantic `model_dump()` payloads; (3) ordering is adapter-internal (`seq` column vs `seq` attribute) — nothing leaks; do not let SQL row ids escape into return values during P2; (4) wiring is mechanical: `cache_backend` Literal += `"turbopuffer"`, lazy-import elif, `TURBOPUFFER_API_KEY`/`TURBOPUFFER_REGION` threaded through the lru_cache'd factory.
+- **Seam requirements this plan satisfies:** (1) all storage details stay behind `CacheDBInterface`; no caller touches adapter internals; (2) entries cross the boundary only as pydantic `model_dump()` payloads; (3) ordering is adapter-internal (`seq` column vs `seq` attribute) — nothing leaks; do not let SQL row ids escape into return values during P2; (4) wiring is mechanical: `cache_backend` Literal += `"turbopuffer"`, lazy-import elif, `TURBOPUFFER_API_KEY`/`TURBOPUFFER_REGION` threaded through the lru_cache'd factory.
 
 ---
 
@@ -339,6 +332,5 @@ Turbopuffer is a namespaced object/vector store with upsert-by-id, delete-by-id,
 2. **Normalize the Redis `None`-on-`last_n==1` quirk in `RedisAdapter` itself** (return `[]` like FS/Postgres), or leave Redis as-is and only document Postgres's `[]` choice? (Some tests pin the Redis behavior.)
 3. **Hot-path payload size:** should `get_latest_qa_entries` eventually project `payload - 'context'` for history reads (formatted history uses `include_context=False` but still fetches full entries)? Behavior-preserving today; revisit with real latency data.
 4. **Throttled global purge tuning:** is 900 s / per-process advisory-lock-guarded sweep enough for high-volume deployments, or is a documented external cron (`DELETE ... WHERE expires_at <= now()`) preferable at scale?
-5. **P6 ordering:** should the KV formalization (P6a) land *before* the adapter to avoid shipping the `async_redis` shim at all? Trade-off: P6a touches Redis/FS/SessionManager/sync_graph and delays the backend; the shim is contained and removable.
-6. **`fakeredis[lua]` core dependency:** verified unused in-repo and only load-bearing because it transitively installs `redis` for the unconditional import this plan removes — candidate for deletion in a separate cleanup PR (needs a check that no downstream consumers rely on it).
-7. **Lock auto-expiry parity (Phase 6):** Redis locks auto-expire after `agentic_lock_expire=240` s; pg advisory locks hold until connection death. Is connection-scoped release acceptable, or do we need a watchdog that closes the lock connection after 240 s?
+5. **`fakeredis[lua]` core dependency:** verified unused in-repo and only load-bearing because it transitively installs `redis` for the unconditional import this plan removes — candidate for deletion in a separate cleanup PR (needs a check that no downstream consumers rely on it).
+6. **Lock auto-expiry parity (Phase 6):** Redis locks auto-expire after `agentic_lock_expire=240` s; pg advisory locks hold until connection death. Is connection-scoped release acceptable, or do we need a watchdog that closes the lock connection after 240 s?

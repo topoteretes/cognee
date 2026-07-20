@@ -197,7 +197,7 @@ async def test_cognee_client_api_remember_sends_session_id():
 
 
 @pytest.mark.asyncio
-async def test_cognee_client_api_recall_sends_session_id_and_null_search_type():
+async def test_cognee_client_api_recall_sends_session_id_prompt_and_null_search_type():
     requests: list[httpx.Request] = []
 
     async def handler(request: httpx.Request) -> httpx.Response:
@@ -209,15 +209,56 @@ async def test_cognee_client_api_recall_sends_session_id_and_null_search_type():
     client.client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
 
     try:
-        await client.recall("hello", session_id="session-1", top_k=5)
+        await client.recall(
+            "hello",
+            session_id="session-1",
+            system_prompt="Answer with provenance.",
+            top_k=5,
+        )
     finally:
         await client.close()
 
     payload = json.loads(requests[0].content.decode())
     assert requests[0].url.path == "/api/v1/recall"
     assert payload["session_id"] == "session-1"
+    assert payload["system_prompt"] == "Answer with provenance."
     assert payload["search_type"] is None
     assert payload["top_k"] == 5
+
+
+@pytest.mark.asyncio
+async def test_mcp_recall_forwards_system_prompt(monkeypatch):
+    import src.server as server
+
+    class FakeClient:
+        def __init__(self):
+            self.recall_kwargs = None
+
+        async def recall(self, **kwargs):
+            self.recall_kwargs = kwargs
+            return [{"text": "ok"}]
+
+    fake_client = FakeClient()
+    monkeypatch.setattr(server, "cognee_client", fake_client)
+
+    result = await server.recall(
+        query="hello",
+        search_type="graph_completion",
+        datasets="main,docs",
+        session_id="session-1",
+        system_prompt="Answer with provenance.",
+        top_k=5,
+    )
+
+    assert "ok" in result[0].text
+    assert fake_client.recall_kwargs == {
+        "query_text": "hello",
+        "search_type": "graph_completion",
+        "datasets": ["main", "docs"],
+        "session_id": "session-1",
+        "system_prompt": "Answer with provenance.",
+        "top_k": 5,
+    }
 
 
 @pytest.mark.asyncio

@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional, Type
 from datetime import datetime
 
 from operator import itemgetter
+from cognee.base_config import get_base_config
 from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.infrastructure.llm.prompts import render_prompt
 from cognee.infrastructure.llm import LLMGateway
@@ -43,7 +44,7 @@ class TemporalRetriever(GraphCompletionRetriever):
         node_name_filter_operator: str = "OR",
         wide_search_top_k: Optional[int] = 100,
         triplet_distance_penalty: Optional[float] = 6.5,
-        feedback_influence: float = 0.0,
+        feedback_influence: float = get_base_config().default_feedback_influence,
         session_id: Optional[str] = None,
         response_model: Type = str,
         include_references: bool = False,

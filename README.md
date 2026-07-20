@@ -53,10 +53,9 @@ Cognee is the open-source AI memory platform that gives AI agents persistent lon
   <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=zh">中文</a>
   </p>
 
-
-<div style="text-align: center">
-  <img src="https://raw.githubusercontent.com/topoteretes/cognee/refs/heads/main/assets/cognee_benefits.png" alt="Why cognee?" width="80%" />
-</div>
+<p align="center">
+  <img src="assets/cognee-demo.gif" alt="Cognee Demo" width="80%" />
+</p>
 </div>
 
 📄 Read the research paper: [Optimizing the Interface Between Knowledge Graphs and LLMs for Complex Reasoning](https://arxiv.org/abs/2505.24478) — Markovic et al., 2025
@@ -74,6 +73,10 @@ Cognee is an open-source AI memory platform for AI Agents. Ingest data in any fo
 
 ✴️ _Available as a plugin for your Claude Code — [claude-code-plugin](https://github.com/topoteretes/cognee-integrations/tree/main/integrations/claude-code)_
 
+🦀 _Available as a Rust client — [cognee-rs](https://github.com/topoteretes/cognee-rs)_
+
+🟦 _Available as a TypeScript client — [@cognee/cognee-ts](https://www.npmjs.com/package/@cognee/cognee-ts)_
+
 
 
 ### Why use Cognee:
@@ -83,17 +86,21 @@ Cognee is an open-source AI memory platform for AI Agents. Ingest data in any fo
 - Persistent and Learning Agents - learn from feedback, context management, cross-agent knowledge sharing
 - Reliable and Trustworthy Agents - agentic user/tenant isolation, traceability, OTEL collector, audit traits
 
-### Product Features
+### How it Works
 
 <p align="center">
-  <img src="assets/cognee_products.png" alt="Cognee Products" width="80%" />
+  <img src="assets/remember.svg" alt="Cognee Products" width="80%" />
+</p>
+
+<p align="center">
+  <img src="assets/recall.svg" alt="Cognee Recall" width="80%" />
 </p>
 
 ## Basic Usage & Feature Guide
 
-To learn more, [check out this short, end-to-end Colab walkthrough](https://colab.research.google.com/drive/12Vi9zID-M3fpKpKiaqDBvkk98ElkRPWy?usp=sharing) of Cognee's core features.
+To learn more, [check out this short, end-to-end Colab walkthrough](https://colab.research.google.com/drive/1HRrzIvzcbwrESVfX76wJLKmtIg00SUga?usp=sharing) of Cognee's core features.
 
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/12Vi9zID-M3fpKpKiaqDBvkk98ElkRPWy?usp=sharing)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1HRrzIvzcbwrESVfX76wJLKmtIg00SUga?usp=sharing)
 
 ## Quickstart
 
@@ -221,32 +228,38 @@ extras, and MCP client configuration.
 
 ### Claude Code
 
-Install the [Cognee memory plugin](https://github.com/topoteretes/cognee-integrations/tree/main/integrations/claude-code) to give Claude Code persistent memory across sessions. The plugin automatically captures tool calls into session memory via hooks and syncs to the permanent knowledge graph at session end.
+Install the [Cognee memory plugin](https://github.com/topoteretes/cognee-integrations/tree/main/integrations/claude-code) to give Claude Code persistent memory across sessions. The plugin captures prompts, tool traces, and assistant responses into session memory, injects relevant context on every prompt, and syncs session memory into the permanent knowledge graph at session end.
 
-**Setup:**
+**Install** from the Claude Code marketplace. The recommended way is from your shell, *before* launching Claude Code, so the first `claude` launch is a clean session that bootstraps memory automatically:
 
 ```bash
-# Install cognee
-pip install cognee
+# Add the marketplace and install the plugin (one-time, user-scoped)
+claude plugin marketplace add topoteretes/cognee-integrations
+claude plugin install cognee-memory@cognee
 
-# Configure
-export LLM_API_KEY="your-openai-key"
-
-# Clone the plugin
-git clone https://github.com/topoteretes/cognee-integrations.git
-
-# Enable it (add to ~/.zshrc for permanent use)
-claude --plugin-dir ./cognee-integrations/integrations/claude-code
+# Set env vars for your mode (see below), then launch
+export LLM_API_KEY="sk-..."   # local mode; or COGNEE_BASE_URL + COGNEE_API_KEY for cloud
+claude
 ```
 
-Or connect to Cognee Cloud instead of running locally:
+**Local mode** (default) — the plugin bootstraps a local Cognee API at `http://localhost:8011`. Only `LLM_API_KEY` is required; the Cognee API key is auto-minted if absent:
 
 ```bash
-export COGNEE_SERVICE_URL="https://your-instance.cognee.ai"
+export LLM_API_KEY="sk-..."
+```
+
+**Cognee Cloud or a remote server** — set both:
+
+```bash
+export COGNEE_BASE_URL="https://your-instance.cognee.ai"
 export COGNEE_API_KEY="ck_..."
 ```
 
-The plugin hooks into Claude Code's lifecycle — `SessionStart` initializes memory, `PostToolUse` captures actions, `UserPromptSubmit` injects relevant context, `PreCompact` preserves memory across context resets, and `SessionEnd` bridges session data into the permanent graph.
+On startup you should see a "Cognee Memory Connected" system message.
+
+The plugin hooks into Claude Code's lifecycle — `SessionStart` selects mode and sets up identity, `UserPromptSubmit` injects dataset-scoped context, `PostToolUse` captures tool traces, `Stop` writes the assistant's answer, `PreCompact` preserves memory across context resets, and `SessionEnd` triggers the final sync into the permanent graph.
+
+See the [plugin README](https://github.com/topoteretes/cognee-integrations/tree/main/integrations/claude-code) for sessions, datasets, and full configuration.
 
 ### Connect to Cognee Cloud
 
@@ -311,6 +324,38 @@ Agent: "Here's how senior analysts solved a similar retention query.
 - Updates memory with new successful patterns so junior analysts perform at near-expert level
 ```
 
+## Run the Whole Memory Layer on Postgres
+
+Graph memory traditionally means operating a stack — a graph database for relationships, a vector database for embeddings, Redis for sessions, and a relational database for metadata — all deployed, secured, and paid for before an agent remembers anything. In cognee 1.0 you can run the entire memory layer on a single Postgres instance.
+
+| Memory layer | Traditional stack | cognee on Postgres |
+| --- | --- | --- |
+| Relationships | Neo4j or another graph database | cognee's Postgres graph backend |
+| Embeddings | Dedicated vector database | pgvector |
+| Sessions | Redis | SQL session-cache backend |
+| Metadata | Relational database | same Postgres |
+
+The graph still exists — it just lives inside the same Postgres-backed memory layer as the text, metadata, and embeddings, so retrieval moves between similarity and structure without crossing service boundaries. In our CI benchmarks, Postgres search ran ~10% faster than the separate graph-plus-vector setup.
+
+Postgres is the default we recommend for most deployments, but you can still swap in dedicated backends when a workload needs them (Neo4j and Neptune for graphs, Redis for sessions, pgvector and LanceDB for vectors, plus Qdrant, ChromaDB, Weaviate, and Milvus via community adapters). Local development stays fully embedded — SQLite, LanceDB, and Kuzudb — with no extra services to stand up.
+
+```bash
+pip install "cognee[postgres]"
+```
+
+```bash
+DB_PROVIDER=postgres
+VECTOR_DB_PROVIDER=pgvector
+GRAPH_DATABASE_PROVIDER=postgres
+CACHE_BACKEND=postgres
+
+DB_HOST=localhost
+DB_PORT=5432
+DB_USERNAME=cognee
+DB_PASSWORD=cognee
+DB_NAME=cognee_db
+```
+
 ## Deploy Cognee
 
 Use [Cognee Cloud](https://www.cognee.ai) for a fully managed experience, or self-host with one of the 1-click deployment configurations below.
@@ -323,8 +368,44 @@ Use [Cognee Cloud](https://www.cognee.ai) for a fully managed experience, or sel
 | **Fly.io** | Edge deployment, persistent volumes | `bash distributed/deploy/fly-deploy.sh` |
 | **Render** | Simple PaaS with managed Postgres | Deploy to Render button |
 | **Daytona** | Cloud sandboxes (SDK or CLI) | See `distributed/deploy/daytona_sandbox.py` |
+| **Islo** | Isolated cloud sandboxes (SDK) | See `distributed/deploy/islo_sandbox.py` |
 
 See the [`distributed/`](distributed/) folder for deploy scripts, worker configurations, and additional details.
+
+## Use Cognee in Other Languages
+
+Prefer something other than Python? Cognee also ships official clients for Rust and TypeScript.
+
+### Getting Started with Rust
+
+Use the [cognee-rs](https://github.com/topoteretes/cognee-rs) crate to add, cognify, and search from Rust.
+
+```bash
+cargo add cognee
+```
+
+See the [cognee-rs repository](https://github.com/topoteretes/cognee-rs) for full setup and examples.
+
+### Getting Started with TypeScript
+
+Use the [@cognee/cognee-ts](https://www.npmjs.com/package/@cognee/cognee-ts) package to add, cognify, and search from Node.js or the browser.
+
+```bash
+npm install @cognee/cognee-ts
+```
+
+See the [@cognee/cognee-ts package](https://www.npmjs.com/package/@cognee/cognee-ts) for full setup and examples.
+
+## Benchmarks
+
+We ran cognee against [BEAM](https://github.com/topoteretes/cognee), a long-context benchmark that tests whether a system can keep track of a long conversation as it changes — a more useful test for agent memory than typical needle-in-a-haystack benchmarks. Using only cognee's default settings and standard open-source features (no custom models, no BEAM-specific pipelines), we beat the previous state of the art at the 100K-token setting and matched it at 10M tokens.
+
+| Benchmark | Setting | cognee | Previous SOTA | Obsidian / RAG baseline |
+|-----------|---------|--------|---------------|--------------------------|
+| BEAM | 100K tokens | **0.79** (>0.8 with per-question routing) | 0.735 | ~0.33 |
+| BEAM | 10M tokens | **0.67** | 0.641 | ~0.33 |
+
+These numbers are a directional signal rather than a definitive measure — see the write-up for the full methodology, caveats, and what the results actually mean.
 
 ## Latest News
 

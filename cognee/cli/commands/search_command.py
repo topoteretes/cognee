@@ -40,8 +40,8 @@ Search Types & Use Cases:
     Best for: Quick overviews, document abstracts, topic summaries.
 
 **CODE**:
-    Code-specific search with syntax and semantic understanding.
-    Best for: Finding functions, classes, implementation patterns.
+    Deterministic name resolution and graph exploration over an indexed code graph.
+    Best for: Inspecting a function, class, route, module, or dependency without an LLM.
     """
 
     def configure_parser(self, parser: argparse.ArgumentParser) -> None:

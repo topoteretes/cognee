@@ -1,5 +1,6 @@
 """Adapter for Generic API LLM provider API"""
 
+import asyncio
 import base64
 import logging
 import mimetypes
@@ -19,8 +20,17 @@ from tenacity import (
     wait_exponential_jitter,
 )
 
+from cognee.infrastructure.llm.retry_config import (
+    llm_retry_condition,
+    llm_retry_stop_condition,
+)
+
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
-from cognee.infrastructure.llm.exceptions import ContentPolicyFilterError
+from cognee.infrastructure.llm.exceptions import (
+    ContentPolicyFilterError,
+    LLMPaymentRequiredError,
+    is_budget_exhausted_error,
+)
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.llm_interface import (
     LLMInterface,
 )
@@ -45,12 +55,20 @@ def _enrich_llm_span(model: str, name: str) -> None:
     try:
         from opentelemetry import trace as otel_trace  # ty:ignore[unresolved-import]
 
-        from cognee.modules.observability.tracing import COGNEE_LLM_MODEL, COGNEE_LLM_PROVIDER
+        from cognee.context_global_variables import current_pipeline_stage
+        from cognee.modules.observability.tracing import (
+            COGNEE_LLM_MODEL,
+            COGNEE_LLM_PROVIDER,
+            COGNEE_PIPELINE_STAGE,
+        )
 
         current_span = otel_trace.get_current_span()
         if current_span and current_span.is_recording():
             current_span.set_attribute(COGNEE_LLM_MODEL, model)
             current_span.set_attribute(COGNEE_LLM_PROVIDER, name)
+            stage = current_pipeline_stage.get()
+            if stage:
+                current_span.set_attribute(COGNEE_PIPELINE_STAGE, stage)
     except Exception:
         pass
 
@@ -133,11 +151,9 @@ class GenericAPIAdapter(LLMInterface):
 
     @observe(as_type="generation")
     @retry(
-        stop=stop_after_attempt(4),
+        stop=llm_retry_stop_condition,
         wait=wait_exponential_jitter(8, 128),
-        retry=retry_if_not_exception_type(
-            (litellm.exceptions.NotFoundError, litellm.exceptions.AuthenticationError)
-        ),
+        retry=llm_retry_condition,
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
@@ -191,7 +207,7 @@ class GenericAPIAdapter(LLMInterface):
                             "content": f"""{text_input}""",
                         },
                     ],
-                    max_retries=1,
+                    max_retries=self.MAX_RETRIES,
                     api_key=self.api_key,
                     api_base=self.endpoint,
                     response_model=response_model,
@@ -232,7 +248,7 @@ class GenericAPIAdapter(LLMInterface):
                                 "content": f"""{text_input}""",
                             },
                         ],
-                        max_retries=1,
+                        max_retries=self.MAX_RETRIES,
                         api_key=self.fallback_api_key,
                         api_base=self.fallback_endpoint,
                         response_model=response_model,
@@ -252,18 +268,26 @@ class GenericAPIAdapter(LLMInterface):
                     raise ContentPolicyFilterError(
                         f"The provided input contains content that is not aligned with our content policy: {text_input}"
                     ) from error
+        except Exception as e:
+            if is_budget_exhausted_error(e):
+                raise LLMPaymentRequiredError() from e
+            raise
 
     @observe(as_type="transcription")
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential_jitter(2, 128),
         retry=retry_if_not_exception_type(
-            (litellm.exceptions.NotFoundError, litellm.exceptions.AuthenticationError)
+            (
+                litellm.exceptions.NotFoundError,
+                litellm.exceptions.AuthenticationError,
+                asyncio.CancelledError,
+            )
         ),
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
-    async def create_transcript(self, input: str) -> TranscriptionReturnType:
+    async def create_transcript(self, input: str, **kwargs: Any) -> TranscriptionReturnType:
         """
         Generate an audio transcript from a user query.
 
@@ -316,7 +340,11 @@ class GenericAPIAdapter(LLMInterface):
         stop=stop_after_attempt(3),
         wait=wait_exponential_jitter(2, 128),
         retry=retry_if_not_exception_type(
-            (litellm.exceptions.NotFoundError, litellm.exceptions.AuthenticationError)
+            (
+                litellm.exceptions.NotFoundError,
+                litellm.exceptions.AuthenticationError,
+                asyncio.CancelledError,
+            )
         ),
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,

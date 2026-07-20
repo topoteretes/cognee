@@ -6,12 +6,14 @@ from pydantic import BaseModel
 from tenacity import (
     before_sleep_log,
     retry,
-    retry_if_not_exception_type,
-    stop_after_delay,
     wait_exponential_jitter,
 )
 
 from cognee.infrastructure.llm.config import get_llm_config
+from cognee.infrastructure.llm.retry_config import (
+    llm_retry_condition,
+    llm_retry_stop_condition,
+)
 from cognee.infrastructure.llm.structured_output_framework.baml.baml_client import b
 from cognee.infrastructure.llm.structured_output_framework.baml.baml_client.type_builder import (
     TypeBuilder,
@@ -28,9 +30,9 @@ T = TypeVar("T", bound="BaseModel | str")
 
 
 @retry(
-    stop=stop_after_delay(128),
+    stop=llm_retry_stop_condition,
     wait=wait_exponential_jitter(8, 128),
-    retry=retry_if_not_exception_type(asyncio.CancelledError),
+    retry=llm_retry_condition,
     before_sleep=before_sleep_log(logger, logging.WARNING),
     reraise=True,
 )

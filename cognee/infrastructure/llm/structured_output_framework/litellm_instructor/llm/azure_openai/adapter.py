@@ -1,6 +1,5 @@
 """Adapter for Azure OpenAI with managed identity and API key support."""
 
-import asyncio
 import logging
 from typing import Any
 
@@ -19,12 +18,18 @@ from pydantic import BaseModel
 from tenacity import (
     before_sleep_log,
     retry,
-    retry_if_not_exception_type,
-    stop_after_attempt,
     wait_exponential_jitter,
 )
 
-from cognee.infrastructure.llm.exceptions import ContentPolicyFilterError
+from cognee.infrastructure.llm.exceptions import (
+    ContentPolicyFilterError,
+    LLMPaymentRequiredError,
+    is_budget_exhausted_error,
+)
+from cognee.infrastructure.llm.retry_config import (
+    llm_retry_condition,
+    llm_retry_stop_condition,
+)
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.openai.adapter import (
     OpenAIAdapter,
 )
@@ -180,15 +185,9 @@ class AzureOpenAIAdapter(OpenAIAdapter):
 
     @observe(as_type="generation")
     @retry(
-        stop=stop_after_attempt(3),
+        stop=llm_retry_stop_condition,
         wait=wait_exponential_jitter(8, 128),
-        retry=retry_if_not_exception_type(
-            (
-                litellm.exceptions.NotFoundError,
-                litellm.exceptions.AuthenticationError,
-                asyncio.CancelledError,
-            )
-        ),
+        retry=llm_retry_condition,
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
@@ -206,6 +205,9 @@ class AzureOpenAIAdapter(OpenAIAdapter):
         merged_kwargs.pop("api_key", None)
         merged_kwargs.pop("api_base", None)
         merged_kwargs.pop("api_version", None)
+        # None means "use Instructor's default"; ty cannot narrow **kwargs after this pop.
+        if merged_kwargs.get("strict") is None:
+            merged_kwargs.pop("strict", None)
 
         try:
             async with llm_rate_limiter_context_manager():
@@ -223,7 +225,7 @@ class AzureOpenAIAdapter(OpenAIAdapter):
                     ],
                     response_model=response_model,
                     max_retries=self.MAX_RETRIES,
-                    **merged_kwargs,
+                    **merged_kwargs,  # ty: ignore[invalid-argument-type]
                 )
         except (
             ContentFilterFinishReasonError,
@@ -267,3 +269,7 @@ class AzureOpenAIAdapter(OpenAIAdapter):
                     raise ContentPolicyFilterError(
                         f"The provided input contains content that is not aligned with our content policy: {text_input}"
                     ) from error
+        except Exception as e:
+            if is_budget_exhausted_error(e):
+                raise LLMPaymentRequiredError() from e
+            raise

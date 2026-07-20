@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import List, Optional, Union
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from pydantic import Field
@@ -12,6 +12,7 @@ from cognee.api.DTO import InDTO, OutDTO
 from cognee.api.v1.recall.recall import RecallResponse
 from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
+from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError
 from cognee.modules.search.operations import get_history
 from cognee.modules.search.types import SearchResult, SearchType
 from cognee.modules.users.exceptions.exceptions import PermissionDeniedError, UserNotFoundError
@@ -82,8 +83,15 @@ class RecallPayloadDTO(InDTO):
         examples=[None],
         description=(
             "Which memory sources to include: 'graph', 'session', 'trace', "
-            "'graph_context', 'all', 'auto', or a list of these. Defaults to "
+            "'session_context', 'all', 'auto', or a list of these. Defaults to "
             "'auto' (session first when session_id is set, else graph)."
+        ),
+    )
+    context_profile: str = Field(
+        default="qa",
+        description=(
+            "Profile to render for the 'session_context' scope: 'qa' (conversational) or "
+            "'agent' (tool/workflow). Ignored by other scopes."
         ),
     )
 
@@ -146,7 +154,7 @@ def get_recall_router() -> APIRouter:
         - **session_id** (Optional[str]): Session whose cached QA and trace entries
           should be searched
         - **scope** (Optional[str | List[str]]): Memory sources to include: "graph",
-          "session", "trace", "graph_context", "all", "auto", or a list of these
+          "session", "trace", "session_context", "all", "auto", or a list of these
           (default: "auto" — session first when session_id is set, else graph)
 
         ## Error Codes
@@ -181,9 +189,18 @@ def get_recall_router() -> APIRouter:
                 only_context=payload.only_context,
                 session_id=payload.session_id,
                 scope=payload.scope,
+                context_profile=payload.context_profile,
                 include_references=payload.include_references,
             )
             return jsonable_encoder(results)
+        except LLMPaymentRequiredError as error:
+            return JSONResponse(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                content={
+                    "error": "Token budget exhausted",
+                    "detail": str(error),
+                },
+            )
         except (DatabaseNotCreatedError, UserNotFoundError, CogneeValidationError) as e:
             logger = get_logger()
             logger.error("Recall prerequisites error: %s", e, exc_info=True)
