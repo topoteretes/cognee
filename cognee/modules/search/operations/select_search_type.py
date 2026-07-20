@@ -21,6 +21,10 @@ async def select_search_type(
         The best search type given by the LLM.
     """
     default_search_type = SearchType.RAG_COMPLETION
+    # Search types that cannot answer a free-form natural-language query on
+    # their own: CODE runs one exact graph operation driven by a structured
+    # code_query, which FEELING_LUCKY has no way to construct.
+    excluded_search_types = {SearchType.CODE}
     system_prompt = read_query_prompt(system_prompt_path)
 
     try:
@@ -31,8 +35,15 @@ async def select_search_type(
         )
 
         if response.upper() in SearchType.__members__:
+            selected_search_type = SearchType(response.upper())
+            if selected_search_type in excluded_search_types:
+                logger.info(
+                    f"LLM selected {selected_search_type.value}, which requires structured "
+                    f"arguments; falling back to {default_search_type.value}."
+                )
+                return default_search_type
             logger.info(f"Selected lucky search type: {response.upper()}")
-            return SearchType(response.upper())
+            return selected_search_type
 
         # If the response is not a valid search type, return the default search type
         logger.info(f"LLM gives an invalid search type: {response.upper()}")

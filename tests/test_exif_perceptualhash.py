@@ -13,6 +13,7 @@ from PIL import Image
 #  Standalone helper functions (copied from what would be added to image_loader.py)
 # ------------------------------------------------------------------
 
+
 def _dhash(image, hash_size: int = 8) -> str:
     """Difference hash: 64-bit hex string."""
     image = image.convert("L").resize((hash_size + 1, hash_size), Image.LANCZOS)
@@ -37,9 +38,21 @@ def _to_decimal(values, ref: str):
         return None
     try:
         # values are rational tuples like ((48,1), (51,1), (30,1)) → 48° 51' 30"
-        d = values[0][0] / values[0][1] if isinstance(values[0], (tuple, list)) else float(values[0])
-        m = values[1][0] / values[1][1] if isinstance(values[1], (tuple, list)) else float(values[1])
-        s = values[2][0] / values[2][1] if isinstance(values[2], (tuple, list)) else float(values[2])
+        d = (
+            values[0][0] / values[0][1]
+            if isinstance(values[0], (tuple, list))
+            else float(values[0])
+        )
+        m = (
+            values[1][0] / values[1][1]
+            if isinstance(values[1], (tuple, list))
+            else float(values[1])
+        )
+        s = (
+            values[2][0] / values[2][1]
+            if isinstance(values[2], (tuple, list))
+            else float(values[2])
+        )
         decimal = d + m / 60.0 + s / 3600.0
         if ref in ("S", "W"):
             decimal *= -1
@@ -112,6 +125,7 @@ def _extract_exif_metadata(file_path: str) -> str | None:
 #  Fixtures
 # ------------------------------------------------------------------
 
+
 @pytest.fixture
 def gradient_png():
     """A 64x64 gradient PNG (horizontal gradient red→blue)."""
@@ -153,14 +167,14 @@ def jpeg_with_exif():
         exif[271] = "TestCamera"
         exif[272] = "CameraModel42"
         exif[36867] = "2026:07:15 12:00:00"
-        exif[33434] = (1, 120)   # 1/120s exposure (PIL rational - OK)
-        exif[34855] = 400         # ISO speed
+        exif[33434] = (1, 120)  # 1/120s exposure (PIL rational - OK)
+        exif[34855] = 400  # ISO speed
         # GPS with simple rational tuples
         exif[34853] = {
             1: "N",
             2: ((48, 1), (51, 1), (30, 1000)),  # 48° 51' 0.030"
             3: "E",
-            4: ((2, 1), (17, 1), (40, 100)),     # 2° 17' 0.40"
+            4: ((2, 1), (17, 1), (40, 100)),  # 2° 17' 0.40"
         }
         # Try-except around save to handle PIL version differences
         try:
@@ -197,8 +211,8 @@ def jpeg_no_exif():
 #  Tests: EXIF
 # ------------------------------------------------------------------
 
-class TestExifExtraction:
 
+class TestExifExtraction:
     def test_extract_from_jpeg(self, jpeg_with_exif):
         """Verify EXIF metadata is extracted from a JPEG that has it."""
         text = _extract_exif_metadata(jpeg_with_exif)
@@ -248,8 +262,8 @@ class TestExifExtraction:
 #  Tests: Perceptual hash
 # ------------------------------------------------------------------
 
-class TestPerceptualHash:
 
+class TestPerceptualHash:
     def test_same_image_same_hash(self, gradient_png):
         h1 = _dhash(Image.open(gradient_png))
         h2 = _dhash(Image.open(gradient_png))
@@ -294,8 +308,8 @@ class TestPerceptualHash:
 #  Dedup logic
 # ------------------------------------------------------------------
 
-class TestDedupLogic:
 
+class TestDedupLogic:
     def test_set_tracking(self):
         """Basic dedup set operations."""
         seen = set()
