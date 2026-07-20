@@ -14,7 +14,7 @@ from cognee.infrastructure.llm.config import LLMConfig
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.users.methods import get_default_user
-from cognee.modules.pipelines.utils import generate_pipeline_id
+from cognee.modules.pipelines.utils import generate_pipeline_id, validate_batch_size
 from cognee.modules.pipelines.exceptions import PipelineRunFailedError
 from cognee.tasks.ingestion import resolve_data_directories
 from cognee.modules.pipelines.models import PipelineContext
@@ -69,6 +69,8 @@ async def run_tasks(
     embedding_config: Optional[EmbeddingConfig] = None,
     data_cache: bool = False,
 ):
+    validate_batch_size(data_per_batch, "data_per_batch")
+
     if not user:
         user = await get_default_user()
 

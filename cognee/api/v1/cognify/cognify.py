@@ -35,6 +35,7 @@ from cognee.tasks.temporal_graph.extract_knowledge_graph_from_events import (
     extract_knowledge_graph_from_events,
 )
 from cognee.modules.observability import new_span, COGNEE_PIPELINE_NAME, COGNEE_RESULT_SUMMARY
+from cognee.modules.pipelines.utils import validate_batch_size
 
 
 logger = get_logger("cognify")
@@ -203,6 +204,9 @@ async def cognify(
         - LLM_RATE_LIMIT_ENABLED: Enable rate limiting (default: False)
         - LLM_RATE_LIMIT_REQUESTS: Max requests per interval (default: 60)
     """
+    validate_batch_size(chunks_per_batch, "chunks_per_batch", allow_none=True)
+    validate_batch_size(data_per_batch, "data_per_batch")
+
     # Route to remote instance if connected via serve()
     from cognee.api.v1.serve.state import get_remote_client
 
@@ -322,6 +326,8 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
     chunks_per_batch: int = None,
     **kwargs,
 ) -> list[Task]:
+    validate_batch_size(chunks_per_batch, "chunks_per_batch", allow_none=True)
+
     if config is None:
         ontology_config = get_ontology_env_config()
         if (
@@ -346,6 +352,8 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
         chunks_per_batch = (
             cognify_config.chunks_per_batch if cognify_config.chunks_per_batch is not None else 100
         )
+
+    validate_batch_size(chunks_per_batch, "chunks_per_batch")
 
     default_tasks = [
         # EXTRACT: classify raw Data items into typed Document objects
@@ -400,11 +408,13 @@ async def get_temporal_tasks(
     Returns:
         list[Task]: A list of Task objects representing the temporal processing pipeline.
     """
-    if chunks_per_batch is None:
-        from cognee.modules.cognify.config import get_cognify_config
+    validate_batch_size(chunks_per_batch, "chunks_per_batch", allow_none=True)
 
+    if chunks_per_batch is None:
         configured = get_cognify_config().chunks_per_batch
         chunks_per_batch = configured if configured is not None else 10
+
+    validate_batch_size(chunks_per_batch, "chunks_per_batch")
 
     temporal_tasks = [
         # EXTRACT: classify raw Data items into typed Document objects
