@@ -1164,20 +1164,20 @@ async def _remember_inner(
         )
         result.elapsed_seconds = time.monotonic() - result._started_at
 
+        # Build the result object — starts as "running"
+        if not dataset_id and dataset_name:
+            # Create dataset if it doesn't exist
+            user, dataset_id = await resolve_authorized_user_datasets(dataset_name, user)
+            dataset_id = dataset_id[0].id if dataset_id else None
+
         # Bridge session data to permanent graph in the background
         if self_improvement:
             from cognee.api.v1.improve import improve
 
-            # Create/authorize the target dataset before launching the
-            # background improve. Otherwise it bridges into a dataset that was
-            # never created, and every bridge stage fails on write/read
-            # authorization. Mirrors the permanent path below.
-            user, _ = await resolve_authorized_user_datasets(dataset_name, user)
-
             async def _session_improve():
                 try:
                     await improve(
-                        dataset=dataset_name,
+                        dataset=dataset_id,
                         session_ids=[session_id],
                         user=user,
                     )
@@ -1189,11 +1189,6 @@ async def _remember_inner(
 
         return result
 
-    # Build the result object — starts as "running"
-    if not dataset_id and dataset_name:
-        # Create dataset if it doesn't exist
-        user, dataset_id = await resolve_authorized_user_datasets(dataset_name, user)
-        dataset_id = dataset_id[0].id if dataset_id else None
     result = RememberResult(
         status="running",
         dataset_name=dataset_name,
