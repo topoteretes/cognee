@@ -2708,7 +2708,18 @@ class LadybugAdapter(GraphDBInterface):
         Get the k-hop neighborhood subgraph around a set of seed nodes.
 
         Returns all nodes and edges within `depth` hops of any seed node,
-        in the same format as get_graph_data().
+        in the same format as get_graph_data(). A neighbor is included iff there
+        exists a path of length 1..depth reaching it whose every edge type is in
+        `edge_types` (matching the Neo4j/Postgres backends); `edge_types=None` or
+        `[]` disables the filter.
+
+        Performance note: the `edge_types` branch enumerates every path up to
+        `depth` (Kuzu cannot filter a variable-length relationship binding in
+        Cypher — see #3585) and post-filters in Python, so its cost grows
+        combinatorially with node degree × depth on dense graphs. It is intended
+        for shallow, targeted neighborhoods; a future refactor could push per-hop
+        type filtering into Cypher via a fixed-length UNION to return distinct
+        neighbors instead of walks.
         """
         import time
 
