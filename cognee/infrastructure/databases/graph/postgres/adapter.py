@@ -183,6 +183,24 @@ class PostgresAdapter(GraphDBInterface):
             data.update(props)
         return data
 
+    @staticmethod
+    def _active_dataset_id() -> Optional[str]:
+        """The dataset the current request is scoped to, or None when unscoped.
+
+        Under access control ``set_database_global_context_variables`` sets
+        ``current_dataset_id`` to the dataset being served. On this backend every
+        dataset shares the ``graph_node`` / ``graph_edge`` tables and is
+        distinguished only by the ``source_dataset_ids`` array column, so reads
+        must filter by that id — otherwise they return rows from other datasets
+        in the same tenant (cross-dataset leak). Returns None in single-user mode
+        (no context set), leaving queries unscoped exactly as before.
+        """
+        # Imported lazily to avoid a circular import at module load.
+        from cognee.context_global_variables import current_dataset_id
+
+        dataset_id = current_dataset_id.get()
+        return str(dataset_id) if dataset_id else None
+
     async def query(self, query_str: str, params: Optional[dict] = None) -> List[Any]:
         """Not supported. Use typed adapter methods or a Cypher-capable graph backend.
 
@@ -358,11 +376,14 @@ class PostgresAdapter(GraphDBInterface):
         """
         if not node_ids:
             return []
+        params: Dict[str, Any] = {"ids": node_ids}
+        sql = "SELECT id, name, type, properties FROM graph_node WHERE id = ANY(:ids)"
+        dataset_id = self._active_dataset_id()
+        if dataset_id is not None:
+            sql += " AND :dataset_id = ANY(source_dataset_ids)"
+            params["dataset_id"] = dataset_id
         async with self._session() as session:
-            result = await session.execute(
-                text("SELECT id, name, type, properties FROM graph_node WHERE id = ANY(:ids)"),
-                {"ids": node_ids},
-            )
+            result = await session.execute(text(sql), params)
             return [self._parse_node_row(row) for row in result.fetchall()]
 
     async def add_edge(
@@ -666,14 +687,20 @@ class PostgresAdapter(GraphDBInterface):
             return [], []
         ids = [str(i) for i in target_ids]
 
+        dataset_id = self._active_dataset_id()
+        dataset_filter = " AND :dataset_id = ANY(source_dataset_ids)" if dataset_id else ""
+
         async with self._session() as session:
+            edge_params: Dict[str, Any] = {"ids": ids}
+            if dataset_id:
+                edge_params["dataset_id"] = dataset_id
             edge_result = await session.execute(
-                text("""
+                text(f"""
                     SELECT source_id, target_id, relationship_name, properties
                     FROM graph_edge
-                    WHERE source_id = ANY(:ids) OR target_id = ANY(:ids)
+                    WHERE (source_id = ANY(:ids) OR target_id = ANY(:ids)){dataset_filter}
                 """),
-                {"ids": ids},
+                edge_params,
             )
             edges = []
             endpoint_ids = set()
@@ -687,9 +714,15 @@ class PostgresAdapter(GraphDBInterface):
             if not endpoint_ids:
                 return [], []
 
+            node_params: Dict[str, Any] = {"ids": list(endpoint_ids)}
+            if dataset_id:
+                node_params["dataset_id"] = dataset_id
             node_result = await session.execute(
-                text("SELECT id, name, type, properties FROM graph_node WHERE id = ANY(:ids)"),
-                {"ids": list(endpoint_ids)},
+                text(
+                    "SELECT id, name, type, properties FROM graph_node "
+                    f"WHERE id = ANY(:ids){dataset_filter}"
+                ),
+                node_params,
             )
             nodes = []
             for row in node_result.fetchall():
