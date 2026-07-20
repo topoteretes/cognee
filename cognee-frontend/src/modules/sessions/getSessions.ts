@@ -255,10 +255,15 @@ export async function getGraphEnrichmentRuns(
 export async function getSessionDetail(
   instance: CogneeInstance,
   sessionId: string,
+  scope: { datasetId?: string | null; ownerUserId?: string } = {},
 ): Promise<SessionDetail | null> {
   if (!(await isSessionsAvailable(instance))) return null;
+  const query = new URLSearchParams();
+  if (scope.datasetId) query.set("dataset_id", scope.datasetId);
+  if (scope.ownerUserId) query.set("owner_user_id", scope.ownerUserId);
+  const suffix = query.size ? `?${query.toString()}` : "";
   return instance
-    .fetch(`/v1/sessions/${encodeURIComponent(sessionId)}`)
+    .fetch(`/v1/sessions/${encodeURIComponent(sessionId)}${suffix}`)
     .then((r) => (r.ok ? r.json() : null))
     .catch((err) => {
       console.warn("[getSessions] getSessionDetail failed:", err instanceof Error ? err.message : err);

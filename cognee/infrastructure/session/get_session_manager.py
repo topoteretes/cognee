@@ -1,8 +1,9 @@
 from cognee.infrastructure.databases.cache import get_cache_engine
 from cognee.infrastructure.session.session_manager import SessionManager
+from cognee.infrastructure.session.session_scope import INHERIT_DATASET, DatasetScopeArg
 
 
-def get_session_manager() -> SessionManager:
+def get_session_manager(dataset_id: DatasetScopeArg = INHERIT_DATASET) -> SessionManager:
     """
     Return a SessionManager instance.
 
@@ -12,4 +13,4 @@ def get_session_manager() -> SessionManager:
     and return empty/False as appropriate.
     """
     cache_engine = get_cache_engine()
-    return SessionManager(cache_engine=cache_engine)
+    return SessionManager(cache_engine=cache_engine, dataset_id=dataset_id)

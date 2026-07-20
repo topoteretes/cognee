@@ -6,6 +6,7 @@ from uuid import UUID as UUIDType
 
 from sqlalchemy import select
 
+from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.agents.models import (
     AgentConnection,
@@ -25,6 +26,10 @@ from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.modules.users.models import User
 from cognee.modules.users.permissions.methods.get_specific_user_permission_datasets import (
     get_specific_user_permission_datasets,
+)
+from cognee.modules.data.methods.get_authorized_dataset import get_authorized_dataset
+from cognee.modules.data.methods.get_authorized_dataset_by_name import (
+    get_authorized_dataset_by_name,
 )
 from cognee.shared.logging_utils import get_logger
 
@@ -107,17 +112,27 @@ def _memory_sources_from_datasets(datasets: list[Any]) -> list[MemorySourceConne
     return sources
 
 
-def _is_visible_registered_agent(
+def _visible_registered_agent(
     agent: AgentConnection,
     *,
     visible_user_ids: set[UUIDType],
     permitted_dataset_ids: set[str],
-) -> bool:
+) -> AgentConnection | None:
     if agent.user_id and agent.user_id in visible_user_ids:
-        return True
-    if any(dataset.id in permitted_dataset_ids for dataset in agent.datasets if dataset.id):
-        return True
-    return agent.user_id is None and not agent.datasets
+        return agent
+
+    visible_datasets = [
+        dataset
+        for dataset in agent.datasets
+        if dataset.id is not None and dataset.id in permitted_dataset_ids
+    ]
+    if visible_datasets:
+        # A dataset grant exposes only that dataset's view of the connection. Do not
+        # disclose or later hydrate session data from the connection's other datasets.
+        return agent.model_copy(update={"datasets": visible_datasets})
+    if agent.user_id is None and not agent.datasets:
+        return agent
+    return None
 
 
 def _merge_agents(agents: list[AgentConnection]) -> list[AgentConnection]:
@@ -177,15 +192,15 @@ async def list_agent_connections(
     visible_user_id_set = set(visible_user_ids)
     permitted_dataset_id_strings = {source.id for source in memory_sources}
 
-    registered_agents = [
-        agent
-        for agent in list_registered_agent_connections()
-        if _is_visible_registered_agent(
-            agent,
+    registered_agents = []
+    for registered_agent in list_registered_agent_connections():
+        visible_agent = _visible_registered_agent(
+            registered_agent,
             visible_user_ids=visible_user_id_set,
             permitted_dataset_ids=permitted_dataset_id_strings,
         )
-    ]
+        if visible_agent is not None:
+            registered_agents.append(visible_agent)
     persisted_agents = await list_persisted_agent_connections(
         visible_user_ids, active_only=active_only
     )
@@ -243,15 +258,47 @@ async def get_agent_connection_detail(
     if agent.session_id and agent.user_id:
         try:
             from cognee.infrastructure.session.get_session_manager import get_session_manager
+            from cognee.modules.session_lifecycle.metrics import get_session_row
 
-            session_manager = get_session_manager()
+            readable_dataset_ids = {
+                str(dataset.id) for dataset in await _readable_datasets_for(user)
+            }
+            referenced_dataset_ids = {
+                dataset.id for dataset in agent.datasets if dataset.id is not None
+            }
+            dataset_ids = referenced_dataset_ids.intersection(readable_dataset_ids)
+            # A session read must identify one dataset partition. An unscoped connection
+            # can still read its legacy owner-only session. Dataset-backed connections
+            # require one currently-readable scope; stored refs alone are never authority.
+            if referenced_dataset_ids and len(dataset_ids) != 1:
+                raise CogneeValidationError(
+                    "Agent session has no single currently-readable dataset scope.",
+                    log=False,
+                )
+            dataset_id = next(iter(dataset_ids), None)
+            session_owner_id = str(agent.user_id)
+            if dataset_id is not None:
+                dataset_uuid = UUIDType(dataset_id)
+                row = await get_session_row(
+                    session_id=agent.session_id,
+                    user_id=user.id,
+                    permitted_dataset_ids=[dataset_uuid],
+                    dataset_id=dataset_uuid,
+                    owner_user_id=agent.user_id,
+                )
+                if row is None:
+                    raise CogneeValidationError(
+                        "Agent session is not visible in the authorized dataset scope.",
+                        log=False,
+                    )
+            session_manager = get_session_manager(dataset_id=dataset_id)
             qas = await session_manager.get_session(
-                user_id=agent.user_id,
+                user_id=session_owner_id,
                 session_id=agent.session_id,
                 formatted=False,
             )
             traces = await session_manager.get_agent_trace_session(
-                user_id=agent.user_id,
+                user_id=session_owner_id,
                 session_id=agent.session_id,
                 last_n=20,
             )
@@ -259,7 +306,13 @@ async def get_agent_connection_detail(
                 [_entry_to_dict(entry) for entry in qas[-20:]] if isinstance(qas, list) else []
             )
             recent_traces = [_entry_to_dict(entry) for entry in traces[-20:]]
-            recent_sessions = [{"session_id": agent.session_id, "user_id": agent.user_id}]
+            recent_sessions = [
+                {
+                    "session_id": agent.session_id,
+                    "user_id": session_owner_id,
+                    "dataset_id": dataset_id,
+                }
+            ]
         except Exception as error:
             logger.debug("Failed to hydrate agent detail from session cache: %s", error)
 
@@ -273,18 +326,49 @@ async def get_agent_connection_detail(
 
 
 async def register_agent_from_request(user: User, request: RegisterAgentRequest) -> AgentConnection:
-    datasets = [
-        AgentDatasetRef(id=dataset_id, role="read_write", type="dataset")
-        for dataset_id in request.dataset_ids
-    ]
-    datasets.extend(
-        AgentDatasetRef(
-            name=dataset_name,
-            role="read_write",
-            type=classify_memory_source_type(dataset_name),
-        )
-        for dataset_name in request.dataset_names
-    )
+    datasets: list[AgentDatasetRef] = []
+    seen_dataset_ids: set[str] = set()
+    for requested_id in request.dataset_ids:
+        try:
+            parsed_id = UUIDType(requested_id)
+        except (TypeError, ValueError) as error:
+            raise CogneeValidationError(
+                f"Invalid dataset id: {requested_id!r}.", log=False
+            ) from error
+        dataset = await get_authorized_dataset(user, parsed_id, "write")
+        if dataset is None:
+            raise CogneeValidationError(
+                f"Dataset {requested_id!r} was not found or is not writable.", log=False
+            )
+        canonical_id = str(dataset.id)
+        if canonical_id not in seen_dataset_ids:
+            seen_dataset_ids.add(canonical_id)
+            datasets.append(
+                AgentDatasetRef(
+                    id=canonical_id,
+                    name=dataset.name,
+                    role="read_write",
+                    type=classify_memory_source_type(dataset.name),
+                )
+            )
+
+    for requested_name in request.dataset_names:
+        dataset = await get_authorized_dataset_by_name(requested_name, user, "write")
+        if dataset is None:
+            raise CogneeValidationError(
+                f"Dataset {requested_name!r} was not found or is not writable.", log=False
+            )
+        canonical_id = str(dataset.id)
+        if canonical_id not in seen_dataset_ids:
+            seen_dataset_ids.add(canonical_id)
+            datasets.append(
+                AgentDatasetRef(
+                    id=canonical_id,
+                    name=dataset.name,
+                    role="read_write",
+                    type=classify_memory_source_type(dataset.name),
+                )
+            )
     return await register_agent_connection(
         agent_session_name=request.agent_session_name,
         connection_type=request.type,

@@ -121,7 +121,7 @@ async def load_distillable_session_inputs(
     scope: SessionDistillationScope,
 ) -> tuple[List[dict], List[SessionContextEntry]]:
     """Load QA turns and keep context entries worth distilling."""
-    session_manager = get_session_manager()
+    session_manager = get_session_manager(dataset_id=scope.dataset.id)
     context_rows = await session_manager.get_session_context_entries(
         user_id=scope.user_id,
         session_id=scope.session_id,

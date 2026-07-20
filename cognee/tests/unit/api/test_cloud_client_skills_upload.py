@@ -13,8 +13,10 @@ import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 from unittest.mock import patch
+from uuid import uuid4
 
 from cognee.api.v1.serve.cloud_client import CloudClient
+from cognee.memory import QAEntry
 
 
 class _FakeResponse:
@@ -38,10 +40,12 @@ class _FakeSession:
 
     def __init__(self):
         self.last_form = None
+        self.last_json = None
         self.closed = False
 
-    def post(self, _url, data=None, **kwargs):
+    def post(self, _url, data=None, json=None, **kwargs):
         self.last_form = data
+        self.last_json = json
         return _FakeResponse()
 
     async def close(self):
@@ -132,6 +136,47 @@ def test_remember_skills_rejects_empty_folder(tmp_path):
         assert "No SKILL.md files" in str(e)
         return
     raise AssertionError("expected ValueError for empty skills folder")
+
+
+def test_remember_forwards_dataset_id_in_multipart_form():
+    client = CloudClient(service_url="https://example.test", api_key="k")
+    fake_session = _FakeSession()
+    dataset_id = uuid4()
+
+    async def run():
+        with patch.object(client, "_get_session", return_value=fake_session):
+            await client.remember(
+                "session memory",
+                dataset_name="ignored-name",
+                dataset_id=dataset_id,
+                session_id="session-1",
+            )
+
+    asyncio.run(run())
+
+    fields = _form_field_dump(fake_session.last_form)
+    values = {name: body.decode("utf-8") for name, _filename, body in fields}
+    assert values["datasetId"] == str(dataset_id)
+    assert values["session_id"] == "session-1"
+
+
+def test_remember_entry_forwards_dataset_id_in_json():
+    client = CloudClient(service_url="https://example.test", api_key="k")
+    fake_session = _FakeSession()
+    dataset_id = uuid4()
+
+    async def run():
+        with patch.object(client, "_get_session", return_value=fake_session):
+            await client.remember_entry(
+                QAEntry(question="Q", answer="A"),
+                dataset_id=dataset_id,
+                session_id="session-1",
+            )
+
+    asyncio.run(run())
+
+    assert fake_session.last_json["dataset_id"] == str(dataset_id)
+    assert fake_session.last_json["session_id"] == "session-1"
 
 
 if __name__ == "__main__":

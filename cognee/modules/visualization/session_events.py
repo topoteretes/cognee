@@ -16,7 +16,9 @@ Two event kinds are emitted per the renderer's contract:
 """
 
 from typing import Any, Dict, List, Optional
+from uuid import UUID
 
+from cognee.context_global_variables import current_dataset_id
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("visualization.session_events")
@@ -79,13 +81,29 @@ async def _list_recent_session_ids(user_uuid, limit: int) -> List[str]:
     from cognee.infrastructure.databases.relational import get_relational_engine
     from cognee.modules.session_lifecycle.models import SessionRecord
 
+    filters = [SessionRecord.user_id == user_uuid]
+    active_dataset_id = current_dataset_id.get()
+    if active_dataset_id is None:
+        filters.append(SessionRecord.public_session_id.is_(None))
+    else:
+        try:
+            active_dataset_id = UUID(str(active_dataset_id))
+        except (TypeError, ValueError):
+            return []
+        filters.extend(
+            [
+                SessionRecord.public_session_id.is_not(None),
+                SessionRecord.dataset_id == active_dataset_id,
+            ]
+        )
+
     engine = get_relational_engine()
     async with engine.get_async_session() as session:
         rows = (
             (
                 await session.execute(
                     select(SessionRecord)
-                    .where(SessionRecord.user_id == user_uuid)
+                    .where(*filters)
                     .order_by(SessionRecord.last_activity_at.desc())
                     .limit(limit)
                 )
@@ -93,7 +111,7 @@ async def _list_recent_session_ids(user_uuid, limit: int) -> List[str]:
             .scalars()
             .all()
         )
-    return [str(row.session_id) for row in rows]
+    return [str(row.public_session_id or row.session_id) for row in rows]
 
 
 async def collect_session_events(

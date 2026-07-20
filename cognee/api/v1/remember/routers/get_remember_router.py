@@ -9,6 +9,7 @@ from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError
 from typing import List, Optional, Union, Literal, Annotated
 from pydantic import BaseModel, Field, WithJsonSchema
 
+from cognee.exceptions import CogneeValidationError
 from cognee.memory import QAEntry, TraceEntry, FeedbackEntry, SkillRunEntry
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
@@ -381,6 +382,11 @@ def get_remember_router() -> APIRouter:
                 status_code=status.HTTP_402_PAYMENT_REQUIRED,
                 content={"error": "Token budget exhausted", "detail": str(error)},
             )
+        except CogneeValidationError as error:
+            return JSONResponse(
+                status_code=error.status_code,
+                content={"error": error.name, "detail": error.message},
+            )
         except ValueError as error:
             logger.error("Remember endpoint validation error: %s", error, exc_info=True)
             return JSONResponse(
@@ -407,6 +413,13 @@ def get_remember_router() -> APIRouter:
             Field(discriminator="type"),
         ]
         dataset_name: str = "main_dataset"
+        dataset_id: Optional[UUID] = Field(
+            default=None,
+            description=(
+                "UUID of an existing writable dataset. Takes precedence over dataset_name "
+                "and is required to target a shared dataset by ID."
+            ),
+        )
         session_id: Optional[str] = Field(
             default=None,
             examples=["claude-code-1718000000"],
@@ -426,6 +439,8 @@ def get_remember_router() -> APIRouter:
         ``FeedbackEntry``, or ``SkillRunEntry`` and dispatches to the
         matching ``remember`` path. Session-backed entries require
         ``session_id``; ``SkillRunEntry`` can persist with or without one.
+        ``dataset_id`` takes precedence over ``dataset_name`` and is the
+        canonical way to target a shared dataset.
 
         ## Response
         The returned ``RememberResult`` includes ``entry_type`` and
@@ -449,6 +464,7 @@ def get_remember_router() -> APIRouter:
             result = await cognee_remember(
                 payload.entry,
                 dataset_name=payload.dataset_name,
+                dataset_id=payload.dataset_id,
                 session_id=payload.session_id,
                 user=user,
                 skill_improvement=payload.skill_improvement,
@@ -457,6 +473,11 @@ def get_remember_router() -> APIRouter:
         except ValueError as error:
             # Known validation errors: missing session_id, user not found, etc.
             return JSONResponse(status_code=400, content={"error": str(error)})
+        except CogneeValidationError as error:
+            return JSONResponse(
+                status_code=error.status_code,
+                content={"error": error.name, "detail": error.message},
+            )
         except RuntimeError as error:
             # Session cache unavailable
             return JSONResponse(status_code=503, content={"error": str(error)})

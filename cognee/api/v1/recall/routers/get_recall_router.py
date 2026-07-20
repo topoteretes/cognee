@@ -39,7 +39,7 @@ class RecallPayloadDTO(InDTO):
         examples=[["default_dataset"]],
         description=(
             "Dataset names to search within. Omit (null) to search all datasets "
-            "you have read access to."
+            "you have read access to. Session/trace/context scopes require exactly one dataset."
         ),
     )
     dataset_ids: Optional[list[UUID]] = Field(
@@ -47,7 +47,8 @@ class RecallPayloadDTO(InDTO):
         examples=[None],
         description=(
             "Dataset UUIDs to search within; takes precedence over 'datasets' names "
-            "when both are provided. Leave empty to resolve by name."
+            "when both are provided. Leave empty to resolve by name. Session/trace/context "
+            "scopes require exactly one dataset."
         ),
     )
     query: str = Field(default="What is in the document?")

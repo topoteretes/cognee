@@ -449,10 +449,12 @@ async def retrieve_session_memory_context(context: AgentMemoryContext) -> str:
 
     session_manager = get_session_manager()
     try:
+        scope_kwargs = {"dataset_id": context.scope.dataset_id} if context.scope is not None else {}
         feedback_values = await session_manager.get_agent_trace_feedback(
             user_id=str(context.user.id),
             session_id=context.config.session_id,
             last_n=context.config.session_memory_last_n,
+            **scope_kwargs,
         )
     except Exception as error:
         logger.warning(
@@ -483,10 +485,12 @@ async def persist_trace(context: AgentMemoryContext) -> None:
 
     session_manager = get_session_manager()
     user_id = str(context.user.id)
+    scope_kwargs = {"dataset_id": context.scope.dataset_id} if context.scope is not None else {}
     try:
         await session_manager.add_agent_trace_step(
             user_id=user_id,
             session_id=context.config.session_id,
+            **scope_kwargs,
             origin_function=context.origin_function,
             status=context.status,
             generate_feedback_with_llm=context.config.session_trace_summary,
@@ -514,6 +518,7 @@ async def persist_trace(context: AgentMemoryContext) -> None:
         trace_count = await session_manager.get_agent_trace_count(
             user_id=user_id,
             session_id=resolved_session_id,
+            **scope_kwargs,
         )
         if trace_count == 0 or trace_count % context.config.persist_session_trace_after != 0:
             return

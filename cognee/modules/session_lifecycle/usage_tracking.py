@@ -23,19 +23,23 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger("session_usage")
 
 
-# (session_id, user_id) when active, else None.
-_active_session: ContextVar[Optional[tuple[str, UUIDType]]] = ContextVar(
+# (public session_id, user_id, dataset_id) when active, else None.
+_active_session: ContextVar[Optional[tuple[str, UUIDType, UUIDType | str | None]]] = ContextVar(
     "cognee_session_usage_target", default=None
 )
 
 
 @asynccontextmanager
-async def track_session_usage(session_id: str, user_id: UUIDType):
+async def track_session_usage(
+    session_id: str,
+    user_id: UUIDType,
+    dataset_id: UUIDType | str | None = None,
+):
     """Bind a session as the target for LLM-usage accumulation inside this scope."""
     if not session_id or user_id is None:
         yield
         return
-    token = _active_session.set((session_id, user_id))
+    token = _active_session.set((session_id, user_id, dataset_id))
     try:
         yield
     finally:
@@ -144,7 +148,7 @@ async def record_llm_call(
     target = _active_session.get()
     if target is None:
         return
-    session_id, user_id = target
+    session_id, user_id, dataset_id = target
 
     tokens_in = (
         tokens_in_override if tokens_in_override is not None else _estimate_tokens(input_text)
@@ -160,6 +164,7 @@ async def record_llm_call(
         await accumulate_usage(
             session_id=session_id,
             user_id=user_id,
+            dataset_id=dataset_id,
             tokens_in=tokens_in,
             tokens_out=tokens_out,
             cost_usd=cost,

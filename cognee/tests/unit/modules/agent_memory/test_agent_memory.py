@@ -563,9 +563,11 @@ async def test_retrieve_memory_context_search_only_skips_session_manager(monkeyp
 @pytest.mark.asyncio
 async def test_retrieve_memory_context_combines_session_and_cognee_memory(monkeypatch):
     search_mock = AsyncMock(return_value=["Relevant memory"])
+    captured = {}
 
-    async def get_agent_trace_feedback(*, user_id, session_id, last_n=None):
+    async def get_agent_trace_feedback(*, user_id, session_id, last_n=None, dataset_id=None):
         del user_id, session_id
+        captured["dataset_id"] = dataset_id
         values = ["Earlier step", "Most recent step"]
         return values if last_n is None else values[-last_n:]
 
@@ -585,6 +587,7 @@ async def test_retrieve_memory_context_combines_session_and_cognee_memory(monkey
     assert await retrieve_memory_context(context) == (
         "Recent Session Memory:\nMost recent step\n\nRelevant Cognee Memory:\nRelevant memory"
     )
+    assert captured["dataset_id"] == context.scope.dataset_id
 
 
 @pytest.mark.asyncio

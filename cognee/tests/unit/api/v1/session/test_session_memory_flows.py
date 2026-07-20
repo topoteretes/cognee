@@ -1,7 +1,8 @@
 import asyncio
 import importlib
-from contextlib import contextmanager
+from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
@@ -23,11 +24,20 @@ _mod_query_router = importlib.import_module("cognee.api.v1.recall.query_router")
 _mod_search_methods = importlib.import_module("cognee.modules.search.methods.search")
 
 
+@asynccontextmanager
+async def _noop_database_context(*_args, **_kwargs):
+    yield
+
+
 @contextmanager
 def _patch_remember_startup():
     with (
         patch("cognee.modules.migrations.startup.run_migrations_and_block", new=AsyncMock()),
         patch("cognee.modules.engine.operations.setup.setup", new=AsyncMock()),
+        patch(
+            "cognee.context_global_variables.set_database_global_context_variables",
+            new=_noop_database_context,
+        ),
     ):
         yield
 
@@ -317,16 +327,37 @@ class TestRememberResult:
 
     @pytest.mark.asyncio
     async def test_session_result_has_elapsed(self):
-        """Session-stored result also tracks elapsed time."""
+        """Raw session QA writes run in the selected dataset owner's DB context."""
         mock_user = MagicMock()
         mock_user.id = "u1"
 
         mock_sm = MagicMock()
         mock_sm.is_available = True
-        mock_sm.add_qa = AsyncMock()
+        context_active = False
+
+        async def add_qa(**_kwargs):
+            assert context_active is True
+
+        mock_sm.add_qa = AsyncMock(side_effect=add_qa)
+        dataset = SimpleNamespace(id=uuid4(), name="main_dataset", owner_id=uuid4())
+        context_calls = []
+
+        @asynccontextmanager
+        async def database_context(dataset_id, owner_id):
+            nonlocal context_active
+            context_calls.append((dataset_id, owner_id))
+            context_active = True
+            try:
+                yield
+            finally:
+                context_active = False
 
         with (
             _patch_remember_startup(),
+            patch(
+                "cognee.context_global_variables.set_database_global_context_variables",
+                new=database_context,
+            ),
             patch(
                 "cognee.modules.users.methods.get_default_user",
                 AsyncMock(return_value=mock_user),
@@ -335,6 +366,11 @@ class TestRememberResult:
                 _mod_sm,
                 "get_session_manager",
                 return_value=mock_sm,
+            ) as get_session_manager,
+            patch.object(
+                _get_remember_module(),
+                "resolve_authorized_user_datasets",
+                AsyncMock(return_value=(mock_user, [dataset])),
             ),
         ):
             from cognee.api.v1.remember.remember import RememberResult, remember
@@ -345,7 +381,97 @@ class TestRememberResult:
         assert result.status == "session_stored"
         assert result.session_id == "s1"
         assert result.session_ids == ["s1"]
+        assert result.dataset_id == str(dataset.id)
         assert result.elapsed_seconds is not None
+        get_session_manager.assert_called_once_with(dataset_id=dataset.id)
+        assert context_calls == [(dataset.id, dataset.owner_id)]
+
+    @pytest.mark.asyncio
+    async def test_typed_session_entry_uses_canonical_dataset_scope(self):
+        from cognee.api.v1.remember.remember import remember
+        from cognee.memory import QAEntry
+
+        user = SimpleNamespace(id=uuid4())
+        dataset = SimpleNamespace(id=uuid4(), name="canonical", owner_id=uuid4())
+        resolver = AsyncMock(return_value=(user, [dataset]))
+        mock_sm = MagicMock(is_available=True)
+        context_active = False
+
+        async def add_qa(**_kwargs):
+            assert context_active is True
+            return "qa-1"
+
+        mock_sm.add_qa = AsyncMock(side_effect=add_qa)
+        context_calls = []
+
+        @asynccontextmanager
+        async def database_context(dataset_id, owner_id):
+            nonlocal context_active
+            context_calls.append((dataset_id, owner_id))
+            context_active = True
+            try:
+                yield
+            finally:
+                context_active = False
+
+        with (
+            _patch_remember_startup(),
+            patch(
+                "cognee.context_global_variables.set_database_global_context_variables",
+                new=database_context,
+            ),
+            patch.object(
+                _get_remember_module(),
+                "resolve_authorized_user_datasets",
+                resolver,
+            ),
+            patch.object(
+                _mod_sm,
+                "get_session_manager",
+                return_value=mock_sm,
+            ) as get_session_manager,
+        ):
+            result = await remember(
+                QAEntry(question="Q", answer="A"),
+                dataset_id=dataset.id,
+                session_id="shared-id",
+                user=user,
+            )
+
+        resolver.assert_awaited_once_with(dataset.id, user)
+        get_session_manager.assert_called_once_with(dataset_id=dataset.id)
+        assert result.dataset_name == "canonical"
+        assert result.dataset_id == str(dataset.id)
+        assert result.entry_id == "qa-1"
+        assert context_calls == [(dataset.id, dataset.owner_id)]
+
+    @pytest.mark.asyncio
+    async def test_session_remember_does_not_write_when_dataset_is_unauthorized(self):
+        from cognee.api.v1.remember.remember import remember
+        from cognee.modules.users.exceptions import PermissionDeniedError
+
+        user = SimpleNamespace(id=uuid4())
+        get_session_manager = MagicMock()
+
+        with (
+            _patch_remember_startup(),
+            patch.object(
+                _get_remember_module(),
+                "resolve_authorized_user_datasets",
+                AsyncMock(side_effect=PermissionDeniedError()),
+            ),
+            patch.object(_mod_sm, "get_session_manager", get_session_manager),
+        ):
+            with pytest.raises(PermissionDeniedError):
+                await remember(
+                    "secret",
+                    dataset_id=uuid4(),
+                    session_id="shared-id",
+                    user=user,
+                    self_improvement=False,
+                )
+
+        get_session_manager.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -804,6 +930,11 @@ class TestRecallSessionMode:
                 recall_mod,
                 "_search_session",
                 AsyncMock(return_value=session_entries),
+            ) as search_session_mock,
+            patch.object(
+                recall_mod,
+                "get_authorized_existing_datasets",
+                AsyncMock(return_value=[SimpleNamespace(id=dataset_id)]),
             ),
             patch.object(
                 _mod_search_methods,
@@ -824,4 +955,5 @@ class TestRecallSessionMode:
             )
 
         assert [result.source for result in results] == ["session", "graph"]
+        assert search_session_mock.await_args.kwargs["dataset_id"] == dataset_id
         assert authorized_search_mock.await_args.kwargs["dataset_ids"] == [dataset_id]

@@ -14,7 +14,7 @@ import pytest
 import pytest_asyncio
 
 import cognee
-from cognee.modules.data.methods import get_datasets_by_name
+from cognee.modules.data.methods import get_authorized_existing_datasets, get_datasets_by_name
 from cognee.modules.engine.operations.setup import setup as engine_setup
 from cognee.modules.users.methods import get_default_user
 
@@ -62,7 +62,7 @@ async def test_session_remember_creates_dataset_before_background_improve(clean_
 
     async def fake_improve(dataset, *, session_ids=None, user=None, **kwargs):
         resolver = user or await get_default_user()
-        existing = await get_datasets_by_name([str(dataset)], resolver.id)
+        existing = await get_authorized_existing_datasets([dataset], "write", resolver)
         seen["dataset_present_at_improve"] = bool(existing)
         return {}
 

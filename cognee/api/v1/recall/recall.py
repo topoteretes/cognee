@@ -35,7 +35,7 @@ from cognee.modules.recall.types.RecallResponse import (
 from cognee.modules.recall.types.SearchResultItem import SearchResultItem
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
 from cognee.modules.search.types import SearchResult, SearchType
-from cognee.modules.users.exceptions.exceptions import UserNotFoundError
+from cognee.modules.users.exceptions.exceptions import PermissionDeniedError, UserNotFoundError
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
 
@@ -74,85 +74,88 @@ async def _resolve_user_id(user: str | None) -> str | None:
     return str(user.id) if hasattr(user, "id") else None
 
 
-async def _resolve_session_cache_user_id(session_id: str, caller_user_id: str | None) -> str | None:
+async def _resolve_session_cache_user_id(
+    session_id: str,
+    caller_user_id: str | None,
+    dataset_id: UUID | None = None,
+) -> str | None:
     """Resolve the user_id to use when querying the session cache.
 
-    Session-cache entries are keyed by the session's OWNER, not by the
-    authenticated caller. A caller may legitimately query someone
-    else's session via a dataset read grant — in that case we need to
-    return the owner's id so ``SessionManager.get_session`` finds the
-    entries.
-
-    Two complications the resolver handles:
-
-    * The same ``session_id`` can exist under multiple owners (the PK
-      is ``(session_id, user_id)``, not ``session_id`` alone). The
-      caller might own an empty row AND simultaneously have read
-      permission on a non-owned row that has all the cache content.
-      We pick the candidate most likely to have real entries — the
-      one with ``dataset_id`` populated wins over an empty row.
-
-    * Falls back to ``caller_user_id`` when nothing is in
-      ``session_records`` yet so behaviour matches the pre-visibility
-      state.
+    Unscoped reads are owner-only and use the caller's legacy cache.
+    Dataset-scoped reads resolve an owner only from a row encoded for
+    the exact authorized dataset. They never scan all caller-readable
+    datasets and never fall back to the legacy cache.
     """
     if not session_id:
         return caller_user_id
+    if dataset_id is None:
+        return caller_user_id
     try:
-        from uuid import UUID
-
-        from sqlalchemy import select
-
-        from cognee.infrastructure.databases.relational import get_relational_engine
-        from cognee.modules.session_lifecycle.models import SessionRecord
-        from cognee.modules.users.permissions.methods.get_specific_user_permission_datasets import (
-            get_specific_user_permission_datasets,
-        )
-
         caller_uuid = UUID(caller_user_id) if caller_user_id else None
         if caller_uuid is None:
-            return caller_user_id
+            return None
 
-        permitted_ids: list[UUID] = []
-        try:
-            permitted = await get_specific_user_permission_datasets(caller_uuid, "read", None)
-            permitted_ids = [ds.id for ds in permitted] if permitted else []
-        except Exception:
-            permitted_ids = []
+        from cognee.modules.session_lifecycle.metrics import get_session_row
 
-        # Fetch ALL candidate rows the caller can see for this
-        # session_id. Owner match OR permitted-dataset match.
-        engine = get_relational_engine()
-        async with engine.get_async_session() as session:
-            stmt = select(SessionRecord).where(SessionRecord.session_id == session_id)
-            rows = list((await session.execute(stmt)).scalars().all())
-
-        if not rows:
-            return caller_user_id
-
-        visible: list[SessionRecord] = []
-        for r in rows:
-            if r.user_id == caller_uuid:
-                visible.append(r)
-            elif permitted_ids and r.dataset_id in permitted_ids:
-                visible.append(r)
-
-        if not visible:
-            return caller_user_id
-
-        # Prefer a row with dataset_id populated — those came through
-        # the proper write path and have cache content. Within that,
-        # prefer rows the caller does NOT own (the active writer of
-        # the session, e.g. an agent).
-        with_dataset = [r for r in visible if r.dataset_id is not None]
-        pool = with_dataset or visible
-        non_owner = [r for r in pool if r.user_id != caller_uuid]
-        chosen = (non_owner or pool)[0]
-        owner = getattr(chosen, "user_id", None)
-        return str(owner) if owner is not None else caller_user_id
+        row = await get_session_row(
+            session_id=session_id,
+            user_id=caller_uuid,
+            permitted_dataset_ids=[dataset_id],
+            dataset_id=dataset_id,
+        )
+        owner = getattr(row, "user_id", None) if row is not None else None
+        return str(owner) if owner is not None else None
     except Exception:
-        pass
-    return caller_user_id
+        return None
+
+
+async def _resolve_requested_session_dataset_id(
+    *,
+    session_id: str,
+    datasets: list[str] | None,
+    dataset_ids: list[UUID] | None,
+    user: object | None,
+) -> UUID | None:
+    """Resolve one exact readable dataset for session-cache sources.
+
+    Graph recall can span multiple datasets, but a public session ID is
+    not globally unique across dataset namespaces. Session/trace/context
+    sources therefore require exactly one requested dataset when scoped.
+    """
+    requested = list(dataset_ids) if dataset_ids else list(datasets or [])
+    resolved_user = user or await get_default_user()
+    if not requested:
+        owner_id = getattr(resolved_user, "id", None)
+        if owner_id is None:
+            return None
+        from cognee.modules.session_lifecycle.metrics import get_owned_session_dataset_id
+
+        try:
+            inferred_dataset_id = await get_owned_session_dataset_id(
+                session_id=session_id,
+                user_id=UUID(str(owner_id)),
+            )
+        except ValueError as error:
+            raise CogneeValidationError(
+                message=str(error),
+                name="SessionDatasetScopeError",
+            ) from error
+        except Exception as error:
+            logger.debug("Session dataset-scope inference unavailable: %s", error)
+            return None
+        if inferred_dataset_id is None:
+            return None
+        requested = [inferred_dataset_id]
+    if len(requested) != 1:
+        raise CogneeValidationError(
+            message="Session recall requires exactly one dataset.",
+            name="SessionDatasetScopeError",
+        )
+
+    authorized = await get_authorized_existing_datasets(requested, "read", resolved_user)
+    if len(authorized) != 1:
+        raise PermissionDeniedError("Requested session dataset is not readable.")
+    return UUID(str(authorized[0].id))
 
 
 async def _search_session(
@@ -160,6 +163,7 @@ async def _search_session(
     session_id: str,
     top_k: int = 15,
     user: str | None = None,
+    dataset_id: UUID | None = None,
     _parent_span=None,
 ) -> list[ResponseQAEntry]:
     """Search session-cache QA entries by keyword matching.
@@ -174,11 +178,13 @@ async def _search_session(
     if not caller_user_id:
         return []
     # Cache is keyed by session owner — resolve cross-user grants.
-    cache_user_id = await _resolve_session_cache_user_id(session_id, caller_user_id)
+    cache_user_id = await _resolve_session_cache_user_id(
+        session_id, caller_user_id, dataset_id=dataset_id
+    )
     if not cache_user_id:
         return []
 
-    sm = get_session_manager()
+    sm = get_session_manager(dataset_id=dataset_id)
     if not sm.is_available:
         return []
 
@@ -218,6 +224,7 @@ async def _search_trace(
     session_id: str,
     top_k: int = 15,
     user: str | None = None,
+    dataset_id: UUID | None = None,
 ) -> list[ResponseAgentTraceEntry]:
     """Search session-cache agent trace steps by keyword matching.
 
@@ -232,11 +239,13 @@ async def _search_trace(
     caller_user_id = await _resolve_user_id(user)
     if not caller_user_id:
         return []
-    cache_user_id = await _resolve_session_cache_user_id(session_id, caller_user_id)
+    cache_user_id = await _resolve_session_cache_user_id(
+        session_id, caller_user_id, dataset_id=dataset_id
+    )
     if not cache_user_id:
         return []
 
-    sm = get_session_manager()
+    sm = get_session_manager(dataset_id=dataset_id)
     if not sm.is_available:
         return []
 
@@ -289,6 +298,7 @@ async def _fetch_session_context(
     session_id: str,
     context_profile: str,
     user: str | None = None,
+    dataset_id: UUID | None = None,
 ) -> list[ResponseSessionContextEntry]:
     """Render active session-context lessons for one profile as a one-item list.
 
@@ -301,11 +311,13 @@ async def _fetch_session_context(
     caller_user_id = await _resolve_user_id(user)
     if not caller_user_id:
         return []
-    cache_user_id = await _resolve_session_cache_user_id(session_id, caller_user_id)
+    cache_user_id = await _resolve_session_cache_user_id(
+        session_id, caller_user_id, dataset_id=dataset_id
+    )
     if not cache_user_id:
         return []
 
-    sm = get_session_manager()
+    sm = get_session_manager(dataset_id=dataset_id)
     if not sm.is_available:
         return []
 
@@ -473,6 +485,15 @@ async def recall(
             span.set_attribute(COGNEE_RESULT_COUNT, len(results) if results else 0)
             return results
 
+        session_dataset_id = None
+        if session_id and {"session", "trace", "session_context"}.intersection(sources):
+            session_dataset_id = await _resolve_requested_session_dataset_id(
+                session_id=session_id or "",
+                datasets=datasets,
+                dataset_ids=dataset_ids,
+                user=user,
+            )
+
         merged: list[RecallResponse] = []
 
         async def _run_session() -> list[RecallResponse]:
@@ -484,6 +505,7 @@ async def recall(
                     session_id=session_id,
                     top_k=top_k,
                     user=user,
+                    dataset_id=session_dataset_id,
                 )
             )
 
@@ -496,6 +518,7 @@ async def recall(
                     session_id=session_id,
                     top_k=top_k,
                     user=user,
+                    dataset_id=session_dataset_id,
                 )
             )
 
@@ -508,6 +531,7 @@ async def recall(
                     session_id=session_id,
                     context_profile=context_profile,
                     user=user,
+                    dataset_id=session_dataset_id,
                 )
             )
 

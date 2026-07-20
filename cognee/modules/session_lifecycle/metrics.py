@@ -24,16 +24,34 @@ from enum import Enum
 from typing import Optional, Sequence
 from uuid import UUID as UUIDType
 
-from sqlalchemy import and_, case, func, or_, select, update
+from sqlalchemy import and_, case, delete, false, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.infrastructure.session.session_scope import get_storage_session_id
 from cognee.shared.logging_utils import get_logger
 
 from .models import SessionModelUsage, SessionRecord
 
 logger = get_logger("session_lifecycle")
+
+
+def get_permitted_dataset_sessions_sql(permitted_dataset_ids: Sequence[UUIDType]):
+    """SQL predicate for rows safely shareable through dataset permissions.
+
+    ``dataset_id`` alone is not a trustworthy marker: older releases attached
+    one dataset to a cache namespace that could contain turns from several.
+    Only new rows with an explicit ``public_session_id`` were written through
+    the dataset-scoped storage path and may be shared.
+    """
+    dataset_ids = list(permitted_dataset_ids or [])
+    if not dataset_ids:
+        return false()
+    return and_(
+        SessionRecord.public_session_id.is_not(None),
+        SessionRecord.dataset_id.in_(dataset_ids),
+    )
 
 
 class SessionStatus(str, Enum):
@@ -73,6 +91,8 @@ async def ensure_and_touch_session(
     Also fills in ``dataset_id`` when currently null.
     """
     now = datetime.now(timezone.utc)
+    public_session_id = str(session_id) if dataset_id is not None else None
+    storage_session_id = get_storage_session_id(str(session_id), dataset_id)
     engine = get_relational_engine()
 
     async with engine.get_async_session() as session:
@@ -80,8 +100,9 @@ async def ensure_and_touch_session(
         dialect = _dialect_name(bind)
 
         values = {
-            "session_id": session_id,
+            "session_id": storage_session_id,
             "user_id": user_id,
+            "public_session_id": public_session_id,
             "dataset_id": dataset_id,
             "status": SessionStatus.RUNNING.value,
             "started_at": now,
@@ -115,7 +136,7 @@ async def ensure_and_touch_session(
             await session.execute(
                 select(SessionRecord).where(
                     and_(
-                        SessionRecord.session_id == session_id,
+                        SessionRecord.session_id == storage_session_id,
                         SessionRecord.user_id == user_id,
                     )
                 )
@@ -139,6 +160,7 @@ async def accumulate_usage(
     cost_usd: float = 0.0,
     model: Optional[str] = None,
     errored: bool = False,
+    dataset_id: Optional[UUIDType] = None,
 ) -> None:
     """Atomically add usage counters to the session row + per-model row.
 
@@ -150,6 +172,7 @@ async def accumulate_usage(
     if tokens_in == 0 and tokens_out == 0 and cost_usd == 0.0 and not errored and model is None:
         return
 
+    storage_session_id = get_storage_session_id(str(session_id), dataset_id)
     engine = get_relational_engine()
 
     async with engine.get_async_session() as session:
@@ -172,7 +195,7 @@ async def accumulate_usage(
                 update(SessionRecord)
                 .where(
                     and_(
-                        SessionRecord.session_id == session_id,
+                        SessionRecord.session_id == storage_session_id,
                         SessionRecord.user_id == user_id,
                         SessionRecord.status == SessionStatus.RUNNING.value,
                     )
@@ -189,7 +212,7 @@ async def accumulate_usage(
             if dialect in ("sqlite", "postgresql"):
                 insert = sqlite_insert if dialect == "sqlite" else pg_insert
                 stmt = insert(SessionModelUsage).values(
-                    session_id=session_id,
+                    session_id=storage_session_id,
                     user_id=user_id,
                     model=model,
                     tokens_in=tokens_in,
@@ -213,7 +236,7 @@ async def accumulate_usage(
                     await session.execute(
                         select(SessionModelUsage).where(
                             and_(
-                                SessionModelUsage.session_id == session_id,
+                                SessionModelUsage.session_id == storage_session_id,
                                 SessionModelUsage.user_id == user_id,
                                 SessionModelUsage.model == model,
                             )
@@ -223,7 +246,7 @@ async def accumulate_usage(
                 if existing is None:
                     session.add(
                         SessionModelUsage(
-                            session_id=session_id,
+                            session_id=storage_session_id,
                             user_id=user_id,
                             model=model,
                             tokens_in=tokens_in,
@@ -246,19 +269,21 @@ async def mark_ended(
     session_id: str,
     user_id: UUIDType,
     status: SessionStatus,
+    dataset_id: Optional[UUIDType] = None,
 ) -> None:
     """Transition to a terminal status (completed / failed)."""
     if status == SessionStatus.RUNNING or status == SessionStatus.ABANDONED:
         raise ValueError(f"mark_ended requires a terminal status (completed/failed), got {status}")
 
     now = datetime.now(timezone.utc)
+    storage_session_id = get_storage_session_id(str(session_id), dataset_id)
     engine = get_relational_engine()
     async with engine.get_async_session() as session:
         stmt = (
             update(SessionRecord)
             .where(
                 and_(
-                    SessionRecord.session_id == session_id,
+                    SessionRecord.session_id == storage_session_id,
                     SessionRecord.user_id == user_id,
                 )
             )
@@ -266,6 +291,82 @@ async def mark_ended(
         )
         await session.execute(stmt)
         await session.commit()
+
+
+async def delete_session_lifecycle(
+    *,
+    session_id: str,
+    user_id: str | UUIDType,
+    dataset_id: str | UUIDType | None = None,
+) -> bool:
+    """Delete one exact session's lifecycle and per-model usage rows.
+
+    The public session ID is translated with the same dataset scope used by
+    ``SessionManager``. Dataset-scoped deletes additionally require the trusted
+    public/dataset markers, so they cannot remove a colliding legacy row. This
+    helper is best-effort: malformed identifiers or relational failures return
+    ``False`` without breaking an otherwise successful cache deletion.
+    """
+    try:
+        normalized_user_id = user_id if isinstance(user_id, UUIDType) else UUIDType(str(user_id))
+        normalized_dataset_id = (
+            dataset_id
+            if isinstance(dataset_id, UUIDType)
+            else UUIDType(str(dataset_id))
+            if dataset_id is not None
+            else None
+        )
+        public_session_id = str(session_id)
+        storage_session_id = get_storage_session_id(
+            public_session_id,
+            normalized_dataset_id,
+        )
+    except (TypeError, ValueError):
+        return False
+
+    record_filters = [
+        SessionRecord.session_id == storage_session_id,
+        SessionRecord.user_id == normalized_user_id,
+    ]
+    if normalized_dataset_id is None:
+        record_filters.append(SessionRecord.public_session_id.is_(None))
+    else:
+        record_filters.extend(
+            [
+                SessionRecord.public_session_id == public_session_id,
+                SessionRecord.dataset_id == normalized_dataset_id,
+            ]
+        )
+
+    try:
+        engine = get_relational_engine()
+        async with engine.get_async_session() as session:
+            matching_record = (
+                await session.execute(
+                    select(SessionRecord.session_id).where(and_(*record_filters)).limit(1)
+                )
+            ).scalar_one_or_none()
+            if matching_record is None:
+                return False
+
+            await session.execute(
+                delete(SessionModelUsage).where(
+                    and_(
+                        SessionModelUsage.session_id == storage_session_id,
+                        SessionModelUsage.user_id == normalized_user_id,
+                    )
+                )
+            )
+            await session.execute(delete(SessionRecord).where(and_(*record_filters)))
+            await session.commit()
+            return True
+    except Exception as exc:
+        logger.warning(
+            "Failed to delete lifecycle rows for session %s: %s",
+            public_session_id,
+            exc,
+        )
+        return False
 
 
 def get_effective_status_sql():
@@ -292,6 +393,50 @@ def get_effective_status_sql():
     )
 
 
+async def get_owned_session_dataset_id(
+    *,
+    session_id: str,
+    user_id: UUIDType,
+) -> Optional[UUIDType]:
+    """Infer one dataset scope for an owner's public session ID.
+
+    Legacy content wins when both legacy and scoped rows exist, preserving the
+    old owner-only namespace. A public ID used in more than one dataset is
+    intentionally ambiguous and must be selected explicitly by the caller.
+    """
+    engine = get_relational_engine()
+    async with engine.get_async_session() as session:
+        rows = list(
+            (
+                await session.execute(
+                    select(SessionRecord).where(
+                        and_(
+                            SessionRecord.user_id == user_id,
+                            or_(
+                                SessionRecord.public_session_id == str(session_id),
+                                and_(
+                                    SessionRecord.public_session_id.is_(None),
+                                    SessionRecord.session_id == str(session_id),
+                                ),
+                            ),
+                        )
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    if any(row.public_session_id is None for row in rows):
+        return None
+    dataset_ids = {row.dataset_id for row in rows if row.dataset_id is not None}
+    if len(dataset_ids) > 1:
+        raise ValueError(
+            f"Session {session_id!r} exists in multiple datasets; provide dataset_id explicitly."
+        )
+    return next(iter(dataset_ids), None)
+
+
 async def get_session_row(
     *,
     session_id: str,
@@ -299,12 +444,15 @@ async def get_session_row(
     user_ids: Optional[list[UUIDType]] = None,
     permitted_dataset_ids: Optional[list[UUIDType]] = None,
     prefer_other_owner: bool = False,
+    dataset_id: Optional[UUIDType] = None,
+    owner_user_id: Optional[UUIDType] = None,
 ) -> Optional[SessionRecord]:
     """Fetch a session row visible to the caller.
 
-    Returns the row if the caller (or their child agents, via
-    ``user_ids``) owns the session OR if the session's dataset is in
-    ``permitted_dataset_ids``. Returns None otherwise.
+    Without ``dataset_id``, only caller/child-owned legacy rows are eligible;
+    dataset grants never implicitly select a scope. With an explicit dataset,
+    a marked scoped row is visible only through a current read grant for that
+    exact dataset. Ownership and parenthood never bypass dataset permission.
 
     The same ``session_id`` can exist under multiple owners (it's only
     unique per user in the composite PK). When the query matches
@@ -315,19 +463,30 @@ async def get_session_row(
     engine = get_relational_engine()
     async with engine.get_async_session() as session:
         if user_ids is not None and len(user_ids) > 0:
-            visibility_terms = [SessionRecord.user_id.in_(user_ids)]
+            ownership = SessionRecord.user_id.in_(user_ids)
         else:
-            visibility_terms = [SessionRecord.user_id == user_id]
-        if permitted_dataset_ids:
-            visibility_terms.append(SessionRecord.dataset_id.in_(permitted_dataset_ids))
-        result = await session.execute(
-            select(SessionRecord).where(
-                and_(
-                    SessionRecord.session_id == session_id,
-                    or_(*visibility_terms) if len(visibility_terms) > 1 else visibility_terms[0],
-                )
+            ownership = SessionRecord.user_id == user_id
+
+        if dataset_id is not None:
+            identity = and_(
+                SessionRecord.session_id == get_storage_session_id(str(session_id), dataset_id),
+                SessionRecord.public_session_id == str(session_id),
+                SessionRecord.dataset_id == dataset_id,
             )
-        )
+            visibility = get_permitted_dataset_sessions_sql(permitted_dataset_ids or [])
+        else:
+            # Scoped rows require an explicit dataset selection and its current
+            # permission. Ownership applies only to the legacy namespace.
+            identity = and_(
+                SessionRecord.public_session_id.is_(None),
+                SessionRecord.session_id == str(session_id),
+            )
+            visibility = and_(SessionRecord.public_session_id.is_(None), ownership)
+
+        filters = [identity, visibility]
+        if owner_user_id is not None:
+            filters.append(SessionRecord.user_id == owner_user_id)
+        result = await session.execute(select(SessionRecord).where(and_(*filters)))
         rows = list(result.scalars().all())
         if not rows:
             return None
@@ -335,6 +494,14 @@ async def get_session_row(
             non_owner = [r for r in rows if r.user_id != user_id]
             if non_owner:
                 return non_owner[0]
+        caller_owned = [r for r in rows if r.user_id == user_id]
+        if caller_owned:
+            return caller_owned[0]
+        if owner_user_id is None and len(rows) > 1:
+            # A dataset grant can expose the same public ID from multiple
+            # owners. Refuse an arbitrary cache owner; the caller must select
+            # one explicitly (the sessions dashboard provides that selector).
+            return None
         return rows[0]
 
 
@@ -381,10 +548,10 @@ async def list_session_rows(
 ) -> SessionListPage:
     """List sessions with pagination metadata.
 
-    Visibility: returns sessions the caller owns (or their child
-    agents own, via ``user_ids``) OR sessions whose ``dataset_id``
-    is in ``permitted_dataset_ids`` (read permission granted at the
-    dataset level).
+    Visibility: legacy rows are visible to their owner (or the owner's parent
+    via ``user_ids``). Dataset-scoped rows are visible only when their dataset
+    is in ``permitted_dataset_ids``; ownership does not bypass a revoked or
+    missing dataset permission.
 
     status_filter accepts the effective status (including
     ``abandoned``) — the SQL predicate handles the abandoned-by-time
@@ -397,17 +564,23 @@ async def list_session_rows(
         # Ownership / permission predicate.
         visibility_terms = []
         if user_ids is not None and len(user_ids) > 0:
-            visibility_terms.append(SessionRecord.user_id.in_(user_ids))
+            ownership = SessionRecord.user_id.in_(user_ids)
         elif user_id is not None:
-            visibility_terms.append(SessionRecord.user_id == user_id)
+            ownership = SessionRecord.user_id == user_id
+        else:
+            ownership = None
+        if ownership is not None:
+            visibility_terms.append(and_(SessionRecord.public_session_id.is_(None), ownership))
         if permitted_dataset_ids:
-            visibility_terms.append(SessionRecord.dataset_id.in_(permitted_dataset_ids))
+            visibility_terms.append(get_permitted_dataset_sessions_sql(permitted_dataset_ids))
 
-        filters = []
-        if visibility_terms:
-            filters.append(
-                or_(*visibility_terms) if len(visibility_terms) > 1 else visibility_terms[0]
-            )
+        if not visibility_terms:
+            visibility = false()
+        elif len(visibility_terms) == 1:
+            visibility = visibility_terms[0]
+        else:
+            visibility = or_(*visibility_terms)
+        filters = [visibility]
         if since is not None:
             filters.append(SessionRecord.last_activity_at >= since)
         if status_filter:
@@ -463,7 +636,13 @@ async def touch_session(*, session_id, user_id, dataset_id=None):
 _session_record_write_failed = False
 
 
-async def record_session_activity(user_id: str, session_id: str, *, errored: bool = False) -> None:
+async def record_session_activity(
+    user_id: str,
+    session_id: str,
+    *,
+    dataset_id: str | UUIDType | None = None,
+    errored: bool = False,
+) -> None:
     """Write a lifecycle heartbeat for a session: upsert + touch the SessionRecord row.
 
     Accepts a string ``user_id`` (coerced to UUID). Swallows failures — the
@@ -478,9 +657,23 @@ async def record_session_activity(user_id: str, session_id: str, *, errored: boo
         except (ValueError, TypeError):
             return
 
-        await ensure_and_touch_session(session_id=session_id, user_id=user_uuid)
+        try:
+            dataset_uuid = UUIDType(str(dataset_id)) if dataset_id is not None else None
+        except (ValueError, TypeError):
+            return
+
+        await ensure_and_touch_session(
+            session_id=session_id,
+            user_id=user_uuid,
+            dataset_id=dataset_uuid,
+        )
         if errored:
-            await accumulate_usage(session_id=session_id, user_id=user_uuid, errored=True)
+            await accumulate_usage(
+                session_id=session_id,
+                user_id=user_uuid,
+                dataset_id=dataset_uuid,
+                errored=True,
+            )
     except Exception as exc:
         if not _session_record_write_failed:
             _session_record_write_failed = True

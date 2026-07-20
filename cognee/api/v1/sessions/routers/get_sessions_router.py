@@ -18,6 +18,7 @@ from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.session_lifecycle.metrics import (
     SessionStatus,
     get_effective_status_sql,
+    get_permitted_dataset_sessions_sql,
     get_session_row,
     list_session_rows,
 )
@@ -75,6 +76,27 @@ async def _visible_user_ids(user: User) -> list[UUIDType]:
     ids = [user.id]
     ids.extend(await _child_agent_user_ids(user.id))
     return ids
+
+
+def _session_visibility_sql(
+    visible_user_ids: list[UUIDType],
+    permitted_dataset_ids: list[UUIDType],
+):
+    """Visibility predicate shared by session dashboard aggregates.
+
+    Legacy rows have no trusted dataset partition and remain owner/child-only.
+    Dataset-scoped rows require a live read grant even when the caller originally
+    wrote the cache content.
+    """
+    visibility_terms = [
+        and_(
+            SessionRecord.public_session_id.is_(None),
+            SessionRecord.user_id.in_(visible_user_ids),
+        )
+    ]
+    if permitted_dataset_ids:
+        visibility_terms.append(get_permitted_dataset_sessions_sql(permitted_dataset_ids))
+    return or_(*visibility_terms) if len(visibility_terms) > 1 else visibility_terms[0]
 
 
 def get_sessions_router() -> APIRouter:
@@ -198,12 +220,7 @@ def get_sessions_router() -> APIRouter:
 
         engine = get_relational_engine()
         async with engine.get_async_session() as session:
-            visibility_terms = [SessionRecord.user_id.in_(visible_ids)]
-            if permitted:
-                visibility_terms.append(SessionRecord.dataset_id.in_(permitted))
-            base_filter = [
-                or_(*visibility_terms) if len(visibility_terms) > 1 else visibility_terms[0]
-            ]
+            base_filter = [_session_visibility_sql(visible_ids, permitted)]
             if since is not None:
                 base_filter.append(SessionRecord.last_activity_at >= since)
 
@@ -298,9 +315,6 @@ def get_sessions_router() -> APIRouter:
         visible_ids = await _visible_user_ids(user)
         engine = get_relational_engine()
         async with engine.get_async_session() as session:
-            visibility_terms = [SessionRecord.user_id.in_(visible_ids)]
-            if permitted:
-                visibility_terms.append(SessionRecord.dataset_id.in_(permitted))
             stmt = (
                 select(
                     SessionModelUsage.model.label("model"),
@@ -316,7 +330,7 @@ def get_sessions_router() -> APIRouter:
                         SessionModelUsage.user_id == SessionRecord.user_id,
                     ),
                 )
-                .where(or_(*visibility_terms) if len(visibility_terms) > 1 else visibility_terms[0])
+                .where(_session_visibility_sql(visible_ids, permitted))
                 .group_by(SessionModelUsage.model)
                 .order_by(func.sum(SessionModelUsage.cost_usd).desc())
             )
@@ -348,18 +362,43 @@ def get_sessions_router() -> APIRouter:
             ),
             examples=["claude-code-1718000000"],
         ),
+        dataset_id: Optional[UUIDType] = Query(
+            None,
+            description=(
+                "Exact dataset scope for the session. Required to read a dataset-scoped "
+                "session owned by another user and to disambiguate the same session ID "
+                "used in multiple datasets."
+            ),
+        ),
+        owner_user_id: Optional[UUIDType] = Query(
+            None,
+            description=(
+                "Exact owner of the session cache. Use the user_id returned by the sessions "
+                "list when multiple owners use the same session ID in one shared dataset."
+            ),
+        ),
         user: User = Depends(get_authenticated_user),
     ):
         permitted = await _permitted_dataset_ids_for(user)
+        if dataset_id is not None and dataset_id not in permitted:
+            # Do not reveal whether the requested dataset/session exists.
+            raise HTTPException(status_code=404, detail="session not found")
         visible_ids = await _visible_user_ids(user)
         row = await get_session_row(
             session_id=session_id,
             user_id=user.id,
             user_ids=visible_ids,
-            permitted_dataset_ids=permitted,
+            permitted_dataset_ids=[dataset_id] if dataset_id is not None else [],
+            dataset_id=dataset_id,
+            owner_user_id=owner_user_id,
         )
         if row is None:
             raise HTTPException(status_code=404, detail="session not found")
+        if dataset_id is None and getattr(row, "public_session_id", None) is not None:
+            raise HTTPException(
+                status_code=409,
+                detail="dataset_id is required for a dataset-scoped session",
+            )
 
         # Pull the rich content (QAs + trace steps) from the session cache.
         # Important: cache entries are keyed by the session's OWNER, not
@@ -369,7 +408,16 @@ def get_sessions_router() -> APIRouter:
         from cognee.infrastructure.session.get_session_manager import get_session_manager
 
         owner_user_id = str(getattr(row, "user_id", ""))
-        sm = get_session_manager()
+        # Legacy rows can carry a stale dataset_id even though their cache was
+        # written before dataset namespaces existed. Only the explicit public
+        # marker identifies a safely scoped row; quarantined legacy content
+        # must continue to use the owner-only legacy manager.
+        row_dataset_id = (
+            getattr(row, "dataset_id", None)
+            if getattr(row, "public_session_id", None) is not None
+            else None
+        )
+        sm = get_session_manager(dataset_id=row_dataset_id)
         qas: list = []
         traces: list = []
         if sm.is_available and owner_user_id:

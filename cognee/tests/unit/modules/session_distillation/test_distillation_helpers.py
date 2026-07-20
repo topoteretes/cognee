@@ -74,10 +74,12 @@ class TestLoadDistillableSessionInputs:
             ),
             get_session=AsyncMock(return_value=[_qa_row(question="What changed?")]),
         )
-        monkeypatch.setattr(distill_module, "get_session_manager", lambda: session_manager)
+        monkeypatch.setattr(
+            distill_module, "get_session_manager", lambda dataset_id=None: session_manager
+        )
 
         qa_rows, context_entries = await distill_module.load_distillable_session_inputs(
-            SimpleNamespace(user_id="u-1", session_id="s-1")
+            SimpleNamespace(user_id="u-1", session_id="s-1", dataset=SimpleNamespace(id=uuid4()))
         )
 
         assert len(qa_rows) == 1
@@ -107,10 +109,12 @@ class TestLoadDistillableSessionInputs:
             ),
             get_session=AsyncMock(return_value=[]),
         )
-        monkeypatch.setattr(distill_module, "get_session_manager", lambda: session_manager)
+        monkeypatch.setattr(
+            distill_module, "get_session_manager", lambda dataset_id=None: session_manager
+        )
 
         _qa_rows, context_entries = await distill_module.load_distillable_session_inputs(
-            SimpleNamespace(user_id="u-1", session_id="s-1")
+            SimpleNamespace(user_id="u-1", session_id="s-1", dataset=SimpleNamespace(id=uuid4()))
         )
 
         assert len(context_entries) == 1
@@ -240,9 +244,9 @@ class TestProfileSymmetry:
         assert sm.updates == writes_before  # no writes from the read-only render
 
         # (3) Distillation sees both profiles.
-        monkeypatch.setattr(distill_module, "get_session_manager", lambda: sm)
+        monkeypatch.setattr(distill_module, "get_session_manager", lambda dataset_id=None: sm)
         _qa_rows, entries = await distill_module.load_distillable_session_inputs(
-            SimpleNamespace(user_id="u", session_id="s")
+            SimpleNamespace(user_id="u", session_id="s", dataset=SimpleNamespace(id=uuid4()))
         )
         assert {entry.context_profile for entry in entries} == {"qa", "agent"}
 
@@ -361,7 +365,9 @@ class TestDistillSessionBoundary:
             "get_authorized_existing_datasets",
             fake_get_authorized_existing_datasets,
         )
-        monkeypatch.setattr(distill_module, "get_session_manager", lambda: session_manager)
+        monkeypatch.setattr(
+            distill_module, "get_session_manager", lambda dataset_id=None: session_manager
+        )
 
         result = await distill_module.distill_session("s-1", dataset="team", user=user)
 

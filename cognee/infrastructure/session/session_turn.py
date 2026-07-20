@@ -84,9 +84,13 @@ async def select_session_history(
     chronological order. On any failure, this falls back to the plain last-N window.
     """
     try:
+        storage_id_resolver = getattr(session_manager, "get_storage_session_id", None)
+        storage_session_id = (
+            storage_id_resolver(session_id) if storage_id_resolver is not None else session_id
+        )
         vector_qa_ids = await search_session_qa_ids(
             user_id=user_id,
-            session_id=session_id,
+            session_id=storage_session_id,
             query_text=query_text,
         )
         recent_entries = await session_manager.get_session(

@@ -37,6 +37,11 @@ Subcommands:
             help="Return only the last N entries",
         )
         p_get.add_argument(
+            "--dataset-id",
+            default=None,
+            help="Read the session from this dataset scope (UUID)",
+        )
+        p_get.add_argument(
             "-f",
             "--format",
             choices=["pretty", "json"],
@@ -66,6 +71,7 @@ Subcommands:
                 session_id=sid,
                 last_n=args.last_n,
                 user=user,
+                dataset_id=args.dataset_id,
             )
             if not entries:
                 fmt.echo(f"No entries in session '{sid}'.")

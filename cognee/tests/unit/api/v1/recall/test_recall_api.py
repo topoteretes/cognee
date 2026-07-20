@@ -17,6 +17,52 @@ def api_recall_mod():
 
 
 @pytest.mark.asyncio
+async def test_recall_infers_owner_unique_dataset_for_default_session_flow(
+    monkeypatch, api_recall_mod
+):
+    user = _make_user()
+    dataset_id = uuid4()
+    captured = {}
+
+    metrics = importlib.import_module("cognee.modules.session_lifecycle.metrics")
+    serve_state = importlib.import_module("cognee.api.v1.serve.state")
+
+    async def infer_scope(**kwargs):
+        captured["inference"] = kwargs
+        return dataset_id
+
+    async def authorized(datasets, permission_type, resolved_user):
+        assert datasets == [dataset_id]
+        assert permission_type == "read"
+        assert resolved_user is user
+        return [types.SimpleNamespace(id=dataset_id)]
+
+    async def search_session(**kwargs):
+        captured["search_dataset_id"] = kwargs["dataset_id"]
+        return []
+
+    monkeypatch.setattr(metrics, "get_owned_session_dataset_id", infer_scope)
+    monkeypatch.setattr(api_recall_mod, "get_authorized_existing_datasets", authorized)
+    monkeypatch.setattr(api_recall_mod, "_search_session", search_session)
+    monkeypatch.setattr(serve_state, "get_remote_client", lambda: None)
+
+    assert (
+        await api_recall_mod.recall(
+            query_text="q",
+            session_id="remembered-session",
+            scope="session",
+            user=user,
+        )
+        == []
+    )
+    assert captured["inference"] == {
+        "session_id": "remembered-session",
+        "user_id": user.id,
+    }
+    assert captured["search_dataset_id"] == dataset_id
+
+
+@pytest.mark.asyncio
 async def test_recall_dataset_ids_takes_precedence_over_datasets(monkeypatch, api_recall_mod):
     user = _make_user()
     explicit_id = uuid4()
@@ -128,13 +174,14 @@ async def test_recall_session_with_dataset_ids_does_not_short_circuit_graph(
         return []
 
     async def dummy_get_authorized_existing_datasets(*args, **kwargs):
-        captured["resolved_from_datasets"] = True
-        return []
+        captured["authorized_session_dataset"] = args[0]
+        return [types.SimpleNamespace(id=explicit_id)]
 
     def dummy_get_remote_client():
         return None
 
     async def dummy_search_session(**kwargs):
+        captured["session_dataset_id"] = kwargs.get("dataset_id")
         return []
 
     async def dummy_search_trace(**kwargs):
@@ -169,7 +216,25 @@ async def test_recall_session_with_dataset_ids_does_not_short_circuit_graph(
 
     assert out == []
     assert captured["dataset_ids"] == [explicit_id]
-    assert "resolved_from_datasets" not in captured
+    assert captured["authorized_session_dataset"] == [explicit_id]
+    assert captured["session_dataset_id"] == explicit_id
+
+
+@pytest.mark.asyncio
+async def test_recall_session_scope_rejects_ambiguous_dataset_list(monkeypatch, api_recall_mod):
+    from cognee.exceptions import CogneeValidationError
+
+    serve_state = importlib.import_module("cognee.api.v1.serve.state")
+    monkeypatch.setattr(serve_state, "get_remote_client", lambda: None)
+
+    with pytest.raises(CogneeValidationError, match="exactly one dataset"):
+        await api_recall_mod.recall(
+            query_text="q",
+            scope="session",
+            dataset_ids=[uuid4(), uuid4()],
+            session_id="session-1",
+            user=_make_user(),
+        )
 
 
 # ----------------------------------------------------------------- session_context scope
@@ -192,9 +257,12 @@ async def test_recall_session_context_scope_threads_profile(monkeypatch, api_rec
     user = _make_user()
     captured = {}
 
-    async def dummy_fetch_session_context(query_text, session_id, context_profile, user=None):
+    async def dummy_fetch_session_context(
+        query_text, session_id, context_profile, user=None, dataset_id=None
+    ):
         captured["context_profile"] = context_profile
         captured["session_id"] = session_id
+        captured["dataset_id"] = dataset_id
         return [
             ResponseSessionContextEntry(
                 content="block", context_profile=context_profile, source="session_context"
@@ -213,7 +281,7 @@ async def test_recall_session_context_scope_threads_profile(monkeypatch, api_rec
         user=user,
     )
 
-    assert captured == {"context_profile": "agent", "session_id": "s"}
+    assert captured == {"context_profile": "agent", "session_id": "s", "dataset_id": None}
     assert len(out) == 1
     assert out[0].source == "session_context"
     assert out[0].context_profile == "agent"
@@ -405,11 +473,11 @@ async def test_fetch_session_context_renders_profile_read_only(monkeypatch, api_
 
     fake = _FakeSM()
 
-    async def fake_resolve_cache_user(session_id, caller_user_id):
+    async def fake_resolve_cache_user(session_id, caller_user_id, dataset_id=None):
         return caller_user_id
 
     gsm_mod = importlib.import_module("cognee.infrastructure.session.get_session_manager")
-    monkeypatch.setattr(gsm_mod, "get_session_manager", lambda: fake)
+    monkeypatch.setattr(gsm_mod, "get_session_manager", lambda dataset_id=None: fake)
     monkeypatch.setattr(api_recall_mod, "_resolve_session_cache_user_id", fake_resolve_cache_user)
 
     out = await api_recall_mod._fetch_session_context(
@@ -434,11 +502,11 @@ async def test_fetch_session_context_empty_when_no_lessons(monkeypatch, api_reca
         async def get_session_context_entries(self, user_id, session_id):
             return []
 
-    async def fake_resolve_cache_user(session_id, caller_user_id):
+    async def fake_resolve_cache_user(session_id, caller_user_id, dataset_id=None):
         return caller_user_id
 
     gsm_mod = importlib.import_module("cognee.infrastructure.session.get_session_manager")
-    monkeypatch.setattr(gsm_mod, "get_session_manager", lambda: _EmptySM())
+    monkeypatch.setattr(gsm_mod, "get_session_manager", lambda dataset_id=None: _EmptySM())
     monkeypatch.setattr(api_recall_mod, "_resolve_session_cache_user_id", fake_resolve_cache_user)
 
     out = await api_recall_mod._fetch_session_context(

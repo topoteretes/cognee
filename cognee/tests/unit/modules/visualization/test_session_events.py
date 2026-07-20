@@ -1,7 +1,27 @@
-"""Unit tests for the session operation-event mapper (pure, no cache/DB)."""
+"""Unit tests for session operation-event collection and mapping."""
 
+from datetime import datetime, timezone
+from uuid import uuid4
+
+import pytest
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+from cognee.context_global_variables import current_dataset_id
 from cognee.infrastructure.databases.cache.models import SessionQAEntry
-from cognee.modules.visualization.session_events import map_session_entries_to_events
+from cognee.infrastructure.session.session_scope import get_storage_session_id
+from cognee.modules.session_lifecycle.models import SessionRecord
+from cognee.modules.visualization.session_events import (
+    _list_recent_session_ids,
+    map_session_entries_to_events,
+)
+
+
+class _RelationalEngine:
+    def __init__(self, engine):
+        self._sessions = async_sessionmaker(engine, expire_on_commit=False)
+
+    def get_async_session(self):
+        return self._sessions()
 
 
 def _entry(**overrides):
@@ -64,3 +84,80 @@ class TestMapSessionEntriesToEvents:
         assert map_session_entries_to_events("s1", entries) == map_session_entries_to_events(
             "s1", entries
         )
+
+
+@pytest.mark.asyncio
+async def test_recent_session_ids_are_public_and_filtered_to_active_dataset(monkeypatch):
+    import cognee.infrastructure.databases.relational as relational
+
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(SessionRecord.__table__.create)
+    wrapper = _RelationalEngine(engine)
+    monkeypatch.setattr(relational, "get_relational_engine", lambda: wrapper)
+
+    owner_id = uuid4()
+    other_owner_id = uuid4()
+    dataset_a = uuid4()
+    dataset_b = uuid4()
+    now = datetime.now(timezone.utc)
+
+    async with wrapper.get_async_session() as session:
+        session.add_all(
+            [
+                SessionRecord(
+                    session_id=get_storage_session_id("dataset-a-session", dataset_a),
+                    public_session_id="dataset-a-session",
+                    user_id=owner_id,
+                    dataset_id=dataset_a,
+                    status="running",
+                    started_at=now,
+                    last_activity_at=now,
+                ),
+                SessionRecord(
+                    session_id=get_storage_session_id("dataset-b-session", dataset_b),
+                    public_session_id="dataset-b-session",
+                    user_id=owner_id,
+                    dataset_id=dataset_b,
+                    status="running",
+                    started_at=now,
+                    last_activity_at=now,
+                ),
+                # A legacy row may carry a stale sticky dataset id, but must
+                # remain quarantined from dataset-scoped visualization.
+                SessionRecord(
+                    session_id="legacy-session",
+                    public_session_id=None,
+                    user_id=owner_id,
+                    dataset_id=dataset_a,
+                    status="running",
+                    started_at=now,
+                    last_activity_at=now,
+                ),
+                SessionRecord(
+                    session_id=get_storage_session_id("other-owner-session", dataset_a),
+                    public_session_id="other-owner-session",
+                    user_id=other_owner_id,
+                    dataset_id=dataset_a,
+                    status="running",
+                    started_at=now,
+                    last_activity_at=now,
+                ),
+            ]
+        )
+        await session.commit()
+
+    try:
+        dataset_token = current_dataset_id.set(str(dataset_a))
+        try:
+            assert await _list_recent_session_ids(owner_id, 10) == ["dataset-a-session"]
+        finally:
+            current_dataset_id.reset(dataset_token)
+
+        legacy_token = current_dataset_id.set(None)
+        try:
+            assert await _list_recent_session_ids(owner_id, 10) == ["legacy-session"]
+        finally:
+            current_dataset_id.reset(legacy_token)
+    finally:
+        await engine.dispose()

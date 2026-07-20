@@ -61,7 +61,10 @@ class CloudClient:
         session = await self._get_session()
 
         form = aiohttp.FormData()
-        form.add_field("datasetName", dataset_name)
+        if dataset_name:
+            form.add_field("datasetName", dataset_name)
+        if kwargs.get("dataset_id") is not None:
+            form.add_field("datasetId", str(kwargs["dataset_id"]))
 
         if kwargs.get("session_id"):
             form.add_field("session_id", kwargs["session_id"])
@@ -141,6 +144,7 @@ class CloudClient:
         self,
         entry,
         dataset_name: str = "main_dataset",
+        dataset_id: Optional[UUID] = None,
         session_id: Optional[str] = None,
         skill_improvement: Optional[dict] = None,
     ) -> dict:
@@ -156,6 +160,7 @@ class CloudClient:
         payload = {
             "entry": entry_dump,
             "dataset_name": dataset_name,
+            "dataset_id": str(dataset_id) if dataset_id is not None else None,
             "session_id": session_id,
             "skill_improvement": skill_improvement,
         }

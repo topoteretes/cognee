@@ -1,4 +1,5 @@
 import sys
+from uuid import uuid4
 
 import pytest
 from types import SimpleNamespace
@@ -7,7 +8,7 @@ from unittest.mock import AsyncMock, patch
 from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.cache.models import SessionQAEntry
 from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
-from cognee.modules.users.exceptions.exceptions import UserNotFoundError
+from cognee.modules.users.exceptions.exceptions import PermissionDeniedError, UserNotFoundError
 
 
 def _user(id_: str):
@@ -172,7 +173,7 @@ class TestResolveUser:
 
         await delete_feedback(session_id="s1", qa_id="q1")
         sm.delete_feedback.assert_called_once_with(
-            user_id="ctx-user-id", session_id="s1", qa_id="q1"
+            user_id="ctx-user-id", session_id="s1", qa_id="q1", dataset_id=None
         )
 
     @pytest.mark.asyncio
@@ -189,6 +190,78 @@ class TestResolveUser:
 
 class TestGetSession:
     """Tests for get_session."""
+
+    @pytest.mark.asyncio
+    async def test_infers_unique_owner_dataset_when_scope_is_omitted(self, monkeypatch, sm):
+        from cognee.api.v1.session.session import get_session
+        from cognee.modules.session_lifecycle import metrics
+
+        user_id = uuid4()
+        dataset_id = uuid4()
+        user = _user(str(user_id))
+        infer_scope = AsyncMock(return_value=dataset_id)
+        authorize = AsyncMock(return_value=SimpleNamespace(id=dataset_id))
+        monkeypatch.setattr(metrics, "get_owned_session_dataset_id", infer_scope)
+        monkeypatch.setattr(_session_module(), "get_authorized_dataset", authorize)
+
+        await get_session(session_id="scoped", user=user)
+
+        infer_scope.assert_awaited_once_with(session_id="scoped", user_id=user_id)
+        authorize.assert_awaited_once_with(user, dataset_id, "read")
+        assert sm.get_session.await_args.kwargs["dataset_id"] == dataset_id
+
+    @pytest.mark.asyncio
+    async def test_explicit_dataset_scope_is_canonicalized_and_read_authorized(self, sm):
+        from cognee.api.v1.session.session import get_session
+
+        user = _user(str(uuid4()))
+        dataset_id = uuid4()
+        authorize = AsyncMock(return_value=SimpleNamespace(id=dataset_id))
+
+        with patch.object(_session_module(), "get_authorized_dataset", authorize):
+            await get_session(
+                session_id="scoped",
+                dataset_id=str(dataset_id),
+                user=user,
+            )
+
+        authorize.assert_awaited_once_with(user, dataset_id, "read")
+        assert sm.get_session.await_args.kwargs["dataset_id"] == dataset_id
+
+    @pytest.mark.asyncio
+    async def test_revoked_read_permission_rejects_inferred_dataset_scope(self, monkeypatch, sm):
+        from cognee.api.v1.session.session import get_session
+        from cognee.modules.session_lifecycle import metrics
+
+        user = _user(str(uuid4()))
+        dataset_id = uuid4()
+        infer_scope = AsyncMock(return_value=dataset_id)
+        authorize = AsyncMock(side_effect=PermissionDeniedError())
+        monkeypatch.setattr(metrics, "get_owned_session_dataset_id", infer_scope)
+        monkeypatch.setattr(_session_module(), "get_authorized_dataset", authorize)
+
+        with pytest.raises(PermissionDeniedError):
+            await get_session(session_id="revoked", user=user)
+
+        authorize.assert_awaited_once_with(user, dataset_id, "read")
+        sm.get_session.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_legacy_unscoped_session_remains_owner_only(self, monkeypatch, sm):
+        from cognee.api.v1.session.session import get_session
+        from cognee.modules.session_lifecycle import metrics
+
+        user = _user(str(uuid4()))
+        infer_scope = AsyncMock(return_value=None)
+        authorize = AsyncMock()
+        monkeypatch.setattr(metrics, "get_owned_session_dataset_id", infer_scope)
+        monkeypatch.setattr(_session_module(), "get_authorized_dataset", authorize)
+
+        await get_session(session_id="legacy", user=user)
+
+        authorize.assert_not_awaited()
+        assert sm.get_session.await_args.kwargs["user_id"] == str(user.id)
+        assert sm.get_session.await_args.kwargs["dataset_id"] is None
 
     @pytest.mark.asyncio
     async def test_returns_empty_when_raw_empty(self, session_user_ctx, sm):
@@ -343,6 +416,38 @@ class TestAddFeedback:
         assert kw["feedback_text"] is None
         assert kw["feedback_score"] is None
 
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("function_name", "manager_method"),
+        [
+            ("add_feedback", "add_feedback"),
+            ("add_frequency_weights", "update_qa"),
+            ("delete_feedback", "delete_feedback"),
+        ],
+    )
+    async def test_dataset_mutations_reject_unauthorized_write_access(
+        self,
+        function_name,
+        manager_method,
+        sm,
+    ):
+        user = _user(str(uuid4()))
+        dataset_id = uuid4()
+        authorize = AsyncMock(side_effect=PermissionDeniedError())
+        mutation = getattr(_session_module(), function_name)
+
+        with patch.object(_session_module(), "get_authorized_dataset", authorize):
+            with pytest.raises(PermissionDeniedError):
+                await mutation(
+                    session_id="scoped",
+                    qa_id="qa-1",
+                    dataset_id=str(dataset_id),
+                    user=user,
+                )
+
+        authorize.assert_awaited_once_with(user, dataset_id, "write")
+        getattr(sm, manager_method).assert_not_awaited()
+
 
 # add_frequency_weights
 
@@ -455,7 +560,7 @@ class TestDeleteFeedback:
         result = await delete_feedback(session_id="s1", qa_id="q1")
         assert result is True
         sm.delete_feedback.assert_called_once_with(
-            user_id="ctx-user-id", session_id="s1", qa_id="q1"
+            user_id="ctx-user-id", session_id="s1", qa_id="q1", dataset_id=None
         )
 
     @pytest.mark.asyncio

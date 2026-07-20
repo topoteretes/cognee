@@ -23,6 +23,10 @@ import { parseServerIso, formatDate, formatRelativeTime, durationSeconds, format
 const ACCENT = "#6510F4";
 const RANGES: TimeRange[] = ["24h", "7d", "30d", "all"];
 
+function sessionKey(session: Pick<SessionRow, "session_id" | "user_id" | "dataset_id">): string {
+  return JSON.stringify([session.user_id, session.dataset_id, session.session_id]);
+}
+
 function statusColor(status: string): string {
   switch ((status || "").toLowerCase()) {
     case "completed": return "#22C55E";
@@ -438,7 +442,7 @@ export default function SessionsPage() {
   const [stats, setStats] = useState<SessionStats | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedSession, setSelectedSession] = useState<SessionRow | null>(null);
   const [detail, setDetail] = useState<SessionDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -467,20 +471,26 @@ export default function SessionsPage() {
       listSessions(cogniInstance, { range, limit: 100 }).then((page) => setSessions(page.sessions)),
       getSessionStats(cogniInstance, range).then(setStats),
     ];
-    if (selectedId) {
-      tasks.push(getSessionDetail(cogniInstance, selectedId).then(setDetail));
+    if (selectedSession) {
+      tasks.push(getSessionDetail(cogniInstance, selectedSession.session_id, {
+        datasetId: selectedSession.dataset_id,
+        ownerUserId: selectedSession.user_id,
+      }).then(setDetail));
     }
     setRefreshNonce((n) => n + 1);
     await Promise.all(tasks);
     setRefreshing(false);
-  }, [cogniInstance, range, selectedId]);
+  }, [cogniInstance, range, selectedSession]);
 
-  const selectSession = useCallback(async (id: string) => {
+  const selectSession = useCallback(async (session: SessionRow) => {
     if (!cogniInstance) return;
-    setSelectedId(id);
+    setSelectedSession(session);
     setDetail(null);
     setDetailLoading(true);
-    const d = await getSessionDetail(cogniInstance, id);
+    const d = await getSessionDetail(cogniInstance, session.session_id, {
+      datasetId: session.dataset_id,
+      ownerUserId: session.user_id,
+    });
     setDetail(d);
     setDetailLoading(false);
   }, [cogniInstance]);
@@ -582,9 +592,9 @@ export default function SessionsPage() {
             </div>
             <div style={{ flex: 1, overflowY: "auto" }}>
               {sessions.map((s, i) => {
-                const active = s.session_id === selectedId;
+                const active = selectedSession !== null && sessionKey(s) === sessionKey(selectedSession);
                 return (
-                  <div key={s.session_id} onClick={() => selectSession(s.session_id)}
+                  <div key={sessionKey(s)} onClick={() => selectSession(s)}
                     style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", borderBottom: i < sessions.length - 1 ? "1px solid rgba(255,255,255,0.07)" : "none", cursor: "pointer", background: active ? "rgba(188,155,255,0.20)" : "transparent", borderLeft: active ? `2px solid ${ACCENT}` : "2px solid transparent" }}
                     onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = "rgba(255,255,255,0.06)"; }}
                     onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = "transparent"; }}
@@ -607,7 +617,7 @@ export default function SessionsPage() {
 
           {/* Detail */}
           <div style={{ flex: 1, overflowY: "auto", padding: "24px 28px 24px 28px" }}>
-            {!selectedId ? (
+            {!selectedSession ? (
               <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", gap: 8 }}>
                 <span style={{ fontSize: 13, color: "rgba(237,236,234,0.35)" }}>Select a session to inspect its tools, files, and metadata</span>
               </div>

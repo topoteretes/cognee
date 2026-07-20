@@ -19,6 +19,7 @@ Endpoints under test:
 
 import os
 import uuid
+from types import SimpleNamespace
 import pytest
 from unittest.mock import MagicMock, patch
 
@@ -434,6 +435,14 @@ class TestAgentsE2E:
         async def persisted_agent_connections(_user_id, active_only=True):
             return []
 
+        async def authorized_dataset(_user, dataset_id, _permission):
+            return SimpleNamespace(id=dataset_id, name="project_dataset")
+
+        async def authorized_dataset_by_name(dataset_name, _user, _permission):
+            return SimpleNamespace(
+                id=uuid.uuid5(uuid.NAMESPACE_URL, dataset_name), name=dataset_name
+            )
+
         with (
             patch(
                 "cognee.modules.agents.operations._readable_datasets_for",
@@ -446,6 +455,14 @@ class TestAgentsE2E:
             patch(
                 "cognee.modules.agents.operations.list_persisted_agent_connections",
                 persisted_agent_connections,
+            ),
+            patch(
+                "cognee.modules.agents.operations.get_authorized_dataset",
+                authorized_dataset,
+            ),
+            patch(
+                "cognee.modules.agents.operations.get_authorized_dataset_by_name",
+                authorized_dataset_by_name,
             ),
         ):
             yield
