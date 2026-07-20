@@ -328,10 +328,13 @@ class RedisAdapter(CacheDBInterface):
         """
         Retrieve the most recent Q/A/context triplet(s) for the given session.
         """
+        if last_n <= 0:
+            return []
+
         session_key = self._session_key(user_id, session_id)
         if last_n == 1:
             data = await self.async_redis.lindex(session_key, -1)
-            return [SessionQAEntry.model_validate_json(data)] if data else None
+            return [SessionQAEntry.model_validate_json(data)] if data else []
         data = await self.async_redis.lrange(session_key, -last_n, -1)
         return [SessionQAEntry.model_validate_json(d) for d in data] if data else []
 
@@ -574,6 +577,8 @@ class RedisAdapter(CacheDBInterface):
         """Retrieve stored trace steps for the given session."""
         trace_key = self._agent_trace_key(user_id, session_id)
         if last_n is not None:
+            if last_n <= 0:
+                return []
             return [
                 SessionAgentTraceEntry(**entry)
                 for entry in await self._load_entries(trace_key, -last_n, -1)

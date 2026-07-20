@@ -492,6 +492,9 @@ class SqlCacheAdapter(CacheDBInterface):
         self, user_id: str, session_id: str, last_n: int = 5
     ) -> List[SessionQAEntry]:
         """Return the most recent QA entries (chronological); [] when none, for all last_n."""
+        if last_n <= 0:
+            return []
+
         await self._ensure_initialized()
         try:
             async with self.sessionmaker() as session:
@@ -754,6 +757,9 @@ class SqlCacheAdapter(CacheDBInterface):
         self, user_id: str, session_id: str, last_n: Optional[int] = None
     ) -> List[SessionAgentTraceEntry]:
         """Retrieve stored trace steps for the given session (reads don't refresh TTL)."""
+        if last_n is not None and last_n <= 0:
+            return []
+
         await self._ensure_initialized()
         try:
             async with self.sessionmaker() as session:
