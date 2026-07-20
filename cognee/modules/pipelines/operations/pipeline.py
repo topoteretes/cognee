@@ -1,8 +1,9 @@
 import asyncio
 from contextvars import ContextVar
+from typing import Any, AsyncIterator, Awaitable, Callable, Optional, Union
 from uuid import UUID
-from typing import AsyncIterator, Awaitable, Callable, Optional, Union
 
+from cognee.infrastructure.locks.dataset_pipeline_lock import dataset_pipeline_lock
 from cognee.modules.pipelines.layers.setup_and_check_environment import (
     setup_and_check_environment,
 )
@@ -23,37 +24,17 @@ from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
 from cognee.modules.pipelines.layers.check_pipeline_run_qualification import (
     check_pipeline_run_qualification,
 )
-from typing import Any
 
 logger = get_logger("cognee.pipeline")
 
 update_status_lock = asyncio.Lock()
 
-# Per-dataset locks so concurrent pipeline runs on the SAME dataset are serialized:
-# a run waits until any in-flight run for that dataset finishes, while different
-# datasets still run in parallel.
-# NOTE: process-local only (asyncio) — this does NOT protect against multiple
-# processes/workers running against the same dataset. To be replaced by a
-# cross-process mechanism (e.g. DB-backed lock) later.
-_dataset_locks: dict[UUID, asyncio.Lock] = {}
-_dataset_locks_guard = asyncio.Lock()
-
 # Tracks the dataset ids whose per-dataset lock is already held by the current
 # execution. A pipeline task may legitimately start another pipeline on the same
 # dataset (e.g. cognify_session -> add()/cognify()); without this, re-acquiring the
-# non-reentrant _dataset_locks[dataset_id] from the same execution self-deadlocks.
+# non-reentrant dataset lock from the same execution self-deadlocks.
 # ContextVar propagates into the child tasks run_tasks spawns via asyncio.create_task.
 _held_datasets: ContextVar[frozenset] = ContextVar("_held_datasets", default=frozenset())
-
-
-async def _get_dataset_lock(dataset_id: UUID) -> asyncio.Lock:
-    """Return the asyncio.Lock for a dataset, creating it on first use."""
-    async with _dataset_locks_guard:
-        lock = _dataset_locks.get(dataset_id)
-        if lock is None:
-            lock = asyncio.Lock()
-            _dataset_locks[dataset_id] = lock
-        return lock
 
 
 async def _drive_marking_held(dataset_id: UUID, source: AsyncIterator[Any]) -> AsyncIterator[Any]:
@@ -183,6 +164,6 @@ async def run_pipeline_per_dataset(
 
     # External run: serialize on the per-dataset lock, marking the dataset held so
     # any nested run on it takes the re-entrant path above.
-    async with await _get_dataset_lock(dataset.id):
+    async with dataset_pipeline_lock(dataset.id):
         async for run_info in _drive_marking_held(dataset.id, _run_body()):
             yield run_info
