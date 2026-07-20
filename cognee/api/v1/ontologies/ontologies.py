@@ -62,9 +62,14 @@ class OntologyService:
         if ontology_key in metadata:
             raise ValueError(f"Ontology key '{ontology_key}' already exists")
 
+        # Prevent path traversal from writing files outside the user's ontology directory.
+        base_dir = user_dir.resolve()
+        file_path = (user_dir / f"{ontology_key}.owl").resolve()
+        if file_path.parent != base_dir:
+            raise ValueError("Invalid ontology key")
+
         content = await file.read()
 
-        file_path = user_dir / f"{ontology_key}.owl"
         with open(file_path, "wb") as f:
             f.write(content)
 
@@ -141,6 +146,7 @@ class OntologyService:
             ValueError: If any ontology key not found
         """
         user_dir = self._get_user_dir(str(user.id))
+        base_dir = user_dir.resolve()
         metadata = self._load_metadata(user_dir)
 
         contents = []
@@ -148,7 +154,10 @@ class OntologyService:
             if key not in metadata:
                 raise ValueError(f"Ontology key '{key}' not found")
 
-            file_path = user_dir / f"{key}.owl"
+            file_path = (user_dir / f"{key}.owl").resolve()
+            if file_path.parent != base_dir:
+                raise ValueError("Invalid ontology key")
+
             if not file_path.exists():
                 raise ValueError(f"Ontology file for key '{key}' not found")
 
