@@ -2,6 +2,7 @@ import asyncio
 
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.vector import get_vector_engine_async
+from cognee.infrastructure.databases.vector.embeddings.config import get_embedding_context_config
 from cognee.infrastructure.engine import DataPoint
 
 logger = get_logger("index_data_points")
@@ -10,9 +11,11 @@ logger = get_logger("index_data_points")
 async def index_data_points(data_points: list[DataPoint], vector_engine=None):
     """Index data points in the vector engine by creating embeddings for specified fields.
 
-    Each data point is indexed individually. A semaphore (sized to the embedding
-    engine's batch_size) keeps that many calls in flight at all times, so as one
-    completes the next starts immediately without waiting for an entire batch to drain.
+    Data points are indexed in batches of the embedding engine's batch_size. A semaphore
+    bounds how many batches run concurrently so that at most
+    ``embedding_max_concurrent_data_points`` data points (default 150, env
+    ``EMBEDDING_MAX_CONCURRENT_DATA_POINTS``) are in flight at once:
+    ``max(1, embedding_max_concurrent_data_points // batch_size)`` concurrent batches.
 
     Args:
         data_points: List of DataPoint objects to index. Each DataPoint's metadata must
@@ -52,7 +55,8 @@ async def index_data_points(data_points: list[DataPoint], vector_engine=None):
             data_points_by_type[type_name][field_name].append(indexed_data_point)
 
     batch_size = vector_engine.embedding_engine.get_batch_size()
-    semaphore = asyncio.Semaphore(4)
+    max_concurrent_data_points = get_embedding_context_config().embedding_max_concurrent_data_points
+    semaphore = asyncio.Semaphore(max(1, max_concurrent_data_points // batch_size))
 
     async def _index_batch(type_name, field_name, batch):
         async with semaphore:

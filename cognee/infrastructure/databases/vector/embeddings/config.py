@@ -80,6 +80,9 @@ class EmbeddingConfig(BaseSettings):
     embedding_api_version: Optional[str] = None
     embedding_max_completion_tokens: Optional[int] = 8191
     embedding_batch_size: Optional[int] = None
+    # Total data points allowed in flight to the embedding engine during indexing.
+    # Concurrent embedding requests = max(1, this // embedding_batch_size).
+    embedding_max_concurrent_data_points: int = 150
     huggingface_tokenizer: Optional[str] = None
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
@@ -125,6 +128,7 @@ class EmbeddingConfig(BaseSettings):
             "embedding_max_completion_tokens": self.embedding_max_completion_tokens,
             "huggingface_tokenizer": self.huggingface_tokenizer,
             "embedding_batch_size": self.embedding_batch_size,
+            "embedding_max_concurrent_data_points": self.embedding_max_concurrent_data_points,
         }
 
 
