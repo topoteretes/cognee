@@ -1154,21 +1154,22 @@ async def _remember_inner(
         user = await get_default_user()
         shared_kwargs["user"] = user
 
+    # Build the result object — starts as "running"
+    if not dataset_id and dataset_name:
+        # Create dataset if it doesn't exist
+        user, dataset_id = await resolve_authorized_user_datasets(dataset_name, user)
+        dataset_id = dataset_id[0].id if dataset_id else None
+
     # Session memory: store in session cache, then optionally bridge to graph
     if session_id:
         await _add_to_session(session_id, data, user)
         result = RememberResult(
             status="session_stored",
             dataset_name=dataset_name,
+            dataset_id=str(dataset_id) if dataset_id else None,
             session_ids=[session_id],
         )
         result.elapsed_seconds = time.monotonic() - result._started_at
-
-        # Build the result object — starts as "running"
-        if not dataset_id and dataset_name:
-            # Create dataset if it doesn't exist
-            user, dataset_id = await resolve_authorized_user_datasets(dataset_name, user)
-            dataset_id = dataset_id[0].id if dataset_id else None
 
         # Bridge session data to permanent graph in the background
         if self_improvement:
