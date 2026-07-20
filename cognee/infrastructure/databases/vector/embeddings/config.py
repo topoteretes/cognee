@@ -81,6 +81,12 @@ class EmbeddingConfig(BaseSettings):
     embedding_max_completion_tokens: Optional[int] = 8191
     embedding_batch_size: Optional[int] = None
     huggingface_tokenizer: Optional[str] = None
+    # Some providers (e.g. NVIDIA NIM's nv-embed family) require an
+    # "input_type" field in the embedding request body (typically "query" or
+    # "passage"/"document"). This is not part of the OpenAI embeddings spec,
+    # so it has no effect on providers that don't recognize it. Configure via
+    # the EMBEDDING_INPUT_TYPE env var.
+    embedding_input_type: Optional[str] = None
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
     def model_post_init(self, __context) -> None:
@@ -124,6 +130,7 @@ class EmbeddingConfig(BaseSettings):
             "embedding_api_version": self.embedding_api_version,
             "embedding_max_completion_tokens": self.embedding_max_completion_tokens,
             "huggingface_tokenizer": self.huggingface_tokenizer,
+            "embedding_input_type": self.embedding_input_type,
             "embedding_batch_size": self.embedding_batch_size,
         }
 

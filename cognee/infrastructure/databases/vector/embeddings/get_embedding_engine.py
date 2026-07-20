@@ -35,6 +35,7 @@ def get_embedding_engine() -> EmbeddingEngine:
         config.huggingface_tokenizer,
         llm_config.llm_api_key,
         llm_config.llm_provider,
+        config.embedding_input_type,
     )
 
 
@@ -51,6 +52,7 @@ def create_embedding_engine(
     huggingface_tokenizer,
     llm_api_key,
     llm_provider,
+    embedding_input_type=None,
 ):
     """
     Create and return an embedding engine based on the specified provider.
@@ -111,6 +113,7 @@ def create_embedding_engine(
             endpoint=embedding_endpoint,
             api_key=embedding_api_key or llm_api_key,
             batch_size=embedding_batch_size,
+            input_type=embedding_input_type,
         )
 
     from .LiteLLMEmbeddingEngine import LiteLLMEmbeddingEngine
@@ -125,4 +128,5 @@ def create_embedding_engine(
         dimensions=embedding_dimensions,
         max_completion_tokens=embedding_max_completion_tokens,
         batch_size=embedding_batch_size,
+        input_type=embedding_input_type,
     )
