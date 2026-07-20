@@ -1,7 +1,7 @@
 import os
 import asyncio
 from typing import Any, Dict, List, Optional, Type
-from datetime import datetime
+from datetime import datetime, timezone
 
 from operator import itemgetter
 from cognee.base_config import get_base_config
@@ -93,7 +93,7 @@ class TemporalRetriever(GraphCompletionRetriever):
         else:
             base_directory = None
 
-        time_now = datetime.now().strftime("%d-%m-%Y")
+        time_now = datetime.now(timezone.utc).strftime("%d-%m-%Y")
 
         system_prompt = render_prompt(
             prompt_path, {"time_now": time_now}, base_directory=base_directory

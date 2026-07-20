@@ -48,7 +48,7 @@ BEAM_SUPPORTED_SPLITS = ("100K", "500K", "1M", "10M")
 
 
 def print_step(message: str) -> None:
-    print(f"[{datetime.now().strftime('%H:%M:%S')}] {message}", flush=True)
+    print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] {message}", flush=True)
 
 
 def configure_quiet_logging() -> None:

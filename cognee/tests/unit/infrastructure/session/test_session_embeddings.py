@@ -1,7 +1,7 @@
 """Unit tests for session QA vector recall and active-context helpers."""
 
 import importlib
-from datetime import datetime
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -47,7 +47,7 @@ def _entry(section, content, **kwargs):
         section=section,
         content=content,
         normalized_content=normalize_content(content),
-        created_at=kwargs.pop("created_at", datetime.utcnow().isoformat()),
+        created_at=kwargs.pop("created_at", datetime.now(timezone.utc).isoformat()),
         **kwargs,
     )
 

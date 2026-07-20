@@ -13,7 +13,7 @@ work, never the whole run.
 
 import asyncio
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional, Union
 from uuid import UUID
 
@@ -365,7 +365,7 @@ async def publish_distilled_lessons(
     scope: SessionDistillationScope,
     accepted: List[WrittenLesson],
 ) -> List[str]:
-    distilled_on = datetime.utcnow().strftime("%Y-%m-%d")
+    distilled_on = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     documents = [
         render_lesson_document(lesson, session_id=scope.session_id, distilled_on=distilled_on)
         for lesson in accepted

@@ -5,7 +5,7 @@ run anywhere. They verify ranker ordering, budget capping, candidate validation/
 fail-open contract.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import uuid4
 
 import pytest
@@ -28,7 +28,7 @@ def _entry(section, content, **kwargs):
         section=section,
         content=content,
         normalized_content=normalize_content(content),
-        created_at=kwargs.pop("created_at", datetime.utcnow().isoformat()),
+        created_at=kwargs.pop("created_at", datetime.now(timezone.utc).isoformat()),
         **kwargs,
     )
 
