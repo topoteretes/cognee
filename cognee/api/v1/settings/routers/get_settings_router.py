@@ -1,8 +1,9 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from pydantic import ConfigDict
+
 from cognee.api.DTO import InDTO, OutDTO
-from typing import Union, Optional, Literal
-from cognee.modules.users.methods import get_authenticated_user
-from fastapi import Depends
+from typing import Union, Optional, Literal, cast
+from cognee.modules.users.methods import get_authenticated_superuser
 from cognee.modules.users.models import User
 from cognee.modules.settings.get_settings import LLMConfig, VectorDBConfig
 
@@ -21,6 +22,8 @@ class SettingsDTO(OutDTO):
 
 
 class LLMConfigInputDTO(InDTO):
+    model_config = ConfigDict(extra="forbid")
+
     provider: Union[
         Literal["openai"],
         Literal["ollama"],
@@ -33,6 +36,8 @@ class LLMConfigInputDTO(InDTO):
 
 
 class VectorDBConfigInputDTO(InDTO):
+    model_config = ConfigDict(extra="forbid")
+
     provider: Union[
         Literal["lancedb"],
         Literal["pgvector"],
@@ -42,6 +47,8 @@ class VectorDBConfigInputDTO(InDTO):
 
 
 class SettingsPayloadDTO(InDTO):
+    model_config = ConfigDict(extra="forbid")
+
     llm: Optional[LLMConfigInputDTO] = None
     vector_db: Optional[VectorDBConfigInputDTO] = None
 
@@ -50,7 +57,7 @@ def get_settings_router() -> APIRouter:
     router = APIRouter()
 
     @router.get("", response_model=SettingsDTO)
-    async def get_settings(user: User = Depends(get_authenticated_user)):
+    async def get_settings(user: User = Depends(get_authenticated_superuser)):
         """
         Get the current system settings.
 
@@ -64,6 +71,8 @@ def get_settings_router() -> APIRouter:
         - **vector_db**: Vector database configuration (provider, URL, API key)
 
         ## Error Codes
+        - **401 Unauthorized**: Authentication is required
+        - **403 Forbidden**: The authenticated user is not a superuser
         - **500 Internal Server Error**: Error retrieving settings
         """
         from cognee.modules.settings import get_settings as get_cognee_settings
@@ -72,7 +81,8 @@ def get_settings_router() -> APIRouter:
 
     @router.post("", response_model=None)
     async def save_settings(
-        new_settings: SettingsPayloadDTO, user: User = Depends(get_authenticated_user)
+        new_settings: SettingsPayloadDTO,
+        user: User = Depends(get_authenticated_superuser),
     ):
         """
         Save or update system settings.
@@ -90,14 +100,20 @@ def get_settings_router() -> APIRouter:
 
         ## Error Codes
         - **400 Bad Request**: Invalid settings provided
+        - **401 Unauthorized**: Authentication is required
+        - **403 Forbidden**: The authenticated user is not a superuser
         - **500 Internal Server Error**: Error saving settings
         """
         from cognee.modules.settings import save_llm_config, save_vector_db_config
+        from cognee.modules.settings.save_llm_config import LLMConfig as LLMConfigUpdate
+        from cognee.modules.settings.save_vector_db_config import (
+            VectorDBConfig as VectorDBConfigUpdate,
+        )
 
         if new_settings.llm is not None:
-            await save_llm_config(new_settings.llm)
+            await save_llm_config(cast(LLMConfigUpdate, new_settings.llm))
 
         if new_settings.vector_db is not None:
-            await save_vector_db_config(new_settings.vector_db)
+            await save_vector_db_config(cast(VectorDBConfigUpdate, new_settings.vector_db))
 
     return router
