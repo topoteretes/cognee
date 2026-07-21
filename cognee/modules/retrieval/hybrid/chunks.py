@@ -35,7 +35,7 @@ async def retrieve_hybrid_chunks(
     query_vector: Optional[list[float]] = None,
     use_truth_weight: bool = False,
     q_coords: Optional[list[float]] = None,
-    truth_state_by_id: Optional[dict] = None,
+    graph_engine: Any = None,
     current_truth_epoch: Optional[int] = None,
 ) -> dict[str, Any]:
     candidate_limit = max(0, chunks_top_k * 2)
@@ -80,6 +80,10 @@ async def retrieve_hybrid_chunks(
         )
         attach_source_chunks(pairs, source_chunks)
 
+    truth_state_by_id = await load_candidate_truth_state(
+        graph_engine, pairs, use_truth_weight, q_coords, current_truth_epoch
+    )
+
     ranked_pairs = rank_chunk_summary_pairs(
         pairs,
         chunks_top_k,
@@ -101,6 +105,45 @@ async def retrieve_hybrid_chunks(
         "chunks": [pair["chunk"] for pair in ranked_pairs if pair["chunk"] is not None],
         "chunk_summaries": summary_text_by_chunk_id(ranked_pairs),
     }
+
+
+async def load_candidate_truth_state(
+    graph_engine: Any,
+    pairs: list[dict],
+    use_truth_weight: bool,
+    q_coords: Optional[list[float]],
+    current_truth_epoch: Optional[int],
+) -> Optional[dict]:
+    """Batch-fetch truth alignments for every assembled candidate chunk.
+
+    Keyed over the full candidate set (BM25 + vector + summary source chunks),
+    not just the vector window, so ranking applies a consistent truth factor to
+    every channel. Returns ``None`` (baseline) when the truth weight is off or
+    context is missing, and fails open to baseline on any error.
+    """
+    if not (
+        use_truth_weight
+        and q_coords
+        and current_truth_epoch is not None
+        and graph_engine is not None
+    ):
+        return None
+
+    chunk_ids = []
+    seen = set()
+    for pair in pairs:
+        chunk_id = pair["chunk_id"] or result_id(pair["chunk"])
+        if chunk_id and chunk_id not in seen:
+            seen.add(chunk_id)
+            chunk_ids.append(str(chunk_id))
+    if not chunk_ids:
+        return {}
+
+    try:
+        return await graph_engine.get_node_truth_state(chunk_ids)
+    except Exception as error:
+        logger.debug("Truth-subspace lookup failed; using baseline ranking: %s", error)
+        return None
 
 
 def summary_candidate_limit(chunks_top_k: int, text_summaries_top_k: Optional[int]) -> int:
