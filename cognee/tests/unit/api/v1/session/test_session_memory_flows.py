@@ -336,6 +336,11 @@ class TestRememberResult:
                 "get_session_manager",
                 return_value=mock_sm,
             ),
+            patch.object(
+                _get_remember_module(),
+                "resolve_authorized_user_datasets",
+                AsyncMock(return_value=(mock_user, "")),
+            ),
         ):
             from cognee.api.v1.remember.remember import RememberResult, remember
 
