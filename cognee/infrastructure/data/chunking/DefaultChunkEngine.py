@@ -104,7 +104,13 @@ class DefaultChunkEngine:
         """
         data = "".join(data_chunks)
         chunks = []
-        for i in range(0, len(data), chunk_size - chunk_overlap):
+        # Advance by at least one character per step. When chunk_overlap >=
+        # chunk_size the raw stride (chunk_size - chunk_overlap) is 0 or negative:
+        # 0 makes range() raise "arg 3 must not be zero", and a negative stride
+        # yields an empty range that silently drops all data. Clamping to 1 keeps
+        # the loop progressing (heavier overlap) instead of crashing or losing text.
+        step = max(1, chunk_size - chunk_overlap)
+        for i in range(0, len(data), step):
             chunks.append(data[i : i + chunk_size])
         numbered_chunks: list[Any] = []
         for i, chunk in enumerate(chunks):
