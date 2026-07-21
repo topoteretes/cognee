@@ -98,9 +98,9 @@ Cognee is an open-source AI memory platform for AI Agents. Ingest data in any fo
 
 ## Basic Usage & Feature Guide
 
-To learn more, [check out this short, end-to-end Colab walkthrough](https://colab.research.google.com/drive/12Vi9zID-M3fpKpKiaqDBvkk98ElkRPWy?usp=sharing) of Cognee's core features.
+To learn more, [check out this short, end-to-end Colab walkthrough](https://colab.research.google.com/drive/1HRrzIvzcbwrESVfX76wJLKmtIg00SUga?usp=sharing) of Cognee's core features.
 
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/12Vi9zID-M3fpKpKiaqDBvkk98ElkRPWy?usp=sharing)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1HRrzIvzcbwrESVfX76wJLKmtIg00SUga?usp=sharing)
 
 ## Quickstart
 
@@ -368,6 +368,7 @@ Use [Cognee Cloud](https://www.cognee.ai) for a fully managed experience, or sel
 | **Fly.io** | Edge deployment, persistent volumes | `bash distributed/deploy/fly-deploy.sh` |
 | **Render** | Simple PaaS with managed Postgres | Deploy to Render button |
 | **Daytona** | Cloud sandboxes (SDK or CLI) | See `distributed/deploy/daytona_sandbox.py` |
+| **Islo** | Isolated cloud sandboxes (SDK) | See `distributed/deploy/islo_sandbox.py` |
 
 See the [`distributed/`](distributed/) folder for deploy scripts, worker configurations, and additional details.
 

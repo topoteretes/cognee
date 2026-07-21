@@ -1,4 +1,3 @@
-import requests
 import os
 import json
 import random
@@ -45,6 +44,11 @@ class HotpotQAAdapter(BaseBenchmarkAdapter):
             with open(filename, "r", encoding="utf-8") as f:
                 raw_corpus = json.load(f)
         else:
+            # Imported lazily: requests is not a declared cognee dependency
+            # (present transitively today), so keep the benchmark registry
+            # importable regardless.
+            import requests
+
             response = requests.get(self.dataset_info["url"])
             response.raise_for_status()
             raw_corpus = response.json()

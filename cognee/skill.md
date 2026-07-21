@@ -204,7 +204,7 @@ await cognee.run_custom_pipeline(
 
 A `DataPoint` is the **atomic unit of knowledge** in Cognee.
 
-Use this concept whenever the user asks how Cognee represents structured data internally or how to insert graph-native objects directly.
+Use this concept whenever the user asks how Cognee represents structured data internally or how to insert graph objects directly.
 
 Key ideas:
 
@@ -291,6 +291,7 @@ Use these defaults:
 - `NATURAL_LANGUAGE`: natural language to graph query
 - `TEMPORAL`: time-aware graph search
 - `CODING_RULES`: code rules and patterns
+- `CODE`: deterministic code fact lookup, graph traversal, paths, and impact analysis
 - `FEELING_LUCKY`: let Cognee choose automatically
 - `FEEDBACK`: apply feedback to improve later retrieval behavior
 
@@ -560,11 +561,26 @@ await cognee.search(
 
 Use visualization when the user wants to inspect or present the graph.
 
+`visualize_graph` renders a **bounded subgraph** by default (seed nodes + a
+k-hop neighborhood, capped at `max_nodes`) instead of the whole graph.
+
 ```python
+# Default: bounded subgraph. Seed by a query, explicit ids, or a recall result;
+# with none of those, the highest-degree nodes seed a representative view.
 await cognee.visualize_graph("/path/to/output.html")
+await cognee.visualize_graph("/path/to/output.html", query="What relates to Python?")
+await cognee.visualize_graph("/path/to/output.html", seed_node_ids=["node-id-1"])
+await cognee.visualize_graph("/path/to/output.html", recall_result=recall_output)
+
+# Legacy whole-graph render.
+await cognee.visualize_graph("/path/to/output.html", full=True)
+
 await cognee.start_visualization_server(port=8080)
 await cognee.start_ui()
 ```
+
+Caps: `neighborhood_depth=2`, `neighborhood_seed_top_k=10`, `max_nodes=500`.
+See `examples/python/subgraph_visualization_demo.py`.
 
 ## Pruning and reset operations
 
