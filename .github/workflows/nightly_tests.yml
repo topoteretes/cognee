@@ -78,6 +78,50 @@ jobs:
       mock_memories_key: nightly_ci_artifacts/performance_test_artifacts/mock_war_and_peace.json
     secrets: inherit
 
+  # ══ Performance (Rust SDK): builds latest cognee-rs and drives the SAME ═════
+  # ══ orchestrator via cognee-cli bench (file_based, mock LLM, offline). ══════
+  perf-rust:
+    name: Performance — Rust SDK — 50 Small Documents (mock LLM)
+    uses: ./.github/workflows/performance_report_rust.yml
+    with:
+      runs: '3'
+      mode: mock_llm
+      label: 50_small_documents
+      memories: scripts/perf/fixtures/memories.json
+      cassette: scripts/perf/fixtures/cassette.json
+    secrets: inherit
+
+  perf-rust-wap:
+    name: Performance — Rust SDK — War and Peace (mock LLM)
+    uses: ./.github/workflows/performance_report_rust.yml
+    with:
+      runs: '3'
+      mode: mock_llm
+      label: war_and_peace
+      memories: scripts/perf/fixtures/war_and_peace/memories.json
+      cassette: scripts/perf/fixtures/war_and_peace/cassette.json
+    secrets: inherit
+
+  perf-rust-llm:
+    name: Performance — Rust SDK — 50 Small Documents (real LLM)
+    uses: ./.github/workflows/performance_report_rust.yml
+    with:
+      runs: '3'
+      mode: llm
+      label: 50_small_documents
+      memories: scripts/perf/fixtures/memories.json
+    secrets: inherit
+
+  perf-rust-wap-llm:
+    name: Performance — Rust SDK — War and Peace (real LLM)
+    uses: ./.github/workflows/performance_report_rust.yml
+    with:
+      runs: '3'
+      mode: llm
+      label: war_and_peace
+      memories: scripts/perf/fixtures/war_and_peace/memories.json
+    secrets: inherit
+
   notify:
     name: Test Completion Status
     needs: [
@@ -87,6 +131,10 @@ jobs:
       perf-small-mock,
       perf-wap-llm,
       perf-wap-mock,
+      perf-rust,
+      perf-rust-wap,
+      perf-rust-llm,
+      perf-rust-wap-llm,
     ]
     runs-on: ubuntu-latest
     if: ${{ !cancelled() }}
@@ -99,7 +147,11 @@ jobs:
                 "${{ needs.perf-small-llm.result }}" == "success" &&
                 "${{ needs.perf-small-mock.result }}" == "success" &&
                 "${{ needs.perf-wap-llm.result }}" == "success" &&
-                "${{ needs.perf-wap-mock.result }}" == "success" ]]; then
+                "${{ needs.perf-wap-mock.result }}" == "success" &&
+                "${{ needs.perf-rust.result }}" == "success" &&
+                "${{ needs.perf-rust-wap.result }}" == "success" &&
+                "${{ needs.perf-rust-llm.result }}" == "success" &&
+                "${{ needs.perf-rust-wap-llm.result }}" == "success" ]]; then
             echo "passed=true" >> "$GITHUB_OUTPUT"
             echo "emoji=✅" >> "$GITHUB_OUTPUT"
             echo "summary=All nightly test suites completed successfully!" >> "$GITHUB_OUTPUT"
@@ -128,6 +180,10 @@ jobs:
             url_pg_small_mock ${{ needs.perf-small-mock.outputs.postgres_html_key }}
             url_pg_wap_llm ${{ needs.perf-wap-llm.outputs.postgres_html_key }}
             url_pg_wap_mock ${{ needs.perf-wap-mock.outputs.postgres_html_key }}
+            url_rust ${{ needs.perf-rust.outputs.html_key }}
+            url_rust_wap ${{ needs.perf-rust-wap.outputs.html_key }}
+            url_rust_llm ${{ needs.perf-rust-llm.outputs.html_key }}
+            url_rust_wap_llm ${{ needs.perf-rust-wap-llm.outputs.html_key }}
         run: |
           set -euo pipefail
           # 7 days = 604800s is the maximum lifetime for an IAM-user presigned URL.
@@ -138,6 +194,10 @@ jobs:
           done <<< "$REPORT_KEYS"
 
       - name: Post status to Slack
+        # Only post on the real scheduled/manual runs. The pull_request trigger
+        # (which fires when this workflow file itself changes) validates the
+        # pipeline without spamming the nightly Slack channel.
+        if: ${{ github.event_name != 'pull_request' }}
         uses: slackapi/slack-github-action@v2.1.0
         with:
           method: chat.postMessage
@@ -233,6 +293,46 @@ jobs:
                     search     p50 `${{ fromJSON(needs.perf-wap-mock.outputs.postgres_metrics || '{}').search.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-wap-mock.outputs.postgres_metrics || '{}').search.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-wap-mock.outputs.postgres_metrics || '{}').search.p99 }}s`
                     total      p50 `${{ fromJSON(needs.perf-wap-mock.outputs.postgres_metrics || '{}').total.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-wap-mock.outputs.postgres_metrics || '{}').total.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-wap-mock.outputs.postgres_metrics || '{}').total.p99 }}s`
                     <${{ steps.presign.outputs.url_pg_wap_mock }}|HTML report>
+              - type: "section"
+                text:
+                  type: "mrkdwn"
+                  text: |
+                    *🦀 Rust SDK (file_based) — 50 Small Documents — Mock LLM* (`${{ needs.perf-rust.result }}`)  •  runs `${{ fromJSON(needs.perf-rust.outputs.metrics || '{}').success }}`
+                    add      p50 `${{ fromJSON(needs.perf-rust.outputs.metrics || '{}').add.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-rust.outputs.metrics || '{}').add.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-rust.outputs.metrics || '{}').add.p99 }}s`
+                    cognify  p50 `${{ fromJSON(needs.perf-rust.outputs.metrics || '{}').cognify.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-rust.outputs.metrics || '{}').cognify.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-rust.outputs.metrics || '{}').cognify.p99 }}s`
+                    search     p50 `${{ fromJSON(needs.perf-rust.outputs.metrics || '{}').search.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-rust.outputs.metrics || '{}').search.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-rust.outputs.metrics || '{}').search.p99 }}s`
+                    total      p50 `${{ fromJSON(needs.perf-rust.outputs.metrics || '{}').total.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-rust.outputs.metrics || '{}').total.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-rust.outputs.metrics || '{}').total.p99 }}s`
+                    <${{ steps.presign.outputs.url_rust }}|HTML report>
+              - type: "section"
+                text:
+                  type: "mrkdwn"
+                  text: |
+                    *🦀 Rust SDK (file_based) — War and Peace — Mock LLM* (`${{ needs.perf-rust-wap.result }}`)  •  runs `${{ fromJSON(needs.perf-rust-wap.outputs.metrics || '{}').success }}`
+                    add      p50 `${{ fromJSON(needs.perf-rust-wap.outputs.metrics || '{}').add.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-rust-wap.outputs.metrics || '{}').add.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-rust-wap.outputs.metrics || '{}').add.p99 }}s`
+                    cognify  p50 `${{ fromJSON(needs.perf-rust-wap.outputs.metrics || '{}').cognify.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-rust-wap.outputs.metrics || '{}').cognify.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-rust-wap.outputs.metrics || '{}').cognify.p99 }}s`
+                    search     p50 `${{ fromJSON(needs.perf-rust-wap.outputs.metrics || '{}').search.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-rust-wap.outputs.metrics || '{}').search.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-rust-wap.outputs.metrics || '{}').search.p99 }}s`
+                    total      p50 `${{ fromJSON(needs.perf-rust-wap.outputs.metrics || '{}').total.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-rust-wap.outputs.metrics || '{}').total.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-rust-wap.outputs.metrics || '{}').total.p99 }}s`
+                    <${{ steps.presign.outputs.url_rust_wap }}|HTML report>
+              - type: "section"
+                text:
+                  type: "mrkdwn"
+                  text: |
+                    *🦀 Rust SDK (file_based) — 50 Small Documents — Real LLM* (`${{ needs.perf-rust-llm.result }}`)  •  runs `${{ fromJSON(needs.perf-rust-llm.outputs.metrics || '{}').success }}`
+                    add      p50 `${{ fromJSON(needs.perf-rust-llm.outputs.metrics || '{}').add.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-rust-llm.outputs.metrics || '{}').add.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-rust-llm.outputs.metrics || '{}').add.p99 }}s`
+                    cognify  p50 `${{ fromJSON(needs.perf-rust-llm.outputs.metrics || '{}').cognify.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-rust-llm.outputs.metrics || '{}').cognify.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-rust-llm.outputs.metrics || '{}').cognify.p99 }}s`
+                    search     p50 `${{ fromJSON(needs.perf-rust-llm.outputs.metrics || '{}').search.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-rust-llm.outputs.metrics || '{}').search.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-rust-llm.outputs.metrics || '{}').search.p99 }}s`
+                    total      p50 `${{ fromJSON(needs.perf-rust-llm.outputs.metrics || '{}').total.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-rust-llm.outputs.metrics || '{}').total.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-rust-llm.outputs.metrics || '{}').total.p99 }}s`
+                    <${{ steps.presign.outputs.url_rust_llm }}|HTML report>
+              - type: "section"
+                text:
+                  type: "mrkdwn"
+                  text: |
+                    *🦀 Rust SDK (file_based) — War and Peace — Real LLM* (`${{ needs.perf-rust-wap-llm.result }}`)  •  runs `${{ fromJSON(needs.perf-rust-wap-llm.outputs.metrics || '{}').success }}`
+                    add      p50 `${{ fromJSON(needs.perf-rust-wap-llm.outputs.metrics || '{}').add.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-rust-wap-llm.outputs.metrics || '{}').add.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-rust-wap-llm.outputs.metrics || '{}').add.p99 }}s`
+                    cognify  p50 `${{ fromJSON(needs.perf-rust-wap-llm.outputs.metrics || '{}').cognify.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-rust-wap-llm.outputs.metrics || '{}').cognify.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-rust-wap-llm.outputs.metrics || '{}').cognify.p99 }}s`
+                    search     p50 `${{ fromJSON(needs.perf-rust-wap-llm.outputs.metrics || '{}').search.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-rust-wap-llm.outputs.metrics || '{}').search.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-rust-wap-llm.outputs.metrics || '{}').search.p99 }}s`
+                    total      p50 `${{ fromJSON(needs.perf-rust-wap-llm.outputs.metrics || '{}').total.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-rust-wap-llm.outputs.metrics || '{}').total.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-rust-wap-llm.outputs.metrics || '{}').total.p99 }}s`
+                    <${{ steps.presign.outputs.url_rust_wap_llm }}|HTML report>
               - type: "section"
                 text:
                   type: "mrkdwn"
