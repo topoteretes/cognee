@@ -1,0 +1,63 @@
+name: test | Published Docker image validation (scheduled)
+
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-validation-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-published-images:
+    name: "${{ matrix.image }}:${{ matrix.tag }}"
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      # max_bytes are generous uncompressed-size ceilings (docker inspect .Size
+      # reports the uncompressed size). They are meant to catch runaway growth,
+      # not to be tight; tune down once real sizes are known from a first run.
+      matrix:
+        include:
+          - image: cognee/cognee
+            tag: main
+            max_bytes: "6442450944"
+          - image: cognee/cognee
+            tag: latest
+            max_bytes: "6442450944"
+          - image: cognee/cognee-mcp
+            tag: main
+            max_bytes: "10737418240"
+          - image: cognee/cognee-mcp
+            tag: latest
+            max_bytes: "10737418240"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Free up disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc || true
+          df -h
+
+      - name: Trivy scan (fail on CRITICAL)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ matrix.image }}:${{ matrix.tag }}
+          severity: CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+
+      - name: Boot, metadata checks, and health
+        run: |
+          chmod +x scripts/docker_validation.sh
+          scripts/docker_validation.sh \
+            "${{ matrix.image }}" \
+            "${{ matrix.tag }}" \
+            "${{ matrix.max_bytes }}"
