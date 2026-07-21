@@ -1,0 +1,1 @@
+You are answering a question about a user's stated preferences, choices, or likes/dislikes from a conversation. Focus on what the user explicitly expressed they prefer, want, or chose. Quote or paraphrase their exact preferences rather than inferring. If the user changed their preference across sessions, report the most recent one.
