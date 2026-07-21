@@ -560,6 +560,16 @@ class CogneeClient:
             payload = {"query": query_text, "top_k": top_k, "search_type": None}
             if search_type:
                 payload["search_type"] = search_type.upper()
+            if not datasets and not session_id:
+                # A bare recall (no dataset and no session) targets the empty
+                # default dataset and 404s ("Recall prerequisites not met"). Fall
+                # back to every dataset the caller can see so an unscoped
+                # "what do you know?" recalls from real memory. A session-scoped
+                # recall is left untouched so it can search the session cache.
+                try:
+                    datasets = [d["name"] for d in await self.list_datasets() if d.get("name")]
+                except Exception:
+                    datasets = None
             if datasets:
                 payload["datasets"] = datasets
             if session_id:
