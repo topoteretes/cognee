@@ -1,7 +1,7 @@
 import uuid
 from typing import Any
 
-from cognee.context_global_variables import session_user
+from cognee.context_global_variables import current_dataset_id, session_user
 from cognee.infrastructure.databases.cache import SessionAgentTraceEntry, SessionQAEntry
 from cognee.infrastructure.databases.cache.cache_db_interface import CacheDBInterface
 from cognee.infrastructure.databases.cache.config import CacheConfig
@@ -28,7 +28,10 @@ from cognee.modules.observability import (
     new_span,
 )
 from cognee.modules.retrieval.utils.completion import generate_completion
-from cognee.modules.session_lifecycle.metrics import record_session_activity
+from cognee.modules.session_lifecycle.metrics import (
+    delete_session_lifecycle,
+    record_session_activity,
+)
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.utils import send_telemetry
 
@@ -73,6 +76,7 @@ class SessionManager:
         cache_engine: Any,
         default_session_id: str = "default_session",
         session_history_last_n: int = 10,
+        dataset_id: str | uuid.UUID | None = None,
     ) -> None:
         """
         Initialize SessionManager with a cache engine.
@@ -84,14 +88,28 @@ class SessionManager:
                                "default_session".
             session_history_last_n: Number of prior Q&A entries to include in conversation
                                    history for completion. Defaults to 10.
+            dataset_id: Dataset this manager writes sessions for. Falls back to the
+                       current_dataset_id context variable. Used to derive a per-dataset
+                       default session ID and to attribute lifecycle rows to the dataset;
+                       explicit session IDs are stored unchanged.
         """
         self._cache = cache_engine
         self.default_session_id = default_session_id
         self.session_history_last_n = session_history_last_n
+        resolved_dataset_id = dataset_id if dataset_id is not None else current_dataset_id.get()
+        self.dataset_id = str(resolved_dataset_id) if resolved_dataset_id is not None else None
 
     def _resolve_session_id(self, session_id: str | None) -> str:
-        """Return session_id if provided, otherwise default_session_id."""
-        return session_id if session_id is not None else self.default_session_id
+        """Return session_id if provided, otherwise the default session ID.
+
+        The default is scoped per dataset so that omitting session_id in two
+        different datasets can never mix their turns in one session.
+        """
+        if session_id is not None:
+            return session_id
+        if self.dataset_id is not None:
+            return f"{self.default_session_id}_{self.dataset_id}"
+        return self.default_session_id
 
     @property
     def is_available(self) -> bool:
@@ -161,7 +179,7 @@ class SessionManager:
                 question=question,
                 answer=answer,
             )
-            await record_session_activity(user_id, session_id)
+            await record_session_activity(user_id, session_id, dataset_id=self.dataset_id)
             return qa_id
 
     async def add_agent_trace_step(
@@ -216,7 +234,9 @@ class SessionManager:
             error_message=error_message,
             session_feedback=session_feedback,
         )
-        await record_session_activity(user_id, session_id, errored=status == "error")
+        await record_session_activity(
+            user_id, session_id, dataset_id=self.dataset_id, errored=status == "error"
+        )
         await self._maybe_extract_agent_context(
             user_id=user_id,
             session_id=session_id,
@@ -869,6 +889,10 @@ class SessionManager:
             user_id=user_id,
             session_id=session_id,
         )
+        lifecycle_deleted = await delete_session_lifecycle(
+            session_id=session_id,
+            user_id=user_id,
+        )
         if deleted:
             await delete_session_qa_vectors(user_id=user_id, session_id=session_id)
-        return deleted
+        return deleted or lifecycle_deleted

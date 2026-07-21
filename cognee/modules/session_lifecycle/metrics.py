@@ -24,7 +24,7 @@ from enum import Enum
 from typing import Optional, Sequence
 from uuid import UUID as UUIDType
 
-from sqlalchemy import and_, case, func, or_, select, update
+from sqlalchemy import and_, case, delete, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
@@ -268,6 +268,48 @@ async def mark_ended(
         await session.commit()
 
 
+async def delete_session_lifecycle(
+    *,
+    session_id: str,
+    user_id: str | UUIDType,
+) -> bool:
+    """Delete a session's lifecycle row and its per-model usage rows.
+
+    Best-effort companion to SessionManager.delete_session: a malformed
+    user_id or a relational failure returns False without breaking an
+    otherwise successful cache deletion.
+    """
+    try:
+        user_uuid = UUIDType(str(user_id))
+    except (ValueError, TypeError):
+        return False
+
+    try:
+        engine = get_relational_engine()
+        async with engine.get_async_session() as session:
+            await session.execute(
+                delete(SessionModelUsage).where(
+                    and_(
+                        SessionModelUsage.session_id == session_id,
+                        SessionModelUsage.user_id == user_uuid,
+                    )
+                )
+            )
+            result = await session.execute(
+                delete(SessionRecord).where(
+                    and_(
+                        SessionRecord.session_id == session_id,
+                        SessionRecord.user_id == user_uuid,
+                    )
+                )
+            )
+            await session.commit()
+            return bool(result.rowcount)
+    except Exception as exc:
+        logger.warning("Failed to delete lifecycle rows for session %s: %s", session_id, exc)
+        return False
+
+
 def get_effective_status_sql():
     """Return a SQL expression that evaluates to the effective status.
 
@@ -463,10 +505,17 @@ async def touch_session(*, session_id, user_id, dataset_id=None):
 _session_record_write_failed = False
 
 
-async def record_session_activity(user_id: str, session_id: str, *, errored: bool = False) -> None:
+async def record_session_activity(
+    user_id: str,
+    session_id: str,
+    *,
+    dataset_id: str | UUIDType | None = None,
+    errored: bool = False,
+) -> None:
     """Write a lifecycle heartbeat for a session: upsert + touch the SessionRecord row.
 
-    Accepts a string ``user_id`` (coerced to UUID). Swallows failures — the
+    Accepts a string ``user_id`` (coerced to UUID). ``dataset_id`` fills the
+    row's dataset attribution when it is not set yet. Swallows failures — the
     session_records table is optional for SessionManager correctness — but logs once at
     WARNING per process so silent breakage stays visible in ops.
     """
@@ -478,7 +527,14 @@ async def record_session_activity(user_id: str, session_id: str, *, errored: boo
         except (ValueError, TypeError):
             return
 
-        await ensure_and_touch_session(session_id=session_id, user_id=user_uuid)
+        try:
+            dataset_uuid = UUIDType(str(dataset_id)) if dataset_id is not None else None
+        except (ValueError, TypeError):
+            dataset_uuid = None
+
+        await ensure_and_touch_session(
+            session_id=session_id, user_id=user_uuid, dataset_id=dataset_uuid
+        )
         if errored:
             await accumulate_usage(session_id=session_id, user_id=user_uuid, errored=True)
     except Exception as exc:

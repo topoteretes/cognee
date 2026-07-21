@@ -16,7 +16,9 @@ Two event kinds are emitted per the renderer's contract:
 """
 
 from typing import Any, Dict, List, Optional
+from uuid import UUID
 
+from cognee.context_global_variables import current_dataset_id
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("visualization.session_events")
@@ -71,6 +73,9 @@ def map_session_entries_to_events(session_id: str, entries: List[Any]) -> List[D
 async def _list_recent_session_ids(user_uuid, limit: int) -> List[str]:
     """Most recently active session ids for a user, from the lifecycle table.
 
+    When a dataset context is active, only sessions attributed to that
+    dataset are returned so visualizations don't mix datasets.
+
     ``user_uuid`` must be the raw UUID (the column is UUID-typed; a string
     fails the SQLAlchemy bind with "'str' object has no attribute 'hex'").
     """
@@ -79,13 +84,21 @@ async def _list_recent_session_ids(user_uuid, limit: int) -> List[str]:
     from cognee.infrastructure.databases.relational import get_relational_engine
     from cognee.modules.session_lifecycle.models import SessionRecord
 
+    filters = [SessionRecord.user_id == user_uuid]
+    active_dataset_id = current_dataset_id.get()
+    if active_dataset_id is not None:
+        try:
+            filters.append(SessionRecord.dataset_id == UUID(str(active_dataset_id)))
+        except (TypeError, ValueError):
+            return []
+
     engine = get_relational_engine()
     async with engine.get_async_session() as session:
         rows = (
             (
                 await session.execute(
                     select(SessionRecord)
-                    .where(SessionRecord.user_id == user_uuid)
+                    .where(*filters)
                     .order_by(SessionRecord.last_activity_at.desc())
                     .limit(limit)
                 )
