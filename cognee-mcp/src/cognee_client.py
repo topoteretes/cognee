@@ -59,7 +59,13 @@ class CogneeClient:
             logger.info(f"Cognee client initialized in API mode: {self.api_url}")
             if self.tenant_id:
                 logger.info(f"Tenant ID extracted from URL: {self.tenant_id}")
-            self.client = httpx.AsyncClient(timeout=300.0)  # 5 minute timeout for long operations
+            # follow_redirects=True is required: the cloud API serves collection
+            # routes with a trailing slash (e.g. /api/v1/datasets/) and 307-redirects
+            # the slash-less form. Without following redirects, GETs like
+            # list_datasets() silently read the empty redirect body as "no data".
+            self.client = httpx.AsyncClient(
+                timeout=300.0, follow_redirects=True
+            )  # 5 minute timeout for long operations
         else:
             logger.info("Cognee client initialized in direct mode")
             # Import cognee only if we're using direct mode
@@ -230,6 +236,16 @@ class CogneeClient:
             # API mode: Make HTTP request
             endpoint = f"{self.api_url}/api/v1/search"
             payload = {"query": query_text, "search_type": query_type.upper(), "top_k": top_k}
+            if not datasets:
+                # Cloud search with no dataset targets the (usually empty) default
+                # dataset and 404s with NoDataError. Default to every dataset the
+                # caller can see so an unscoped query ("what do you know?") searches
+                # real memory instead of nothing. Unauthorized/empty datasets are
+                # filtered server-side, so passing them all is safe.
+                try:
+                    datasets = [d["name"] for d in await self.list_datasets() if d.get("name")]
+                except Exception:
+                    datasets = None
             if datasets:
                 payload["datasets"] = datasets
             if system_prompt:
