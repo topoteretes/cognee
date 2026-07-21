@@ -1914,15 +1914,17 @@ async def main():
     # Cognee API connection options
     parser.add_argument(
         "--api-url",
-        default=None,
-        help="Base URL of a running Cognee FastAPI server (e.g., http://localhost:8000). "
-        "If provided, the MCP server will connect to the API instead of using cognee directly.",
+        default=os.getenv("COGNEE_BASE_URL"),
+        help="Base URL of a running Cognee FastAPI server or Cognee Cloud tenant "
+        "(e.g., https://<tenant>.cognee.ai). If provided, the MCP server connects to the "
+        "API instead of using cognee directly. Can also be set via the COGNEE_BASE_URL env var.",
     )
 
     parser.add_argument(
         "--api-token",
-        default=None,
-        help="Authentication token for the API (optional, required if API has authentication enabled).",
+        default=os.getenv("COGNEE_API_KEY"),
+        help="Authentication token for the API, sent as X-Api-Key (required if the API has "
+        "authentication enabled). Can also be set via the COGNEE_API_KEY env var.",
     )
 
     # Cognee Cloud connection options
