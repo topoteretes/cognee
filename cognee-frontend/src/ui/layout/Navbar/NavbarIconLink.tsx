@@ -10,6 +10,7 @@ interface NavbarIconLinkProps {
   link: string;
   isActive: boolean;
   external?: boolean;
+  collapsed?: boolean;
   onClick?: () => void;
 }
 
@@ -19,13 +20,16 @@ export default function NavbarIconLink({
   link,
   isActive,
   external,
+  collapsed = false,
   onClick,
 }: NavbarIconLinkProps) {
   const classes = classNames(
-    "flex items-center gap-[10px] rounded-[6px] px-3 py-2 text-[14px] transition-colors",
+    "flex items-center rounded-[6px] px-3 py-2 text-[14px] transition-colors",
+    // Collapsing only applies to the desktop rail (`sm` and up); the mobile
+    // drawer always shows full-width labels.
+    collapsed ? "gap-[10px] sm:gap-0 sm:justify-center" : "gap-[10px]",
     {
       "font-medium": isActive,
-      "": !isActive,
     }
   );
 
@@ -40,13 +44,15 @@ export default function NavbarIconLink({
       href={link}
       className={classes}
       style={linkStyle}
+      title={collapsed ? text : undefined}
+      aria-label={collapsed ? text : undefined}
       {...(external ? { target: "_blank", rel: "noopener noreferrer" } : {})}
       onClick={onClick}
       onMouseEnter={!isActive ? (e) => { (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.06)"; } : undefined}
       onMouseLeave={!isActive ? (e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; } : undefined}
     >
       {icon}
-      {text}
+      <span className={classNames("whitespace-nowrap", { "sm:hidden": collapsed })}>{text}</span>
     </Link>
   );
 }

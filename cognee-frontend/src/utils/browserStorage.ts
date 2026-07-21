@@ -18,6 +18,7 @@ const KEYS = {
   creditsBannerDismissed:"cognee-credits-banner-dismissed",
   // localStorage
   connectedIntegrations: (tenantId: string) => `cognee-connected-integrations-${tenantId}`,
+  sidebarCollapsed:      "cognee-sidebar-collapsed",
 } as const;
 
 // ── Low-level safe I/O ────────────────────────────────────────────────────
@@ -110,4 +111,16 @@ export function setConnectedIntegrations(tenantId: string, value: Record<string,
 /** Clears integration state for a tenant (called on workspace switch). */
 export function clearConnectedIntegrations(tenantId: string): void {
   localRemove(KEYS.connectedIntegrations(tenantId));
+}
+
+// cognee-sidebar-collapsed (localStorage) ---------------------------------
+
+/** Returns true if the user collapsed the desktop sidebar to an icon rail. */
+export function getSidebarCollapsed(): boolean {
+  return localGet(KEYS.sidebarCollapsed) === "1";
+}
+
+/** Persists the desktop sidebar collapsed/expanded preference. */
+export function setSidebarCollapsed(collapsed: boolean): void {
+  localSet(KEYS.sidebarCollapsed, collapsed ? "1" : "0");
 }

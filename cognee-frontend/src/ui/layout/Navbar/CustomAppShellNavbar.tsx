@@ -92,6 +92,28 @@ function KeyIcon({ active }: { active: boolean }) {
   );
 }
 
+// Double chevron for the collapse toggle. Points left («) when expanded and
+// rotates to point right (») when collapsed, mirroring the action it performs.
+function CollapseChevron({ collapsed }: { collapsed: boolean }) {
+  return (
+    <svg
+      width="15"
+      height="15"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={{ flexShrink: 0, transform: collapsed ? "rotate(180deg)" : "none", transition: "transform 200ms ease" }}
+      aria-hidden="true"
+    >
+      <path d="M13 17l-5-5 5-5" />
+      <path d="M18 17l-5-5 5-5" />
+    </svg>
+  );
+}
+
 // -- Navigation data --
 
 // Routes that require the tenant pod — dimmed/locked while it provisions.
@@ -144,7 +166,7 @@ const NAV_SECTIONS: NavSection[] = [
 
 export default function CustomAppShellNavbar() {
   const pathname = usePathname();
-  const { isOpen, close } = useNavbar();
+  const { isOpen, close, isCollapsed, toggleCollapsed } = useNavbar();
   const { tenantReady } = useTenant();
   const [feedbackOpen, setFeedbackOpen] = useState(false);
 
@@ -162,10 +184,11 @@ export default function CustomAppShellNavbar() {
         className={`
           flex-shrink-0 flex flex-col
           fixed sm:relative z-40 sm:z-auto h-full sm:h-auto
-          transition-transform sm:translate-x-0
+          w-[240px] ${isCollapsed ? "sm:w-[72px]" : "sm:w-[240px]"}
+          transition-[transform,width] duration-200 ease-in-out sm:translate-x-0
           ${isOpen ? "translate-x-0" : "-translate-x-full sm:translate-x-0"}
         `}
-        style={{ width: 240, maxHeight: "100vh", overflow: "hidden", background: "rgba(0,0,0,0.6)", backdropFilter: "blur(12px)", borderRight: "1px solid rgba(255,255,255,0.08)" }}
+        style={{ maxHeight: "100vh", overflow: "hidden", background: "rgba(0,0,0,0.6)", backdropFilter: "blur(12px)", borderRight: "1px solid rgba(255,255,255,0.08)" }}
       >
         {/* Close button on mobile */}
         <div className="flex sm:hidden justify-end p-2">
@@ -184,7 +207,7 @@ export default function CustomAppShellNavbar() {
           {NAV_SECTIONS.map((section) => (
             <div key={section.label} className="mb-4">
               <div
-                className="px-3 mb-1"
+                className={`px-3 mb-1 whitespace-nowrap ${isCollapsed ? "sm:hidden" : ""}`}
                 style={{
                   fontSize: 11,
                   fontWeight: 700,
@@ -203,12 +226,12 @@ export default function CustomAppShellNavbar() {
                     <div
                       key={item.link}
                       title="Available once your workspace is ready"
-                      className="flex items-center gap-[10px] rounded-[6px] px-3 py-2 text-[14px]"
+                      className={`flex items-center rounded-[6px] px-3 py-2 text-[14px] ${isCollapsed ? "gap-[10px] sm:gap-0 sm:justify-center" : "gap-[10px]"}`}
                       style={{ color: "rgba(237,236,234,0.3)", cursor: "not-allowed", userSelect: "none" }}
                       aria-disabled="true"
                     >
                       {item.icon({ active: false })}
-                      {item.text}
+                      <span className={`whitespace-nowrap ${isCollapsed ? "sm:hidden" : ""}`}>{item.text}</span>
                     </div>
                   );
                 }
@@ -218,6 +241,7 @@ export default function CustomAppShellNavbar() {
                     text={item.text}
                     link={item.link}
                     isActive={isActive}
+                    collapsed={isCollapsed}
                     icon={item.icon({ active: isActive })}
                   />
                 );
@@ -226,10 +250,40 @@ export default function CustomAppShellNavbar() {
           ))}
         </nav>
 
-        {/* Feedback + Billing pinned to the bottom-left of the sidebar */}
+        {/* Collapse toggle + Feedback + Billing pinned to the bottom of the sidebar */}
         <div style={{ padding: 12, borderTop: "1px solid rgba(255,255,255,0.08)", display: "flex", flexDirection: "column", gap: 8 }}>
+          {/* Desktop-only collapse/expand toggle. Mobile uses the drawer close
+              button and the floating hamburger instead. */}
+          <button
+            onClick={toggleCollapsed}
+            aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            aria-expanded={!isCollapsed}
+            title={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            className={`hidden sm:flex cursor-pointer items-center ${isCollapsed ? "sm:justify-center" : ""}`}
+            style={{
+              gap: 7,
+              width: "100%",
+              padding: "7px 12px",
+              background: "transparent",
+              border: "none",
+              borderRadius: 8,
+              fontFamily: "inherit",
+              fontSize: 12.5,
+              fontWeight: 500,
+              color: "rgba(237,236,234,0.35)",
+              transition: "color 120ms ease, background 120ms ease",
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = "#EDECEA"; e.currentTarget.style.background = "rgba(255,255,255,0.06)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = "rgba(237,236,234,0.35)"; e.currentTarget.style.background = "transparent"; }}
+          >
+            <CollapseChevron collapsed={isCollapsed} />
+            {!isCollapsed && <span className="whitespace-nowrap">Collapse</span>}
+          </button>
+
           <button
             onClick={() => setFeedbackOpen(true)}
+            title={isCollapsed ? "Give feedback" : undefined}
+            aria-label={isCollapsed ? "Give feedback" : undefined}
             className="cursor-pointer"
             style={{
               display: "flex",
@@ -250,13 +304,15 @@ export default function CustomAppShellNavbar() {
             onMouseEnter={(e) => { e.currentTarget.style.color = "#EDECEA"; e.currentTarget.style.background = "rgba(255,255,255,0.06)"; }}
             onMouseLeave={(e) => { e.currentTarget.style.color = "rgba(237,236,234,0.35)"; e.currentTarget.style.background = "transparent"; }}
           >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.7 }}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.7, flexShrink: 0 }}>
               <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
             </svg>
-            Give feedback
+            <span className={isCollapsed ? "sm:hidden" : ""}>Give feedback</span>
           </button>
           <Link
             href="/billing"
+            title={isCollapsed ? "Billing / Pricing" : undefined}
+            aria-label={isCollapsed ? "Billing / Pricing" : undefined}
             className="flex items-center justify-center rounded-[8px] w-full"
             style={{
               padding: "10px 12px",
@@ -269,7 +325,12 @@ export default function CustomAppShellNavbar() {
             onMouseEnter={e => ((e.currentTarget as HTMLElement).style.background = "#A988F0")}
             onMouseLeave={e => ((e.currentTarget as HTMLElement).style.background = "#BC9BFF")}
           >
-            Billing / Pricing
+            {/* Card icon shown only on the desktop rail when collapsed. */}
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={isCollapsed ? "hidden sm:block" : "hidden"} aria-hidden="true">
+              <rect x="2" y="5" width="20" height="14" rx="2" />
+              <line x1="2" y1="10" x2="22" y2="10" />
+            </svg>
+            <span className={isCollapsed ? "sm:hidden" : ""}>Billing / Pricing</span>
           </Link>
         </div>
       </aside>
