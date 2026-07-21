@@ -1,0 +1,150 @@
+{
+  "retrievers": [
+    {
+      "name": "hybrid_completion_20_20_qa_v1",
+      "base": "hybrid_completion",
+      "kwargs": {
+        "chunks_top_k": 20,
+        "entities_top_k": 20
+      },
+      "qa_prompt_paths": {
+        "DEFAULT": "cognee/eval_framework/beam/report_artifacts/qa_prompts/default.txt",
+        "abstention": "cognee/eval_framework/beam/report_artifacts/qa_prompts/abstention.txt",
+        "contradiction_resolution": "cognee/eval_framework/beam/report_artifacts/qa_prompts/contradiction_resolution.txt",
+        "event_ordering": "cognee/eval_framework/beam/report_artifacts/qa_prompts/event_ordering.txt",
+        "information_extraction": "cognee/eval_framework/beam/report_artifacts/qa_prompts/information_extraction.txt",
+        "instruction_following": "cognee/eval_framework/beam/report_artifacts/qa_prompts/instruction_following.txt",
+        "knowledge_update": "cognee/eval_framework/beam/report_artifacts/qa_prompts/knowledge_update.txt",
+        "multi_session_reasoning": "cognee/eval_framework/beam/report_artifacts/qa_prompts/multi_session_reasoning.txt",
+        "preference_following": "cognee/eval_framework/beam/report_artifacts/qa_prompts/preference_following.txt",
+        "summarization": "cognee/eval_framework/beam/report_artifacts/qa_prompts/summarization.txt",
+        "temporal_reasoning": "cognee/eval_framework/beam/report_artifacts/qa_prompts/temporal_reasoning.txt"
+      }
+    },
+    {
+      "name": "hybrid_completion_compact_balanced_c10_e10_edges5_f50_qa_v1",
+      "base": "hybrid_completion",
+      "kwargs": {
+        "chunks_top_k": 10,
+        "entities_top_k": 10,
+        "max_edges_per_entity": 5,
+        "facts_top_k": 50
+      },
+      "qa_prompt_paths": {
+        "DEFAULT": "cognee/eval_framework/beam/report_artifacts/qa_prompts/default.txt",
+        "abstention": "cognee/eval_framework/beam/report_artifacts/qa_prompts/abstention.txt",
+        "contradiction_resolution": "cognee/eval_framework/beam/report_artifacts/qa_prompts/contradiction_resolution.txt",
+        "event_ordering": "cognee/eval_framework/beam/report_artifacts/qa_prompts/event_ordering.txt",
+        "information_extraction": "cognee/eval_framework/beam/report_artifacts/qa_prompts/information_extraction.txt",
+        "instruction_following": "cognee/eval_framework/beam/report_artifacts/qa_prompts/instruction_following.txt",
+        "knowledge_update": "cognee/eval_framework/beam/report_artifacts/qa_prompts/knowledge_update.txt",
+        "multi_session_reasoning": "cognee/eval_framework/beam/report_artifacts/qa_prompts/multi_session_reasoning.txt",
+        "preference_following": "cognee/eval_framework/beam/report_artifacts/qa_prompts/preference_following.txt",
+        "summarization": "cognee/eval_framework/beam/report_artifacts/qa_prompts/summarization.txt",
+        "temporal_reasoning": "cognee/eval_framework/beam/report_artifacts/qa_prompts/temporal_reasoning.txt"
+      }
+    },
+    {
+      "name": "hybrid_completion_fact_gci_c10_e10_edges10_f100_gci5_qa_v1",
+      "base": "hybrid_completion",
+      "kwargs": {
+        "chunks_top_k": 10,
+        "entities_top_k": 10,
+        "max_edges_per_entity": 10,
+        "facts_top_k": 100,
+        "include_global_context_index": true,
+        "global_context_index_top_k": 5
+      },
+      "qa_prompt_paths": {
+        "DEFAULT": "cognee/eval_framework/beam/report_artifacts/qa_prompts/default.txt",
+        "abstention": "cognee/eval_framework/beam/report_artifacts/qa_prompts/abstention.txt",
+        "contradiction_resolution": "cognee/eval_framework/beam/report_artifacts/qa_prompts/contradiction_resolution.txt",
+        "event_ordering": "cognee/eval_framework/beam/report_artifacts/qa_prompts/event_ordering.txt",
+        "information_extraction": "cognee/eval_framework/beam/report_artifacts/qa_prompts/information_extraction.txt",
+        "instruction_following": "cognee/eval_framework/beam/report_artifacts/qa_prompts/instruction_following.txt",
+        "knowledge_update": "cognee/eval_framework/beam/report_artifacts/qa_prompts/knowledge_update.txt",
+        "multi_session_reasoning": "cognee/eval_framework/beam/report_artifacts/qa_prompts/multi_session_reasoning.txt",
+        "preference_following": "cognee/eval_framework/beam/report_artifacts/qa_prompts/preference_following.txt",
+        "summarization": "cognee/eval_framework/beam/report_artifacts/qa_prompts/summarization.txt",
+        "temporal_reasoning": "cognee/eval_framework/beam/report_artifacts/qa_prompts/temporal_reasoning.txt"
+      }
+    },
+    {
+      "name": "hybrid_completion_chunk_wide_c30_e5_edges5_f20_gci5_qa_v1",
+      "base": "hybrid_completion",
+      "kwargs": {
+        "chunks_top_k": 30,
+        "entities_top_k": 5,
+        "max_edges_per_entity": 5,
+        "facts_top_k": 20,
+        "include_global_context_index": true,
+        "global_context_index_top_k": 5
+      },
+      "qa_prompt_paths": {
+        "DEFAULT": "cognee/eval_framework/beam/report_artifacts/qa_prompts/default.txt",
+        "abstention": "cognee/eval_framework/beam/report_artifacts/qa_prompts/abstention.txt",
+        "contradiction_resolution": "cognee/eval_framework/beam/report_artifacts/qa_prompts/contradiction_resolution.txt",
+        "event_ordering": "cognee/eval_framework/beam/report_artifacts/qa_prompts/event_ordering.txt",
+        "information_extraction": "cognee/eval_framework/beam/report_artifacts/qa_prompts/information_extraction.txt",
+        "instruction_following": "cognee/eval_framework/beam/report_artifacts/qa_prompts/instruction_following.txt",
+        "knowledge_update": "cognee/eval_framework/beam/report_artifacts/qa_prompts/knowledge_update.txt",
+        "multi_session_reasoning": "cognee/eval_framework/beam/report_artifacts/qa_prompts/multi_session_reasoning.txt",
+        "preference_following": "cognee/eval_framework/beam/report_artifacts/qa_prompts/preference_following.txt",
+        "summarization": "cognee/eval_framework/beam/report_artifacts/qa_prompts/summarization.txt",
+        "temporal_reasoning": "cognee/eval_framework/beam/report_artifacts/qa_prompts/temporal_reasoning.txt"
+      }
+    },
+    {
+      "name": "hybrid_completion_chunkless_graph_e20_edges5_f100_gci20_qa_v1",
+      "base": "hybrid_completion",
+      "kwargs": {
+        "chunks_top_k": 0,
+        "text_summaries_top_k": 0,
+        "entities_top_k": 20,
+        "max_edges_per_entity": 5,
+        "facts_top_k": 100,
+        "include_global_context_index": true,
+        "global_context_index_top_k": 20
+      },
+      "qa_prompt_paths": {
+        "DEFAULT": "cognee/eval_framework/beam/report_artifacts/qa_prompts/default.txt",
+        "abstention": "cognee/eval_framework/beam/report_artifacts/qa_prompts/abstention.txt",
+        "contradiction_resolution": "cognee/eval_framework/beam/report_artifacts/qa_prompts/contradiction_resolution.txt",
+        "event_ordering": "cognee/eval_framework/beam/report_artifacts/qa_prompts/event_ordering.txt",
+        "information_extraction": "cognee/eval_framework/beam/report_artifacts/qa_prompts/information_extraction.txt",
+        "instruction_following": "cognee/eval_framework/beam/report_artifacts/qa_prompts/instruction_following.txt",
+        "knowledge_update": "cognee/eval_framework/beam/report_artifacts/qa_prompts/knowledge_update.txt",
+        "multi_session_reasoning": "cognee/eval_framework/beam/report_artifacts/qa_prompts/multi_session_reasoning.txt",
+        "preference_following": "cognee/eval_framework/beam/report_artifacts/qa_prompts/preference_following.txt",
+        "summarization": "cognee/eval_framework/beam/report_artifacts/qa_prompts/summarization.txt",
+        "temporal_reasoning": "cognee/eval_framework/beam/report_artifacts/qa_prompts/temporal_reasoning.txt"
+      }
+    },
+    {
+      "name": "hybrid_completion_no_summ_gci_c30_e10_edges5_f50_gci10_qa_v1",
+      "base": "hybrid_completion",
+      "kwargs": {
+        "chunks_top_k": 30,
+        "text_summaries_top_k": 0,
+        "entities_top_k": 10,
+        "max_edges_per_entity": 5,
+        "facts_top_k": 50,
+        "include_global_context_index": true,
+        "global_context_index_top_k": 10
+      },
+      "qa_prompt_paths": {
+        "DEFAULT": "cognee/eval_framework/beam/report_artifacts/qa_prompts/default.txt",
+        "abstention": "cognee/eval_framework/beam/report_artifacts/qa_prompts/abstention.txt",
+        "contradiction_resolution": "cognee/eval_framework/beam/report_artifacts/qa_prompts/contradiction_resolution.txt",
+        "event_ordering": "cognee/eval_framework/beam/report_artifacts/qa_prompts/event_ordering.txt",
+        "information_extraction": "cognee/eval_framework/beam/report_artifacts/qa_prompts/information_extraction.txt",
+        "instruction_following": "cognee/eval_framework/beam/report_artifacts/qa_prompts/instruction_following.txt",
+        "knowledge_update": "cognee/eval_framework/beam/report_artifacts/qa_prompts/knowledge_update.txt",
+        "multi_session_reasoning": "cognee/eval_framework/beam/report_artifacts/qa_prompts/multi_session_reasoning.txt",
+        "preference_following": "cognee/eval_framework/beam/report_artifacts/qa_prompts/preference_following.txt",
+        "summarization": "cognee/eval_framework/beam/report_artifacts/qa_prompts/summarization.txt",
+        "temporal_reasoning": "cognee/eval_framework/beam/report_artifacts/qa_prompts/temporal_reasoning.txt"
+      }
+    }
+  ]
+}

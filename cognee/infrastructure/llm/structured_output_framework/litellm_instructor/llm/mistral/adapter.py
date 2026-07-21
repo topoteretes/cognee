@@ -180,7 +180,10 @@ class MistralAdapter(GenericAPIAdapter):
         transcription_model = self.transcription_model
         if self.transcription_model.startswith("mistral"):
             transcription_model = self.transcription_model.split("/")[-1]
-        file_name = input.split("/")[-1]
+        # Normalize Windows ("\") and POSIX ("/") separators before taking the
+        # basename; on Windows `input` is a backslash path, so splitting on "/"
+        # alone would send the full path as the file name to the API.
+        file_name = str(input).replace("\\", "/").split("/")[-1]
         async with open_data_file(input, mode="rb") as f:
             transcription_response = self.mistral_client.audio.transcriptions.complete(
                 model=transcription_model,
