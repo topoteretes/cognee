@@ -301,7 +301,12 @@ curl -s "$COGNEE_BASE_URL/api/v1/datasets/?session_id=<session-id>" -H "X-Api-Ke
 // clipboard-only — nothing is sent to our servers; the user pastes and
 // runs the command in their own local terminal.
 
-export const CODEX_SKILLS_CONTENT = `# Cognee Cloud Memory Skill
+export const CODEX_SKILLS_CONTENT = `---
+name: cognee-memory
+description: Connects your agent to Cognee Cloud for persistent knowledge graph memory.
+---
+
+# Cognee Cloud Memory Skill
 
 This skill connects Codex to Cognee Cloud for persistent knowledge graph memory.
 
@@ -457,16 +462,16 @@ export const CODEX_MARKETPLACE_ADD = "codex plugin marketplace add topoteretes/c
 export const CODEX_PLUGIN_INSTALL = "codex plugin add cognee@cognee";
 
 // Onboarding: a ready-to-paste prompt telling the connected agent to push the
-// user's existing context into Cognee as long-term memory (uses the cognee
-// plugin/skill's remember tools).
+// user's existing context into Cognee as long-term memory.
 //
-// Key correctness points baked into the prompt:
-//  - Permanent memory goes to the graph via /remember with NO session_id
-//    (session_id is only for grouping live conversation activity).
-//  - Skill files (SKILL.md) must be uploaded with content_type="skills" so
-//    Cognee ingests them as skill nodes; everything attaches to default_dataset.
+// Written for the PLUGIN, not the HTTP API: the plugin works passively (hooks
+// capture sessions automatically), and its only active write surface is the
+// cognee-remember skill — inline text + a category (user/project/agent) + an
+// optional dataset. It has no session_id or content_type parameters, so the
+// prompt must not mention them; it only states WHAT to store, the category,
+// and the dataset.
 export const UPLOAD_MEMORY_PROMPT =
-  "Upload my existing memory to Cognee Cloud as long-term memory. Gather what you already know about me and my work — my CLAUDE.md / AGENTS.md, project notes, and key facts from our past conversations — and store it directly in the knowledge graph with the cognee remember tool WITHOUT a session id (this is permanent memory, not a conversation), attached to the default_dataset. For any skill files (e.g. SKILL.md), upload them with content_type set to \"skills\" so Cognee ingests them as skill nodes — also attached to the default_dataset.";
+  "Bring my existing memory into Cognee as permanent long-term memory. Gather what you already know about me and my work — my CLAUDE.md / AGENTS.md, project notes, and durable facts from our past conversations — and store it with the cognee-remember skill in the \"agent_sessions\" dataset: facts about me, my preferences and how I like to work as category \"user\"; project and codebase knowledge as category \"project\". Group related facts into a few substantial remember calls rather than many tiny ones, and give me a short summary of what you stored. The Cognee plugin handles sessions automatically — you don't need a session id or any manual API call.";
 
 // Onboarding Option B: the sample text the user pastes to their agent to store
 // in Cognee, giving them something concrete to recall in the next step.

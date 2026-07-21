@@ -33,6 +33,7 @@ from cognee.modules.retrieval.cypher_search_retriever import CypherSearchRetriev
 from cognee.modules.retrieval.connection_path_retriever import ConnectionPathRetriever
 from cognee.modules.retrieval.natural_language_retriever import NaturalLanguageRetriever
 from cognee.modules.retrieval.agentic_retriever import AgenticRetriever
+from cognee.modules.retrieval.code_retriever import CodeRetriever
 from cognee.context_global_variables import session_user
 
 
@@ -77,6 +78,10 @@ async def get_search_type_retriever_instance(
 
     # Registry mapping search types to their corresponding retriever classes and input parameters
     search_core_registry: dict[SearchType, Tuple[BaseRetriever, dict]] = {
+        SearchType.CODE: (
+            CodeRetriever,
+            {"config": retriever_specific_config},
+        ),
         SearchType.SUMMARIES: (SummariesRetriever, {"top_k": top_k, "session_id": session_id}),
         SearchType.CHUNKS: (
             ChunksRetriever,
@@ -95,6 +100,8 @@ async def get_search_type_retriever_instance(
                 "session_id": session_id,
                 "response_model": retriever_specific_config.get("response_model", str),
                 "include_references": include_references,
+                "node_name": node_name,
+                "node_name_filter_operator": node_name_filter_operator,
             },
         ),
         SearchType.HYBRID_COMPLETION: (
@@ -132,6 +139,8 @@ async def get_search_type_retriever_instance(
                 "session_id": session_id,
                 "response_model": retriever_specific_config.get("response_model", str),
                 "include_references": include_references,
+                "node_name": node_name,
+                "node_name_filter_operator": node_name_filter_operator,
             },
         ),
         SearchType.GRAPH_COMPLETION: (

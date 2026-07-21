@@ -179,3 +179,52 @@ async def test_non_knowledge_graph_model_unchanged():
 
     assert chunk.contains == custom_graph
     assert result == [chunk]
+
+
+@pytest.mark.asyncio
+async def test_all_dlt_chunks_short_circuits_llm_extraction():
+    from cognee.modules.data.processing.document_types import DltRowDocument
+
+    chunks = [_make_chunk(f"row {i}") for i in range(3)]
+    for chunk in chunks:
+        chunk.is_part_of = MagicMock(spec=DltRowDocument)
+
+    fake_calc = MagicMock()
+
+    result = await extract_graph_from_data(
+        chunks,
+        KnowledgeGraph,
+        calculate_chunk_graphs=fake_calc,
+    )
+
+    assert result == chunks
+    fake_calc.assert_not_called()
+
+
+@pytest.mark.asyncio
+@patch.object(egd_module, "integrate_chunk_graphs", new_callable=AsyncMock)
+async def test_dlt_chunks_partitioned_from_llm_extraction(mock_integrate):
+    from cognee.modules.data.processing.document_types import DltRowDocument
+
+    dlt_chunk = _make_chunk("dlt row")
+    dlt_chunk.is_part_of = MagicMock(spec=DltRowDocument)
+    normal_chunks = [_make_chunk("regular a"), _make_chunk("regular b")]
+    mock_integrate.side_effect = lambda *a, **kw: a[0]
+
+    received = []
+
+    async def fake_calc(chunks, graph_model, custom_prompt, **kwargs):
+        received.extend(chunks)
+        return [_two_node_graph() for _ in chunks]
+
+    config = {"ontology_config": {"ontology_resolver": _mock_resolver()}}
+
+    await extract_graph_from_data(
+        [dlt_chunk, *normal_chunks],
+        KnowledgeGraph,
+        config=config,
+        calculate_chunk_graphs=fake_calc,
+    )
+
+    # Only the non-DLT chunks reach LLM extraction, in original order.
+    assert received == normal_chunks

@@ -368,6 +368,7 @@ Use [Cognee Cloud](https://www.cognee.ai) for a fully managed experience, or sel
 | **Fly.io** | Edge deployment, persistent volumes | `bash distributed/deploy/fly-deploy.sh` |
 | **Render** | Simple PaaS with managed Postgres | Deploy to Render button |
 | **Daytona** | Cloud sandboxes (SDK or CLI) | See `distributed/deploy/daytona_sandbox.py` |
+| **Islo** | Isolated cloud sandboxes (SDK) | See `distributed/deploy/islo_sandbox.py` |
 
 See the [`distributed/`](distributed/) folder for deploy scripts, worker configurations, and additional details.
 
@@ -397,14 +398,14 @@ See the [@cognee/cognee-ts package](https://www.npmjs.com/package/@cognee/cognee
 
 ## Benchmarks
 
-We ran cognee against [BEAM](https://github.com/topoteretes/cognee), a long-context benchmark that tests whether a system can keep track of a long conversation as it changes — a more useful test for agent memory than typical needle-in-a-haystack benchmarks. Using only cognee's default settings and standard open-source features (no custom models, no BEAM-specific pipelines), we beat the previous state of the art at the 100K-token setting and matched it at 10M tokens.
+We ran cognee against [BEAM](https://github.com/mohammadtavakoli78/BEAM), a long-context benchmark that tests whether a system can keep track of a long conversation as it changes — a more useful test for agent memory than typical needle-in-a-haystack benchmarks. Using only cognee's default settings and standard open-source features (no custom models, no BEAM-specific pipelines), we beat the previous state of the art at the 100K-token setting and matched it at 10M tokens.
 
 | Benchmark | Setting | cognee | Previous SOTA | Obsidian / RAG baseline |
 |-----------|---------|--------|---------------|--------------------------|
 | BEAM | 100K tokens | **0.79** (>0.8 with per-question routing) | 0.735 | ~0.33 |
 | BEAM | 10M tokens | **0.67** | 0.641 | ~0.33 |
 
-These numbers are a directional signal rather than a definitive measure — see the write-up for the full methodology, caveats, and what the results actually mean.
+These numbers are a directional signal rather than a definitive measure — see the [BEAM preliminary report](cognee/eval_framework/beam/REPORT.md) for the full methodology, caveats, and what the results actually mean.
 
 ## Latest News
 

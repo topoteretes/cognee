@@ -331,6 +331,8 @@ class CloudClient:
             payload["maxIter"] = kwargs["max_iter"]
         if kwargs.get("include_references") is not None:
             payload["includeReferences"] = kwargs["include_references"]
+        if kwargs.get("code_query") is not None:
+            payload["codeQuery"] = kwargs["code_query"]
 
         async with session.post(
             f"{self.service_url}/api/v1/search",

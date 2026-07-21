@@ -297,7 +297,7 @@ export default function SearchPage() {
         setLegacyConvos(convos);
         if (convos.length > 0) setActiveConvoId((prev) => prev || convos[0].id);
       })
-      .catch(() => {});
+      .catch((err) => console.error("Failed to fetch legacy search history:", err));
     (async () => {
       try {
         const page = await listSessions(cogniInstance, { range: "30d", limit: 50 });
@@ -322,7 +322,7 @@ export default function SearchPage() {
               );
               setActiveConvoId((prev) => prev || convo.id);
             })
-            .catch(() => {});
+            .catch((err) => console.error("Failed to fetch session detail:", err));
         });
       } catch {
         // Sessions endpoint unavailable — sidebar just starts empty.

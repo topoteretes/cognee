@@ -16,6 +16,7 @@ from tenacity import (
 )
 
 from cognee.infrastructure.llm.retry_config import (
+    llm_retry_condition,
     llm_retry_stop_condition,
 )
 
@@ -82,14 +83,7 @@ class MistralAdapter(GenericAPIAdapter):
     @retry(
         stop=llm_retry_stop_condition,
         wait=wait_exponential_jitter(8, 128),
-        retry=retry_if_not_exception_type(
-            (
-                litellm.exceptions.NotFoundError,
-                litellm.exceptions.AuthenticationError,
-                asyncio.CancelledError,
-                LLMPaymentRequiredError,
-            )
-        ),
+        retry=llm_retry_condition,
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
@@ -168,7 +162,7 @@ class MistralAdapter(GenericAPIAdapter):
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
-    async def create_transcript(self, input) -> TranscriptionReturnType | None:
+    async def create_transcript(self, input: str, **kwargs: Any) -> TranscriptionReturnType | None:
         """
         Generate an audio transcript from a user query.
 
@@ -186,7 +180,10 @@ class MistralAdapter(GenericAPIAdapter):
         transcription_model = self.transcription_model
         if self.transcription_model.startswith("mistral"):
             transcription_model = self.transcription_model.split("/")[-1]
-        file_name = input.split("/")[-1]
+        # Normalize Windows ("\") and POSIX ("/") separators before taking the
+        # basename; on Windows `input` is a backslash path, so splitting on "/"
+        # alone would send the full path as the file name to the API.
+        file_name = str(input).replace("\\", "/").split("/")[-1]
         async with open_data_file(input, mode="rb") as f:
             transcription_response = self.mistral_client.audio.transcriptions.complete(
                 model=transcription_model,

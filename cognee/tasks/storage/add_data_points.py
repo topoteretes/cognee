@@ -5,6 +5,14 @@ from cognee.modules.pipelines.tasks.task import task_summary
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.infrastructure.databases.unified.capabilities import EngineCapability
+from cognee.infrastructure.databases.provenance import (
+    EdgeIdentity,
+    data_item_id,
+    make_source_ref_key,
+)
+from cognee.infrastructure.databases.provenance.markers import (
+    mark_graph_provenance_if_empty,
+)
 from cognee.infrastructure.databases.relational import get_async_session
 from cognee.modules.graph.methods import upsert_edges, upsert_nodes
 from cognee.modules.graph.utils import (
@@ -33,6 +41,7 @@ async def add_data_points(
     custom_edges: Optional[List] = None,
     embed_triplets: bool = False,
     ctx: Optional["PipelineContext"] = None,
+    graph_only: bool = False,
 ) -> List[DataPoint]:
     """
     Add a batch of data points to the graph database by extracting nodes and edges,
@@ -43,6 +52,8 @@ async def add_data_points(
         custom_edges: Custom edges between datapoints.
         embed_triplets: If True, creates and indexes triplet embeddings.
         ctx: Pipeline runtime context (user, dataset, data_item).
+        graph_only: Persist graph nodes and edges without initializing or writing
+            a vector engine. Intended for deterministic extraction pipelines.
     """
     user = ctx.user if ctx else None
     data_item = ctx.data_item if ctx else None
@@ -53,6 +64,10 @@ async def add_data_points(
         raise InvalidDataPointsInAddDataPointsError("data_points must be a list.")
     if not all(isinstance(dp, DataPoint) for dp in data_points):
         raise InvalidDataPointsInAddDataPointsError("data_points: each item must be a DataPoint.")
+    if graph_only and embed_triplets:
+        raise InvalidDataPointsInAddDataPointsError(
+            "embed_triplets cannot be enabled when graph_only is True."
+        )
 
     nodes = []
     edges = []
@@ -86,51 +101,101 @@ async def add_data_points(
         else None
     )
 
-    unified = await get_unified_engine()
-    graph_engine = unified.graph
-    vector_engine = unified.vector
-    use_hybrid = unified.has_capability(EngineCapability.HYBRID_WRITE)
+    if graph_only:
+        from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
 
-    if user and dataset and data_item:
-        # Single session for all upserts: one transaction, one commit. The
-        # rollback ledger is written BEFORE the graph/vector writes so a
-        # failed write can always be swept by the rollback handler.
-        async with get_async_session() as session:
-            await upsert_nodes(
-                nodes,
-                tenant_id=user.tenant_id,
-                user_id=user.id,
-                dataset_id=dataset.id,
-                data_id=data_item.id,
-                session=session,
-                pipeline_run_id=pipeline_run_id,
-            )
-            await upsert_edges(
-                edges,
-                tenant_id=user.tenant_id,
-                user_id=user.id,
-                dataset_id=dataset.id,
-                data_id=data_item.id,
-                session=session,
-                pipeline_run_id=pipeline_run_id,
-            )
-            if custom_edges:
-                await upsert_edges(
-                    custom_edges,
+        graph_engine = await get_graph_engine()
+        vector_engine = None
+        use_hybrid = False
+    else:
+        unified = await get_unified_engine()
+        graph_engine = unified.graph
+        vector_engine = unified.vector
+        use_hybrid = unified.has_capability(EngineCapability.HYBRID_WRITE)
+
+    # Provenance needs a concrete (dataset, data) pair. data_item_id resolves
+    # the id whether data_item is a relational Data (.id) or an ingestion
+    # DataItem (.data_id); it is None for items that carry neither (a raw
+    # file/text item, or the CogneeGraph memify passes in), in which case there
+    # is nothing to attribute and both the ledger and graph-fold paths are skipped.
+    data_id = data_item_id(data_item)
+    stores_provenance = False
+    if user and dataset and data_id is not None:
+        # Graph-provenance graphs (empty graphs marked via graph metadata) carry
+        # their provenance in the graph itself, so they skip the relational
+        # rollback ledger entirely. On backends that implement provenance
+        # (e.g. Ladybug + LanceDB) a fresh empty graph IS marked here and takes
+        # the graph-provenance path; backends without provenance support raise on
+        # set_graph_metadata, so this stays False and the ledger path runs.
+        #
+        # On the non-hybrid path the provenance source refs are folded into the
+        # graph write below (atomic — no window where an artifact exists without
+        # its provenance). Hybrid backends still attach in a second pass and keep
+        # that window; if the attach raises, the run is marked failed.
+        #
+        # Under COGNEE_DISTRIBUTED the graph write is diverted to a queue; the
+        # provenance stamp (source_ref_key / pipeline_run_id) rides along in the
+        # queue payload and is folded per data item by the graph_saving_worker,
+        # so graph-native provenance works in distributed mode too.
+        stores_provenance = await mark_graph_provenance_if_empty(graph_engine)
+
+        if not stores_provenance:
+            # Single session for all upserts: one transaction, one commit. The
+            # rollback ledger is written BEFORE the graph/vector writes so a
+            # failed write can always be swept by the rollback handler.
+            async with get_async_session() as session:
+                await upsert_nodes(
+                    nodes,
                     tenant_id=user.tenant_id,
                     user_id=user.id,
                     dataset_id=dataset.id,
-                    data_id=data_item.id,
+                    data_id=data_id,
                     session=session,
                     pipeline_run_id=pipeline_run_id,
                 )
-            await session.commit()
+                await upsert_edges(
+                    edges,
+                    tenant_id=user.tenant_id,
+                    user_id=user.id,
+                    dataset_id=dataset.id,
+                    data_id=data_id,
+                    session=session,
+                    pipeline_run_id=pipeline_run_id,
+                )
+                if custom_edges:
+                    await upsert_edges(
+                        custom_edges,
+                        tenant_id=user.tenant_id,
+                        user_id=user.id,
+                        dataset_id=dataset.id,
+                        data_id=data_id,
+                        session=session,
+                        pipeline_run_id=pipeline_run_id,
+                    )
+                await session.commit()
+
+    # Graph provenance is folded INTO the graph write so a node/edge is
+    # created and stamped in one atomic statement (no write-then-attach window,
+    # no concurrent lost update — COG-5522 #4/#8). Only the non-hybrid path can
+    # fold today; hybrid backends still stamp via a separate attach pass below.
+    # source_ref_key stays None for non-graph-provenance writes (no provenance).
+    fold_source_ref_key = None
+    fold_run_arg = None
+    if stores_provenance and not use_hybrid:
+        fold_source_ref_key = make_source_ref_key(dataset.id, data_id)
+        fold_run_arg = str(pipeline_run_id) if pipeline_run_id else None
 
     if use_hybrid:
         await graph_engine.add_nodes_with_vectors(nodes)
+    elif graph_only:
+        await graph_engine.add_nodes(
+            nodes, source_ref_key=fold_source_ref_key, pipeline_run_id=fold_run_arg
+        )
     else:
         await asyncio.gather(
-            graph_engine.add_nodes(nodes),
+            graph_engine.add_nodes(
+                nodes, source_ref_key=fold_source_ref_key, pipeline_run_id=fold_run_arg
+            ),
             index_data_points(
                 [node.model_copy(deep=True) for node in nodes],
                 vector_engine=vector_engine,
@@ -139,9 +204,16 @@ async def add_data_points(
 
     if use_hybrid:
         await graph_engine.add_edges_with_vectors(edges)
+    elif graph_only:
+        await graph_engine.add_edges(
+            edges, source_ref_key=fold_source_ref_key, pipeline_run_id=fold_run_arg
+        )
     else:
         await asyncio.gather(
-            graph_engine.add_edges(edges), index_graph_edges(edges, vector_engine=vector_engine)
+            graph_engine.add_edges(
+                edges, source_ref_key=fold_source_ref_key, pipeline_run_id=fold_run_arg
+            ),
+            index_graph_edges(edges, vector_engine=vector_engine),
         )
 
     if custom_edges:
@@ -150,13 +222,39 @@ async def add_data_points(
         # rollback-ledger upsert, so no second ensure_default_edge_properties here.
         if use_hybrid:
             await graph_engine.add_edges_with_vectors(custom_edges)
+        elif graph_only:
+            await graph_engine.add_edges(
+                custom_edges,
+                source_ref_key=fold_source_ref_key,
+                pipeline_run_id=fold_run_arg,
+            )
         else:
             await asyncio.gather(
-                graph_engine.add_edges(custom_edges),
+                graph_engine.add_edges(
+                    custom_edges,
+                    source_ref_key=fold_source_ref_key,
+                    pipeline_run_id=fold_run_arg,
+                ),
                 index_graph_edges(custom_edges, vector_engine=vector_engine),
             )
 
         edges.extend(custom_edges)
+
+    if stores_provenance and use_hybrid:
+        # Hybrid backends write nodes/edges and their vectors in one call that
+        # cannot yet fold provenance, so stamp the source refs in a separate
+        # attach pass. This keeps a write-then-attach window for hybrid graphs
+        # only; the non-hybrid path above is already atomic.
+        source_ref_key = make_source_ref_key(dataset.id, data_id)
+        run_arg = str(pipeline_run_id) if pipeline_run_id else None
+
+        node_ids = [str(node.id) for node in nodes]
+        edge_ids = [EdgeIdentity(str(edge[0]), str(edge[1]), edge[2]) for edge in edges]
+
+        if node_ids:
+            await graph_engine.attach_node_source_refs(node_ids, [source_ref_key], run_arg)
+        if edge_ids:
+            await graph_engine.attach_edge_source_refs(edge_ids, [source_ref_key], run_arg)
 
     if embed_triplets:
         triplets = _create_triplets_from_graph(nodes, edges)

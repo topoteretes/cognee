@@ -49,18 +49,55 @@ def _estimate_tokens(text: str) -> int:
     return max(1, len(text) // 4)
 
 
-# Minimal per-model pricing table. Conservative and incomplete —
-# unrecognized models cost $0.
-# USD per 1M tokens: (input, output)
+# Rough per-model pricing for cost estimates. Longest-prefix match (see below),
+# so a model id need only start with a key; unknown models cost $0 and callers
+# warn. USD per 1M tokens (input, output) at each provider's base tier; verified
+# against the official pricing pages July 2026.
 _PRICING_PER_M_TOKENS = {
+    # OpenAI — https://developers.openai.com/api/docs/pricing
+    "gpt-5.5": (5.00, 30.00),
+    "gpt-5.5-pro": (30.00, 180.00),
+    "gpt-5.4": (2.50, 15.00),
+    "gpt-5.4-mini": (0.75, 4.50),
+    "gpt-5.4-nano": (0.20, 1.25),
+    "gpt-5.4-pro": (30.00, 180.00),
+    "gpt-5": (1.25, 10.00),
+    "gpt-5-mini": (0.25, 2.00),
+    "gpt-5-nano": (0.05, 0.40),
+    "gpt-4.1": (2.00, 8.00),
+    "gpt-4.1-mini": (0.40, 1.60),
+    "gpt-4.1-nano": (0.10, 0.40),
     "gpt-4o": (2.50, 10.00),
     "gpt-4o-mini": (0.15, 0.60),
     "gpt-4-turbo": (10.00, 30.00),
     "gpt-4": (30.00, 60.00),
     "gpt-3.5-turbo": (0.50, 1.50),
+    "o3": (2.00, 8.00),
+    "o4-mini": (1.10, 4.40),
+    # Anthropic — https://platform.claude.com/docs/en/about-claude/pricing
+    "claude-fable-5": (10.00, 50.00),
+    "claude-opus-4-8": (5.00, 25.00),
+    "claude-opus-4-7": (5.00, 25.00),
+    "claude-opus-4-6": (5.00, 25.00),
+    "claude-opus-4-5": (5.00, 25.00),
+    "claude-opus-4": (15.00, 75.00),  # Opus 4.0 / 4.1
+    "claude-sonnet-5": (3.00, 15.00),  # $2/$10 introductory through 2026-08-31
+    "claude-sonnet-4": (3.00, 15.00),  # Sonnet 4.0 / 4.5 / 4.6
+    "claude-haiku-4-5": (1.00, 5.00),
     "claude-3-5-sonnet": (3.00, 15.00),
+    "claude-3-5-haiku": (0.80, 4.00),
     "claude-3-opus": (15.00, 75.00),
     "claude-3-haiku": (0.25, 1.25),
+    # Google Gemini — https://ai.google.dev/gemini-api/docs/pricing
+    "gemini-3.5-flash": (1.50, 9.00),
+    "gemini-3.1-pro": (2.00, 12.00),
+    "gemini-3.1-flash-lite": (0.25, 1.50),
+    "gemini-3-flash": (0.50, 3.00),
+    "gemini-2.5-pro": (1.25, 10.00),
+    "gemini-2.5-flash-lite": (0.10, 0.40),
+    "gemini-2.5-flash": (0.30, 2.50),
+    "gemini-2.0-flash-lite": (0.075, 0.30),
+    "gemini-2.0-flash": (0.10, 0.40),
     "gemini-1.5-pro": (1.25, 5.00),
     "gemini-1.5-flash": (0.075, 0.30),
 }
@@ -80,6 +117,14 @@ def _estimate_cost_usd(model: Optional[str], tokens_in: int, tokens_out: int) ->
         if key.startswith(base):
             return (tokens_in / 1_000_000) * pin + (tokens_out / 1_000_000) * pout
     return 0.0
+
+
+def estimate_cost_usd(model: Optional[str], tokens_in: int, tokens_out: int) -> float:
+    """Estimate USD cost for a model using Cognee's rough pricing table.
+
+    Unrecognized models cost $0 — callers that surface the number should say so.
+    """
+    return _estimate_cost_usd(model, tokens_in, tokens_out)
 
 
 async def record_llm_call(

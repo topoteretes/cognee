@@ -139,7 +139,7 @@ class BedrockAdapter(LLMInterface):
                 raise LLMPaymentRequiredError() from e
             raise
 
-    async def create_transcript(self, input: str) -> TranscriptionReturnType | None:
+    async def create_transcript(self, input: str, **kwargs: Any) -> TranscriptionReturnType | None:
         raise NotImplementedError
 
     async def transcribe_image(self, input: str) -> Any:

@@ -19,6 +19,7 @@ from cognee.modules.retrieval.graph_summary_completion_retriever import (
     GraphSummaryCompletionRetriever,
 )
 from cognee.modules.retrieval.temporal_retriever import TemporalRetriever
+from cognee.modules.retrieval.code_retriever import CodeRetriever
 
 
 class _DummyCommunityRetriever:
@@ -121,6 +122,26 @@ async def test_default_mapping_passes_top_k_to_retrievers():
 
 
 @pytest.mark.asyncio
+async def test_code_retriever_receives_structured_operation_config():
+    import cognee.modules.search.methods.get_search_type_retriever_instance as mod
+
+    retriever_instance = await mod.get_search_type_retriever_instance(
+        SearchType.CODE,
+        query_text="Checkout",
+        retriever_specific_config={
+            "operation": "traverse",
+            "direction": "reverse",
+            "max_depth": 3,
+        },
+    )
+
+    assert isinstance(retriever_instance, CodeRetriever)
+    assert retriever_instance.operation == "traverse"
+    assert retriever_instance.config["direction"] == "reverse"
+    assert retriever_instance.config["max_depth"] == 3
+
+
+@pytest.mark.asyncio
 async def test_chunks_retriever_receives_nodeset_filter_arguments():
     import cognee.modules.search.methods.get_search_type_retriever_instance as mod
     from cognee.modules.retrieval.chunks_retriever import ChunksRetriever
@@ -134,6 +155,44 @@ async def test_chunks_retriever_receives_nodeset_filter_arguments():
     )
 
     assert isinstance(retriever_instance, ChunksRetriever)
+    assert retriever_instance.top_k == 30
+    assert retriever_instance.node_name == ["KEN", "src_type:figure"]
+    assert retriever_instance.node_name_filter_operator == "AND"
+
+
+@pytest.mark.asyncio
+async def test_rag_completion_retriever_receives_nodeset_filter_arguments():
+    import cognee.modules.search.methods.get_search_type_retriever_instance as mod
+    from cognee.modules.retrieval.completion_retriever import CompletionRetriever
+
+    retriever_instance = await mod.get_search_type_retriever_instance(
+        SearchType.RAG_COMPLETION,
+        query_text="land cover",
+        top_k=30,
+        node_name=["KEN", "src_type:figure"],
+        node_name_filter_operator="AND",
+    )
+
+    assert isinstance(retriever_instance, CompletionRetriever)
+    assert retriever_instance.top_k == 30
+    assert retriever_instance.node_name == ["KEN", "src_type:figure"]
+    assert retriever_instance.node_name_filter_operator == "AND"
+
+
+@pytest.mark.asyncio
+async def test_triplet_completion_retriever_receives_nodeset_filter_arguments():
+    import cognee.modules.search.methods.get_search_type_retriever_instance as mod
+    from cognee.modules.retrieval.triplet_retriever import TripletRetriever
+
+    retriever_instance = await mod.get_search_type_retriever_instance(
+        SearchType.TRIPLET_COMPLETION,
+        query_text="land cover",
+        top_k=30,
+        node_name=["KEN", "src_type:figure"],
+        node_name_filter_operator="AND",
+    )
+
+    assert isinstance(retriever_instance, TripletRetriever)
     assert retriever_instance.top_k == 30
     assert retriever_instance.node_name == ["KEN", "src_type:figure"]
     assert retriever_instance.node_name_filter_operator == "AND"

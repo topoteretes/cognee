@@ -1133,6 +1133,7 @@ async def recall(
     search_type: str = None,
     datasets: str = None,
     session_id: str = None,
+    system_prompt: str = None,
     top_k: int = 15,
 ) -> list:
     """Search memory with auto-routing and session awareness.
@@ -1156,6 +1157,8 @@ async def recall(
         Comma-separated dataset names to search within.
     session_id : str, optional
         Session ID for session-first search.
+    system_prompt : str, optional
+        Override the synthesis prompt for completion searches.
     top_k : int
         Maximum results to return (default: 10).
     """
@@ -1168,6 +1171,7 @@ async def recall(
                 search_type=search_type,
                 datasets=dataset_list,
                 session_id=session_id,
+                system_prompt=system_prompt,
                 top_k=normalized_top_k,
             )
             return [
@@ -1967,10 +1971,15 @@ async def main():
 
         logger.info("Running database migrations...")
 
-        await setup()
-        # Full startup migrations (relational schema + graph/vector revision
-        # chains) — MCP writes new-scheme data, so it must migrate like the API.
-        await run_migrations()
+        # Database setup and migrations print progress and "table already
+        # exists" notices to stdout. In stdio transport stdout is the JSON-RPC
+        # channel, so route that output to stderr — the same guard every tool
+        # applies around its cognee calls.
+        with redirect_stdout(sys.stderr):
+            await setup()
+            # Full startup migrations (relational schema + graph/vector revision
+            # chains) — MCP writes new-scheme data, so it must migrate like the API.
+            await run_migrations()
 
         logger.info("Database migrations done.")
     elif not is_remote:

@@ -1,5 +1,10 @@
 from fastapi import status
-from cognee.exceptions import CogneeSystemError, CogneeValidationError, CogneeConfigurationError
+from cognee.exceptions import (
+    CogneeApiError,
+    CogneeSystemError,
+    CogneeValidationError,
+    CogneeConfigurationError,
+)
 
 
 class DatabaseNotCreatedError(CogneeSystemError):
@@ -18,6 +23,18 @@ class DatabaseNotCreatedError(CogneeSystemError):
         status_code: int = status.HTTP_422_UNPROCESSABLE_CONTENT,
     ):
         super().__init__(message, name, status_code)
+
+
+class UnsupportedProvenanceCapability(CogneeApiError):
+    """Raised when an adapter does not implement graph provenance operations."""
+
+    def __init__(
+        self,
+        message: str = "This backend does not support graph provenance yet.",
+        name: str = "UnsupportedProvenanceCapability",
+        status_code: int = status.HTTP_501_NOT_IMPLEMENTED,
+    ):
+        super().__init__(message, name, status_code, log=False)
 
 
 class EntityNotFoundError(CogneeValidationError):
@@ -99,6 +116,18 @@ class EmbeddingException(CogneeConfigurationError):
         self,
         message: str = "Embedding Exception.",
         name: str = "EmbeddingException",
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+    ):
+        super().__init__(message, name, status_code)
+
+
+class EmbeddingContextWindowTooSmallError(EmbeddingException):
+    """Raised when over-length embedding input cannot be split any further."""
+
+    def __init__(
+        self,
+        message: str = "Text is too short to split further but exceeds context window.",
+        name: str = "EmbeddingContextWindowTooSmallError",
         status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
     ):
         super().__init__(message, name, status_code)

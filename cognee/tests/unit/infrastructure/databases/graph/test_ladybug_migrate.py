@@ -14,16 +14,17 @@ from cognee.infrastructure.databases.graph.ladybug.ladybug_migrate import (
 )
 
 
-def _write_catalog_kz(dir_path: str, version_code: int) -> str:
+def _write_catalog_kz(dir_path: str, version_code: int, magic: bytes = b"KUZ\x00") -> str:
     """Write a fake catalog.kz with the given storage version_code.
 
-    Format mirrors what read_ladybug_storage_version expects:
-      3-byte magic 'KUZ' + 1 byte padding + 8 bytes little-endian uint64.
+    Format mirrors what read_ladybug_storage_version expects: a 4-byte magic
+    ('KUZ' + padding on kuzu-era files, 'LBUG' on ladybug >= 0.18) followed by
+    8 bytes little-endian uint64.
     """
     os.makedirs(dir_path, exist_ok=True)
     catalog = os.path.join(dir_path, "catalog.kz")
     with open(catalog, "wb") as f:
-        f.write(b"KUZ\x00")
+        f.write(magic)
         f.write(struct.pack("<Q", version_code))
     return catalog
 
@@ -46,6 +47,19 @@ def test_ladybug_version_mapping_covers_0_16_and_0_17_storage_codes():
 def test_read_ladybug_storage_version_0_17_code(tmp_path):
     _write_catalog_kz(str(tmp_path), 41)
     assert read_ladybug_storage_version(str(tmp_path)) == "0.17.1"
+
+
+def test_ladybug_version_mapping_covers_0_18_storage_code():
+    # 0.18.0, 0.18.1 and 0.18.2 all write storage code 42 (verified against the
+    # published wheels), so the mapping holds the latest patch of the line.
+    assert ladybug_version_mapping[42] == "0.18.2"
+
+
+def test_read_ladybug_storage_version_0_18_code(tmp_path):
+    # 0.18 databases use the new 4-byte 'LBUG' magic; the version code still
+    # sits at byte offset 4, so the parser must map it the same way.
+    _write_catalog_kz(str(tmp_path), 42, magic=b"LBUG")
+    assert read_ladybug_storage_version(str(tmp_path)) == "0.18.2"
 
 
 def test_read_ladybug_storage_version_unknown_code_raises(tmp_path):

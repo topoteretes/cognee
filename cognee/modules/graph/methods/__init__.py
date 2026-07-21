@@ -15,6 +15,7 @@ from .get_orphaned_nodeset_labels_for_dataset import (
 )
 from .delete_data_related_nodes import delete_data_related_nodes
 from .delete_data_related_edges import delete_data_related_edges
+from .try_delete_data_by_graph_provenance import try_delete_data_by_graph_provenance
 from .delete_data_nodes_and_edges import delete_data_nodes_and_edges
 from .delete_from_graph_and_vector import delete_from_graph_and_vector
 

@@ -1,7 +1,7 @@
 [project]
 name = "cognee"
 
-version = "1.2.2.dev3"
+version = "1.4.0"
 description = "Cognee - is a library for enriching LLM context with a semantic layer for better understanding and reasoning."
 authors = [
     { name = "Vasilije Markovic" },
@@ -52,7 +52,7 @@ dependencies = [
     "structlog>=25.2.0,<26",
     "pympler>=1.1,<2.0.0",
     "pylance>=0.22.0,<=0.36.0",
-    "ladybug>=0.16.0,<0.18",
+    "ladybug>=0.16.0,<=0.18.2",
     "python-magic-bin<0.5 ; platform_system == 'Windows'", # Only needed for Windows
     "networkx>=3.4.2,<4",
     "uvicorn>=0.34.0,<1.0.0",
@@ -110,6 +110,7 @@ postgres-binary = [
     "pgvector>=0.3.5,<0.4",
     "asyncpg>=0.30.0,<1.0.0",
 ]
+turso = ["libsql-experimental>=0.0.55,<0.1"]
 notebook = ["notebook>=7.1.0,<8"]
 langchain = [
     "langsmith>=0.2.3,<1.0.0",
@@ -149,17 +150,19 @@ evals = [
     "locust>=2.0.0,<3",
 ]
 
+# Umbrella extra for the evaluation harness: pulls in the analysis/dashboard
+# dependencies (evals) plus the DeepEval engine. Core cognee never imports these;
+# they are lazily loaded only when the harness or DeepEval engine is used.
+# One-liner install:  pip install "cognee[eval]"
+eval = [
+    "cognee[evals,deepeval]",
+]
+
 graphiti = ["graphiti-core>=0.28.0"]
 # Note: New s3fs and boto3 versions don't work well together
 # Always use comaptible fixed versions of these two dependencies
 aws = ["s3fs[boto3]==2025.3.2"]
 dlt = ["dlt[sqlalchemy]>=1.9.0,<2"]
-gmail = [
-    "dlt[sqlalchemy]>=1.9.0,<2",
-    "google-api-python-client>=2.100.0,<3",
-    "google-auth>=2.23.0,<3",
-    "google-auth-oauthlib>=1.1.0,<2",
-]
 baml = ["baml-py (==0.206.0)"]
 dev = [
     "pytest>=7.4.0,<8",

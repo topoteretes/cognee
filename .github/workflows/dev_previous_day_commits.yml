@@ -235,6 +235,24 @@ jobs:
           python3 tools/write_docs_scope_plan_outputs.py \
             --scope-plan "${{ steps.branch_paths.outputs.docs_scope_plan }}"
 
+      - name: Print generated planning markdown
+        if: ${{ steps.assessment.outputs.needs_update == 'true' }}
+        run: |
+          for file in \
+            "${{ steps.branch_paths.outputs.notes_markdown }}" \
+            "${{ steps.branch_paths.outputs.assessment_markdown }}" \
+            "${{ steps.branch_paths.outputs.docs_edit_scope_markdown }}" \
+            "${{ steps.branch_paths.outputs.docs_scope_plan }}"
+          do
+            if [ -s "$file" ]; then
+              echo "## ${file}"
+              cat "$file"
+              echo
+            else
+              echo "## ${file} (missing or empty)"
+            fi
+          done
+
       - name: Generate docs changes with Claude
         if: ${{ steps.assessment.outputs.needs_update == 'true' && steps.scope_plan.outputs.docs_needed == 'true' }}
         id: claude
@@ -349,3 +367,31 @@ jobs:
             echo
             cat "${{ steps.branch_paths.outputs.assessment_markdown }}"
           } >> "${GITHUB_STEP_SUMMARY}"
+
+  notify-failure:
+    name: Notify failure
+    needs:
+      - prepare-merged-branches
+      - create-docs-prs
+    if: ${{ failure() }}
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Send failure email
+        env:
+          SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT || '587' }}
+          SMTP_USERNAME: ${{ secrets.MILENKO_SMTP_USERNAME || vars.DEV_PREVIOUS_DAY_COMMITS_NOTIFICATION_EMAIL }}
+          SMTP_PASSWORD: ${{ secrets.MILENKO_SMTP_PASSWORD }}
+          SMTP_USE_TLS: ${{ vars.SMTP_USE_TLS || 'true' }}
+          NOTIFICATION_EMAIL_SENDER: ${{ secrets.NOTIFICATION_EMAIL_SENDER }}
+          NOTIFICATION_EMAIL_RECEIVER: ${{ secrets.NOTIFICATION_EMAIL_RECEIVER }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          PREPARE_RESULT: ${{ needs.prepare-merged-branches.result }}
+          CREATE_DOCS_PRS_RESULT: ${{ needs.create-docs-prs.result }}
+        run: |
+          if [ -z "${SMTP_SERVER}" ] || [ -z "${SMTP_USERNAME}" ] || [ -z "${SMTP_PASSWORD}" ] || [ -z "${NOTIFICATION_EMAIL_SENDER}" ] || [ -z "${NOTIFICATION_EMAIL_RECEIVER}" ]; then
+            echo "SMTP secrets or DEV_PREVIOUS_DAY_COMMITS_NOTIFICATION_EMAIL variable are not configured; skipping failure email."
+            exit 0
+          fi
+
+          python3 tools/send_failure_email.py
