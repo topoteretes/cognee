@@ -1,0 +1,264 @@
+{
+  "generated_at": "2026-07-09T13:00:31.176025+00:00",
+  "note": "Phase-0 DLT ingestion baseline (#3626). No LLM. SQLite destination. Sizes run sequentially in one process, each with a unique dataset name.",
+  "results": [
+    {
+      "n_rows_config": 200,
+      "max_rows_per_table": null,
+      "first_ingest": {
+        "n_dataitems": 610,
+        "t_resolve": 4.163,
+        "t_ingest": 8.762,
+        "t_cleanup": 0.203,
+        "t_total": 13.128,
+        "rows_per_sec": 46.5,
+        "peak_mem_mb": 14.8,
+        "peak_mem_resolve_mb": 4.5,
+        "stage_breakdown": {
+          "resolve": {
+            "schema_extract": {
+              "calls": 1,
+              "seconds": 0.1687
+            },
+            "row_readback": {
+              "calls": 1,
+              "seconds": 0.0631
+            },
+            "dlt_ingest_total": {
+              "calls": 1,
+              "seconds": 0.8994
+            },
+            "id_resolve": {
+              "calls": 610,
+              "seconds": 3.2271
+            }
+          },
+          "ingest_data": {
+            "id_resolve": {
+              "calls": 610,
+              "seconds": 3.5949
+            },
+            "metadata_threads": {
+              "calls": 1830,
+              "seconds": 2.8171
+            }
+          },
+          "orphan_cleanup": {}
+        }
+      },
+      "reingest_with_deletions": {
+        "n_dataitems": 490,
+        "t_resolve": 3.448,
+        "t_ingest": 9.705,
+        "t_cleanup": 8.195,
+        "t_total": 21.347,
+        "rows_per_sec": 23.0,
+        "peak_mem_mb": 12.2,
+        "peak_mem_resolve_mb": 2.2,
+        "stage_breakdown": {
+          "resolve": {
+            "schema_extract": {
+              "calls": 1,
+              "seconds": 0.1228
+            },
+            "row_readback": {
+              "calls": 1,
+              "seconds": 0.0512
+            },
+            "dlt_ingest_total": {
+              "calls": 1,
+              "seconds": 0.6577
+            },
+            "id_resolve": {
+              "calls": 490,
+              "seconds": 2.7594
+            }
+          },
+          "ingest_data": {
+            "id_resolve": {
+              "calls": 490,
+              "seconds": 3.0068
+            },
+            "metadata_threads": {
+              "calls": 1470,
+              "seconds": 2.5361
+            }
+          },
+          "orphan_cleanup": {}
+        }
+      }
+    },
+    {
+      "n_rows_config": 500,
+      "max_rows_per_table": null,
+      "first_ingest": {
+        "n_dataitems": 1510,
+        "t_resolve": 9.078,
+        "t_ingest": 21.855,
+        "t_cleanup": 0.425,
+        "t_total": 31.358,
+        "rows_per_sec": 48.2,
+        "peak_mem_mb": 26.7,
+        "peak_mem_resolve_mb": 4.3,
+        "stage_breakdown": {
+          "resolve": {
+            "schema_extract": {
+              "calls": 1,
+              "seconds": 0.124
+            },
+            "row_readback": {
+              "calls": 1,
+              "seconds": 0.1229
+            },
+            "dlt_ingest_total": {
+              "calls": 1,
+              "seconds": 0.9578
+            },
+            "id_resolve": {
+              "calls": 1510,
+              "seconds": 8.0326
+            }
+          },
+          "ingest_data": {
+            "id_resolve": {
+              "calls": 1510,
+              "seconds": 8.5474
+            },
+            "metadata_threads": {
+              "calls": 4530,
+              "seconds": 7.7444
+            }
+          },
+          "orphan_cleanup": {}
+        }
+      },
+      "reingest_with_deletions": {
+        "n_dataitems": 1210,
+        "t_resolve": 7.242,
+        "t_ingest": 24.118,
+        "t_cleanup": 23.91,
+        "t_total": 55.27,
+        "rows_per_sec": 21.9,
+        "peak_mem_mb": 28.9,
+        "peak_mem_resolve_mb": 3.6,
+        "stage_breakdown": {
+          "resolve": {
+            "schema_extract": {
+              "calls": 1,
+              "seconds": 0.1192
+            },
+            "row_readback": {
+              "calls": 1,
+              "seconds": 0.0986
+            },
+            "dlt_ingest_total": {
+              "calls": 1,
+              "seconds": 0.8416
+            },
+            "id_resolve": {
+              "calls": 1210,
+              "seconds": 6.3318
+            }
+          },
+          "ingest_data": {
+            "id_resolve": {
+              "calls": 1210,
+              "seconds": 7.0299
+            },
+            "metadata_threads": {
+              "calls": 3630,
+              "seconds": 6.3677
+            }
+          },
+          "orphan_cleanup": {}
+        }
+      }
+    },
+    {
+      "n_rows_config": 900,
+      "max_rows_per_table": null,
+      "first_ingest": {
+        "n_dataitems": 2710,
+        "t_resolve": 15.834,
+        "t_ingest": 39.985,
+        "t_cleanup": 1.144,
+        "t_total": 56.963,
+        "rows_per_sec": 47.6,
+        "peak_mem_mb": 55.2,
+        "peak_mem_resolve_mb": 6.6,
+        "stage_breakdown": {
+          "resolve": {
+            "schema_extract": {
+              "calls": 1,
+              "seconds": 0.1231
+            },
+            "row_readback": {
+              "calls": 1,
+              "seconds": 0.2143
+            },
+            "dlt_ingest_total": {
+              "calls": 1,
+              "seconds": 1.1957
+            },
+            "id_resolve": {
+              "calls": 2710,
+              "seconds": 14.4829
+            }
+          },
+          "ingest_data": {
+            "id_resolve": {
+              "calls": 2710,
+              "seconds": 15.494
+            },
+            "metadata_threads": {
+              "calls": 8130,
+              "seconds": 14.4888
+            }
+          },
+          "orphan_cleanup": {}
+        }
+      },
+      "reingest_with_deletions": {
+        "n_dataitems": 2170,
+        "t_resolve": 12.749,
+        "t_ingest": 47.178,
+        "t_cleanup": 48.479,
+        "t_total": 108.406,
+        "rows_per_sec": 20.0,
+        "peak_mem_mb": 51.3,
+        "peak_mem_resolve_mb": 5.4,
+        "stage_breakdown": {
+          "resolve": {
+            "schema_extract": {
+              "calls": 1,
+              "seconds": 0.117
+            },
+            "row_readback": {
+              "calls": 1,
+              "seconds": 0.172
+            },
+            "dlt_ingest_total": {
+              "calls": 1,
+              "seconds": 1.0245
+            },
+            "id_resolve": {
+              "calls": 2170,
+              "seconds": 11.5956
+            }
+          },
+          "ingest_data": {
+            "id_resolve": {
+              "calls": 2170,
+              "seconds": 12.8819
+            },
+            "metadata_threads": {
+              "calls": 6510,
+              "seconds": 13.5513
+            }
+          },
+          "orphan_cleanup": {}
+        }
+      }
+    }
+  ]
+}
