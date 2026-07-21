@@ -331,7 +331,7 @@ class RedisAdapter(CacheDBInterface):
         session_key = self._session_key(user_id, session_id)
         if last_n == 1:
             data = await self.async_redis.lindex(session_key, -1)
-            return [SessionQAEntry.model_validate_json(data)] if data else None
+            return [SessionQAEntry.model_validate_json(data)] if data else []
         data = await self.async_redis.lrange(session_key, -last_n, -1)
         return [SessionQAEntry.model_validate_json(d) for d in data] if data else []
 

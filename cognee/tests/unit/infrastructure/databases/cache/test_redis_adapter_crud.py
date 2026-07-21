@@ -186,6 +186,14 @@ async def test_create_and_get(adapter):
 
 
 @pytest.mark.asyncio
+async def test_empty_session_returns_empty_list_for_all_last_n(adapter):
+    """Empty sessions return [] for every latest-entry window size."""
+    assert await adapter.get_latest_qa_entries("u1", "missing", last_n=1) == []
+    assert await adapter.get_latest_qa_entries("u1", "missing", last_n=5) == []
+    assert await adapter.get_all_qa_entries("u1", "missing") == []
+
+
+@pytest.mark.asyncio
 async def test_create_qa_entry_sets_session_ttl_when_enabled(adapter, redis_store):
     """Session keys receive TTL on create when Redis session TTL is enabled."""
     await adapter.create_qa_entry("u1", "s1", "Q", "C", "A", qa_id="id1")
