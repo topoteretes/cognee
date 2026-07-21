@@ -19,6 +19,9 @@ from cognee.infrastructure.databases.vector.turso.TursoVectorDatasetDatabaseHand
 from cognee.infrastructure.databases.graph.postgres.PostgresGraphDatasetDatabaseHandler import (
     PostgresGraphDatasetDatabaseHandler,
 )
+from cognee.infrastructure.databases.graph.turso.TursoGraphDatasetDatabaseHandler import (
+    TursoGraphDatasetDatabaseHandler,
+)
 
 supported_dataset_database_handlers = {
     "neo4j_aura_dev": {
@@ -47,4 +50,8 @@ supported_dataset_database_handlers = {
         "handler_provider": "ladybug",
     },
     "kuzu": {"handler_instance": LadybugDatasetDatabaseHandler, "handler_provider": "kuzu"},
+    "turso_graph": {
+        "handler_instance": TursoGraphDatasetDatabaseHandler,
+        "handler_provider": "turso",
+    },
 }

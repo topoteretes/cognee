@@ -2138,19 +2138,21 @@ class Neo4jAdapter(GraphDBInterface):
         query_edges = f"""
         MATCH (n)-[r]->(m)
         WHERE {where_clause} AND {where_clause.replace("n.", "m.")}
-        RETURN n.id AS source, n.id AS target, TYPE(r) AS type, properties(r) AS properties
+        RETURN n.id AS source, m.id AS target, TYPE(r) AS type, properties(r) AS properties
         """
         result_edges = await self.query(query_edges)
 
-        edges = [
-            (
-                record["properties"]["source_node_id"],
-                record["properties"]["target_node_id"],
-                record["type"],
-                _strip_provenance(record["properties"]),
+        edges = []
+        for record in result_edges:
+            properties = _strip_provenance(record["properties"] or {})
+            edges.append(
+                (
+                    properties.get("source_node_id", record["source"]),
+                    properties.get("target_node_id", record["target"]),
+                    record["type"],
+                    properties,
+                )
             )
-            for record in result_edges
-        ]
 
         return (nodes, edges)
 

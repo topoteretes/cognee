@@ -77,6 +77,22 @@ class _NoAnswerRetriever:
         raise AssertionError("retrieval should be skipped")
 
 
+class _DeterministicRetriever:
+    supports_session_turn_preparation = False
+
+    async def prepare_session_turn_for_retrieval(self, query):
+        raise AssertionError("deterministic retrieval must not prepare a conversational turn")
+
+    async def get_retrieved_objects(self, query):
+        return {"operation": "query_facts", "facts": []}
+
+    async def get_context_from_objects(self, query, retrieved_objects):
+        return '{"facts":[],"operation":"query_facts"}'
+
+    async def get_completion_from_context(self, query, retrieved_objects, context):
+        return retrieved_objects
+
+
 @pytest.mark.asyncio
 async def test_get_retriever_output_uses_effective_query_before_retrieval():
     retriever = _EffectiveQueryRetriever()
@@ -131,6 +147,28 @@ async def test_get_retriever_output_skips_retrieval_for_no_answer_turn():
     assert result.result_object is None
     assert result.context is None
     assert result.completion == ["Thanks, I noted that."]
+
+
+@pytest.mark.asyncio
+async def test_get_retriever_output_can_bypass_session_preparation_without_only_context():
+    retriever = _DeterministicRetriever()
+    with (
+        patch.object(
+            get_retriever_output_module,
+            "get_graph_engine",
+            new_callable=AsyncMock,
+            return_value=_FakeGraphEngine(),
+        ),
+        patch.object(
+            get_retriever_output_module,
+            "get_search_type_retriever_instance",
+            new_callable=AsyncMock,
+            return_value=retriever,
+        ),
+    ):
+        result = await get_retriever_output(SearchType.CODE, "Checkout")
+
+    assert result.completion == {"operation": "query_facts", "facts": []}
 
 
 def test_count_retrieved_objects_counts_structured_lists():

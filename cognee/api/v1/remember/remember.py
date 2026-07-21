@@ -54,8 +54,9 @@ class RememberKwargs(TypedDict, total=False):
     user: object
     vector_db_config: dict
     graph_db_config: dict
-    content_type: Literal["skills"]
+    content_type: Literal["skills", "code"]
     skill_improvement: dict[str, Any]
+    index_vectors: bool
     skills_text: str
     skill_name: str
     primary_key: str
@@ -683,8 +684,11 @@ async def remember(
             estimate excludes the LLM calls ``improve()`` makes when
             ``self_improvement=True``.
         content_type: Set to ``"skills"`` to explicitly ingest SKILL.md
-            files as dataset-scoped Skill nodes. ``remember()`` does not
-            auto-detect skill paths.
+            files as dataset-scoped Skill nodes, or ``"code"`` to index a
+            code repository (local path or remote git URL, or a list of
+            them) as an architectural code graph via the enola-backed
+            pipeline. ``remember()`` does not auto-detect skill paths or
+            repositories.
         skill_improvement: Internal skill-improvement control dict used with
             ``SkillRunEntry`` or ``content_type="skills"``. ``apply=True``
             requires an existing ``proposal_id``.
@@ -915,6 +919,8 @@ async def _remember_inner(
     # normal remember), so they must be consumed here regardless of content_type.
     skills_text = kwargs.pop("skills_text", None)
     skill_name = kwargs.pop("skill_name", None)
+    # code-only kwarg, consumed here for the same reason as the skills ones.
+    index_vectors = kwargs.pop("index_vectors", None)
 
     def _requested_node_set(default: str) -> str:
         requested_node_set = kwargs.get("node_set") or [default]
@@ -924,12 +930,73 @@ async def _remember_inner(
             return requested_node_set[0]
         return default
 
-    if content_type not in (None, "skills"):
-        raise ValueError("Unsupported remember content_type. Supported values: 'skills'.")
+    if content_type not in (None, "skills", "code"):
+        raise ValueError("Unsupported remember content_type. Supported values: 'skills', 'code'.")
     if skill_improvement is not None and content_type != "skills":
         raise ValueError(
             "skill_improvement is supported only for SkillRunEntry or content_type='skills'."
         )
+    if index_vectors is not None and content_type != "code":
+        raise ValueError("index_vectors is supported only for content_type='code'.")
+    if content_type == "code" and session_id is not None:
+        raise ValueError(
+            "session_id is not applicable to content_type='code'; code graphs are "
+            "stored in the permanent graph, not a session cache."
+        )
+
+    if content_type == "code":
+        from pathlib import Path as _Path
+
+        from cognee import __version__ as cognee_version
+        from cognee.modules.run_custom_pipeline import run_custom_pipeline
+        from cognee.shared.utils import send_telemetry
+        from cognee.tasks.code_graph import get_code_graph_tasks
+        from cognee.tasks.code_graph.resolve_repo import resolve_repo_source
+
+        repo_specs = data if isinstance(data, list) else [data]
+        if not repo_specs or not all(isinstance(spec, (str, _Path)) for spec in repo_specs):
+            raise ValueError(
+                "content_type='code' expects a repository path or git URL "
+                "(or a list of them) as data."
+            )
+
+        send_telemetry(
+            "cognee.remember.code_graph",
+            kwargs.get("user", "sdk"),
+            additional_properties={
+                "dataset_name": dataset_name,
+                "repository_count": len(repo_specs),
+                "index_vectors": bool(index_vectors),
+                "cognee_version": cognee_version,
+            },
+        )
+
+        result = RememberResult(
+            status="completed",
+            dataset_name=dataset_name,
+            dataset_id=str(kwargs.get("dataset_id")) if kwargs.get("dataset_id") else None,
+            session_ids=None,
+        )
+        result.items = []
+        for spec in repo_specs:
+            repo_path = await resolve_repo_source(spec)
+            await run_custom_pipeline(
+                tasks=get_code_graph_tasks(str(repo_path), index_vectors=bool(index_vectors)),
+                data=str(repo_path),
+                dataset=kwargs.get("dataset_id") or dataset_name,
+                user=kwargs.get("user"),
+                pipeline_name="code_graph_pipeline",
+                # The default (graph-only) pipeline performs no LLM or embedding
+                # calls, so it must not demand an API key on first run. With
+                # index_vectors=True embeddings are used, so the checks stay on.
+                skip_connection_test=not bool(index_vectors),
+            )
+            result.items.append(
+                {"kind": "code_repository", "source": str(spec), "path": str(repo_path)}
+            )
+        result.items_processed = len(result.items)
+        result.elapsed_seconds = time.monotonic() - result._started_at
+        return result
 
     if content_type == "skills":
         import shutil
