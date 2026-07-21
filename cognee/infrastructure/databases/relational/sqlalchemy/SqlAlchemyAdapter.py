@@ -205,7 +205,6 @@ class SQLAlchemyAdapter:
                     f'CREATE TABLE IF NOT EXISTS {schema_name}."{table_name}" ({", ".join(fields_query_parts)});'
                 )
             )
-            await connection.close()
 
     async def delete_table(self, table_name: str, schema_name: Optional[str] = "public"):
         """
