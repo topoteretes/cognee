@@ -9,6 +9,8 @@ working without churn.
 
 from __future__ import annotations
 
+import re
+
 from ._kuzu_helpers import install_json_extension_local
 from .harness import (
     DEFAULT_DISPATCH,
@@ -30,6 +32,80 @@ from .kuzu_protocol import (
 
 
 _LOCK_HELD_MARKER = "could not set lock on file"
+
+# Ladybug reports the lock holder as "... Lock is held by PID <pid>".
+_LOCK_PID_PATTERN = re.compile(r"held by pid\s+(\d+)", re.IGNORECASE)
+
+
+def _pid_alive(pid: int) -> bool:
+    """Best-effort liveness check for a lock-holder PID.
+
+    POSIX-accurate; conservative everywhere else. Returns True whenever the
+    process still exists OR liveness can't be determined, so a live or unknown
+    holder is never mistaken for a dead one. Only a definitive
+    ``ProcessLookupError`` proves the holder is gone.
+    """
+    import os
+
+    if pid <= 0:
+        return True
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except (PermissionError, OSError):
+        # Exists but owned by another user, or the platform can't answer (e.g.
+        # signal 0 unsupported on Windows) — assume alive and leave it alone.
+        return True
+    return True
+
+
+def _reclaim_stale_lock(db_path, exc) -> bool:
+    """Remove a Ladybug lock file orphaned by a dead worker.
+
+    A worker that crashes (OOM, SIGKILL, a hard error mid-open) can leave
+    ``<db_path>.lock`` on disk. Every later open then fails with
+    "Lock is held by PID <pid>" for a PID that no longer exists, which wedges all
+    subsequent ``recall()`` calls (gh #3708). We remove the stale lock only when
+    the holder PID is parseable from the error AND confirmed not alive — a live
+    or unknown holder is left untouched, so a healthy worker never has its lock
+    yanked out from under it.
+
+    Returns True when a stale lock was removed (the caller may retry the open).
+    """
+    import os
+
+    if not db_path:
+        return False
+    match = _LOCK_PID_PATTERN.search(str(exc))
+    if not match:
+        return False
+    holder_pid = int(match.group(1))
+    if holder_pid == os.getpid() or _pid_alive(holder_pid):
+        return False
+    try:
+        os.remove(str(db_path) + ".lock")
+    except (FileNotFoundError, OSError):
+        return False
+    return True
+
+
+def _open_locked_with_recovery(ladybug, kwargs, db_path, first_exc):
+    """Open a Ladybug database that first failed with a lock-held error.
+
+    Two layers: back off for transient inter-worker contention
+    (``_retry_open_locked``), then — if the lock still won't clear — reclaim it
+    when it was orphaned by a dead worker (gh #3708) and reopen once. Any
+    non-lock error, or a lock whose holder is alive/unknown, propagates unchanged.
+    """
+    try:
+        return _retry_open_locked(ladybug, kwargs, first_exc)
+    except RuntimeError as retry_exc:
+        if _LOCK_HELD_MARKER not in str(retry_exc).lower():
+            raise
+        if not _reclaim_stale_lock(db_path, retry_exc):
+            raise
+        return ladybug.Database(**kwargs)
 
 
 def _retry_open_locked(ladybug, kwargs, original_exc):
@@ -78,10 +154,12 @@ def _open_database(registry: HandleRegistry, req: Request) -> HandleResult:
         message = str(e).lower()
 
         if _LOCK_HELD_MARKER in message:
-            # Transient inter-process lock contention with another worker that
-            # is still shutting down for the same path — retry with backoff
-            # rather than treating it as corruption/migration.
-            db = _retry_open_locked(ladybug, req.kwargs, e)
+            # A lock-held failure is usually transient inter-process contention
+            # with another worker still shutting down for the same path (retry
+            # with backoff), but it can also be a stale lock orphaned by a dead
+            # worker — reclaim that only when its holder PID is confirmed gone
+            # (gh #3708), never treating it as corruption/migration.
+            db = _open_locked_with_recovery(ladybug, req.kwargs, db_path, e)
         else:
             if "wal" in message:
                 # In case of corrupted WAL file preventing database opening, remove the WAL file and try again
