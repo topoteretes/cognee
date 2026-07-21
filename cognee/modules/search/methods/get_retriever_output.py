@@ -44,6 +44,16 @@ async def get_retriever_output(
 
     if is_empty:
         logger.warning("Search attempt on an empty knowledge graph")
+        return SearchResultPayload(
+            result_object=[],
+            context=None,
+            completion=[],
+            search_type=query_type,
+            only_context=kwargs.get("only_context", False),
+            dataset_name=kwargs.get("dataset").name if kwargs.get("dataset") else None,
+            dataset_id=kwargs.get("dataset").id if kwargs.get("dataset") else None,
+            dataset_tenant_id=kwargs.get("dataset").tenant_id if kwargs.get("dataset") else None,
+        )
 
     retriever_instance = await get_search_type_retriever_instance(
         query_type=effective_query_type, query_text=query_text, **kwargs
