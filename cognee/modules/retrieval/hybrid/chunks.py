@@ -41,7 +41,13 @@ async def retrieve_hybrid_chunks(
     candidate_limit = max(0, chunks_top_k * 2)
     summary_limit = summary_candidate_limit(chunks_top_k, text_summaries_top_k)
     bm25_chunks, vector_chunks, summary_hits = await asyncio.gather(
-        search_bm25_chunks(query, candidate_limit, node_name, node_name_filter_operator),
+        search_bm25_chunks(
+            vector_engine,
+            query,
+            candidate_limit,
+            node_name,
+            node_name_filter_operator,
+        ),
         search_collection(
             vector_engine,
             "DocumentChunk_text",
@@ -52,9 +58,8 @@ async def retrieve_hybrid_chunks(
             required=True,
             query_vector=query_vector,
         ),
-        search_collection(
+        search_optional_summary_collection(
             vector_engine,
-            "TextSummary_text",
             query,
             summary_limit,
             node_name,
@@ -72,12 +77,19 @@ async def retrieve_hybrid_chunks(
     )
     missing_source_chunk_ids = source_chunk_ids_to_load(pairs)
     if missing_source_chunk_ids:
-        source_chunks = await load_source_chunks_for_summaries(
-            vector_engine,
-            missing_source_chunk_ids,
-            node_name,
-            node_name_filter_operator,
-        )
+        try:
+            source_chunks = await load_source_chunks_for_summaries(
+                vector_engine,
+                missing_source_chunk_ids,
+                node_name,
+                node_name_filter_operator,
+            )
+        except Exception as error:
+            logger.warning(
+                "TextSummary source-chunk load failed; continuing with existing chunks: %s",
+                error,
+            )
+            source_chunks = []
         attach_source_chunks(pairs, source_chunks)
 
     ranked_pairs = rank_chunk_summary_pairs(
@@ -97,10 +109,23 @@ async def retrieve_hybrid_chunks(
             node_name_filter_operator,
         )
 
-    return {
+    result = {
         "chunks": [pair["chunk"] for pair in ranked_pairs if pair["chunk"] is not None],
         "chunk_summaries": summary_text_by_chunk_id(ranked_pairs),
     }
+    if ranked_pairs:
+        result["chunk_attribution"] = [
+            {
+                "chunk_id": pair["chunk_id"],
+                "retrieval_score": pair["retrieval_score"],
+                "rrf_score": pair["rrf_score"],
+                "channels": [dict(channel) for channel in pair["retrieval_channels"]],
+                "importance_weight": pair["importance_weight"],
+                "truth_factor": pair["truth_factor"],
+            }
+            for pair in ranked_pairs
+        ]
+    return result
 
 
 def summary_candidate_limit(chunks_top_k: int, text_summaries_top_k: Optional[int]) -> int:
@@ -110,24 +135,32 @@ def summary_candidate_limit(chunks_top_k: int, text_summaries_top_k: Optional[in
 
 
 async def search_bm25_chunks(
+    vector_engine: Any,
     query: str,
     limit: int,
     node_name: Optional[list[str]],
     node_name_filter_operator: str,
-) -> list[dict]:
+) -> list[Any]:
     if limit <= 0:
         return []
 
     try:
-        retriever = BM25ChunksRetriever(top_k=limit, with_scores=True)
+        retriever = BM25ChunksRetriever(
+            top_k=limit,
+            with_scores=True,
+            node_name=node_name,
+            node_name_filter_operator=node_name_filter_operator,
+            use_cache=True,
+        )
         scored_chunks = await retriever.get_retrieved_objects(query)
+        logger.debug("BM25 corpus cache status: %s", retriever.cache_status)
     except NoDataError:
         return []
     except Exception as error:
         logger.warning("BM25 chunk retrieval failed; using vector chunks only: %s", error)
         return []
 
-    chunks = []
+    candidates = []
     for item in scored_chunks:
         chunk, score = scored_payload(item)
         if score <= 0:
@@ -136,7 +169,47 @@ async def search_bm25_chunks(
             continue
         if not payload_matches_node_filter(chunk, node_name, node_name_filter_operator):
             continue
-        chunks.append(chunk)
+        chunk_id = result_id(chunk)
+        if not chunk_id:
+            logger.warning("Dropping BM25 candidate without a stable chunk id")
+            continue
+        candidates.append((chunk_id, score))
+
+    if not candidates:
+        return []
+
+    try:
+        current_rows = await vector_engine.retrieve(
+            "DocumentChunk_text",
+            [chunk_id for chunk_id, _ in candidates],
+        )
+    except Exception as error:
+        # Cached lexical candidates are not authoritative. If freshness cannot be
+        # checked, fail this lane closed and let vector/graph retrieval continue.
+        logger.warning("BM25 candidate validation failed; using vector chunks only: %s", error)
+        return []
+
+    current_by_id = {result_id(row): row for row in current_rows if result_id(row)}
+    chunks = []
+    for chunk_id, score in candidates:
+        current_row = current_by_id.get(chunk_id)
+        if current_row is None:
+            logger.debug("Dropping deleted BM25 chunk candidate: %s", chunk_id)
+            continue
+
+        current_payload = payload(current_row)
+        if not current_payload:
+            logger.warning("Dropping BM25 candidate with empty current payload: %s", chunk_id)
+            continue
+        refreshed_payload = dict(current_payload)
+        refreshed_payload.setdefault("id", chunk_id)
+        if not payload_matches_node_filter(refreshed_payload, node_name, node_name_filter_operator):
+            logger.debug("Dropping out-of-scope BM25 chunk candidate: %s", chunk_id)
+            continue
+
+        # Preserve the native BM25 score for attribution while replacing stale graph
+        # payload with the current vector row.
+        chunks.append((refreshed_payload, score))
     return chunks
 
 
@@ -172,6 +245,32 @@ async def search_collection(
             logger.error("%s collection not found", collection_name)
             raise NoDataError("No data found in the system, please add data first.") from error
         logger.debug("%s collection not found; using empty channel", collection_name)
+        return []
+
+
+async def search_optional_summary_collection(
+    vector_engine: Any,
+    query: str,
+    limit: int,
+    node_name: Optional[list[str]],
+    node_name_filter_operator: str,
+    query_vector: Optional[list[float]] = None,
+) -> list[Any]:
+    try:
+        return await search_collection(
+            vector_engine,
+            "TextSummary_text",
+            query,
+            limit,
+            node_name,
+            node_name_filter_operator,
+            query_vector=query_vector,
+        )
+    except Exception as error:
+        logger.warning(
+            "TextSummary_text search failed; continuing with lexical/vector chunks: %s",
+            error,
+        )
         return []
 
 
@@ -242,6 +341,12 @@ async def load_summary_text_for_ranked_pairs(
         )
     except CollectionNotFoundError:
         logger.warning("TextSummary_text collection missing while loading chunk summaries")
+        return
+    except Exception as error:
+        logger.warning(
+            "TextSummary_text load failed; continuing without paired summaries: %s",
+            error,
+        )
         return
 
     summaries_by_id = {result_id(summary): summary for summary in summaries}

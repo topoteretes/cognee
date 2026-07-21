@@ -190,6 +190,41 @@ def test_answer_with_no_significant_terms_yields_no_evidence():
     assert format_chunk_references([_payload()], answer="It is.") == ""
 
 
+def test_answer_grounding_matches_unicode_words_after_normalization():
+    payload = _payload(text="Le caf\u00e9 sert une cr\u00e8me br\u00fbl\u00e9e maison.")
+
+    result = format_chunk_references(
+        [payload], answer="La CRE\u0300ME BRU\u0302LE\u0301E est servie au CAFE\u0301."
+    )
+
+    assert "Evidence:" in result
+    assert "cr\u00e8me br\u00fbl\u00e9e" in result
+
+
+def test_answer_grounding_matches_cjk_phrases_without_spaces():
+    payload = _payload(
+        text="\u30a2\u30ea\u30b9\u306f\u30a2\u30af\u30e1\u793e\u3067\u30c7\u30fc\u30bf\u30c1\u30fc\u30e0\u3092\u7387\u3044\u3066\u3044\u308b\u3002"
+    )
+
+    result = format_chunk_references(
+        [payload], answer="\u30a2\u30af\u30e1\u793e\u306e\u30c7\u30fc\u30bf\u30c1\u30fc\u30e0"
+    )
+
+    assert "Evidence:" in result
+    assert "\u30a2\u30af\u30e1\u793e" in result
+
+
+def test_answer_grounding_rejects_unrelated_cjk_text():
+    payload = _payload(
+        text="\u30da\u30f3\u30ae\u30f3\u306f\u5357\u6975\u306b\u751f\u606f\u3057\u3066\u3044\u308b\u3002"
+    )
+
+    assert (
+        format_chunk_references([payload], answer="\u30a2\u30af\u30e1\u793e\u306e\u58f2\u4e0a")
+        == ""
+    )
+
+
 def test_answer_none_keeps_all_usable_candidates():
     """answer=None preserves the unfiltered retrieval-order behavior."""
     unrelated = _payload(text="Penguins live in Antarctica.")

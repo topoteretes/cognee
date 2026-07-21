@@ -1,3 +1,5 @@
+import re
+import unicodedata
 from typing import Any, Optional
 
 from cognee.modules.retrieval.hybrid.facts import connection_edge_type_id
@@ -17,9 +19,18 @@ async def build_entities(
     entity_hits: list[Any],
     max_edges_per_entity: int,
     edge_ranks: Optional[dict[str, int]] = None,
+    node_name: Optional[list[str]] = None,
+    node_name_filter_operator: str = "OR",
 ):
     if not entity_hits:
         return []
+
+    if node_name:
+        entity_hits = [
+            result
+            for result in entity_hits
+            if _node_matches_filter(payload(result), node_name, node_name_filter_operator)
+        ]
 
     entities = [_entity_from_result(result) for result in entity_hits]
     entity_ids = [entity["id"] for entity in entities if entity["id"]]
@@ -34,18 +45,38 @@ async def build_entities(
         )
         return entities
 
-    connections_by_entity_id = _partition_neighborhood(entity_ids, nodes, edges)
+    connections_by_entity_id = _partition_neighborhood(
+        entity_ids,
+        nodes,
+        edges,
+        node_name=node_name,
+        node_name_filter_operator=node_name_filter_operator,
+    )
     for entity in entities:
-        entity["edges"] = _edge_bullets_from_connections(
+        ranked_edges = _ranked_edge_bullets_from_connections(
             connections_by_entity_id.get(entity["id"], []),
-            max_edges_per_entity,
             edge_ranks or {},
         )
+        entity["edges"] = ranked_edges[: max(0, max_edges_per_entity)]
+        # Query-ranked local edges that did not fit the entity bullet budget
+        # remain available as concrete evidence for the non-duplicative facts
+        # section. Unranked neighborhood noise is not retained.
+        fact_evidence = [
+            edge
+            for edge in ranked_edges[max(0, max_edges_per_entity) :]
+            if edge.get("edge_type_id") in (edge_ranks or {})
+        ]
+        if fact_evidence:
+            entity["fact_evidence"] = fact_evidence
     return entities
 
 
 def _partition_neighborhood(
-    entity_ids: list[str], nodes: list[Any], edges: list[Any]
+    entity_ids: list[str],
+    nodes: list[Any],
+    edges: list[Any],
+    node_name: Optional[list[str]] = None,
+    node_name_filter_operator: str = "OR",
 ) -> dict[str, list[tuple[dict, dict, dict]]]:
     """Rebuild per-entity (source, edge, target) connection triples from the flat one-hop
     subgraph returned by get_neighborhood; drops neighbor-to-neighbor edges."""
@@ -60,10 +91,21 @@ def _partition_neighborhood(
             continue
         source_id, target_id = str(edge[0]), str(edge[1])
         properties = edge[3] if len(edge) > 3 and isinstance(edge[3], dict) else {}
+        source = nodes_by_id.get(source_id, {"id": source_id})
+        target = nodes_by_id.get(target_id, {"id": target_id})
+        if node_name and not _connection_matches_node_filter(
+            source,
+            properties,
+            target,
+            entity_ids,
+            node_name,
+            node_name_filter_operator,
+        ):
+            continue
         triple = (
-            nodes_by_id.get(source_id, {"id": source_id}),
+            source,
             {"relationship_name": edge[2], "properties": properties},
-            nodes_by_id.get(target_id, {"id": target_id}),
+            target,
         )
         if source_id in connections:
             connections[source_id].append(triple)
@@ -133,6 +175,13 @@ def _edge_bullets_from_connections(
     if max_edges <= 0:
         return []
 
+    return _ranked_edge_bullets_from_connections(connections, edge_ranks)[:max_edges]
+
+
+def _ranked_edge_bullets_from_connections(
+    connections: list[Any], edge_ranks: dict[str, int]
+) -> list[dict]:
+
     edges = []
     seen_keys = set()
     seen_texts = set()
@@ -149,26 +198,25 @@ def _edge_bullets_from_connections(
         dedupe_key = _edge_dedupe_key(bullet)
         if dedupe_key and dedupe_key in seen_keys:
             continue
-        if not dedupe_key and bullet["text"] in seen_texts:
+        normalized_text = _normalized_text(bullet["text"])
+        if not dedupe_key and normalized_text in seen_texts:
             continue
 
         if dedupe_key:
             seen_keys.add(dedupe_key)
         else:
-            seen_texts.add(bullet["text"])
+            seen_texts.add(normalized_text)
         edges.append(bullet)
     edges.sort(key=lambda edge: _edge_sort_key(edge, edge_ranks))
-    return edges[:max_edges]
+    return edges
 
 
-def _edge_sort_key(edge: dict, edge_ranks: dict[str, int]) -> tuple[int, int]:
-    """Pinned type edges first, then query-ranked edges, then legacy graph order."""
-    if _is_type_edge(edge):
-        return (0, 0)
+def _edge_sort_key(edge: dict, edge_ranks: dict[str, int]) -> tuple[int, int, int]:
+    """Query-ranked evidence first; type edges only break ties for unranked edges."""
     rank = edge_ranks.get(edge.get("edge_type_id"))
-    if rank is None:
-        return (2, 0)
-    return (1, rank)
+    if rank is not None:
+        return (0, rank, 0)
+    return (1, 0 if _is_type_edge(edge) else 1, 0)
 
 
 def _unpack_connection(connection: Any) -> Optional[tuple[dict, dict, dict]]:
@@ -190,6 +238,7 @@ def _edge_bullet(source: dict, edge: dict, target: dict) -> Optional[dict]:
     if not text:
         return None
 
+    properties = edge.get("properties") if isinstance(edge.get("properties"), dict) else {}
     return {
         "text": text,
         "source": source_label,
@@ -198,6 +247,7 @@ def _edge_bullet(source: dict, edge: dict, target: dict) -> Optional[dict]:
         "relationship": relationship,
         "target_id": display_value(target.get("id")),
         "edge_type_id": connection_edge_type_id(edge),
+        "provenance": _edge_provenance(properties),
     }
 
 
@@ -230,3 +280,81 @@ def _nested_edge_text(edge: dict) -> Optional[str]:
 
 def _node_label(node: dict) -> Optional[str]:
     return first_display_value(node.get("name"), node.get("id"))
+
+
+def _connection_matches_node_filter(
+    source: dict,
+    properties: dict,
+    target: dict,
+    entity_ids: list[str],
+    node_name: list[str],
+    node_name_filter_operator: str,
+) -> bool:
+    seed_ids = set(entity_ids)
+    source_matches = str(source.get("id")) in seed_ids or _node_matches_filter(
+        source, node_name, node_name_filter_operator
+    )
+    target_matches = str(target.get("id")) in seed_ids or _node_matches_filter(
+        target, node_name, node_name_filter_operator
+    )
+    if not source_matches or not target_matches:
+        return False
+
+    # Some graph providers attach scope directly to an edge. When present it
+    # must agree with the requested scope; absent edge tags inherit the strict
+    # endpoint decision above.
+    if "belongs_to_set" in properties:
+        return _node_matches_filter(properties, node_name, node_name_filter_operator)
+    return True
+
+
+def _node_matches_filter(node: dict, node_name: list[str], node_name_filter_operator: str) -> bool:
+    values = node.get("belongs_to_set")
+    if not isinstance(values, list):
+        return False
+
+    actual = {_node_set_name(value) for value in values}
+    actual.discard(None)
+    expected = {str(value) for value in node_name}
+    if node_name_filter_operator.upper() == "AND":
+        return expected.issubset(actual)
+    return bool(actual & expected)
+
+
+def _node_set_name(value: Any) -> Optional[str]:
+    if isinstance(value, dict):
+        return first_display_value(value.get("name"), value.get("id"))
+    return first_display_value(getattr(value, "name", None), value)
+
+
+_PROVENANCE_KEYS = {
+    "source_id",
+    "source_chunk_id",
+    "data_id",
+    "dataset_id",
+    "document_id",
+    "source_path",
+    "page",
+    "page_number",
+    "start",
+    "end",
+    "timestamp",
+    "valid_from",
+    "valid_to",
+    "valid_at",
+    "created_at",
+    "updated_at",
+}
+
+
+def _edge_provenance(properties: dict) -> dict:
+    return {
+        key: value
+        for key, value in properties.items()
+        if key in _PROVENANCE_KEYS and value is not None
+    }
+
+
+def _normalized_text(text: str) -> str:
+    normalized = unicodedata.normalize("NFKC", text).casefold()
+    return re.sub(r"\s+", " ", normalized).strip()

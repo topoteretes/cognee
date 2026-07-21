@@ -262,6 +262,13 @@ async def add_data_points(
             await index_data_points(triplets, vector_engine=vector_engine)
             logger.info(f"Created and indexed {len(triplets)} triplets from graph structure")
 
+    # Hybrid BM25 snapshots are process-local accelerators. Invalidate only after all
+    # graph/vector writes succeed so a subsequent query cannot reuse a pre-write corpus.
+    if dataset is not None:
+        from cognee.modules.retrieval.bm25_retriever import BM25ChunksRetriever
+
+        BM25ChunksRetriever.invalidate_cache(str(dataset.id))
+
     return data_points
 
 

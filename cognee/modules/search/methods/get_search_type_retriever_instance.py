@@ -14,7 +14,11 @@ from cognee.modules.search.exceptions import UnsupportedSearchTypeError
 from cognee.modules.retrieval.chunks_retriever import ChunksRetriever
 from cognee.modules.retrieval.summaries_retriever import SummariesRetriever
 from cognee.modules.retrieval.completion_retriever import CompletionRetriever
-from cognee.modules.retrieval.hybrid_retriever import HybridRetriever
+from cognee.modules.retrieval.hybrid_retriever import (
+    DEFAULT_MAX_CONTEXT_CHARS,
+    DEFAULT_MAX_CONTEXT_ITEMS,
+    HybridRetriever,
+)
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.graph_completion_decomposition_retriever import (
     GraphCompletionDecompositionRetriever,
@@ -111,7 +115,11 @@ async def get_search_type_retriever_instance(
                 "max_edges_per_entity": retriever_specific_config.get("max_edges_per_entity", 10),
                 "node_name": node_name,
                 "node_name_filter_operator": node_name_filter_operator,
-                "system_prompt_path": system_prompt_path,
+                "system_prompt_path": (
+                    "hybrid_answer_guarded.txt"
+                    if system_prompt_path == "answer_simple_question.txt"
+                    else system_prompt_path
+                ),
                 "system_prompt": system_prompt,
                 "session_id": session_id,
                 "response_model": retriever_specific_config.get("response_model", str),
@@ -127,6 +135,25 @@ async def get_search_type_retriever_instance(
                 ),
                 "use_truth_weight": retriever_specific_config.get("use_truth_weight", False),
                 "facts_top_k": retriever_specific_config.get("facts_top_k", top_k),
+                "include_references": include_references,
+                "max_context_chars": retriever_specific_config.get(
+                    "max_context_chars", DEFAULT_MAX_CONTEXT_CHARS
+                ),
+                "max_context_items": retriever_specific_config.get(
+                    "max_context_items", DEFAULT_MAX_CONTEXT_ITEMS
+                ),
+                "graph_fallback_enabled": retriever_specific_config.get(
+                    "graph_fallback_enabled", True
+                ),
+                "graph_fallback_top_k": retriever_specific_config.get(
+                    "graph_fallback_top_k", top_k
+                ),
+                "graph_fallback_node_type": node_type,
+                "graph_fallback_wide_search_top_k": wide_search_top_k,
+                "graph_fallback_triplet_distance_penalty": triplet_distance_penalty,
+                "graph_fallback_feedback_influence": feedback_influence,
+                "graph_fallback_neighborhood_depth": neighborhood_depth,
+                "graph_fallback_neighborhood_seed_top_k": neighborhood_seed_top_k,
             },
         ),
         SearchType.TRIPLET_COMPLETION: (

@@ -23,8 +23,8 @@ export interface RecallRequest {
  * server's scope-aware fan-out applies: graph + session + trace +
  * graph_context, tagged with _source.
  *
- * Pass ``searchType: null`` to opt into the server's auto-router.
- * Default is ``HYBRID_COMPLETION``.
+ * Pass a concrete ``searchType`` to force a retriever. By default the
+ * server's query router chooses the appropriate strategy.
  */
 export default function recallKnowledge(
   instance: CogneeInstance,
@@ -39,8 +39,8 @@ export default function recallKnowledge(
   body.top_k = req.topK ?? pipelineSettings.topK;
   // Server default is false; we default on so completions ship with citations.
   body.include_references = pipelineSettings.includeReferences;
-  // Explicit null asks the server to auto-route; undefined falls back to HYBRID_COMPLETION.
-  body.search_type = req.searchType !== undefined ? req.searchType : "HYBRID_COMPLETION";
+  // Explicit values force a retriever; undefined and null both opt into auto-routing.
+  body.search_type = req.searchType ?? null;
 
   return instance
     .fetch("/v1/recall", {

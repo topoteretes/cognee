@@ -27,8 +27,8 @@ Otherwise, this is a memory-oriented alias for `cognee search`.
             "--query-type",
             "-t",
             choices=SEARCH_TYPE_CHOICES,
-            default="GRAPH_COMPLETION",
-            help="Search mode (default: GRAPH_COMPLETION)",
+            default=None,
+            help="Search mode (default: auto-route; session-only when used with --session-id)",
         )
         parser.add_argument(
             "--datasets",
@@ -72,18 +72,17 @@ Otherwise, this is a memory-oriented alias for `cognee search`.
 
             # Session-only mode: -s without -d and without explicit -t
             session_only = (
-                args.session_id is not None
-                and not args.datasets
-                and args.query_type == "GRAPH_COMPLETION"  # i.e., the user didn't pass -t
+                args.session_id is not None and not args.datasets and args.query_type is None
             )
 
             if session_only:
                 fmt.echo(f"Searching session '{args.session_id}': '{args.query_text}'")
             else:
+                query_type_label = args.query_type or "AUTO"
                 datasets_msg = (
                     f" in datasets {args.datasets}" if args.datasets else " across all datasets"
                 )
-                fmt.echo(f"Recalling: '{args.query_text}' (type: {args.query_type}){datasets_msg}")
+                fmt.echo(f"Recalling: '{args.query_text}' (type: {query_type_label}){datasets_msg}")
 
             async def run_recall():
                 try:
@@ -103,7 +102,7 @@ Otherwise, this is a memory-oriented alias for `cognee search`.
                             **session_kwargs,
                         )
                     else:
-                        query_type = SearchType[args.query_type]
+                        query_type = SearchType[args.query_type] if args.query_type else None
                         recall_kwargs = {
                             "query_text": args.query_text,
                             "query_type": query_type,
@@ -149,10 +148,16 @@ Otherwise, this is a memory-oriented alias for `cognee search`.
                         if i < len(results):
                             fmt.echo("-" * 40)
                 else:
-                    fmt.echo(f"\nFound {len(results)} result(s) using {args.query_type}:")
+                    query_type_label = args.query_type or "AUTO"
+                    fmt.echo(f"\nFound {len(results)} result(s) using {query_type_label}:")
                     fmt.echo("=" * 60)
 
-                    if args.query_type in ["GRAPH_COMPLETION", "RAG_COMPLETION"]:
+                    if args.query_type in [
+                        None,
+                        "HYBRID_COMPLETION",
+                        "GRAPH_COMPLETION",
+                        "RAG_COMPLETION",
+                    ]:
                         for i, result in enumerate(results, 1):
                             fmt.echo(f"{fmt.bold('Response:')} {result}")
                             if i < len(results):

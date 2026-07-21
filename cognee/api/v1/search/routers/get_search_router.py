@@ -51,7 +51,11 @@ class SearchPayloadDTO(InDTO):
     )
     query: str = Field(default="What is in the document?")
     system_prompt: Optional[str] = Field(
-        default="Answer the question using the provided context. Be as brief as possible."
+        default=None,
+        description=(
+            "Optional system-prompt override. Omit it to use the selected retriever's "
+            "guarded default prompt."
+        ),
     )
     node_name: Optional[list[str]] = Field(
         default=None,

@@ -20,6 +20,12 @@ from cognee.modules.data.methods.get_authorized_dataset import get_authorized_da
 from cognee.modules.users.methods.get_user import get_user
 
 
+def _invalidate_bm25_cache(dataset_id: UUID) -> None:
+    from cognee.modules.retrieval.bm25_retriever import BM25ChunksRetriever
+
+    BM25ChunksRetriever.invalidate_cache(str(dataset_id))
+
+
 async def delete_dataset_nodes_and_edges(dataset_id: UUID, user_id: UUID) -> None:
     user = await get_user(user_id)
     # Check if user has delete permission for the dataset before proceeding with deletion of related graph/vector nodes and edges.
@@ -34,6 +40,7 @@ async def delete_dataset_nodes_and_edges(dataset_id: UUID, user_id: UUID) -> Non
         graph_engine = unified.graph
         if await stores_provenance_in_graph(graph_engine):
             await unified.delete_by_dataset_id(str(dataset_id))
+            _invalidate_bm25_cache(dataset_id)
             return
 
     if backend_access_control_enabled():
@@ -57,3 +64,4 @@ async def delete_dataset_nodes_and_edges(dataset_id: UUID, user_id: UUID) -> Non
     # graph/vector nodes needed deletion (e.g. shared nodes across datasets).
     await delete_dataset_related_nodes(dataset_id)
     await delete_dataset_related_edges(dataset_id)
+    _invalidate_bm25_cache(dataset_id)

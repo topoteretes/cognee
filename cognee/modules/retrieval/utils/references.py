@@ -19,6 +19,7 @@ when there is nothing usable, and never raise on backend failures.
 """
 
 import re
+import unicodedata
 from typing import Any, List, Optional, Set, Tuple
 
 from cognee.shared.logging_utils import get_logger
@@ -162,9 +163,36 @@ def _chunk_id(obj: Any, payload: dict) -> Optional[str]:
 
 
 def _significant_terms(text: str) -> Set[str]:
-    """Lowercased alphanumeric terms of an answer, minus stopwords and stubs."""
-    tokens = re.findall(r"[a-z0-9]+", text.lower())
-    return {token for token in tokens if len(token) >= 3 and token not in _STOPWORDS}
+    """Unicode-aware terms used to ground an answer in retrieved chunks.
+
+    Whitespace-delimited scripts contribute normalized words. CJK and other
+    compact scripts additionally contribute character bigrams/trigrams so a
+    short answer can overlap a longer source sentence without requiring spaces.
+    """
+    normalized = unicodedata.normalize("NFKC", text).casefold()
+    terms: Set[str] = set()
+    for token in re.findall(r"[^\W_]+", normalized, flags=re.UNICODE):
+        if _contains_compact_script(token):
+            if len(token) >= 2:
+                terms.update(token[index : index + 2] for index in range(len(token) - 1))
+            if len(token) >= 3:
+                terms.update(token[index : index + 3] for index in range(len(token) - 2))
+            continue
+        if len(token) >= 3 and token not in _STOPWORDS:
+            terms.add(token)
+    return terms
+
+
+def _contains_compact_script(token: str) -> bool:
+    return any(
+        "\u0e00" <= character <= "\u0e7f"  # Thai
+        or "\u3040" <= character <= "\u30ff"  # Hiragana and Katakana
+        or "\u3400" <= character <= "\u4dbf"  # CJK Extension A
+        or "\u4e00" <= character <= "\u9fff"  # CJK Unified Ideographs
+        or "\uac00" <= character <= "\ud7af"  # Hangul syllables
+        or "\uf900" <= character <= "\ufaff"  # CJK compatibility ideographs
+        for character in token
+    )
 
 
 def format_chunk_references(
@@ -247,7 +275,7 @@ def format_chunk_references(
 
         score = 0
         if answer_terms is not None:
-            chunk_terms = set(re.findall(r"[a-z0-9]+", text.lower()))
+            chunk_terms = _significant_terms(text)
             score = len(answer_terms & chunk_terms)
             if score == 0:
                 # No term from the answer appears in this chunk: it is almost

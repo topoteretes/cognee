@@ -18,6 +18,12 @@ from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 
+_RETRIEVAL_METADATA_KEYS = {
+    "chunk_attribution",
+    "context_chunk_ids",
+    "retrieval_status",
+}
+
 
 async def _effective_search_type(query_type: SearchType, query_text: str) -> SearchType:
     """Resolve FEELING_LUCKY to the retriever type that will actually run."""
@@ -142,7 +148,9 @@ def _count_retrieved_objects(retrieved_objects) -> int:
         return len(retrieved_objects)
     if isinstance(retrieved_objects, dict):
         list_counts = [
-            len(value) for value in retrieved_objects.values() if isinstance(value, list)
+            len(value)
+            for key, value in retrieved_objects.items()
+            if key not in _RETRIEVAL_METADATA_KEYS and isinstance(value, list)
         ]
         if list_counts:
             return sum(list_counts)

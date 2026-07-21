@@ -5,6 +5,7 @@ from cognee.modules.retrieval.hybrid.facts import (
     connection_edge_type_id,
     edge_rank_by_id,
     format_facts,
+    graph_evidence_by_edge_type_id,
     select_facts,
 )
 
@@ -107,6 +108,134 @@ def test_select_facts_returns_empty_for_empty_hits_or_zero_top_k():
     assert select_facts([_hit("Alice works at Acme.")], set(), 0) == []
 
 
+def test_select_facts_can_require_resolvable_graph_evidence():
+    hit = _hit("Alice works at Acme.")
+    evidence = {
+        hit.id: [
+            {
+                "source": "Alice",
+                "source_id": "alice",
+                "relationship": "works_at",
+                "target": "Acme",
+                "target_id": "acme",
+                "provenance": {"source_chunk_id": "chunk-1"},
+            }
+        ]
+    }
+
+    assert select_facts([hit], set(), 5, require_evidence=True) == []
+    assert select_facts([hit], set(), 5, evidence_by_id=evidence, require_evidence=True) == [
+        {
+            "id": hit.id,
+            "text": "Alice works at Acme.",
+            "evidence": evidence[hit.id],
+        }
+    ]
+
+
+def test_graph_evidence_is_deduplicated_and_keeps_temporal_provenance():
+    edge_id = _edge_id("Alice works at Acme.")
+    edge = {
+        "edge_type_id": edge_id,
+        "source": "Alice",
+        "source_id": "alice",
+        "relationship": "works_at",
+        "target": "Acme",
+        "target_id": "acme",
+        "provenance": {"valid_from": "2026-03-01"},
+    }
+
+    evidence = graph_evidence_by_edge_type_id([{"edges": [edge, dict(edge)]}])
+
+    assert evidence[edge_id] == [
+        {
+            "source": "Alice",
+            "source_id": "alice",
+            "relationship": "works_at",
+            "target": "Acme",
+            "target_id": "acme",
+            "provenance": {"valid_from": "2026-03-01"},
+        }
+    ]
+
+
+def test_graph_evidence_keeps_distinct_temporal_and_source_variants():
+    edge_id = _edge_id("Alice works at Acme.")
+    base = {
+        "edge_type_id": edge_id,
+        "source": "Alice",
+        "source_id": "alice",
+        "relationship": "works_at",
+        "target": "Acme",
+        "target_id": "acme",
+    }
+    march = {**base, "provenance": {"source_chunk_id": "march", "valid_from": "2026-03"}}
+    june = {**base, "provenance": {"source_chunk_id": "june", "valid_from": "2026-06"}}
+
+    evidence = graph_evidence_by_edge_type_id([{"edges": [march], "fact_evidence": [june]}])
+
+    assert [item["provenance"] for item in evidence[edge_id]] == [
+        {"source_chunk_id": "march", "valid_from": "2026-03"},
+        {"source_chunk_id": "june", "valid_from": "2026-06"},
+    ]
+
+
+def test_reserved_entity_edge_can_be_selected_as_nonduplicative_grounded_fact():
+    shown_text = "Alice works at Acme."
+    reserved_text = "Alice founded Initech."
+    shown_id = _edge_id(shown_text)
+    reserved_id = _edge_id(reserved_text)
+    entities = [
+        {
+            "edges": [
+                {
+                    "edge_type_id": shown_id,
+                    "source_id": "alice",
+                    "relationship": "works_at",
+                    "target_id": "acme",
+                }
+            ],
+            "fact_evidence": [
+                {
+                    "edge_type_id": reserved_id,
+                    "source_id": "alice",
+                    "relationship": "founded",
+                    "target_id": "initech",
+                }
+            ],
+        }
+    ]
+
+    facts = select_facts(
+        [_hit(shown_text), _hit(reserved_text)],
+        {shown_id},
+        5,
+        evidence_by_id=graph_evidence_by_edge_type_id(entities),
+        require_evidence=True,
+    )
+
+    assert [fact["text"] for fact in facts] == [reserved_text]
+
+
+def test_select_facts_unicode_normalizes_deduplication():
+    composed = _hit("Caf\u00e9 has a multilingual menu.")
+    decomposed = _hit("Cafe\u0301   has a multilingual menu.")
+
+    facts = select_facts([composed, decomposed], set(), 5)
+
+    assert [fact["text"] for fact in facts] == ["Caf\u00e9 has a multilingual menu."]
+
+
+def test_select_facts_accepts_substantive_cjk_text_without_spaces():
+    fact = _hit(
+        "\u30a2\u30ea\u30b9\u306f\u30a2\u30af\u30e1\u793e\u3067\u30c7\u30fc\u30bf\u30c1\u30fc\u30e0\u3092\u7387\u3044\u3066\u3044\u308b"
+    )
+
+    facts = select_facts([fact], set(), 5)
+
+    assert [item["text"] for item in facts] == [fact.payload["text"]]
+
+
 def test_format_facts():
     facts = [
         {"id": "fact-1", "text": "Alice works at Acme."},
@@ -116,4 +245,31 @@ def test_format_facts():
     assert format_facts([]) == ""
     assert format_facts(facts) == (
         "## Related facts\n- Alice works at Acme.\n- Bob founded Initech."
+    )
+
+
+def test_format_facts_renders_graph_evidence():
+    facts = [
+        {
+            "id": "fact-1",
+            "text": "Alice works at Acme.",
+            "evidence": [
+                {
+                    "source": "Alice",
+                    "relationship": "works_at",
+                    "target": "Acme",
+                    "provenance": {
+                        "source_chunk_id": "chunk-1",
+                        "page": 3,
+                        "valid_from": "2026-03-01",
+                    },
+                }
+            ],
+        }
+    ]
+
+    assert format_facts(facts) == (
+        "## Related facts\n"
+        "- Alice works at Acme. [graph evidence: Alice -- works_at -- Acme; "
+        "source: chunk-1, page 3; valid: 2026-03-01 to open]"
     )

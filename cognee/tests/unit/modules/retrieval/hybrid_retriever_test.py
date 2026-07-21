@@ -7,7 +7,6 @@ import pytest
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 from cognee.infrastructure.session.session_manager import SessionTurnPreparation
 from cognee.modules.graph.models.EdgeType import EdgeType
-from cognee.modules.retrieval.exceptions.exceptions import NoDataError, QueryValidationError
 from cognee.modules.retrieval.hybrid_retriever import HybridRetriever
 
 
@@ -131,34 +130,47 @@ async def test_empty_graph_does_not_prevent_chunk_search():
 
 
 @pytest.mark.asyncio
-async def test_query_batch_is_rejected_before_work_starts():
-    retriever = HybridRetriever()
+async def test_query_batch_embeds_once_and_returns_aligned_results():
+    vector = MagicMock()
+    vector.search = AsyncMock(return_value=[])
+    unified = _unified(vector=vector)
+    unified.vector.embedding_engine.embed_text = AsyncMock(
+        return_value=[QUERY_VECTOR, QUERY_VECTOR]
+    )
+    retriever = HybridRetriever(graph_fallback_enabled=False)
 
-    with pytest.raises(QueryValidationError, match="HYBRID_COMPLETION"):
-        await retriever.get_retrieved_objects(query_batch=["q"])
+    with patch(
+        "cognee.modules.retrieval.hybrid_retriever.get_unified_engine",
+        new_callable=AsyncMock,
+        return_value=unified,
+    ):
+        retrieved = await retriever.get_retrieved_objects(query_batch=["one", "two"])
 
-    with pytest.raises(QueryValidationError, match="HYBRID_COMPLETION"):
-        await retriever.get_context_from_objects(query_batch=["q"])
-
-    with pytest.raises(QueryValidationError, match="HYBRID_COMPLETION"):
-        await retriever.get_completion_from_context(query_batch=["q"])
+    assert len(retrieved) == 2
+    assert all(result["chunks"] == [] for result in retrieved)
+    unified.vector.embedding_engine.embed_text.assert_awaited_once_with(["one", "two"])
 
 
 @pytest.mark.asyncio
-async def test_missing_document_chunk_collection_raises_no_data_error():
+async def test_missing_document_chunk_collection_degrades_without_losing_other_lanes():
     vector = MagicMock()
     vector.search = _vector_search(missing_collections={"DocumentChunk_text"})
     graph = MagicMock()
 
-    retriever = HybridRetriever()
+    retriever = HybridRetriever(graph_fallback_enabled=False)
 
     with patch(
         "cognee.modules.retrieval.hybrid_retriever.get_unified_engine",
         new_callable=AsyncMock,
         return_value=_unified(vector=vector, graph=graph),
     ):
-        with pytest.raises(NoDataError, match="No data found"):
-            await retriever.get_retrieved_objects(query="q")
+        retrieved = await retriever.get_retrieved_objects(query="q")
+
+    assert retrieved["chunks"] == []
+    assert retrieved["retrieval_status"]["chunks"] == {
+        "status": "degraded",
+        "detail": "NoDataError",
+    }
 
 
 @pytest.mark.asyncio
@@ -235,6 +247,12 @@ async def test_chunk_retrieval_ranks_bm25_and_vector_channels_with_dedupe():
             _result("semantic-2", {"id": "semantic-2", "text": "Second semantic extra"}),
         ]
     )
+    vector.retrieve = AsyncMock(
+        return_value=[
+            _result("bm25-1", {"id": "bm25-1", "text": "BM25 first"}),
+            _result("shared", {"id": "shared", "text": "BM25 shared"}),
+        ]
+    )
     retriever = HybridRetriever(chunks_top_k=4, text_summaries_top_k=0)
 
     with (
@@ -250,7 +268,13 @@ async def test_chunk_retrieval_ranks_bm25_and_vector_channels_with_dedupe():
     ):
         retrieved = await retriever.get_retrieved_objects(query="q")
 
-    bm25_cls.assert_called_once_with(top_k=8, with_scores=True)
+    bm25_cls.assert_called_once_with(
+        top_k=8,
+        with_scores=True,
+        node_name=None,
+        node_name_filter_operator="OR",
+        use_cache=True,
+    )
     bm25_retriever.get_retrieved_objects.assert_awaited_once_with("q")
     assert [_payload_text(chunk) for chunk in retrieved["chunks"]] == [
         "BM25 shared",
@@ -271,6 +295,18 @@ async def test_bm25_chunks_respect_nodeset_filter_before_ranking():
     )
     vector = MagicMock()
     vector.search = AsyncMock(return_value=[])
+    vector.retrieve = AsyncMock(
+        return_value=[
+            _result(
+                "keep",
+                {
+                    "id": "keep",
+                    "text": "Keep",
+                    "belongs_to_set": ["KEN", "src_type:figure"],
+                },
+            )
+        ]
+    )
     retriever = HybridRetriever(
         chunks_top_k=4,
         node_name=["KEN", "src_type:figure"],
@@ -306,6 +342,9 @@ async def test_zero_score_bm25_chunks_do_not_reserve_context_slots():
     vector = MagicMock()
     vector.search = _vector_search(
         chunks=[_result("semantic", {"id": "semantic", "text": "Semantic fallback"})]
+    )
+    vector.retrieve = AsyncMock(
+        return_value=[_result("positive", {"id": "positive", "text": "Positive lexical score"})]
     )
     retriever = HybridRetriever(chunks_top_k=2, text_summaries_top_k=0)
 
@@ -348,7 +387,13 @@ async def test_default_summary_search_participates_in_chunk_ranking():
             )
         ],
     )
-    vector.retrieve = AsyncMock(return_value=[])
+
+    async def retrieve(collection_name, _ids):
+        if collection_name == "DocumentChunk_text":
+            return [_result("lexical", {"id": "lexical", "text": "Lexical"})]
+        return []
+
+    vector.retrieve = AsyncMock(side_effect=retrieve)
     retriever = HybridRetriever(chunks_top_k=1)
 
     with (
@@ -364,8 +409,9 @@ async def test_default_summary_search_participates_in_chunk_ranking():
     ):
         retrieved = await retriever.get_retrieved_objects(query="q")
 
-    assert [_payload_text(chunk) for chunk in retrieved["chunks"]] == ["Semantic"]
-    assert retrieved["chunk_summaries"] == {"semantic": "Semantic summary"}
+    # A derived summary no longer counts as a second independent semantic vote.
+    assert [_payload_text(chunk) for chunk in retrieved["chunks"]] == ["Lexical"]
+    assert retrieved["chunk_summaries"] == {}
 
 
 @pytest.mark.asyncio
@@ -376,6 +422,7 @@ async def test_summary_retrieval_opt_out_disables_summary_channel_only():
     )
     vector = MagicMock()
     vector.search = _vector_search(chunks=[_result("semantic", {"id": "semantic", "text": "S"})])
+    vector.retrieve = AsyncMock(return_value=[_result("bm25", {"id": "bm25", "text": "BM25"})])
     retriever = HybridRetriever(chunks_top_k=2, text_summaries_top_k=0)
 
     with (
@@ -572,7 +619,8 @@ async def test_importance_weight_adjusts_summary_enabled_ranking():
     ):
         retrieved = await retriever.get_retrieved_objects(query="q")
 
-    assert [_payload_text(chunk) for chunk in retrieved["chunks"]] == ["High", "Low"]
+    # Importance is a tie-break only and cannot reverse a stronger query rank.
+    assert [_payload_text(chunk) for chunk in retrieved["chunks"]] == ["Low", "High"]
 
 
 @pytest.mark.asyncio
@@ -724,7 +772,13 @@ async def test_independent_retrieval_channels_run_concurrently():
     ):
         retrieved = await asyncio.wait_for(retriever.get_retrieved_objects(query="q"), timeout=1)
 
-    assert retrieved == {"chunks": [], "chunk_summaries": {}, "entities": [], "facts": []}
+    assert {key: retrieved[key] for key in ("chunks", "chunk_summaries", "entities", "facts")} == {
+        "chunks": [],
+        "chunk_summaries": {},
+        "entities": [],
+        "facts": [],
+    }
+    assert retrieved["retrieval_status"]["chunks"]["status"] == "ok"
 
 
 @pytest.mark.asyncio
@@ -928,14 +982,25 @@ async def test_missing_entity_collection_returns_empty_channel():
     ):
         retrieved = await retriever.get_retrieved_objects(query="q")
 
-    assert retrieved == {"chunks": [], "chunk_summaries": {}, "entities": [], "facts": []}
+    assert {key: retrieved[key] for key in ("chunks", "chunk_summaries", "entities", "facts")} == {
+        "chunks": [],
+        "chunk_summaries": {},
+        "entities": [],
+        "facts": [],
+    }
+    assert retrieved["retrieval_status"]["entities"]["status"] == "ok"
 
 
 @pytest.mark.asyncio
 async def test_entity_search_receives_nodeset_filters_and_expands_connections():
     vector = MagicMock()
     vector.search = _vector_search(
-        entities=[_result("entity-1", {"id": "entity-1", "name": "Entity"})]
+        entities=[
+            _result(
+                "entity-1",
+                {"id": "entity-1", "name": "Entity", "belongs_to_set": ["KEN"]},
+            )
+        ]
     )
     graph = _graph()
     retriever = HybridRetriever(node_name=["KEN"], node_name_filter_operator="AND")
@@ -1040,8 +1105,8 @@ async def test_global_context_is_prepended_when_enabled():
             retrieved_objects={"chunks": [_result(payload={"text": "Chunk"})], "entities": []},
         )
 
-    assert context.startswith("## Global context\nWorld summary:\nRoot summary")
-    assert "\n\n## Relevant passages\nChunk" in context
+    assert context.startswith("## Relevant passages\nChunk")
+    assert "## Global context\nWorld summary:\nRoot summary" in context
     get_unified.assert_awaited_once()
     search_summaries.assert_awaited_once_with("q", 3, vector)
 
@@ -1228,8 +1293,8 @@ async def test_edge_hits_rank_entity_bullets_and_fill_facts_section():
         retrieved = await retriever.get_retrieved_objects(query="q")
 
     bullets = [edge["text"] for edge in retrieved["entities"][0]["edges"]]
-    assert bullets == ["Alice -- is_a -- Person", ranked_bullet, unranked_bullet]
-    assert [item["text"] for item in retrieved["facts"]] == [fact]
+    assert bullets == [ranked_bullet, "Alice -- is_a -- Person", unranked_bullet]
+    assert retrieved["facts"] == []
 
 
 @pytest.mark.asyncio
@@ -1264,14 +1329,19 @@ async def test_scoped_search_keeps_bullet_ranking_but_hides_facts():
     ranked_bullet = "Alice works at Acme."
     vector = MagicMock()
     vector.search = _vector_search(
-        entities=[_result("entity-1", {"id": "entity-1", "name": "Alice"})],
+        entities=[
+            _result(
+                "entity-1",
+                {"id": "entity-1", "name": "Alice", "belongs_to_set": ["KEN"]},
+            )
+        ],
         edge_types=[_edge_hit(ranked_bullet)],
     )
     graph = _graph(
         nodes=[
-            ("entity-1", {"name": "Alice"}),
-            ("tennis-id", {"name": "Tennis"}),
-            ("acme-id", {"name": "Acme"}),
+            ("entity-1", {"name": "Alice", "belongs_to_set": ["KEN"]}),
+            ("tennis-id", {"name": "Tennis", "belongs_to_set": ["KEN"]}),
+            ("acme-id", {"name": "Acme", "belongs_to_set": ["KEN"]}),
         ],
         edges=[
             ("entity-1", "tennis-id", "plays", {"edge_text": "Alice plays tennis."}),
@@ -1378,7 +1448,7 @@ async def test_graph_neighborhood_error_keeps_chunks_entities_and_facts():
             "edges": [],
         }
     ]
-    assert [item["text"] for item in retrieved["facts"]] == [fact]
+    assert retrieved["facts"] == []
 
 
 @pytest.mark.asyncio

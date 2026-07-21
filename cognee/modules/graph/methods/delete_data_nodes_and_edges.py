@@ -29,6 +29,12 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger("delete_data_nodes_and_edges")
 
 
+def _invalidate_bm25_cache(dataset_id: UUID) -> None:
+    from cognee.modules.retrieval.bm25_retriever import BM25ChunksRetriever
+
+    BM25ChunksRetriever.invalidate_cache(str(dataset_id))
+
+
 async def delete_data_nodes_and_edges(dataset_id: UUID, data_id: UUID, user_id: UUID) -> None:
     user = await get_user(user_id)
 
@@ -40,6 +46,7 @@ async def delete_data_nodes_and_edges(dataset_id: UUID, data_id: UUID, user_id: 
     # rows). The graph marker is a mode boundary, not a migration signal: marked
     # graphs use this unified path; old/unmarked graphs stay on the ledger path.
     if await try_delete_data_by_graph_provenance(dataset_id, data_id):
+        _invalidate_bm25_cache(dataset_id)
         return
 
     if backend_access_control_enabled():
@@ -119,3 +126,5 @@ async def delete_data_nodes_and_edges(dataset_id: UUID, data_id: UUID, user_id: 
                 dataset_id,
                 e,
             )
+
+    _invalidate_bm25_cache(dataset_id)
