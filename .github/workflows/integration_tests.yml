@@ -114,8 +114,9 @@ jobs:
         with:
           python-version: '3.11.x'
           # fastembed so the embedding tokenizer delegation tests can import
-          # FastembedEmbeddingEngine.
-          extra-dependencies: "scraping fastembed"
+          # FastembedEmbeddingEngine; mistral so the Mistral transcript-basename
+          # test can import MistralAdapter (pulls in the mistralai SDK).
+          extra-dependencies: "scraping fastembed mistral"
 
       - name: Run Infrastructure Tests
         run: uv run pytest cognee/tests/integration/infrastructure/ --splits 3 --group ${{ matrix.split-group }}

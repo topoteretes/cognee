@@ -8,6 +8,10 @@ Mistral API instead of the basename.
 The fix normalizes both ``\\`` and ``/`` before taking the basename. This test is
 cross-platform strict: the Windows-style input contains backslashes regardless of
 host, so a revert to splitting on ``/`` only fails on any OS.
+
+Lives under ``integration/`` because importing ``MistralAdapter`` pulls in the
+``mistralai`` SDK, which is only present with the ``mistral`` extra (installed by
+the integration-infra CI job, not the base unit-test job).
 """
 
 import io
