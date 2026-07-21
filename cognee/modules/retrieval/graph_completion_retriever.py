@@ -32,6 +32,30 @@ from cognee.infrastructure.databases.cache.config import CacheConfig
 logger = get_logger("GraphCompletionRetriever")
 
 
+def _suppress_shared_entity_descriptions(retrieved_edges: list) -> None:
+    """On scoped searches, drop node descriptions that another dataset may have
+    written. description is a single global property on shared entity nodes and
+    every re-extraction overwrites it (last writer wins), so on a node-set-scoped
+    search it can carry phrasing derived from a dataset outside the filter. Only
+    nodes provably owned by exactly one node set keep it; chunk nodes are
+    unaffected because rendering prefers their `text`."""
+    for edge in retrieved_edges:
+        for node in (getattr(edge, "node1", None), getattr(edge, "node2", None)):
+            attributes = getattr(node, "attributes", None)
+            if not isinstance(attributes, dict) or attributes.get("description") is None:
+                continue
+            if attributes.get("text"):
+                continue
+            belongs_to_set = attributes.get("belongs_to_set")
+            owners = (
+                {str(item) for item in belongs_to_set}
+                if isinstance(belongs_to_set, list)
+                else set()
+            )
+            if len(owners) != 1:
+                attributes.pop("description", None)
+
+
 class GraphCompletionRetriever(BaseRetriever):
     """
     Retriever for handling graph-based completion searches.
@@ -153,6 +177,8 @@ class GraphCompletionRetriever(BaseRetriever):
 
             - str: A formatted string representation of the nodes and their connections.
         """
+        if self.node_name and retrieved_edges:
+            _suppress_shared_entity_descriptions(retrieved_edges)
         return await resolve_edges_to_text(retrieved_edges)
 
     async def get_triplets(

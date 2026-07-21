@@ -1269,9 +1269,9 @@ async def test_scoped_search_keeps_bullet_ranking_but_hides_facts():
     )
     graph = _graph(
         nodes=[
-            ("entity-1", {"name": "Alice"}),
-            ("tennis-id", {"name": "Tennis"}),
-            ("acme-id", {"name": "Acme"}),
+            ("entity-1", {"name": "Alice", "belongs_to_set": ["KEN"]}),
+            ("tennis-id", {"name": "Tennis", "belongs_to_set": ["KEN"]}),
+            ("acme-id", {"name": "Acme", "belongs_to_set": ["KEN"]}),
         ],
         edges=[
             ("entity-1", "tennis-id", "plays", {"edge_text": "Alice plays tennis."}),
