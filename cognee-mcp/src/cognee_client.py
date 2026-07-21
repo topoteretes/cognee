@@ -244,7 +244,7 @@ class CogneeClient:
                 # filtered server-side, so passing them all is safe.
                 try:
                     datasets = [d["name"] for d in await self.list_datasets() if d.get("name")]
-                except Exception:
+                except (httpx.HTTPError, json.JSONDecodeError):
                     datasets = None
             if datasets:
                 payload["datasets"] = datasets
@@ -568,7 +568,7 @@ class CogneeClient:
                 # recall is left untouched so it can search the session cache.
                 try:
                     datasets = [d["name"] for d in await self.list_datasets() if d.get("name")]
-                except Exception:
+                except (httpx.HTTPError, json.JSONDecodeError):
                     datasets = None
             if datasets:
                 payload["datasets"] = datasets
