@@ -19,6 +19,18 @@ class BaseConfig(BaseSettings):
     # Opt-in by default to preserve existing retrieval behavior.
     default_feedback_influence: float = float(os.getenv("DEFAULT_FEEDBACK_INFLUENCE", "0.0"))
 
+    # Provenance-by-default (issue #3632). When enabled, the base ingestion
+    # pipeline stamps source lineage (originating pipeline/task, dataset node
+    # set, content hash) onto every node and every edge so results stay
+    # traceable to their source. On by default; set PROVENANCE_ENABLED=false to
+    # disable. The underlying source_* fields are nullable, so toggling this is
+    # fully backward compatible.
+    provenance_enabled: bool = os.getenv("PROVENANCE_ENABLED", "true").lower() in (
+        "true",
+        "1",
+        "yes",
+    )
+
     @pydantic.model_validator(mode="after")
     def validate_paths(self):
         # Adding this here temporarily to ensure that the cache root directory is set correctly for S3 storage automatically

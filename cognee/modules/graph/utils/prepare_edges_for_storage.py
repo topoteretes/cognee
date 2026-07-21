@@ -97,6 +97,20 @@ def _build_fallback_edge_text(
     return f"{source_label} {relationship_phrase} {target_label}."
 
 
+# Node provenance fields copied onto an edge from its source endpoint so edges
+# are traceable to the same source lineage as their nodes (issue #3632).
+_EDGE_PROVENANCE_FIELDS = (
+    "source_pipeline",
+    "source_task",
+    "source_node_set",
+    "source_content_hash",
+    "source_user",
+    "source_dataset_id",
+    "source_document_id",
+    "source_chunk_id",
+)
+
+
 def ensure_default_edge_properties(
     edges: List[Tuple[str, str, str, Dict[str, Any]]],
     nodes: Iterable[Any] | None = None,
@@ -125,6 +139,21 @@ def ensure_default_edge_properties(
                 relationship_name,
                 nodes_by_id,
             )
+
+        # Provenance-by-default (issue #3632): nodes are stamped with their
+        # source lineage during the pipeline run, but edges were left with
+        # empty provenance. Copy the source endpoint's lineage onto the edge
+        # (set-if-absent, so explicit edge values win) so every edge is
+        # traceable to the same source as its nodes. When provenance is
+        # disabled the source node carries no lineage, so nothing is copied.
+        source_node = nodes_by_id.get(str(source_id))
+        if source_node is not None:
+            for field_name in _EDGE_PROVENANCE_FIELDS:
+                if field_name in props:
+                    continue
+                value = _get_value(source_node, field_name)
+                if value is not None:
+                    props[field_name] = value
 
         result.append((source_id, target_id, relationship_name, props))
     return result

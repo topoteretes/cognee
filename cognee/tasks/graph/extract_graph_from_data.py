@@ -20,6 +20,7 @@ from cognee.shared.data_models import KnowledgeGraph
 from cognee.infrastructure.llm.extraction import extract_content_graph
 from cognee.infrastructure.llm.pipeline_stage import pipeline_stage
 from cognee.infrastructure.engine import DataPoint
+from cognee.base_config import get_base_config
 from cognee.tasks.graph.exceptions import (
     InvalidGraphModelError,
     InvalidDataChunksError,
@@ -52,6 +53,37 @@ def _stamp_provenance_deep(data, pipeline_name, task_name, visited=None):
     elif isinstance(data, (list, tuple)):
         for item in data:
             _stamp_provenance_deep(item, pipeline_name, task_name, visited)
+
+
+def _stamp_source_ids(data_chunks):
+    """Stamp id-exact source lineage (issue #3632) onto the entities each chunk
+    contains.
+
+    This is the one place the chunk -> document -> entity link is known, so it
+    stamps ``source_chunk_id`` (the DocumentChunk id) and ``source_document_id``
+    (the chunk's ``document_id``) onto the entities the chunk produced. Only the
+    entities directly contained by a chunk are stamped — nested/type nodes are
+    shared across chunks, so tagging them with a single chunk's id would be
+    wrong. Set-if-None, so the first chunk that contains a deduplicated entity
+    wins, matching the rest of the provenance stamping.
+    """
+    for chunk in data_chunks:
+        if not isinstance(chunk, DocumentChunk):
+            continue
+
+        chunk_id = str(chunk.id)
+        document_id = chunk.document_id
+
+        for item in chunk.contains or []:
+            # contains holds either a bare Entity/Event or a (Edge, Entity) tuple
+            entity = item[1] if isinstance(item, tuple) else item
+            if not isinstance(entity, DataPoint):
+                continue
+
+            if entity.source_chunk_id is None:
+                entity.source_chunk_id = chunk_id
+            if document_id is not None and entity.source_document_id is None:
+                entity.source_document_id = document_id
 
 
 async def integrate_chunk_graphs(
@@ -113,9 +145,17 @@ async def integrate_chunk_graphs(
     )
 
     if entity_nodes:
-        if pipeline_name or task_name:
-            for node in entity_nodes:
-                _stamp_provenance_deep(node, pipeline_name, task_name)
+        # Provenance-by-default (issue #3632): the extract-path stamping honors
+        # the same PROVENANCE_ENABLED switch as the runtime stamper, so
+        # disabling it turns provenance fully off (no leak).
+        if get_base_config().provenance_enabled:
+            if pipeline_name or task_name:
+                for node in entity_nodes:
+                    _stamp_provenance_deep(node, pipeline_name, task_name)
+
+            # Id-exact source lineage: stamp document/chunk ids from the chunk
+            # each entity belongs to (only knowable here).
+            _stamp_source_ids(data_chunks)
 
         cache_entity_embeddings = kwargs.get("cache_entity_embeddings")
         if callable(cache_entity_embeddings):
