@@ -479,27 +479,25 @@ def _create_graph_engine(
             else:
                 from cognee.infrastructure.databases.relational import get_relational_config
 
-                logger.warning(
-                    "Postgres graph credentials are not fully configured; "
-                    "falling back to the relational database configuration. "
-                    "Set GRAPH_DATABASE_HOST/PORT/USERNAME/PASSWORD/NAME explicitly "
-                    "to avoid this fallback."
-                )
-
+                # Fall back to the relational database configuration.
                 relational_config = get_relational_config()
-                db_username = relational_config.db_username
-                db_password = relational_config.db_password
-                db_host = relational_config.db_host
-                db_port = relational_config.db_port
-                db_name = relational_config.db_name
 
-                if not (db_host and db_port and db_name and db_username and db_password):
-                    raise EnvironmentError("Missing required Postgres graph credentials!")
+                if relational_config.db_url:
+                    connection_string = relational_config.db_url
+                else:
+                    db_username = relational_config.db_username
+                    db_password = relational_config.db_password
+                    db_host = relational_config.db_host
+                    db_port = relational_config.db_port
+                    db_name = relational_config.db_name
 
-                connection_string: str = (
-                    f"postgresql+asyncpg://{db_username}:{db_password}"
-                    f"@{db_host}:{db_port}/{db_name}"
-                )
+                    if not (db_host and db_port and db_name and db_username and db_password):
+                        raise EnvironmentError("Missing required Postgres graph credentials!")
+
+                    connection_string: str = (
+                        f"postgresql+asyncpg://{db_username}:{db_password}"
+                        f"@{db_host}:{db_port}/{db_name}"
+                    )
 
         from .postgres.adapter import PostgresAdapter
 
