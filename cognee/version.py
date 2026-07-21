@@ -6,7 +6,8 @@ from pathlib import Path
 
 def get_cognee_version() -> str:
     """Returns either the version of installed cognee package or the one
-    found in nearby pyproject.toml"""
+    found in nearby pyproject.toml. Useful for local development and tracking
+    version info in dependencies."""
     with suppress(FileNotFoundError, StopIteration):
         with open(
             os.path.join(Path(__file__).parent.parent, "pyproject.toml"), encoding="utf-8"
