@@ -226,6 +226,33 @@ uv run python examples/demos/simple_cognee_example.py
 For non-OpenAI providers (Anthropic, Bedrock, Ollama, fastembed, …) see
 [the cognee docs](https://docs.cognee.ai) and `.env.template`.
 
+## 🧪 Testing examples (mocked, no API key)
+
+Every example is covered by a fast, deterministic test that runs it end to end
+with the LLM and embedding layers mocked — no API key, no network, no external
+services. The tests live under [`cognee/tests/examples/`](../cognee/tests/examples/)
+and mirror this folder's layout.
+
+```bash
+# Run all mocked example tests (no LLM_API_KEY needed)
+uv run pytest cognee/tests/examples/ -v
+
+# Run just one folder
+uv run pytest cognee/tests/examples/guides/ -v
+```
+
+How the harness works (see [`cognee/tests/utils/example_mock_llm.py`](../cognee/tests/utils/example_mock_llm.py)):
+
+- **LLM** — all structured calls flow through the single choke point
+  `LLMGateway.acreate_structured_output`. The harness patches it (plus
+  `create_transcript` / `transcribe_image`) and returns a minimal, valid
+  instance of whatever Pydantic `response_model` the call site asked for
+  (a real `KnowledgeGraph` with nodes/edges, `"MOCK_ANSWER"` for `str`, etc.).
+- **Embeddings** — cognee's built-in `MOCK_EMBEDDING=true` flag returns zero
+  vectors while keeping the real tokenizer, so chunk boundaries stay correct.
+- **Isolation** — each test gets a `tmp_path` data/system root and prunes
+  before/after, so no shared state and no database file-lock contention.
+
 ## 🤝 Contributing a new example
 
 1. Pick the right folder:
@@ -236,5 +263,26 @@ For non-OpenAI providers (Anthropic, Bedrock, Ollama, fastembed, …) see
 2. Self-contained: an example should run with `uv run python <path>` after `uv sync` and a configured `.env`. No global setup.
 3. Add an entry to the appropriate table above.
 4. If your example demonstrates a feature, add it to the **By feature** cross-index too.
+5. Add a mocked test. Expose an async `main()` in your script, then add a test
+   under [`cognee/tests/examples/`](../cognee/tests/examples/) that loads and runs it:
+
+```python
+import pytest
+from cognee.tests.utils.example_runner import import_example
+
+pytestmark = pytest.mark.asyncio
+
+
+async def test_my_example(isolated_example_env):
+    module = import_example("examples/<folder>/my_example.py")
+    await module.main()
+```
+
+The `isolated_example_env` fixture applies the LLM + embedding mocks and a
+`tmp_path`-isolated data/system root. If your example needs an external service
+(Docker, AWS), guard it with `requires_docker()` / `requires_aws()` from
+`cognee.tests.utils.example_runner`, or mock the boundary. If a call site uses a
+custom Pydantic `response_model` the factory doesn't yet handle well, extend
+`build_mock_response` in [`cognee/tests/utils/example_mock_llm.py`](../cognee/tests/utils/example_mock_llm.py).
 
 See [`CONTRIBUTING.md`](../CONTRIBUTING.md) for the broader contribution flow.
