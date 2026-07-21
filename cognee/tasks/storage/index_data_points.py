@@ -47,7 +47,7 @@ async def index_data_points(data_points: list[DataPoint], vector_engine=None):
                 await vector_engine.create_vector_index(type_name, field_name)
                 data_points_by_type[type_name][field_name] = []
 
-            indexed_data_point = data_point.model_copy()
+            indexed_data_point = data_point.model_copy(deep=True)
             indexed_data_point.metadata["index_fields"] = [field_name]
             data_points_by_type[type_name][field_name].append(indexed_data_point)
 
