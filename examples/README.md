@@ -27,6 +27,7 @@ to verify behaviour across the SDK.
 | [`guides/`](guides/) | Short focused how-to guides | 13 |
 | [`integrations/`](integrations/) | Data-source connectors — installed from cognee-community | 1 |
 | [`pocs/`](pocs/) | Research-grade proofs of concept (entity disambiguation, canonicalization, prefetch) | 7 |
+| [`tutorials/`](tutorials/) | Step-by-step tutorials for common workflows (migration, ...) | 1 |
 
 Most runnable demos and backend examples use the v1.0 memory API (`remember`, `recall`, `forget`, `improve`). The lower-level `add`, `cognify`, `search`, and `prune` calls are intentionally kept in examples that demonstrate pipeline internals, permissions, relational migrations, or research POCs.
 
