@@ -314,13 +314,37 @@ AgentCandidateContextUpdateVariant = Annotated[
 
 
 class AgentContextExtraction(BaseModel):
-    """LLM output for the batch pass: agent-profile lessons drawn from trace evidence."""
+    """LLM output for the batch pass: agent-profile lessons drawn from trace evidence.
 
-    lessons: List[AgentCandidateContextUpdateVariant] = Field(
+    ``lessons`` is intentionally typed as the plain base model, not the section-specific
+    discriminated union (``AgentCandidateContextUpdateVariant``). instructor's structured-output
+    modes ask the model to pick one of N pydantic classes via a discriminator field before the
+    fields even validate -- reliable for large/cloud models, but empirically unreliable for
+    smaller local models (measured against a local Ollama `llama3.1:8b`, both with instructor's
+    default `json_mode` and with `json_schema_mode`): the model frequently omits the discriminator
+    field entirely or returns a shape `union_tag_not_found` can't resolve, so most extractions are
+    rejected outright. The base model enforces the identical constraint
+    (``AgentCandidateContextUpdate.section_valid`` already restricts ``section`` to
+    ``AGENT_VALID_SECTIONS``) without requiring a discriminator match, and the only real consumer
+    of this output (``extract_batch_agent_context`` -> ``apply_candidate_updates`` ->
+    ``_coerce_candidate_model``) accepts any ``CandidateContextUpdate`` subclass via `isinstance`,
+    so nothing downstream depends on the specific subclass identity -- only on ``section`` already
+    being valid, which the base model guarantees on its own. In local testing against
+    `llama3.1:8b`, the discriminated union was rejected outright on most trials while this
+    base-model schema was consistently accepted -- and, since it asks the model to fill in fewer
+    structural fields, also faster. This does loosen the JSON schema instructor emits for every
+    provider (``section`` becomes a free-form string instead of an enumerated discriminator), but
+    ``section_valid`` remains the actual enforcement point regardless of provider, so correctness
+    is unaffected -- an invalid ``section`` is still rejected, just via the validator instead of
+    the schema.
+    """
+
+    lessons: List[AgentCandidateContextUpdate] = Field(
         default_factory=list,
         description=(
-            "Reusable agent/tool lessons drawn from the traces. Each item must be one of the "
-            "section-specific agent candidate types."
+            "Reusable agent/tool lessons drawn from the traces. Each item's `section` must be "
+            "one of tool_rules, workflow_state, success_patterns, failure_lessons, or "
+            "environment_facts, matching the kind of tool/workflow lesson the content is."
         ),
     )
 

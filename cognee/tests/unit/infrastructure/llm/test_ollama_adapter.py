@@ -58,3 +58,7 @@ async def test_acreate_structured_output_awaits_async_client():
     # ...not offloaded to a worker thread, and its result is returned unchanged.
     assert not to_thread_spy.called, "structured call must be awaited natively, not offloaded"
     assert result is sentinel
+
+
+# Unpaired-UTF-16-surrogate sanitization is centralized in LLMGateway.acreate_structured_output
+# (covers every provider adapter, not just Ollama) -- see test_llm_gateway_sanitize.py.
