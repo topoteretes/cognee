@@ -19,7 +19,7 @@ from cognee.modules.pipelines.operations import (
     log_pipeline_run_complete,
     log_pipeline_run_error,
 )
-from cognee.modules.pipelines.utils import generate_pipeline_id
+from cognee.modules.pipelines.utils import generate_pipeline_id, validate_batch_size
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.users.models import User
@@ -99,6 +99,8 @@ async def run_tasks_distributed(
     embedding_config: Optional[EmbeddingConfig] = None,
     data_cache: bool = False,
 ):
+    validate_batch_size(data_per_batch, "data_per_batch")
+
     if not user:
         user = await get_default_user()
 
