@@ -6,6 +6,7 @@ from cognee.cli import DEFAULT_DOCS_URL
 from cognee.cli.config import CHUNKER_CHOICES
 import cognee.cli.echo as fmt
 from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
+from cognee.cli.commands._next_step import format_next_step_hint
 
 
 class RememberCommand(SupportsCliCommand):
@@ -114,6 +115,10 @@ After completion, use `cognee recall` (or `cognee search`) to query the graph.
                 fmt.success("Data ingested and cognification started in background!")
             else:
                 fmt.success("Data ingested and knowledge graph built successfully!")
+
+            hint = format_next_step_hint("remember", args.dataset_name)
+            if hint:
+                fmt.note(hint)
 
             if result:
                 if result.dataset_id:

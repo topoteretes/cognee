@@ -7,6 +7,7 @@ from cognee.cli import DEFAULT_DOCS_URL
 from cognee.cli.config import SEARCH_TYPE_CHOICES, OUTPUT_FORMAT_CHOICES
 import cognee.cli.echo as fmt
 from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
+from cognee.cli.commands._next_step import format_next_step_hint
 
 
 class RecallCommand(SupportsCliCommand):
@@ -129,6 +130,11 @@ Otherwise, this is a memory-oriented alias for `cognee search`.
             else:
                 if not results:
                     fmt.warning("No results found for your query.")
+                    hint = format_next_step_hint(
+                        "recall", args.datasets[0] if args.datasets else None
+                    )
+                    if hint:
+                        fmt.note(hint)
                     return
 
                 # Detect session results by _source tag
