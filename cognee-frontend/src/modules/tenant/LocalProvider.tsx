@@ -89,6 +89,8 @@ export function LocalProvider({ children }: { children: React.ReactNode }) {
       planType: null,
       hasAccess: true,
       requestCreateWorkspace: () => {},
+      // Single-user local mode: the only user is always the owner.
+      isOwner: true,
       nameModalOpen: false,
       releaseLoader: () => {},
     }}>

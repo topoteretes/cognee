@@ -65,7 +65,7 @@ export const TenantContext = createContext<TenantContextValue>({
   planType: null,
   hasAccess: true,
   requestCreateWorkspace: () => {},
-  isOwner: true,
+  isOwner: false,
   nameModalOpen: false,
   releaseLoader: () => {},
 });

@@ -656,9 +656,9 @@ function SlackCard() {
     if (!outcome) return;
 
     setMessage(SLACK_OUTCOME_MESSAGES[outcome] || null);
-    if (instance) {
-      getSlackConnection(instance).then(setStatus).catch(() => {});
-    }
+    // Connection status is refreshed by the [instance] effect above once
+    // instance is ready — no need to duplicate that fetch here (and doing
+    // so here would race it if instance wasn't ready on this first render).
     // Strip the query param so a refresh doesn't re-show the message.
     router.replace("/integrations");
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -680,8 +680,12 @@ function SlackCard() {
     if (!instance) return;
     setLoading(true);
     try {
-      await disconnectSlack(instance);
-      setStatus({ connected: false });
+      const { disconnected } = await disconnectSlack(instance);
+      if (disconnected) {
+        setStatus({ connected: false });
+      } else {
+        setMessage("Could not disconnect Slack. Please try again.");
+      }
     } catch (err) {
       setMessage(err instanceof Error && err.message ? err.message : "Could not disconnect Slack. Please try again.");
     } finally {
@@ -726,7 +730,7 @@ function SlackCard() {
             cursor: loading || !instance ? "wait" : "pointer",
           }}
         >
-          {loading ? "…" : connected ? "Disconnect" : "Connect"}
+          {loading ? (connected ? "Disconnecting…" : "Connecting…") : connected ? "Disconnect" : "Connect"}
         </button>
         {connected && (
           <button
