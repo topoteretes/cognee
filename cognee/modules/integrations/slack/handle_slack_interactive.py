@@ -41,7 +41,10 @@ async def handle_slack_interactive(raw_body: bytes) -> dict[str, Any]:
 
     payload = json.loads(raw_payload)
 
-    if payload.get("type") == "message_action" and payload.get("callback_id") == REMEMBER_THIS_CALLBACK_ID:
+    if (
+        payload.get("type") == "message_action"
+        and payload.get("callback_id") == REMEMBER_THIS_CALLBACK_ID
+    ):
         await _handle_remember_this(payload)
 
     return {}
@@ -57,6 +60,7 @@ async def _handle_remember_this(payload: dict[str, Any]) -> None:
     """
     response_url = payload.get("response_url", "")
     team_id = (payload.get("team") or {}).get("id", "")
+    invoking_slack_user_id = (payload.get("user") or {}).get("id", "")
 
     credential = await get_by_team(team_id) if team_id else None
     if not is_active(credential):
@@ -65,6 +69,22 @@ async def _handle_remember_this(payload: dict[str, Any]) -> None:
             _ephemeral(
                 "This Slack workspace is not connected to Cognee. "
                 "Connect it from your Integrations settings."
+            ),
+        )
+        return
+
+    # Stopgap until real Slack-user <-> cognee-user linking exists: only the
+    # Slack user who completed the OAuth install may write into the
+    # connecting user's memory via this shortcut — see handle_cognee_ask.py
+    # for the matching /cognee-ask check and the reasoning. Fails closed for
+    # pre-existing connections made before this field was captured.
+    installed_by = (credential.provider_metadata or {}).get("installed_by_slack_user_id")
+    if not installed_by or installed_by != invoking_slack_user_id:
+        await post_to_response_url(
+            response_url,
+            _ephemeral(
+                "Only the Cognee account that connected this Slack workspace can use "
+                '"Remember this". Ask that person to reconnect if this seems wrong.'
             ),
         )
         return
@@ -88,12 +108,16 @@ async def _handle_remember_this(payload: dict[str, Any]) -> None:
         logger.error("Slack credential for team %s points at a deleted user", team_id)
         await post_to_response_url(
             response_url,
-            _ephemeral("Slack integration is not fully configured. Please disconnect and reconnect."),
+            _ephemeral(
+                "Slack integration is not fully configured. Please disconnect and reconnect."
+            ),
         )
         return
     except Exception:  # noqa: BLE001 - any remember failure must degrade to a chat message, not a crash
         logger.exception("Failed to remember a Slack message for team %s", team_id)
-        await post_to_response_url(response_url, _ephemeral("Could not save that message. Please try again."))
+        await post_to_response_url(
+            response_url, _ephemeral("Could not save that message. Please try again.")
+        )
         return
 
     await post_to_response_url(response_url, _ephemeral("Saved to Cognee memory."))

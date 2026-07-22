@@ -44,9 +44,7 @@ class SlackIntegration(OAuthIntegration):
         # install.
         account_id = team.get("id") or enterprise.get("id")
         if not account_id:
-            raise ValueError(
-                "oauth.v2.access response carries neither team.id nor enterprise.id"
-            )
+            raise ValueError("oauth.v2.access response carries neither team.id nor enterprise.id")
 
         token_payload = {
             "access_token": token_response.get("access_token"),
@@ -54,9 +52,18 @@ class SlackIntegration(OAuthIntegration):
         }
         # Non-secret, Slack-specific fields needed later (posting messages,
         # Grid-awareness) — kept out of the encrypted blob so they stay queryable.
+        # installed_by_slack_user_id: the Slack user who completed this OAuth
+        # install (Slack always populates authed_user.id, even for a bot-only
+        # install with no user scopes). Cognee has no real Slack-user <->
+        # cognee-user linking yet (tracked separately), so this is used as a
+        # stopgap authorization check — see handle_cognee_ask.py and
+        # handle_slack_interactive.py's "Remember this" handler — to stop any
+        # workspace member from querying/writing to the connecting user's
+        # memory, not just the person who actually connected it.
         provider_metadata = {
             "bot_user_id": token_response.get("bot_user_id"),
             "enterprise_id": enterprise.get("id"),
+            "installed_by_slack_user_id": (token_response.get("authed_user") or {}).get("id"),
         }
 
         token_expires_at = None

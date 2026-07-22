@@ -21,8 +21,15 @@ from cognee.modules.integrations.slack.handle_slack_interactive import handle_sl
 MODULE = "cognee.modules.integrations.slack.handle_slack_interactive"
 
 
-def _credential(user_id=None):
-    return SimpleNamespace(user_id=user_id or uuid4(), status=STATUS_ACTIVE)
+INVOKING_USER = "U100"
+
+
+def _credential(user_id=None, installed_by_slack_user_id=INVOKING_USER):
+    return SimpleNamespace(
+        user_id=user_id or uuid4(),
+        status=STATUS_ACTIVE,
+        provider_metadata={"installed_by_slack_user_id": installed_by_slack_user_id},
+    )
 
 
 def _body(payload: dict) -> bytes:
@@ -35,6 +42,7 @@ def _shortcut_payload(
     channel_name="general",
     message_text="ship it",
     message_user="U9",
+    invoking_user=INVOKING_USER,
     response_url="https://hooks.slack.com/x",
     callback_id="remember_this",
 ):
@@ -42,6 +50,7 @@ def _shortcut_payload(
         "type": "message_action",
         "callback_id": callback_id,
         "team": {"id": team_id},
+        "user": {"id": invoking_user},
         "channel": {"name": channel_name},
         "message": {"text": message_text, "user": message_user},
         "response_url": response_url,
@@ -96,6 +105,38 @@ async def test_remember_this_rejects_unconnected_workspace():
     remember.assert_not_awaited()
     _, reply = post.call_args[0]
     assert "not connected" in reply["text"]
+
+
+@pytest.mark.asyncio
+async def test_remember_this_rejects_non_installing_user():
+    credential = _credential(installed_by_slack_user_id=INVOKING_USER)
+    with (
+        patch(f"{MODULE}.get_by_team", new=AsyncMock(return_value=credential)),
+        patch(f"{MODULE}.remember_message", new=AsyncMock()) as remember,
+        patch(f"{MODULE}.post_to_response_url", new=AsyncMock()) as post,
+    ):
+        await handle_slack_interactive(_body(_shortcut_payload(invoking_user="U999-someone-else")))
+
+    remember.assert_not_awaited()
+    _, reply = post.call_args[0]
+    assert "Only the Cognee account" in reply["text"]
+
+
+@pytest.mark.asyncio
+async def test_remember_this_rejects_when_installed_by_is_unset():
+    # Pre-existing connections made before installed_by_slack_user_id was
+    # captured — must fail closed, not silently allow everyone.
+    credential = _credential(installed_by_slack_user_id=None)
+    with (
+        patch(f"{MODULE}.get_by_team", new=AsyncMock(return_value=credential)),
+        patch(f"{MODULE}.remember_message", new=AsyncMock()) as remember,
+        patch(f"{MODULE}.post_to_response_url", new=AsyncMock()) as post,
+    ):
+        await handle_slack_interactive(_body(_shortcut_payload()))
+
+    remember.assert_not_awaited()
+    _, reply = post.call_args[0]
+    assert "Only the Cognee account" in reply["text"]
 
 
 @pytest.mark.asyncio

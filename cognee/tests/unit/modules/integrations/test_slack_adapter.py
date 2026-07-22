@@ -42,15 +42,27 @@ def test_splits_secret_from_metadata():
             "refresh_token": "xoxe-refresh",
             "bot_user_id": "U999",
             "enterprise": {"id": "E456"},
+            "authed_user": {"id": "U111"},
         }
     )
     assert installation.token_payload == {
         "access_token": "xoxb-secret",
         "refresh_token": "xoxe-refresh",
     }
-    assert installation.provider_metadata == {"bot_user_id": "U999", "enterprise_id": "E456"}
+    assert installation.provider_metadata == {
+        "bot_user_id": "U999",
+        "enterprise_id": "E456",
+        "installed_by_slack_user_id": "U111",
+    }
     # Secret material never ends up in the clear-text metadata.
     assert "xoxb-secret" not in installation.provider_metadata.values()
+
+
+def test_missing_authed_user_leaves_installed_by_none():
+    installation = integration.parse_installation(
+        {"team": {"id": "T123"}, "access_token": "xoxb-secret"}
+    )
+    assert installation.provider_metadata["installed_by_slack_user_id"] is None
 
 
 def test_expires_in_becomes_token_expires_at():

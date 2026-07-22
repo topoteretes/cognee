@@ -94,6 +94,7 @@ async def handle_cognee_ask(raw_body: bytes) -> dict[str, Any]:
     """
     form = parse_qs(raw_body.decode())
     team_id = (form.get("team_id") or [""])[0]
+    invoking_slack_user_id = (form.get("user_id") or [""])[0]
     text = (form.get("text") or [""])[0].strip()
     response_url = (form.get("response_url") or [""])[0]
 
@@ -104,16 +105,28 @@ async def handle_cognee_ask(raw_body: bytes) -> dict[str, Any]:
             "Connect it from your Integrations settings."
         )
 
+    # Stopgap until real Slack-user <-> cognee-user linking exists: only the
+    # Slack user who completed the OAuth install may query the connecting
+    # user's memory — otherwise any workspace member could search (and have
+    # broadcast in_channel) someone else's entire Cognee memory. Fails closed
+    # for pre-existing connections made before this field was captured.
+    installed_by = (credential.provider_metadata or {}).get("installed_by_slack_user_id")
+    if not installed_by or installed_by != invoking_slack_user_id:
+        return _ephemeral(
+            "Only the Cognee account that connected this Slack workspace can use "
+            "/cognee-ask. Ask that person to reconnect if this seems wrong."
+        )
+
     if not text:
         return _ephemeral("Usage: `/cognee-ask <your question>`")
 
-    task = asyncio.create_task(
-        _search_and_respond(response_url, team_id, credential.user_id, text)
-    )
+    task = asyncio.create_task(_search_and_respond(response_url, team_id, credential.user_id, text))
     _pending_searches.add(task)
     task.add_done_callback(_pending_searches.discard)
 
-    preview = text if len(text) <= _QUERY_PREVIEW_MAX_CHARS else text[:_QUERY_PREVIEW_MAX_CHARS] + "…"
+    preview = (
+        text if len(text) <= _QUERY_PREVIEW_MAX_CHARS else text[:_QUERY_PREVIEW_MAX_CHARS] + "…"
+    )
     # This is the synchronous ack (within Slack's 3-second window), and Slack
     # only shows the "<@user> used /cognee-ask <query>" invocation line to
     # everyone in the channel/DM when *this* response is in_channel — an

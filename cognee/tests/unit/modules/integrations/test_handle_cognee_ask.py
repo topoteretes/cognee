@@ -28,13 +28,26 @@ from cognee.modules.search.types import SearchType
 MODULE = "cognee.modules.integrations.slack.handle_cognee_ask"
 
 
-def _body(team_id: str = "T123", text: str = "what happened in Q3?", response_url: str = "https://hooks.slack.com/x") -> bytes:
-    return urlencode({"team_id": team_id, "text": text, "response_url": response_url}).encode()
+INVOKING_USER = "U100"
 
 
-def _credential(user_id=None):
+def _body(
+    team_id: str = "T123",
+    text: str = "what happened in Q3?",
+    response_url: str = "https://hooks.slack.com/x",
+    user_id: str = INVOKING_USER,
+) -> bytes:
+    return urlencode(
+        {"team_id": team_id, "text": text, "response_url": response_url, "user_id": user_id}
+    ).encode()
+
+
+def _credential(user_id=None, installed_by_slack_user_id=INVOKING_USER):
     return SimpleNamespace(
-        tenant_id=uuid4(), user_id=user_id or uuid4(), provider_metadata=None, status=STATUS_ACTIVE
+        tenant_id=uuid4(),
+        user_id=user_id or uuid4(),
+        provider_metadata={"installed_by_slack_user_id": installed_by_slack_user_id},
+        status=STATUS_ACTIVE,
     )
 
 
@@ -47,6 +60,28 @@ async def test_unconnected_workspace_is_rejected():
         response = await handle_cognee_ask(_body())
 
     assert "not connected" in response["text"]
+    assert response["response_type"] == "ephemeral"
+
+
+@pytest.mark.asyncio
+async def test_rejects_non_installing_user():
+    credential = _credential(installed_by_slack_user_id=INVOKING_USER)
+    with patch(f"{MODULE}.get_by_team", new=AsyncMock(return_value=credential)):
+        response = await handle_cognee_ask(_body(user_id="U999-someone-else"))
+
+    assert "Only the Cognee account" in response["text"]
+    assert response["response_type"] == "ephemeral"
+
+
+@pytest.mark.asyncio
+async def test_rejects_when_installed_by_is_unset():
+    # Pre-existing connections made before installed_by_slack_user_id was
+    # captured — must fail closed, not silently allow everyone.
+    credential = _credential(installed_by_slack_user_id=None)
+    with patch(f"{MODULE}.get_by_team", new=AsyncMock(return_value=credential)):
+        response = await handle_cognee_ask(_body())
+
+    assert "Only the Cognee account" in response["text"]
     assert response["response_type"] == "ephemeral"
 
 
@@ -84,7 +119,11 @@ async def test_valid_query_schedules_the_background_search_with_right_args():
         patch(f"{MODULE}.get_by_team", new=AsyncMock(return_value=credential)),
         patch(f"{MODULE}._search_and_respond", new=search_and_respond),
     ):
-        await handle_cognee_ask(_body(team_id="T123", text="what do we know?", response_url="https://hooks.slack.com/xyz"))
+        await handle_cognee_ask(
+            _body(
+                team_id="T123", text="what do we know?", response_url="https://hooks.slack.com/xyz"
+            )
+        )
         await asyncio.sleep(0)  # let the scheduled task actually start
 
     search_and_respond.assert_awaited_once_with(
@@ -198,7 +237,10 @@ def test_format_answer_blocks_have_one_section_per_fact_with_dividers_between():
     results = [{"search_result": f"fact {i}"} for i in range(3)]
     _, blocks = _format_answer(results)
 
-    assert blocks[0] == {"type": "header", "text": {"type": "plain_text", "text": "Answer", "emoji": True}}
+    assert blocks[0] == {
+        "type": "header",
+        "text": {"type": "plain_text", "text": "Answer", "emoji": True},
+    }
     sections = [b for b in blocks if b["type"] == "section"]
     assert [s["text"]["text"] for s in sections] == ["fact 0", "fact 1", "fact 2"]
     # Dividers sit between facts, never trailing after the last one.
