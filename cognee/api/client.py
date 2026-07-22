@@ -289,6 +289,14 @@ app.include_router(
     tags=["health"],
 )
 
+# Also expose the health router under the versioned API path. Clients and
+# k8s readiness probes expect /api/v1/health; without this it 404s (CLO-318).
+app.include_router(
+    get_health_router(),
+    prefix="/api/v1/health",
+    tags=["health"],
+)
+
 app.include_router(get_agents_router(), prefix="/api/v1/agents")
 
 # Activity / observability

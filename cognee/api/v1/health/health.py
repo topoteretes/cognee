@@ -1,5 +1,6 @@
 """Health check system for cognee API."""
 
+import os
 from io import BytesIO
 import time
 import asyncio
@@ -13,6 +14,30 @@ from cognee.version import get_cognee_version
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
+
+# Default per-component timeout. A wedged DB/pooler must never let a health
+# check hang — readiness probes need a prompt answer so a half-ready pod stops
+# accepting traffic it cannot serve (CLO-318). Tunable via env for ops.
+DEFAULT_HEALTH_CHECK_TIMEOUT_SECONDS = 5.0
+
+
+def _health_check_timeout() -> float:
+    """Per-component health-check timeout in seconds (env-overridable)."""
+    raw = os.getenv("HEALTH_CHECK_TIMEOUT_SECONDS")
+    if raw is None:
+        return DEFAULT_HEALTH_CHECK_TIMEOUT_SECONDS
+    try:
+        value = float(raw)
+    except ValueError:
+        return DEFAULT_HEALTH_CHECK_TIMEOUT_SECONDS
+    return value if value > 0 else DEFAULT_HEALTH_CHECK_TIMEOUT_SECONDS
+
+
+def _check_failure_detail(error: BaseException, timeout: float) -> str:
+    """Human-readable detail for a failed/timed-out component check."""
+    if isinstance(error, (asyncio.TimeoutError, TimeoutError)):
+        return f"Health check timed out after {timeout:g}s (backend unresponsive)"
+    return f"Health check failed: {str(error)}"
 
 
 class HealthStatus(str, Enum):
@@ -242,8 +267,17 @@ class HealthChecker:
             )
 
     async def get_health_status(self, detailed: bool = False) -> HealthResponse:
-        """Get comprehensive health status."""
+        """Get comprehensive health status.
+
+        Each component check is bounded by a timeout so a hung backend (e.g. a
+        wedged Postgres/PgBouncer pooler) surfaces as UNHEALTHY promptly instead
+        of stalling the whole endpoint (CLO-318).
+        """
         components = {}
+        timeout = _health_check_timeout()
+
+        async def _bounded(coro):
+            return await asyncio.wait_for(coro, timeout=timeout)
 
         critical_checks = [
             ("relational_db", self.check_relational_db()),
@@ -254,7 +288,7 @@ class HealthChecker:
 
         # Run critical checks
         critical_results = await asyncio.gather(
-            *[check for _, check in critical_checks], return_exceptions=True
+            *[_bounded(check) for _, check in critical_checks], return_exceptions=True
         )
 
         for (name, _), result in zip(critical_checks, critical_results):
@@ -263,7 +297,7 @@ class HealthChecker:
                     status=HealthStatus.UNHEALTHY,
                     provider="unknown",
                     response_time_ms=0,
-                    details=f"Health check failed: {str(result)}",
+                    details=_check_failure_detail(result, timeout),
                 )
             else:
                 components[name] = result
@@ -277,7 +311,7 @@ class HealthChecker:
             ]
 
             non_critical_results = await asyncio.gather(
-                *[check for _, check in non_critical_checks], return_exceptions=True
+                *[_bounded(check) for _, check in non_critical_checks], return_exceptions=True
             )
 
             for (name, _), result in zip(non_critical_checks, non_critical_results):
@@ -286,7 +320,7 @@ class HealthChecker:
                         status=HealthStatus.DEGRADED,
                         provider="unknown",
                         response_time_ms=0,
-                        details=f"Health check failed: {str(result)}",
+                        details=_check_failure_detail(result, timeout),
                     )
                 else:
                     components[name] = result
