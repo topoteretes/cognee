@@ -66,6 +66,7 @@ dependencies = [
     "cbor2>=5.8.0",
     "langdetect>=1.0.9",
     "datamodel-code-generator>=0.54.0",
+    "aiokafka>=0.10.0",
 ]
 
 [project.optional-dependencies]

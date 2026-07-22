@@ -1,0 +1,36 @@
+{
+  "meta": {
+    "python_version": "3.12.10",
+    "cognee_version": "1.2.2-local",
+    "corpus_seed": 42,
+    "batch_size": 5,
+    "max_concurrency": 4,
+    "llm_model": "unknown",
+    "run_at": "2026-07-03T22:17:27.654058",
+    "mock_llm": true
+  },
+  "throughput": {
+    "total_messages": 50,
+    "duration_seconds": 9.5275237,
+    "messages_per_second": 5.247953358541633
+  },
+  "latency": {
+    "add_p50_ns": 2958572300,
+    "add_p95_ns": 5387269824,
+    "add_p99_ns": 6031663885,
+    "cognify_p50_ns": 1300,
+    "cognify_p95_ns": 1555,
+    "cognify_p99_ns": 1591,
+    "total_p50_ns": 2958576600,
+    "total_p95_ns": 5387272909,
+    "total_p99_ns": 6031667222
+  },
+  "search_vs_scale": [
+    {
+      "corpus_size": 50,
+      "p50_ns": 20750,
+      "p95_ns": 43269,
+      "p99_ns": 861448
+    }
+  ]
+}
