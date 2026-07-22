@@ -20,6 +20,9 @@ export interface TenantContextValue {
   localInstance: CogneeInstance;
   serviceUrl: string | null;
   isInitializing: boolean;
+  tenantReady: boolean;
+  podUnreachable: boolean;
+  isOwner: boolean;
   error: string | null;
   statusMessage: { title: string; subtitle: string } | null;
   availableTenants: AvailableTenant[];
@@ -27,6 +30,7 @@ export interface TenantContextValue {
   planType: PlanType;
   hasAccess: boolean;
   requestCreateWorkspace: () => void;
+  releaseLoader: () => void;
 }
 
 export const localInstance: CogneeInstance = {
@@ -40,6 +44,9 @@ export const TenantContext = createContext<TenantContextValue>({
   localInstance,
   serviceUrl: null,
   isInitializing: true,
+  tenantReady: false,
+  podUnreachable: false,
+  isOwner: false,
   error: null,
   statusMessage: null,
   availableTenants: [],
@@ -47,6 +54,7 @@ export const TenantContext = createContext<TenantContextValue>({
   planType: null,
   hasAccess: true,
   requestCreateWorkspace: () => {},
+  releaseLoader: () => {},
 });
 
 export function useTenant() {
@@ -54,12 +62,16 @@ export function useTenant() {
   return {
     tenant: context.tenant,
     isInitializing: context.isInitializing,
+    tenantReady: context.tenantReady,
+    podUnreachable: context.podUnreachable,
+    isOwner: context.isOwner,
     error: context.error,
     availableTenants: context.availableTenants,
     switchTenant: context.switchTenant,
     planType: context.planType,
     hasAccess: context.hasAccess,
     requestCreateWorkspace: context.requestCreateWorkspace,
+    releaseLoader: context.releaseLoader,
   };
 }
 
