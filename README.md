@@ -170,6 +170,13 @@ cognee-cli remember "Cognee turns documents into AI memory."
 cognee-cli recall "What does Cognee do?"
 
 cognee-cli forget --all
+
+# Browse what is stored in your memory (datasets, sessions, graph stats, recent ingests)
+cognee-cli inspect
+cognee-cli inspect dataset <name-or-id>
+cognee-cli inspect sessions
+cognee-cli inspect recent
+cognee-cli inspect --json
 ```
 
 To open the local UI, run:

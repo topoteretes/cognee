@@ -108,6 +108,7 @@ cognee-cli add "Your text here"
 cognee-cli cognify
 cognee-cli search "Your query"
 cognee-cli delete --all
+cognee-cli inspect           # Browse memory stores (overview, dataset, sessions, recent)
 
 # Launch full stack with UI
 cognee-cli -ui

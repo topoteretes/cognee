@@ -14,6 +14,7 @@ COMMAND_DESCRIPTIONS = {
     "delete": "Delete data from cognee knowledge base",
     "config": "Manage cognee configuration settings",
     "datasets": "Manage datasets (list, create, inspect, status, delete)",
+    "inspect": "Inspect stored memory (datasets, sessions, counts)",
     "agents": "Manage agents (create, list, get, delete, register, unregister, connections)",
     "sessions": "View conversation sessions and Q&A history",
     "feedback": "Add or remove feedback on session Q&A entries",
