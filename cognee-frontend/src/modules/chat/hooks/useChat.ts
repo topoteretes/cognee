@@ -39,7 +39,7 @@ export default function useChat(dataset: Dataset, instance: CogneeInstance) {
     setTrue: disableSearchRun,
     setFalse: enableSearchRun,
   } = useBoolean(false);
-  
+
   const refreshChat = useCallback(async () => {
     const data = await fetchMessages(instance);
     return setMessages(data);
