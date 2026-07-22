@@ -17,12 +17,39 @@ from sqlalchemy import (
     MetaData,
     Table,
     Text,
+    TypeDecorator,
     UniqueConstraint,
     func,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 
 cache_metadata = MetaData()
+
+
+class StringKey(TypeDecorator):
+    """TEXT key column that coerces stringable ids (e.g. ``uuid.UUID``) to ``str``.
+
+    Client-side only: DDL is delegated to ``impl`` so the emitted column is a
+    plain TEXT, identical to before — existing tables need no migration. The
+    asyncpg dialect renders explicit bind casts, so an id bound as a
+    ``uuid.UUID`` would make Postgres parse ``text = uuid`` and raise 42883
+    ("operator does not exist") instead of coercing; sqlite rejects non-str
+    binds outright. Normalizing in the bind processor keeps every read and
+    write keyed by the same string no matter which type the caller holds.
+    """
+
+    impl = Text
+    cache_ok = True
+
+    def process_bind_param(self, value, dialect):
+        if value is None or isinstance(value, str):
+            return value
+        return str(value)
+
+    def coerce_compared_value(self, op, value):
+        # Compare through this decorator (not the raw impl) so binds in
+        # WHERE/IN comparisons run through process_bind_param too.
+        return self
 
 
 def _payload_type():
@@ -40,9 +67,9 @@ cache_qa_entries = Table(
     "cache_qa_entries",
     cache_metadata,
     Column("seq", _seq_type(), primary_key=True, autoincrement=True),
-    Column("user_id", Text, nullable=False),
-    Column("session_id", Text, nullable=False),
-    Column("qa_id", Text, nullable=False),
+    Column("user_id", StringKey(), nullable=False),
+    Column("session_id", StringKey(), nullable=False),
+    Column("qa_id", StringKey(), nullable=False),
     Column("payload", _payload_type(), nullable=False),
     Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
     Column("expires_at", DateTime(timezone=True), nullable=True),
@@ -67,8 +94,8 @@ cache_trace_entries = Table(
     "cache_trace_entries",
     cache_metadata,
     Column("seq", _seq_type(), primary_key=True, autoincrement=True),
-    Column("user_id", Text, nullable=False),
-    Column("session_id", Text, nullable=False),
+    Column("user_id", StringKey(), nullable=False),
+    Column("session_id", StringKey(), nullable=False),
     Column("payload", _payload_type(), nullable=False),
     Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
     Column("expires_at", DateTime(timezone=True), nullable=True),
@@ -94,9 +121,9 @@ cache_session_context = Table(
     "cache_session_context",
     cache_metadata,
     Column("seq", _seq_type(), primary_key=True, autoincrement=True),
-    Column("user_id", Text, nullable=False),
-    Column("session_id", Text, nullable=False),
-    Column("entry_id", Text, nullable=False),
+    Column("user_id", StringKey(), nullable=False),
+    Column("session_id", StringKey(), nullable=False),
+    Column("entry_id", StringKey(), nullable=False),
     Column("payload", _payload_type(), nullable=False),
     Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
     Column("expires_at", DateTime(timezone=True), nullable=True),
@@ -120,8 +147,8 @@ cache_usage_logs = Table(
     "cache_usage_logs",
     cache_metadata,
     Column("seq", _seq_type(), primary_key=True, autoincrement=True),
-    Column("log_key", Text, nullable=False),
-    Column("user_id", Text, nullable=False),
+    Column("log_key", StringKey(), nullable=False),
+    Column("user_id", StringKey(), nullable=False),
     Column("payload", _payload_type(), nullable=False),
     Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
     Column("expires_at", DateTime(timezone=True), nullable=True),
@@ -138,7 +165,7 @@ Index(
 cache_kv = Table(
     "cache_kv",
     cache_metadata,
-    Column("key", Text, primary_key=True),
+    Column("key", StringKey(), primary_key=True),
     Column("value", Text, nullable=False),
     Column("expires_at", DateTime(timezone=True), nullable=True),
 )
