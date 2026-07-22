@@ -202,8 +202,27 @@ class SqlCacheAdapter(CacheDBInterface):
         return or_(table.c.expires_at.is_(None), table.c.expires_at > self._now())
 
     def _session_filter(self, table, user_id: str, session_id: str):
-        """WHERE clause for one session's rows."""
+        """WHERE clause for one session's rows (StringKey columns stringify the binds)."""
         return (table.c.user_id == user_id) & (table.c.session_id == session_id)
+
+    async def _lock_session_writes(self, session, table, user_id: str, session_id: str) -> None:
+        """Serialize same-session write transactions on Postgres.
+
+        Session writes end with the sliding-TTL UPDATE over all of the session's
+        rows while already holding row locks taken earlier in the transaction
+        (a FOR UPDATE read or a fresh insert), so two concurrent writers acquire
+        row locks in opposite orders and deadlock. One transaction-scoped
+        advisory lock per (table, user, session) makes them queue instead; it
+        auto-releases at COMMIT/ROLLBACK. No-op on SQLite (single-writer lock).
+        """
+        if not self._is_postgres:
+            return
+        lock_id = int.from_bytes(
+            sha256(f"{table.name}:{user_id}:{session_id}".encode()).digest()[:8],
+            "big",
+            signed=True,
+        )
+        await session.execute(text("SELECT pg_advisory_xact_lock(:lock_id)"), {"lock_id": lock_id})
 
     async def _refresh_session_ttl(self, session, table, user_id: str, session_id: str) -> None:
         """Slide the whole session's expiry forward (Redis EXPIRE-on-write parity)."""
@@ -471,6 +490,7 @@ class SqlCacheAdapter(CacheDBInterface):
                 used_session_context_ids=used_session_context_ids,
             )
             async with self.sessionmaker() as session, session.begin():
+                await self._lock_session_writes(session, cache_qa_entries, user_id, session_id)
                 await self._purge_session_expired(session, cache_qa_entries, user_id, session_id)
                 await session.execute(
                     insert(cache_qa_entries).values(
@@ -566,6 +586,7 @@ class SqlCacheAdapter(CacheDBInterface):
         while True:
             try:
                 async with self.sessionmaker() as session, session.begin():
+                    await self._lock_session_writes(session, cache_qa_entries, user_id, session_id)
                     result = await session.execute(
                         select(cache_qa_entries.c.payload)
                         .where(
@@ -662,6 +683,7 @@ class SqlCacheAdapter(CacheDBInterface):
         await self._ensure_initialized()
         try:
             async with self.sessionmaker() as session, session.begin():
+                await self._lock_session_writes(session, cache_qa_entries, user_id, session_id)
                 result = await session.execute(
                     delete(cache_qa_entries).where(
                         self._session_filter(cache_qa_entries, user_id, session_id),
@@ -687,6 +709,10 @@ class SqlCacheAdapter(CacheDBInterface):
         try:
             async with self.sessionmaker() as session, session.begin():
                 deleted_rows = 0
+                # Fixed acquisition order (matching the tuple below) so this
+                # multi-table writer can never cycle with single-table writers.
+                for table in (cache_qa_entries, cache_trace_entries, cache_session_context):
+                    await self._lock_session_writes(session, table, user_id, session_id)
                 for table in (cache_qa_entries, cache_trace_entries, cache_session_context):
                     # Expired rows are invisible — drop them first so they don't
                     # count toward "session existed".
@@ -734,6 +760,7 @@ class SqlCacheAdapter(CacheDBInterface):
                 session_feedback=session_feedback,
             )
             async with self.sessionmaker() as session, session.begin():
+                await self._lock_session_writes(session, cache_trace_entries, user_id, session_id)
                 await self._purge_session_expired(session, cache_trace_entries, user_id, session_id)
                 await session.execute(
                     insert(cache_trace_entries).values(
@@ -820,6 +847,7 @@ class SqlCacheAdapter(CacheDBInterface):
         entry_id = entry_dump.get("id") or str(uuid.uuid4())
         try:
             async with self.sessionmaker() as session, session.begin():
+                await self._lock_session_writes(session, cache_session_context, user_id, session_id)
                 await self._purge_session_expired(
                     session, cache_session_context, user_id, session_id
                 )
@@ -870,6 +898,9 @@ class SqlCacheAdapter(CacheDBInterface):
         while True:
             try:
                 async with self.sessionmaker() as session, session.begin():
+                    await self._lock_session_writes(
+                        session, cache_session_context, user_id, session_id
+                    )
                     result = await session.execute(
                         select(cache_session_context.c.payload)
                         .where(
@@ -913,6 +944,7 @@ class SqlCacheAdapter(CacheDBInterface):
         await self._ensure_initialized()
         try:
             async with self.sessionmaker() as session, session.begin():
+                await self._lock_session_writes(session, cache_session_context, user_id, session_id)
                 await self._purge_session_expired(
                     session, cache_session_context, user_id, session_id
                 )
