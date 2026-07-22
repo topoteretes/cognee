@@ -310,6 +310,47 @@ async def delete_session_lifecycle(
         return False
 
 
+async def get_session_dataset(
+    *,
+    session_id: str,
+    user_id: str | UUIDType,
+) -> Optional[tuple[UUIDType, UUIDType]]:
+    """Return (dataset_id, dataset_owner_id) for a session's attributed dataset.
+
+    The dataset owner identifies the database context that session vectors were
+    written under. Best-effort: returns None when the session has no dataset
+    attribution, the dataset row is gone, or the lookup fails.
+    """
+    try:
+        user_uuid = UUIDType(str(user_id))
+    except (ValueError, TypeError):
+        return None
+
+    try:
+        from cognee.modules.data.models import Dataset
+
+        engine = get_relational_engine()
+        async with engine.get_async_session() as session:
+            row = (
+                await session.execute(
+                    select(Dataset.id, Dataset.owner_id)
+                    .join(SessionRecord, SessionRecord.dataset_id == Dataset.id)
+                    .where(
+                        and_(
+                            SessionRecord.session_id == session_id,
+                            SessionRecord.user_id == user_uuid,
+                        )
+                    )
+                )
+            ).first()
+        if row is None or row.owner_id is None:
+            return None
+        return row.id, row.owner_id
+    except Exception as exc:
+        logger.debug("Failed to resolve dataset for session %s: %s", session_id, exc)
+        return None
+
+
 def get_effective_status_sql():
     """Return a SQL expression that evaluates to the effective status.
 

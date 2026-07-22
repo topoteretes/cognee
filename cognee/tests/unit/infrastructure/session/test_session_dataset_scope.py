@@ -11,7 +11,7 @@ Explicit session IDs are stored unchanged — existing sessions keep working.
 """
 
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
@@ -21,6 +21,7 @@ from cognee.context_global_variables import current_dataset_id
 from cognee.infrastructure.session.session_manager import SessionManager
 from cognee.modules.session_lifecycle.metrics import (
     delete_session_lifecycle,
+    get_session_dataset,
     record_session_activity,
 )
 from cognee.modules.session_lifecycle.models import SessionModelUsage, SessionRecord
@@ -217,3 +218,211 @@ async def test_delete_session_lifecycle_missing_row_returns_false():
 @pytest.mark.asyncio
 async def test_delete_session_lifecycle_invalid_user_returns_false():
     assert await delete_session_lifecycle(session_id="s1", user_id="not-a-uuid") is False
+
+
+async def _create_attributed_session(dataset_owner_id=None):
+    """Insert a Dataset and a SessionRecord attributed to it; return the ids."""
+    from cognee.modules.data.models import Dataset
+
+    user_id = uuid4()
+    dataset_id = uuid4()
+    owner_id = dataset_owner_id or user_id
+    session_id = f"scope-test-{uuid4()}"
+    now = datetime.now(timezone.utc)
+
+    engine = get_relational_engine()
+    async with engine.engine.begin() as conn:
+        await conn.run_sync(SessionRecord.metadata.create_all)
+
+    async with engine.get_async_session() as session:
+        session.add(Dataset(id=dataset_id, name="scope_ds", owner_id=owner_id))
+        session.add(
+            SessionRecord(
+                session_id=session_id,
+                user_id=user_id,
+                dataset_id=dataset_id,
+                status="running",
+                started_at=now,
+                last_activity_at=now,
+            )
+        )
+        await session.commit()
+    return user_id, dataset_id, owner_id, session_id
+
+
+@pytest.mark.asyncio
+async def test_get_session_dataset_returns_dataset_and_owner():
+    dataset_owner = uuid4()
+    user_id, dataset_id, owner_id, session_id = await _create_attributed_session(dataset_owner)
+
+    resolved = await get_session_dataset(session_id=session_id, user_id=user_id)
+    assert resolved == (dataset_id, dataset_owner)
+
+
+@pytest.mark.asyncio
+async def test_get_session_dataset_none_without_attribution():
+    user_id = uuid4()
+    session_id = f"scope-test-{uuid4()}"
+    now = datetime.now(timezone.utc)
+
+    engine = get_relational_engine()
+    async with engine.engine.begin() as conn:
+        await conn.run_sync(SessionRecord.metadata.create_all)
+    async with engine.get_async_session() as session:
+        session.add(
+            SessionRecord(
+                session_id=session_id,
+                user_id=user_id,
+                status="running",
+                started_at=now,
+                last_activity_at=now,
+            )
+        )
+        await session.commit()
+
+    assert await get_session_dataset(session_id=session_id, user_id=user_id) is None
+
+
+@pytest.mark.asyncio
+async def test_get_session_dataset_invalid_user_returns_none():
+    assert await get_session_dataset(session_id="s1", user_id="not-a-uuid") is None
+
+
+class TestScopedVectorCleanup:
+    """Vector cleanup runs in the session's attributed dataset store AND the ambient store."""
+
+    @staticmethod
+    def _db_context_mock():
+        context = MagicMock()
+        context.return_value.__aenter__ = AsyncMock(return_value=None)
+        context.return_value.__aexit__ = AsyncMock(return_value=False)
+        return context
+
+    @pytest.mark.asyncio
+    async def test_delete_session_cleans_dataset_store(self):
+        dataset_id, owner_id = uuid4(), uuid4()
+        cache = AsyncMock()
+        cache.delete_session.return_value = True
+        manager = SessionManager(cache_engine=cache)
+        db_context = self._db_context_mock()
+        call_order = []
+
+        with (
+            patch(
+                "cognee.infrastructure.session.session_manager.get_session_dataset",
+                new_callable=AsyncMock,
+                side_effect=lambda **kw: call_order.append("resolve") or (dataset_id, owner_id),
+            ),
+            patch(
+                "cognee.infrastructure.session.session_manager.delete_session_lifecycle",
+                new_callable=AsyncMock,
+                side_effect=lambda **kw: call_order.append("lifecycle") or True,
+            ),
+            patch(
+                "cognee.infrastructure.session.session_manager.delete_session_qa_vectors",
+                new_callable=AsyncMock,
+            ) as vectors_mock,
+            patch(
+                "cognee.context_global_variables.set_database_global_context_variables",
+                db_context,
+            ),
+        ):
+            assert await manager.delete_session(user_id="u1", session_id="s1") is True
+
+        # Attribution must be read before the lifecycle row is deleted.
+        assert call_order == ["resolve", "lifecycle"]
+        db_context.assert_called_once_with(dataset_id, owner_id)
+        # Once inside the dataset store, once in the ambient store.
+        assert vectors_mock.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_delete_session_without_attribution_uses_ambient_store_only(self):
+        cache = AsyncMock()
+        cache.delete_session.return_value = True
+        manager = SessionManager(cache_engine=cache)
+        db_context = self._db_context_mock()
+
+        with (
+            patch(
+                "cognee.infrastructure.session.session_manager.get_session_dataset",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch(
+                "cognee.infrastructure.session.session_manager.delete_session_lifecycle",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
+            patch(
+                "cognee.infrastructure.session.session_manager.delete_session_qa_vectors",
+                new_callable=AsyncMock,
+            ) as vectors_mock,
+            patch(
+                "cognee.context_global_variables.set_database_global_context_variables",
+                db_context,
+            ),
+        ):
+            assert await manager.delete_session(user_id="u1", session_id="s1") is True
+
+        db_context.assert_not_called()
+        assert vectors_mock.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_delete_qa_cleans_dataset_store(self):
+        dataset_id, owner_id = uuid4(), uuid4()
+        cache = AsyncMock()
+        cache.delete_qa_entry.return_value = True
+        manager = SessionManager(cache_engine=cache)
+        db_context = self._db_context_mock()
+
+        with (
+            patch(
+                "cognee.infrastructure.session.session_manager.get_session_dataset",
+                new_callable=AsyncMock,
+                return_value=(dataset_id, owner_id),
+            ),
+            patch(
+                "cognee.infrastructure.session.session_manager.delete_session_qa_vector",
+                new_callable=AsyncMock,
+            ) as vector_mock,
+            patch(
+                "cognee.context_global_variables.set_database_global_context_variables",
+                db_context,
+            ),
+        ):
+            assert await manager.delete_qa(user_id="u1", session_id="s1", qa_id="q1") is True
+
+        db_context.assert_called_once_with(dataset_id, owner_id)
+        assert vector_mock.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_delete_session_scoped_cleanup_failure_still_cleans_ambient(self):
+        """A broken dataset context must not block the ambient cleanup."""
+        cache = AsyncMock()
+        cache.delete_session.return_value = True
+        manager = SessionManager(cache_engine=cache)
+        db_context = MagicMock(side_effect=RuntimeError("dataset database is gone"))
+
+        with (
+            patch(
+                "cognee.infrastructure.session.session_manager.get_session_dataset",
+                new_callable=AsyncMock,
+                return_value=(uuid4(), uuid4()),
+            ),
+            patch(
+                "cognee.infrastructure.session.session_manager.delete_session_lifecycle",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
+            patch(
+                "cognee.infrastructure.session.session_manager.delete_session_qa_vectors",
+                new_callable=AsyncMock,
+            ) as vectors_mock,
+            patch(
+                "cognee.context_global_variables.set_database_global_context_variables",
+                db_context,
+            ),
+        ):
+            assert await manager.delete_session(user_id="u1", session_id="s1") is True
+
+        assert vectors_mock.await_count == 1

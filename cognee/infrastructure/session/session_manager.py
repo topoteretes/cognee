@@ -30,6 +30,7 @@ from cognee.modules.observability import (
 from cognee.modules.retrieval.utils.completion import generate_completion
 from cognee.modules.session_lifecycle.metrics import (
     delete_session_lifecycle,
+    get_session_dataset,
     record_session_activity,
 )
 from cognee.shared.logging_utils import get_logger
@@ -712,6 +713,37 @@ class SessionManager:
             qa_id=qa_id,
         )
 
+    async def _delete_vectors_in_session_stores(
+        self,
+        *,
+        session_id: str,
+        session_dataset: tuple | None,
+        delete_vectors,
+    ) -> None:
+        """Run a fail-open vector deletion in every store that may hold session vectors.
+
+        A dataset-scoped session's vectors live in its dataset's store; a session
+        that predates dataset scoping (or gained attribution mid-life) can also
+        hold vectors in the ambient store. Deleting where nothing matches is a
+        no-op, so both passes are safe.
+        """
+        if session_dataset is not None:
+            try:
+                from cognee.context_global_variables import (
+                    set_database_global_context_variables,
+                )
+
+                dataset_id, dataset_owner_id = session_dataset
+                async with set_database_global_context_variables(dataset_id, dataset_owner_id):
+                    await delete_vectors()
+            except Exception as error:
+                logger.warning(
+                    "Dataset-scoped session vector cleanup failed for %s: %s",
+                    session_id,
+                    error,
+                )
+        await delete_vectors()
+
     async def delete_qa(
         self,
         *,
@@ -739,7 +771,12 @@ class SessionManager:
                 qa_id=qa_id,
             )
             if deleted:
-                await delete_session_qa_vector(qa_id=qa_id)
+                session_dataset = await get_session_dataset(session_id=session_id, user_id=user_id)
+                await self._delete_vectors_in_session_stores(
+                    session_id=session_id,
+                    session_dataset=session_dataset,
+                    delete_vectors=lambda: delete_session_qa_vector(qa_id=qa_id),
+                )
             return deleted
 
     # -- Session context entries (active guidance layer) --------------------
@@ -885,6 +922,10 @@ class SessionManager:
         except Exception:
             pass
 
+        # Resolve the dataset attribution BEFORE removing the lifecycle row —
+        # it is the only pointer to the store holding this session's vectors.
+        session_dataset = await get_session_dataset(session_id=session_id, user_id=user_id)
+
         deleted = await self._cache.delete_session(
             user_id=user_id,
             session_id=session_id,
@@ -894,5 +935,11 @@ class SessionManager:
             user_id=user_id,
         )
         if deleted:
-            await delete_session_qa_vectors(user_id=user_id, session_id=session_id)
+            await self._delete_vectors_in_session_stores(
+                session_id=session_id,
+                session_dataset=session_dataset,
+                delete_vectors=lambda: delete_session_qa_vectors(
+                    user_id=user_id, session_id=session_id
+                ),
+            )
         return deleted or lifecycle_deleted
