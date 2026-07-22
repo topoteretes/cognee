@@ -1,0 +1,8 @@
+# Local secrets and runtime artifacts. Never commit the real .env.
+.env
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Local verification driver (not part of the shipped package).
+demo_real_run.py
