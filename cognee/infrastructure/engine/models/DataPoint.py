@@ -72,6 +72,8 @@ class DataPoint(BaseModel):
     source_user: str | None = None
     source_content_hash: str | None = None
     feedback_weight: float = 0.5
+    # A never-recalled node has no usage boost; first recall initializes it from zero.
+    frequency_weight: float = 0.0
     importance_weight: float | None = 0.5
 
     def __init__(self, **data: Any) -> None:

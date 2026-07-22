@@ -44,7 +44,7 @@ async def improve(
 ):
     """Enrich an existing knowledge graph with additional context and rules.
 
-    When ``session_ids`` is provided, the improvement pipeline runs four
+    When ``session_ids`` is provided, the improvement pipeline runs session bridge
     stages:
 
     1. **Apply feedback weights** -- session entries with feedback scores
@@ -52,21 +52,25 @@ async def improve(
        to produce those answers. Higher-rated answers boost their source
        nodes; lower-rated answers decrease them.
 
-    2. **Persist session Q&A** -- the question/answer text from those
+    2. **Apply frequency weights** -- session entries with recorded graph
+       element usage increment ``frequency_weight`` for the nodes/edges that
+       were recalled, including unrated answers.
+
+    3. **Persist session Q&A** -- the question/answer text from those
        sessions is cognified into the permanent graph, tagged with
        ``node_set="user_sessions_from_cache"``.
 
-    2c. **Distill sessions** -- each session's gated active-guidance
+    3c. **Distill sessions** -- each session's gated active-guidance
        entries are curated into entity-anchored lessons and
        add+cognified into the graph (tagged ``session_learnings``).
        Sessions with no gated guidance produce nothing. This is what
        lets ``remember(session, self_improvement=True)`` cover session
        distillation without an explicit ``distill_session`` call.
 
-    3. **Default enrichment** -- triplet embeddings are extracted and
+    4. **Default enrichment** -- triplet embeddings are extracted and
        indexed (same as calling ``improve()`` without sessions).
 
-    4. **Global context index** -- when ``build_global_context_index=True``,
+    5. **Global context index** -- when ``build_global_context_index=True``,
        builds retrieval-ready bucket and root summaries over the graph's
        text summaries.
 
@@ -167,7 +171,7 @@ async def improve(
                     feedback_alpha=feedback_alpha,
                     run_in_background=run_in_background,
                 )
-                stages_run.extend(["feedback_weights", "persist_sessions"])
+                stages_run.extend(["feedback_weights", "frequency_weights", "persist_sessions"])
 
                 # Stage 2b: persist agent trace steps (tool calls with
                 # per-step feedback) into the graph. Without this, the
@@ -299,12 +303,16 @@ async def _bridge_sessions(
     feedback_alpha: float,
     run_in_background: bool,
 ):
-    """Run feedback weights and session persistence pipelines.
+    """Run feedback, frequency, and session persistence pipelines.
 
-    Stage 1 (feedback weights): Updates ``feedback_weight`` on graph nodes
+    Stage 1a (feedback weights): Updates ``feedback_weight`` on graph nodes
     and edges that were *used during retrieval* in session Q&A entries.
     Only elements referenced in ``used_graph_element_ids`` are affected.
     If no retrieval has occurred in these sessions, no weights are updated.
+
+    Stage 1b (frequency weights): Increments ``frequency_weight`` on graph
+    nodes and edges used during retrieval. Unlike feedback, this also applies
+    to unrated QAs because recall frequency is a usage signal.
 
     Stage 2 (persist Q&A): Cognifies the actual question/answer text from
     sessions into the permanent graph, tagged with
@@ -328,6 +336,19 @@ async def _bridge_sessions(
         logger.info("improve: feedback weights applied from %d session(s)", len(session_ids))
     except Exception as e:
         logger.warning("improve: feedback weights failed (non-fatal): %s", e)
+
+    try:
+        from cognee.memify_pipelines.apply_frequency_weights import apply_frequency_weights_pipeline
+
+        await apply_frequency_weights_pipeline(
+            user=user,
+            session_ids=session_ids,
+            dataset=dataset_name,
+            run_in_background=run_in_background,
+        )
+        logger.info("improve: frequency weights applied from %d session(s)", len(session_ids))
+    except Exception as e:
+        logger.warning("improve: frequency weights failed (non-fatal): %s", e)
 
     # Stage 2: persist session Q&A into permanent graph
     from cognee.memify_pipelines.persist_sessions_in_knowledge_graph import (

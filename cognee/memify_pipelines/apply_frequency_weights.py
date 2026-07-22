@@ -11,7 +11,7 @@ from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.memify.apply_frequency_weights import apply_frequency_weights
-from cognee.tasks.memify.extract_feedback_qas import extract_feedback_qas
+from cognee.tasks.memify.extract_feedback_qas import extract_recall_qas
 
 logger = get_logger("apply_frequency_weights_pipeline")
 
@@ -26,7 +26,7 @@ async def apply_frequency_weights_pipeline(
     """
     Apply session usage-based graph frequency_weight updates via memify pipeline.
 
-    This pipeline reads QAs from provided session IDs, filters eligible entries,
+    This pipeline reads QAs from provided session IDs, filters eligible recall entries,
     updates mapped graph nodes/edges with incremented frequency weights, and marks each QA
     as applied in memify metadata only on full success.
     """
@@ -56,7 +56,7 @@ async def apply_frequency_weights_pipeline(
     async with set_database_global_context_variables(
         dataset_to_write[0].id, dataset_to_write[0].owner_id
     ):
-        extraction_tasks = [Task(extract_feedback_qas, session_ids=session_ids)]
+        extraction_tasks = [Task(extract_recall_qas, session_ids=session_ids)]
         enrichment_tasks = [Task(apply_frequency_weights, task_config={"batch_size": batch_size})]
 
         result = await memify(
