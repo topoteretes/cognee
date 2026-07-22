@@ -54,6 +54,16 @@ class DataDTO(OutDTO):
     dataset_id: UUID
 
 
+class DatasetGraphSummaryDTO(OutDTO):
+    dataset_id: UUID
+    pipeline_run_id: Optional[UUID] = None
+    num_nodes: int
+    num_edges: int
+    # None while pipeline_run_id is set means the last count attempt degraded
+    # (graph store unavailable) and wasn't cached — retried on the next poll.
+    computed_at: Optional[datetime] = None
+
+
 class GraphNodeDTO(OutDTO):
     id: UUID
     label: str
@@ -476,6 +486,158 @@ def get_datasets_router() -> APIRouter:
             return datasets_statuses
         except Exception as error:
             return JSONResponse(status_code=409, content={"error": str(error)})
+
+    @router.get("/graph-summary", response_model=List[DatasetGraphSummaryDTO])
+    async def get_datasets_graph_summary(
+        dataset_ids: Annotated[
+            List[UUID],
+            Query(
+                alias="dataset_ids",
+                description=(
+                    "Dataset UUIDs to summarize (from GET /api/v1/datasets)."
+                    " Omit to summarize every dataset you can read."
+                ),
+                examples=[["b8a7c3de-4f5a-4b6c-8d9e-0f1a2b3c4d5e"]],
+            ),
+        ] = [],
+        user: User = Depends(get_authenticated_user),
+    ):
+        """
+        Get node/edge counts per dataset, cached per cognify run.
+
+        Counts are computed once per dataset's latest cognify run and cached in
+        GraphMetrics, keyed by pipeline_run_id — orders of magnitude cheaper on
+        repeat polls than GET /{dataset_id}/graph, which does a full traversal.
+
+        ## Query Parameters
+        - **dataset_ids** (List[UUID], optional): Dataset UUIDs to summarize.
+          If omitted, summarizes every dataset the user has read permission on.
+
+        ## Response
+        Returns a list of summaries containing:
+        - **datasetId**: The dataset's UUID
+        - **pipelineRunId**: The dataset's latest cognify run, or null if it
+          has never been cognified
+        - **numNodes** / **numEdges**: Graph size for that run
+        - **computedAt**: When the count was cached, or null if the last
+          attempt degraded (graph store unavailable) and wasn't cached
+        """
+        send_telemetry(
+            "Datasets API Endpoint Invoked",
+            user.id,
+            additional_properties={
+                "endpoint": "GET /v1/datasets/graph-summary",
+                "dataset_ids": [str(dataset_id) for dataset_id in dataset_ids],
+                "cognee_version": cognee_version,
+            },
+        )
+
+        from datetime import timezone
+        from sqlalchemy import select, func
+        from sqlalchemy.orm import aliased
+        from cognee.context_global_variables import set_database_global_context_variables
+        from cognee.infrastructure.databases.graph import get_graph_engine
+        from cognee.modules.data.models import GraphMetrics
+        from cognee.modules.pipelines.models import PipelineRun
+
+        authorized_datasets = await get_authorized_existing_datasets(dataset_ids, "read", user)
+
+        if not authorized_datasets:
+            return []
+
+        db_engine = get_relational_engine()
+
+        async with db_engine.get_async_session() as session:
+            ranked_runs = (
+                select(
+                    PipelineRun,
+                    func.row_number()
+                    .over(
+                        partition_by=PipelineRun.dataset_id,
+                        order_by=PipelineRun.created_at.desc(),
+                    )
+                    .label("rn"),
+                )
+                .filter(PipelineRun.dataset_id.in_([dataset.id for dataset in authorized_datasets]))
+                .filter(PipelineRun.pipeline_name == "cognify_pipeline")
+                .subquery()
+            )
+            aliased_run = aliased(PipelineRun, ranked_runs)
+            latest_runs = (
+                (await session.execute(select(aliased_run).filter(ranked_runs.c.rn == 1)))
+                .scalars()
+                .all()
+            )
+            latest_run_by_dataset = {run.dataset_id: run for run in latest_runs}
+
+        summaries = []
+        for dataset in authorized_datasets:
+            latest_run = latest_run_by_dataset.get(dataset.id)
+            if latest_run is None:
+                summaries.append(
+                    DatasetGraphSummaryDTO(
+                        dataset_id=dataset.id, num_nodes=0, num_edges=0
+                    )
+                )
+                continue
+
+            async with db_engine.get_async_session() as session:
+                cached = (
+                    await session.execute(
+                        select(GraphMetrics).where(GraphMetrics.id == latest_run.pipeline_run_id)
+                    )
+                ).scalars().first()
+
+            if cached is not None:
+                summaries.append(
+                    DatasetGraphSummaryDTO(
+                        dataset_id=dataset.id,
+                        pipeline_run_id=latest_run.pipeline_run_id,
+                        num_nodes=cached.num_nodes or 0,
+                        num_edges=cached.num_edges or 0,
+                        computed_at=cached.created_at,
+                    )
+                )
+                continue
+
+            try:
+                async with set_database_global_context_variables(dataset.id, dataset.owner_id):
+                    graph_engine = await get_graph_engine()
+                    graph_metrics = await graph_engine.get_graph_metrics(include_optional=False)
+
+                async with db_engine.get_async_session() as session:
+                    session.add(
+                        GraphMetrics(
+                            id=latest_run.pipeline_run_id,
+                            num_nodes=graph_metrics.get("num_nodes"),
+                            num_edges=graph_metrics.get("num_edges"),
+                        )
+                    )
+                    await session.commit()
+
+                summaries.append(
+                    DatasetGraphSummaryDTO(
+                        dataset_id=dataset.id,
+                        pipeline_run_id=latest_run.pipeline_run_id,
+                        num_nodes=graph_metrics.get("num_nodes") or 0,
+                        num_edges=graph_metrics.get("num_edges") or 0,
+                        computed_at=datetime.now(timezone.utc),
+                    )
+                )
+            except Exception as error:
+                logger.warning(
+                    "Failed to compute graph metrics for dataset %s: %s", dataset.id, error
+                )
+                summaries.append(
+                    DatasetGraphSummaryDTO(
+                        dataset_id=dataset.id,
+                        pipeline_run_id=latest_run.pipeline_run_id,
+                        num_nodes=0,
+                        num_edges=0,
+                    )
+                )
+
+        return summaries
 
     @router.get("/{dataset_id}/data/{data_id}/raw", response_class=FileResponse)
     async def get_raw_data(
