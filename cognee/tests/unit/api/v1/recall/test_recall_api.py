@@ -16,6 +16,98 @@ def api_recall_mod():
     return importlib.import_module("cognee.api.v1.recall.recall")
 
 
+def _session_row(user_id, dataset_id):
+    return types.SimpleNamespace(user_id=user_id, dataset_id=dataset_id)
+
+
+def test_session_cache_owner_prefers_callers_scoped_row(api_recall_mod):
+    caller_id = uuid4()
+    other_id = uuid4()
+    caller_dataset_id = uuid4()
+    other_dataset_id = uuid4()
+    rows = [
+        _session_row(other_id, other_dataset_id),
+        _session_row(caller_id, caller_dataset_id),
+    ]
+
+    owner = api_recall_mod._select_session_cache_owner(
+        rows,
+        caller_id,
+        {caller_dataset_id, other_dataset_id},
+        {caller_dataset_id, other_dataset_id},
+    )
+
+    assert owner == caller_id
+
+
+def test_session_cache_owner_honors_requested_dataset_scope(api_recall_mod):
+    caller_id = uuid4()
+    agent_id = uuid4()
+    caller_dataset_id = uuid4()
+    agent_dataset_id = uuid4()
+    rows = [
+        _session_row(caller_id, caller_dataset_id),
+        _session_row(agent_id, agent_dataset_id),
+    ]
+
+    owner = api_recall_mod._select_session_cache_owner(
+        rows,
+        caller_id,
+        {caller_dataset_id, agent_dataset_id},
+        {agent_dataset_id},
+    )
+
+    assert owner == agent_id
+    assert (
+        api_recall_mod._select_session_cache_owner(
+            rows,
+            caller_id,
+            {caller_dataset_id, agent_dataset_id},
+            {uuid4()},
+        )
+        is None
+    )
+
+
+def test_session_cache_owner_rejects_ambiguous_non_owner_rows(api_recall_mod):
+    caller_id = uuid4()
+    first_agent_id = uuid4()
+    second_agent_id = uuid4()
+    dataset_id = uuid4()
+    rows = [
+        _session_row(first_agent_id, dataset_id),
+        _session_row(second_agent_id, dataset_id),
+    ]
+
+    owner = api_recall_mod._select_session_cache_owner(
+        rows,
+        caller_id,
+        {dataset_id},
+        {dataset_id},
+    )
+
+    assert owner is None
+
+
+def test_session_cache_owner_preserves_single_agent_session_fallback(api_recall_mod):
+    caller_id = uuid4()
+    agent_id = uuid4()
+    dataset_id = uuid4()
+    rows = [
+        _session_row(caller_id, None),
+        _session_row(agent_id, dataset_id),
+    ]
+
+    owner = api_recall_mod._select_session_cache_owner(
+        rows,
+        caller_id,
+        {dataset_id},
+        None,
+    )
+
+    assert owner == agent_id
+
+
 @pytest.mark.asyncio
 async def test_recall_dataset_ids_takes_precedence_over_datasets(monkeypatch, api_recall_mod):
     user = _make_user()
@@ -135,6 +227,7 @@ async def test_recall_session_with_dataset_ids_does_not_short_circuit_graph(
         return None
 
     async def dummy_search_session(**kwargs):
+        captured["session_dataset_ids"] = kwargs.get("dataset_ids")
         return []
 
     async def dummy_search_trace(**kwargs):
@@ -169,7 +262,86 @@ async def test_recall_session_with_dataset_ids_does_not_short_circuit_graph(
 
     assert out == []
     assert captured["dataset_ids"] == [explicit_id]
+    assert captured["session_dataset_ids"] == [explicit_id]
     assert "resolved_from_datasets" not in captured
+
+
+@pytest.mark.asyncio
+async def test_recall_threads_dataset_scope_to_all_session_sources(monkeypatch, api_recall_mod):
+    user = _make_user()
+    explicit_id = uuid4()
+    captured = {}
+
+    async def dummy_search_session(**kwargs):
+        captured["session"] = kwargs.get("dataset_ids")
+        return []
+
+    async def dummy_search_trace(**kwargs):
+        captured["trace"] = kwargs.get("dataset_ids")
+        return []
+
+    async def dummy_fetch_session_context(**kwargs):
+        captured["session_context"] = kwargs.get("dataset_ids")
+        return []
+
+    monkeypatch.setattr(api_recall_mod, "_search_session", dummy_search_session)
+    monkeypatch.setattr(api_recall_mod, "_search_trace", dummy_search_trace)
+    monkeypatch.setattr(api_recall_mod, "_fetch_session_context", dummy_fetch_session_context)
+
+    serve_state = importlib.import_module("cognee.api.v1.serve.state")
+    monkeypatch.setattr(serve_state, "get_remote_client", lambda: None)
+
+    out = await api_recall_mod.recall(
+        query_text="q",
+        dataset_ids=[explicit_id],
+        session_id="session-1",
+        scope=["session", "trace", "session_context"],
+        user=user,
+    )
+
+    assert out == []
+    assert captured == {
+        "session": [explicit_id],
+        "trace": [explicit_id],
+        "session_context": [explicit_id],
+    }
+
+
+@pytest.mark.asyncio
+async def test_recall_resolves_dataset_names_for_session_sources(monkeypatch, api_recall_mod):
+    user = _make_user()
+    resolved_id = uuid4()
+    captured = {}
+
+    async def dummy_get_authorized_existing_datasets(datasets, permission, resolved_user):
+        captured["authorization"] = (datasets, permission, resolved_user)
+        return [types.SimpleNamespace(id=resolved_id)]
+
+    async def dummy_search_session(**kwargs):
+        captured["session_dataset_ids"] = kwargs.get("dataset_ids")
+        return []
+
+    monkeypatch.setattr(
+        api_recall_mod,
+        "get_authorized_existing_datasets",
+        dummy_get_authorized_existing_datasets,
+    )
+    monkeypatch.setattr(api_recall_mod, "_search_session", dummy_search_session)
+
+    serve_state = importlib.import_module("cognee.api.v1.serve.state")
+    monkeypatch.setattr(serve_state, "get_remote_client", lambda: None)
+
+    out = await api_recall_mod.recall(
+        query_text="q",
+        datasets=["shared-dataset"],
+        session_id="session-1",
+        scope=["session"],
+        user=user,
+    )
+
+    assert out == []
+    assert captured["authorization"] == (["shared-dataset"], "read", user)
+    assert captured["session_dataset_ids"] == [resolved_id]
 
 
 # ----------------------------------------------------------------- session_context scope
@@ -192,7 +364,9 @@ async def test_recall_session_context_scope_threads_profile(monkeypatch, api_rec
     user = _make_user()
     captured = {}
 
-    async def dummy_fetch_session_context(query_text, session_id, context_profile, user=None):
+    async def dummy_fetch_session_context(
+        query_text, session_id, context_profile, user=None, dataset_ids=None
+    ):
         captured["context_profile"] = context_profile
         captured["session_id"] = session_id
         return [
@@ -405,7 +579,7 @@ async def test_fetch_session_context_renders_profile_read_only(monkeypatch, api_
 
     fake = _FakeSM()
 
-    async def fake_resolve_cache_user(session_id, caller_user_id):
+    async def fake_resolve_cache_user(session_id, caller_user_id, dataset_ids=None):
         return caller_user_id
 
     gsm_mod = importlib.import_module("cognee.infrastructure.session.get_session_manager")
@@ -434,7 +608,7 @@ async def test_fetch_session_context_empty_when_no_lessons(monkeypatch, api_reca
         async def get_session_context_entries(self, user_id, session_id):
             return []
 
-    async def fake_resolve_cache_user(session_id, caller_user_id):
+    async def fake_resolve_cache_user(session_id, caller_user_id, dataset_ids=None):
         return caller_user_id
 
     gsm_mod = importlib.import_module("cognee.infrastructure.session.get_session_manager")
