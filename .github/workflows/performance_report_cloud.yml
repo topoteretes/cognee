@@ -1,17 +1,22 @@
 name: performance report (cloud)
 
-# Reusable workflow: runs the percentile performance report against a Cognee
-# Cloud tenant (all processing server-side via cognee.serve()), uploads the
-# JSON + HTML artifacts to S3, and exposes the headline metrics + HTML object
-# key as outputs for the caller (the Slack bot in nightly_tests.yml).
+# Reusable workflow: runs the percentile performance report against Cognee
+# Cloud (all processing server-side via cognee.serve()), uploads the JSON +
+# HTML artifacts to S3, and exposes the headline metrics + HTML object key as
+# outputs for the caller (the Slack bot in nightly_tests.yml).
+#
+# Every benchmark run CREATES its own tenant through the tenant-controller
+# API, measures creation time as its own metric (tenant_create_time_s), runs
+# the full add/cognify/search cycle on that fresh tenant, and deletes it
+# afterwards — so suites never share tenant state.
 #
 # Mock mode is NOT supported here: the LLM and embedding configuration live on
 # the tenant, so there is nothing to mock client-side (bench_cognee.py rejects
-# --mock-llm together with --tenant-url).
+# --mock-llm in cloud mode).
 #
-# Required repository secrets:
-#   COGNEE_CLOUD_TENANT_URL — tenant base URL (e.g. https://tenant-<id>.aws.cognee.ai)
-#   COGNEE_CLOUD_API_KEY    — API key for that tenant
+# Required repository secret:
+#   COGNEE_CLOUD_API_KEY — API key authorized on the tenant-controller API
+#                          (https://api.aws.cognee.ai)
 on:
   workflow_call:
     inputs:
@@ -80,14 +85,13 @@ jobs:
         id: run
         env:
           PYTHONFAULTHANDLER: 1
-          COGNEE_CLOUD_TENANT_URL: ${{ secrets.COGNEE_CLOUD_TENANT_URL }}
           # bench_cognee.py picks the key up from COGNEE_API_KEY, keeping it
           # out of the process argument list.
           COGNEE_API_KEY: ${{ secrets.COGNEE_CLOUD_API_KEY }}
         run: |
           set -euo pipefail
-          if [ -z "${COGNEE_CLOUD_TENANT_URL:-}" ] || [ -z "${COGNEE_API_KEY:-}" ]; then
-            echo "COGNEE_CLOUD_TENANT_URL / COGNEE_CLOUD_API_KEY secrets are not set." >&2
+          if [ -z "${COGNEE_API_KEY:-}" ]; then
+            echo "COGNEE_CLOUD_API_KEY secret is not set." >&2
             exit 1
           fi
           TS="$(date -u '+%Y-%m-%d_%H-%M-%SZ')"
@@ -98,15 +102,26 @@ jobs:
           echo "HTML_PATH=$HTML_PATH" >> "$GITHUB_ENV"
 
           ARGS=(--runs "${{ inputs.runs }}" --memories "$MEMORIES_FILE")
-          ARGS+=(--tenant-url "$COGNEE_CLOUD_TENANT_URL")
+          # Fresh tenant per run: creation time is measured as its own metric
+          # and the tenant is deleted after the run, so suites never collide.
+          ARGS+=(--create-tenant)
+          # Dataset-scoped naming/cleanup stays as belt-and-braces isolation.
+          ARGS+=(--dataset-name "bench_${{ inputs.label }}")
           if [ -n "${{ inputs.num_memories }}" ]; then
             ARGS+=(--num-memories "${{ inputs.num_memories }}")
           fi
 
+          # Capture the exit code instead of failing here: the report writes
+          # its JSON/HTML even when runs fail, and the upload + metrics steps
+          # must still run. The job fails at the end via REPORT_RC.
+          set +e
           uv run python cognee/tests/performance/statistics_percentile_report.py \
             "${ARGS[@]}" \
             --output "$JSON_PATH" \
             --html "$HTML_PATH"
+          REPORT_RC=$?
+          set -e
+          echo "REPORT_RC=$REPORT_RC" >> "$GITHUB_ENV"
 
       - name: Upload reports to S3
         id: upload
@@ -130,9 +145,16 @@ jobs:
           set -euo pipefail
           METRICS="$(jq -c '{
             success: "\(.succeeded)/\(.num_runs)",
+            tenant_create: {p50: .stats.tenant_create_time_s.p50, p90: .stats.tenant_create_time_s.p90, p99: .stats.tenant_create_time_s.p99},
             add:     {p50: .stats.add_time_s.p50,          p90: .stats.add_time_s.p90,          p99: .stats.add_time_s.p99},
             cognify: {p50: .stats.cognify_time_s.p50,      p90: .stats.cognify_time_s.p90,      p99: .stats.cognify_time_s.p99},
             search:  {p50: .stats.search_time.p50,         p90: .stats.search_time.p90,         p99: .stats.search_time.p99},
             total:   {p50: .stats.total_ingest_time_s.p50, p90: .stats.total_ingest_time_s.p90, p99: .stats.total_ingest_time_s.p99}
           }' "$JSON_PATH")"
           echo "metrics=$METRICS" >> "$GITHUB_OUTPUT"
+
+      - name: Fail if any benchmark run failed
+        if: ${{ env.REPORT_RC != '0' }}
+        run: |
+          echo "Performance report exited with code $REPORT_RC — one or more benchmark runs failed."
+          exit 1

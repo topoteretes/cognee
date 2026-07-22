@@ -266,6 +266,7 @@ jobs:
                   type: "mrkdwn"
                   text: |
                     *📊 Cognee Cloud — 50 Small Documents* (`${{ needs.perf-small-cloud.result }}`)  •  runs `${{ fromJSON(needs.perf-small-cloud.outputs.cloud_metrics || '{}').success }}`
+                    tenant   p50 `${{ fromJSON(needs.perf-small-cloud.outputs.cloud_metrics || '{}').tenant_create.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-small-cloud.outputs.cloud_metrics || '{}').tenant_create.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-small-cloud.outputs.cloud_metrics || '{}').tenant_create.p99 }}s`
                     add      p50 `${{ fromJSON(needs.perf-small-cloud.outputs.cloud_metrics || '{}').add.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-small-cloud.outputs.cloud_metrics || '{}').add.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-small-cloud.outputs.cloud_metrics || '{}').add.p99 }}s`
                     cognify  p50 `${{ fromJSON(needs.perf-small-cloud.outputs.cloud_metrics || '{}').cognify.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-small-cloud.outputs.cloud_metrics || '{}').cognify.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-small-cloud.outputs.cloud_metrics || '{}').cognify.p99 }}s`
                     search     p50 `${{ fromJSON(needs.perf-small-cloud.outputs.cloud_metrics || '{}').search.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-small-cloud.outputs.cloud_metrics || '{}').search.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-small-cloud.outputs.cloud_metrics || '{}').search.p99 }}s`
@@ -276,6 +277,7 @@ jobs:
                   type: "mrkdwn"
                   text: |
                     *📚 Cognee Cloud — War and Peace* (`${{ needs.perf-wap-cloud.result }}`)  •  runs `${{ fromJSON(needs.perf-wap-cloud.outputs.cloud_metrics || '{}').success }}`
+                    tenant   p50 `${{ fromJSON(needs.perf-wap-cloud.outputs.cloud_metrics || '{}').tenant_create.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-wap-cloud.outputs.cloud_metrics || '{}').tenant_create.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-wap-cloud.outputs.cloud_metrics || '{}').tenant_create.p99 }}s`
                     add      p50 `${{ fromJSON(needs.perf-wap-cloud.outputs.cloud_metrics || '{}').add.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-wap-cloud.outputs.cloud_metrics || '{}').add.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-wap-cloud.outputs.cloud_metrics || '{}').add.p99 }}s`
                     cognify  p50 `${{ fromJSON(needs.perf-wap-cloud.outputs.cloud_metrics || '{}').cognify.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-wap-cloud.outputs.cloud_metrics || '{}').cognify.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-wap-cloud.outputs.cloud_metrics || '{}').cognify.p99 }}s`
                     search     p50 `${{ fromJSON(needs.perf-wap-cloud.outputs.cloud_metrics || '{}').search.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-wap-cloud.outputs.cloud_metrics || '{}').search.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-wap-cloud.outputs.cloud_metrics || '{}').search.p99 }}s`

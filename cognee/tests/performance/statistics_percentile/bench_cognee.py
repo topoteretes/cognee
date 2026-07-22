@@ -80,17 +80,23 @@ def _resolve_config(args: argparse.Namespace) -> dict:
 
 
 def _resolve_cloud_config(args: argparse.Namespace) -> dict:
-    """Resolve config for cloud mode (--tenant-url): all processing is server-side."""
+    """Resolve config for cloud mode (--tenant-url / --create-tenant):
+    all processing is server-side."""
     if args.mock_llm:
-        sys.exit("Error: --mock-llm is not supported with --tenant-url (LLM runs server-side)")
+        sys.exit("Error: --mock-llm is not supported in cloud mode (LLM runs server-side)")
     api_key = args.tenant_api_key or os.environ.get("COGNEE_API_KEY", "")
     if not api_key:
         sys.exit(
-            "Error: --tenant-api-key (or COGNEE_API_KEY env var) is required with --tenant-url"
+            "Error: --tenant-api-key (or COGNEE_API_KEY env var) is required in cloud mode"
         )
+    if not args.tenant_url and not args.create_tenant:
+        sys.exit("Error: cloud mode needs --tenant-url or --create-tenant")
     return {
-        "tenant_url": args.tenant_url.rstrip("/"),
+        "tenant_url": args.tenant_url.rstrip("/") if args.tenant_url else None,
         "tenant_api_key": api_key,
+        "dataset_name": args.dataset_name or DATASET_NAME,
+        "create_tenant": bool(args.create_tenant),
+        "management_url": args.management_url.rstrip("/"),
         "mock_llm": False,
     }
 
@@ -230,12 +236,14 @@ async def run_benchmark(
         "add": "success",
         "cognify": "success",
         "search": "success",
+        "dataset_delete": "success",
     }
     t_prune = 0.0
     t_db_setup = 0.0
     t_add = 0.0
     t_cognify = 0.0
     t_search = 0.0
+    t_dataset_delete = 0.0
 
     # ── Prune (clean slate) ──────────────────────────────────────────────
     print("Pruning previous data...")
@@ -299,6 +307,28 @@ async def run_benchmark(
         status["search"] = f"failed: {e}"
         print(f"  Search FAILED: {e}")
 
+    # ── Phase 4: dataset delete (populated) ──────────────────────────────
+    # Deleting the dataset AFTER the graph is built measures the meaningful
+    # case (nodes, edges, and vectors all present) — mirrors the cloud mode's
+    # dataset_delete_time_s metric.
+    print("\nPhase 4: Deleting the populated dataset...")
+    t_dataset_delete_start = time.time()
+    try:
+        from cognee.api.v1.datasets.datasets import datasets as datasets_api
+        from cognee.modules.data.methods import get_datasets_by_name
+        from cognee.modules.users.methods import get_default_user
+
+        user = await get_default_user()
+        found = await get_datasets_by_name([DATASET_NAME], user.id)
+        if found:
+            await datasets_api.empty_dataset(found[0].id, user)
+        t_dataset_delete = time.time() - t_dataset_delete_start
+        print(f"  Dataset deleted in {t_dataset_delete:.2f}s")
+    except Exception as e:
+        t_dataset_delete = time.time() - t_dataset_delete_start
+        status["dataset_delete"] = f"failed: {e}"
+        print(f"  Dataset delete FAILED: {e}")
+
     all_ok = all(v == "success" for v in status.values())
 
     # ── Report ───────────────────────────────────────────────────────────
@@ -310,6 +340,7 @@ async def run_benchmark(
         "prune_time_s": round(t_prune, 3),
         "db_setup_time_s": round(t_db_setup, 3),
         "search_time": t_search,
+        "dataset_delete_time_s": round(t_dataset_delete, 3),
         "status": status,
         "success": all_ok,
         "config": {
@@ -331,6 +362,7 @@ async def run_benchmark(
     print(f"  Search total      : {t_search:.2f}s  [{status['search']}]")
     print(f"  DB setup time     : {t_db_setup:.2f}s  [{status['db_setup']}]")
     print(f"  Prune time        : {t_prune:.2f}s  [{status['prune']}]")
+    print(f"  Dataset delete    : {t_dataset_delete:.2f}s  [{status['dataset_delete']}]")
     print(f"  LLM model         : {llm_model}")
     print(f"  Embedding model   : {embedding_model} ({embedding_dims}d)")
     if config.get("mock_llm"):
@@ -339,6 +371,93 @@ async def run_benchmark(
     print("=" * 60)
 
     return results
+
+
+def _err(e: Exception) -> str:
+    """Readable error text: timeout-class exceptions stringify to '' (the
+    infamous blank 'cognify: failed: ' in CI logs), so fall back to repr."""
+    return str(e) or repr(e)
+
+
+async def _create_cloud_tenant(
+    management_url: str, api_key: str, tenant_name: str, ready_timeout_s: float = 600.0
+) -> tuple[str, str, float]:
+    """Create a tenant via the tenant-controller API and wait until healthy.
+
+    Returns (tenant_id, service_url, seconds) where seconds covers the create
+    call PLUS the wait until the tenant reports healthy — the number that
+    matters is "time until a usable tenant", not just the POST round trip.
+    """
+    import aiohttp
+    from urllib.parse import urlsplit
+
+    t0 = time.time()
+    async with aiohttp.ClientSession(headers={"X-Api-Key": api_key}) as session:
+        async with session.post(
+            f"{management_url}/api/v1/tenants", params={"tenant_name": tenant_name}
+        ) as resp:
+            if resp.status >= 400:
+                body = await resp.text()
+                raise RuntimeError(f"Tenant creation failed ({resp.status}): {body}")
+            tenant_id = (await resp.json())["tenant_id"]
+
+        deadline = time.time() + ready_timeout_s
+        while True:
+            async with session.get(
+                f"{management_url}/api/v1/tenants/{tenant_id}/status"
+            ) as resp:
+                if resp.status < 400 and (await resp.json()).get("status") == "healthy":
+                    break
+            if time.time() > deadline:
+                raise TimeoutError(
+                    f"Tenant {tenant_id} not healthy after {ready_timeout_s:.0f}s"
+                )
+            await asyncio.sleep(2)
+
+    # Service URL convention: api.<domain> hosts the controller and
+    # tenant-<id>.<domain> hosts the tenant (e.g. https://tenant-<id>.aws.cognee.ai).
+    management_host = urlsplit(management_url).netloc
+    service_host = management_host.replace("api.", f"tenant-{tenant_id}.", 1)
+    return tenant_id, f"https://{service_host}", time.time() - t0
+
+
+async def _delete_cloud_tenant(management_url: str, api_key: str, tenant_id: str) -> float:
+    """Delete a benchmark-created tenant; returns seconds taken."""
+    import aiohttp
+
+    t0 = time.time()
+    async with aiohttp.ClientSession(headers={"X-Api-Key": api_key}) as session:
+        async with session.delete(
+            f"{management_url}/api/v1/tenants", params={"tenant_id": tenant_id}
+        ) as resp:
+            if resp.status >= 400:
+                body = await resp.text()
+                raise RuntimeError(f"Tenant deletion failed ({resp.status}): {body}")
+    return time.time() - t0
+
+
+async def _delete_cloud_dataset_if_exists(client, dataset_name: str) -> None:
+    """Dataset-scoped clean slate for cloud runs.
+
+    Multiple benchmark suites share one tenant in nightly CI, so a global
+    ``forget(everything=True)`` would wipe a concurrently-running suite's
+    data. Delete ONLY this suite's dataset — and only when it exists (the
+    first run on a fresh tenant has nothing to delete).
+    """
+    session = await client._get_session()
+    async with session.get(f"{client.service_url}/api/v1/datasets") as resp:
+        if resp.status >= 400:
+            body = await resp.text()
+            raise RuntimeError(f"Listing datasets failed ({resp.status}): {body}")
+        datasets = await resp.json()
+    existing_names = {
+        record.get("name") for record in datasets if isinstance(record, dict)
+    }
+    if dataset_name not in existing_names:
+        print(f"  Dataset '{dataset_name}' not present on tenant; nothing to delete")
+        return
+    await client.forget(dataset=dataset_name)
+    print(f"  Deleted dataset '{dataset_name}'")
 
 
 async def _wait_for_cloud_cognify(
@@ -395,8 +514,6 @@ async def run_benchmark_cloud(
     """
     import cognee
 
-    client = await cognee.serve(url=config["tenant_url"], api_key=config["tenant_api_key"])
-
     n = len(memories)
     status = {
         "prune": "success",
@@ -409,61 +526,135 @@ async def run_benchmark_cloud(
     t_add = 0.0
     t_cognify = 0.0
     t_search = 0.0
+    t_tenant_create = 0.0
+    t_tenant_delete = 0.0
+    t_dataset_delete = 0.0
 
-    # ── Prune (clean slate on the tenant) ────────────────────────────────
-    print("Pruning previous data on tenant...")
-    t_prune_start = time.time()
-    try:
-        await client.forget(everything=True)
-        t_prune = time.time() - t_prune_start
-        print(f"  Prune completed in {t_prune:.2f}s")
-    except Exception as e:
-        t_prune = time.time() - t_prune_start
-        status["prune"] = f"failed: {e}"
-        print(f"  Prune FAILED: {e}")
+    dataset_name = config.get("dataset_name", DATASET_NAME)
 
-    # ── Phase 1: add ─────────────────────────────────────────────────────
-    print(f"\nPhase 1: Adding {n} memories via remote add...")
-    text_list = [memory_to_text(mem) for mem in memories]
-    t_add_start = time.time()
-    try:
-        await client.add(text_list, dataset_name=DATASET_NAME)
-        t_add = time.time() - t_add_start
-    except Exception as e:
-        t_add = time.time() - t_add_start
-        status["add"] = f"failed: {e}"
-        print(f"  Add FAILED: {e}")
+    # ── Phase 0 (cloud-only metric): tenant creation ─────────────────────
+    # With --create-tenant, the whole benchmark runs on a tenant provisioned
+    # here, and tenant creation time (create call + wait-until-healthy) is
+    # measured as its own metric. The tenant is deleted after the run.
+    tenant_id = None
+    tenant_url = config["tenant_url"]
+    tenant_ready = True
+    if config.get("create_tenant"):
+        status["tenant_create"] = "success"
+        status["tenant_delete"] = "success"
+        # DNS-safe, unique per run: labels use underscores, hostnames cannot.
+        tenant_name = f"bench-{dataset_name}-{int(time.time())}".replace("_", "-")
+        print(f"Phase 0: Creating tenant '{tenant_name}'...")
+        try:
+            tenant_id, tenant_url, t_tenant_create = await _create_cloud_tenant(
+                config["management_url"], config["tenant_api_key"], tenant_name
+            )
+            print(f"  Tenant {tenant_id} ready in {t_tenant_create:.2f}s at {tenant_url}")
+        except Exception as e:
+            status["tenant_create"] = f"failed: {_err(e)}"
+            for phase in ("prune", "add", "cognify", "search"):
+                status[phase] = "skipped"
+            tenant_ready = False
+            print(f"  Tenant creation FAILED: {_err(e)}")
 
-    # ── Phase 2: cognify ─────────────────────────────────────────────────
-    print("\nPhase 2: Running remote cognify (knowledge graph build)...")
-    t_cognify_start = time.time()
-    try:
-        cognify_response = await client.cognify(datasets=[DATASET_NAME])
-        # The tenant builds the graph in the background — wait for completion
-        # so t_cognify measures the build, not just the API round trip.
-        await _wait_for_cloud_cognify(client, cognify_response)
-        t_cognify = time.time() - t_cognify_start
-    except Exception as e:
-        t_cognify = time.time() - t_cognify_start
-        status["cognify"] = f"failed: {e}"
-        print(f"  Cognify FAILED: {e}")
+    if tenant_ready:
+        client = await cognee.serve(url=tenant_url, api_key=config["tenant_api_key"])
+
+        # ── Prune (dataset-scoped clean slate on the tenant) ─────────────
+        # Suites share the tenant, so never forget(everything=True) here.
+        # On a just-created tenant the dataset cannot exist, so the pre-run
+        # prune is skipped; dataset deletion is instead measured AFTER the
+        # graph is built (dataset_delete_time_s), which is the meaningful
+        # number — deleting a populated dataset.
+        if config.get("create_tenant"):
+            status["prune"] = "skipped"
+            print("Skipping pre-run prune (fresh tenant, nothing to delete)")
+        else:
+            print(f"Deleting previous '{dataset_name}' dataset on tenant (if it exists)...")
+            t_prune_start = time.time()
+            try:
+                await _delete_cloud_dataset_if_exists(client, dataset_name)
+                t_prune = time.time() - t_prune_start
+                print(f"  Prune completed in {t_prune:.2f}s")
+            except Exception as e:
+                t_prune = time.time() - t_prune_start
+                status["prune"] = f"failed: {_err(e)}"
+                print(f"  Prune FAILED: {_err(e)}")
+
+        # ── Phase 1: add ─────────────────────────────────────────────────
+        print(f"\nPhase 1: Adding {n} memories via remote add...")
+        text_list = [memory_to_text(mem) for mem in memories]
+        t_add_start = time.time()
+        try:
+            await client.add(text_list, dataset_name=dataset_name)
+            t_add = time.time() - t_add_start
+        except Exception as e:
+            t_add = time.time() - t_add_start
+            status["add"] = f"failed: {_err(e)}"
+            print(f"  Add FAILED: {_err(e)}")
+
+        # ── Phase 2: cognify ─────────────────────────────────────────────
+        print("\nPhase 2: Running remote cognify (knowledge graph build)...")
+        t_cognify_start = time.time()
+        try:
+            cognify_response = await client.cognify(datasets=[dataset_name])
+            # The tenant builds the graph in the background — wait for
+            # completion so t_cognify measures the build, not the round trip.
+            await _wait_for_cloud_cognify(client, cognify_response)
+            t_cognify = time.time() - t_cognify_start
+        except Exception as e:
+            t_cognify = time.time() - t_cognify_start
+            status["cognify"] = f"failed: {_err(e)}"
+            print(f"  Cognify FAILED: {_err(e)}")
+
+        # ── Phase 3: search ──────────────────────────────────────────────
+        # Scoped to this suite's dataset so a concurrently-running suite on
+        # the same tenant cannot contaminate the search timing or results.
+        print("\nPhase 3: Running remote search query...")
+        t_q_start = time.time()
+        try:
+            await client.search(
+                "What is in the document", datasets=[dataset_name], only_context=True
+            )
+            t_search = time.time() - t_q_start
+        except Exception as e:
+            t_search = time.time() - t_q_start
+            status["search"] = f"failed: {_err(e)}"
+            print(f"  Search FAILED: {_err(e)}")
+
+        # ── Phase 4 (cloud-only metric): delete the POPULATED dataset ────
+        # Only meaningful with a graph in it, hence after cognify/search and
+        # before tenant teardown.
+        if config.get("create_tenant"):
+            status["dataset_delete"] = "success"
+            print(f"\nPhase 4: Deleting populated dataset '{dataset_name}'...")
+            t_dataset_delete_start = time.time()
+            try:
+                await client.forget(dataset=dataset_name)
+                t_dataset_delete = time.time() - t_dataset_delete_start
+                print(f"  Dataset deleted in {t_dataset_delete:.2f}s")
+            except Exception as e:
+                t_dataset_delete = time.time() - t_dataset_delete_start
+                status["dataset_delete"] = f"failed: {_err(e)}"
+                print(f"  Dataset deletion FAILED: {_err(e)}")
+
+        await client.close()
 
     t_total = t_add + t_cognify
 
-    # ── Phase 3: search ──────────────────────────────────────────────────
-    print("\nPhase 3: Running remote search query...")
-    t_q_start = time.time()
-    try:
-        await client.search("What is in the document", only_context=True)
-        t_search = time.time() - t_q_start
-    except Exception as e:
-        t_search = time.time() - t_q_start
-        status["search"] = f"failed: {e}"
-        print(f"  Search FAILED: {e}")
+    # ── Tenant teardown (only for tenants this run created) ──────────────
+    if tenant_id is not None:
+        print(f"\nDeleting benchmark tenant {tenant_id}...")
+        try:
+            t_tenant_delete = await _delete_cloud_tenant(
+                config["management_url"], config["tenant_api_key"], tenant_id
+            )
+            print(f"  Tenant deleted in {t_tenant_delete:.2f}s")
+        except Exception as e:
+            status["tenant_delete"] = f"failed: {_err(e)}"
+            print(f"  Tenant deletion FAILED (manual cleanup needed for {tenant_id}): {e}")
 
-    await client.close()
-
-    all_ok = all(v == "success" for v in status.values())
+    all_ok = all(v in ("success", "skipped") for v in status.values())
 
     # ── Report ───────────────────────────────────────────────────────────
     results = {
@@ -480,16 +671,35 @@ async def run_benchmark_cloud(
             "llm_model": "cloud (server-side)",
             "embedding_model": "cloud (server-side)",
             "embedding_dimensions": "server",
-            "dataset_name": DATASET_NAME,
+            "dataset_name": dataset_name,
             "mock_llm": False,
-            "tenant_url": config["tenant_url"],
+            "tenant_url": tenant_url,
+            "created_tenant": bool(config.get("create_tenant")),
         },
     }
+    if config.get("create_tenant"):
+        results["tenant_create_time_s"] = round(t_tenant_create, 3)
+        results["dataset_delete_time_s"] = round(t_dataset_delete, 3)
+        results["tenant_delete_time_s"] = round(t_tenant_delete, 3)
+        # Pre-run prune is skipped on a fresh tenant; drop the meaningless
+        # zero so the report only shows metrics that were actually measured.
+        results.pop("prune_time_s", None)
 
     print("\n" + "=" * 60)
     print("RESULTS (cloud)")
     print("=" * 60)
-    print(f"  Tenant            : {config['tenant_url']}")
+    print(f"  Tenant            : {tenant_url}")
+    if config.get("create_tenant"):
+        print(
+            f"  Tenant create     : {t_tenant_create:.2f}s  [{status['tenant_create']}]"
+        )
+        print(
+            f"  Dataset delete    : {t_dataset_delete:.2f}s  "
+            f"[{status.get('dataset_delete', 'skipped')}]"
+        )
+        print(
+            f"  Tenant delete     : {t_tenant_delete:.2f}s  [{status['tenant_delete']}]"
+        )
     print(f"  Memories inserted : {n}")
     print(f"  add time          : {t_add:.2f}s  ({t_add / n:.2f}s per memory)  [{status['add']}]")
     print(f"  cognify time      : {t_cognify:.2f}s  [{status['cognify']}]")
@@ -570,6 +780,29 @@ def main():
         help="API key for the cloud tenant (or set COGNEE_API_KEY)",
     )
     parser.add_argument(
+        "--dataset-name",
+        default=None,
+        help=(
+            "Dataset name for cloud mode (default: bench_memories). Give each "
+            "suite sharing a tenant its own name — cloud cleanup is dataset-scoped."
+        ),
+    )
+    parser.add_argument(
+        "--create-tenant",
+        action="store_true",
+        default=False,
+        help=(
+            "Cloud mode: create a fresh tenant via the tenant-controller API, "
+            "measure creation time as its own metric, run the whole benchmark "
+            "on it, and delete it afterwards. Replaces --tenant-url."
+        ),
+    )
+    parser.add_argument(
+        "--management-url",
+        default="https://api.aws.cognee.ai",
+        help="Tenant-controller API base URL for --create-tenant (default: %(default)s)",
+    )
+    parser.add_argument(
         "--output",
         "-o",
         type=Path,
@@ -578,7 +811,8 @@ def main():
     )
     args = parser.parse_args()
 
-    if args.tenant_url:
+    cloud_mode = bool(args.tenant_url or args.create_tenant)
+    if cloud_mode:
         config = _resolve_cloud_config(args)
     else:
         config = _resolve_config(args)
@@ -590,8 +824,9 @@ def main():
         memories = memories[: args.num_memories]
     print(f"Loaded {len(memories)} memories from {args.memories}")
 
-    if args.tenant_url:
-        print(f"Config: cloud tenant {config['tenant_url']}\n")
+    if cloud_mode:
+        tenant_label = config["tenant_url"] or f"fresh tenant via {config['management_url']}"
+        print(f"Config: cloud tenant {tenant_label}\n")
         results = asyncio.run(run_benchmark_cloud(memories, config=config))
     else:
         mock_label = " [MOCK]" if config["mock_llm"] else ""
@@ -604,6 +839,12 @@ def main():
         with open(args.output, "w") as f:
             json.dump(results, f, indent=2)
         print(f"\nResults written to {args.output}")
+
+    # Propagate failures via the exit code so CI can gate on run outcomes.
+    # The results JSON is already written above — orchestrators (the
+    # percentile report) still collect the failed run's data.
+    if not results.get("success", True):
+        sys.exit(1)
 
 
 if __name__ == "__main__":
