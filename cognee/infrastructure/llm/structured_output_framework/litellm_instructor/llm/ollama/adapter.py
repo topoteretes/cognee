@@ -16,6 +16,7 @@ from tenacity import (
 )
 
 from cognee.infrastructure.llm.retry_config import (
+    llm_retry_condition,
     llm_retry_stop_condition,
 )
 
@@ -90,14 +91,7 @@ class OllamaAPIAdapter(LLMInterface):
     @retry(
         stop=llm_retry_stop_condition,
         wait=wait_exponential_jitter(8, 128),
-        retry=retry_if_not_exception_type(
-            (
-                litellm.exceptions.NotFoundError,
-                litellm.exceptions.AuthenticationError,
-                asyncio.CancelledError,
-                LLMPaymentRequiredError,
-            )
-        ),
+        retry=llm_retry_condition,
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )

@@ -1,6 +1,6 @@
 [project]
 name = "cognee-mcp"
-version = "0.5.4"
+version = "0.5.5"
 description = "Cognee MCP server"
 readme = "README.md"
 requires-python = ">=3.10"
