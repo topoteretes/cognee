@@ -2,6 +2,7 @@ from uuid import UUID
 from typing import Optional, Union, Any
 
 from cognee.context_global_variables import set_database_global_context_variables
+from cognee.infrastructure.locks import dataset_lock
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.observability import (
     new_span,
@@ -260,37 +261,42 @@ async def _forget_dataset_memory(dataset_ref: Union[str, UUID], user: Any) -> di
 
     dataset_id = await _resolve_dataset_id(dataset_ref, user)
 
-    # 1. Delete graph nodes/edges and vector embeddings
-    await delete_dataset_nodes_and_edges(dataset_id, user.id)
+    # Same per-dataset lock as pipeline runs: wait for any in-flight pipeline
+    # on this dataset and exclude concurrent deletes.
+    async with dataset_lock(dataset_id):
+        # 1. Delete graph nodes/edges and vector embeddings
+        await delete_dataset_nodes_and_edges(dataset_id, user.id)
 
-    # 2. Reset pipeline_status on all data records in this dataset
-    db_engine = get_relational_engine()
-    async with db_engine.get_async_session() as session:
-        data_ids_query = select(DatasetData.data_id).where(DatasetData.dataset_id == dataset_id)
-        data_records = (
-            (await session.execute(select(Data).where(Data.id.in_(data_ids_query)))).scalars().all()
+        # 2. Reset pipeline_status on all data records in this dataset
+        db_engine = get_relational_engine()
+        async with db_engine.get_async_session() as session:
+            data_ids_query = select(DatasetData.data_id).where(DatasetData.dataset_id == dataset_id)
+            data_records = (
+                (await session.execute(select(Data).where(Data.id.in_(data_ids_query))))
+                .scalars()
+                .all()
+            )
+
+            dataset_id_str = str(dataset_id)
+            for data_record in data_records:
+                if not data_record.pipeline_status:
+                    continue
+                updated = False
+                for pipeline_name in list(data_record.pipeline_status.keys()):
+                    if dataset_id_str in data_record.pipeline_status[pipeline_name]:
+                        del data_record.pipeline_status[pipeline_name][dataset_id_str]
+                        updated = True
+                if updated:
+                    orm_attributes.flag_modified(data_record, "pipeline_status")
+
+            await session.commit()
+
+        # 3. Reset dataset-level pipeline run status so cached cognify runs can execute again.
+        await reset_dataset_pipeline_run_status(
+            dataset_id=dataset_id,
+            user=user,
+            pipeline_names=["cognify_pipeline"],
         )
-
-        dataset_id_str = str(dataset_id)
-        for data_record in data_records:
-            if not data_record.pipeline_status:
-                continue
-            updated = False
-            for pipeline_name in list(data_record.pipeline_status.keys()):
-                if dataset_id_str in data_record.pipeline_status[pipeline_name]:
-                    del data_record.pipeline_status[pipeline_name][dataset_id_str]
-                    updated = True
-            if updated:
-                orm_attributes.flag_modified(data_record, "pipeline_status")
-
-        await session.commit()
-
-    # 3. Reset dataset-level pipeline run status so cached cognify runs can execute again.
-    await reset_dataset_pipeline_run_status(
-        dataset_id=dataset_id,
-        user=user,
-        pipeline_names=["cognify_pipeline"],
-    )
 
     logger.info(
         "forget: cleared memory for dataset=%s, user=%s (%d data records reset)",
@@ -329,30 +335,33 @@ async def _forget_data_memory(data_id: UUID, dataset_ref: Union[str, UUID], user
 
     dataset_id = await _resolve_dataset_id(dataset_ref, user)
 
-    # 1. Delete graph nodes/edges and vector embeddings for this data item
-    await delete_data_nodes_and_edges(dataset_id, data_id, user.id)
+    # Same per-dataset lock as pipeline runs: wait for any in-flight pipeline
+    # on this dataset and exclude concurrent deletes.
+    async with dataset_lock(dataset_id):
+        # 1. Delete graph nodes/edges and vector embeddings for this data item
+        await delete_data_nodes_and_edges(dataset_id, data_id, user.id)
 
-    # 2. Reset pipeline_status for this data record
-    db_engine = get_relational_engine()
-    async with db_engine.get_async_session() as session:
-        data_record = (
-            (await session.execute(select(Data).where(Data.id == data_id))).scalars().first()
-        )
+        # 2. Reset pipeline_status for this data record
+        db_engine = get_relational_engine()
+        async with db_engine.get_async_session() as session:
+            data_record = (
+                (await session.execute(select(Data).where(Data.id == data_id))).scalars().first()
+            )
 
-        if data_record and data_record.pipeline_status:
-            dataset_id_str = str(dataset_id)
-            updated = False
-            # Memory-only forget removes cognify artifacts (graph/vector), so only
-            # cognify_pipeline status should be reset. Keep add status intact.
-            if (
-                "cognify_pipeline" in data_record.pipeline_status
-                and dataset_id_str in data_record.pipeline_status["cognify_pipeline"]
-            ):
-                del data_record.pipeline_status["cognify_pipeline"][dataset_id_str]
-                updated = True
-            if updated:
-                orm_attributes.flag_modified(data_record, "pipeline_status")
-            await session.commit()
+            if data_record and data_record.pipeline_status:
+                dataset_id_str = str(dataset_id)
+                updated = False
+                # Memory-only forget removes cognify artifacts (graph/vector), so only
+                # cognify_pipeline status should be reset. Keep add status intact.
+                if (
+                    "cognify_pipeline" in data_record.pipeline_status
+                    and dataset_id_str in data_record.pipeline_status["cognify_pipeline"]
+                ):
+                    del data_record.pipeline_status["cognify_pipeline"][dataset_id_str]
+                    updated = True
+                if updated:
+                    orm_attributes.flag_modified(data_record, "pipeline_status")
+                await session.commit()
 
     logger.info(
         "forget: cleared memory for data_id=%s in dataset=%s, user=%s",
