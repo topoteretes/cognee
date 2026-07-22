@@ -1060,12 +1060,13 @@ class Neo4jAdapter(GraphDBInterface):
         Returns:
         --------
 
-            A list of boolean values indicating the existence of each edge.
+            The subset of the input edges that exist in the graph, as
+            (from_node, to_node, relationship_name) tuples.
         """
-        query = """
+        query = f"""
             UNWIND $edges AS edge
-            MATCH (a)-[r]->(b)
-            WHERE id(a) = edge.from_node AND id(b) = edge.to_node AND type(r) = edge.relationship_name
+            MATCH (a:`{BASE_LABEL}`)-[r]->(b:`{BASE_LABEL}`)
+            WHERE a.id = edge.from_node AND b.id = edge.to_node AND type(r) = edge.relationship_name
             RETURN edge.from_node AS from_node, edge.to_node AS to_node, edge.relationship_name AS relationship_name, count(r) > 0 AS edge_exists
         """
 
@@ -1082,7 +1083,11 @@ class Neo4jAdapter(GraphDBInterface):
             }
 
             results = await self.query(query, params)
-            return [result["edge_exists"] for result in results]
+            return [
+                (str(result["from_node"]), str(result["to_node"]), str(result["relationship_name"]))
+                for result in results
+                if result["edge_exists"]
+            ]
         except Neo4jError as error:
             logger.error("Neo4j query error: %s", error, exc_info=True)
             raise error
@@ -1608,15 +1613,17 @@ class Neo4jAdapter(GraphDBInterface):
 
             - list: A list of connections represented as tuples of details.
         """
+        # result.data() flattens a Relationship to (start_props, type, end_props)
+        # and discards its properties, so they must be returned explicitly.
         predecessors_query = f"""
         MATCH (node:`{BASE_LABEL}`)<-[relation]-(neighbour)
         WHERE node.id = $node_id
-        RETURN neighbour, relation, node
+        RETURN neighbour, relation, node, properties(relation) AS relation_properties
         """
         successors_query = f"""
         MATCH (node:`{BASE_LABEL}`)-[relation]->(neighbour)
         WHERE node.id = $node_id
-        RETURN node, relation, neighbour
+        RETURN node, relation, neighbour, properties(relation) AS relation_properties
         """
 
         predecessors, successors = await asyncio.gather(
@@ -1626,23 +1633,27 @@ class Neo4jAdapter(GraphDBInterface):
 
         connections = []
 
-        for neighbour in predecessors:
-            neighbour = neighbour["relation"]
+        for record in predecessors:
+            relation = record["relation"]
+            edge = {"relationship_name": relation[1]}
+            edge.update(record["relation_properties"] or {})
             connections.append(
                 (
-                    _strip_provenance(neighbour[0]),
-                    {"relationship_name": neighbour[1]},
-                    _strip_provenance(neighbour[2]),
+                    _strip_provenance(relation[0]),
+                    edge,
+                    _strip_provenance(relation[2]),
                 )
             )
 
-        for neighbour in successors:
-            neighbour = neighbour["relation"]
+        for record in successors:
+            relation = record["relation"]
+            edge = {"relationship_name": relation[1]}
+            edge.update(record["relation_properties"] or {})
             connections.append(
                 (
-                    _strip_provenance(neighbour[0]),
-                    {"relationship_name": neighbour[1]},
-                    _strip_provenance(neighbour[2]),
+                    _strip_provenance(relation[0]),
+                    edge,
+                    _strip_provenance(relation[2]),
                 )
             )
 
