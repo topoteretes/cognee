@@ -1,0 +1,22 @@
+# Email thread: Passport scan for group booking
+
+From: Stefan Ilic <stefan.ilic@example.com>
+To: Veljko <veljko@topoteretes.com>
+Date: 2026-06-08T12:05
+Subject: Passport scan for July cabin booking
+
+Hey Veljko,
+
+The ferry company needs passport scans for everyone before they confirm the
+July cabin booking. Can you send yours by Wednesday, 2026-06-10 at 18:00?
+
+Stefan
+
+---
+
+From: Veljko <veljko@topoteretes.com>
+To: Stefan Ilic <stefan.ilic@example.com>
+Date: 2026-06-08T12:22
+Subject: Re: Passport scan for July cabin booking
+
+Sent it in the shared folder just now. File name is veljko-passport-scan.pdf.

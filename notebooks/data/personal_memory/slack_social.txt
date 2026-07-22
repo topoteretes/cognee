@@ -1,0 +1,4 @@
+# #friends-weekend: Saturday climbing plan
+[luka@example.com, 2026-06-11T07:55] @veljko@topoteretes.com are you in for climbing on Saturday? Please answer by EOD 2026-06-11 so I can reserve the lanes.
+[petra@example.com, 2026-06-11T08:01] I am in if we go before lunch.
+[milos@example.com, 2026-06-11T12:17] Same. Veljko, if you are coming, I can bring the extra shoes.

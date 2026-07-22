@@ -1,0 +1,5 @@
+# #health-family: Dentist insurance form
+[dragan@topoteretes.com, 2026-06-10T16:42] @veljko@topoteretes.com the dentist office called. They need the insurance form before the appointment on Friday, 2026-06-12 at 09:30.
+[veljko@topoteretes.com, 2026-06-10T17:05] Thanks, I saw it. I will fill it out tonight after my last meeting.
+[dragan@topoteretes.com, 2026-06-11T09:14] Did you manage to send it? They said the form has to be in their inbox before Thursday, 2026-06-11 at 17:00 or they may move the appointment.
+[sofia@topoteretes.com, 2026-06-11T13:20] I checked the family inbox and I do not see the submitted form yet.

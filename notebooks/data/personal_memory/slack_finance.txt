@@ -1,0 +1,4 @@
+# #finance-personal: Reimbursement receipt cleanup
+[tara@topoteretes.com, 2026-06-10T10:04] @veljko@topoteretes.com the coworking reimbursement is missing the May receipt. Can you add it to Ramp by EOD 2026-06-10?
+[veljko@topoteretes.com, 2026-06-10T10:31] Added the May receipt and matched it to the coworking reimbursement. Let me know if Ramp still complains.
+[tara@topoteretes.com, 2026-06-10T10:44] It is clean now, thanks.
