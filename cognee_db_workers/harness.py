@@ -28,7 +28,7 @@ from typing import Any, Callable, Dict, Optional
 
 SHUTDOWN = "__SUBPROCESS_HARNESS_SHUTDOWN__"
 _DEFAULT_SHUTDOWN_TIMEOUT = 10.0
-_DEFAULT_INIT_TIMEOUT = 60.0
+_DEFAULT_INIT_TIMEOUT = 300.0  # was 60.0 — raised for Cognee MCP stdio bootstrap to finish Neo4j + LanceDB init
 
 
 def _env_float(name: str, default: Optional[float]) -> Optional[float]:
