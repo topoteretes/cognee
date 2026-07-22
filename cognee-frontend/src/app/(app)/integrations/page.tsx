@@ -1,9 +1,15 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useCogniInstance } from "@/modules/tenant/TenantProvider";
 import { TrackPageView } from "@/modules/analytics";
+import getSlackConnection, { SlackConnection } from "@/modules/integrations/slack/getSlackConnection";
+import connectSlack from "@/modules/integrations/slack/connectSlack";
+import disconnectSlack from "@/modules/integrations/slack/disconnectSlack";
+import getSlackChannels, { SlackChannel } from "@/modules/integrations/slack/getSlackChannels";
+import saveSlackChannels from "@/modules/integrations/slack/saveSlackChannels";
 import {
   OPENCLAW_PROMPT,
   CLAUDE_MARKETPLACE_ADD, CLAUDE_PLUGIN_INSTALL,
@@ -499,10 +505,246 @@ function AgentSection({ cards }: { cards: AgentCfg[] }) {
   );
 }
 
+// ── Slack (live connection) ───────────────────────────────────────────────
+
+const SLACK_OUTCOME_MESSAGES: Record<string, string> = {
+  connected: "Slack workspace connected.",
+  cancelled: "Slack connection cancelled.",
+  error_invalid_state: "Slack connection failed — please try again.",
+  error_already_connected: "That Slack workspace is already connected to another account.",
+  error_exchange_failed: "Slack connection failed — please try again.",
+};
+
+function SlackChannelsModal({ onClose }: { onClose: () => void }) {
+  const { cogniInstance, localInstance } = useCogniInstance();
+  const instance = cogniInstance || localInstance;
+
+  const [channels, setChannels] = useState<SlackChannel[] | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // Same portal pattern as ExtractionSettingsModal — null on first render
+  // (SSR) so the fixed overlay only mounts client-side, escaping any
+  // transformed ancestor that would break position: fixed.
+  const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
+  useEffect(() => { setPortalTarget(document.body); }, []);
+
+  useEffect(() => {
+    if (!instance) return;
+    getSlackChannels(instance)
+      .then(({ channels }) => {
+        setChannels(channels);
+        setSelected(new Set(channels.filter((c) => c.allowed).map((c) => c.id)));
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : "Could not load channels."));
+  }, [instance]);
+
+  function toggle(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  async function handleSave() {
+    if (!instance) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await saveSlackChannels(instance, Array.from(selected));
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save channels. Please try again.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!portalTarget) return null;
+  return createPortal(
+    <div
+      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", backdropFilter: "blur(4px)", WebkitBackdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}
+      onClick={onClose}
+    >
+      <div
+        style={{ background: "rgba(15,15,15,0.92)", backdropFilter: "blur(16px)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: 24, width: 400, maxHeight: "80vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(0,0,0,0.6)" }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div style={{ marginBottom: 16 }}>
+          <h2 style={{ fontSize: 16, fontWeight: 700, color: "#EDECEA", margin: 0 }}>Slack channels</h2>
+          <p style={{ fontSize: 13, color: "rgba(237,236,234,0.55)", margin: "4px 0 0" }}>
+            Choose which channels can use /cognee-ask. Leave everything unchecked to allow it everywhere.
+          </p>
+        </div>
+        <div style={{ height: 1, background: "rgba(255,255,255,0.08)", margin: "0 0 16px" }} />
+
+        <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 2 }}>
+          {channels === null && !error && (
+            <p style={{ fontSize: 13, color: "rgba(237,236,234,0.55)" }}>Loading channels…</p>
+          )}
+          {error && <p style={{ fontSize: 12, color: "#EF4444", margin: 0 }}>{error}</p>}
+          {channels?.length === 0 && (
+            <p style={{ fontSize: 13, color: "rgba(237,236,234,0.55)" }}>No public channels found.</p>
+          )}
+          {channels?.map((channel) => (
+            <label
+              key={channel.id}
+              style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 6px", borderRadius: 6, cursor: "pointer" }}
+            >
+              <input
+                type="checkbox"
+                checked={selected.has(channel.id)}
+                onChange={() => toggle(channel.id)}
+                style={{ width: 16, height: 16, accentColor: "#6510F4" }}
+              />
+              <span style={{ fontSize: 13, color: "#EDECEA" }}>#{channel.name}</span>
+            </label>
+          ))}
+        </div>
+
+        <div style={{ height: 1, background: "rgba(255,255,255,0.08)", margin: "16px 0" }} />
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          <button
+            onClick={onClose}
+            disabled={saving}
+            style={{ height: 36, padding: "0 16px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.15)", background: "transparent", fontSize: 13, fontWeight: 500, color: "rgba(237,236,234,0.8)", cursor: "pointer", fontFamily: "inherit" }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={saving || channels === null}
+            style={{
+              height: 36, padding: "0 16px", borderRadius: 8, border: "none",
+              background: saving || channels === null ? "rgba(255,255,255,0.08)" : "#6510F4",
+              fontSize: 13, fontWeight: 500,
+              color: saving || channels === null ? "rgba(237,236,234,0.35)" : "#fff",
+              cursor: saving || channels === null ? "default" : "pointer", fontFamily: "inherit",
+            }}
+          >
+            {saving ? "Saving…" : "Save"}
+          </button>
+        </div>
+      </div>
+    </div>,
+    portalTarget,
+  );
+}
+
+function SlackCard() {
+  const { cogniInstance, localInstance } = useCogniInstance();
+  const instance = cogniInstance || localInstance;
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  const [status, setStatus] = useState<SlackConnection | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [showChannels, setShowChannels] = useState(false);
+
+  useEffect(() => {
+    if (!instance) return;
+    getSlackConnection(instance)
+      .then(setStatus)
+      .catch(() => setStatus({ connected: false }));
+  }, [instance]);
+
+  useEffect(() => {
+    const outcome = searchParams.get("slack");
+    if (!outcome) return;
+
+    setMessage(SLACK_OUTCOME_MESSAGES[outcome] || null);
+    if (instance) {
+      getSlackConnection(instance).then(setStatus).catch(() => {});
+    }
+    // Strip the query param so a refresh doesn't re-show the message.
+    router.replace("/integrations");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
+  async function handleConnect() {
+    if (!instance) return;
+    setLoading(true);
+    try {
+      const authorizeUrl = await connectSlack(instance);
+      window.location.href = authorizeUrl;
+    } catch (err) {
+      setMessage(err instanceof Error && err.message ? err.message : "Could not start the Slack connection. Please try again.");
+      setLoading(false);
+    }
+  }
+
+  async function handleDisconnect() {
+    if (!instance) return;
+    setLoading(true);
+    try {
+      await disconnectSlack(instance);
+      setStatus({ connected: false });
+    } catch (err) {
+      setMessage(err instanceof Error && err.message ? err.message : "Could not disconnect Slack. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const connected = status?.connected ?? false;
+
+  return (
+    <div style={{ background: "rgba(255,255,255,0.06)", backdropFilter: "blur(12px)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: 20, display: "flex", flexDirection: "column", gap: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
+          <div style={{ width: 40, height: 40, borderRadius: 10, background: "#4A154B", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            <span style={{ color: "#fff", fontSize: 14, fontWeight: 700 }}>Sl</span>
+          </div>
+          <span style={{ fontSize: 16, fontWeight: 500, color: "#EDECEA", fontFamily: '"TWKLausanne", sans-serif' }}>Slack</span>
+        </div>
+        {connected && (
+          <span style={{ flexShrink: 0, background: "rgba(34,197,94,0.15)", color: "#4ADE80", fontSize: 11, fontWeight: 500, padding: "2px 8px", borderRadius: 999 }}>Connected</span>
+        )}
+      </div>
+      <p style={{ fontSize: 13, color: "rgba(237,236,234,0.55)", margin: 0 }}>
+        {connected
+          ? `Connected to ${status?.accountLabel || "your workspace"}. Ask questions from Slack with /cognee-ask.`
+          : "Ask Cognee questions from Slack with /cognee-ask."}
+      </p>
+      {message && <p style={{ fontSize: 12, color: "#BC9BFF", margin: 0 }}>{message}</p>}
+      <div style={{ display: "flex", gap: 8 }}>
+        <button
+          onClick={connected ? handleDisconnect : handleConnect}
+          disabled={loading || !instance}
+          style={{
+            alignSelf: "flex-start",
+            background: connected ? "rgba(255,255,255,0.06)" : "#6510F4",
+            color: connected ? "rgba(237,236,234,0.7)" : "#fff",
+            border: connected ? "1px solid rgba(255,255,255,0.1)" : "none",
+            borderRadius: 8,
+            padding: "6px 14px",
+            fontSize: 13,
+            fontWeight: 500,
+            cursor: loading || !instance ? "wait" : "pointer",
+          }}
+        >
+          {loading ? "…" : connected ? "Disconnect" : "Connect"}
+        </button>
+        {connected && (
+          <button
+            onClick={() => setShowChannels(true)}
+            style={{ alignSelf: "flex-start", background: "rgba(255,255,255,0.06)", color: "rgba(237,236,234,0.7)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "6px 14px", fontSize: 13, fontWeight: 500, cursor: "pointer" }}
+          >
+            Manage channels
+          </button>
+        )}
+      </div>
+      {showChannels && <SlackChannelsModal onClose={() => setShowChannels(false)} />}
+    </div>
+  );
+}
+
 // ── Data source integrations ──────────────────────────────────────────────
 
 const INTEGRATIONS = [
-  { name: "Slack",               description: "Turn channels and threads into searchable memory.",   initials: "Sl", color: "#4A154B" },
   { name: "Notion",              description: "Sync pages and databases into your knowledge graph.", initials: "No", color: "#000000" },
   { name: "Google Drive",        description: "Ingest Docs, Sheets, and Slides automatically.",      initials: "GD", color: "#1A73E8" },
   { name: "GitHub",              description: "Index issues, PRs, and repository docs.",             initials: "GH", color: "#181717" },
@@ -556,6 +798,7 @@ export default function IntegrationsPage() {
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 16 }}>
+            <SlackCard />
             {INTEGRATIONS.map((it) => (
               <div key={it.name} style={{ background: "rgba(255,255,255,0.06)", backdropFilter: "blur(12px)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: 20, display: "flex", flexDirection: "column", gap: 12 }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
