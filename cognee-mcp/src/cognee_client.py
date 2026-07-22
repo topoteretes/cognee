@@ -180,7 +180,11 @@ class CogneeClient:
             endpoint = f"{self.api_url}/api/v1/cognify"
             payload = {
                 "datasets": datasets or ["main_dataset"],
-                "run_in_background": False,
+                # Kick cognify off server-side and return immediately instead of
+                # holding the HTTP request open for the whole (minutes-long)
+                # pipeline. The MCP cognify tool already runs in the background
+                # and directs the caller to poll dataset status for completion.
+                "run_in_background": True,
             }
             if custom_prompt:
                 payload["custom_prompt"] = custom_prompt
