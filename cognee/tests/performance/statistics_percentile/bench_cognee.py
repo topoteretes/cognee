@@ -545,12 +545,16 @@ async def run_benchmark_cloud(
         # DNS-safe, unique per run: labels use underscores, hostnames cannot.
         tenant_name = f"bench-{dataset_name}-{int(time.time())}".replace("_", "-")
         print(f"Phase 0: Creating tenant '{tenant_name}'...")
+        t_tenant_create_start = time.time()
         try:
             tenant_id, tenant_url, t_tenant_create = await _create_cloud_tenant(
                 config["management_url"], config["tenant_api_key"], tenant_name
             )
             print(f"  Tenant {tenant_id} ready in {t_tenant_create:.2f}s at {tenant_url}")
         except Exception as e:
+            # Record elapsed-until-failure like every other phase (0.0 would
+            # skew failed-run percentiles low).
+            t_tenant_create = time.time() - t_tenant_create_start
             status["tenant_create"] = f"failed: {_err(e)}"
             for phase in ("prune", "add", "cognify", "search"):
                 status[phase] = "skipped"
@@ -645,12 +649,14 @@ async def run_benchmark_cloud(
     # ── Tenant teardown (only for tenants this run created) ──────────────
     if tenant_id is not None:
         print(f"\nDeleting benchmark tenant {tenant_id}...")
+        t_tenant_delete_start = time.time()
         try:
             t_tenant_delete = await _delete_cloud_tenant(
                 config["management_url"], config["tenant_api_key"], tenant_id
             )
             print(f"  Tenant deleted in {t_tenant_delete:.2f}s")
         except Exception as e:
+            t_tenant_delete = time.time() - t_tenant_delete_start
             status["tenant_delete"] = f"failed: {_err(e)}"
             print(f"  Tenant deletion FAILED (manual cleanup needed for {tenant_id}): {e}")
 
