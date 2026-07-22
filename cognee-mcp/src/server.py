@@ -377,7 +377,7 @@ async def cognify(
                 await cognee_client.cognify(
                     datasets=[dataset_name], custom_prompt=custom_prompt, graph_model=graph_model
                 )
-                logger.info("Cognify process finished.")
+                logger.info("Cognify submitted; running in the background on the server.")
             except Exception as e:
                 logger.error("Cognify process failed.")
                 raise ValueError(f"Failed to cognify: {str(e)}") from e
