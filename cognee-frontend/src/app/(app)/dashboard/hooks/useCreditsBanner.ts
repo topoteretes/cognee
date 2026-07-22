@@ -50,7 +50,8 @@ export function useCreditsBanner(): CreditsBannerState {
 
   const showCreditPctBanner = !dismissed && creditsSpentPct !== null && creditsSpentPct >= 90;
   const showLowBalanceBanner = !showCreditPctBanner && creditsRemainingUsd !== null && creditsRemainingUsd < 1;
-  const showVoucherBanner = !showCreditPctBanner && !showLowBalanceBanner;
+  // Promotional-only banner, hidden — voucher redemption isn't offered here.
+  const showVoucherBanner = false;
 
   const dismiss = useCallback(() => {
     dismissCreditsBanner();
