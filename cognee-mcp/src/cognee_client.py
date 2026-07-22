@@ -27,6 +27,11 @@ except ImportError:
 
 logger = get_logger()
 
+# Read-only GETs (dataset list/status) should fail fast rather than inherit the
+# 300s client timeout intended for long POSTs like cognify: a hung or black-holed
+# GET would otherwise freeze the caller for a full 5 minutes.
+READ_TIMEOUT_SECONDS = 30.0
+
 
 class CogneeClient:
     """
@@ -370,7 +375,9 @@ class CogneeClient:
             # reports the pipeline run state keyed by dataset id.
             endpoint = f"{self.api_url}/api/v1/datasets/status"
             params = [("dataset", str(d)) for d in dataset_ids]
-            response = await self.client.get(endpoint, params=params, headers=self._get_headers())
+            response = await self.client.get(
+                endpoint, params=params, headers=self._get_headers(), timeout=READ_TIMEOUT_SECONDS
+            )
             response.raise_for_status()
             return response.json()
         else:
@@ -392,8 +399,13 @@ class CogneeClient:
         """
         if self.use_api:
             # API mode: Make HTTP request
-            endpoint = f"{self.api_url}/api/v1/datasets"
-            response = await self.client.get(endpoint, headers=self._get_headers())
+            # Canonical collection route has a trailing slash; calling it
+            # directly avoids a 307 redirect (and the http:// downgrade that
+            # used to black-hole this call — see CLO-320).
+            endpoint = f"{self.api_url}/api/v1/datasets/"
+            response = await self.client.get(
+                endpoint, headers=self._get_headers(), timeout=READ_TIMEOUT_SECONDS
+            )
             response.raise_for_status()
             return response.json()
         else:
