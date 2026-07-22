@@ -575,18 +575,22 @@ def get_datasets_router() -> APIRouter:
             latest_run = latest_run_by_dataset.get(dataset.id)
             if latest_run is None:
                 summaries.append(
-                    DatasetGraphSummaryDTO(
-                        dataset_id=dataset.id, num_nodes=0, num_edges=0
-                    )
+                    DatasetGraphSummaryDTO(dataset_id=dataset.id, num_nodes=0, num_edges=0)
                 )
                 continue
 
             async with db_engine.get_async_session() as session:
                 cached = (
-                    await session.execute(
-                        select(GraphMetrics).where(GraphMetrics.id == latest_run.pipeline_run_id)
+                    (
+                        await session.execute(
+                            select(GraphMetrics).where(
+                                GraphMetrics.id == latest_run.pipeline_run_id
+                            )
+                        )
                     )
-                ).scalars().first()
+                    .scalars()
+                    .first()
+                )
 
             if cached is not None:
                 summaries.append(
