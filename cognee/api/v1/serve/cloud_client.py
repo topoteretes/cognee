@@ -66,6 +66,8 @@ class CloudClient:
         if kwargs.get("dataset_id") is not None:
             form.add_field("datasetId", str(kwargs["dataset_id"]))
 
+        if kwargs.get("dataset_id"):
+            form.add_field("datasetId", str(kwargs["dataset_id"]))
         if kwargs.get("session_id"):
             form.add_field("session_id", kwargs["session_id"])
         if kwargs.get("run_in_background"):

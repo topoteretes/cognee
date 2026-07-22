@@ -14,7 +14,7 @@ import pytest
 import pytest_asyncio
 
 import cognee
-from cognee.modules.data.methods import get_authorized_existing_datasets, get_datasets_by_name
+from cognee.modules.data.methods import get_datasets_by_name
 from cognee.modules.engine.operations.setup import setup as engine_setup
 from cognee.modules.users.methods import get_default_user
 
@@ -61,10 +61,12 @@ async def test_session_remember_creates_dataset_before_background_improve(clean_
     seen = {}
 
     async def fake_improve(dataset, *, session_ids=None, user=None, **kwargs):
+        # remember() bridges sessions by dataset UUID, so resolve by id.
+        from cognee.modules.data.methods.get_authorized_dataset import get_authorized_dataset
+
         resolver = user or await get_default_user()
-        # ``dataset`` is now the dataset UUID; resolve by id-or-name.
-        existing = await get_authorized_existing_datasets([dataset], "write", resolver)
-        seen["dataset_present_at_improve"] = bool(existing)
+        existing = await get_authorized_dataset(resolver, dataset, "write")
+        seen["dataset_present_at_improve"] = existing is not None and existing.name == dataset_name
         return {}
 
     improve_pkg = importlib.import_module("cognee.api.v1.improve")
