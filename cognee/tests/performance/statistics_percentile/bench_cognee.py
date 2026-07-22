@@ -341,6 +341,49 @@ async def run_benchmark(
     return results
 
 
+async def _wait_for_cloud_cognify(
+    client, cognify_response: dict, poll_interval_s: float = 5.0, timeout_s: float = 7200.0
+) -> None:
+    """Block until every dataset in a cognify response finishes building.
+
+    Cloud tenants run cognify in the background and return
+    ``PipelineRunStarted`` immediately, so the POST duration alone measures
+    only the API round trip. Poll ``GET /v1/datasets/status`` until each
+    started dataset reports COMPLETED (raising on ERRORED/timeout) so the
+    benchmarked cognify time covers the actual knowledge-graph build.
+    """
+    pending = {
+        str(dataset_id)
+        for dataset_id, info in (cognify_response or {}).items()
+        if isinstance(info, dict) and info.get("status") == "PipelineRunStarted"
+    }
+    if not pending:
+        return  # the tenant processed synchronously; nothing to wait for
+
+    session = await client._get_session()
+    deadline = time.time() + timeout_s
+    while pending:
+        if time.time() > deadline:
+            raise TimeoutError(f"cognify still running after {timeout_s:.0f}s: {sorted(pending)}")
+        await asyncio.sleep(poll_interval_s)
+        params = [("dataset", dataset_id) for dataset_id in sorted(pending)]
+        params.append(("pipeline", "cognify_pipeline"))
+        async with session.get(
+            f"{client.service_url}/api/v1/datasets/status", params=params
+        ) as resp:
+            if resp.status >= 400:
+                continue  # transient status-endpoint hiccup; keep polling
+            statuses = await resp.json()
+        for dataset_id in list(pending):
+            value = statuses.get(dataset_id)
+            if isinstance(value, dict):  # nested {pipeline_name: status} shape
+                value = value.get("cognify_pipeline")
+            if value == "DATASET_PROCESSING_COMPLETED":
+                pending.discard(dataset_id)
+            elif value == "DATASET_PROCESSING_ERRORED":
+                raise RuntimeError(f"cognify errored on the tenant for dataset {dataset_id}")
+
+
 async def run_benchmark_cloud(
     memories: list[dict],
     *,
@@ -395,7 +438,10 @@ async def run_benchmark_cloud(
     print("\nPhase 2: Running remote cognify (knowledge graph build)...")
     t_cognify_start = time.time()
     try:
-        await client.cognify(datasets=[DATASET_NAME])
+        cognify_response = await client.cognify(datasets=[DATASET_NAME])
+        # The tenant builds the graph in the background — wait for completion
+        # so t_cognify measures the build, not just the API round trip.
+        await _wait_for_cloud_cognify(client, cognify_response)
         t_cognify = time.time() - t_cognify_start
     except Exception as e:
         t_cognify = time.time() - t_cognify_start

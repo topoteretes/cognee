@@ -12,6 +12,7 @@ on:
     paths:
       - '.github/workflows/nightly_tests.yml'
       - '.github/workflows/performance_report.yml'
+      - '.github/workflows/performance_report_cloud.yml'
 
 
 concurrency:
@@ -78,6 +79,27 @@ jobs:
       mock_memories_key: nightly_ci_artifacts/performance_test_artifacts/mock_war_and_peace.json
     secrets: inherit
 
+  # ══ Performance: Cognee Cloud tenant. No mock variants — the LLM runs ══════
+  # server-side on the tenant, so there is nothing to mock client-side.
+  perf-small-cloud:
+    name: Performance — 50 Small Documents (cloud)
+    uses: ./.github/workflows/performance_report_cloud.yml
+    with:
+      label: 50_small_documents
+      runs: '3'
+      num_memories: '50'
+      memories_key: nightly_ci_artifacts/performance_test_artifacts/memories.json
+    secrets: inherit
+
+  perf-wap-cloud:
+    name: Performance — War and Peace (cloud)
+    uses: ./.github/workflows/performance_report_cloud.yml
+    with:
+      label: war_and_peace
+      runs: '3'
+      memories_key: nightly_ci_artifacts/performance_test_artifacts/war_and_peace.json
+    secrets: inherit
+
   notify:
     name: Test Completion Status
     needs: [
@@ -87,6 +109,8 @@ jobs:
       perf-small-mock,
       perf-wap-llm,
       perf-wap-mock,
+      perf-small-cloud,
+      perf-wap-cloud,
     ]
     runs-on: ubuntu-latest
     if: ${{ !cancelled() }}
@@ -99,7 +123,9 @@ jobs:
                 "${{ needs.perf-small-llm.result }}" == "success" &&
                 "${{ needs.perf-small-mock.result }}" == "success" &&
                 "${{ needs.perf-wap-llm.result }}" == "success" &&
-                "${{ needs.perf-wap-mock.result }}" == "success" ]]; then
+                "${{ needs.perf-wap-mock.result }}" == "success" &&
+                "${{ needs.perf-small-cloud.result }}" == "success" &&
+                "${{ needs.perf-wap-cloud.result }}" == "success" ]]; then
             echo "passed=true" >> "$GITHUB_OUTPUT"
             echo "emoji=✅" >> "$GITHUB_OUTPUT"
             echo "summary=All nightly test suites completed successfully!" >> "$GITHUB_OUTPUT"
@@ -128,6 +154,8 @@ jobs:
             url_pg_small_mock ${{ needs.perf-small-mock.outputs.postgres_html_key }}
             url_pg_wap_llm ${{ needs.perf-wap-llm.outputs.postgres_html_key }}
             url_pg_wap_mock ${{ needs.perf-wap-mock.outputs.postgres_html_key }}
+            url_cloud_small ${{ needs.perf-small-cloud.outputs.cloud_html_key }}
+            url_cloud_wap ${{ needs.perf-wap-cloud.outputs.cloud_html_key }}
         run: |
           set -euo pipefail
           # 7 days = 604800s is the maximum lifetime for an IAM-user presigned URL.
@@ -233,6 +261,26 @@ jobs:
                     search     p50 `${{ fromJSON(needs.perf-wap-mock.outputs.postgres_metrics || '{}').search.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-wap-mock.outputs.postgres_metrics || '{}').search.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-wap-mock.outputs.postgres_metrics || '{}').search.p99 }}s`
                     total      p50 `${{ fromJSON(needs.perf-wap-mock.outputs.postgres_metrics || '{}').total.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-wap-mock.outputs.postgres_metrics || '{}').total.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-wap-mock.outputs.postgres_metrics || '{}').total.p99 }}s`
                     <${{ steps.presign.outputs.url_pg_wap_mock }}|HTML report>
+              - type: "section"
+                text:
+                  type: "mrkdwn"
+                  text: |
+                    *📊 Cognee Cloud — 50 Small Documents* (`${{ needs.perf-small-cloud.result }}`)  •  runs `${{ fromJSON(needs.perf-small-cloud.outputs.cloud_metrics || '{}').success }}`
+                    add      p50 `${{ fromJSON(needs.perf-small-cloud.outputs.cloud_metrics || '{}').add.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-small-cloud.outputs.cloud_metrics || '{}').add.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-small-cloud.outputs.cloud_metrics || '{}').add.p99 }}s`
+                    cognify  p50 `${{ fromJSON(needs.perf-small-cloud.outputs.cloud_metrics || '{}').cognify.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-small-cloud.outputs.cloud_metrics || '{}').cognify.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-small-cloud.outputs.cloud_metrics || '{}').cognify.p99 }}s`
+                    search     p50 `${{ fromJSON(needs.perf-small-cloud.outputs.cloud_metrics || '{}').search.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-small-cloud.outputs.cloud_metrics || '{}').search.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-small-cloud.outputs.cloud_metrics || '{}').search.p99 }}s`
+                    total      p50 `${{ fromJSON(needs.perf-small-cloud.outputs.cloud_metrics || '{}').total.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-small-cloud.outputs.cloud_metrics || '{}').total.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-small-cloud.outputs.cloud_metrics || '{}').total.p99 }}s`
+                    <${{ steps.presign.outputs.url_cloud_small }}|HTML report>
+              - type: "section"
+                text:
+                  type: "mrkdwn"
+                  text: |
+                    *📚 Cognee Cloud — War and Peace* (`${{ needs.perf-wap-cloud.result }}`)  •  runs `${{ fromJSON(needs.perf-wap-cloud.outputs.cloud_metrics || '{}').success }}`
+                    add      p50 `${{ fromJSON(needs.perf-wap-cloud.outputs.cloud_metrics || '{}').add.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-wap-cloud.outputs.cloud_metrics || '{}').add.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-wap-cloud.outputs.cloud_metrics || '{}').add.p99 }}s`
+                    cognify  p50 `${{ fromJSON(needs.perf-wap-cloud.outputs.cloud_metrics || '{}').cognify.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-wap-cloud.outputs.cloud_metrics || '{}').cognify.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-wap-cloud.outputs.cloud_metrics || '{}').cognify.p99 }}s`
+                    search     p50 `${{ fromJSON(needs.perf-wap-cloud.outputs.cloud_metrics || '{}').search.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-wap-cloud.outputs.cloud_metrics || '{}').search.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-wap-cloud.outputs.cloud_metrics || '{}').search.p99 }}s`
+                    total      p50 `${{ fromJSON(needs.perf-wap-cloud.outputs.cloud_metrics || '{}').total.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-wap-cloud.outputs.cloud_metrics || '{}').total.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-wap-cloud.outputs.cloud_metrics || '{}').total.p99 }}s`
+                    <${{ steps.presign.outputs.url_cloud_wap }}|HTML report>
               - type: "section"
                 text:
                   type: "mrkdwn"
