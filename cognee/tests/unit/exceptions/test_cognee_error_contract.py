@@ -28,15 +28,14 @@ import cognee
 from cognee.exceptions import CogneeApiError
 
 
-# Root classes of the Cognee error hierarchy. Any class that (transitively)
-# subclasses one of these must run a base ``__init__``.
-FAMILY_ROOTS = {
-    "CogneeApiError",
-    "CogneeSystemError",
-    "CogneeValidationError",
-    "CogneeConfigurationError",
-    "CogneeTransientError",
-}
+# The single root of the Cognee error hierarchy, read off the class itself so it
+# can never drift from the source. Every other error class is *discovered* from
+# here by name (see ``_family_classes_in_repo``): seeding the fixpoint with just
+# this name re-derives the intermediate roots (CogneeSystemError, …) and all
+# leaves, so nothing about the hierarchy is hard-coded beyond "CogneeApiError is
+# the root". The runtime test additionally asserts this static discovery misses
+# nothing the live ``__subclasses__()`` walk finds.
+ROOT_NAME = CogneeApiError.__name__
 
 PACKAGE_ROOT = Path(cognee.__file__).parent
 
@@ -109,7 +108,7 @@ def _family_classes_in_repo():
                 if base_names:
                     definitions.append((path, node, base_names))
 
-    family_names = set(FAMILY_ROOTS)
+    family_names = {ROOT_NAME}
     changed = True
     while changed:
         changed = False
@@ -230,6 +229,22 @@ def test_cognee_error_subclasses_preserve_args_and_chaining():
 
     classes = _all_subclasses(CogneeApiError)
     assert classes, "No CogneeApiError subclasses discovered at runtime."
+
+    # Consistency: the import-free static discovery must be a superset of what the
+    # live class tree reports (for cognee, non-test classes). If a real subclass
+    # slips past the AST sweep, the static guard is blind to it — fail loudly here
+    # rather than let coverage silently shrink.
+    static_family = _family_classes_in_repo()[1]
+    runtime_names = {
+        cls.__name__
+        for cls in classes
+        if (cls.__module__ or "").startswith("cognee.") and ".tests." not in (cls.__module__ or "")
+    }
+    missed = runtime_names - static_family
+    assert not missed, (
+        f"Static AST discovery missed live CogneeApiError subclasses {sorted(missed)}; "
+        f"the static guard would not check them."
+    )
 
     for cls in classes:
         exc = cls(**_build_kwargs(cls))
