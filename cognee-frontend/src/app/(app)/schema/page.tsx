@@ -4,7 +4,7 @@ import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useCogniInstance } from "@/modules/tenant/TenantProvider";
 import PageLoading from "@/ui/elements/PageLoading";
-import { useFilter } from "@/ui/layout/FilterContext";
+import { useFilter, useRefreshDatasetsOnMount } from "@/ui/layout/FilterContext";
 import { TrackPageView, trackEvent } from "@/modules/analytics";
 import BrainSelector from "@/ui/elements/BrainSelector";
 import { notifications } from "@mantine/notifications";
@@ -27,6 +27,10 @@ import { listOntologies, uploadOntology, deleteOntology, type OntologyMeta } fro
 import { generateCustomPrompt } from "@/modules/llm/managementLlmApi";
 import cognifyDataset from "@/modules/datasets/cognifyDataset";
 import { captureException } from "@/utils/monitoring";
+
+// Visualize renders the full graph synchronously with no caching, so large
+// graphs can take well past the default 10s GET timeout.
+const VISUALIZE_TIMEOUT_MS = 90_000;
 
 // ── Shared button style (black) ───────────────────────────────────────────
 
@@ -90,6 +94,7 @@ export default function SchemaPage() {
   const router = useRouter();
   const { cogniInstance, isInitializing } = useCogniInstance();
   const { datasets, selectedDataset } = useFilter();
+  useRefreshDatasetsOnMount();
 
   // ── Viz state ────────────────────────────────────────────────────────────
   const [vizSrc, setVizSrc] = useState<string | null>(null);
@@ -182,7 +187,7 @@ export default function SchemaPage() {
     if (vizBlobRef.current) { URL.revokeObjectURL(vizBlobRef.current); vizBlobRef.current = null; }
 
     const fetchViz = cogniInstance
-      ? cogniInstance.fetch(`/v1/visualize?dataset_id=${activeDataset.id}`)
+      ? cogniInstance.fetch(`/v1/visualize?dataset_id=${activeDataset.id}`, { timeoutMs: VISUALIZE_TIMEOUT_MS })
       : global.fetch(`/api/visualize?dataset_id=${activeDataset.id}`, { credentials: "include" });
 
     fetchViz

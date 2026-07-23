@@ -3,12 +3,16 @@
 import { useEffect, useState, useRef } from "react";
 import Link from "next/link";
 import { useCogniInstance } from "@/modules/tenant/TenantProvider";
-import { useFilter } from "@/ui/layout/FilterContext";
+import { useFilter, useRefreshDatasetsOnMount } from "@/ui/layout/FilterContext";
 import BrainSelector from "@/ui/elements/BrainSelector";
 import PageLoading from "@/ui/elements/PageLoading";
 import { TrackPageView } from "@/modules/analytics";
 import type { DatasetProcessingStatus } from "@/modules/datasets/pollDatasetStatus";
 import { useDatasetStatuses } from "@/modules/datasets/useDatasetStatuses";
+
+// Visualize renders the full graph synchronously with no caching, so large
+// graphs can take well past the default 10s GET timeout.
+const VISUALIZE_TIMEOUT_MS = 90_000;
 
 type DisplayStatus = "pending" | "running" | "completed" | "failed" | "empty";
 
@@ -32,6 +36,7 @@ const STATUS_CFG: Record<DisplayStatus, { label: string; color: string; dotBg: s
 export default function KnowledgeGraphPage() {
   const { cogniInstance, isInitializing } = useCogniInstance();
   const { datasets, selectedDataset, refreshDatasets } = useFilter();
+  useRefreshDatasetsOnMount();
 
   const [iframeSrc, setIframeSrc] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -68,6 +73,11 @@ export default function KnowledgeGraphPage() {
   // Fetch visualization
   useEffect(() => {
     if (!datasetId || isInitializing) { setLoading(false); return; }
+    // Guards against a stale in-flight fetch: if the brain is switched while a
+    // viz is still loading, the previous request must not overwrite the new
+    // brain's state — otherwise the header shows the new name while the old
+    // graph loads in.
+    let cancelled = false;
     setLoading(true);
     setIframeSrc(null);
     setError(null);
@@ -75,12 +85,13 @@ export default function KnowledgeGraphPage() {
     if (blobRef.current) { URL.revokeObjectURL(blobRef.current); blobRef.current = null; }
 
     const fetchViz = cogniInstance
-      ? cogniInstance.fetch(`/v1/visualize?dataset_id=${datasetId}`)
+      ? cogniInstance.fetch(`/v1/visualize?dataset_id=${datasetId}`, { timeoutMs: VISUALIZE_TIMEOUT_MS })
       : global.fetch(`/api/visualize?dataset_id=${datasetId}`, { credentials: "include" });
 
     fetchViz
       .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.text(); })
       .then((html) => {
+        if (cancelled) return;
         if (html && html.length > 100 && (html.includes("<!DOCTYPE") || html.includes("<html"))) {
           const closeScript = "<" + "/script>";
           // Dark background CSS beats the first paint (no white flash) and
@@ -100,10 +111,10 @@ export default function KnowledgeGraphPage() {
           setError("No graph data in this brain yet.");
         }
       })
-      .catch((err) => setError(err.message || "Failed to load visualization"))
-      .finally(() => setLoading(false));
+      .catch((err) => { if (cancelled) return; setError(err.message || "Failed to load visualization"); })
+      .finally(() => { if (cancelled) return; setLoading(false); });
 
-    return () => { if (blobRef.current) { URL.revokeObjectURL(blobRef.current); blobRef.current = null; } };
+    return () => { cancelled = true; if (blobRef.current) { URL.revokeObjectURL(blobRef.current); blobRef.current = null; } };
   }, [datasetId, isInitializing, vizRefreshKey]);
 
   if (isInitializing) {

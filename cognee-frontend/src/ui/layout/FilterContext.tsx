@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef, ReactNode } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient, type UseQueryOptions } from "@tanstack/react-query";
 import { useCogniInstance, useTenant } from "@/modules/tenant/TenantProvider";
 import getDatasets from "@/modules/datasets/getDatasets";
 import { BACKGROUND_QUERY_RETRY_COUNT, backgroundQueryRetryDelay } from "@/modules/query/backgroundQueryRetry";
@@ -88,6 +88,45 @@ function colorForTenant(id: string): string {
   return TENANT_COLORS[Math.abs(hash) % TENANT_COLORS.length];
 }
 
+// Shared with useRefreshDatasetsOnMount below, so both land on the exact same
+// query — same key, same fetch behavior — and react-query dedupes them into
+// one in-flight request instead of two independent fetches.
+function datasetsQueryOptions(
+  cogniInstance: ReturnType<typeof useCogniInstance>["cogniInstance"],
+  tenantId: string | null,
+  enabled: boolean,
+): UseQueryOptions<Dataset[]> {
+  return {
+    queryKey: ["datasets", tenantId],
+    queryFn: ({ signal }) =>
+      getDatasets(cogniInstance!, signal, BACKGROUND_POLL_TIMEOUT_MS).then((d: Dataset[]) => (Array.isArray(d) ? d : [])),
+    enabled,
+    refetchInterval: false,
+    retry: BACKGROUND_QUERY_RETRY_COUNT,
+    retryDelay: backgroundQueryRetryDelay,
+  };
+}
+
+// FilterProvider lives in the layout and never remounts on navigation, so its
+// datasets query never gets a mount-triggered refetch just from moving
+// between pages — only from a user-initiated create/delete/upload. That
+// leaves datasets created out-of-band (e.g. by an agent session) stale on
+// pages that read the list from FilterContext. Pages that need the list to be
+// current (Mindmap, Memory Schema, Dashboard) call this once to opt into a
+// mount-time freshness check — it shares the provider's query key, so
+// react-query dedupes it with the provider's own fetch instead of firing a
+// second network request, and only actually hits the network if the cached
+// data is stale.
+export function useRefreshDatasetsOnMount(): void {
+  const { cogniInstance, isInitializing } = useCogniInstance();
+  const { tenant, tenantReady } = useTenant();
+  const tenantId = tenant?.tenant_id ?? null;
+  useQuery({
+    ...datasetsQueryOptions(cogniInstance, tenantId, !!cogniInstance && !isInitializing && tenantReady),
+    refetchOnMount: "always",
+  });
+}
+
 export function FilterProvider({ children }: { children: ReactNode }) {
   const { cogniInstance, isInitializing } = useCogniInstance();
   const { tenant, tenantReady, availableTenants, switchTenant } = useTenant();
@@ -105,18 +144,12 @@ export function FilterProvider({ children }: { children: ReactNode }) {
   // react-query's default refetchOnWindowFocus keeps it from going stale
   // across tabs/sessions without hammering every page that mounts this
   // provider (most of which never even render the list).
-  const datasetsQuery = useQuery({
-    queryKey: ["datasets", tenantId],
-    queryFn: ({ signal }) =>
-      getDatasets(cogniInstance!, signal, BACKGROUND_POLL_TIMEOUT_MS).then((d: Dataset[]) => (Array.isArray(d) ? d : [])),
+  const datasetsQuery = useQuery(
     // tenantReady, not just cogniInstance: a freshly-created workspace's pod
     // can still be unreachable while cogniInstance already exists (see
     // useDashboardTelemetry.ts / useGraphSummary.ts for the same fix).
-    enabled: !!cogniInstance && !isInitializing && tenantReady,
-    refetchInterval: false,
-    retry: BACKGROUND_QUERY_RETRY_COUNT,
-    retryDelay: backgroundQueryRetryDelay,
-  });
+    datasetsQueryOptions(cogniInstance, tenantId, !!cogniInstance && !isInitializing && tenantReady),
+  );
 
   // Memoized so the fallback `[]` isn't a fresh reference on every render —
   // keeps the `value` memo below (and its consumers) stable when there's no
@@ -136,27 +169,22 @@ export function FilterProvider({ children }: { children: ReactNode }) {
     }));
   }, [availableTenants]);
 
-  // Snapshot of the persisted workspace selection. Starts null so the first
-  // client render matches the server-rendered HTML exactly (the server has no
-  // localStorage) — reading it eagerly in a lazy useState initializer caused
-  // a hydration mismatch, since that initializer runs during the hydration
-  // pass itself, not after it. Read it in an effect instead; this still
-  // means the hardcoded personal default paints for one frame before
-  // correcting itself, but that's the tradeoff for a correct hydration.
-  const [persistedSelection, setPersistedSelection] = useState<Workspace | null>(null);
-  useEffect(() => {
+  // Snapshot of the persisted workspace selection, read synchronously during
+  // the FIRST render via a lazy initializer — not in an effect. An effect
+  // only runs after that first render commits, so it still paints the
+  // hardcoded personal default for one frame before correcting itself; this
+  // was visible as a brief flash even after switching to a non-personal
+  // workspace. Guarded for SSR, where localStorage doesn't exist — this
+  // component only ever runs client-side, so the guard is just to keep the
+  // initializer from throwing during the server render pass.
+  const [persistedSelection] = useState<Workspace | null>(() => {
+    if (typeof window === "undefined") return null;
     const id = localStorage.getItem("cognee_selected_tenant");
     const name = localStorage.getItem("cognee_selected_tenant_name");
-    if (id && name) {
-      setPersistedSelection({
-        id,
-        name,
-        initial: name.charAt(0).toUpperCase(),
-        color: colorForTenant(id),
-        type: "organization" as const,
-      });
-    }
-  }, []);
+    return id && name
+      ? { id, name, initial: name.charAt(0).toUpperCase(), color: colorForTenant(id), type: "organization" as const }
+      : null;
+  });
 
   // The workspace shown in the topbar — derived, not its own state. It used
   // to be mirrored into a separate useState synced by an effect, which added

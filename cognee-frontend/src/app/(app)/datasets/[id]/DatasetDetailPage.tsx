@@ -1,28 +1,41 @@
 "use client";
 
 import { captureException, recordUploadSuccess, recordUploadFailure } from "@/utils/monitoring";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useCogniInstance } from "@/modules/tenant/TenantProvider";
 import { useFilter } from "@/ui/layout/FilterContext";
+import PageLoading from "@/ui/elements/PageLoading";
 import getDatasetData from "@/modules/datasets/getDatasetData";
 import deleteDatasetData from "@/modules/datasets/deleteDatasetData";
 import deleteDataset from "@/modules/datasets/deleteDataset";
-import rememberData from "@/modules/ingestion/rememberData";
+import { useBrainUpload } from "@/modules/ingestion/useBrainUpload";
 import { MAX_FILES_PER_UPLOAD } from "@/modules/ingestion/uploadLimits";
+import DeleteConfirmModal from "@/ui/elements/DeleteConfirmModal";
+import CreateModelModal from "./partials/CreateModelModal";
+import CreatePromptModal from "./partials/CreatePromptModal";
+import PromptEditorModal from "./partials/PromptEditorModal";
+import UploadOntologyModal from "./partials/UploadOntologyModal";
+import MemoryCustomizationBar from "./partials/MemoryCustomizationBar";
+import FilesTable from "./partials/FilesTable";
+import { decodeFilename } from "@/utils/fileFormat";
+import mapInferredSchema from "@/modules/graphModels/mapInferredSchema";
+import isMemoryBlobName from "@/modules/datasets/isMemoryBlobName";
+import TrashIcon from "@/ui/elements/TrashIcon";
 import cognifyDataset from "@/modules/datasets/cognifyDataset";
 import pollDatasetStatus from "@/modules/datasets/pollDatasetStatus";
 import { useDatasetStatuses } from "@/modules/datasets/useDatasetStatuses";
 import { notifications } from "@mantine/notifications";
-import { Tooltip } from "@mantine/core";
+import { Loader } from "@mantine/core";
 import { TrackPageView, trackEvent } from "@/modules/analytics";
 import type { GraphModel } from "@/modules/graphModels/types";
 import { toCleanSchema } from "@/modules/graphModels/types";
 import { toGraphModelSchema } from "@/modules/graphModels/toGraphModelSchema";
-import { loadGraphModelsConfig, syncGraphModels, assignGraphModelToDataset, assignPromptToDataset, assignOntologyToDataset, clearDatasetOutdated, findModelForDataset, findPromptForDataset, findOntologyForDataset, saveCustomPrompt, deleteCustomPrompt, type GraphModelsConfig, type CustomPromptsMap } from "@/modules/configuration/userConfiguration";
+import { loadGraphModelsConfig, syncGraphModels, assignGraphModelToDataset, assignPromptToDataset, assignOntologyToDataset, clearDatasetOutdated, findModelForDataset, findPromptForDataset, findOntologyForDataset, saveCustomPrompt, deleteCustomPrompt, type CustomPromptsMap } from "@/modules/configuration/userConfiguration";
 import { inferSchema, generateCustomPrompt } from "@/modules/llm/managementLlmApi";
 import { listOntologies, uploadOntology, deleteOntology, type OntologyMeta } from "@/modules/ontologies/ontologyApi";
 import ShareDatasetModal from "@/ui/elements/ShareDatasetModal";
+import { describeProcessingError } from "../processingErrorMessage";
 import { v4 as uuid } from "uuid";
 
 interface FileEntry {
@@ -30,58 +43,10 @@ interface FileEntry {
   name: string;
   extension?: string;
   mimeType?: string;
+  size?: number;
   createdAt?: string;
 }
 
-// ── File type colors and labels ──
-
-const EXT_META: Record<string, { fill: string; stroke: string; text: string; label: string }> = {
-  pdf:  { fill: "#FEE2E2", stroke: "#EF4444", text: "#DC2626", label: "PDF" },
-  docx: { fill: "#DBEAFE", stroke: "#3B82F6", text: "#2563EB", label: "DOC" },
-  doc:  { fill: "#DBEAFE", stroke: "#3B82F6", text: "#2563EB", label: "DOC" },
-  md:   { fill: "#F3F4F6", stroke: "#6B7280", text: "#374151", label: "MD" },
-  txt:  { fill: "#F3F4F6", stroke: "#9CA3AF", text: "#6B7280", label: "TXT" },
-  csv:  { fill: "#DCFCE7", stroke: "#22C55E", text: "#16A34A", label: "CSV" },
-  json: { fill: "#FEF3C7", stroke: "#D97706", text: "#B45309", label: "JSON" },
-};
-
-function getExtMeta(name: string, ext?: string) {
-  const e = (ext || name.split(".").pop() || "").toLowerCase();
-  return EXT_META[e] || { fill: "#F3F4F6", stroke: "#9CA3AF", text: "#6B7280", label: e.toUpperCase().slice(0, 4) || "FILE" };
-}
-
-function getTypeName(name: string, ext?: string) {
-  const e = (ext || name.split(".").pop() || "").toLowerCase();
-  const names: Record<string, string> = { pdf: "PDF", docx: "DOCX", doc: "DOC", md: "Markdown", txt: "Text", csv: "CSV", json: "JSON" };
-  return names[e] || e.toUpperCase();
-}
-
-function formatDate(dateStr?: string): string {
-  if (!dateStr) return "—";
-  const d = new Date(dateStr);
-  const date = d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-  const time = d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
-  return `${date}, ${time}`;
-}
-
-// Text remembered via the memory API is stored as "text_<md5>.txt" — a
-// meaningless hash filename. Detect those so we can render a proper title.
-function isMemoryBlobName(name: string): boolean {
-  return /^text_[0-9a-f]{16,}(\.txt)?$/i.test(name);
-}
-
-// ── SVG document icon matching Paper reference ──
-
-function FileIcon({ fill, stroke, text, label }: { fill: string; stroke: string; text: string; label: string }) {
-  const fontSize = label.length > 3 ? 4.5 : label.length > 2 ? 5 : 5.5;
-  return (
-    <svg width="16" height="20" viewBox="0 0 16 20" fill="none" style={{ flexShrink: 0 }}>
-      <path d="M10 1H3a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V6l-5-5z" fill={fill} stroke={stroke} strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M10 1v5h5" stroke={stroke} strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
-      <text x="8" y="14.5" textAnchor="middle" fontSize={fontSize} fontWeight="700" fill={text}>{label}</text>
-    </svg>
-  );
-}
 
 // Default extraction prompt from cognee OSS (generate_graph_prompt.txt)
 const DEFAULT_EXTRACTION_PROMPT = `You are a top-tier algorithm designed for extracting information in structured formats to build a knowledge graph.
@@ -117,13 +82,6 @@ Remember, the knowledge graph should be coherent and easily understandable, so m
 # 4. Strict Compliance
 Adhere to the rules strictly. Non-compliance will result in termination.`;
 
-function TrashIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0 }}>
-      <path d="M3 4h10M6 4V3h4v1M5 4v8.5a.5.5 0 00.5.5h5a.5.5 0 00.5-.5V4" stroke="#A1A1AA" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
 
 // ── Main Page ──
 
@@ -133,8 +91,9 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
   const { cogniInstance, isInitializing } = useCogniInstance();
   const { datasets: contextDatasets } = useFilter();
   const [datasetName, setDatasetName] = useState<string>(datasetId);
-  const [lastSynced, setLastSynced] = useState<string | null>(null);
+  const [, setLastSynced] = useState<string | null>(null);
   const [files, setFiles] = useState<FileEntry[]>([]);
+  const [filesError, setFilesError] = useState(false);
   const [loading, setLoading] = useState(true);
   // data id → session id parsed from the memory blob ("Session ID: <id>"
   // header written by the session→graph bridge), or null when none found.
@@ -167,21 +126,25 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
     return () => { cancelled = true; };
   }, [cogniInstance, datasetId, files, memorySessionIds]);
   const [isDragging, setIsDragging] = useState(false);
-  const [uploading, setUploading] = useState(false);
+  const { isUploading, stage: uploadStage, upload } = useBrainUpload(cogniInstance);
   const [processing, setProcessing] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [isConnectedSource, setIsConnectedSource] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [deletingFileId, setDeletingFileId] = useState<string | null>(null);
+  const [deleteFileTarget, setDeleteFileTarget] = useState<FileEntry | null>(null);
   const [search, setSearch] = useState("");
   const [showShareModal, setShowShareModal] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [confirmDeletePrompt, setConfirmDeletePrompt] = useState(false);
+  const [deletingPrompt, setDeletingPrompt] = useState(false);
+  const [confirmDeleteOntologyKey, setConfirmDeleteOntologyKey] = useState<string | null>(null);
+  const [deletingOntology, setDeletingOntology] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Graph model selection
   const [graphModels, setGraphModels] = useState<GraphModel[]>([]);
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
-  const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
-  const modelDropdownRef = useRef<HTMLDivElement>(null);
   const [graphOutdated, setGraphOutdated] = useState(false);
   const [datasetStatus, setDatasetStatus] = useState<"ready" | "pending" | "processing" | "failed" | "outdated" | "empty">("empty");
   const [showCreateModelModal, setShowCreateModelModal] = useState(false);
@@ -190,16 +153,12 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
   // Custom prompt selection (simple dict: { name: text })
   const [customPrompts, setCustomPrompts] = useState<CustomPromptsMap>({});
   const [selectedPromptName, setSelectedPromptName] = useState<string | null>(null);
-  const [promptDropdownOpen, setPromptDropdownOpen] = useState(false);
-  const promptDropdownRef = useRef<HTMLDivElement>(null);
   const [showCreatePromptModal, setShowCreatePromptModal] = useState(false);
   const [inferringPrompt, setInferringPrompt] = useState(false);
 
   // Ontology selection
   const [ontologies, setOntologies] = useState<Record<string, OntologyMeta>>({});
   const [selectedOntologyKey, setSelectedOntologyKey] = useState<string | null>(null);
-  const [ontologyDropdownOpen, setOntologyDropdownOpen] = useState(false);
-  const ontologyDropdownRef = useRef<HTMLDivElement>(null);
   const [showUploadOntologyModal, setShowUploadOntologyModal] = useState(false);
 
   // Load graph models and assignment from backend config
@@ -220,49 +179,28 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
       captureException(err, { context: "dataset-detail.list-ontologies" }));
   }, [datasetId, cogniInstance, isInitializing]);
 
-  // Close dropdown on outside click
-  useEffect(() => {
-    function handleClickOutside(e: MouseEvent) {
-      if (modelDropdownRef.current && !modelDropdownRef.current.contains(e.target as Node)) {
-        setModelDropdownOpen(false);
-      }
-    }
-    if (modelDropdownOpen) {
-      document.addEventListener("mousedown", handleClickOutside);
-      return () => document.removeEventListener("mousedown", handleClickOutside);
-    }
-  }, [modelDropdownOpen]);
+  // Dropdown open/close + outside-click handling lives inside
+  // MemoryCustomizationBar; the page only owns selection + persistence.
 
-  // Close prompt dropdown on outside click
-  useEffect(() => {
-    function handleClickOutside(e: MouseEvent) {
-      if (promptDropdownRef.current && !promptDropdownRef.current.contains(e.target as Node)) {
-        setPromptDropdownOpen(false);
-      }
+  async function handleDeleteOntology(key: string): Promise<void> {
+    if (!cogniInstance) return;
+    setDeletingOntology(true);
+    try {
+      await deleteOntology(cogniInstance, key);
+      setOntologies((prev) => { const next = { ...prev }; delete next[key]; return next; });
+      if (selectedOntologyKey === key) setSelectedOntologyKey(null);
+      setConfirmDeleteOntologyKey(null);
+      notifications.show({ title: "Ontology deleted", message: `"${key}" removed.`, color: "green", autoClose: 4000 });
+    } catch (err) {
+      notifications.show({ title: "Delete failed", message: err instanceof Error ? err.message : String(err), color: "red" });
+    } finally {
+      setDeletingOntology(false);
     }
-    if (promptDropdownOpen) {
-      document.addEventListener("mousedown", handleClickOutside);
-      return () => document.removeEventListener("mousedown", handleClickOutside);
-    }
-  }, [promptDropdownOpen]);
-
-  // Close ontology dropdown on outside click
-  useEffect(() => {
-    function handleClickOutside(e: MouseEvent) {
-      if (ontologyDropdownRef.current && !ontologyDropdownRef.current.contains(e.target as Node)) {
-        setOntologyDropdownOpen(false);
-      }
-    }
-    if (ontologyDropdownOpen) {
-      document.addEventListener("mousedown", handleClickOutside);
-      return () => document.removeEventListener("mousedown", handleClickOutside);
-    }
-  }, [ontologyDropdownOpen]);
+  }
 
   function handleSelectOntology(key: string | null) {
     const prev = selectedOntologyKey;
     setSelectedOntologyKey(key);
-    setOntologyDropdownOpen(false);
     notifications.show({ title: "Ontology updated", message: `"${datasetName}" now uses "${key ?? "Automatic"}".`, color: "green", autoClose: 4000 });
     if (prev !== key && files.length > 0) {
       setGraphOutdated(true);
@@ -277,7 +215,6 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
   function handleSelectPrompt(name: string | null) {
     const prev = selectedPromptName;
     setSelectedPromptName(name);
-    setPromptDropdownOpen(false);
     notifications.show({ title: "Prompt updated", message: `"${datasetName}" now uses "${name ?? "Automatic"}".`, color: "green", autoClose: 4000 });
     if (prev !== name && files.length > 0) {
       setGraphOutdated(true);
@@ -296,14 +233,14 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
   const [savingPrompt, setSavingPrompt] = useState(false);
 
   async function handleInferPrompt() {
-    if (!selectedModelId) return;
+    if (!cogniInstance || !selectedModelId) return;
     setInferringPrompt(true);
     try {
       const model = graphModels.find((m) => m.id === selectedModelId);
       if (model) {
         const cleanSchema = toCleanSchema(model.schema);
         const graphModelSchema = toGraphModelSchema(cleanSchema);
-        const result = await generateCustomPrompt(cogniInstance!, graphModelSchema);
+        const result = await generateCustomPrompt(cogniInstance, graphModelSchema);
         setEditingPromptName(`${datasetName} Prompt`);
         setEditingPromptText(result.customPrompt);
         setShowCreatePromptModal(false);
@@ -323,6 +260,24 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
     setEditingPromptText(DEFAULT_EXTRACTION_PROMPT);
     setShowCreatePromptModal(false);
     setShowPromptEditor(true);
+  }
+
+  async function handleConfirmDeletePrompt(): Promise<void> {
+    const name = editingPromptName.trim();
+    if (!name || !cogniInstance) return;
+    setDeletingPrompt(true);
+    try {
+      await deleteCustomPrompt(cogniInstance, name);
+      setCustomPrompts((prev) => { const next = { ...prev }; delete next[name]; return next; });
+      if (selectedPromptName === name) setSelectedPromptName(null);
+      setConfirmDeletePrompt(false);
+      setShowPromptEditor(false);
+      notifications.show({ title: "Prompt deleted", message: `"${name}" removed.`, color: "green", autoClose: 4000 });
+    } catch (err) {
+      notifications.show({ title: "Delete failed", message: err instanceof Error ? err.message : String(err), color: "red" });
+    } finally {
+      setDeletingPrompt(false);
+    }
   }
 
   async function handleSavePrompt() {
@@ -347,10 +302,34 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
     }
   }
 
+  // Rejects on failure so UploadOntologyModal re-enables its form; resolves on
+  // success after closing the modal itself.
+  async function handleUploadOntology(key: string, file: File, description?: string): Promise<void> {
+    if (!cogniInstance) return;
+    try {
+      await uploadOntology(cogniInstance, key, file, description);
+      const updated = await listOntologies(cogniInstance);
+      setOntologies(updated);
+      setSelectedOntologyKey(key);
+      setShowUploadOntologyModal(false);
+      assignOntologyToDataset(cogniInstance, datasetId, key).catch((err) => {
+        captureException(err, { context: "dataset-detail.assign-ontology-after-upload", datasetId, key });
+        notifications.show({
+          title: "Ontology uploaded, but not assigned",
+          message: `"${key}" was uploaded but couldn't be assigned to this dataset automatically. Assign it manually from the dropdown.`,
+          color: "orange",
+        });
+      });
+      notifications.show({ title: "Ontology uploaded", message: `"${key}" is ready to use.`, color: "green", autoClose: 4000 });
+    } catch (err) {
+      notifications.show({ title: "Upload failed", message: err instanceof Error ? err.message : String(err), color: "red" });
+      throw err;
+    }
+  }
+
   function handleSelectModel(modelId: string | null) {
     const prevModelId = selectedModelId;
     setSelectedModelId(modelId);
-    setModelDropdownOpen(false);
     const modelName = modelId ? graphModels.find((m) => m.id === modelId)?.name ?? "Unknown" : "Automatic";
     trackEvent({ pageName: "Dataset Detail", eventName: "graph_model_selected", additionalProperties: { dataset_id: datasetId, model_id: modelId ?? "automatic" } });
     notifications.show({ title: "Graph model updated", message: `"${datasetName}" now uses "${modelName}".`, color: "green", autoClose: 4000 });
@@ -397,31 +376,7 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
         if (result.graphSchema) {
             // Convert the JSON Schema from the LLM into our internal format
             // Store as-is for now — the editor can display it
-            modelSchema = {
-              options: {},
-              entities: Object.entries(result.graphSchema.$defs || {})
-                .filter(([key]) => !key.endsWith("Type"))
-                .map(([name, def]: [string, any]) => ({
-                  _id: uuid(),
-                  name: def.title || name,
-                  description: def.description || "",
-                  fields: Object.entries(def.properties || {})
-                    .filter(([fieldName]) => fieldName !== "is_type" && fieldName !== "metadata")
-                    .map(([fieldName, fieldDef]: [string, any]) => {
-                      if (fieldDef.$ref) {
-                        const target = fieldDef.$ref.replace("#/$defs/", "");
-                        return { _id: uuid(), name: fieldName, kind: "relation" as const, relation: { targetEntityName: target, cardinality: "one" as const } };
-                      }
-                      if (fieldDef.type === "array" && fieldDef.items?.$ref) {
-                        const target = fieldDef.items.$ref.replace("#/$defs/", "");
-                        return { _id: uuid(), name: fieldName, kind: "relation" as const, relation: { targetEntityName: target, cardinality: "many" as const } };
-                      }
-                      const primitiveType = (fieldDef.type === "number" || fieldDef.type === "integer") ? "number" : fieldDef.type === "boolean" ? "boolean" : "string";
-                      return { _id: uuid(), name: fieldName, kind: "primitive" as const, primitiveType: primitiveType as "string" | "number" | "boolean" | "date", required: (def.required || []).includes(fieldName) };
-                    }),
-                  indexFields: [],
-                })),
-            };
+            modelSchema = mapInferredSchema(result.graphSchema);
             notifications.show({ title: "Schema inferred", message: `Detected ${modelSchema.entities.length} entity types from your data.`, color: "green", autoClose: 4000 });
           }
       } catch (err) {
@@ -455,17 +410,46 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
     }
   }
 
+  const loadFiles = useCallback(async () => {
+    if (!cogniInstance) return;
+    try {
+      const data = await getDatasetData(datasetId, cogniInstance);
+      setFiles(Array.isArray(data) ? data.map((d: FileEntry & { rawDataLocation?: string; originalExtension?: string; original_extension?: string; originalMimeType?: string; original_mime_type?: string; size_bytes?: number; file_size?: number }) => ({
+        id: d.id,
+        name: d.name || d.rawDataLocation?.split("/").pop() || d.id,
+        extension: d.originalExtension || d.original_extension || d.extension,
+        mimeType: d.originalMimeType || d.original_mime_type || d.mimeType,
+        size: d.size ?? d.size_bytes ?? d.file_size,
+        createdAt: d.createdAt,
+      })) : []);
+      setFilesError(false);
+    } catch {
+      // Don't blank the list into a fake "empty" state — surface the load
+      // failure so the user knows their files aren't gone, just unreachable.
+      setFilesError(true);
+    } finally {
+      setLoading(false);
+    }
+  }, [cogniInstance, datasetId]);
+
+  // Resolves the dataset's display name from FilterContext's shared datasets
+  // list, which loads asynchronously and may still be empty on the first
+  // render of this effect (e.g. a hard refresh landing directly on this page)
+  // — depending on contextDatasets lets this retry once it arrives, instead
+  // of leaving datasetName stuck on the raw id fallback forever.
   useEffect(() => {
-    if (!cogniInstance || isInitializing) return;
-    // Resolve dataset name from FilterContext
     const ds = contextDatasets.find((d) => d.id === datasetId) as { id: string; name: string; updatedAt?: string; connection_id?: string } | undefined;
     if (ds) {
       setDatasetName(ds.name);
       if (ds.updatedAt) setLastSynced(ds.updatedAt);
       if (ds.connection_id) setIsConnectedSource(true);
     }
+  }, [contextDatasets, datasetId]);
+
+  useEffect(() => {
+    if (!cogniInstance || isInitializing) return;
     loadFiles();
-  }, [cogniInstance, isInitializing]);
+  }, [cogniInstance, isInitializing, loadFiles]);
 
   const { statuses, refetch: refetchStatuses } = useDatasetStatuses(!isInitializing);
 
@@ -490,24 +474,6 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
     }
   }, [statuses, datasetId, graphOutdated, files.length]);
 
-  async function loadFiles() {
-    if (!cogniInstance) return;
-    try {
-      const data = await getDatasetData(datasetId, cogniInstance);
-      setFiles(Array.isArray(data) ? data.map((d: FileEntry & { rawDataLocation?: string; originalExtension?: string; original_extension?: string; originalMimeType?: string; original_mime_type?: string }) => ({
-        id: d.id,
-        name: d.name || d.rawDataLocation?.split("/").pop() || d.id,
-        extension: d.originalExtension || d.original_extension || d.extension,
-        mimeType: d.originalMimeType || d.original_mime_type || d.mimeType,
-        createdAt: d.createdAt,
-      })) : []);
-    } catch {
-      setFiles([]);
-    } finally {
-      setLoading(false);
-    }
-  }
-
   async function handleUpload(newFiles: FileList | File[]) {
     if (!cogniInstance) return;
     const filesArray = Array.from(newFiles);
@@ -523,9 +489,7 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
 
     const totalBytes = filesArray.reduce((sum, f) => sum + f.size, 0);
     const fileTypes = filesArray.map((f) => f.type || "unknown");
-    const uploadStartedAt = Date.now();
 
-    setUploading(true);
     trackEvent({
       pageName: "Dataset Detail",
       eventName: "dataset_upload_started",
@@ -537,106 +501,102 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
       },
     });
 
-    try {
-      // Kick off ingestion in the background so the upload POST returns immediately.
-      // The add itself is done once this call returns — anything that fails after
-      // this point (status polling) must not be reported as an upload failure.
-      await rememberData({ id: datasetId }, filesArray, cogniInstance, { ...getCognifyOptions(), runInBackground: true });
-    } catch (err) {
-      setUploading(false);
-
-      const durationMs = Date.now() - uploadStartedAt;
-      const errorName = err instanceof Error ? err.name : "UnknownError";
-      const errorMessage = err instanceof Error ? err.message : String(err);
-
-      recordUploadFailure(errorName, durationMs);
-      trackEvent({
-        pageName: "Dataset Detail",
-        eventName: "dataset_upload_failed",
-        additionalProperties: {
-          dataset_id: datasetId,
-          file_count: String(filesArray.length),
-          total_bytes: String(totalBytes),
-          file_types: fileTypes.join(","),
-          duration_ms: String(durationMs),
-          error_name: errorName,
-          error_message: errorMessage,
-        },
-      });
-
-      if (errorName === "UploadTimeoutError") {
+    await upload({
+      datasetId,
+      files: filesArray,
+      options: getCognifyOptions(),
+      // Belt-and-suspenders: the check above already blocks this case, but if
+      // that check is ever removed/changed the hook's own guard must still
+      // surface an error instead of silently no-opping.
+      onLimitExceeded: (selected) => {
         notifications.show({
-          title: "Upload timed out",
-          message: "The file took too long to process. Please try again with a smaller file.",
-          color: "red",
-          autoClose: false,
-        });
-      } else {
-        captureException(err, { datasetId, fileCount: filesArray.length, totalBytes, durationMs });
-        notifications.show({
-          title: "Upload failed",
-          message: errorMessage,
+          title: "Too many files",
+          message: `You selected ${selected.length} files. Please upload ${MAX_FILES_PER_UPLOAD} or fewer at a time.`,
           color: "red",
         });
-      }
-      return;
-    }
-
-    try {
-      // Files were already added successfully by this point — this only tracks
-      // knowledge-graph build progress, so its failure is reported separately.
-      await pollDatasetStatus(datasetId, cogniInstance, { intervalMs: 5000 });
-      await loadFiles();
-      setUploading(false);
-      setLastSynced(new Date().toISOString());
-
-      trackEvent({
-        pageName: "Dataset Detail",
-        eventName: "dataset_files_uploaded",
-        additionalProperties: {
-          dataset_id: datasetId,
-          file_count: String(filesArray.length),
-          total_bytes: String(totalBytes),
-          duration_ms: String(Date.now() - uploadStartedAt),
-        },
-      });
-      recordUploadSuccess(Date.now() - uploadStartedAt, totalBytes, filesArray.length);
-    } catch (err) {
-      setUploading(false);
-      await loadFiles();
-
-      const durationMs = Date.now() - uploadStartedAt;
-      const errorMessage = err instanceof Error ? err.message : String(err);
-
-      captureException(err, { datasetId, fileCount: filesArray.length, totalBytes, durationMs, stage: "processing" });
-      trackEvent({
-        pageName: "Dataset Detail",
-        eventName: "dataset_processing_failed",
-        additionalProperties: {
-          dataset_id: datasetId,
-          file_count: String(filesArray.length),
-          total_bytes: String(totalBytes),
-          duration_ms: String(durationMs),
-          error_message: errorMessage,
-        },
-      });
-      notifications.show({
-        title: "Knowledge graph build failed",
-        message: `Files were added, but building the knowledge graph failed: ${errorMessage}`,
-        color: "red",
-      });
-    }
+      },
+      onUploadError: (error, ctx) => {
+        const errorName = error instanceof Error ? error.name : "UnknownError";
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        recordUploadFailure(errorName, ctx.durationMs);
+        trackEvent({
+          pageName: "Dataset Detail",
+          eventName: "dataset_upload_failed",
+          additionalProperties: {
+            dataset_id: datasetId,
+            file_count: String(filesArray.length),
+            total_bytes: String(totalBytes),
+            file_types: fileTypes.join(","),
+            duration_ms: String(ctx.durationMs),
+            error_name: errorName,
+            error_message: errorMessage,
+          },
+        });
+        if (errorName === "UploadTimeoutError") {
+          notifications.show({
+            title: "Upload timed out",
+            message: "The file took too long to process. Please try again with a smaller file.",
+            color: "red",
+            autoClose: false,
+          });
+        } else {
+          captureException(error, { datasetId, fileCount: filesArray.length, totalBytes, durationMs: ctx.durationMs });
+          notifications.show({
+            title: "Upload failed",
+            message: errorMessage,
+            color: "red",
+          });
+        }
+      },
+      onProcessed: async (ctx) => {
+        await loadFiles();
+        setLastSynced(new Date().toISOString());
+        trackEvent({
+          pageName: "Dataset Detail",
+          eventName: "dataset_files_uploaded",
+          additionalProperties: {
+            dataset_id: datasetId,
+            file_count: String(filesArray.length),
+            total_bytes: String(totalBytes),
+            duration_ms: String(ctx.durationMs),
+          },
+        });
+        recordUploadSuccess(ctx.durationMs, totalBytes, filesArray.length);
+      },
+      onProcessingError: async (error, ctx) => {
+        await loadFiles();
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        captureException(error, { datasetId, fileCount: filesArray.length, totalBytes, durationMs: ctx.durationMs, stage: "processing" });
+        trackEvent({
+          pageName: "Dataset Detail",
+          eventName: "dataset_processing_failed",
+          additionalProperties: {
+            dataset_id: datasetId,
+            file_count: String(filesArray.length),
+            total_bytes: String(totalBytes),
+            duration_ms: String(ctx.durationMs),
+            error_message: errorMessage,
+          },
+        });
+        const { title, message, isTimeout } = describeProcessingError(error);
+        notifications.show({ title, message, color: isTimeout ? "yellow" : "red" });
+      },
+    });
   }
 
   async function handleDelete(fileId: string) {
-    if (!cogniInstance) return;
+    if (!cogniInstance || deletingFileId) return;
+    setDeletingFileId(fileId);
     try {
       await deleteDatasetData(datasetId, fileId, cogniInstance);
       const deletedFile = files.find((f) => f.id === fileId);
       trackEvent({ pageName: "Dataset Detail", eventName: "dataset_file_deleted", additionalProperties: { dataset_id: datasetId, file_name: deletedFile?.name ?? fileId } });
       setFiles((prev) => prev.filter((f) => f.id !== fileId));
+      setDeleteFileTarget(null);
     } catch (err) {
       console.error("Delete failed:", err);
+    } finally {
+      setDeletingFileId(null);
     }
   }
 
@@ -646,14 +606,43 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
     try {
       await cognifyDataset({ id: datasetId, name: datasetName, data: [], status: "processing" }, cogniInstance, getCognifyOptions());
       refetchStatuses();
-      const finalStatus = await pollDatasetStatus(datasetId, cogniInstance, { intervalMs: 5000 });
-      trackEvent({ pageName: "Dataset Detail", eventName: "dataset_synced", additionalProperties: { dataset_id: datasetId, status: finalStatus } });
-      setLastSynced(new Date().toISOString());
-      refetchStatuses();
+      // Track completion in the background instead of awaiting it here — the
+      // build can take minutes, and the header's Processing indicator (driven
+      // by the shared status poller) already reflects progress. Blocking the
+      // Sync button for that whole duration reads as "stuck", same issue as
+      // the upload button (CLO-292).
+      pollDatasetStatus(datasetId, cogniInstance, { intervalMs: 5000 })
+        .then((finalStatus) => {
+          trackEvent({ pageName: "Dataset Detail", eventName: "dataset_synced", additionalProperties: { dataset_id: datasetId, status: finalStatus } });
+          setLastSynced(new Date().toISOString());
+          refetchStatuses();
+        })
+        .catch((err) => console.error("Sync build failed:", err));
     } catch (err) {
       console.error("Sync failed:", err);
     } finally {
       setSyncing(false);
+    }
+  }
+
+  // Re-run cognify for the current dataset (used by both the "outdated" and
+  // "failed" banners). onError restores the pre-rebuild banner state.
+  async function rebuildGraph(onError: () => void): Promise<void> {
+    if (!cogniInstance) return;
+    setGraphOutdated(false);
+    setDatasetStatus("processing");
+    try {
+      await cognifyDataset({ id: datasetId, name: datasetName, data: [], status: "processing" }, cogniInstance, getCognifyOptions());
+      trackEvent({ pageName: "Dataset Detail", eventName: "dataset_recognified", additionalProperties: { dataset_id: datasetId } });
+      clearDatasetOutdated(cogniInstance, datasetId).catch((err) =>
+        captureException(err, { context: "dataset-detail.clear-outdated-flag", datasetId }));
+      // Force an immediate status re-fetch so the shared poller picks up the
+      // new in-progress state right away instead of waiting for the next tick.
+      refetchStatuses();
+    } catch (err) {
+      console.error("Re-cognify failed:", err);
+      notifications.show({ title: "Rebuild failed", message: err instanceof Error ? err.message : String(err), color: "red" });
+      onError();
     }
   }
 
@@ -663,7 +652,7 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
     try {
       await deleteDataset(datasetId, cogniInstance);
       trackEvent({ pageName: "Dataset Detail", eventName: "dataset_deleted", additionalProperties: { dataset_id: datasetId } });
-      window.location.href = "/datasets";
+      router.push("/datasets");
     } catch (err) {
       console.error("Delete brain failed:", err);
       setDeleting(false);
@@ -674,7 +663,7 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
   const filtered = search ? files.filter((f) => f.name.toLowerCase().includes(search.toLowerCase())) : files;
 
   if (loading || isInitializing) {
-    return <><TrackPageView page="Dataset Detail" additionalProperties={{ dataset_id: datasetId }} /><div style={{ padding: 32, display: "flex", alignItems: "center", justifyContent: "center", height: "100%" }}><span style={{ fontSize: 14, color: "rgba(237,236,234,0.55)" }}>Loading files...</span></div></>;
+    return <><TrackPageView page="Dataset Detail" additionalProperties={{ dataset_id: datasetId }} /><PageLoading name="Files" /></>;
   }
 
   return (
@@ -732,7 +721,11 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
               className="cursor-pointer hover:bg-white/10"
               style={{ background: "rgba(255,255,255,0.06)", backdropFilter: "blur(12px)", color: "rgba(237,236,234,0.7)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, padding: "8px 16px", fontSize: 13, fontWeight: 500, display: "flex", alignItems: "center", gap: 6 }}
             >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(237,236,234,0.7)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={syncing ? { animation: "spin 1s linear infinite" } : undefined}><path d="M21 2v6h-6" /><path d="M3 12a9 9 0 0115.36-6.36L21 8" /><path d="M3 22v-6h6" /><path d="M21 12a9 9 0 01-15.36 6.36L3 16" /></svg>
+              {syncing ? (
+                <Loader size={14} color="rgba(237,236,234,0.7)" />
+              ) : (
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(237,236,234,0.7)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 2v6h-6" /><path d="M3 12a9 9 0 0115.36-6.36L21 8" /><path d="M3 22v-6h6" /><path d="M21 12a9 9 0 01-15.36 6.36L3 16" /></svg>
+              )}
               {syncing ? "Syncing..." : "Sync"}
             </button>
           )}
@@ -756,12 +749,16 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
           </button>
           <button
             onClick={() => fileInputRef.current?.click()}
-            disabled={uploading}
+            disabled={isUploading}
             className="cursor-pointer hover:bg-[#5A0ED6]"
             style={{ background: "#6510F4", color: "#fff", border: "none", borderRadius: 6, padding: "8px 16px", fontSize: 13, fontWeight: 500, display: "flex", alignItems: "center", gap: 6 }}
           >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" /></svg>
-          {uploading ? "Uploading..." : "Upload files"}
+          {isUploading ? (
+            <Loader size={14} color="#fff" />
+          ) : (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" /></svg>
+          )}
+          {isUploading ? (uploadStage === "processing" ? "Building knowledge graph..." : "Uploading...") : "Upload files"}
           </button>
         </div>
       </div>
@@ -778,216 +775,82 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
 
       {/* Delete confirmation modal */}
       {showDeleteConfirm && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)", WebkitBackdropFilter: "blur(4px)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={() => setShowDeleteConfirm(false)}>
-          <div onClick={(e) => e.stopPropagation()} style={{ background: "rgba(15,15,15,0.92)", backdropFilter: "blur(16px)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: 24, width: 420, display: "flex", flexDirection: "column", gap: 16, boxShadow: "0 16px 48px rgba(0,0,0,0.12)" }}>
-            <h2 style={{ fontSize: 18, fontWeight: 700, color: "#EDECEA", margin: 0 }}>Delete brain</h2>
-            <p style={{ fontSize: 13, color: "rgba(237,236,234,0.55)", margin: 0 }}>
-              Are you sure you want to delete <strong>{datasetName}</strong>? This will permanently remove the dataset and all its files. This action cannot be undone.
-            </p>
-            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-              <button onClick={() => setShowDeleteConfirm(false)} className="cursor-pointer" style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "8px 16px", fontSize: 13, fontWeight: 500, color: "rgba(237,236,234,0.7)", fontFamily: "inherit" }}>Cancel</button>
-              <button onClick={handleDeleteDataset} disabled={deleting} className="cursor-pointer" style={{ background: "#EF4444", border: "none", borderRadius: 8, padding: "8px 16px", fontSize: 13, fontWeight: 500, color: "#fff", fontFamily: "inherit" }}>
-                {deleting ? "Deleting..." : "Delete"}
-              </button>
-            </div>
-          </div>
-        </div>
+        <DeleteConfirmModal
+          title="Delete brain"
+          message={<>Are you sure you want to delete <strong>{datasetName}</strong>? This will permanently remove the dataset and all its files. This action cannot be undone.</>}
+          onConfirm={handleDeleteDataset}
+          onCancel={() => setShowDeleteConfirm(false)}
+          busy={deleting}
+        />
       )}
 
       {/* Create graph model modal */}
       {showCreateModelModal && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)", WebkitBackdropFilter: "blur(4px)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={() => !inferring && setShowCreateModelModal(false)}>
-          <div onClick={(e) => e.stopPropagation()} style={{ background: "rgba(15,15,15,0.92)", backdropFilter: "blur(16px)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: 24, width: 440, display: "flex", flexDirection: "column", gap: 16, boxShadow: "0 16px 48px rgba(0,0,0,0.12)" }}>
-            <h2 style={{ fontSize: 18, fontWeight: 700, color: "#EDECEA", margin: 0 }}>Create Graph Model</h2>
-            {inferring ? (
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12, padding: "24px 0" }}>
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#6510F4" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ animation: "spin 1s linear infinite" }}><path d="M21 12a9 9 0 11-6.219-8.56" /></svg>
-                <span style={{ fontSize: 14, color: "#6510F4", fontWeight: 500 }}>Inferring schema from your data...</span>
-                <span style={{ fontSize: 12, color: "rgba(237,236,234,0.55)" }}>This may take a moment</span>
-              </div>
-            ) : (
-              <>
-                <p style={{ fontSize: 13, color: "rgba(237,236,234,0.55)", margin: 0, lineHeight: "20px" }}>
-                  Would you like to infer a graph model from your existing data? Cognee will analyze your files and suggest entity types and relationships.
-                </p>
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  <button
-                    onClick={() => handleCreateModel(true)}
-                    disabled={files.length === 0}
-                    className="cursor-pointer hover:bg-white/10"
-                    style={{ display: "flex", alignItems: "center", gap: 12, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "14px 16px", textAlign: "left", fontFamily: "inherit", opacity: files.length === 0 ? 0.5 : 1 }}
-                  >
-                    <div style={{ width: 36, height: 36, background: "rgba(188,155,255,0.20)", border: "1px solid rgba(188,155,255,0.35)", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#6510F4" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>
-                    </div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                      <span style={{ fontSize: 14, fontWeight: 500, color: "#EDECEA" }}>Infer from data</span>
-                      <span style={{ fontSize: 12, color: "rgba(237,236,234,0.55)" }}>
-                        {files.length === 0 ? "No files in this brain yet" : `Analyze ${files.length} file${files.length !== 1 ? "s" : ""} to suggest a schema`}
-                      </span>
-                    </div>
-                  </button>
-                  <button
-                    onClick={() => handleCreateModel(false)}
-                    className="cursor-pointer hover:bg-white/10"
-                    style={{ display: "flex", alignItems: "center", gap: 12, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "14px 16px", textAlign: "left", fontFamily: "inherit" }}
-                  >
-                    <div style={{ width: 36, height: 36, background: "rgba(255,255,255,0.06)", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="rgba(237,236,234,0.55)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
-                    </div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                      <span style={{ fontSize: 14, fontWeight: 500, color: "#EDECEA" }}>Start blank</span>
-                      <span style={{ fontSize: 12, color: "rgba(237,236,234,0.55)" }}>Define entity types and relationships manually</span>
-                    </div>
-                  </button>
-                </div>
-                <button
-                  onClick={() => setShowCreateModelModal(false)}
-                  className="cursor-pointer"
-                  style={{ background: "none", border: "none", fontSize: 13, color: "rgba(237,236,234,0.55)", fontFamily: "inherit", padding: "4px 0" }}
-                >
-                  Cancel
-                </button>
-              </>
-            )}
-          </div>
-        </div>
+        <CreateModelModal
+          inferring={inferring}
+          filesCount={files.length}
+          onInfer={() => handleCreateModel(true)}
+          onBlank={() => handleCreateModel(false)}
+          onCancel={() => setShowCreateModelModal(false)}
+        />
       )}
 
       {/* Create custom prompt modal */}
       {showCreatePromptModal && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)", WebkitBackdropFilter: "blur(4px)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={() => !inferringPrompt && setShowCreatePromptModal(false)}>
-          <div onClick={(e) => e.stopPropagation()} style={{ background: "rgba(15,15,15,0.92)", backdropFilter: "blur(16px)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: 24, width: 440, display: "flex", flexDirection: "column", gap: 16, boxShadow: "0 16px 48px rgba(0,0,0,0.12)" }}>
-            <h2 style={{ fontSize: 18, fontWeight: 700, color: "#EDECEA", margin: 0 }}>Create Custom Prompt</h2>
-            {inferringPrompt ? (
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12, padding: "24px 0" }}>
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#6510F4" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ animation: "spin 1s linear infinite" }}><path d="M21 12a9 9 0 11-6.219-8.56" /></svg>
-                <span style={{ fontSize: 14, color: "#6510F4", fontWeight: 500 }}>Generating prompt from &ldquo;{graphModels.find((m) => m.id === selectedModelId)?.name ?? "graph model"}&rdquo;...</span>
-                <span style={{ fontSize: 12, color: "rgba(237,236,234,0.55)" }}>This may take a moment</span>
-              </div>
-            ) : (
-              <>
-                <p style={{ fontSize: 13, color: "rgba(237,236,234,0.55)", margin: 0, lineHeight: "20px" }}>
-                  A custom prompt guides how Cognee extracts entities and relationships from your data.
-                </p>
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  <button
-                    onClick={handleInferPrompt}
-                    disabled={!selectedModelId}
-                    className="cursor-pointer hover:bg-white/10"
-                    style={{ display: "flex", alignItems: "center", gap: 12, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "14px 16px", textAlign: "left", fontFamily: "inherit", opacity: !selectedModelId ? 0.5 : 1 }}
-                  >
-                    <div style={{ width: 36, height: 36, background: "rgba(188,155,255,0.20)", border: "1px solid rgba(188,155,255,0.35)", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#6510F4" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>
-                    </div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                      <span style={{ fontSize: 14, fontWeight: 500, color: "#EDECEA" }}>Generate from graph model</span>
-                      <span style={{ fontSize: 12, color: "rgba(237,236,234,0.55)" }}>
-                        {!selectedModelId
-                          ? "Select a graph model first"
-                          : `Using "${graphModels.find((m) => m.id === selectedModelId)?.name ?? "Unknown"}"`}
-                      </span>
-                    </div>
-                  </button>
-                  <button
-                    onClick={handleStartBlankPrompt}
-                    className="cursor-pointer hover:bg-white/10"
-                    style={{ display: "flex", alignItems: "center", gap: 12, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "14px 16px", textAlign: "left", fontFamily: "inherit" }}
-                  >
-                    <div style={{ width: 36, height: 36, background: "rgba(255,255,255,0.06)", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="rgba(237,236,234,0.55)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
-                    </div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                      <span style={{ fontSize: 14, fontWeight: 500, color: "#EDECEA" }}>Start blank</span>
-                      <span style={{ fontSize: 12, color: "rgba(237,236,234,0.55)" }}>Write your own extraction prompt</span>
-                    </div>
-                  </button>
-                </div>
-                <button
-                  onClick={() => setShowCreatePromptModal(false)}
-                  className="cursor-pointer"
-                  style={{ background: "none", border: "none", fontSize: 13, color: "rgba(237,236,234,0.55)", fontFamily: "inherit", padding: "4px 0" }}
-                >
-                  Cancel
-                </button>
-              </>
-            )}
-          </div>
-        </div>
+        <CreatePromptModal
+          inferringPrompt={inferringPrompt}
+          modelName={graphModels.find((m) => m.id === selectedModelId)?.name ?? null}
+          onGenerate={handleInferPrompt}
+          onBlank={handleStartBlankPrompt}
+          onCancel={() => setShowCreatePromptModal(false)}
+        />
       )}
 
       {/* Prompt editor modal */}
       {showPromptEditor && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)", WebkitBackdropFilter: "blur(4px)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={() => !savingPrompt && setShowPromptEditor(false)}>
-          <div onClick={(e) => e.stopPropagation()} style={{ background: "rgba(15,15,15,0.92)", backdropFilter: "blur(16px)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: 24, width: 600, maxHeight: "80vh", display: "flex", flexDirection: "column", gap: 16, boxShadow: "0 16px 48px rgba(0,0,0,0.12)" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <h2 style={{ fontSize: 18, fontWeight: 700, color: "#EDECEA", margin: 0 }}>Edit Prompt</h2>
-              <button onClick={() => setShowPromptEditor(false)} className="cursor-pointer" style={{ background: "none", border: "none", color: "rgba(237,236,234,0.35)", fontSize: 18 }}>&#10005;</button>
-            </div>
+        <PromptEditorModal
+          name={editingPromptName}
+          text={editingPromptText}
+          saving={savingPrompt}
+          onNameChange={setEditingPromptName}
+          onTextChange={setEditingPromptText}
+          onSave={handleSavePrompt}
+          onClose={() => setShowPromptEditor(false)}
+          onDelete={() => setConfirmDeletePrompt(true)}
+        />
+      )}
 
-            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              <label style={{ fontSize: 12, fontWeight: 700, color: "rgba(237,236,234,0.55)", textTransform: "uppercase", letterSpacing: 0.3 }}>Name</label>
-              <input
-                type="text"
-                value={editingPromptName}
-                onChange={(e) => setEditingPromptName(e.target.value)}
-                placeholder="Prompt name"
-                style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 8, padding: "8px 12px", fontSize: 14, fontFamily: "inherit", color: "#EDECEA", outline: "none" }}
-              />
-            </div>
+      {/* Delete prompt confirmation modal */}
+      {confirmDeletePrompt && (
+        <DeleteConfirmModal
+          title="Delete prompt"
+          message={<>Are you sure you want to delete <strong>{editingPromptName.trim() || "this prompt"}</strong>? This action cannot be undone.</>}
+          onConfirm={handleConfirmDeletePrompt}
+          onCancel={() => setConfirmDeletePrompt(false)}
+          busy={deletingPrompt}
+        />
+      )}
 
-            <div style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1, minHeight: 0 }}>
-              <label style={{ fontSize: 12, fontWeight: 700, color: "rgba(237,236,234,0.55)", textTransform: "uppercase", letterSpacing: 0.3 }}>Prompt</label>
-              <textarea
-                value={editingPromptText}
-                onChange={(e) => setEditingPromptText(e.target.value)}
-                placeholder="Write your extraction prompt here. This prompt will be used by Cognee when extracting entities and relationships from your data.&#10;&#10;Example: Extract all companies, people, and their relationships from the text. Focus on ownership, employment, and partnership relations."
-                style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 8, padding: "10px 12px", fontSize: 13, color: "#EDECEA", outline: "none", resize: "vertical", minHeight: 200, maxHeight: 400, lineHeight: "20px" }}
-              />
-            </div>
+      {/* Delete ontology confirmation modal */}
+      {confirmDeleteOntologyKey && (
+        <DeleteConfirmModal
+          title="Delete ontology"
+          message={<>Are you sure you want to delete <strong>{confirmDeleteOntologyKey}</strong>? This action cannot be undone.</>}
+          onConfirm={() => handleDeleteOntology(confirmDeleteOntologyKey)}
+          onCancel={() => setConfirmDeleteOntologyKey(null)}
+          busy={deletingOntology}
+        />
+      )}
 
-            <div style={{ display: "flex", gap: 8, justifyContent: "space-between" }}>
-              <button
-                onClick={async () => {
-                  const name = editingPromptName.trim();
-                  if (!name || !cogniInstance) return;
-                  if (!window.confirm(`Delete prompt "${name}"?`)) return;
-                  try {
-                    await deleteCustomPrompt(cogniInstance, name);
-                    setCustomPrompts((prev) => { const next = { ...prev }; delete next[name]; return next; });
-                    if (selectedPromptName === name) setSelectedPromptName(null);
-                    setShowPromptEditor(false);
-                    notifications.show({ title: "Prompt deleted", message: `"${name}" removed.`, color: "green", autoClose: 4000 });
-                  } catch (err) {
-                    notifications.show({ title: "Delete failed", message: err instanceof Error ? err.message : String(err), color: "red" });
-                  }
-                }}
-                className="cursor-pointer hover:opacity-100"
-                style={{ background: "none", border: "none", padding: 4, opacity: 0.5, transition: "opacity 150ms", display: "flex", alignItems: "center", justifyContent: "center" }}
-                title="Delete prompt"
-              >
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 4h10M6 4V3h4v1M5 4v8.5a.5.5 0 00.5.5h5a.5.5 0 00.5-.5V4" stroke="#EF4444" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" /></svg>
-              </button>
-              <div style={{ display: "flex", gap: 8 }}>
-                <button
-                  onClick={() => setShowPromptEditor(false)}
-                  className="cursor-pointer"
-                  style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "8px 16px", fontSize: 13, fontWeight: 500, color: "rgba(237,236,234,0.7)", fontFamily: "inherit" }}
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleSavePrompt}
-                  disabled={savingPrompt}
-                  className="cursor-pointer"
-                  style={{ background: "#6510F4", border: "none", borderRadius: 8, padding: "8px 16px", fontSize: 13, fontWeight: 500, color: "#fff", fontFamily: "inherit" }}
-                >
-                  {savingPrompt ? "Saving..." : "Save prompt"}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+      {/* Delete file confirmation modal */}
+      {deleteFileTarget && (
+        <DeleteConfirmModal
+          title="Delete file"
+          message={<>Are you sure you want to delete <strong>{decodeFilename(deleteFileTarget.name)}</strong>? This action cannot be undone.</>}
+          onConfirm={() => handleDelete(deleteFileTarget.id)}
+          onCancel={() => setDeleteFileTarget(null)}
+          busy={deletingFileId === deleteFileTarget.id}
+        />
       )}
 
       {/* Search */}
@@ -1002,220 +865,30 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
       </div>
 
       {/* Memory customization */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        <span style={{ fontSize: 12, fontWeight: 700, color: "rgba(237,236,234,0.35)", letterSpacing: 0.3, textTransform: "uppercase" }}>Memory customization</span>
-        <div style={{ display: "flex", gap: 16 }}>
-          {/* Graph model dropdown */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <span style={{ fontSize: 11, fontWeight: 700, color: "rgba(237,236,234,0.55)", letterSpacing: 0.2, display: "flex", alignItems: "center", gap: 4 }}>Graph Model <Tooltip label="Define entity types and relationships to control how Cognee structures your knowledge graph." withArrow multiline w={240} position="top"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0 }}><circle cx="8" cy="8" r="7" stroke="#A1A1AA" strokeWidth="1.5" /><text x="8" y="12" textAnchor="middle" fontSize="10" fontWeight="700" fill="#A1A1AA">i</text></svg></Tooltip></span>
-          <div ref={modelDropdownRef} style={{ position: "relative" }}>
-            <button
-              onClick={() => setModelDropdownOpen((v) => !v)}
-              className="cursor-pointer hover:bg-white/10"
-              style={{ background: "rgba(255,255,255,0.06)", backdropFilter: "blur(12px)", color: "rgba(237,236,234,0.7)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, padding: "8px 16px", fontSize: 13, fontWeight: 500, display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(237,236,234,0.7)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="6" cy="6" r="3" /><circle cx="18" cy="6" r="3" /><circle cx="12" cy="18" r="3" /><line x1="8.5" y1="7.5" x2="10.5" y2="16" /><line x1="15.5" y1="7.5" x2="13.5" y2="16" /></svg>
-              {selectedModelId ? (graphModels.find((m) => m.id === selectedModelId)?.name ?? "Automatic") : "Automatic"}
-              <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2.5 4L5 6.5L7.5 4" stroke="rgba(237,236,234,0.55)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
-            </button>
-            {modelDropdownOpen && (
-              <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, background: "#1a1a1a", border: "1px solid rgba(255,255,255,0.08)", backdropFilter: "blur(16px)", borderRadius: 8, boxShadow: "0 8px 24px rgba(0,0,0,0.4)", minWidth: 220, zIndex: 50, overflow: "hidden" }}>
-                <div style={{ padding: "6px 10px 4px", fontSize: 11, fontWeight: 700, color: "rgba(237,236,234,0.35)", letterSpacing: 0.3, textTransform: "uppercase" }}>Graph Model</div>
-                <button onClick={() => handleSelectModel(null)} className="cursor-pointer hover:bg-white/10" style={{ width: "100%", background: "none", border: "none", padding: "8px 12px", fontSize: 13, color: "#EDECEA", display: "flex", alignItems: "center", gap: 8, textAlign: "left", fontFamily: "inherit" }}>
-                  <span style={{ width: 16, textAlign: "center", fontSize: 13, color: "#BC9BFF" }}>{selectedModelId === null ? "✓" : ""}</span>
-                  <span style={{ flex: 1 }}>Automatic</span>
-                  <span style={{ fontSize: 11, color: "rgba(237,236,234,0.35)" }}>Default</span>
-                </button>
-                {graphModels.length > 0 && <div style={{ height: 1, background: "rgba(255,255,255,0.08)", margin: "4px 0" }} />}
-                {graphModels.map((model) => (
-                  <div key={model.id} className="hover:bg-white/10" style={{ display: "flex", alignItems: "center", padding: "8px 12px", gap: 8 }}>
-                    <button onClick={() => handleSelectModel(model.id)} className="cursor-pointer" style={{ flex: 1, background: "none", border: "none", padding: 0, fontSize: 13, color: "#EDECEA", display: "flex", alignItems: "center", gap: 8, textAlign: "left", fontFamily: "inherit" }}>
-                      <span style={{ width: 16, textAlign: "center", fontSize: 13, color: "#BC9BFF", flexShrink: 0 }}>{selectedModelId === model.id ? "✓" : ""}</span>
-                      <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{model.name}</span>
-                    </button>
-                    <button onClick={(e) => { e.stopPropagation(); setModelDropdownOpen(false); router.push(`/graph-models/${model.id}`); }} className="cursor-pointer hover:opacity-100" style={{ background: "none", border: "none", padding: 2, opacity: 0.4, transition: "opacity 150ms", flexShrink: 0 }} title="Edit model">
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="rgba(237,236,234,0.7)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
-                    </button>
-                  </div>
-                ))}
-                <div style={{ height: 1, background: "rgba(255,255,255,0.08)", margin: "4px 0" }} />
-                <button onClick={() => { setModelDropdownOpen(false); setShowCreateModelModal(true); }} className="cursor-pointer hover:bg-white/10" style={{ width: "100%", background: "none", border: "none", padding: "8px 12px", fontSize: 13, color: "#6510F4", fontWeight: 500, display: "flex", alignItems: "center", gap: 8, textAlign: "left", fontFamily: "inherit" }}>
-                  <span style={{ width: 16, textAlign: "center" }}>+</span>
-                  <span>Create new</span>
-                </button>
-              </div>
-            )}
-          </div>
-          </div>
-          {/* Custom prompt dropdown */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <span style={{ fontSize: 11, fontWeight: 700, color: "rgba(237,236,234,0.55)", letterSpacing: 0.2, display: "flex", alignItems: "center", gap: 4 }}>Prompt <Tooltip label="Custom instructions that guide how Cognee extracts entities and relationships from your data." withArrow multiline w={240} position="top"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0 }}><circle cx="8" cy="8" r="7" stroke="#A1A1AA" strokeWidth="1.5" /><text x="8" y="12" textAnchor="middle" fontSize="10" fontWeight="700" fill="#A1A1AA">i</text></svg></Tooltip></span>
-          <div ref={promptDropdownRef} style={{ position: "relative" }}>
-            <button
-              onClick={() => setPromptDropdownOpen((v) => !v)}
-              className="cursor-pointer hover:bg-white/10"
-              style={{ background: "rgba(255,255,255,0.06)", backdropFilter: "blur(12px)", color: "rgba(237,236,234,0.7)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, padding: "8px 16px", fontSize: 13, fontWeight: 500, display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(237,236,234,0.7)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" /></svg>
-              {selectedPromptName ?? "Automatic"}
-              <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2.5 4L5 6.5L7.5 4" stroke="rgba(237,236,234,0.55)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
-            </button>
-            {promptDropdownOpen && (
-              <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, background: "#1a1a1a", border: "1px solid rgba(255,255,255,0.08)", backdropFilter: "blur(16px)", borderRadius: 8, boxShadow: "0 8px 24px rgba(0,0,0,0.4)", minWidth: 220, zIndex: 50, overflow: "hidden" }}>
-                <div style={{ padding: "6px 10px 4px", fontSize: 11, fontWeight: 700, color: "rgba(237,236,234,0.35)", letterSpacing: 0.3, textTransform: "uppercase" }}>Custom Prompt</div>
-                <button onClick={() => handleSelectPrompt(null)} className="cursor-pointer hover:bg-white/10" style={{ width: "100%", background: "none", border: "none", padding: "8px 12px", fontSize: 13, color: "#EDECEA", display: "flex", alignItems: "center", gap: 8, textAlign: "left", fontFamily: "inherit" }}>
-                  <span style={{ width: 16, textAlign: "center", fontSize: 13, color: "#BC9BFF" }}>{selectedPromptName === null ? "✓" : ""}</span>
-                  <span style={{ flex: 1 }}>Automatic</span>
-                  <span style={{ fontSize: 11, color: "rgba(237,236,234,0.35)" }}>Default</span>
-                </button>
-                {Object.keys(customPrompts).length > 0 && <div style={{ height: 1, background: "rgba(255,255,255,0.08)", margin: "4px 0" }} />}
-                {Object.entries(customPrompts).map(([name, text]) => (
-                  <div key={name} className="hover:bg-white/10" style={{ display: "flex", alignItems: "center", padding: "8px 12px", gap: 8 }}>
-                    <button onClick={() => handleSelectPrompt(name)} className="cursor-pointer" style={{ flex: 1, background: "none", border: "none", padding: 0, fontSize: 13, color: "#EDECEA", display: "flex", alignItems: "center", gap: 8, textAlign: "left", fontFamily: "inherit" }}>
-                      <span style={{ width: 16, textAlign: "center", fontSize: 13, color: "#BC9BFF", flexShrink: 0 }}>{selectedPromptName === name ? "✓" : ""}</span>
-                      <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</span>
-                    </button>
-                    <button onClick={(e) => { e.stopPropagation(); setPromptDropdownOpen(false); setEditingPromptName(name); setEditingPromptText(text); setShowPromptEditor(true); }} className="cursor-pointer hover:opacity-100" style={{ background: "none", border: "none", padding: 2, opacity: 0.4, transition: "opacity 150ms", flexShrink: 0 }} title="Edit prompt">
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="rgba(237,236,234,0.7)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
-                    </button>
-                  </div>
-                ))}
-                <div style={{ height: 1, background: "rgba(255,255,255,0.08)", margin: "4px 0" }} />
-                <button onClick={() => { setPromptDropdownOpen(false); setShowCreatePromptModal(true); }} className="cursor-pointer hover:bg-white/10" style={{ width: "100%", background: "none", border: "none", padding: "8px 12px", fontSize: 13, color: "#6510F4", fontWeight: 500, display: "flex", alignItems: "center", gap: 8, textAlign: "left", fontFamily: "inherit" }}>
-                  <span style={{ width: 16, textAlign: "center" }}>+</span>
-                  <span>Create new</span>
-                </button>
-              </div>
-            )}
-          </div>
-          </div>
-          {/* Ontology dropdown */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <span style={{ fontSize: 11, fontWeight: 700, color: "rgba(237,236,234,0.55)", letterSpacing: 0.2, display: "flex", alignItems: "center", gap: 4 }}>Ontology <Tooltip label="Upload a formal ontology (OWL/RDF) to enforce domain-specific vocabulary and relationships in your knowledge graph." withArrow multiline w={240} position="top"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0 }}><circle cx="8" cy="8" r="7" stroke="#A1A1AA" strokeWidth="1.5" /><text x="8" y="12" textAnchor="middle" fontSize="10" fontWeight="700" fill="#A1A1AA">i</text></svg></Tooltip></span>
-          <div ref={ontologyDropdownRef} style={{ position: "relative" }}>
-            <button
-              onClick={() => setOntologyDropdownOpen((v) => !v)}
-              className="cursor-pointer hover:bg-white/10"
-              style={{ background: "rgba(255,255,255,0.06)", backdropFilter: "blur(12px)", color: "rgba(237,236,234,0.7)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, padding: "8px 16px", fontSize: 13, fontWeight: 500, display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(237,236,234,0.7)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 19.5A2.5 2.5 0 016.5 17H20" /><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z" /></svg>
-              {selectedOntologyKey ?? "Automatic"}
-              <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2.5 4L5 6.5L7.5 4" stroke="rgba(237,236,234,0.55)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
-            </button>
-            {ontologyDropdownOpen && (
-              <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, background: "#1a1a1a", border: "1px solid rgba(255,255,255,0.08)", backdropFilter: "blur(16px)", borderRadius: 8, boxShadow: "0 8px 24px rgba(0,0,0,0.4)", width: 260, zIndex: 50, overflow: "hidden" }}>
-                <div style={{ padding: "6px 10px 4px", fontSize: 11, fontWeight: 700, color: "rgba(237,236,234,0.35)", letterSpacing: 0.3, textTransform: "uppercase" }}>Ontology</div>
-                <button onClick={() => handleSelectOntology(null)} className="cursor-pointer hover:bg-white/10" style={{ width: "100%", background: "none", border: "none", padding: "8px 12px", fontSize: 13, color: "#EDECEA", display: "flex", alignItems: "center", gap: 8, textAlign: "left", fontFamily: "inherit" }}>
-                  <span style={{ width: 16, textAlign: "center", fontSize: 13, color: "#BC9BFF", flexShrink: 0 }}>{selectedOntologyKey === null ? "✓" : ""}</span>
-                  <span>Automatic</span>
-                </button>
-                {Object.keys(ontologies).length > 0 && <div style={{ height: 1, background: "rgba(255,255,255,0.08)", margin: "4px 0" }} />}
-                {Object.entries(ontologies).map(([key, meta]) => (
-                  <div key={key} className="hover:bg-white/10" style={{ display: "flex", alignItems: "center", padding: "8px 12px", gap: 8 }}>
-                    <button onClick={() => handleSelectOntology(key)} className="cursor-pointer" style={{ flex: 1, minWidth: 0, background: "none", border: "none", padding: 0, fontSize: 13, color: "#EDECEA", display: "flex", alignItems: "center", gap: 8, textAlign: "left", fontFamily: "inherit" }}>
-                      <span style={{ width: 16, textAlign: "center", fontSize: 13, color: "#BC9BFF", flexShrink: 0 }}>{selectedOntologyKey === key ? "✓" : ""}</span>
-                      <span title={meta.filename} style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{meta.filename}</span>
-                    </button>
-                    <button onClick={async (e) => {
-                      e.stopPropagation();
-                      if (!cogniInstance) return;
-                      try {
-                        await deleteOntology(cogniInstance, key);
-                        setOntologies((prev) => { const next = { ...prev }; delete next[key]; return next; });
-                        if (selectedOntologyKey === key) setSelectedOntologyKey(null);
-                        notifications.show({ title: "Ontology deleted", message: `"${key}" removed.`, color: "green", autoClose: 4000 });
-                      } catch (err) {
-                        notifications.show({ title: "Delete failed", message: err instanceof Error ? err.message : String(err), color: "red" });
-                      }
-                    }} className="cursor-pointer hover:opacity-100" style={{ background: "none", border: "none", padding: 4, opacity: 0.5, transition: "opacity 150ms", flexShrink: 0, minWidth: 20, minHeight: 20, display: "flex", alignItems: "center", justifyContent: "center" }} title="Delete ontology">
-                      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0 }}><path d="M3 4h10M6 4V3h4v1M5 4v8.5a.5.5 0 00.5.5h5a.5.5 0 00.5-.5V4" stroke="#EF4444" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                    </button>
-                  </div>
-                ))}
-                <div style={{ height: 1, background: "rgba(255,255,255,0.08)", margin: "4px 0" }} />
-                <button onClick={() => { setOntologyDropdownOpen(false); setShowUploadOntologyModal(true); }} className="cursor-pointer hover:bg-white/10" style={{ width: "100%", background: "none", border: "none", padding: "8px 12px", fontSize: 13, color: "#6510F4", fontWeight: 500, display: "flex", alignItems: "center", gap: 8, textAlign: "left", fontFamily: "inherit" }}>
-                  <span style={{ width: 16, textAlign: "center", flexShrink: 0 }}>+</span>
-                  <span>Upload new</span>
-                </button>
-              </div>
-            )}
-          </div>
-          </div>
-        </div>
-      </div>
+      <MemoryCustomizationBar
+        graphModels={graphModels}
+        selectedModelId={selectedModelId}
+        onSelectModel={handleSelectModel}
+        onEditModel={(id) => router.push(`/graph-models/${id}`)}
+        onCreateModel={() => setShowCreateModelModal(true)}
+        customPrompts={customPrompts}
+        selectedPromptName={selectedPromptName}
+        onSelectPrompt={handleSelectPrompt}
+        onEditPrompt={(name, text) => { setEditingPromptName(name); setEditingPromptText(text); setShowPromptEditor(true); }}
+        onCreatePrompt={() => setShowCreatePromptModal(true)}
+        ontologies={ontologies}
+        selectedOntologyKey={selectedOntologyKey}
+        onSelectOntology={handleSelectOntology}
+        onDeleteOntology={setConfirmDeleteOntologyKey}
+        onUploadOntology={() => setShowUploadOntologyModal(true)}
+      />
 
       {/* Upload ontology modal */}
       {showUploadOntologyModal && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)", WebkitBackdropFilter: "blur(4px)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={() => setShowUploadOntologyModal(false)}>
-          <div onClick={(e) => e.stopPropagation()} style={{ background: "rgba(15,15,15,0.92)", backdropFilter: "blur(16px)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: 24, width: 440, display: "flex", flexDirection: "column", gap: 16, boxShadow: "0 16px 48px rgba(0,0,0,0.12)" }}>
-            <h2 style={{ fontSize: 18, fontWeight: 700, color: "#EDECEA", margin: 0 }}>Upload Ontology</h2>
-            <p style={{ fontSize: 13, color: "rgba(237,236,234,0.55)", margin: 0, lineHeight: "20px" }}>
-              Upload an OWL ontology file to guide how Cognee structures your knowledge graph.
-            </p>
-            <form onSubmit={async (e) => {
-              e.preventDefault();
-              if (!cogniInstance) return;
-              const form = e.currentTarget;
-              const keyInput = form.elements.namedItem("ontologyKey") as HTMLInputElement;
-              const fileInput = form.elements.namedItem("ontologyFile") as HTMLInputElement;
-              const descInput = form.elements.namedItem("description") as HTMLInputElement;
-              const key = keyInput.value.trim();
-              const file = fileInput.files?.[0];
-              if (!key || !file) return;
-              const submitBtn = form.querySelector("button[type=submit]") as HTMLButtonElement;
-              submitBtn.disabled = true;
-              submitBtn.textContent = "Uploading...";
-              try {
-                await uploadOntology(cogniInstance, key, file, descInput.value.trim() || undefined);
-                const updated = await listOntologies(cogniInstance);
-                setOntologies(updated);
-                setSelectedOntologyKey(key);
-                setShowUploadOntologyModal(false);
-                if (cogniInstance) {
-                  assignOntologyToDataset(cogniInstance, datasetId, key).catch((err) => {
-                    captureException(err, { context: "dataset-detail.assign-ontology-after-upload", datasetId, key });
-                    notifications.show({
-                      title: "Ontology uploaded, but not assigned",
-                      message: `"${key}" was uploaded but couldn't be assigned to this dataset automatically. Assign it manually from the dropdown.`,
-                      color: "orange",
-                    });
-                  });
-                }
-                notifications.show({ title: "Ontology uploaded", message: `"${key}" is ready to use.`, color: "green", autoClose: 4000 });
-              } catch (err) {
-                notifications.show({ title: "Upload failed", message: err instanceof Error ? err.message : String(err), color: "red" });
-                submitBtn.disabled = false;
-                submitBtn.textContent = "Upload";
-              }
-            }}>
-              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  <label style={{ fontSize: 12, fontWeight: 700, color: "rgba(237,236,234,0.55)", textTransform: "uppercase", letterSpacing: 0.3 }}>Key</label>
-                  <input name="ontologyKey" type="text" required placeholder="e.g. biomedical-ontology" style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 8, padding: "8px 12px", fontSize: 14, fontFamily: "inherit", color: "#EDECEA", outline: "none" }} />
-                </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  <label style={{ fontSize: 12, fontWeight: 700, color: "rgba(237,236,234,0.55)", textTransform: "uppercase", letterSpacing: 0.3 }}>OWL File</label>
-                  <label className="cursor-pointer" style={{ display: "flex", alignItems: "center", gap: 8, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 8, padding: "8px 12px", fontSize: 13, fontFamily: "inherit", color: "rgba(237,236,234,0.55)" }}>
-                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 1v10M4 5l4-4 4 4" stroke="#A1A1AA" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" /><path d="M1 11v2.5A1.5 1.5 0 002.5 15h11a1.5 1.5 0 001.5-1.5V11" stroke="#A1A1AA" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                    <span data-file-label="true" style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Choose a .owl file…</span>
-                    <input name="ontologyFile" type="file" required accept=".owl" style={{ display: "none" }} onChange={(e) => {
-                      const label = e.currentTarget.parentElement?.querySelector("[data-file-label]");
-                      if (label) label.textContent = e.currentTarget.files?.[0]?.name ?? "Choose a .owl file…";
-                    }} />
-                  </label>
-                </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  <label style={{ fontSize: 12, fontWeight: 700, color: "rgba(237,236,234,0.55)", textTransform: "uppercase", letterSpacing: 0.3 }}>Description <span style={{ fontWeight: 400, textTransform: "none" }}>(optional)</span></label>
-                  <input name="description" type="text" placeholder="What does this ontology define?" style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 8, padding: "8px 12px", fontSize: 14, fontFamily: "inherit", color: "#EDECEA", outline: "none" }} />
-                </div>
-              </div>
-              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 8 }}>
-                <button type="button" onClick={() => setShowUploadOntologyModal(false)} className="cursor-pointer" style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "8px 16px", fontSize: 13, fontWeight: 500, color: "rgba(237,236,234,0.7)", fontFamily: "inherit" }}>Cancel</button>
-                <button type="submit" className="cursor-pointer" style={{ background: "#6510F4", border: "none", borderRadius: 8, padding: "8px 16px", fontSize: 13, fontWeight: 500, color: "#fff", fontFamily: "inherit" }}>Upload</button>
-              </div>
-            </form>
-          </div>
-        </div>
+        <UploadOntologyModal
+          onClose={() => setShowUploadOntologyModal(false)}
+          onSubmit={handleUploadOntology}
+        />
       )}
 
       {/* Outdated graph banner */}
@@ -1226,31 +899,28 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
             Knowledge graph is outdated. The graph model was changed since the last build.
           </span>
           <button
-            onClick={async () => {
-              if (!cogniInstance) return;
-              setGraphOutdated(false);
-              setDatasetStatus("processing");
-              try {
-                const cognifyPayload = getCognifyOptions();
-                const result = await cognifyDataset({ id: datasetId, name: datasetName, data: [], status: "processing" }, cogniInstance, cognifyPayload);
-                trackEvent({ pageName: "Dataset Detail", eventName: "dataset_recognified", additionalProperties: { dataset_id: datasetId } });
-                clearDatasetOutdated(cogniInstance, datasetId).catch((err) =>
-                  captureException(err, { context: "dataset-detail.clear-outdated-flag", datasetId }));
-                // Force an immediate status re-fetch so the shared poller picks up
-                // the new in-progress state right away instead of waiting for the
-                // next tick (it may have gone idle if the previous snapshot was terminal).
-                refetchStatuses();
-              } catch (err) {
-                console.error("Re-cognify failed:", err);
-                notifications.show({ title: "Rebuild failed", message: err instanceof Error ? err.message : String(err), color: "red" });
-                setGraphOutdated(true);
-                setDatasetStatus("outdated");
-              }
-            }}
+            onClick={() => rebuildGraph(() => { setGraphOutdated(true); setDatasetStatus("outdated"); })}
             className="cursor-pointer hover:bg-yellow-500/20"
             style={{ background: "rgba(245,158,11,0.2)", border: "1px solid rgba(245,158,11,0.35)", borderRadius: 6, padding: "6px 14px", fontSize: 13, fontWeight: 500, color: "#FBBF24", whiteSpace: "nowrap", fontFamily: "inherit" }}
           >
             Rebuild graph
+          </button>
+        </div>
+      )}
+
+      {/* Failed build banner */}
+      {datasetStatus === "failed" && !processing && (
+        <div style={{ background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 8, padding: "12px 16px", display: "flex", alignItems: "center", gap: 12 }}>
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0 }}><path d="M8 1L1 14h14L8 1z" fill="rgba(239,68,68,0.25)" stroke="#EF4444" strokeWidth="1" /><text x="8" y="12" textAnchor="middle" fontSize="9" fontWeight="700" fill="#F87171">!</text></svg>
+          <span style={{ flex: 1, fontSize: 13, color: "#F87171" }}>
+            Building the knowledge graph failed. Your files are still here — you can retry the build.
+          </span>
+          <button
+            onClick={() => rebuildGraph(() => setDatasetStatus("failed"))}
+            className="cursor-pointer hover:bg-red-500/20"
+            style={{ background: "rgba(239,68,68,0.2)", border: "1px solid rgba(239,68,68,0.35)", borderRadius: 6, padding: "6px 14px", fontSize: 13, fontWeight: 500, color: "#F87171", whiteSpace: "nowrap", fontFamily: "inherit" }}
+          >
+            Retry build
           </button>
         </div>
       )}
@@ -1268,60 +938,16 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
       )}
 
       {/* Files table */}
-      {filtered.length > 0 ? (
-        <div style={{ background: "rgba(255,255,255,0.06)", backdropFilter: "blur(12px)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, overflow: "hidden" }}>
-          <div style={{ display: "flex", alignItems: "center", background: "rgba(255,255,255,0.04)", borderBottom: "1px solid rgba(255,255,255,0.1)", padding: "12px 20px" }}>
-            <span style={{ flex: 1, fontSize: 12, fontWeight: 700, color: "rgba(237,236,234,0.55)" }}>Name</span>
-            <span style={{ width: 100, fontSize: 12, fontWeight: 700, color: "rgba(237,236,234,0.55)", flexShrink: 0 }}>Type</span>
-            <span style={{ width: 80, fontSize: 12, fontWeight: 700, color: "rgba(237,236,234,0.55)", flexShrink: 0 }}>Size</span>
-            <span style={{ width: 170, fontSize: 12, fontWeight: 700, color: "rgba(237,236,234,0.55)", flexShrink: 0 }}>Added</span>
-            <span style={{ width: 40, flexShrink: 0 }} />
-          </div>
-          {filtered.map((file, i) => {
-            const isMemory = isMemoryBlobName(file.name);
-            const memorySession = memorySessionIds[file.id];
-            const meta = isMemory
-              ? { fill: "rgba(188,155,255,0.20)", stroke: "#BC9BFF", text: "#BC9BFF", label: "MEM" }
-              : getExtMeta(file.name, file.extension);
-            const typeName = isMemory ? "Memory" : getTypeName(file.name, file.extension);
-            const displayName = isMemory
-              ? (memorySession ? `Memory · ${memorySession}` : "Memory")
-              : decodeURIComponent(file.name);
-            return (
-              <div
-                key={file.id}
-                className="hover:bg-white/10"
-                style={{ display: "flex", alignItems: "center", padding: "14px 20px", borderBottom: i < filtered.length - 1 ? "1px solid rgba(255,255,255,0.07)" : "none", transition: "background 150ms" }}
-              >
-                <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 10 }}>
-                  <FileIcon fill={meta.fill} stroke={meta.stroke} text={meta.text} label={meta.label} />
-                  <span style={{ fontSize: 13, fontWeight: 500, color: "#EDECEA" }}>{displayName}</span>
-                </div>
-                <span style={{ width: 100, fontSize: 13, color: "rgba(237,236,234,0.55)", flexShrink: 0 }}>{typeName}</span>
-                <span style={{ width: 80, fontSize: 13, color: "rgba(237,236,234,0.55)", flexShrink: 0 }}>—</span>
-                <span style={{ width: 170, fontSize: 13, color: "rgba(237,236,234,0.35)", flexShrink: 0 }}>{formatDate(file.createdAt)}</span>
-                <div style={{ width: 40, display: "flex", justifyContent: "flex-end", flexShrink: 0 }}>
-                  <button
-                    onClick={() => handleDelete(file.id)}
-                    className="cursor-pointer hover:opacity-100 rounded p-1"
-                    style={{ background: "none", border: "none", opacity: 0.5, transition: "opacity 150ms" }}
-                    onMouseEnter={(e) => { e.currentTarget.style.opacity = "1"; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.opacity = "0.5"; }}
-                    title="Delete file"
-                  >
-                    <TrashIcon />
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      ) : (
-        <div style={{ flex: 1, background: "rgba(255,255,255,0.06)", backdropFilter: "blur(12px)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12, padding: 48 }}>
-          <span style={{ fontSize: 15, color: "rgba(237,236,234,0.35)" }}>{search ? "No files match your search" : "No files yet"}</span>
-          <button onClick={() => fileInputRef.current?.click()} className="cursor-pointer hover:bg-[#5A0ED6]" style={{ background: "#6510F4", color: "#fff", border: "none", borderRadius: 8, padding: "8px 16px", fontSize: 13, fontWeight: 500 }}>Upload files</button>
-        </div>
-      )}
+      <FilesTable
+        files={filtered}
+        memorySessionIds={memorySessionIds}
+        search={search}
+        loadError={filesError}
+        onDelete={(id) => setDeleteFileTarget(filtered.find((f) => f.id === id) ?? null)}
+        onUploadClick={() => fileInputRef.current?.click()}
+        onRetry={loadFiles}
+        deletingId={deletingFileId}
+      />
 
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>

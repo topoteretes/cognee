@@ -8,6 +8,7 @@ import CogneeUser from "@/modules/users/CogneeUser";
 import isCloudEnvironment from "@/utils/isCloudEnvironment";
 
 import Image from "next/image";
+import Link from "next/link";
 import HelpMenu from "./HelpMenu";
 import ProfileMenu from "./ProfileMenu";
 import { useFilter } from "./FilterContext";
@@ -143,7 +144,12 @@ export default function TopBar() {
 
         {/* 2. Page name */}
         {isDatasetDetail ? (
-          <><Slash /><span style={{ fontSize: 14, fontWeight: 500, color: "rgba(237,236,234,0.7)" }}>Documents</span></>
+          <>
+            <Slash />
+            <Link href="/datasets" className="hover:opacity-70" style={{ fontSize: 14, fontWeight: 500, color: "rgba(237,236,234,0.55)" }}>Brain</Link>
+            <Slash />
+            <span style={{ fontSize: 14, fontWeight: 500, color: "rgba(237,236,234,0.7)" }}>Documents</span>
+          </>
         ) : basePath !== "/" && basePath !== "/dashboard" ? (
           <><Slash /><span style={{ fontSize: 14, fontWeight: 500, color: "rgba(237,236,234,0.7)" }}>{pageName}</span></>
         ) : null}
