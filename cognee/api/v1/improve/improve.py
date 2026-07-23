@@ -127,7 +127,18 @@ async def improve(
 
         client = get_remote_client()
         if client is not None:
-            return await client.improve(dataset, node_name=node_name, **kwargs)
+            if build_truth_subspace:
+                logger.warning(
+                    "build_truth_subspace is not supported by the remote improve API; ignoring."
+                )
+            return await client.improve(
+                dataset,
+                node_name=node_name,
+                session_ids=session_ids,
+                run_in_background=run_in_background,
+                build_global_context_index=build_global_context_index,
+                **kwargs,
+            )
 
         from cognee.modules.users.methods import get_default_user
 
