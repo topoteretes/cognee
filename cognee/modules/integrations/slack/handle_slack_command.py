@@ -1,6 +1,7 @@
 """Slash command handling for the Slack app.
 
-Only ``/cognee-ask`` is implemented today. ``/cognee-remember`` and
+``/cognee-ask`` and ``/cognee-link`` (per-member account linking — see
+handle_slack_link.py) are implemented today. ``/cognee-remember`` and
 ``/cognee-forget`` (async ``response_url`` pattern) are natural follow-ons
 once this integration has an owner to prioritize them.
 
@@ -18,6 +19,7 @@ from typing import Any
 from urllib.parse import parse_qs
 
 from cognee.modules.integrations.slack.handle_cognee_ask import handle_cognee_ask
+from cognee.modules.integrations.slack.handle_slack_link import handle_cognee_link
 from cognee.modules.integrations.slack.persistence import get_by_team, is_active
 
 
@@ -50,5 +52,8 @@ async def handle_slack_command(raw_body: bytes) -> dict[str, Any]:
 
     if command == "/cognee-ask":
         return await handle_cognee_ask(raw_body)
+
+    if command == "/cognee-link":
+        return await handle_cognee_link(raw_body)
 
     return _ephemeral(f"Command `{command}` is not yet supported.")

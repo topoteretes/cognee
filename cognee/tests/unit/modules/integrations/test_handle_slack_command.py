@@ -25,7 +25,9 @@ def _body(command="/cognee-ask", team_id="T123", channel_id="C1", text="hi"):
 
 
 def _credential(allowed_channel_ids=None):
-    metadata = {"allowed_channel_ids": allowed_channel_ids} if allowed_channel_ids is not None else {}
+    metadata = (
+        {"allowed_channel_ids": allowed_channel_ids} if allowed_channel_ids is not None else {}
+    )
     return SimpleNamespace(provider_metadata=metadata, status=STATUS_ACTIVE)
 
 
@@ -82,6 +84,18 @@ async def test_channel_on_allowlist_is_permitted():
         response = await handle_slack_command(_body(channel_id="C2"))
     ask.assert_awaited_once()
     assert response == {"ok": True}
+
+
+@pytest.mark.asyncio
+async def test_cognee_link_dispatches_to_its_handler():
+    credential = _credential(allowed_channel_ids=[])
+    with (
+        patch(f"{MODULE}.get_by_team", new=AsyncMock(return_value=credential)),
+        patch(f"{MODULE}.handle_cognee_link", new=AsyncMock(return_value={"linked": True})) as link,
+    ):
+        response = await handle_slack_command(_body(command="/cognee-link", text="some-api-key"))
+    link.assert_awaited_once()
+    assert response == {"linked": True}
 
 
 @pytest.mark.asyncio

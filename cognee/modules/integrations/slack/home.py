@@ -2,9 +2,11 @@
 
 Slack shows a blank Home tab until the app calls ``views.publish`` — this is
 what makes clicking Cognee in the sidebar show anything at all. The view is
-static/informational: Cognee has no Slack-user <-> cognee-user linking yet
-(that's CLO-240), so this can't be personalized per viewer, only explain how
-to use ``/cognee-ask``.
+static/informational (same content for every viewer) — it exists to answer
+the "what do I even do with this app, and what does it need from me?"
+question, since a new member has no other way to discover ``/cognee-link``
+before ever needing it (there is nothing prompting them to run it until
+they try ``/cognee-ask`` and get turned away — see handle_cognee_ask.py).
 """
 
 from typing import Any
@@ -32,7 +34,39 @@ def _build_home_view() -> dict[str, Any]:
                 "type": "section",
                 "text": {
                     "type": "mrkdwn",
-                    "text": "*Ask a question*\nType `/cognee-ask <your question>` in any connected channel.",
+                    "text": (
+                        "*1. Link your Cognee account*\n"
+                        "Every workspace member needs their own link before "
+                        '`/cognee-ask` or "Remember this" will use *their* '
+                        "memory instead of just the person who installed this app.\n"
+                        "Run `/cognee-link` — it replies privately with a link. Open it "
+                        "in a browser where you're already logged in to Cognee and "
+                        "click *Confirm*. Nothing to copy or paste."
+                    ),
+                },
+            },
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": (
+                        "*2. Ask a question*\n"
+                        "Type `/cognee-ask <your question>` in any connected "
+                        "channel. Nothing is posted publicly until you review "
+                        "the answer and choose *Share* — *Discard* drops it, "
+                        "visible to no one."
+                    ),
+                },
+            },
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": (
+                        "*3. Remember something*\n"
+                        "Hover any message → *More actions* → *Connect to "
+                        "apps* → *Remember this* to save it to your memory."
+                    ),
                 },
             },
             {

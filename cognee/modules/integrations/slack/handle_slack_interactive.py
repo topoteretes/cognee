@@ -6,11 +6,12 @@ the Events API, which POSTs raw JSON directly. Parsed here from the
 verified raw bytes, same reasoning as ``handle_slack_command``'s module
 docstring (a parsed-body parameter would break signature verification).
 
-Only the "Remember this" message shortcut is implemented today. Every
-interactive payload type this app doesn't act on (button clicks, modals,
-future shortcuts) acks empty rather than erroring — same reasoning as
-unhandled slash commands and events: erroring only earns a Slack retry,
-never a better outcome for a payload this app doesn't act on.
+Handles the "Remember this" message shortcut and the ``/cognee-ask`` answer
+review prompt's Share/Discard buttons (see handle_cognee_ask.py). Every
+other interactive payload type this app doesn't act on (other block
+actions, modals, future shortcuts) acks empty rather than erroring — same
+reasoning as unhandled slash commands and events: erroring only earns a
+Slack retry, never a better outcome for a payload this app doesn't act on.
 """
 
 import json
@@ -19,7 +20,17 @@ from typing import Any, Optional
 from urllib.parse import parse_qs
 
 from cognee.infrastructure.databases.exceptions import EntityNotFoundError
-from cognee.modules.integrations.slack.persistence import get_by_team, is_active
+from cognee.modules.integrations.slack.handle_cognee_ask import (
+    ASK_DISCARD_ACTION_ID,
+    ASK_SHARE_ACTION_ID,
+    handle_cognee_ask_discard,
+    handle_cognee_ask_share,
+)
+from cognee.modules.integrations.slack.persistence import (
+    get_by_team,
+    is_active,
+    resolve_owner_user_id,
+)
 from cognee.modules.integrations.slack.remember_message import remember_message
 from cognee.modules.integrations.slack.response_url import post_to_response_url
 
@@ -28,8 +39,11 @@ logger = logging.getLogger(__name__)
 REMEMBER_THIS_CALLBACK_ID = "remember_this"
 
 
-def _ephemeral(text: str) -> dict[str, Any]:
-    return {"response_type": "ephemeral", "text": text}
+def _ephemeral(text: str, *, replace_original: bool = False) -> dict[str, Any]:
+    payload: dict[str, Any] = {"response_type": "ephemeral", "text": text}
+    if replace_original:
+        payload["replace_original"] = True
+    return payload
 
 
 async def handle_slack_interactive(raw_body: bytes) -> dict[str, Any]:
@@ -40,14 +54,28 @@ async def handle_slack_interactive(raw_body: bytes) -> dict[str, Any]:
         return {}
 
     payload = json.loads(raw_payload)
+    payload_type = payload.get("type")
 
-    if (
-        payload.get("type") == "message_action"
-        and payload.get("callback_id") == REMEMBER_THIS_CALLBACK_ID
-    ):
+    if payload_type == "message_action" and payload.get("callback_id") == REMEMBER_THIS_CALLBACK_ID:
         await _handle_remember_this(payload)
+    elif payload_type == "block_actions":
+        await _handle_block_action(payload)
 
     return {}
+
+
+async def _handle_block_action(payload: dict[str, Any]) -> None:
+    """Dispatch a clicked button by its ``action_id``."""
+    action = (payload.get("actions") or [{}])[0]
+    action_id = action.get("action_id")
+    response_url = payload.get("response_url", "")
+
+    if action_id == ASK_SHARE_ACTION_ID:
+        response = await handle_cognee_ask_share(response_url, action.get("value", ""))
+        await post_to_response_url(response_url, response)
+    elif action_id == ASK_DISCARD_ACTION_ID:
+        response = await handle_cognee_ask_discard(action.get("value", ""))
+        await post_to_response_url(response_url, response)
 
 
 async def _handle_remember_this(payload: dict[str, Any]) -> None:
@@ -73,18 +101,16 @@ async def _handle_remember_this(payload: dict[str, Any]) -> None:
         )
         return
 
-    # Stopgap until real Slack-user <-> cognee-user linking exists: only the
-    # Slack user who completed the OAuth install may write into the
-    # connecting user's memory via this shortcut — see handle_cognee_ask.py
-    # for the matching /cognee-ask check and the reasoning. Fails closed for
-    # pre-existing connections made before this field was captured.
-    installed_by = (credential.provider_metadata or {}).get("installed_by_slack_user_id")
-    if not installed_by or installed_by != invoking_slack_user_id:
+    # See persistence.resolve_owner_user_id and handle_cognee_ask.py for the
+    # full reasoning (real per-member linking, falling back to "only the
+    # installer" as a stopgap).
+    owner_user_id = await resolve_owner_user_id(credential, team_id, invoking_slack_user_id)
+    if owner_user_id is None:
         await post_to_response_url(
             response_url,
             _ephemeral(
-                "Only the Cognee account that connected this Slack workspace can use "
-                '"Remember this". Ask that person to reconnect if this seems wrong.'
+                "Link your own Cognee account first: `/cognee-link <api_key>` "
+                "(create a key from your Cognee account's API Keys settings)."
             ),
         )
         return
@@ -102,7 +128,7 @@ async def _handle_remember_this(payload: dict[str, Any]) -> None:
 
     try:
         await remember_message(
-            credential.user_id, text=text, channel_name=channel_name, author_id=author_id
+            owner_user_id, text=text, channel_name=channel_name, author_id=author_id
         )
     except EntityNotFoundError:
         logger.error("Slack credential for team %s points at a deleted user", team_id)

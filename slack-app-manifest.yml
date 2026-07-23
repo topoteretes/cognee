@@ -24,12 +24,25 @@
 #   7. Install the app to your workspace (Slack prompts for this once the
 #      manifest is saved), then go to /integrations in the frontend and
 #      click Connect under Slack.
-#   8. In Slack, run /cognee-ask <your question> in any channel the bot can
-#      see (or a DM with it) to test the full round-trip.
+#   8. In Slack, run /cognee-link and open the link it replies with (in a
+#      browser where you're already logged in to Cognee), then click
+#      Confirm — no key to create or paste. This makes /cognee-ask and
+#      "Remember this" use your own memory, not just the workspace
+#      installer's.
+#   9. Run /cognee-ask <your question> in any channel the bot can see (or a
+#      DM with it) to test the full round-trip.
 
 display_information:
   name: Cognee
-  description: Ask your Cognee memory questions from Slack.
+  description: Ask questions, save messages, and recall your team's shared memory — right from Slack.
+  long_description: >-
+    Cognee turns your Slack workspace into a front door for your team's knowledge
+    graph. Ask it a question with /cognee-ask and get an answer pulled straight
+    from what your team already knows — reviewed privately before anything is
+    shared with the channel. Save an important message to memory in one click
+    with the "Remember this" shortcut. Every teammate links their own Cognee
+    account with /cognee-link, so answers and saved messages are always
+    personal, never mixed up with someone else's.
   background_color: "#6510F4"
 
 features:
@@ -39,17 +52,19 @@ features:
   app_home:
     home_tab_enabled: true
     messages_tab_enabled: true
-    messages_tab_read_only: false
   slash_commands:
     - command: /cognee-ask
       url: https://<public-host>/api/v1/slack/commands
-      description: Ask your Cognee memory a question
+      description: Ask your Cognee memory a question — reviewed privately before you share it
       usage_hint: what do we know about the Q3 launch?
+    - command: /cognee-link
+      url: https://<public-host>/api/v1/slack/commands
+      description: Get a private link to connect this Slack account to your own Cognee memory
   shortcuts:
     - name: Remember this
       type: message
       callback_id: remember_this
-      description: Save this message to your Cognee memory
+      description: Save this message to your own Cognee memory, tagged with who said it and where
 
 oauth_config:
   redirect_urls:

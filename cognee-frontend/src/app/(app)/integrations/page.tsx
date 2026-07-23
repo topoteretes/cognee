@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCogniInstance } from "@/modules/tenant/TenantProvider";
@@ -633,6 +633,23 @@ function SlackChannelsModal({ onClose }: { onClose: () => void }) {
   );
 }
 
+function InlineCode({ children }: { children: React.ReactNode }) {
+  return (
+    <code
+      style={{
+        background: "rgba(255,255,255,0.08)",
+        color: "#BC9BFF",
+        padding: "1px 6px",
+        borderRadius: 4,
+        fontSize: "0.92em",
+        fontFamily: 'ui-monospace, Menlo, Monaco, "Cascadia Mono", "Segoe UI Mono", "Roboto Mono", monospace',
+      }}
+    >
+      {children}
+    </code>
+  );
+}
+
 function SlackCard() {
   const { cogniInstance, localInstance } = useCogniInstance();
   const instance = cogniInstance || localInstance;
@@ -643,6 +660,7 @@ function SlackCard() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [showChannels, setShowChannels] = useState(false);
+  const [showConnectModal, setShowConnectModal] = useState(false);
 
   useEffect(() => {
     if (!instance) return;
@@ -671,6 +689,9 @@ function SlackCard() {
       const authorizeUrl = await connectSlack(instance);
       window.location.href = authorizeUrl;
     } catch (err) {
+      // Close the modal so this becomes visible — it renders on the card
+      // underneath, which the modal's own overlay would otherwise hide.
+      setShowConnectModal(false);
       setMessage(err instanceof Error && err.message ? err.message : "Could not start the Slack connection. Please try again.");
       setLoading(false);
     }
@@ -696,7 +717,9 @@ function SlackCard() {
   const connected = status?.connected ?? false;
 
   return (
-    <div style={{ background: "rgba(255,255,255,0.06)", backdropFilter: "blur(12px)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: 20, display: "flex", flexDirection: "column", gap: 12 }}>
+    <div
+      style={{ background: "rgba(255,255,255,0.06)", backdropFilter: "blur(12px)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: 20, display: "flex", flexDirection: "column", gap: 12 }}
+    >
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
           <div style={{ width: 40, height: 40, borderRadius: 10, background: "#4A154B", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
@@ -704,45 +727,322 @@ function SlackCard() {
           </div>
           <span style={{ fontSize: 16, fontWeight: 500, color: "#EDECEA", fontFamily: '"TWKLausanne", sans-serif' }}>Slack</span>
         </div>
-        {connected && (
-          <span style={{ flexShrink: 0, background: "rgba(34,197,94,0.15)", color: "#4ADE80", fontSize: 11, fontWeight: 500, padding: "2px 8px", borderRadius: 999 }}>Connected</span>
-        )}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+          {connected && (
+            <span style={{ background: "rgba(34,197,94,0.15)", color: "#4ADE80", fontSize: 11, fontWeight: 500, padding: "2px 8px", borderRadius: 999 }}>Connected</span>
+          )}
+          {connected && <SlackHowToTooltip />}
+        </div>
       </div>
-      <p style={{ fontSize: 13, color: "rgba(237,236,234,0.55)", margin: 0 }}>
-        {connected
-          ? `Connected to ${status?.accountLabel || "your workspace"}. Ask questions from Slack with /cognee-ask.`
-          : "Ask Cognee questions from Slack with /cognee-ask."}
+      <p style={{ fontSize: 13, lineHeight: "20px", color: "rgba(237,236,234,0.55)", margin: 0 }}>
+        {connected ? (
+          <>
+            Connected to <strong style={{ color: "rgba(237,236,234,0.8)", fontWeight: 500 }}>{status?.accountLabel || "your workspace"}</strong>.
+            Your team&apos;s memory is one message away — see the <InlineCode>?</InlineCode> above for how it works.
+          </>
+        ) : (
+          <>
+            Bring your team&apos;s shared memory into Slack — ask questions, save what matters, and
+            pick up right where a conversation left off, without ever leaving the channel.
+          </>
+        )}
       </p>
       {message && <p style={{ fontSize: 12, color: "#BC9BFF", margin: 0 }}>{message}</p>}
-      <div style={{ display: "flex", gap: 8 }}>
-        <button
-          onClick={connected ? handleDisconnect : handleConnect}
-          disabled={loading || !instance}
-          style={{
-            alignSelf: "flex-start",
-            background: connected ? "rgba(255,255,255,0.06)" : "#6510F4",
-            color: connected ? "rgba(237,236,234,0.7)" : "#fff",
-            border: connected ? "1px solid rgba(255,255,255,0.1)" : "none",
-            borderRadius: 8,
-            padding: "6px 14px",
-            fontSize: 13,
-            fontWeight: 500,
-            cursor: loading || !instance ? "wait" : "pointer",
-          }}
-        >
-          {loading ? (connected ? "Disconnecting…" : "Connecting…") : connected ? "Disconnect" : "Connect"}
-        </button>
-        {connected && (
+      {connected ? (
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            onClick={handleDisconnect}
+            disabled={loading || !instance}
+            style={{
+              alignSelf: "flex-start", background: "rgba(255,255,255,0.06)", color: "rgba(237,236,234,0.7)",
+              border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "6px 14px", fontSize: 13,
+              fontWeight: 500, cursor: loading || !instance ? "wait" : "pointer",
+            }}
+          >
+            {loading ? "Disconnecting…" : "Disconnect"}
+          </button>
           <button
             onClick={() => setShowChannels(true)}
             style={{ alignSelf: "flex-start", background: "rgba(255,255,255,0.06)", color: "rgba(237,236,234,0.7)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "6px 14px", fontSize: 13, fontWeight: 500, cursor: "pointer" }}
           >
             Manage channels
           </button>
-        )}
-      </div>
+        </div>
+      ) : (
+        <button
+          onClick={() => setShowConnectModal(true)}
+          disabled={!instance}
+          style={{
+            width: "100%", background: "#6510F4", color: "#fff", border: "none", borderRadius: 8,
+            padding: "8px 14px", fontSize: 13, fontWeight: 500, cursor: !instance ? "wait" : "pointer",
+          }}
+        >
+          Connect
+        </button>
+      )}
       {showChannels && <SlackChannelsModal onClose={() => setShowChannels(false)} />}
+      {showConnectModal && (
+        <SlackConnectModal
+          loading={loading}
+          onConnect={handleConnect}
+          onClose={() => setShowConnectModal(false)}
+        />
+      )}
     </div>
+  );
+}
+
+function SlackConnectModal({
+  loading,
+  onConnect,
+  onClose,
+}: {
+  loading: boolean;
+  onConnect: () => void;
+  onClose: () => void;
+}) {
+  const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
+  useEffect(() => { setPortalTarget(document.body); }, []);
+
+  if (!portalTarget) return null;
+  return createPortal(
+    <div
+      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", backdropFilter: "blur(4px)", WebkitBackdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
+      onClick={loading ? undefined : onClose}
+    >
+      <div
+        style={{ background: "rgba(15,15,15,0.92)", backdropFilter: "blur(16px)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: 24, width: 480, maxWidth: "100%", maxHeight: "85vh", overflowY: "auto", display: "flex", flexDirection: "column", gap: 16, boxShadow: "0 20px 60px rgba(0,0,0,0.6)" }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div style={{ width: 44, height: 44, borderRadius: 10, background: "#4A154B", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            <span style={{ color: "#fff", fontSize: 15, fontWeight: 700 }}>Sl</span>
+          </div>
+          <div>
+            <h2 style={{ fontSize: 17, fontWeight: 700, color: "#EDECEA", margin: 0 }}>Connect Slack</h2>
+            <p style={{ fontSize: 12.5, color: "rgba(237,236,234,0.5)", margin: "2px 0 0" }}>
+              Ask questions, save messages, and search memory — right from Slack.
+            </p>
+          </div>
+        </div>
+
+        <div style={{ height: 1, background: "rgba(255,255,255,0.08)" }} />
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 14, fontSize: 12.5, color: "rgba(237,236,234,0.7)", lineHeight: "18px" }}>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#EDECEA", marginBottom: 4 }}>
+              What this integration does
+            </div>
+            <div>
+              Brings your team&apos;s Cognee memory into Slack, so nobody has to leave the
+              conversation to ask a question, save context, or look something up. One workspace
+              connects once; every teammate then links their own Cognee identity, so answers and
+              saved messages are always personal — never mixed up with a colleague&apos;s.
+            </div>
+          </div>
+
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#EDECEA", marginBottom: 6 }}>Commands</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <div>
+                <InlineCode>/cognee-link</InlineCode>
+                <div style={{ marginTop: 2, color: "rgba(237,236,234,0.6)" }}>
+                  One-time setup for each teammate — a private link to confirm their own account.
+                </div>
+              </div>
+              <div>
+                <InlineCode>/cognee-ask &lt;question&gt;</InlineCode>
+                <div style={{ marginTop: 2, color: "rgba(237,236,234,0.6)" }}>
+                  Ask your Cognee memory a question. Reviewed privately (Share/Discard) before
+                  anything posts to the channel.
+                </div>
+              </div>
+              <div>
+                <InlineCode>Remember this</InlineCode>
+                <div style={{ marginTop: 2, color: "rgba(237,236,234,0.6)" }}>
+                  Message shortcut that saves any message to memory, tagged with who said it and where.
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#EDECEA", marginBottom: 4 }}>
+              Channels &amp; permissions
+            </div>
+            <div>
+              By default every channel the bot is invited to can use these commands. Once
+              connected, restrict this to specific channels any time from{" "}
+              <strong style={{ color: "#EDECEA" }}>Manage channels</strong> on this card.
+            </div>
+          </div>
+        </div>
+
+        <div style={{ height: 1, background: "rgba(255,255,255,0.08)" }} />
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          <button
+            onClick={onClose}
+            disabled={loading}
+            style={{ height: 36, padding: "0 16px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.15)", background: "transparent", fontSize: 13, fontWeight: 500, color: "rgba(237,236,234,0.8)", cursor: "pointer", fontFamily: "inherit" }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConnect}
+            disabled={loading}
+            style={{
+              height: 36, padding: "0 18px", borderRadius: 8, border: "none",
+              background: "#6510F4", fontSize: 13, fontWeight: 500, color: "#fff",
+              cursor: loading ? "wait" : "pointer", fontFamily: "inherit",
+            }}
+          >
+            {loading ? "Connecting…" : "Connect to Slack"}
+          </button>
+        </div>
+      </div>
+    </div>,
+    portalTarget,
+  );
+}
+
+function SlackHowToTooltip() {
+  const triggerRef = useRef<HTMLSpanElement>(null);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
+  const [coords, setCoords] = useState<{ top: number; left: number; width: number } | null>(null);
+
+  useEffect(() => {
+    setPortalTarget(document.body);
+    return () => {
+      if (closeTimer.current) clearTimeout(closeTimer.current);
+    };
+  }, []);
+
+  // The tooltip is portaled to document.body — it's no longer a DOM
+  // descendant of the trigger, so moving the mouse from the "?" icon onto
+  // the tooltip itself looks like "left the trigger" and would close it
+  // before the cursor ever arrives. A short cancellable delay bridges that
+  // gap, on both the trigger and the tooltip's own mouse events below.
+  function cancelClose() {
+    if (closeTimer.current) {
+      clearTimeout(closeTimer.current);
+      closeTimer.current = null;
+    }
+  }
+
+  function open() {
+    cancelClose();
+    const rect = triggerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const margin = 16;
+    const width = Math.min(360, window.innerWidth - margin * 2);
+    // Prefer right-aligned to the "?" icon, but clamp so it can never run
+    // past either edge of the viewport regardless of where the card
+    // holding this trigger happens to sit in the page's own grid layout.
+    const left = Math.min(Math.max(rect.right - width, margin), window.innerWidth - width - margin);
+    setCoords({ top: rect.top, left, width });
+  }
+
+  function scheduleClose() {
+    cancelClose();
+    closeTimer.current = setTimeout(() => setCoords(null), 150);
+  }
+
+  return (
+    <span
+      ref={triggerRef}
+      style={{ position: "relative", display: "inline-flex" }}
+      onMouseEnter={open}
+      onMouseLeave={scheduleClose}
+    >
+      <span
+        style={{
+          width: 16, height: 16, borderRadius: "50%", border: "1px solid rgba(237,236,234,0.35)",
+          color: "rgba(237,236,234,0.55)", fontSize: 10, fontWeight: 600, display: "flex",
+          alignItems: "center", justifyContent: "center", cursor: "default",
+        }}
+      >
+        ?
+      </span>
+      {coords && portalTarget && createPortal(
+        <div
+          onMouseEnter={cancelClose}
+          onMouseLeave={scheduleClose}
+          style={{
+            position: "fixed", top: coords.top - 8, left: coords.left, width: coords.width,
+            transform: "translateY(-100%)",
+            maxHeight: 420, overflowY: "auto", background: "#18181B", border: "1px solid rgba(255,255,255,0.1)",
+            borderRadius: 10, padding: "16px 18px", fontSize: 12.5, color: "rgba(237,236,234,0.7)", zIndex: 1000,
+            boxShadow: "0 12px 32px rgba(0,0,0,0.5)", lineHeight: "18px",
+          }}
+        >
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#EDECEA", marginBottom: 4 }}>
+              What this integration does
+            </div>
+            <div>
+              Brings your team&apos;s Cognee memory into Slack, so nobody has to leave the
+              conversation to ask a question, save context, or look something up. One Slack
+              workspace connects once; every teammate then links their own Cognee identity, so
+              answers and saved messages are always personal — never mixed up with a colleague&apos;s.
+            </div>
+          </div>
+
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#EDECEA", marginBottom: 6 }}>Commands</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <div>
+                <InlineCode>/cognee-link</InlineCode>
+                <div style={{ marginTop: 2, color: "rgba(237,236,234,0.6)" }}>
+                  One-time setup for each teammate. Replies privately with a link — open it in a
+                  browser where you&apos;re already logged in and click Confirm. Nothing to copy or paste.
+                </div>
+              </div>
+              <div>
+                <InlineCode>/cognee-ask &lt;question&gt;</InlineCode>
+                <div style={{ marginTop: 2, color: "rgba(237,236,234,0.6)" }}>
+                  Ask your Cognee memory a question. The answer is reviewed privately first
+                  (Share/Discard) — nothing posts to the channel until you choose Share.
+                </div>
+              </div>
+              <div>
+                <InlineCode>Remember this</InlineCode>
+                <div style={{ marginTop: 2, color: "rgba(237,236,234,0.6)" }}>
+                  Message shortcut (hover a message → More actions → Connect to apps). Saves it to
+                  memory, tagged with who said it and in which channel.
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#EDECEA", marginBottom: 4 }}>
+              Installing it
+            </div>
+            <div>
+              One person on the team clicks <strong style={{ color: "#EDECEA" }}>Connect</strong>{" "}
+              above and authorizes the Slack workspace — that&apos;s the whole install. Every other
+              member then runs <InlineCode>/cognee-link</InlineCode> once for their own account;
+              nothing else to configure per person.
+            </div>
+          </div>
+
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#EDECEA", marginBottom: 4 }}>
+              When it&apos;s useful
+            </div>
+            <div>
+              Pulling up a decision buried in an old thread instead of scrolling for it. Capturing
+              a spec, quote, or answer the moment someone posts it, before it scrolls out of view.
+              Onboarding a new teammate onto shared team knowledge without a separate tool to open.
+            </div>
+          </div>
+        </div>
+        </div>,
+        portalTarget,
+      )}
+    </span>
   );
 }
 

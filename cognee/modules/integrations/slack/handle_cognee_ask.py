@@ -1,41 +1,61 @@
 """Handle ``/cognee-ask`` slash command — recall from knowledge graph.
 
+Nothing about a ``/cognee-ask`` becomes visible to the channel until the
+asker has seen the answer and explicitly chosen to share it — neither the
+question nor the answer are known to be channel-appropriate before that.
+So every step here, including the initial "searching..." ack, is
+``ephemeral`` (visible only to whoever ran the command). Once the search
+finishes, the answer is shown back privately with Share/Discard buttons:
+Share is the *only* thing that ever posts ``in_channel`` (question and
+answer together, since nothing was public before it); Discard drops the
+answer entirely, visible to no one, not even the asker.
+
 Slack requires an ack within 3 seconds; ``HYBRID_COMPLETION`` search calls an
 LLM and routinely takes longer than that. So the fast path here only
-validates the workspace/query and acks immediately with a placeholder — the
-actual search runs in a background task, and its answer is delivered
-afterward via the command's ``response_url`` (see
+validates and acks immediately with a placeholder — the actual search runs
+in a background task, and its answer is delivered afterward via the
+command's ``response_url`` (see
 :mod:`cognee.modules.integrations.slack.response_url`; ``replace_original:
-true`` swaps the placeholder for the real answer instead of leaving both
+true`` swaps the placeholder for the next prompt instead of leaving both
 messages visible).
-
-The placeholder ack and every error path are ``ephemeral`` (visible only to
-whoever ran the command) — a found answer is posted ``in_channel`` instead,
-since asking in a shared channel or a DM with a colleague is usually so both
-people can see the answer.
 """
 
 import asyncio
 import logging
 from typing import Any, List, Optional, Tuple
 from urllib.parse import parse_qs
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from cognee.api.v1.search.search import search as cognee_search
 from cognee.infrastructure.databases.exceptions import EntityNotFoundError
-from cognee.modules.integrations.slack.persistence import get_by_team, is_active
+from cognee.modules.integrations.slack.persistence import (
+    get_by_team,
+    is_active,
+    resolve_owner_user_id,
+)
 from cognee.modules.integrations.slack.response_url import post_to_response_url
 from cognee.modules.search.types import SearchType
 from cognee.modules.users.methods import get_user
 
 logger = logging.getLogger(__name__)
 
+# Referenced by handle_slack_interactive.py to dispatch the answer review
+# prompt's button clicks back here.
+ASK_SHARE_ACTION_ID = "cognee_ask_share"
+ASK_DISCARD_ACTION_ID = "cognee_ask_discard"
+
 # asyncio.create_task() only holds a weak reference to its result — without
 # keeping the task alive somewhere, it can be garbage-collected mid-flight
 # the instant handle_cognee_ask returns. Each task removes itself on completion.
 _pending_searches: set = set()
 
-# Keep the placeholder ack readable even if someone pastes an essay.
+# A ready-to-share (question, answer) pair, keyed by a short id (never the
+# text itself — Slack button values cap at 2000 chars, easily blown by a
+# real question+answer). Popped on Share or Discard; an id missing here
+# (server restart, double-click) means "no longer available", not a crash.
+_pending_answers: dict[str, Tuple[str, str, List[dict[str, Any]]]] = {}
+
+# Keep the placeholder/confirm text readable even if someone pastes an essay.
 _QUERY_PREVIEW_MAX_CHARS = 200
 
 
@@ -88,9 +108,10 @@ def _reply(
 async def handle_cognee_ask(raw_body: bytes) -> dict[str, Any]:
     """Ack ``/cognee-ask {query}`` within Slack's 3-second window.
 
-    Everything past the workspace/query validation happens in the
-    background — the real answer is not this function's return value, it
-    arrives as a second message via ``response_url``.
+    Everything past the workspace/query/authorization validation happens in
+    the background — the real answer is not this function's return value,
+    it arrives as a second message via ``response_url`` (first the answer
+    review prompt, then whatever Share/Discard resolves to).
     """
     form = parse_qs(raw_body.decode())
     team_id = (form.get("team_id") or [""])[0]
@@ -105,34 +126,29 @@ async def handle_cognee_ask(raw_body: bytes) -> dict[str, Any]:
             "Connect it from your Integrations settings."
         )
 
-    # Stopgap until real Slack-user <-> cognee-user linking exists: only the
-    # Slack user who completed the OAuth install may query the connecting
-    # user's memory — otherwise any workspace member could search (and have
-    # broadcast in_channel) someone else's entire Cognee memory. Fails closed
-    # for pre-existing connections made before this field was captured.
-    installed_by = (credential.provider_metadata or {}).get("installed_by_slack_user_id")
-    if not installed_by or installed_by != invoking_slack_user_id:
+    owner_user_id = await resolve_owner_user_id(credential, team_id, invoking_slack_user_id)
+    if owner_user_id is None:
         return _ephemeral(
-            "Only the Cognee account that connected this Slack workspace can use "
-            "/cognee-ask. Ask that person to reconnect if this seems wrong."
+            "Link your own Cognee account first: `/cognee-link <api_key>` "
+            "(create a key from your Cognee account's API Keys settings)."
         )
 
     if not text:
         return _ephemeral("Usage: `/cognee-ask <your question>`")
 
-    task = asyncio.create_task(_search_and_respond(response_url, team_id, credential.user_id, text))
+    task = asyncio.create_task(_search_and_respond(response_url, team_id, owner_user_id, text))
     _pending_searches.add(task)
     task.add_done_callback(_pending_searches.discard)
 
-    preview = (
-        text if len(text) <= _QUERY_PREVIEW_MAX_CHARS else text[:_QUERY_PREVIEW_MAX_CHARS] + "…"
-    )
-    # This is the synchronous ack (within Slack's 3-second window), and Slack
-    # only shows the "<@user> used /cognee-ask <query>" invocation line to
-    # everyone in the channel/DM when *this* response is in_channel — an
-    # ephemeral ack here hides the question from Slack's UI entirely, no
-    # matter what visibility the later response_url follow-up uses.
-    return _in_channel(f'Searching your memory for: "{preview}"…')
+    # Ephemeral — nothing is visible to the channel until Share is clicked
+    # on the answer that follows, so this ack (and the "<@user> used
+    # /cognee-ask ..." invocation line an in_channel response would trigger)
+    # must not leak the question either.
+    return _ephemeral(f'Searching your memory for: "{_preview(text)}"…')
+
+
+def _preview(text: str) -> str:
+    return text if len(text) <= _QUERY_PREVIEW_MAX_CHARS else text[:_QUERY_PREVIEW_MAX_CHARS] + "…"
 
 
 async def _search_and_respond(response_url: str, team_id: str, user_id: UUID, text: str) -> None:
@@ -174,9 +190,64 @@ async def _search_and_respond(response_url: str, team_id: str, user_id: UUID, te
         return
 
     fallback_text, blocks = _format_answer(results)
+    answer_id = uuid4().hex
+    _pending_answers[answer_id] = (text, fallback_text, blocks)
+
     await post_to_response_url(
-        response_url, _in_channel(fallback_text, replace_original=True, blocks=blocks)
+        response_url,
+        _ephemeral(
+            f"{fallback_text}\n\nShare this in the channel?",
+            replace_original=True,
+            blocks=[
+                *blocks,
+                {
+                    "type": "actions",
+                    "elements": [
+                        {
+                            "type": "button",
+                            "text": {"type": "plain_text", "text": "Share"},
+                            "style": "primary",
+                            "action_id": ASK_SHARE_ACTION_ID,
+                            "value": answer_id,
+                        },
+                        {
+                            "type": "button",
+                            "text": {"type": "plain_text", "text": "Discard"},
+                            "action_id": ASK_DISCARD_ACTION_ID,
+                            "value": answer_id,
+                        },
+                    ],
+                },
+            ],
+        ),
     )
+
+
+async def handle_cognee_ask_share(response_url: str, answer_id: str) -> dict[str, Any]:
+    """Handle the answer prompt's Share click — posts the question and its
+    answer in_channel together, replacing the ephemeral review prompt. This
+    is the first and only point either one becomes visible to anyone else.
+    """
+    pending = _pending_answers.pop(answer_id, None)
+    if pending is None:
+        return _ephemeral("This answer is no longer available.", replace_original=True)
+
+    question, fallback_text, blocks = pending
+    question_block = {
+        "type": "section",
+        "text": {"type": "mrkdwn", "text": f'*Asked:* "{_preview(question)}"'},
+    }
+    return _in_channel(
+        f'Asked: "{_preview(question)}"\n\n{fallback_text}',
+        replace_original=True,
+        blocks=[question_block, {"type": "divider"}, *blocks],
+    )
+
+
+async def handle_cognee_ask_discard(answer_id: str) -> dict[str, Any]:
+    """Handle the answer prompt's Discard click — drops the answer for good."""
+    _pending_answers.pop(answer_id, None)
+    return _ephemeral("Discarded.", replace_original=True)
 
 
 def _extract_fact(result: Any) -> Optional[str]:
@@ -198,6 +269,31 @@ def _extract_fact(result: Any) -> Optional[str]:
     return value if isinstance(value, str) and value else None
 
 
+# Substrings that mark a fact as "I can't answer this from the given
+# context" rather than an actual answer. HYBRID_COMPLETION can return a
+# separate per-chunk completion for each matched chunk group, and a chunk
+# irrelevant to the question still produces its own such completion —
+# _extract_fact has no way to tell that apart from a real answer (it's just
+# as valid a non-empty string), so it's filtered out here instead.
+_REFUSAL_MARKERS = (
+    "i can't",
+    "i cannot",
+    "i'm unable to",
+    "can't answer",
+    "cannot answer",
+    "no information about",
+    "no relevant information",
+    "doesn't contain",
+    "does not contain",
+    "contains no information",
+)
+
+
+def _is_refusal(fact: str) -> bool:
+    lowered = fact.lower()
+    return any(marker in lowered for marker in _REFUSAL_MARKERS)
+
+
 def _format_answer(results: List[Any]) -> Tuple[str, List[dict[str, Any]]]:
     """Build a ``/cognee-ask`` answer as ``(fallback_text, blocks)``.
 
@@ -208,7 +304,11 @@ def _format_answer(results: List[Any]) -> Tuple[str, List[dict[str, Any]]]:
     yet (that needs a real ``/interactive`` handler, which is a separate
     piece of work); this is presentation only.
     """
-    facts = [fact for fact in (_extract_fact(result) for result in results[:3]) if fact]
+    facts = [
+        fact
+        for fact in (_extract_fact(result) for result in results)
+        if fact and not _is_refusal(fact)
+    ][:3]
     if not facts:
         return "No relevant information found.", []
 

@@ -19,6 +19,7 @@ from cognee.modules.integrations.credentials import (
 )
 from cognee.modules.integrations.models.IntegrationCredential import IntegrationCredential
 from cognee.modules.integrations.slack.channels import list_channels
+from cognee.modules.integrations.slack.handle_slack_link import confirm_link
 from cognee.modules.integrations.slack.persistence import PROVIDER
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.models import User
@@ -43,6 +44,14 @@ class SetAllowedChannelsPayload(InDTO):
 
 class SetAllowedChannelsResultDTO(OutDTO):
     allowed_channel_ids: list[str]
+
+
+class ConfirmLinkPayload(InDTO):
+    code: str
+
+
+class ConfirmLinkResultDTO(OutDTO):
+    linked: bool
 
 
 def _connected_credential_or_404(credential) -> IntegrationCredential:
@@ -110,5 +119,20 @@ def get_slack_channels_router():
         return SetAllowedChannelsResultDTO(
             allowed_channel_ids=updated.provider_metadata["allowed_channel_ids"]
         )
+
+    @router.post("/link")
+    async def link(
+        payload: ConfirmLinkPayload, user: User = Depends(get_authenticated_user)
+    ) -> ConfirmLinkResultDTO:
+        """Confirm a ``/cognee-link`` magic-link code for the authenticated caller.
+
+        Backs the ``/link-slack`` frontend page — the browser session here
+        (not anything typed into Slack) is what proves which cognee account
+        the invoking Slack member should be linked to.
+        """
+        linked = await confirm_link(payload.code, user.id)
+        if not linked:
+            raise HTTPException(status_code=400, detail="This link is invalid or has expired.")
+        return ConfirmLinkResultDTO(linked=True)
 
     return router

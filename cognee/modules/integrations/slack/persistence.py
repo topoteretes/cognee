@@ -20,6 +20,10 @@ from cognee.modules.integrations.credentials import (
     revoke_credential_by_account,
 )
 from cognee.modules.integrations.models.IntegrationCredential import IntegrationCredential
+from cognee.modules.integrations.slack.handle_slack_link import (
+    MEMBER_LINK_PROVIDER,
+    member_link_account_id,
+)
 
 PROVIDER = "slack"
 
@@ -38,3 +42,29 @@ async def revoke_by_team(team_id: str) -> bool:
 
 def is_active(credential: Optional[IntegrationCredential]) -> bool:
     return credential is not None and credential.status == STATUS_ACTIVE
+
+
+async def resolve_owner_user_id(
+    credential: IntegrationCredential, team_id: str, invoking_slack_user_id: str
+) -> Optional[UUID]:
+    """Resolve which cognee user's memory ``invoking_slack_user_id`` should use.
+
+    Shared by every Slack entry point that touches memory (``/cognee-ask``,
+    "Remember this") so the resolution rule lives in one place. Prefers the
+    member's own ``/cognee-link`` (real per-person memory); falls back to
+    "only the installer" as a stopgap until every member is expected to
+    link, which also fails closed for connections made before
+    ``installed_by_slack_user_id`` was captured. ``None`` means the invoking
+    member isn't authorized to use either.
+    """
+    member_link = await get_credential_by_account(
+        MEMBER_LINK_PROVIDER, member_link_account_id(team_id, invoking_slack_user_id)
+    )
+    if is_active(member_link):
+        return member_link.user_id
+
+    installed_by = (credential.provider_metadata or {}).get("installed_by_slack_user_id")
+    if installed_by and installed_by == invoking_slack_user_id:
+        return credential.user_id
+
+    return None

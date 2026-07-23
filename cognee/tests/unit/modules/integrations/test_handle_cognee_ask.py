@@ -1,11 +1,13 @@
 """Unit tests for modules.integrations.slack.handle_cognee_ask.
 
-/cognee-ask now acks fast (workspace/query validation only) and does the
-real search in a background task, delivering the answer via response_url —
-so these tests split into two groups: handle_cognee_ask's own fast-path
-behavior (validation, immediate ack, scheduling), and _search_and_respond's
-behavior in isolation (the part that used to be handle_cognee_ask's whole
-body, now reachable only through the background task).
+``/cognee-ask`` validates the workspace/query/authorization and starts the
+search immediately in the background, acking with an in_channel placeholder
+— splitting into two groups: handle_cognee_ask's own fast-path behavior
+(validation, immediate ack, scheduling) and _search_and_respond's behavior
+in isolation (reachable only through the background task). Once the search
+finishes, the answer is shown back ephemerally first (Share/Discard) rather
+than posted straight to the channel — handle_cognee_ask_share/_discard
+cover that review step.
 """
 
 import asyncio
@@ -19,35 +21,34 @@ import pytest
 from cognee.infrastructure.databases.exceptions import EntityNotFoundError
 from cognee.modules.integrations.credentials import STATUS_ACTIVE
 from cognee.modules.integrations.slack.handle_cognee_ask import (
+    ASK_DISCARD_ACTION_ID,
+    ASK_SHARE_ACTION_ID,
     _format_answer,
+    _pending_answers,
     _search_and_respond,
     handle_cognee_ask,
+    handle_cognee_ask_discard,
+    handle_cognee_ask_share,
 )
 from cognee.modules.search.types import SearchType
 
 MODULE = "cognee.modules.integrations.slack.handle_cognee_ask"
 
 
-INVOKING_USER = "U100"
-
-
 def _body(
     team_id: str = "T123",
     text: str = "what happened in Q3?",
     response_url: str = "https://hooks.slack.com/x",
-    user_id: str = INVOKING_USER,
+    user_id: str = "U100",
 ) -> bytes:
     return urlencode(
         {"team_id": team_id, "text": text, "response_url": response_url, "user_id": user_id}
     ).encode()
 
 
-def _credential(user_id=None, installed_by_slack_user_id=INVOKING_USER):
+def _credential(user_id=None):
     return SimpleNamespace(
-        tenant_id=uuid4(),
-        user_id=user_id or uuid4(),
-        provider_metadata={"installed_by_slack_user_id": installed_by_slack_user_id},
-        status=STATUS_ACTIVE,
+        tenant_id=uuid4(), user_id=user_id or uuid4(), provider_metadata={}, status=STATUS_ACTIVE
     )
 
 
@@ -64,31 +65,25 @@ async def test_unconnected_workspace_is_rejected():
 
 
 @pytest.mark.asyncio
-async def test_rejects_non_installing_user():
-    credential = _credential(installed_by_slack_user_id=INVOKING_USER)
-    with patch(f"{MODULE}.get_by_team", new=AsyncMock(return_value=credential)):
-        response = await handle_cognee_ask(_body(user_id="U999-someone-else"))
-
-    assert "Only the Cognee account" in response["text"]
-    assert response["response_type"] == "ephemeral"
-
-
-@pytest.mark.asyncio
-async def test_rejects_when_installed_by_is_unset():
-    # Pre-existing connections made before installed_by_slack_user_id was
-    # captured — must fail closed, not silently allow everyone.
-    credential = _credential(installed_by_slack_user_id=None)
-    with patch(f"{MODULE}.get_by_team", new=AsyncMock(return_value=credential)):
+async def test_unauthorized_member_is_rejected():
+    credential = _credential()
+    with (
+        patch(f"{MODULE}.get_by_team", new=AsyncMock(return_value=credential)),
+        patch(f"{MODULE}.resolve_owner_user_id", new=AsyncMock(return_value=None)),
+    ):
         response = await handle_cognee_ask(_body())
 
-    assert "Only the Cognee account" in response["text"]
+    assert "/cognee-link" in response["text"]
     assert response["response_type"] == "ephemeral"
 
 
 @pytest.mark.asyncio
 async def test_empty_query_returns_usage():
     credential = _credential()
-    with patch(f"{MODULE}.get_by_team", new=AsyncMock(return_value=credential)):
+    with (
+        patch(f"{MODULE}.get_by_team", new=AsyncMock(return_value=credential)),
+        patch(f"{MODULE}.resolve_owner_user_id", new=AsyncMock(return_value=uuid4())),
+    ):
         response = await handle_cognee_ask(_body(text=""))
 
     assert response["text"].startswith("Usage:")
@@ -100,13 +95,14 @@ async def test_valid_query_acks_immediately_without_the_final_answer():
     credential = _credential()
     with (
         patch(f"{MODULE}.get_by_team", new=AsyncMock(return_value=credential)),
+        patch(f"{MODULE}.resolve_owner_user_id", new=AsyncMock(return_value=uuid4())),
         patch(f"{MODULE}._search_and_respond", new=AsyncMock()),
     ):
         response = await handle_cognee_ask(_body(text="what do we know?"))
 
-    # in_channel here (not ephemeral) is what makes Slack show the
-    # "<@user> used /cognee-ask ..." invocation line to everyone.
-    assert response["response_type"] == "in_channel"
+    # Ephemeral — nothing is visible to the channel until Share is clicked
+    # on the answer, so even the placeholder ack must stay private.
+    assert response["response_type"] == "ephemeral"
     assert "what do we know?" in response["text"]
     assert "replace_original" not in response  # the placeholder, not a replacement
 
@@ -114,9 +110,11 @@ async def test_valid_query_acks_immediately_without_the_final_answer():
 @pytest.mark.asyncio
 async def test_valid_query_schedules_the_background_search_with_right_args():
     credential = _credential()
+    owner_id = uuid4()
     search_and_respond = AsyncMock()
     with (
         patch(f"{MODULE}.get_by_team", new=AsyncMock(return_value=credential)),
+        patch(f"{MODULE}.resolve_owner_user_id", new=AsyncMock(return_value=owner_id)),
         patch(f"{MODULE}._search_and_respond", new=search_and_respond),
     ):
         await handle_cognee_ask(
@@ -127,7 +125,7 @@ async def test_valid_query_schedules_the_background_search_with_right_args():
         await asyncio.sleep(0)  # let the scheduled task actually start
 
     search_and_respond.assert_awaited_once_with(
-        "https://hooks.slack.com/xyz", "T123", credential.user_id, "what do we know?"
+        "https://hooks.slack.com/xyz", "T123", owner_id, "what do we know?"
     )
 
 
@@ -137,6 +135,7 @@ async def test_long_query_is_truncated_in_the_ack_message():
     long_text = "x" * 500
     with (
         patch(f"{MODULE}.get_by_team", new=AsyncMock(return_value=credential)),
+        patch(f"{MODULE}.resolve_owner_user_id", new=AsyncMock(return_value=uuid4())),
         patch(f"{MODULE}._search_and_respond", new=AsyncMock()),
     ):
         response = await handle_cognee_ask(_body(text=long_text))
@@ -166,11 +165,16 @@ async def test_search_and_respond_posts_the_formatted_answer():
     url, payload = post.call_args[0]
     assert url == "https://hooks.slack.com/x"
     assert payload["replace_original"] is True
-    assert payload["response_type"] == "in_channel"  # a found answer is shared, not private
-    assert "fact one" in payload["text"]  # fallback text, for notifications/screen readers
+    # A found answer is shown back privately first (Share/Discard) — never
+    # posted straight to the channel before the asker has seen it.
+    assert payload["response_type"] == "ephemeral"
+    assert "fact one" in payload["text"]
     assert any(
         b["type"] == "section" and b["text"]["text"] == "fact one" for b in payload["blocks"]
     )
+    actions = next(b for b in payload["blocks"] if b["type"] == "actions")
+    action_ids = {el["action_id"] for el in actions["elements"]}
+    assert action_ids == {ASK_SHARE_ACTION_ID, ASK_DISCARD_ACTION_ID}
 
 
 @pytest.mark.asyncio
@@ -215,6 +219,57 @@ async def test_search_and_respond_reports_search_failure():
 
     _, payload = post.call_args[0]
     assert payload["text"] == "Search failed. Please try again."
+
+
+# ── handle_cognee_ask_share / handle_cognee_ask_discard ─────────────────────
+
+
+@pytest.mark.asyncio
+async def test_share_posts_the_question_and_answer_in_channel():
+    _pending_answers["abc123"] = (
+        "what happened in Q3?",
+        "*Answer:*\nfact one",
+        [{"type": "section"}],
+    )
+
+    response = await handle_cognee_ask_share("https://hooks.slack.com/x", "abc123")
+
+    assert response["response_type"] == "in_channel"
+    assert response["replace_original"] is True
+    assert "what happened in Q3?" in response["text"]
+    assert "fact one" in response["text"]
+    # The question is its own block, ahead of the answer's own blocks —
+    # nothing about either was visible to the channel before this.
+    assert response["blocks"][0]["text"]["text"] == '*Asked:* "what happened in Q3?"'
+    assert any(b.get("type") == "section" for b in response["blocks"][1:])
+    assert "abc123" not in _pending_answers  # popped, not left behind
+
+
+@pytest.mark.asyncio
+async def test_share_of_unknown_answer_id_is_a_clean_ephemeral_message():
+    # Server restart, double-click, or an expired/already-handled id.
+    response = await handle_cognee_ask_share("https://hooks.slack.com/x", "does-not-exist")
+
+    assert response["response_type"] == "ephemeral"
+    assert "no longer available" in response["text"]
+
+
+@pytest.mark.asyncio
+async def test_discard_drops_the_answer_and_replies_ephemeral():
+    _pending_answers["abc456"] = (
+        "what happened in Q3?",
+        "*Answer:*\nfact one",
+        [{"type": "section"}],
+    )
+
+    response = await handle_cognee_ask_discard("abc456")
+
+    assert response == {
+        "response_type": "ephemeral",
+        "text": "Discarded.",
+        "replace_original": True,
+    }
+    assert "abc456" not in _pending_answers
 
 
 # ── _format_answer ──────────────────────────────────────────────────────────
@@ -288,5 +343,32 @@ def test_format_answer_results_without_search_result_field():
 
 def test_format_answer_skips_unrecognized_result_shapes():
     fallback_text, blocks = _format_answer([object(), 42, None])
+    assert fallback_text == "No relevant information found."
+    assert blocks == []
+
+
+def test_format_answer_filters_out_refusal_facts():
+    # A chunk irrelevant to the question produces its own "I can't answer"
+    # completion alongside a real answer from a relevant chunk — the
+    # refusal must not show up as if it were a second fact.
+    results = [
+        {"search_result": "LLMs are neural language models built on Transformers."},
+        {
+            "search_result": (
+                "I can't—the provided context only covers the 2026 FIFA World Cup "
+                "and contains no information about LLMs."
+            )
+        },
+    ]
+    fallback_text, blocks = _format_answer(results)
+    sections = [b for b in blocks if b["type"] == "section"]
+    assert len(sections) == 1
+    assert "Transformers" in sections[0]["text"]["text"]
+    assert "World Cup" not in fallback_text
+
+
+def test_format_answer_all_refusals_reads_as_no_relevant_information():
+    results = [{"search_result": "I cannot answer this from the given context."}]
+    fallback_text, blocks = _format_answer(results)
     assert fallback_text == "No relevant information found."
     assert blocks == []
