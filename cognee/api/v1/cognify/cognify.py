@@ -27,9 +27,7 @@ from cognee.tasks.documents import (
     extract_chunks_from_documents,
 )
 from cognee.tasks.graph.extract_graph_and_summarize import extract_graph_and_summarize
-from cognee.tasks.graph.detect_contradictions import (
-    detect_contradictions as detect_contradictions_task,
-)
+from cognee.tasks.graph import detect_contradictions
 from cognee.tasks.storage import add_data_points
 from cognee.tasks.ingestion.extract_dlt_fk_edges import extract_dlt_fk_edges
 from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
@@ -57,7 +55,6 @@ async def cognify(
     incremental_loading: bool = True,
     custom_prompt: Optional[str] = None,
     temporal_cognify: bool = False,
-    detect_contradictions: bool = False,
     data_per_batch: int = 20,
     llm_config: Optional[LLMConfig] = None,
     embedding_config: Optional[EmbeddingConfig] = None,
@@ -131,11 +128,6 @@ async def cognify(
         dry_run: If True, return a stage-level estimate of LLM token usage and rough cost
                  without making LLM calls or writing graph results. The estimate covers all
                  data in the selected dataset(s); an incremental run may process fewer items.
-        detect_contradictions: If True, after the graph is built, compare the newly ingested
-                      facts against the facts already stored in the graph and flag any
-                      contradictions. Each contradiction is logged and recorded as a
-                      "contradicts" edge (with the reason and both facts) so it can be
-                      reviewed instead of silently coexisting. Defaults to False.
 
     Returns:
         Union[dict, list[PipelineRunInfo], DryRunEstimate]:
@@ -288,7 +280,6 @@ async def cognify(
                 config=config,
                 custom_prompt=custom_prompt,
                 chunks_per_batch=chunks_per_batch,
-                detect_contradictions=detect_contradictions,
                 **kwargs,
             )
 
@@ -330,7 +321,6 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
     config: Config = None,
     custom_prompt: Optional[str] = None,
     chunks_per_batch: int = None,
-    detect_contradictions: bool = False,
     **kwargs,
 ) -> list[Task]:
     if config is None:
@@ -352,6 +342,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
 
     cognify_config = get_cognify_config()
     embed_triplets = cognify_config.triplet_embedding
+    check_contradictions = cognify_config.contradiction_detection
 
     if chunks_per_batch is None:
         chunks_per_batch = (
@@ -384,15 +375,16 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
             task_config={"batch_size": chunks_per_batch},
         ),
         Task(extract_dlt_fk_edges),
+        # COGNIFY (opt-in): flag facts in this ingestion that contradict facts
+        # already in the graph. Runs last so both new and existing facts are
+        # persisted and comparable. Default OFF — when the flag is off this spread
+        # is empty and the task list is identical to the pre-detection pipeline.
+        *(
+            [Task(detect_contradictions, task_config={"batch_size": chunks_per_batch})]
+            if check_contradictions
+            else []
+        ),
     ]
-
-    # OPTIONAL: flag facts in this ingestion that contradict facts already in the graph.
-    # Runs last so both new and existing facts are persisted and comparable; disabled by
-    # default to preserve existing behaviour.
-    if detect_contradictions:
-        default_tasks.append(
-            Task(detect_contradictions_task, task_config={"batch_size": chunks_per_batch})
-        )
 
     return default_tasks
 

@@ -1,20 +1,35 @@
 import importlib
+from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from cognee.modules.cognify.config import CognifyConfig
 from cognee.tasks.graph.detect_contradictions import (
-    Contradiction,
-    ContradictionList,
     _build_candidate_facts,
     _collect_touched_node_ids,
     _contradiction_endpoints,
     _node_names,
     detect_contradictions,
 )
+from cognee.tasks.graph.models import Contradiction, ContradictionList
 
 dc_module = importlib.import_module("cognee.tasks.graph.detect_contradictions")
+
+
+@contextmanager
+def _patched_config(**overrides):
+    """Pin the task's tuning so a local .env can never sway these assertions.
+
+    The task reads its thresholds through get_cognify_config() rather than from
+    call-site arguments, and constructor kwargs outrank env/dotenv in
+    pydantic-settings — so every tunable is set explicitly, not just the overrides.
+    """
+    tuning = {"contradiction_confidence_threshold": 0.5, "contradiction_max_facts": 500}
+    tuning.update(overrides)
+    with patch.object(dc_module, "get_cognify_config", return_value=CognifyConfig(**tuning)):
+        yield
 
 
 def _entity(node_id):
@@ -146,6 +161,7 @@ async def test_flags_contradiction_as_graph_edge():
     )
 
     with (
+        _patched_config(),
         patch.object(dc_module, "get_graph_engine", new_callable=AsyncMock, return_value=engine),
         patch.object(
             dc_module.LLMGateway,
@@ -192,6 +208,7 @@ async def test_low_confidence_contradiction_is_not_flagged():
     )
 
     with (
+        _patched_config(),
         patch.object(dc_module, "get_graph_engine", new_callable=AsyncMock, return_value=engine),
         patch.object(
             dc_module.LLMGateway,
@@ -200,8 +217,28 @@ async def test_low_confidence_contradiction_is_not_flagged():
             return_value=llm_result,
         ),
     ):
-        await detect_contradictions(chunks, confidence_threshold=0.5)
+        await detect_contradictions(chunks)
 
+    engine.add_edges.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_max_facts_config_caps_the_facts_sent_to_the_llm():
+    # The cap is config-driven, not a call-site argument: capping at one fact leaves
+    # too few to compare, so the task returns before ever reaching the LLM.
+    chunks = [_summary([_entity("alice"), _entity("1990")])]
+    engine = _mock_graph_engine()
+
+    with (
+        _patched_config(contradiction_max_facts=1),
+        patch.object(dc_module, "get_graph_engine", new_callable=AsyncMock, return_value=engine),
+        patch.object(
+            dc_module.LLMGateway, "acreate_structured_output", new_callable=AsyncMock
+        ) as mock_llm,
+    ):
+        await detect_contradictions(chunks)
+
+    mock_llm.assert_not_called()
     engine.add_edges.assert_not_called()
 
 
@@ -211,6 +248,7 @@ async def test_no_contradictions_does_not_write_edges():
     engine = _mock_graph_engine()
 
     with (
+        _patched_config(),
         patch.object(dc_module, "get_graph_engine", new_callable=AsyncMock, return_value=engine),
         patch.object(
             dc_module.LLMGateway,

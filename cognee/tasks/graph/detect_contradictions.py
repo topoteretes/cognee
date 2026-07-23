@@ -1,12 +1,16 @@
 """Opt-in contradiction detection for the knowledge graph (the "brain").
 
-Runs as the last cognify task. It looks at the entities/events the current
-ingestion touched, gathers the facts (edges) directly connected to them — both
-the newly added ones and any already stored — and asks an LLM which pairs
-directly contradict each other. Each contradiction is surfaced twice instead of
-silently coexisting: a warning is logged, and a ``contradicts`` edge (carrying
-both facts, the reason, and a confidence) is written so the conflict is
-queryable next to the data it concerns.
+Pipeline seam: spliced in as the last cognify task by ``get_default_tasks`` when
+the ``contradiction_detection`` config flag is on (default off). It runs after
+``add_data_points`` so both the new and the pre-existing facts are persisted and
+comparable.
+
+It looks at the entities/events the current ingestion touched, gathers the facts
+(edges) directly connected to them — both the newly added ones and any already
+stored — and asks an LLM which pairs directly contradict each other. Each
+contradiction is surfaced twice instead of silently coexisting: a warning is
+logged, and a ``contradicts`` edge (carrying both facts, the reason, and a
+confidence) is written so the conflict is queryable next to the data it concerns.
 
 The task is non-destructive (it only adds edges, never rewrites/deletes),
 returns its input unchanged so it can be appended to any pipeline, and swallows
@@ -20,14 +24,14 @@ in the same 1-hop neighbourhood.
 
 from typing import Dict, List, Optional, Set, Tuple
 
-from pydantic import BaseModel, Field
-
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.llm import LLMGateway
 from cognee.infrastructure.llm.prompts import read_query_prompt, render_prompt
+from cognee.modules.cognify.config import get_cognify_config
 from cognee.modules.pipelines.tasks.task import task_summary
 from cognee.shared.logging_utils import get_logger
+from cognee.tasks.graph.models import ContradictionList
 
 logger = get_logger("detect_contradictions")
 
@@ -36,23 +40,6 @@ logger = get_logger("detect_contradictions")
 STRUCTURAL_RELATIONSHIPS = frozenset(
     {"contains", "is_part_of", "made_from", "exists_in", "contradicts"}
 )
-
-
-class Contradiction(BaseModel):
-    """One contradiction between two of the numbered facts sent to the LLM."""
-
-    first_fact_id: str = Field(description="Id of the first conflicting fact, e.g. 'F0'.")
-    second_fact_id: str = Field(description="Id of the second conflicting fact, e.g. 'F3'.")
-    reason: str = Field(description="Why the two facts are incompatible.")
-    confidence: float = Field(
-        ge=0.0, le=1.0, description="Confidence that this is a genuine contradiction."
-    )
-
-
-class ContradictionList(BaseModel):
-    """Structured LLM output: the detected contradictions (possibly empty)."""
-
-    contradictions: List[Contradiction] = Field(default_factory=list)
 
 
 def _collect_touched_node_ids(items) -> Set[str]:
@@ -148,19 +135,16 @@ def _contradiction_endpoints(
 
 
 @task_summary("Checked {n} item(s) for contradictions")
-async def detect_contradictions(
-    data_points: List[DataPoint],
-    confidence_threshold: float = 0.5,
-    max_facts: int = 500,
-    **kwargs,
-) -> List[DataPoint]:
+async def detect_contradictions(data_points: List[DataPoint], **kwargs) -> List[DataPoint]:
     """Flag facts touched by the current ingestion that contradict each other.
+
+    Tuning comes from ``CognifyConfig``: ``contradiction_confidence_threshold``
+    (minimum LLM confidence for a contradiction to be flagged) and
+    ``contradiction_max_facts`` (cap on the facts sent to the LLM in one check).
 
     Args:
         data_points: The items produced by the current cognify run. Their
             extracted entities identify which region of the graph to inspect.
-        confidence_threshold: Minimum LLM confidence for a contradiction to be flagged.
-        max_facts: Cap on the number of facts sent to the LLM in a single check.
 
     Returns:
         The unchanged ``data_points`` list, so the task can be appended to a pipeline.
@@ -173,6 +157,7 @@ async def detect_contradictions(
         if not touched_node_ids:
             return data_points
 
+        cognify_config = get_cognify_config()
         graph_engine = await get_graph_engine()
         # Only the region the ingestion touched: every fact one hop from a
         # touched entity (new facts and pre-existing ones alike).
@@ -180,7 +165,7 @@ async def detect_contradictions(
         node_names = _node_names(nodes)
 
         facts, fact_text, fact_edge = _build_candidate_facts(
-            edges, node_names, touched_node_ids, limit=max_facts
+            edges, node_names, touched_node_ids, limit=cognify_config.contradiction_max_facts
         )
 
         # At least two facts are needed for a contradiction to be possible.
@@ -198,7 +183,7 @@ async def detect_contradictions(
 
         contradiction_edges = []
         for contradiction in result.contradictions:
-            if contradiction.confidence < confidence_threshold:
+            if contradiction.confidence < cognify_config.contradiction_confidence_threshold:
                 continue
 
             first_edge = fact_edge.get(contradiction.first_fact_id)
