@@ -660,6 +660,12 @@ async def remember(
     **Without session_id (permanent memory):** Runs ``add()`` +
     ``cognify()`` to ingest data and build the knowledge graph.
 
+    Because the graph is built through ``cognify()``, the cognify feature
+    flags apply here too. Notably, setting ``CONTRADICTION_DETECTION=true``
+    makes every ``remember()`` call check the facts it just stored against
+    the ones already in the graph and record each conflict as a
+    ``contradicts`` edge (see ``CognifyConfig``). Off by default.
+
     **With session_id (session memory):** Stores the data in the
     session cache for fast retrieval. When ``self_improvement`` is
     True (default), also bridges the session data into the permanent

@@ -1,27 +1,30 @@
 """Wiring tests for opt-in contradiction detection (issue #3699).
 
 Contradiction detection is toggled by the ``contradiction_detection`` CognifyConfig
-flag rather than a cognify() argument, so what needs covering is the config surface
-and the splice in get_default_tasks. The flag-OFF case is the critical invariant:
-the task list must be element-for-element identical to the pre-detection pipeline.
-No real API keys are required (get_cognify_config is patched; config + chunk_size
-are passed so no ontology/LLM setup runs).
+flag rather than a cognify() argument, so what needs covering is the config surface,
+the splice in get_default_tasks, and the fact that remember() — which builds its
+graph through cognify() — inherits the flag. The flag-OFF case is the critical
+invariant: the task list must be element-for-element identical to the pre-detection
+pipeline. No real API keys are required (get_cognify_config is patched; config +
+chunk_size are passed so no ontology/LLM setup runs).
 """
 
 import os
 import sys
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from pydantic import ValidationError
 
 from cognee.api.v1.cognify.cognify import get_default_tasks
+from cognee.api.v1.remember.remember import remember
 from cognee.modules.cognify.config import CognifyConfig
 from cognee.tasks.graph.models import Contradiction, ContradictionList
 
 # `from cognee.api.v1.cognify import cognify` would resolve to the re-exported
-# cognify FUNCTION; grab the actual module object for patching get_cognify_config.
+# cognify FUNCTION; grab the actual module objects for patching.
 cognify_module = sys.modules["cognee.api.v1.cognify.cognify"]
+remember_module = sys.modules["cognee.api.v1.remember.remember"]
 
 # The canonical pre-detection task order.
 _BASE_SEQUENCE = [
@@ -98,6 +101,63 @@ class TestGetDefaultTasksSplice:
 
         assert "detect_contradictions" not in signature(cognify).parameters
         assert "detect_contradictions" not in signature(get_default_tasks).parameters
+
+
+class TestRememberInheritsTheFlag:
+    """remember() builds its graph through cognify(), so the flag reaches it too.
+
+    This is the behaviour the config flag buys: remember() routes only a fixed
+    allow-list of kwargs to cognify() (see _COGNIFY_ONLY), so a cognify() argument
+    would have been rejected with "Unexpected keyword arguments" and the feature
+    would have been unreachable from the primary 1.0 API.
+    """
+
+    async def _remember_task_sequence(self, flag_value):
+        """Run remember() far enough to capture the pipeline it hands the executor."""
+        captured = {}
+
+        def _fake_executor(run_in_background=False):
+            async def _run(**executor_kwargs):
+                captured["tasks"] = [task.executable.__name__ for task in executor_kwargs["tasks"]]
+                return {}
+
+            return _run
+
+        config = CognifyConfig(contradiction_detection=flag_value)
+        with (
+            patch.dict(os.environ, {"TELEMETRY_DISABLED": "1"}),
+            patch.object(cognify_module, "get_cognify_config", return_value=config),
+            patch.object(cognify_module, "get_pipeline_executor", _fake_executor),
+            patch("cognee.modules.migrations.startup.run_migrations_and_block", new=AsyncMock()),
+            patch("cognee.api.v1.serve.state.get_remote_client", return_value=None),
+            patch("cognee.modules.engine.operations.setup.setup", new=AsyncMock()),
+            patch("cognee.api.v1.add.add", new=AsyncMock()),
+            patch(
+                "cognee.modules.users.methods.get_default_user",
+                new=AsyncMock(return_value=object()),
+            ),
+            patch.object(
+                remember_module,
+                "resolve_authorized_user_datasets",
+                new=AsyncMock(return_value=(object(), [])),
+            ),
+        ):
+            await remember(
+                "Alice was born in 1985.",
+                self_improvement=False,
+                chunk_size=1024,
+                config={"ontology_config": {"ontology_resolver": None}},
+            )
+        return captured.get("tasks")
+
+    @pytest.mark.asyncio
+    async def test_remember_omits_detection_when_flag_off(self):
+        assert await self._remember_task_sequence(False) == _BASE_SEQUENCE
+
+    @pytest.mark.asyncio
+    async def test_remember_runs_detection_when_flag_on(self):
+        sequence = await self._remember_task_sequence(True)
+        assert sequence == _BASE_SEQUENCE + ["detect_contradictions"]
 
 
 class TestContradictionModels:
