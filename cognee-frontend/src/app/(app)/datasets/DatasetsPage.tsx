@@ -14,6 +14,7 @@ import { useDatasetStatuses } from "@/modules/datasets/useDatasetStatuses";
 import { TrackPageView, trackEvent } from "@/modules/analytics";
 import { loadGraphModelsConfig } from "@/modules/configuration/userConfiguration";
 import rememberData from "@/modules/ingestion/rememberData";
+import { MAX_FILES_PER_UPLOAD } from "@/modules/ingestion/uploadLimits";
 import deleteDatasetData from "@/modules/datasets/deleteDatasetData";
 import ShareDatasetModal from "@/ui/elements/ShareDatasetModal";
 import SkeletonBar from "@/ui/elements/SkeletonBar";
@@ -269,6 +270,11 @@ export default function DatasetsPage() {
     const ds = datasets.find((d) => d.id === selectedId);
     if (!ds) return;
 
+    if (files.length > MAX_FILES_PER_UPLOAD) {
+      setUploadError(`You selected ${files.length} files. Please upload ${MAX_FILES_PER_UPLOAD} or fewer at a time.`);
+      return;
+    }
+
     const totalBytes = files.reduce((sum, f) => sum + f.size, 0);
     const fileTypes = files.map((f) => f.type || "unknown");
     const uploadStartedAt = Date.now();
@@ -288,30 +294,13 @@ export default function DatasetsPage() {
     });
 
     try {
-      // Kick off ingestion in the background so the upload POST returns immediately,
-      // then poll the dataset status until the pipeline finishes. This avoids holding
-      // one HTTP request open for the full (multi-minute) build, which the client
-      // would abort at the rememberData timeout — and which is also exposed to
-      // gateway/LB idle timeouts — while the backend kept processing.
+      // Kick off ingestion in the background so the upload POST returns immediately.
+      // The add itself is done once this call returns — anything that fails after
+      // this point (status polling) must not be reported as an upload failure.
       await rememberData({ id: ds.id, name: ds.name }, files, cogniInstance, { runInBackground: true });
-      await pollDatasetStatus(ds.id, cogniInstance, { intervalMs: 5000 });
-      const data = await getDatasetData(ds.id, cogniInstance) as FileEntry[];
-      setSelectedDocs(Array.isArray(data) ? data : []);
-      setDatasets((prev) => prev.map((d) => d.id === ds.id ? { ...d, documents: Array.isArray(data) ? data.length : d.documents, status: "running" } : d));
-
-      const durationMs = Date.now() - uploadStartedAt;
-      recordUploadSuccess(durationMs, totalBytes, files.length);
-      trackEvent({
-        pageName: "Brains",
-        eventName: "dataset_files_uploaded",
-        additionalProperties: {
-          dataset_id: ds.id,
-          file_count: String(files.length),
-          total_bytes: String(totalBytes),
-          duration_ms: String(durationMs),
-        },
-      });
     } catch (err) {
+      setIsUploading(false);
+
       const durationMs = Date.now() - uploadStartedAt;
       const errorName = err instanceof Error ? err.name : "UnknownError";
       const errorMessage = err instanceof Error ? err.message : String(err);
@@ -336,6 +325,54 @@ export default function DatasetsPage() {
       } else {
         captureException(err, { datasetId: ds.id, fileCount: files.length, totalBytes, durationMs });
         setUploadError(errorMessage || "Upload failed. Please try again.");
+      }
+      return;
+    }
+
+    try {
+      // Files were already added successfully by this point — this only tracks
+      // knowledge-graph build progress, so its failure is reported separately.
+      await pollDatasetStatus(ds.id, cogniInstance, { intervalMs: 5000 });
+      const data = await getDatasetData(ds.id, cogniInstance) as FileEntry[];
+      setSelectedDocs(Array.isArray(data) ? data : []);
+      setDatasets((prev) => prev.map((d) => d.id === ds.id ? { ...d, documents: Array.isArray(data) ? data.length : d.documents, status: "running" } : d));
+
+      const durationMs = Date.now() - uploadStartedAt;
+      recordUploadSuccess(durationMs, totalBytes, files.length);
+      trackEvent({
+        pageName: "Brains",
+        eventName: "dataset_files_uploaded",
+        additionalProperties: {
+          dataset_id: ds.id,
+          file_count: String(files.length),
+          total_bytes: String(totalBytes),
+          duration_ms: String(durationMs),
+        },
+      });
+    } catch (err) {
+      const durationMs = Date.now() - uploadStartedAt;
+      const errorMessage = err instanceof Error ? err.message : String(err);
+
+      captureException(err, { datasetId: ds.id, fileCount: files.length, totalBytes, durationMs, stage: "processing" });
+      trackEvent({
+        pageName: "Brains",
+        eventName: "dataset_processing_failed",
+        additionalProperties: {
+          dataset_id: ds.id,
+          file_count: String(files.length),
+          total_bytes: String(totalBytes),
+          duration_ms: String(durationMs),
+          error_message: errorMessage,
+        },
+      });
+      setUploadError(`Files were added, but building the knowledge graph failed: ${errorMessage}`);
+
+      // Refresh doc list anyway — the files are there even though processing errored.
+      try {
+        const data = await getDatasetData(ds.id, cogniInstance) as FileEntry[];
+        setSelectedDocs(Array.isArray(data) ? data : []);
+      } catch {
+        // best-effort refresh only
       }
     } finally {
       setIsUploading(false);
