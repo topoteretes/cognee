@@ -19,6 +19,7 @@ from cognee.modules.graph.utils import (
     deduplicate_nodes_and_edges,
     ensure_default_edge_properties,
     get_graph_from_model,
+    resolve_structural_duplicates,
 )
 from .index_data_points import index_data_points
 from .index_graph_edges import index_graph_edges
@@ -42,6 +43,7 @@ async def add_data_points(
     embed_triplets: bool = False,
     ctx: Optional["PipelineContext"] = None,
     graph_only: bool = False,
+    structural_dedup: bool = False,
 ) -> List[DataPoint]:
     """
     Add a batch of data points to the graph database by extracting nodes and edges,
@@ -54,6 +56,10 @@ async def add_data_points(
         ctx: Pipeline runtime context (user, dataset, data_item).
         graph_only: Persist graph nodes and edges without initializing or writing
             a vector engine. Intended for deterministic extraction pipelines.
+        structural_dedup: When True, entities that share the same typed
+            neighbourhood in this batch (e.g. "Apple" / "Apple Inc.") are linked
+            with a ``merged_into`` edge (see resolve_structural_duplicates). Off
+            by default; most batches have no structural duplicates.
     """
     user = ctx.user if ctx else None
     data_item = ctx.data_item if ctx else None
@@ -93,6 +99,17 @@ async def add_data_points(
         edges.extend(result_edges)
 
     nodes, edges = deduplicate_nodes_and_edges(nodes, edges)
+
+    # Approach D — opt-in structural (graph-topology) dedup (issue #3630). When
+    # enabled, entities that share the same typed neighbourhood in this batch
+    # (e.g. "Apple" / "Apple Inc.") are linked with a `merged_into` edge, so the
+    # duplication is recorded in the graph, non-destructively and reversibly. Off
+    # by default; most batches have no structural duplicates and pay nothing.
+    if structural_dedup:
+        merge_edges = resolve_structural_duplicates(nodes, edges)
+        if merge_edges:
+            edges = edges + merge_edges
+            logger.info("Structural dedup: linked %d duplicate node pair(s)", len(merge_edges))
 
     edges = ensure_default_edge_properties(edges, nodes=nodes)
     custom_edges = (
