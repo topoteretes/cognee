@@ -14,6 +14,13 @@ class Entity(DataPoint):
     truth_alignment: Optional[list[float]] = None
     truth_subspace_signature: Optional[str] = None
     truth_epoch: Optional[int] = None
+    # Optional entity-canonicalization audit metadata (issue #3629); stamped on the
+    # surviving entity when a duplicate is merged into it. Like the truth-alignment
+    # fields above, these are never embedded and never part of id/dedup, so they do
+    # not affect the vector index or the UUID5 identity — they simply ride along in
+    # the serialized node attributes.
+    merged_aliases: Optional[list[str]] = None
+    merge_confidence: Optional[float] = None
     # identity_fields makes the id deterministic and namespaced by class
     # (``Entity:<name>``) when constructed without an explicit id — the same
     # value ``Entity.id_for(name)`` produces. Prevents the random-uuid4 footgun.
