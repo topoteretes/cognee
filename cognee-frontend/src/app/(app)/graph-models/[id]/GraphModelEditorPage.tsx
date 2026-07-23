@@ -330,11 +330,11 @@ export default function GraphModelEditorPage({ modelId }: GraphModelEditorPagePr
   const selectedEntity = schema.entities.find((e) => e._id === selectedEntityId) ?? null;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", fontFamily: '"Inter", system-ui, sans-serif' }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       <TrackPageView page="Graph Model Editor" />
 
       {/* ── Header bar (Paper-style) ──────────────────────────────────────── */}
-      <div style={{ display: "flex", alignItems: "center", borderBottom: "1px solid #E9ECEF", paddingBlock: "0.75rem", paddingInline: "1.5rem", flexShrink: 0, background: "#fff" }}>
+      <div style={{ display: "flex", alignItems: "center", borderBottom: "1px solid rgba(255,255,255,0.1)", paddingBlock: "0.75rem", paddingInline: "1.5rem", flexShrink: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: "0.625rem" }}>
           {/* Back button */}
           <button
@@ -342,8 +342,8 @@ export default function GraphModelEditorPage({ modelId }: GraphModelEditorPagePr
               if (isDirty && !window.confirm("You have unsaved changes. Leave anyway?")) return;
               router.push(assignedDatasetIds.length > 0 ? `/datasets/${assignedDatasetIds[0]}` : "/datasets");
             }}
-            className="cursor-pointer hover:bg-cognee-hover"
-            style={{ background: "none", border: "none", padding: "2px 6px", borderRadius: 4, fontSize: 16, color: "#757470", fontFamily: "inherit" }}
+            className="cursor-pointer hover:bg-white/10"
+            style={{ background: "none", border: "none", padding: "2px 6px", borderRadius: 4, fontSize: 16, color: "rgba(237,236,234,0.55)", fontFamily: "inherit" }}
             title="Back to models"
           >
             &larr;
@@ -356,25 +356,25 @@ export default function GraphModelEditorPage({ modelId }: GraphModelEditorPagePr
               onChange={(e) => { setModelName(e.target.value); setIsDirty(true); }}
               onBlur={() => setEditingName(false)}
               onKeyDown={(e) => { if (e.key === "Enter") setEditingName(false); if (e.key === "Escape") setEditingName(false); }}
-              style={{ fontSize: "0.875rem", fontWeight: 600, color: "#323332", border: "1px solid #E9ECEF", borderRadius: 4, padding: "1px 6px", fontFamily: "inherit", outline: "none", minWidth: 120 }}
+              style={{ fontSize: "0.875rem", fontWeight: 700, color: "#EDECEA", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 4, padding: "1px 6px", fontFamily: "inherit", outline: "none", minWidth: 120 }}
             />
           ) : (
             <span
               onDoubleClick={() => setEditingName(true)}
               title="Double-click to rename"
-              style={{ fontSize: "0.875rem", fontWeight: 600, color: "#323332", cursor: "default" }}
+              style={{ fontSize: "0.875rem", fontWeight: 700, color: "#EDECEA", cursor: "default" }}
             >
               {modelName}
             </span>
           )}
-          <span style={{ color: "#9CA3AF", fontSize: "0.6875rem" }}>·</span>
-          <span style={{ color: "#0DFF00", fontSize: "0.6875rem" }}>
+          <span style={{ color: "rgba(237,236,234,0.35)", fontSize: "0.6875rem" }}>·</span>
+          <span style={{ color: "#BC9BFF", fontSize: "0.6875rem" }}>
             {entityCount} type{entityCount !== 1 ? "s" : ""}, {relationCount} relationship{relationCount !== 1 ? "s" : ""}
           </span>
           {isDirty && (
             <>
-              <span style={{ color: "#9CA3AF", fontSize: "0.6875rem" }}>·</span>
-              <span style={{ color: "#F59E0B", fontSize: "0.6875rem" }}>Unsaved</span>
+              <span style={{ color: "rgba(237,236,234,0.35)", fontSize: "0.6875rem" }}>·</span>
+              <span style={{ color: "#FBBF24", fontSize: "0.6875rem" }}>Unsaved</span>
             </>
           )}
         </div>
@@ -394,7 +394,7 @@ export default function GraphModelEditorPage({ modelId }: GraphModelEditorPagePr
               }
             }}
             className="cursor-pointer hover:opacity-100"
-            style={{ display: "flex", alignItems: "center", justifyContent: "center", background: "none", borderRadius: "0.375rem", border: "1px solid #FECACA", paddingBlock: "0.4375rem", paddingInline: "0.625rem", opacity: 0.7, transition: "opacity 150ms" }}
+            style={{ display: "flex", alignItems: "center", justifyContent: "center", background: "none", borderRadius: "0.375rem", border: "1px solid rgba(239,68,68,0.4)", paddingBlock: "0.4375rem", paddingInline: "0.625rem", opacity: 0.7, transition: "opacity 150ms" }}
             title="Delete graph model"
           >
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M3 4h10M6 4V3h4v1M5 4v8.5a.5.5 0 00.5.5h5a.5.5 0 00.5-.5V4" stroke="#EF4444" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" /></svg>
@@ -403,11 +403,11 @@ export default function GraphModelEditorPage({ modelId }: GraphModelEditorPagePr
             onClick={isRegenerating ? undefined : openRegenerateModal}
             disabled={isRegenerating}
             className="cursor-pointer"
-            style={{ display: "flex", alignItems: "center", gap: "0.375rem", background: "#fff", borderRadius: "0.375rem", border: "1px solid #E9ECEF", paddingBlock: "0.4375rem", paddingInline: "1rem", color: "#323332", fontFamily: '"Inter", system-ui, sans-serif', fontSize: "0.8125rem", fontWeight: 500, lineHeight: "20px", opacity: isRegenerating ? 0.6 : 1 }}
+            style={{ display: "flex", alignItems: "center", gap: "0.375rem", background: "rgba(255,255,255,0.06)", borderRadius: "0.375rem", border: "1px solid rgba(255,255,255,0.12)", paddingBlock: "0.4375rem", paddingInline: "1rem", color: "#EDECEA", fontSize: "0.8125rem", fontWeight: 500, lineHeight: "20px", opacity: isRegenerating ? 0.6 : 1 }}
           >
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" style={{ animation: isRegenerating ? "spin 1s linear infinite" : "none" }}>
-              <path d="M1.5 8a6.5 6.5 0 0111.48-4.16M14.5 8a6.5 6.5 0 01-11.48 4.16" stroke="#6510F4" strokeWidth="1.3" strokeLinecap="round" />
-              <path d="M13 1v3h-3M3 15v-3h3" stroke="#6510F4" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M1.5 8a6.5 6.5 0 0111.48-4.16M14.5 8a6.5 6.5 0 01-11.48 4.16" stroke="#BC9BFF" strokeWidth="1.3" strokeLinecap="round" />
+              <path d="M13 1v3h-3M3 15v-3h3" stroke="#BC9BFF" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
             {isRegenerating ? "Regenerating..." : "Regenerate"}
           </button>
@@ -415,7 +415,7 @@ export default function GraphModelEditorPage({ modelId }: GraphModelEditorPagePr
             onClick={handleSave}
             disabled={isSaving}
             className="cursor-pointer"
-            style={{ background: "#6510F4", borderRadius: "0.375rem", border: "none", paddingBlock: "0.4375rem", paddingInline: "1.25rem", color: "#fff", fontFamily: '"Inter", system-ui, sans-serif', fontSize: "0.8125rem", fontWeight: 500, lineHeight: "20px" }}
+            style={{ background: "#6510F4", borderRadius: "0.375rem", border: "none", paddingBlock: "0.4375rem", paddingInline: "1.25rem", color: "#fff", fontSize: "0.8125rem", fontWeight: 500, lineHeight: "20px" }}
           >
             {isSaving ? "Saving..." : "Save"}
           </button>
@@ -426,29 +426,28 @@ export default function GraphModelEditorPage({ modelId }: GraphModelEditorPagePr
       <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
 
         {/* ── Graph canvas (center) ───────────────────────────────────── */}
-        <div style={{ flex: 1, position: "relative", background: "#FAFAFA", overflow: "hidden" }}>
+        <div style={{ flex: 1, position: "relative", overflow: "hidden" }}>
           <SchemaGraphPreview
             schema={schema}
             selectedEntityId={selectedEntityId}
             onEntitySelect={(id) => { setSelectedEntityId(id); setSidebarOpen(true); }}
-            onJumpToField={() => {}}
           />
 
           {/* Floating toolbar (top-left) */}
           <div style={{ position: "absolute", top: 12, left: 12, display: "flex", gap: "0.375rem", zIndex: 10 }}>
             <button
               onClick={() => setAddEntityModalOpen(true)}
-              className="cursor-pointer hover:bg-cognee-hover"
-              style={{ display: "flex", alignItems: "center", gap: "0.375rem", background: "#fff", border: "1px solid #E9ECEF", borderRadius: "0.375rem", paddingBlock: "0.375rem", paddingInline: "0.625rem", fontFamily: '"Inter", system-ui, sans-serif', fontSize: "0.6875rem", fontWeight: 500, color: "#323332" }}
+              className="cursor-pointer hover:bg-white/10"
+              style={{ display: "flex", alignItems: "center", gap: "0.375rem", background: "rgba(15,15,15,0.85)", backdropFilter: "blur(12px)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: "0.375rem", paddingBlock: "0.375rem", paddingInline: "0.625rem", fontSize: "0.6875rem", fontWeight: 500, color: "#EDECEA" }}
             >
-              <span style={{ color: "#6510F4", fontSize: "1rem", lineHeight: "20px" }}>+</span>
+              <span style={{ color: "#BC9BFF", fontSize: "1rem", lineHeight: "20px" }}>+</span>
               Add entity type
             </button>
           </div>
 
           {/* Bottom hint bar */}
-          <div style={{ position: "absolute", bottom: 12, left: "50%", transform: "translateX(-50%)", background: "rgba(50,51,50,0.7)", borderRadius: "0.375rem", paddingBlock: "0.375rem", paddingInline: "0.75rem", zIndex: 10 }}>
-            <span style={{ color: "#fff", fontFamily: '"Inter", system-ui, sans-serif', fontSize: "0.6875rem", lineHeight: "20px", whiteSpace: "nowrap" }}>
+          <div style={{ position: "absolute", bottom: 12, left: "50%", transform: "translateX(-50%)", background: "rgba(15,15,15,0.85)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "0.375rem", paddingBlock: "0.375rem", paddingInline: "0.75rem", zIndex: 10 }}>
+            <span style={{ color: "rgba(237,236,234,0.7)", fontSize: "0.6875rem", lineHeight: "20px", whiteSpace: "nowrap" }}>
               Click a type to edit · Drag to reposition
             </span>
           </div>
@@ -456,56 +455,56 @@ export default function GraphModelEditorPage({ modelId }: GraphModelEditorPagePr
 
         {/* ── Right sidebar (entity editor) ───────────────────────────── */}
         {sidebarOpen && selectedEntity && (
-        <div style={{ width: 280, flexShrink: 0, borderLeft: "1px solid #E9ECEF", background: "#fff", display: "flex", flexDirection: "column", overflow: "auto" }}>
+        <div style={{ width: 280, flexShrink: 0, borderLeft: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.04)", backdropFilter: "blur(12px)", display: "flex", flexDirection: "column", overflow: "auto" }}>
             <div style={{ display: "flex", flexDirection: "column", gap: "1rem", padding: "1.25rem", flex: 1 }}>
               {/* Header */}
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <span style={{ fontSize: "0.8125rem", fontWeight: 600, color: "#323332" }}>
+                <span style={{ fontSize: "0.8125rem", fontWeight: 700, color: "#EDECEA" }}>
                   {selectedEntity.name}
                 </span>
                 <button
                   onClick={() => { setSelectedEntityId(null); setSidebarOpen(false); }}
                   className="cursor-pointer"
-                  style={{ background: "none", border: "none", padding: 0, color: "#D8D8D8", fontSize: 14 }}
+                  style={{ background: "none", border: "none", padding: 0, color: "rgba(237,236,234,0.4)", fontSize: 14 }}
                 >
-                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="#D8D8D8" strokeWidth="1.3" strokeLinecap="round" /></svg>
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="rgba(237,236,234,0.4)" strokeWidth="1.3" strokeLinecap="round" /></svg>
                 </button>
               </div>
 
               {/* Name field */}
               <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
-                <span style={{ color: "#9CA3AF", fontSize: "0.625rem", fontWeight: 600, lineHeight: "20px" }}>NAME</span>
+                <span style={{ color: "rgba(237,236,234,0.45)", fontSize: "0.625rem", fontWeight: 700, lineHeight: "20px" }}>NAME</span>
                 <input
                   type="text"
                   value={selectedEntity.name}
                   onChange={(e) => dirtyDispatch({ type: "UPDATE_ENTITY", entityId: selectedEntity._id, updates: { name: e.target.value } })}
-                  style={{ border: "1px solid #D8D8D8", borderRadius: "0.375rem", padding: "0.4375rem 0.625rem", fontSize: 14, fontFamily: "inherit", color: "#000", outline: "none" }}
+                  style={{ border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.06)", borderRadius: "0.375rem", padding: "0.4375rem 0.625rem", fontSize: 14, fontFamily: "inherit", color: "#EDECEA", outline: "none" }}
                 />
               </div>
 
               {/* Description field */}
               <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
-                <span style={{ color: "#9CA3AF", fontSize: "0.625rem", fontWeight: 600, lineHeight: "20px" }}>DESCRIPTION</span>
+                <span style={{ color: "rgba(237,236,234,0.45)", fontSize: "0.625rem", fontWeight: 700, lineHeight: "20px" }}>DESCRIPTION</span>
                 <input
                   type="text"
                   value={selectedEntity.description ?? ""}
                   onChange={(e) => dirtyDispatch({ type: "UPDATE_ENTITY", entityId: selectedEntity._id, updates: { description: e.target.value } })}
                   placeholder="Describe this entity type..."
-                  style={{ border: "1px solid #D8D8D8", borderRadius: "0.375rem", padding: "0.4375rem 0.625rem", fontSize: 14, fontFamily: "inherit", color: "#000", outline: "none" }}
+                  style={{ border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.06)", borderRadius: "0.375rem", padding: "0.4375rem 0.625rem", fontSize: 14, fontFamily: "inherit", color: "#EDECEA", outline: "none" }}
                 />
               </div>
 
               {/* Fields */}
               <div style={{ display: "flex", flexDirection: "column", gap: "0.375rem" }}>
-                <span style={{ color: "#9CA3AF", fontSize: "0.625rem", fontWeight: 600, lineHeight: "20px" }}>
+                <span style={{ color: "rgba(237,236,234,0.45)", fontSize: "0.625rem", fontWeight: 700, lineHeight: "20px" }}>
                   FIELDS ({selectedEntity.fields.length})
                 </span>
                 {selectedEntity.fields.map((field) => (
-                  <div key={field._id} style={{ display: "flex", alignItems: "center", gap: "0.375rem", background: "#FAFAFA", borderRadius: "0.25rem", padding: "0.375rem 0.5rem" }}>
-                    <span style={{ fontSize: "0.75rem", color: "#323332", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  <div key={field._id} style={{ display: "flex", alignItems: "center", gap: "0.375rem", background: "rgba(255,255,255,0.06)", borderRadius: "0.25rem", padding: "0.375rem 0.5rem" }}>
+                    <span style={{ fontSize: "0.75rem", color: "#EDECEA", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {field.name}
                     </span>
-                    <span style={{ fontSize: "0.625rem", color: "#9CA3AF", flexShrink: 0 }}>
+                    <span style={{ fontSize: "0.625rem", color: "rgba(237,236,234,0.45)", flexShrink: 0 }}>
                       {field.kind === "relation"
                         ? `→ ${field.relation.targetEntityName}`
                         : field.kind === "enum"
@@ -525,19 +524,19 @@ export default function GraphModelEditorPage({ modelId }: GraphModelEditorPagePr
 
                 {/* Add field */}
                 {addingField ? (
-                  <div style={{ display: "flex", flexDirection: "column", gap: "0.375rem", border: "1px solid #E9ECEF", borderRadius: "0.375rem", padding: "0.5rem" }}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "0.375rem", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "0.375rem", padding: "0.5rem" }}>
                     <input
                       type="text"
                       value={newFieldName}
                       onChange={(e) => setNewFieldName(e.target.value)}
                       placeholder="Field name"
                       autoFocus
-                      style={{ border: "1px solid #D8D8D8", borderRadius: "0.25rem", padding: "0.3rem 0.5rem", fontSize: "0.75rem", fontFamily: "inherit", outline: "none" }}
+                      style={{ border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.06)", color: "#EDECEA", borderRadius: "0.25rem", padding: "0.3rem 0.5rem", fontSize: "0.75rem", fontFamily: "inherit", outline: "none" }}
                     />
                     <select
                       value={newFieldType}
                       onChange={(e) => setNewFieldType(e.target.value as typeof newFieldType)}
-                      style={{ border: "1px solid #D8D8D8", borderRadius: "0.25rem", padding: "0.3rem 0.5rem", fontSize: "0.75rem", fontFamily: "inherit", outline: "none", background: "#fff" }}
+                      style={{ border: "1px solid rgba(255,255,255,0.12)", borderRadius: "0.25rem", padding: "0.3rem 0.5rem", fontSize: "0.75rem", fontFamily: "inherit", outline: "none", background: "rgba(255,255,255,0.06)", color: "#EDECEA" }}
                     >
                       <option value="string">String</option>
                       <option value="number">Number</option>
@@ -549,7 +548,7 @@ export default function GraphModelEditorPage({ modelId }: GraphModelEditorPagePr
                       <select
                         value={newFieldTarget}
                         onChange={(e) => setNewFieldTarget(e.target.value)}
-                        style={{ border: "1px solid #D8D8D8", borderRadius: "0.25rem", padding: "0.3rem 0.5rem", fontSize: "0.75rem", fontFamily: "inherit", outline: "none", background: "#fff" }}
+                        style={{ border: "1px solid rgba(255,255,255,0.12)", borderRadius: "0.25rem", padding: "0.3rem 0.5rem", fontSize: "0.75rem", fontFamily: "inherit", outline: "none", background: "rgba(255,255,255,0.06)", color: "#EDECEA" }}
                       >
                         <option value="">Select target entity...</option>
                         {schema.entities.map((e) => (
@@ -561,7 +560,7 @@ export default function GraphModelEditorPage({ modelId }: GraphModelEditorPagePr
                       <button
                         onClick={() => { setAddingField(false); setNewFieldName(""); setNewFieldType("string"); setNewFieldTarget(""); }}
                         className="cursor-pointer"
-                        style={{ flex: 1, background: "none", border: "1px solid #E9ECEF", borderRadius: "0.25rem", padding: "0.25rem", fontSize: "0.6875rem", color: "#757470", fontFamily: "inherit" }}
+                        style={{ flex: 1, background: "none", border: "1px solid rgba(255,255,255,0.15)", borderRadius: "0.25rem", padding: "0.25rem", fontSize: "0.6875rem", color: "rgba(237,236,234,0.7)", fontFamily: "inherit" }}
                       >
                         Cancel
                       </button>
@@ -586,8 +585,8 @@ export default function GraphModelEditorPage({ modelId }: GraphModelEditorPagePr
                 ) : (
                   <button
                     onClick={() => setAddingField(true)}
-                    className="cursor-pointer hover:bg-cognee-hover"
-                    style={{ display: "flex", alignItems: "center", gap: "0.25rem", background: "none", border: "1px dashed #D8D8D8", borderRadius: "0.25rem", padding: "0.375rem 0.5rem", fontSize: "0.6875rem", color: "#6510F4", fontWeight: 500, fontFamily: "inherit" }}
+                    className="cursor-pointer hover:bg-white/10"
+                    style={{ display: "flex", alignItems: "center", gap: "0.25rem", background: "none", border: "1px dashed rgba(255,255,255,0.2)", borderRadius: "0.25rem", padding: "0.375rem 0.5rem", fontSize: "0.6875rem", color: "#BC9BFF", fontWeight: 500, fontFamily: "inherit" }}
                   >
                     <span style={{ fontSize: "0.875rem", lineHeight: 1 }}>+</span> Add field
                   </button>
@@ -600,13 +599,13 @@ export default function GraphModelEditorPage({ modelId }: GraphModelEditorPagePr
                 if (relations.length === 0) return null;
                 return (
                   <div style={{ display: "flex", flexDirection: "column", gap: "0.375rem" }}>
-                    <span style={{ color: "#9CA3AF", fontSize: "0.625rem", fontWeight: 600, lineHeight: "20px" }}>RELATIONSHIPS</span>
+                    <span style={{ color: "rgba(237,236,234,0.45)", fontSize: "0.625rem", fontWeight: 700, lineHeight: "20px" }}>RELATIONSHIPS</span>
                     {relations.map((field) => (
-                      <div key={field._id} style={{ display: "flex", alignItems: "center", gap: "0.375rem", background: "#FAFAFA", borderRadius: "0.25rem", padding: "0.375rem 0.5rem" }}>
-                        <span style={{ color: "#6510F4", fontFamily: 'ui-monospace, "SFMono-Regular", monospace', fontSize: "0.6875rem" }}>
+                      <div key={field._id} style={{ display: "flex", alignItems: "center", gap: "0.375rem", background: "rgba(255,255,255,0.06)", borderRadius: "0.25rem", padding: "0.375rem 0.5rem" }}>
+                        <span style={{ color: "#BC9BFF", fontFamily: 'ui-monospace, Menlo, Monaco, "Cascadia Mono", "Segoe UI Mono", "Roboto Mono", monospace', fontSize: "0.6875rem" }}>
                           {field.name}
                         </span>
-                        <span style={{ color: "#757470", fontSize: "0.6875rem" }}>
+                        <span style={{ color: "rgba(237,236,234,0.55)", fontSize: "0.6875rem" }}>
                           → {field.kind === "relation" ? field.relation.targetEntityName : ""}
                         </span>
                       </div>
@@ -619,8 +618,8 @@ export default function GraphModelEditorPage({ modelId }: GraphModelEditorPagePr
               <div style={{ display: "flex", gap: "0.5rem", marginTop: "auto" }}>
                 <button
                   onClick={() => handleDeleteEntity(selectedEntity._id)}
-                  className="cursor-pointer hover:bg-red-50"
-                  style={{ flex: 1, background: "#fff", border: "1px solid #FF5024", borderRadius: "0.375rem", padding: "0.4375rem", color: "#FF5024", fontSize: "0.6875rem", fontFamily: "inherit" }}
+                  className="cursor-pointer hover:bg-red-500/10"
+                  style={{ flex: 1, background: "transparent", border: "1px solid rgba(239,68,68,0.5)", borderRadius: "0.375rem", padding: "0.4375rem", color: "#EF4444", fontSize: "0.6875rem", fontFamily: "inherit" }}
                 >
                   Delete type
                 </button>
@@ -652,27 +651,27 @@ export default function GraphModelEditorPage({ modelId }: GraphModelEditorPagePr
       />
       {/* ── Regenerate modal ────────────────────────────────────────────── */}
       {showRegenerateModal && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.3)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={() => setShowRegenerateModal(false)}>
-          <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, padding: 24, width: 480, maxHeight: "80vh", display: "flex", flexDirection: "column", gap: 16, boxShadow: "0 16px 48px rgba(0,0,0,0.12)" }}>
-            <h2 style={{ fontSize: 18, fontWeight: 600, color: "#18181B", margin: 0 }}>Regenerate Schema</h2>
-            <p style={{ fontSize: 13, color: "#71717A", margin: 0, lineHeight: "20px" }}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.3)", backdropFilter: "blur(4px)", WebkitBackdropFilter: "blur(4px)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={() => setShowRegenerateModal(false)}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "rgba(15,15,15,0.92)", backdropFilter: "blur(16px)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: 24, width: 480, maxHeight: "80vh", display: "flex", flexDirection: "column", gap: 16, boxShadow: "0 20px 60px rgba(0,0,0,0.6)" }}>
+            <h2 style={{ fontSize: 18, fontWeight: 700, color: "#EDECEA", margin: 0 }}>Regenerate Schema</h2>
+            <p style={{ fontSize: 13, color: "rgba(237,236,234,0.55)", margin: 0, lineHeight: "20px" }}>
               Select a dataset and files to analyze. Cognee will infer entity types and relationships from the selected files.
             </p>
 
             {schema.entities.length > 0 && (
-              <div style={{ display: "flex", alignItems: "flex-start", gap: 8, background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 8, padding: "10px 12px" }}>
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0, marginTop: 1 }}><path d="M8 1L1 14h14L8 1z" fill="#FCA5A5" stroke="#EF4444" strokeWidth="1" /><text x="8" y="12" textAnchor="middle" fontSize="9" fontWeight="700" fill="#991B1B">!</text></svg>
-                <span style={{ fontSize: 13, color: "#991B1B", lineHeight: "20px" }}>This will overwrite your existing graph model. The current schema will be replaced entirely.</span>
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 8, background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.35)", borderRadius: 8, padding: "10px 12px" }}>
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0, marginTop: 1 }}><path d="M8 1L1 14h14L8 1z" fill="rgba(239,68,68,0.25)" stroke="#EF4444" strokeWidth="1" /><text x="8" y="12" textAnchor="middle" fontSize="9" fontWeight="700" fill="#FCA5A5">!</text></svg>
+                <span style={{ fontSize: 13, color: "#FCA5A5", lineHeight: "20px" }}>This will overwrite your existing graph model. The current schema will be replaced entirely.</span>
               </div>
             )}
 
             {/* Dataset selector */}
             <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              <label style={{ fontSize: 12, fontWeight: 600, color: "#71717A", textTransform: "uppercase", letterSpacing: 0.3 }}>Dataset</label>
+              <label style={{ fontSize: 12, fontWeight: 700, color: "rgba(237,236,234,0.45)", textTransform: "uppercase", letterSpacing: 0.3 }}>Dataset</label>
               <select
                 value={regenSelectedDataset ?? ""}
                 onChange={(e) => e.target.value && handleRegenDatasetSelect(e.target.value)}
-                style={{ border: "1px solid #E4E4E7", borderRadius: 8, padding: "8px 12px", fontSize: 14, fontFamily: "inherit", color: "#18181B", outline: "none", background: "#fff" }}
+                style={{ border: "1px solid rgba(255,255,255,0.12)", borderRadius: 8, padding: "8px 12px", fontSize: 14, fontFamily: "inherit", color: "#EDECEA", outline: "none", background: "rgba(255,255,255,0.06)" }}
               >
                 <option value="">Select a dataset...</option>
                 {regenDatasets.map((d) => (
@@ -685,7 +684,7 @@ export default function GraphModelEditorPage({ modelId }: GraphModelEditorPagePr
             {regenSelectedDataset && (
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                  <label style={{ fontSize: 12, fontWeight: 600, color: "#71717A", textTransform: "uppercase", letterSpacing: 0.3 }}>
+                  <label style={{ fontSize: 12, fontWeight: 700, color: "rgba(237,236,234,0.45)", textTransform: "uppercase", letterSpacing: 0.3 }}>
                     Files {!regenLoadingFiles && regenFiles.length > 0 && `(${regenSelectedFiles.size}/${regenFiles.length})`}
                   </label>
                   {regenFiles.length > 0 && (
@@ -699,13 +698,13 @@ export default function GraphModelEditorPage({ modelId }: GraphModelEditorPagePr
                   )}
                 </div>
                 {regenLoadingFiles ? (
-                  <div style={{ padding: "12px 0", textAlign: "center", fontSize: 13, color: "#71717A" }}>Loading files...</div>
+                  <div style={{ padding: "12px 0", textAlign: "center", fontSize: 13, color: "rgba(237,236,234,0.55)" }}>Loading files...</div>
                 ) : regenFiles.length === 0 ? (
-                  <div style={{ padding: "12px 0", textAlign: "center", fontSize: 13, color: "#71717A" }}>No files in this dataset</div>
+                  <div style={{ padding: "12px 0", textAlign: "center", fontSize: 13, color: "rgba(237,236,234,0.55)" }}>No files in this dataset</div>
                 ) : (
-                  <div style={{ border: "1px solid #E4E4E7", borderRadius: 8, maxHeight: 220, overflowY: "auto" }}>
+                  <div style={{ border: "1px solid rgba(255,255,255,0.12)", borderRadius: 8, maxHeight: 220, overflowY: "auto" }}>
                     {regenFiles.map((file) => (
-                      <label key={file.id} className="hover:bg-cognee-hover" style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", cursor: "pointer", borderBottom: "1px solid #F4F4F5" }}>
+                      <label key={file.id} className="hover:bg-white/10" style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", cursor: "pointer", borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
                         <input
                           type="checkbox"
                           checked={regenSelectedFiles.has(file.id)}
@@ -718,7 +717,7 @@ export default function GraphModelEditorPage({ modelId }: GraphModelEditorPagePr
                           }}
                           style={{ accentColor: "#6510F4" }}
                         />
-                        <span style={{ fontSize: 13, color: "#18181B", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{file.name}</span>
+                        <span style={{ fontSize: 13, color: "#EDECEA", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{file.name}</span>
                       </label>
                     ))}
                   </div>
@@ -728,7 +727,7 @@ export default function GraphModelEditorPage({ modelId }: GraphModelEditorPagePr
 
             {/* Actions */}
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 4 }}>
-              <button onClick={() => setShowRegenerateModal(false)} className="cursor-pointer" style={{ background: "#fff", border: "1px solid #E4E4E7", borderRadius: 8, padding: "8px 16px", fontSize: 13, fontWeight: 500, color: "#3F3F46", fontFamily: "inherit" }}>Cancel</button>
+              <button onClick={() => setShowRegenerateModal(false)} className="cursor-pointer" style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 8, padding: "8px 16px", fontSize: 13, fontWeight: 500, color: "rgba(237,236,234,0.8)", fontFamily: "inherit" }}>Cancel</button>
               <button
                 onClick={handleRegenerate}
                 disabled={regenSelectedFiles.size === 0}

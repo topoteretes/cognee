@@ -95,6 +95,12 @@ Please refer to our documentation [here](https://docs.cognee.ai/how-to-guides/de
 You can do more advanced configurations by creating .env file using our <a href="https://github.com/topoteretes/cognee/blob/main/.env.template">template.</a>
 To use different LLM providers / database configurations, and for more info check out our <a href="https://docs.cognee.ai">documentation</a>.
 
+> **No API key?** If your MCP host grants the `sampling` capability, `LLM_PROVIDER="mcp-sampling"`
+> delegates completions to the host's own model, so no `LLM_API_KEY` is needed (embeddings still
+> need a provider). Host support varies — as of early 2026 Claude Code does not yet grant sampling
+> ([anthropics/claude-code#1785](https://github.com/anthropics/claude-code/issues/1785)). See the
+> "MCP sampling" section of the .env template.
+
 
 ## 🐳 Docker Usage
 

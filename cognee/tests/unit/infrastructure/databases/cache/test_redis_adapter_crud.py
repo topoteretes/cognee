@@ -78,6 +78,42 @@ def adapter(redis_store):
         yield RedisAdapter(host="localhost", port=6379)
 
 
+def test_ssl_disabled_by_default(redis_store):
+    """Without ssl, clients connect in plaintext (no TLS handshake)."""
+    patch_mod = "cognee.infrastructure.databases.cache.redis.RedisAdapter"
+    sync_redis = MagicMock(return_value=MagicMock(ping=MagicMock()))
+    async_redis = MagicMock(return_value=redis_store)
+    with (
+        patch(f"{patch_mod}.redis.Redis", sync_redis),
+        patch(f"{patch_mod}.aioredis.Redis", async_redis),
+    ):
+        from cognee.infrastructure.databases.cache.redis.RedisAdapter import RedisAdapter
+
+        RedisAdapter(host="localhost", port=6379)
+
+    assert sync_redis.call_args.kwargs["ssl"] is False
+    assert async_redis.call_args.kwargs["ssl"] is False
+
+
+def test_ssl_forwarded_to_both_clients(redis_store):
+    """ssl / ssl_cert_reqs must reach both the sync and async redis clients so
+    the adapter can connect to a TLS-only managed Redis (ElastiCache etc.)."""
+    patch_mod = "cognee.infrastructure.databases.cache.redis.RedisAdapter"
+    sync_redis = MagicMock(return_value=MagicMock(ping=MagicMock()))
+    async_redis = MagicMock(return_value=redis_store)
+    with (
+        patch(f"{patch_mod}.redis.Redis", sync_redis),
+        patch(f"{patch_mod}.aioredis.Redis", async_redis),
+    ):
+        from cognee.infrastructure.databases.cache.redis.RedisAdapter import RedisAdapter
+
+        RedisAdapter(host="localhost", port=6379, ssl=True, ssl_cert_reqs="none")
+
+    for client in (sync_redis, async_redis):
+        assert client.call_args.kwargs["ssl"] is True
+        assert client.call_args.kwargs["ssl_cert_reqs"] == "none"
+
+
 class _FakeRedisLock:
     def __init__(self):
         self.acquired = False

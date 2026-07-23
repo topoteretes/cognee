@@ -93,9 +93,13 @@ async def run_pipeline(
     rollback_handler: Optional[Callable[..., Awaitable[None]]] = None,
     llm_config: Optional[LLMConfig] = None,
     embedding_config: Optional[EmbeddingConfig] = None,
+    data_cache: bool = False,
+    skip_connection_test: bool = False,
 ):
     validate_pipeline_tasks(tasks)
-    await setup_and_check_environment(vector_db_config, graph_db_config)
+    await setup_and_check_environment(
+        vector_db_config, graph_db_config, skip_connection_test=skip_connection_test
+    )
 
     user, authorized_datasets = await resolve_authorized_user_datasets(datasets, user)
 
@@ -114,6 +118,7 @@ async def run_pipeline(
             rollback_handler=rollback_handler,
             llm_config=llm_config,
             embedding_config=embedding_config,
+            data_cache=data_cache,
         ):
             yield run_info
 
@@ -130,6 +135,7 @@ async def run_pipeline_per_dataset(
     rollback_handler: Optional[Callable[..., Awaitable[None]]] = None,
     llm_config: Optional[LLMConfig] = None,
     embedding_config: Optional[EmbeddingConfig] = None,
+    data_cache=False,
 ):
     # The actual work of a single run, factored out so it can run either under
     # the per-dataset lock (normal case) or directly (re-entrant case below).
@@ -159,6 +165,7 @@ async def run_pipeline_per_dataset(
             rollback_handler=rollback_handler,
             llm_config=llm_config,
             embedding_config=embedding_config,
+            data_cache=data_cache,
         )
 
         async for pipeline_run_info in pipeline_run:

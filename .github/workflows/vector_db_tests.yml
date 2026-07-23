@@ -151,3 +151,77 @@ jobs:
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
         run: uv run python ./cognee/tests/test_lancedb.py
+
+  run-turso-tests:
+    name: Turso Tests
+    runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
+    if: ${{ inputs.databases == 'all' || contains(inputs.databases, 'turso') }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: ${{ inputs.python-version }}
+          extra-dependencies: "turso"
+
+      # Adapter behavior against a real embedded libSQL DB (no LLM needed).
+      - name: Run Turso adapter unit tests
+        env:
+          ENV: 'dev'
+        run: uv run pytest cognee/tests/unit/infrastructure/databases/vector/test_turso_adapter.py -v
+
+      # Full search-type e2e suite, run against Turso via VECTOR_DB_PROVIDER.
+      - name: Run Turso search tests
+        env:
+          ENV: 'dev'
+          DATABASE_MAX_LRU_CACHE_SIZE: 1
+          VECTOR_DB_PROVIDER: turso
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_ARGS: ${{ secrets.LLM_ARGS }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_DIMENSIONS: 300
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+        run: uv run pytest cognee/tests/test_search_db.py -v --log-level=INFO
+
+  run-turso-multi-user-tests:
+    name: Turso Multi-User Tests
+    runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
+    if: ${{ inputs.databases == 'all' || contains(inputs.databases, 'turso') }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: ${{ inputs.python-version }}
+          extra-dependencies: "turso"
+
+      # Per-dataset libSQL files isolate users; proves the dataset handler +
+      # permission system work with Turso under backend access control.
+      - name: Run Turso permissions tests
+        env:
+          ENV: 'dev'
+          ENABLE_BACKEND_ACCESS_CONTROL: 'true'
+          VECTOR_DB_PROVIDER: turso
+          VECTOR_DATASET_DATABASE_HANDLER: turso
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_ARGS: ${{ secrets.LLM_ARGS }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_DIMENSIONS: 300
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+        run: uv run pytest cognee/tests/test_permissions.py -v --log-level=INFO

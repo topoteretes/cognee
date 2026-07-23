@@ -285,16 +285,16 @@ class TestCognifyCommandEdgeCases:
             datasets=None,
             user=ANY,
             chunk_size=-100,
-            ontology_file_path=None,
+            config=None,
             chunker=TextChunker,
             run_in_background=False,
             chunks_per_batch=None,
+            dry_run=False,
         )
 
-    @patch(_RESOLVE_USER_PATCH, new_callable=lambda: AsyncMock(return_value=_mock_user()))
     @patch("cognee.cli.commands.cognify_command.asyncio.run", side_effect=_mock_run)
-    def test_cognify_nonexistent_ontology_file(self, mock_asyncio_run, _mock_resolve):
-        """Test cognify command with nonexistent ontology file"""
+    def test_cognify_nonexistent_ontology_file(self, mock_asyncio_run):
+        """Test cognify command fails fast on a nonexistent ontology file"""
         # Mock the cognee module
         mock_cognee = MagicMock()
         mock_cognee.cognify = AsyncMock()
@@ -310,22 +310,10 @@ class TestCognifyCommandEdgeCases:
                 verbose=False,
             )
 
-            # Should pass the path to cognify and let it handle file validation
-            command.execute(args)
+            with pytest.raises(CliCommandException, match="Ontology file not found"):
+                command.execute(args)
 
-        mock_asyncio_run.assert_called_once()
-        assert asyncio.iscoroutine(mock_asyncio_run.call_args[0][0])
-        from cognee.modules.chunking.TextChunker import TextChunker
-
-        mock_cognee.cognify.assert_awaited_once_with(
-            datasets=None,
-            user=ANY,
-            chunk_size=None,
-            ontology_file_path="/nonexistent/path/ontology.owl",
-            chunker=TextChunker,
-            run_in_background=False,
-            chunks_per_batch=None,
-        )
+        mock_cognee.cognify.assert_not_awaited()
 
     @patch("cognee.cli.commands.cognify_command.asyncio.run")
     def test_cognify_langchain_chunker_import_error(self, mock_asyncio_run):
@@ -376,7 +364,7 @@ class TestCognifyCommandEdgeCases:
     @patch(_RESOLVE_USER_PATCH, new_callable=lambda: AsyncMock(return_value=_mock_user()))
     @patch("cognee.cli.commands.cognify_command.asyncio.run", side_effect=_mock_run)
     def test_cognify_empty_datasets_list(self, mock_asyncio_run, _mock_resolve):
-        """Test cognify command with nonexistent ontology file"""
+        """Test cognify command with an empty datasets list"""
         # Mock the cognee module
         mock_cognee = MagicMock()
         mock_cognee.cognify = AsyncMock()
@@ -402,10 +390,11 @@ class TestCognifyCommandEdgeCases:
             datasets=None,
             user=ANY,
             chunk_size=None,
-            ontology_file_path=None,
+            config=None,
             chunker=TextChunker,
             run_in_background=False,
             chunks_per_batch=None,
+            dry_run=False,
         )
 
 

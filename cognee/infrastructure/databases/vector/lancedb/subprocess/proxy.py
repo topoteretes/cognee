@@ -239,7 +239,7 @@ class RemoteLanceDBTable:
         # Best-effort; async release is preferred. Only try sync release if the
         # session still looks alive — otherwise the handle is already gone.
         try:
-            if self._handle_id is not None and not self._session._closed:
+            if self._handle_id is not None and not self._session._closed_event.is_set():
                 self.release_sync()
         except Exception:
             pass
