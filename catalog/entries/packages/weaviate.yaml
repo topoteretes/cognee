@@ -1,0 +1,27 @@
+id: weaviate
+title: Weaviate vector store adapter
+kind: package
+stack: vector-store
+tags:
+  - weaviate
+  - vector-store
+  - python
+  - community-package
+summary: Route cognee's vector operations through Weaviate, using its hybrid semantic + keyword search behind the standard cognee interface.
+what_youll_build: A cognee deployment where cognify writes chunks and embeddings into Weaviate classes, and recall benefits from Weaviate's hybrid search out of the box.
+quickstart: |
+  # start Weaviate locally
+  docker run -p 8080:8080 -p 50051:50051 cr.weaviate.io/semitechnologies/weaviate:1.32.4
+  git clone https://github.com/topoteretes/cognee-community.git
+  cd cognee-community/packages/vector/weaviate
+  pip install cognee-community-vector-adapter-weaviate
+  export LLM_API_KEY=your_openai_key
+  export VECTOR_DB_URL=http://localhost:8080
+  python example.py
+expected_output: |
+  Weaviate classes populated by cognify, plus a recall response that matches
+  the cognee search contract while running against Weaviate under the hood.
+difficulty: medium
+repo: topoteretes/cognee-community
+path: packages/vector/weaviate
+docs_url: https://docs.cognee.ai/packages/vector/weaviate
