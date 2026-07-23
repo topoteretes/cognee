@@ -1,6 +1,6 @@
 import io
 import os.path
-from pathlib import Path
+from pathlib import PureWindowsPath
 from typing import BinaryIO, Optional, TypedDict
 from urllib.parse import unquote, urlparse
 
@@ -24,7 +24,8 @@ def _derive_basename(file_path: str) -> Optional[str]:
     "stem", and vice versa). This normalizes both cases:
 
     * percent-decodes ``file://`` URIs (so "Report%20Q1.pdf" -> "Report Q1"),
-    * treats both "/" and "\\" as separators regardless of host OS,
+    * resolves the basename + stem with ``PureWindowsPath``, which treats both "/"
+      and "\\" as separators on every host OS (so it is OS-agnostic),
     * strips a single trailing extension, preserving the prior ``Path(...).stem``
       semantics (the extension is stored separately in ``FileMetadata["extension"]``).
     """
@@ -32,9 +33,11 @@ def _derive_basename(file_path: str) -> Optional[str]:
     if candidate.startswith("file://"):
         candidate = unquote(urlparse(candidate).path)
 
-    basename = candidate.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
-    # ``basename`` is now separator-free, so Path(...).stem is OS-independent here.
-    return Path(basename).stem or None
+    # ``PureWindowsPath`` treats both "/" and "\\" as separators regardless of host
+    # OS, so basename + stem resolution is OS-independent (a plain ``Path`` /
+    # ``PurePosixPath`` would not split "\\"). Percent-decoding above is URL work
+    # that pathlib cannot do.
+    return PureWindowsPath(candidate).stem or None
 
 
 class FileMetadata(TypedDict):
