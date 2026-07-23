@@ -9,7 +9,7 @@ behavior a uniform shape a second provider can copy.
 """
 
 import logging
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import aiohttp
@@ -69,7 +69,7 @@ class SlackIntegration(OAuthIntegration):
         token_expires_at = None
         expires_in = token_response.get("expires_in")
         if expires_in:
-            token_expires_at = datetime.now(UTC) + timedelta(seconds=int(expires_in))
+            token_expires_at = datetime.now(timezone.utc) + timedelta(seconds=int(expires_in))
 
         return OAuthInstallation(
             provider_account_id=account_id,

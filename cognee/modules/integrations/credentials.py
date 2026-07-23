@@ -10,7 +10,7 @@ need to call the provider's API.
 """
 
 import logging
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any, Optional
 from uuid import UUID
 
@@ -170,7 +170,7 @@ async def revoke_credential_by_account(provider: str, provider_account_id: str) 
 
         if credential.status != STATUS_REVOKED:
             credential.status = STATUS_REVOKED
-            credential.revoked_at = datetime.now(UTC)
+            credential.revoked_at = datetime.now(timezone.utc)
             await db.commit()
 
         return True

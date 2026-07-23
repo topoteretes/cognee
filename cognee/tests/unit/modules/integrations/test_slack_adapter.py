@@ -5,7 +5,7 @@ save_installation() — team vs. enterprise (Grid) routing id, secret/metadata
 split, and expires_in -> token_expires_at conversion.
 """
 
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -66,7 +66,7 @@ def test_missing_authed_user_leaves_installed_by_none():
 
 
 def test_expires_in_becomes_token_expires_at():
-    before = datetime.now(UTC)
+    before = datetime.now(timezone.utc)
     installation = integration.parse_installation(
         {"team": {"id": "T123"}, "access_token": "x", "expires_in": 3600}
     )

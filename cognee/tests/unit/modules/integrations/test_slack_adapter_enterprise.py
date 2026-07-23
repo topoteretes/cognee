@@ -7,7 +7,7 @@ token is already dead), and refresh is a true no-op when there's nothing to
 refresh, since most Slack apps never enable token rotation.
 """
 
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
@@ -133,7 +133,7 @@ async def test_refresh_is_a_noop_without_a_refresh_token():
 @pytest.mark.asyncio
 async def test_refresh_persists_rotated_tokens():
     credential = _fake_credential()
-    expires_at = datetime.now(UTC) + timedelta(hours=1)
+    expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
     session = _fake_session(
         {
             "ok": True,
@@ -160,6 +160,10 @@ async def test_refresh_persists_rotated_tokens():
     _, kwargs = upsert.call_args
     assert kwargs["token_payload"] == {"access_token": "xoxb-new", "refresh_token": "xoxe-new"}
     assert kwargs["provider_account_id"] == "T123"
+    # expires_in: 3600 in the mocked response should become an expiry ~1 hour
+    # out; allow a few seconds of slack for the two `datetime.now(timezone.utc)` calls
+    # (this test's and the code under test's) not landing in the same instant.
+    assert abs((kwargs["token_expires_at"] - expires_at).total_seconds()) < 5
 
 
 @pytest.mark.asyncio
