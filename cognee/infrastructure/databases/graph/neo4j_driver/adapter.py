@@ -157,6 +157,10 @@ class Neo4jAdapter(GraphDBInterface):
     managing sessions and projecting graphs.
     """
 
+    # Attribute names allowed in get_filtered_graph_data, mirroring the
+    # postgres/turso adapters. Values are always bound as query parameters.
+    _ALLOWED_FILTER_ATTRS = {"id", "name", "type"}
+
     def __init__(
         self,
         graph_database_url: str,
@@ -2111,21 +2115,33 @@ class Neo4jAdapter(GraphDBInterface):
 
             A tuple containing filtered nodes and edges based on the specified criteria.
         """
-        where_clauses = []
-        for attribute, values in attribute_filters[0].items():
-            values_str = ", ".join(
-                f"'{value}'" if isinstance(value, str) else str(value) for value in values
-            )
-            where_clauses.append(f"n.{attribute} IN [{values_str}]")
+        # Validate attribute names against a whitelist and bind values as query
+        # parameters — mirroring the postgres/turso adapters — instead of
+        # interpolating names and values into the Cypher text (which broke on
+        # values containing quotes and left the query open to injection). The
+        # edge clause is built explicitly per alias rather than via the
+        # previous `where_clause.replace("n.", "m.")`, which corrupted any
+        # value containing the literal "n." substring.
+        node_clauses = []
+        edge_clauses = []
+        params: Dict[str, Any] = {}
+        for index, (attribute, values) in enumerate(attribute_filters[0].items()):
+            if attribute not in self._ALLOWED_FILTER_ATTRS:
+                raise ValueError(f"Invalid filter attribute: {attribute!r}")
+            param = f"filter_values_{index}"
+            node_clauses.append(f"n.{attribute} IN ${param}")
+            edge_clauses.append(f"m.{attribute} IN ${param}")
+            params[param] = list(values)
 
-        where_clause = " AND ".join(where_clauses)
+        node_where = " AND ".join(node_clauses)
+        edge_where = " AND ".join(node_clauses + edge_clauses)
 
         query_nodes = f"""
         MATCH (n)
-        WHERE {where_clause}
+        WHERE {node_where}
         RETURN n.id AS id, labels(n) AS labels, properties(n) AS properties
         """
-        result_nodes = await self.query(query_nodes)
+        result_nodes = await self.query(query_nodes, params)
 
         nodes = [
             (
@@ -2137,10 +2153,10 @@ class Neo4jAdapter(GraphDBInterface):
 
         query_edges = f"""
         MATCH (n)-[r]->(m)
-        WHERE {where_clause} AND {where_clause.replace("n.", "m.")}
+        WHERE {edge_where}
         RETURN n.id AS source, m.id AS target, TYPE(r) AS type, properties(r) AS properties
         """
-        result_edges = await self.query(query_edges)
+        result_edges = await self.query(query_edges, params)
 
         edges = []
         for record in result_edges:
