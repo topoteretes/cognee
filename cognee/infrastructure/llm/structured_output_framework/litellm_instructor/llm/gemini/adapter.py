@@ -15,6 +15,9 @@ from tenacity import (
     wait_exponential_jitter,
 )
 
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.instructor_modes import (
+    get_instructor_mode,
+)
 from cognee.infrastructure.llm.exceptions import (
     ContentPolicyFilterError,
     LLMPaymentRequiredError,
@@ -49,7 +52,7 @@ class GeminiAdapter(GenericAPIAdapter):
     - transcribe_image(input) -> BaseModel: Inherited from GenericAPIAdapter
     """
 
-    default_instructor_mode = "json_mode"
+    default_instructor_mode = get_instructor_mode("gemini")
 
     def __init__(
         self,

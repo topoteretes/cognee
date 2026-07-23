@@ -22,6 +22,9 @@ from cognee.infrastructure.llm.retry_config import (
 )
 
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.instructor_modes import (
+    get_instructor_mode,
+)
 from cognee.infrastructure.llm.exceptions import (
     ContentPolicyFilterError,
     LLMPaymentRequiredError,
@@ -63,7 +66,7 @@ class OpenAIAdapter(GenericAPIAdapter):
     - MAX_RETRIES
     """
 
-    default_instructor_mode = "json_schema_mode"
+    default_instructor_mode = get_instructor_mode("openai")
     MAX_RETRIES = 2
 
     """Adapter for OpenAI's GPT-3, GPT=4 API"""
