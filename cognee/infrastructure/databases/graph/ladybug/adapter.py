@@ -2358,6 +2358,41 @@ class LadybugAdapter(GraphDBInterface):
         updated_ids = await self._execute_node_truth_state_updates(updates)
         return {nid: (nid in updated_ids) for nid in node_ids}
 
+    async def update_node(self, node_id: str, values: Dict[str, Any]) -> bool:
+        """Merge *values* into an existing node's JSON property blob.
+
+        Reads the node, layers the patch on top of its current properties, and writes
+        the blob back in a single MATCH/SET. Only ``id``/``name``/``type`` are excluded
+        when rebuilding the blob: those are the native columns ``get_node`` injects and
+        ``add_node`` keeps out of the blob. Every other field — ``created_at``,
+        ``updated_at``, ``version``, ... — lives *inside* the blob (that is where
+        ``get_node`` reads them from), so it is carried through untouched and a patch
+        never silently drops a field the caller did not name. Returns False if the node
+        does not exist (or *values* is empty, i.e. there is nothing to patch).
+        """
+        if not isinstance(node_id, str) or not node_id or not values:
+            return False
+        node = await self.get_node(node_id)
+        if node is None:
+            return False
+        # get_node merges the JSON blob with the native id/name/type columns; rebuild
+        # the blob from everything except those three (created_at/updated_at and the
+        # rest are stored in the blob, not as native columns get_node returns), then
+        # layer the patch on top.
+        properties = {k: v for k, v in node.items() if k not in {"id", "name", "type"}}
+        properties.update(values)
+        query = """
+        MATCH (n:Node)
+        WHERE n.id = $id
+        SET n.properties = $properties
+        RETURN n.id AS id
+        """
+        result = await self.query(
+            query,
+            {"id": node_id, "properties": json.dumps(properties, cls=JSONEncoder)},
+        )
+        return bool(result)
+
     async def get_edge_feedback_weights(self, edge_object_ids: List[str]) -> Dict[str, float]:
         if not edge_object_ids:
             return {}
