@@ -12,7 +12,7 @@ import json
 import os
 
 import cognee.cli.echo as fmt
-from cognee.cli.api_client import CogneeApiClient
+from cognee.cli.api_client import CogneeApiClient, is_connection_error
 
 SUPPORTED_COMMANDS = {
     "add",
@@ -61,16 +61,6 @@ def dispatch(args: argparse.Namespace) -> None:
         headers["Authorization"] = f"Bearer {api_token}"
 
     with CogneeApiClient(args.api_url, headers=headers) as client:
-        # Health probe — fail fast with a clear message
-        try:
-            client.health()
-        except Exception:
-            raise RuntimeError(
-                f"Cannot connect to Cognee API at {args.api_url}.  "
-                f"Is the server running?  Start it with:  "
-                f"uvicorn cognee.api.client:app --port 8000"
-            )
-
         dispatchers = {
             "add": _dispatch_add,
             "cognify": _dispatch_cognify,
@@ -92,7 +82,22 @@ def dispatch(args: argparse.Namespace) -> None:
                 f"Run without --api-url to execute it locally."
             )
 
-        handler(client, args)
+        # No pre-flight /health probe: it queried a DB-backed endpoint that can
+        # hang or return 503 on an otherwise-reachable server (and sent no auth
+        # headers), so it mis-reported healthy cloud tenants as "not running".
+        # Run the real command and only translate genuine transport failures
+        # into a friendly, URL-bearing message; HTTP status errors surface with
+        # their real detail via _raise_for_status.
+        try:
+            handler(client, args)
+        except Exception as exc:
+            if is_connection_error(exc):
+                raise RuntimeError(
+                    f"Could not reach the Cognee API at {args.api_url}: {exc}\n"
+                    f"Check the --api-url value and that the server is reachable "
+                    f"(local server: uvicorn cognee.api.client:app --port 8000)."
+                ) from exc
+            raise
 
 
 # -- individual dispatchers -----------------------------------------------
