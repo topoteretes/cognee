@@ -466,3 +466,59 @@ async def test_cloud_client_recall_payload_includes_context_profile(monkeypatch)
     )
 
     assert fake.last_json.get("context_profile") == "agent"
+
+
+@pytest.mark.asyncio
+async def test_record_recall_context_usage_accumulates(monkeypatch, api_recall_mod):
+    """Context-only recall attributes query + served context to the session."""
+
+    class _Entry:
+        def __init__(self, text):
+            self._text = text
+
+        def model_dump_json(self):
+            return self._text
+
+    recorded = {}
+
+    async def fake_record(**kwargs):
+        recorded.update(kwargs)
+
+    monkeypatch.setattr(
+        "cognee.modules.session_lifecycle.usage_tracking.record_transcript_usage", fake_record
+    )
+
+    await api_recall_mod._record_recall_context_usage(
+        session_id="s1",
+        user=_make_user(),
+        query_text="what did I do",
+        entries=[_Entry("ctx-a"), _Entry("ctx-b")],
+    )
+
+    assert recorded["session_id"] == "s1"
+    assert recorded["input_text"] == "what did I do"
+    assert "ctx-a" in recorded["output_text"] and "ctx-b" in recorded["output_text"]
+
+
+@pytest.mark.asyncio
+async def test_record_recall_context_usage_noop_without_user_id(monkeypatch, api_recall_mod):
+    """No attribution when the user id can't be resolved."""
+    called = False
+
+    async def fake_record(**kwargs):
+        nonlocal called
+        called = True
+
+    async def no_user(_user):
+        return None
+
+    monkeypatch.setattr(
+        "cognee.modules.session_lifecycle.usage_tracking.record_transcript_usage", fake_record
+    )
+    monkeypatch.setattr(api_recall_mod, "_resolve_user_id", no_user)
+
+    await api_recall_mod._record_recall_context_usage(
+        session_id="s1", user=None, query_text="q", entries=[]
+    )
+
+    assert called is False

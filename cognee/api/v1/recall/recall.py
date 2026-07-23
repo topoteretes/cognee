@@ -633,4 +633,50 @@ async def recall(
             session_id or "-",
         )
 
+        # Context-only recalls run no LLM completion, so the completion usage
+        # scope records nothing and the session would show $0 for its reads
+        # (the common claude-code / agent pattern). Attribute the query + the
+        # served context to the session as a usage proxy. Guarded on
+        # only_context so a completion recall — already tracked by the usage
+        # scope — is never double-counted.
+        if session_id and only_context and merged:
+            await _record_recall_context_usage(
+                session_id=session_id, user=user, query_text=query_text, entries=merged
+            )
+
         return merged
+
+
+async def _record_recall_context_usage(
+    *,
+    session_id: str,
+    user: object | None,
+    query_text: str,
+    entries: list[RecallResponse],
+) -> None:
+    """Best-effort: approximate a context-only recall's token usage and
+    accumulate it onto its session. Never raises — usage accounting is
+    auxiliary to the recall itself."""
+    try:
+        user_id = await _resolve_user_id(user)
+        if not user_id:
+            return
+
+        def _entry_text(entry: RecallResponse) -> str:
+            dump = getattr(entry, "model_dump_json", None)
+            if callable(dump):
+                return dump()
+            return str(entry)
+
+        context_text = "\n".join(_entry_text(entry) for entry in entries)
+
+        from cognee.modules.session_lifecycle.usage_tracking import record_transcript_usage
+
+        await record_transcript_usage(
+            session_id=session_id,
+            user_id=user_id,
+            input_text=query_text,
+            output_text=context_text,
+        )
+    except Exception as exc:
+        logger.debug("recall: context-usage accounting failed (%s)", exc)

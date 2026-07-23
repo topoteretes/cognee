@@ -181,20 +181,25 @@ async def record_transcript_usage(
     input_text: str = "",
     output_text: str = "",
 ) -> None:
-    """Accumulate *estimated* token usage for one transcript step onto its session.
+    """Accumulate *estimated* token usage for one agent-facing operation.
 
-    Agent-facing operations (``remember`` and ``@agent_memory``-decorated tool
-    calls, via ``SessionManager.add_agent_trace_step``) never enter the
-    ``track_session_usage`` completion scope, so their usage is otherwise never
-    counted and the session shows $0. We approximate tokens from the step's own
-    text (the same ~chars/4 heuristic as ``record_llm_call``) and store them in
-    the same ``tokens_in``/``tokens_out`` columns the dashboard reads; cost is
-    derived downstream from the token totals.
+    Agent-facing operations never enter the ``track_session_usage`` completion
+    scope, so their usage is otherwise never counted and the session shows $0.
+    Callers approximate tokens from the operation's own text (the same
+    ~chars/4 heuristic as ``record_llm_call``) and store them in the same
+    ``tokens_in``/``tokens_out`` columns the dashboard reads; cost is derived
+    downstream from the token totals. Current callers:
 
-    This path is disjoint from ``record_llm_call`` — the completion retrievers
-    that use the usage scope do not emit trace steps — so there is no
-    double-counting. Cost is intentionally left to the caller (the cloud UI
-    prices tokens at the gateway rate), so no ``cost_usd`` is written here.
+    * ``SessionManager.add_agent_trace_step`` — ``remember`` and
+      ``@agent_memory``-decorated tool calls.
+    * ``recall`` — context-only recalls (``only_context=True``), which run no
+      LLM completion so nothing else would track them.
+
+    All these paths are disjoint from ``record_llm_call`` — completion
+    retrievers, which use the usage scope, neither emit trace steps nor take
+    the ``only_context`` branch — so there is no double-counting. Cost is
+    intentionally left to the consumer (the cloud UI prices tokens at the
+    gateway rate), so no ``cost_usd`` is written here.
     """
     tokens_in = _estimate_tokens(input_text)
     tokens_out = _estimate_tokens(output_text)
