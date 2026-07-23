@@ -22,6 +22,8 @@ COMMAND_DESCRIPTIONS = {
     "recall": "Search the knowledge graph for relevant information",
     "improve": "Enrich an existing knowledge graph with additional context and rules",
     "forget": "Remove data from the knowledge graph",
+    "update": "Incrementally re-cognify changed sources and prune removed ones",
+    "hook": "Install or remove a git post-commit hook that refreshes the graph",
     "serve": "Connect to a Cognee instance (cloud or local)",
     "eval": "Run a memory-quality benchmark end to end (corpus, answer, evaluate)",
     "upgrade": "Apply pending relational + data migrations (alembic-style; head or a revision)",

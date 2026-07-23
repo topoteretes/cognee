@@ -101,6 +101,8 @@ def _discover_commands() -> List[Type[SupportsCliCommand]]:
         ("cognee.cli.commands.recall_command", "RecallCommand"),
         ("cognee.cli.commands.improve_command", "ImproveCommand"),
         ("cognee.cli.commands.forget_command", "ForgetCommand"),
+        ("cognee.cli.commands.update_command", "UpdateCommand"),
+        ("cognee.cli.commands.hook_command", "HookCommand"),
         ("cognee.cli.commands.serve_command", "ServeCommand"),
         ("cognee.cli.commands.eval_command", "EvalCommand"),
         ("cognee.cli.commands.migrate_command", "UpgradeCommand"),
