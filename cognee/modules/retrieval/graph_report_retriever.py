@@ -71,6 +71,11 @@ class GraphReportRetriever(BaseRetriever):
     4. Suggested questions — one cheap LLM call over the report context.
     """
 
+    # The report is computed over the whole graph and ignores the query, so the
+    # conversational session-turn analysis (which may call an LLM before
+    # retrieval) is pointless here — opt out, like other deterministic retrievers.
+    supports_session_turn_preparation = False
+
     def __init__(self, top_n: int = 10) -> None:
         """
         Args:
