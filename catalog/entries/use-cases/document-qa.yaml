@@ -1,0 +1,21 @@
+id: document-qa
+title: Document Q&A backed by a knowledge graph
+kind: use-case
+stack: use-case
+tags:
+  - document-qa
+  - graph-rag
+  - recall
+  - reading-comprehension
+summary: Answer questions grounded in a set of documents using cognee's graph-completion retrieval instead of plain RAG.
+what_youll_build: A recall pipeline that ingests documents, extracts entities and relationships into a graph, and answers questions with citations back to source chunks.
+quickstart: |
+  uv pip install cognee
+  export LLM_API_KEY=your_openai_key
+  python examples/guides/recall_core.py
+expected_output: |
+  A ranked list of retrieved passages plus a synthesized natural-language
+  answer citing the original documents. Compare against a plain RAG baseline
+  to see graph-completion's contribution.
+difficulty: easy
+example_path: examples/guides/recall_core.py

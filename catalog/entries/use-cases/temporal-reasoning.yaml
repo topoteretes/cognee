@@ -1,0 +1,21 @@
+id: temporal-reasoning
+title: Temporal reasoning over time-stamped events
+kind: use-case
+stack: use-case
+tags:
+  - temporal
+  - events
+  - time-aware
+  - graph-completion
+summary: Recall against a knowledge graph where every node knows when it was true, so questions about ordering and duration return coherent answers.
+what_youll_build: A recall pipeline that ingests time-stamped events, builds a temporal knowledge graph, and answers questions like "what happened first" or "what was true on date X".
+quickstart: |
+  uv pip install cognee
+  export LLM_API_KEY=your_openai_key
+  python examples/guides/temporal_recall.py
+expected_output: |
+  Answers to time-relative questions grounded in the ingested events, with
+  recall order matching the true event ordering rather than embedding-similarity
+  order alone.
+difficulty: medium
+example_path: examples/guides/temporal_recall.py
