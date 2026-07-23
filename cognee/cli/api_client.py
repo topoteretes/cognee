@@ -99,7 +99,9 @@ class CogneeApiClient:
                 detail = resp.json()
             except Exception:
                 detail = resp.text
-            raise RuntimeError(f"API error {resp.status_code}: {detail}")
+            from cognee.cli.error_emit import parse_http_error_payload
+
+            raise parse_http_error_payload(detail, resp.status_code)
 
     # -- probes ----------------------------------------------------------
 

@@ -8,6 +8,7 @@ from cognee.cli import DEFAULT_DOCS_URL
 from cognee.cli.config import CHUNKER_CHOICES
 import cognee.cli.echo as fmt
 from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
+from cognee.exceptions import CogneeApiError
 
 
 class CognifyCommand(SupportsCliCommand):
@@ -163,6 +164,8 @@ After successful cognify processing, use `cognee search` to query the knowledge 
                         dry_run=dry_run,
                     )
                     return result
+                except CogneeApiError:
+                    raise
                 except Exception as e:
                     raise CliCommandInnerException(f"Failed to cognify: {str(e)}") from e
 
@@ -183,6 +186,8 @@ After successful cognify processing, use `cognee search` to query the knowledge 
                 if args.verbose and result:
                     fmt.echo(f"Processing results: {result}")
 
+        except CogneeApiError:
+            raise
         except Exception as e:
             if isinstance(e, CliCommandInnerException):
                 raise CliCommandException(str(e), error_code=1) from e

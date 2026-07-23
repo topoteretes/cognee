@@ -14,6 +14,7 @@ from pathlib import Path
 
 from cognee import datasets
 from cognee.api.DTO import InDTO, OutDTO
+from cognee.exceptions import CogneeApiError, CogneeSystemError
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.data.methods import get_datasets_by_name
@@ -135,9 +136,11 @@ def get_datasets_router() -> APIRouter:
             return datasets
         except Exception as error:
             logger.error(f"Error retrieving datasets: {str(error)}")
-            raise HTTPException(
-                status_code=status.HTTP_418_IM_A_TEAPOT,
-                detail=f"Error retrieving datasets: {str(error)}",
+            if isinstance(error, CogneeApiError):
+                raise
+            raise CogneeSystemError(
+                message=f"Error retrieving datasets: {str(error)}",
+                name="DatasetListError",
             ) from error
 
     @router.post("", response_model=DatasetDTO)
@@ -188,9 +191,11 @@ def get_datasets_router() -> APIRouter:
             return dataset
         except Exception as error:
             logger.error(f"Error creating dataset: {str(error)}")
-            raise HTTPException(
-                status_code=status.HTTP_418_IM_A_TEAPOT,
-                detail=f"Error creating dataset: {str(error)}",
+            if isinstance(error, CogneeApiError):
+                raise
+            raise CogneeSystemError(
+                message=f"Error creating dataset: {str(error)}",
+                name="DatasetCreateError",
             ) from error
 
     @router.delete("")

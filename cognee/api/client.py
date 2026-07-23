@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 from fastapi.openapi.utils import get_openapi
 
-from cognee.exceptions import CogneeApiError
+from cognee.exceptions import CogneeApiError, http_error_content
 from cognee.shared.logging_utils import get_logger, setup_logging
 from cognee.api.v1.cloud.routers import get_checks_router
 from cognee.api.v1.permissions.routers import get_permissions_router
@@ -183,21 +183,11 @@ async def request_validation_exception_handler(request: Request, exc: RequestVal
 
 @app.exception_handler(CogneeApiError)
 async def exception_handler(_: Request, exc: CogneeApiError) -> JSONResponse:
-    detail = {}
-
-    if exc.name and exc.message and exc.status_code:
-        status_code = exc.status_code
-        detail["message"] = f"{exc.message} [{exc.name}]"
-    else:
-        # Log an error indicating the exception is improperly defined
-        logger.error("Improperly defined exception: %s", exc)
-        # Provide a default error response
-        detail["message"] = "An unexpected error occurred."
-        status_code = status.HTTP_418_IM_A_TEAPOT
-
-    # log the stack trace for easier serverside debugging
     logger.error(format_exc())
-    return JSONResponse(status_code=status_code, content={"detail": detail["message"]})
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=http_error_content(exc),
+    )
 
 
 app.include_router(get_auth_router(), prefix="/api/v1/auth", tags=["auth"])

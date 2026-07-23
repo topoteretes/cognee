@@ -1,6 +1,8 @@
 from cognee.exceptions import (
-    CogneeValidationError,
     CogneeConfigurationError,
+    CogneeDataNotReadyError,
+    CogneePermissionError,
+    CogneeValidationError,
 )
 from fastapi import status
 
@@ -15,7 +17,7 @@ class UnstructuredLibraryImportError(CogneeConfigurationError):
         super().__init__(message, name, status_code)
 
 
-class UnauthorizedDataAccessError(CogneeValidationError):
+class UnauthorizedDataAccessError(CogneePermissionError):
     def __init__(
         self,
         message: str = "User does not have permission to access this data.",
@@ -25,14 +27,15 @@ class UnauthorizedDataAccessError(CogneeValidationError):
         super().__init__(message, name, status_code)
 
 
-class DatasetNotFoundError(CogneeValidationError):
+class DatasetNotFoundError(CogneeDataNotReadyError):
     def __init__(
         self,
         message: str = "Dataset not found.",
         name: str = "DatasetNotFoundError",
         status_code=status.HTTP_404_NOT_FOUND,
+        remediation: str | None = "Use an existing dataset name or create one with cognee.add().",
     ):
-        super().__init__(message, name, status_code)
+        super().__init__(message, name, status_code, remediation=remediation)
 
 
 class DatasetTypeError(CogneeValidationError):

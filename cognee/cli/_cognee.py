@@ -19,6 +19,8 @@ from cognee.cli.config import CLI_DESCRIPTION
 from cognee.cli import debug
 import cognee.cli.echo as fmt
 from cognee.cli.exceptions import CliCommandException
+from cognee.cli.error_emit import emit_cognee_error
+from cognee.exceptions import CogneeApiError
 
 
 ACTION_EXECUTED = False
@@ -161,6 +163,11 @@ def _create_parser() -> tuple[argparse.ArgumentParser, Dict[str, SupportsCliComm
         "--api-key",
         default=None,
         help="API key sent as X-Api-Key when --api-url is set. Falls back to $COGNEE_API_KEY.",
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit structured JSON errors on stdout for machine consumers",
     )
     parser.add_argument(
         "--api-token",
@@ -373,12 +380,26 @@ def main() -> int:
             error_code = -1
             raiseable_exception = ex
 
-            # Handle CLI-specific exceptions
             if isinstance(ex, CliCommandException):
                 error_code = ex.error_code
                 docs_url = ex.docs_url or docs_url
-                raiseable_exception = ex.raiseable_exception
+                raiseable_exception = ex.raiseable_exception or ex
 
+            cognee_error = None
+            if isinstance(raiseable_exception, CogneeApiError):
+                cognee_error = raiseable_exception
+            elif isinstance(ex, CogneeApiError):
+                cognee_error = ex
+
+            if cognee_error is not None:
+                return emit_cognee_error(
+                    cognee_error,
+                    json_mode=getattr(args, "json", False),
+                    docs_url=docs_url,
+                )
+
+            if raiseable_exception:
+                fmt.error(str(ex))
             # Print exception
             fmt.error(str(ex))
 
