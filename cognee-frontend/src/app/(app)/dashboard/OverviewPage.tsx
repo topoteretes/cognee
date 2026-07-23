@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { notifications } from "@mantine/notifications";
 import { trackEvent } from "@/modules/analytics";
 import { useCogniInstance, useTenant } from "@/modules/tenant/TenantProvider";
-import { useFilter } from "@/ui/layout/FilterContext";
+import { useFilter, useRefreshDatasetsOnMount } from "@/ui/layout/FilterContext";
 import { AgentActivityTerminal, ownerDisplayName } from "@/ui/elements/AgentActivityTerminal";
 import type { PipelineRun, Range } from "@/ui/elements/AgentActivityTerminal";
 import DashboardSkeleton from "./DashboardSkeleton";
@@ -31,6 +31,7 @@ export default function OverviewPage(): React.ReactElement {
   const { cogniInstance, isInitializing, serviceUrl, apiKey } = useCogniInstance();
   const { tenantReady, podUnreachable, tenant, isOwner } = useTenant();
   const { agents, datasets, selectedDataset, selectedAgent, loading: filterLoading } = useFilter();
+  useRefreshDatasetsOnMount();
   const router = useRouter();
   const uploadInputRef = useRef<HTMLInputElement>(null);
 
@@ -53,7 +54,9 @@ export default function OverviewPage(): React.ReactElement {
 
   const { runs, sessions, loading } = useDashboardTelemetry(RANGE);
   const connectedIntegrations = useConnectedIntegrations(sessions, tenant?.tenant_id ?? null);
-  const { graphNodes, graphEdges } = useGraphSummary(selectedDataset, datasets, runs);
+  // Dashboard KPIs always report workspace-wide totals — pass null so the
+  // graph counts never inherit a dataset selection carried over from another page.
+  const { graphNodes, graphEdges } = useGraphSummary(null, datasets, runs);
   const credits = useCreditsBanner();
   const upload = useDatasetUpload();
   useOnboardingRedirect();
@@ -164,7 +167,7 @@ export default function OverviewPage(): React.ReactElement {
           sessionCount={sessions.length}
           graphNodes={graphNodes}
           graphEdges={graphEdges}
-          brains={filteredDatasets.length}
+          brains={datasets.length}
           dataLoading={dataLoading}
         />
 

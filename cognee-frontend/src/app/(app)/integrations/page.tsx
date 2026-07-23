@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useCogniInstance } from "@/modules/tenant/TenantProvider";
-import { TrackPageView } from "@/modules/analytics";
+import { TrackPageView, trackEvent } from "@/modules/analytics";
 import {
   OPENCLAW_PROMPT,
   CLAUDE_MARKETPLACE_ADD, CLAUDE_PLUGIN_INSTALL,
@@ -37,6 +37,22 @@ const VSCODE_MCP_CONFIG = `{
   }
 }`;
 
+// Claude Desktop's config file already exists (it holds "preferences" and other
+// keys), so users MERGE this "mcpServers" key into it — hence no outer file
+// braces here, unlike the whole-file configs the other MCP cards write. Pasting
+// a full { "mcpServers": … } object would nest braces inside the existing root
+// and break the JSON.
+const CLAUDE_DESKTOP_MCP_ENTRY = `"mcpServers": {
+  "cognee": {
+    "command": "uvx",
+    "args": [
+      "cognee-mcp@latest",
+      "--api-url", "{{BASE_URL}}",
+      "--api-token", "{{API_KEY}}"
+    ]
+  }
+}`;
+
 // ── Copy-on-click code block ──────────────────────────────────────────────
 
 function InlineCodeBlock({ code, toCopy, loading }: { code: string; toCopy?: string; loading?: boolean }) {
@@ -61,16 +77,78 @@ function InlineCodeBlock({ code, toCopy, loading }: { code: string; toCopy?: str
   );
 }
 
+// A read-only, annotated preview of claude_desktop_config.json: the user's
+// existing keys are dimmed and the inserted Cognee block is highlighted, so they
+// can eyeball their open file against it. Copy grabs just the merge-ready
+// "mcpServers" fragment (no outer braces).
+function ConfigPreview({ baseUrl, apiKey, loading }: { baseUrl: string; apiKey: string; loading: boolean }) {
+  const [copied, setCopied] = useState(false);
+  const mono = 'ui-monospace, Menlo, Monaco, "Cascadia Mono", "Segoe UI Mono", "Roboto Mono", monospace';
+  function doCopy() {
+    if (loading) return;
+    navigator.clipboard.writeText(fillTemplate(CLAUDE_DESKTOP_MCP_ENTRY, baseUrl, apiKey));
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1800);
+  }
+  const inserted = [
+    '  "mcpServers": {',
+    '    "cognee": {',
+    '      "command": "uvx",',
+    '      "args": [',
+    '        "cognee-mcp@latest",',
+    `        "--api-url", "${loading ? "…" : baseUrl}",`,
+    `        "--api-token", "${loading ? "…" : apiKey}"`,
+    "      ]",
+    "    }",
+    "  },",
+  ];
+  const dim = "rgba(237,236,234,0.4)";
+  return (
+    <div style={{ position: "relative", background: "#18181B", borderRadius: 8, marginBottom: 4 }}>
+      <button onClick={(e) => { e.stopPropagation(); doCopy(); }} aria-label={copied ? "Copied" : "Copy the highlighted block"} style={{ position: "absolute", top: 8, right: 10, background: "rgba(24,24,27,0.85)", border: "none", cursor: loading ? "wait" : "pointer", padding: 2, borderRadius: 4, zIndex: 2 }}>
+        {copied
+          ? <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M3.5 8.5L6.5 11.5L12.5 4.5" stroke="#22C55E" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+          : <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="5" y="5" width="8" height="8" rx="1.5" stroke="#6B7280" strokeWidth="1.5" /><path d="M11 3H4.5A1.5 1.5 0 003 4.5V11" stroke="#6B7280" strokeWidth="1.5" strokeLinecap="round" /></svg>}
+      </button>
+      <div style={{ overflowX: "auto", padding: "12px 0", fontFamily: mono, fontSize: 12.5, lineHeight: 1.75, whiteSpace: "pre" }}>
+        <div style={{ padding: "0 14px", color: dim }}>{"{"}</div>
+        {inserted.map((line, i) => (
+          <div key={i} style={{ padding: "0 14px", color: loading ? "rgba(237,236,234,0.5)" : "#EDECEA", background: "rgba(34,197,94,0.13)", borderLeft: "2px solid #22C55E" }}>{line}</div>
+        ))}
+        <div style={{ padding: "0 14px", color: dim }}>{'  "preferences": { … }'}</div>
+        <div style={{ padding: "0 14px", color: dim }}>{"}"}</div>
+      </div>
+    </div>
+  );
+}
+
+// A subtle callout that visually separates a "gotcha"/troubleshooting note from
+// the main step instruction.
+function InfoBox({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{ display: "flex", gap: 9, background: "rgba(188,155,255,0.08)", border: "1px solid rgba(188,155,255,0.22)", borderRadius: 8, padding: "10px 12px" }}>
+      <svg width="15" height="15" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0, marginTop: 1 }}>
+        <circle cx="8" cy="8" r="6.5" stroke="#BC9BFF" strokeWidth="1.3" />
+        <path d="M8 7.2V11" stroke="#BC9BFF" strokeWidth="1.4" strokeLinecap="round" />
+        <circle cx="8" cy="4.9" r="0.9" fill="#BC9BFF" />
+      </svg>
+      <div style={{ fontSize: 12.5, color: "rgba(237,236,234,0.6)", lineHeight: 1.6 }}>{children}</div>
+    </div>
+  );
+}
+
 // ── Agent config ──────────────────────────────────────────────────────────
 
 interface StepDef {
   title: string;
-  description: string;
+  description: React.ReactNode;
   code?: string;
   codeToCopy?: string;
   loading?: boolean;
   /** When set, renders multiple separately-copyable code blocks (commands run one at a time). */
   codeBlocks?: { code: string; codeToCopy?: string; label?: string }[];
+  /** Custom rendered content (e.g. an annotated config preview) shown below the description. */
+  content?: React.ReactNode;
 }
 
 interface AgentCfg {
@@ -224,8 +302,50 @@ const AGENT_CARDS: AgentCfg[] = [
     logo: imgLogo("/visuals/logos/claude.svg", "Claude Desktop"),
     icon: imgIcon("/visuals/logos/claude.svg", "Claude Desktop"),
     buildSteps: (baseUrl, apiKey, loading) => [
-      mcpConfigStep("claude_desktop_config.json", "Claude Desktop", '"$HOME/Library/Application Support/Claude"', '"$HOME/Library/Application Support/Claude/claude_desktop_config.json"', baseUrl, apiKey, loading),
-      { title: "Test the connection", description: "Restart Claude Desktop. Open a new conversation and ask: \"What do you know from cognee?\" — Cognee's memory will respond." },
+      {
+        title: "Install uv (provides uvx)",
+        description: "Cognee needs uv installed. Use whichever you trust:",
+        codeBlocks: [
+          { label: "Homebrew", code: "brew install uv" },
+          { label: "Install script", code: "curl -LsSf https://astral.sh/uv/install.sh | sh" },
+        ],
+      },
+      {
+        title: "Open the MCP config file",
+        description: (
+          <>
+            In Claude Desktop, open <strong style={{ color: "#EDECEA" }}>Settings</strong> → <strong style={{ color: "#EDECEA" }}>Developer</strong> → <strong style={{ color: "#EDECEA" }}>Edit Config</strong> to create and open <strong style={{ color: "#EDECEA" }}>claude_desktop_config.json</strong>. Leave it open for the next step.
+          </>
+        ),
+      },
+      {
+        title: "Add the Cognee server to the config",
+        description: (
+          <>
+            Merge the highlighted block into your config — eyeball it against your open file.
+            {"\n"}• No <strong style={{ color: "#EDECEA" }}>{'"mcpServers"'}</strong> yet → add the whole block at the top.
+            {"\n"}• Already have one → add only the <strong style={{ color: "#EDECEA" }}>{'"cognee"'}</strong> entry inside it.
+          </>
+        ),
+        content: <ConfigPreview baseUrl={baseUrl} apiKey={apiKey} loading={loading} />,
+      },
+      {
+        title: "Restart and test",
+        description: (
+          <>
+            Fully quit Claude Desktop — <strong style={{ color: "#EDECEA" }}>⌘Q</strong>, or quit from the tray on Windows (closing the window is not enough) — then reopen it.
+            {"\n\n"}Nothing visibly changes in the UI, so confirm by using it: in a new chat, ask the prompt below. If Claude runs a <strong style={{ color: "#EDECEA" }}>cognee</strong> tool and answers from your memory, you are connected.
+          </>
+        ),
+        code: "What do you know from cognee?",
+        content: (
+          <div style={{ marginTop: 12 }}>
+            <InfoBox>
+              If Claude never calls a <strong style={{ color: "#EDECEA" }}>cognee</strong> tool, it usually cannot find <strong style={{ color: "#EDECEA" }}>uvx</strong> on its PATH — run <strong style={{ color: "#EDECEA" }}>which uvx</strong> and use that absolute path as the <strong style={{ color: "#EDECEA" }}>command</strong> value in the config.{" "}<strong style={{ color: "#EDECEA" }}>(the uvx from step 1)</strong>
+            </InfoBox>
+          </div>
+        ),
+      },
     ],
   },
   {
@@ -257,8 +377,32 @@ const AGENT_CARDS: AgentCfg[] = [
     logo: imgLogo("/visuals/logos/vscode.svg", "VS Code"),
     icon: imgIcon("/visuals/logos/vscode.svg", "VS Code"),
     buildSteps: (baseUrl, apiKey, loading) => [
-      { title: "Configure VS Code", description: "From your project root, run this command to register the Cognee MCP server for VS Code (Copilot agent mode), then reload the window. Cognee runs via uvx (requires uv) — no separate install. VS Code prompts for your API key on first use (kept out of the committable file); an existing mcp.json is backed up to .bak.", code: ".vscode/mcp.json", codeToCopy: `mkdir -p .vscode && [ -f .vscode/mcp.json ] && cp .vscode/mcp.json .vscode/mcp.json.bak; cat > .vscode/mcp.json << 'COGNEE_EOF'\n${fillTemplate(VSCODE_MCP_CONFIG, baseUrl, apiKey)}\nCOGNEE_EOF`, loading },
-      { title: "Test the connection", description: "Open Copilot Chat in agent mode and ask: \"What do you know from cognee?\" — the Cognee memory tools should respond." },
+      {
+        title: "Install the prerequisites",
+        description: "You need VS Code 1.102 or newer with the GitHub Copilot and Copilot Chat extensions installed and signed in (the free Copilot plan is enough) — MCP servers run inside Copilot's agent mode. Cognee itself runs via uvx, so you also need uv. Run this to install uv (skip if you already have it), then reopen VS Code.",
+        code: "curl -LsSf https://astral.sh/uv/install.sh | sh",
+      },
+      {
+        title: "Add the Cognee MCP server",
+        description: "Open your project folder in VS Code, then run this in a terminal from the project root to create .vscode/mcp.json (an existing one is backed up to .bak first). Your API key is not written to the file — VS Code asks for it on first start and stores it securely, so the file is safe to commit. To make Cognee available in every project instead, open the Command Palette (⇧⌘P / Ctrl+Shift+P), run \"MCP: Open User Configuration\", and paste the same \"servers\" block there.",
+        code: ".vscode/mcp.json",
+        codeToCopy: `mkdir -p .vscode && [ -f .vscode/mcp.json ] && cp .vscode/mcp.json .vscode/mcp.json.bak; cat > .vscode/mcp.json << 'COGNEE_EOF'\n${fillTemplate(VSCODE_MCP_CONFIG, baseUrl, apiKey)}\nCOGNEE_EOF`,
+        loading,
+      },
+      {
+        title: "Start the server and enter your API key",
+        description: "Open .vscode/mcp.json in VS Code — a \"Start\" button appears just above the \"cognee\" line; click it (or open the Command Palette and run \"MCP: List Servers\" → cognee → Start). On first start VS Code prompts for your Cognee API key: paste it, and accept the trust prompt if one appears. A green \"Running\" status means it connected to your cloud.",
+        code: "MCP: List Servers",
+      },
+      {
+        title: "Switch Copilot Chat to Agent mode",
+        description: "Open the Copilot Chat view (⌃⌘I / Ctrl+Alt+I). In the mode dropdown at the bottom of the chat box, choose \"Agent\" — Cognee's tools only show up in agent mode. Click the tools (wrench) icon and make sure the cognee tools are enabled.",
+      },
+      {
+        title: "Test the connection",
+        description: "In the chat box (still in Agent mode), send the prompt below. Copilot should call Cognee's memory tools and answer from your cloud brain.",
+        code: "What do you know from cognee?",
+      },
     ],
   },
   {
@@ -467,7 +611,7 @@ function AgentSection({ cards }: { cards: AgentCfg[] }) {
                   <div style={{ display: "grid", gridTemplateRows: isStepActive ? "1fr" : "0fr", opacity: isStepActive ? 1 : 0, transition: "grid-template-rows 260ms ease, opacity 200ms ease" }}>
                     <div style={{ overflow: "hidden" }}>
                       <div onClick={(e) => e.stopPropagation()} style={{ padding: "10px 20px 18px 56px" }}>
-                        {step.description && <p style={{ fontSize: 13, color: "rgba(237,236,234,0.55)", margin: "0 0 12px", lineHeight: 1.6 }}>{step.description}</p>}
+                        {step.description && <p style={{ fontSize: 13, color: "rgba(237,236,234,0.55)", margin: "0 0 12px", lineHeight: 1.6, whiteSpace: "pre-line" }}>{step.description}</p>}
                         {step.code && <InlineCodeBlock code={step.code} toCopy={step.codeToCopy} loading={step.loading} />}
                         {step.codeBlocks && (
                           <div style={{ display: "flex", flexDirection: "column", gap: step.codeBlocks.some(cb => cb.label) ? 14 : 8 }}>
@@ -483,6 +627,7 @@ function AgentSection({ cards }: { cards: AgentCfg[] }) {
                             ))}
                           </div>
                         )}
+                        {step.content}
                         {i < activeSteps.length - 1
                           ? <p style={{ margin: "10px 0 0", fontSize: 12, color: "#C8C8C8" }}>Click step {i + 2} when ready ↓</p>
                           : <button onClick={(e) => { e.stopPropagation(); setActiveKey(null); router.push("/sessions"); }} style={{ marginTop: 12, display: "inline-flex", alignItems: "center", gap: 5, background: "none", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 8, padding: "7px 14px", fontSize: 13, fontWeight: 500, color: "rgba(237,236,234,0.7)", fontFamily: "inherit", cursor: "pointer" }}>Go to Sessions →</button>}
@@ -511,6 +656,114 @@ const INTEGRATIONS = [
   { name: "Jira",                description: "Sync tickets and epics into the graph.",              initials: "Jr", color: "#0052CC" },
   { name: "Google Drive Sheets", description: "Pull structured data from spreadsheets.",            initials: "Sh", color: "#0F9D58" },
 ];
+
+// ── Data sources: "false door" experiment ─────────────────────────────────
+// These data sources aren't built yet. Each card presents as a real, available
+// connector (no "coming soon" telegraph) so a Connect click measures genuine
+// intent; the click opens a Coming Soon modal and fires analytics so we can
+// decide what to build next. Both interactions are tracked (see tracking-plan).
+
+function ComingSoonModal({
+  source,
+  onClose,
+}: {
+  source: (typeof INTEGRATIONS)[number];
+  onClose: () => void;
+}) {
+  const [notified, setNotified] = useState(false);
+
+  function requestNotify() {
+    trackEvent({
+      pageName: "Integrations",
+      eventName: "data_source_notify_requested",
+      additionalProperties: { data_source: source.name },
+    });
+    setNotified(true);
+  }
+
+  return (
+    <div role="dialog" aria-modal="true" onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", backdropFilter: "blur(4px)", WebkitBackdropFilter: "blur(4px)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: "rgba(15,15,15,0.92)", backdropFilter: "blur(16px)", borderRadius: 14, width: 440, maxWidth: "100%", boxShadow: "0 20px 60px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.1)", overflow: "hidden" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "16px 20px", borderBottom: "1px solid rgba(255,255,255,0.1)" }}>
+          <div style={{ width: 32, height: 32, borderRadius: 8, background: source.color, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            <span style={{ color: "#fff", fontSize: 12, fontWeight: 700 }}>{source.initials}</span>
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: "#EDECEA", lineHeight: "20px" }}>Coming soon</div>
+            <div style={{ fontSize: 12, color: "rgba(237,236,234,0.45)", marginTop: 1 }}>{source.name}</div>
+          </div>
+          <button onClick={onClose} aria-label="Close" style={{ background: "none", border: "none", color: "rgba(237,236,234,0.65)", cursor: "pointer", padding: 4, borderRadius: 6, lineHeight: 1 }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+          </button>
+        </div>
+        <div style={{ padding: "18px 20px 20px" }}>
+          {notified ? (
+            <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+              <svg width="18" height="18" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0, marginTop: 1 }}><circle cx="8" cy="8" r="7" stroke="#22C55E" strokeWidth="1.3" /><path d="M5 8.2L7 10.2L11 5.8" stroke="#22C55E" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+              <p style={{ margin: 0, fontSize: 14, color: "rgba(237,236,234,0.75)", lineHeight: 1.6 }}>
+                Thanks — we’ll email you the moment the <strong style={{ color: "#EDECEA" }}>{source.name}</strong> integration is live.
+              </p>
+            </div>
+          ) : (
+            <>
+              <p style={{ margin: "0 0 16px", fontSize: 14, color: "rgba(237,236,234,0.6)", lineHeight: 1.6 }}>
+                We can let you know once the <strong style={{ color: "#EDECEA" }}>{source.name}</strong> integration is live to upgrade your Company Brain.
+              </p>
+              <button onClick={requestNotify} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "#6510F4", border: "none", borderRadius: 8, padding: "9px 16px", fontSize: 13.5, fontWeight: 600, color: "#fff", cursor: "pointer", fontFamily: "inherit" }}>
+                Get notified once live
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DataSourcesSection() {
+  const [activeName, setActiveName] = useState<string | null>(null);
+  const activeSource = INTEGRATIONS.find((it) => it.name === activeName) ?? null;
+
+  function openSource(source: (typeof INTEGRATIONS)[number]) {
+    trackEvent({
+      pageName: "Integrations",
+      eventName: "data_source_connect_clicked",
+      additionalProperties: { data_source: source.name },
+    });
+    setActiveName(source.name);
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div>
+        <h2 style={{ fontSize: 18, fontWeight: 700, color: "#EDECEA", margin: "0 0 4px", letterSpacing: "-0.01em" }}>Data sources</h2>
+        <p style={{ fontSize: 14, color: "rgba(237,236,234,0.55)", margin: 0 }}>Connect the tools your team already uses as data sources for your brains.</p>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 16 }}>
+        {INTEGRATIONS.map((it) => (
+          <button key={it.name} className="aci-card" onClick={() => openSource(it)} style={{ position: "relative", background: "rgba(255,255,255,0.06)", backdropFilter: "blur(12px)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: 20, display: "flex", flexDirection: "column", gap: 12, textAlign: "left", cursor: "pointer", fontFamily: "inherit", width: "100%" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
+              <div style={{ width: 40, height: 40, borderRadius: 10, background: it.color, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                <span style={{ color: "#fff", fontSize: 14, fontWeight: 700 }}>{it.initials}</span>
+              </div>
+              <span style={{ fontSize: 16, fontWeight: 500, color: "#EDECEA", fontFamily: '"TWKLausanne", sans-serif', overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.name}</span>
+            </div>
+            <span style={{ display: "block", fontSize: 13, color: "rgba(237,236,234,0.55)" }}>{it.description}</span>
+            <span className="aci-cta-chip" style={{ alignSelf: "flex-start", display: "inline-flex", alignItems: "center", gap: 4, background: "rgba(20,20,22,0.92)", backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)", border: "1px solid rgba(237,236,234,0.65)", borderRadius: 6, padding: "4px 9px", fontSize: 11, fontWeight: 500, color: "rgba(237,236,234,0.65)", whiteSpace: "nowrap", transition: "background 150ms" }}>Connect</span>
+          </button>
+        ))}
+      </div>
+
+      <p style={{ fontSize: 13, color: "rgba(237,236,234,0.35)", textAlign: "center", margin: 0 }}>
+        More integrations on the way.{" "}
+        <a href="mailto:support@cognee.ai?subject=Integration%20request" style={{ color: "#6510F4", textDecoration: "underline" }}>Let us know</a> what to prioritize.
+      </p>
+
+      {activeSource && <ComingSoonModal source={activeSource} onClose={() => setActiveName(null)} />}
+    </div>
+  );
+}
 
 // ── Page ──────────────────────────────────────────────────────────────────
 
@@ -545,39 +798,8 @@ export default function IntegrationsPage() {
         {/* ── Divider ── */}
         <div style={{ height: 1, background: "rgba(255,255,255,0.08)" }} />
 
-        {/* ── Data sources ── */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          <div>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
-              <h2 style={{ fontSize: 18, fontWeight: 700, color: "#EDECEA", margin: 0, letterSpacing: "-0.01em" }}>Data sources</h2>
-              <span style={{ background: "rgba(188,155,255,0.20)", color: "#BC9BFF", fontSize: 11, fontWeight: 700, padding: "2px 10px", borderRadius: 999 }}>Coming soon</span>
-            </div>
-            <p style={{ fontSize: 14, color: "rgba(237,236,234,0.55)", margin: 0 }}>Connect the tools your team already uses as data sources for your brains.</p>
-          </div>
-
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 16 }}>
-            {INTEGRATIONS.map((it) => (
-              <div key={it.name} style={{ background: "rgba(255,255,255,0.06)", backdropFilter: "blur(12px)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: 20, display: "flex", flexDirection: "column", gap: 12 }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
-                    <div style={{ width: 40, height: 40, borderRadius: 10, background: it.color, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                      <span style={{ color: "#fff", fontSize: 14, fontWeight: 700 }}>{it.initials}</span>
-                    </div>
-                    <span style={{ fontSize: 16, fontWeight: 500, color: "#EDECEA", fontFamily: '"TWKLausanne", sans-serif', overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.name}</span>
-                  </div>
-                  <span style={{ flexShrink: 0, background: "rgba(255,255,255,0.06)", color: "rgba(237,236,234,0.35)", fontSize: 11, fontWeight: 500, padding: "2px 8px", borderRadius: 999 }}>Coming soon</span>
-                </div>
-                <p style={{ fontSize: 13, color: "rgba(237,236,234,0.55)", margin: 0 }}>{it.description}</p>
-                <button disabled style={{ alignSelf: "flex-start", background: "rgba(255,255,255,0.06)", color: "rgba(237,236,234,0.35)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "6px 14px", fontSize: 13, fontWeight: 500, cursor: "not-allowed" }}>Notify me</button>
-              </div>
-            ))}
-          </div>
-
-          <p style={{ fontSize: 13, color: "rgba(237,236,234,0.35)", textAlign: "center", margin: 0 }}>
-            More integrations on the way.{" "}
-            <a href="mailto:support@cognee.ai?subject=Integration%20request" style={{ color: "#6510F4", textDecoration: "underline" }}>Let us know</a> what to prioritize.
-          </p>
-        </div>
+        {/* ── Data sources (false doors) ── */}
+        <DataSourcesSection />
 
       </div>
     </div>

@@ -84,7 +84,6 @@ export function LocalProvider({ children }: { children: React.ReactNode }) {
       podUnreachable: false,
       error,
       statusMessage: null,
-      availableTenants: [],
       switchTenant: () => {},
       planType: null,
       hasAccess: true,
