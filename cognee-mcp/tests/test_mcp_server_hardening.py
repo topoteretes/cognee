@@ -606,3 +606,105 @@ async def test_list_datasets_json_text_channel_over_mcp_protocol(monkeypatch):
     assert "2 datasets:" in text
     assert "alpha (id-alpha)" in text
     assert "beta (id-beta)" in text
+
+
+@pytest.mark.asyncio
+async def test_recall_uses_env_default_system_prompt_when_caller_omits_it(monkeypatch):
+    """The env default is injected when the caller passes no system_prompt."""
+    monkeypatch.setenv("COGNEE_MCP_RECALL_SYSTEM_PROMPT", "Answer with provenance.")
+    monkeypatch.delenv("COGNEE_MCP_RECALL_SYSTEM_PROMPT_FILE", raising=False)
+
+    requests: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json=[])
+
+    client = CogneeClient(api_url="http://cognee.local")
+    await client.client.aclose()
+    client.client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+    try:
+        await client.recall("hello")
+    finally:
+        await client.close()
+
+    payload = json.loads(requests[0].content.decode())
+    assert payload["system_prompt"] == "Answer with provenance."
+
+
+@pytest.mark.asyncio
+async def test_recall_caller_system_prompt_wins_over_env_default(monkeypatch):
+    """An explicit caller prompt always takes precedence over the env default."""
+    monkeypatch.setenv("COGNEE_MCP_RECALL_SYSTEM_PROMPT", "Env default.")
+    monkeypatch.delenv("COGNEE_MCP_RECALL_SYSTEM_PROMPT_FILE", raising=False)
+
+    requests: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json=[])
+
+    client = CogneeClient(api_url="http://cognee.local")
+    await client.client.aclose()
+    client.client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+    try:
+        await client.recall("hello", system_prompt="Caller wins.")
+    finally:
+        await client.close()
+
+    payload = json.loads(requests[0].content.decode())
+    assert payload["system_prompt"] == "Caller wins."
+
+
+@pytest.mark.asyncio
+async def test_recall_reads_env_default_system_prompt_from_file(monkeypatch, tmp_path):
+    """The default can be supplied through a file for larger prompts."""
+    prompt_file = tmp_path / "recall_prompt.txt"
+    prompt_file.write_text("Prompt from file.\n", encoding="utf-8")
+    monkeypatch.delenv("COGNEE_MCP_RECALL_SYSTEM_PROMPT", raising=False)
+    monkeypatch.setenv("COGNEE_MCP_RECALL_SYSTEM_PROMPT_FILE", str(prompt_file))
+
+    requests: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json=[])
+
+    client = CogneeClient(api_url="http://cognee.local")
+    await client.client.aclose()
+    client.client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+    try:
+        await client.recall("hello")
+    finally:
+        await client.close()
+
+    payload = json.loads(requests[0].content.decode())
+    assert payload["system_prompt"] == "Prompt from file."
+
+
+@pytest.mark.asyncio
+async def test_recall_without_env_default_omits_system_prompt(monkeypatch):
+    """With no default configured, the payload carries no system_prompt."""
+    monkeypatch.delenv("COGNEE_MCP_RECALL_SYSTEM_PROMPT", raising=False)
+    monkeypatch.delenv("COGNEE_MCP_RECALL_SYSTEM_PROMPT_FILE", raising=False)
+
+    requests: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json=[])
+
+    client = CogneeClient(api_url="http://cognee.local")
+    await client.client.aclose()
+    client.client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+    try:
+        await client.recall("hello")
+    finally:
+        await client.close()
+
+    payload = json.loads(requests[0].content.decode())
+    assert "system_prompt" not in payload

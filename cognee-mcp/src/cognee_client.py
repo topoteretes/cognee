@@ -6,6 +6,7 @@ This module provides a unified interface for interacting with Cognee, supporting
 - API mode: Makes HTTP requests to a running Cognee FastAPI server
 """
 
+import os
 import sys
 import hashlib
 from typing import Optional, Any, List, Dict
@@ -31,6 +32,34 @@ logger = get_logger()
 # 300s client timeout intended for long POSTs like cognify: a hung or black-holed
 # GET would otherwise freeze the caller for a full 5 minutes.
 READ_TIMEOUT_SECONDS = 30.0
+
+
+def _default_recall_system_prompt() -> Optional[str]:
+    """Return the server-side default synthesis prompt for recall, if configured.
+
+    Opt-in via environment:
+      COGNEE_MCP_RECALL_SYSTEM_PROMPT       inline prompt text
+      COGNEE_MCP_RECALL_SYSTEM_PROMPT_FILE  path to a file holding the prompt
+
+    Returns None when neither is set, leaving current behaviour untouched.
+    """
+    inline = os.environ.get("COGNEE_MCP_RECALL_SYSTEM_PROMPT")
+    if inline and inline.strip():
+        return inline.strip()
+
+    path = os.environ.get("COGNEE_MCP_RECALL_SYSTEM_PROMPT_FILE")
+    if path:
+        try:
+            with open(path, encoding="utf-8") as handle:
+                text = handle.read().strip()
+        except OSError as error:
+            logger.warning(
+                "Could not read COGNEE_MCP_RECALL_SYSTEM_PROMPT_FILE %s: %s", path, error
+            )
+            return None
+        if text:
+            return text
+    return None
 
 
 class CogneeClient:
@@ -555,6 +584,8 @@ class CogneeClient:
         top_k: int = 15,
     ) -> Any:
         """Search memory via recall() with auto-routing and session awareness."""
+        if not system_prompt:
+            system_prompt = _default_recall_system_prompt()
         if self.use_api:
             endpoint = f"{self.api_url}/api/v1/recall"
             payload = {"query": query_text, "top_k": top_k, "search_type": None}

@@ -1158,7 +1158,9 @@ async def recall(
     session_id : str, optional
         Session ID for session-first search.
     system_prompt : str, optional
-        Override the synthesis prompt for completion searches.
+        Override the synthesis prompt for completion searches. When omitted,
+        falls back to COGNEE_MCP_RECALL_SYSTEM_PROMPT / _FILE if configured
+        on the server.
     top_k : int
         Maximum results to return (default: 10).
     """
