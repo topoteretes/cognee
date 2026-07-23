@@ -1,11 +1,27 @@
 import argparse
 import asyncio
+from importlib import resources
 
 from cognee.cli.reference import SupportsCliCommand
 from cognee.cli import DEFAULT_DOCS_URL
 from cognee.cli.config import CHUNKER_CHOICES
 import cognee.cli.echo as fmt
 from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
+from cognee.cli.hints import hint_recall
+
+
+_SAMPLE_FIXTURE = "quickstart.txt"
+
+
+def _resolve_sample_path() -> str:
+    """Return the absolute path of the bundled quickstart fixture.
+
+    ``importlib.resources.files`` gives a path that survives both editable
+    and wheel installs. The fixture is copied into the package on install,
+    so no environment variable or ``DATA_ROOT_DIRECTORY`` override is
+    required to run the demo.
+    """
+    return str(resources.files("cognee.cli.samples").joinpath(_SAMPLE_FIXTURE))
 
 
 class RememberCommand(SupportsCliCommand):
@@ -24,8 +40,16 @@ After completion, use `cognee recall` (or `cognee search`) to query the graph.
     def configure_parser(self, parser: argparse.ArgumentParser) -> None:
         parser.add_argument(
             "data",
-            nargs="+",
+            nargs="*",
             help="Data to add: text content, file paths, file URLs, or S3 paths",
+        )
+        parser.add_argument(
+            "--sample-data",
+            action="store_true",
+            help=(
+                "Ingest the bundled quickstart fixture instead of user data. "
+                "Handy for a first-run smoke test; still requires LLM_API_KEY."
+            ),
         )
         parser.add_argument(
             "--dataset-name",
@@ -64,6 +88,19 @@ After completion, use `cognee recall` (or `cognee search`) to query the graph.
     def execute(self, args: argparse.Namespace) -> None:
         try:
             import cognee
+
+            if args.sample_data:
+                if args.data:
+                    raise CliCommandInnerException(
+                        "--sample-data cannot be combined with explicit data arguments."
+                    )
+                sample_path = _resolve_sample_path()
+                fmt.note(f"Using bundled sample fixture: {sample_path}")
+                args.data = [sample_path]
+            elif not args.data:
+                raise CliCommandInnerException(
+                    "No data supplied. Pass file paths, text, or --sample-data."
+                )
 
             dry_run = getattr(args, "dry_run", False)
             action = "Estimating" if dry_run else "Remembering"
@@ -124,6 +161,8 @@ After completion, use `cognee recall` (or `cognee search`) to query the graph.
                     fmt.echo(f"  Content hash: {result.content_hash}")
                 if result.elapsed_seconds is not None:
                     fmt.echo(f"  Elapsed: {result.elapsed_seconds:.1f}s")
+
+            hint_recall(args.dataset_name)
 
         except Exception as e:
             if isinstance(e, CliCommandInnerException):
