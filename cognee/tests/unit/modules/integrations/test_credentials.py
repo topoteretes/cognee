@@ -119,7 +119,9 @@ async def test_update_provider_metadata_merges_without_touching_token_fields():
         "cognee.modules.integrations.credentials.get_relational_engine",
         return_value=make_engine(session),
     ):
-        updated = await update_provider_metadata(PROVIDER, ACCOUNT_ID, {"allowed_channel_ids": ["C1"]})
+        updated = await update_provider_metadata(
+            PROVIDER, ACCOUNT_ID, {"allowed_channel_ids": ["C1"]}
+        )
 
     assert updated.provider_metadata == {"bot_user_id": "U1", "allowed_channel_ids": ["C1"]}
     session.commit.assert_awaited_once()

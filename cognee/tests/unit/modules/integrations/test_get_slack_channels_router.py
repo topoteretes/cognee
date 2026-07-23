@@ -36,7 +36,9 @@ def client():
 def _credential(allowed_channel_ids=None):
     return SimpleNamespace(
         provider_account_id="T123",
-        provider_metadata={"allowed_channel_ids": allowed_channel_ids} if allowed_channel_ids else {},
+        provider_metadata={"allowed_channel_ids": allowed_channel_ids}
+        if allowed_channel_ids
+        else {},
     )
 
 
@@ -99,6 +101,4 @@ def test_put_channels_saves_and_echoes_the_allowlist(client):
 
     assert response.status_code == 200
     assert response.json()["allowedChannelIds"] == ["C1", "C2"]
-    update_mock.assert_awaited_once_with(
-        "slack", "T123", {"allowed_channel_ids": ["C1", "C2"]}
-    )
+    update_mock.assert_awaited_once_with("slack", "T123", {"allowed_channel_ids": ["C1", "C2"]})

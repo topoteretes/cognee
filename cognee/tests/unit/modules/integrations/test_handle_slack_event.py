@@ -112,9 +112,7 @@ async def test_app_home_opened_publishes_view_when_connected():
     with (
         patch(f"{MODULE}.get_by_team", new=AsyncMock(return_value=credential)),
         patch(f"{MODULE}.is_active", return_value=True),
-        patch(
-            f"{MODULE}.decrypt_token_payload", return_value={"access_token": "xoxb-secret"}
-        ),
+        patch(f"{MODULE}.decrypt_token_payload", return_value={"access_token": "xoxb-secret"}),
         patch(f"{MODULE}.publish_home_view", new=AsyncMock()) as publish,
     ):
         response = await handle_slack_event(_body(_home_envelope()))
@@ -155,9 +153,7 @@ async def test_app_home_opened_publish_failure_does_not_fail_the_ack():
     with (
         patch(f"{MODULE}.get_by_team", new=AsyncMock(return_value=credential)),
         patch(f"{MODULE}.is_active", return_value=True),
-        patch(
-            f"{MODULE}.decrypt_token_payload", return_value={"access_token": "xoxb-secret"}
-        ),
+        patch(f"{MODULE}.decrypt_token_payload", return_value={"access_token": "xoxb-secret"}),
         patch(
             f"{MODULE}.publish_home_view", new=AsyncMock(side_effect=RuntimeError("not_enabled"))
         ),

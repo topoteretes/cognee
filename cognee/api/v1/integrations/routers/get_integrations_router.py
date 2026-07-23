@@ -93,7 +93,9 @@ def get_integrations_router():
     integrations_router = APIRouter()
 
     @integrations_router.post("/{provider}/authorize")
-    async def authorize(provider: str, user: User = Depends(get_authenticated_user)) -> AuthorizeUrlDTO:
+    async def authorize(
+        provider: str, user: User = Depends(get_authenticated_user)
+    ) -> AuthorizeUrlDTO:
         """Mint the provider's authorize URL for the requesting user."""
         with new_span("cognee.integrations.authorize") as span:
             span.set_attribute("cognee.integrations.provider", provider)
@@ -139,9 +141,7 @@ def get_integrations_router():
             except CrossUserConflictError:
                 # The account is already connected to another user; refuse
                 # rather than silently reassign it (see upsert_credential).
-                logger.warning(
-                    "%s account already connected elsewhere; user %s", provider, user_id
-                )
+                logger.warning("%s account already connected elsewhere; user %s", provider, user_id)
                 span.set_attribute("cognee.integrations.outcome", "error_already_connected")
                 return _frontend_redirect(integration, "error_already_connected")
             except Exception:  # noqa: BLE001 - any exchange/parse failure must redirect, not 500

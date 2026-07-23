@@ -49,9 +49,7 @@ def upgrade() -> None:
         sa.Column("revoked_at", sa.DateTime(timezone=True), nullable=True),
         sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index(
-        "ix_integration_credentials_user_id", "integration_credentials", ["user_id"]
-    )
+    op.create_index("ix_integration_credentials_user_id", "integration_credentials", ["user_id"])
     op.create_index(
         "ix_integration_credentials_provider_account",
         "integration_credentials",

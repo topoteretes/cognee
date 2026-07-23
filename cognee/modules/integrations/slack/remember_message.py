@@ -14,7 +14,9 @@ from cognee.modules.users.methods import get_user
 SLACK_DATASET_NAME = "slack"
 
 
-def _format_remembered_text(text: str, *, channel_name: Optional[str], author_id: Optional[str]) -> str:
+def _format_remembered_text(
+    text: str, *, channel_name: Optional[str], author_id: Optional[str]
+) -> str:
     channel = f"#{channel_name}" if channel_name else "Slack"
     author = f"<@{author_id}>" if author_id else "someone"
     return f"In {channel}, {author} said: {text}"

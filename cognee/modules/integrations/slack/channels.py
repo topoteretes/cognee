@@ -82,9 +82,15 @@ async def _fetch_page(
             return payload
 
         if payload.get("error") != "ratelimited" or attempt >= _MAX_RATELIMIT_RETRIES:
-            raise RuntimeError(f"Slack conversations.list failed: {payload.get('error', 'unknown')}")
+            raise RuntimeError(
+                f"Slack conversations.list failed: {payload.get('error', 'unknown')}"
+            )
 
-        delay = int(retry_after) if retry_after and retry_after.isdigit() else _DEFAULT_RETRY_AFTER_SECONDS
+        delay = (
+            int(retry_after)
+            if retry_after and retry_after.isdigit()
+            else _DEFAULT_RETRY_AFTER_SECONDS
+        )
         attempt += 1
         logger.warning(
             "Slack conversations.list rate-limited, retrying in %ss (attempt %s/%s)",

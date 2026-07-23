@@ -57,7 +57,9 @@ def validate_state(state: str, *, signing_secret: str) -> Optional[UUID]:
     user_id_str, expires_str, signature = parts
 
     payload = f"{user_id_str}:{expires_str}"
-    if not hmac.compare_digest(sign_state_payload(payload, signing_secret=signing_secret), signature):
+    if not hmac.compare_digest(
+        sign_state_payload(payload, signing_secret=signing_secret), signature
+    ):
         return None
 
     try:

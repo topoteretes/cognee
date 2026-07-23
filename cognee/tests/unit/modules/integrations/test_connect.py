@@ -56,7 +56,8 @@ async def test_wires_exchange_code_through_to_upsert_credential():
     integration = _FakeIntegration(installation, code_seen)
 
     with patch(
-        "cognee.modules.integrations.connect.upsert_credential", new=AsyncMock(return_value="credential")
+        "cognee.modules.integrations.connect.upsert_credential",
+        new=AsyncMock(return_value="credential"),
     ) as upsert:
         result = await complete_installation(integration, code="the-code", user_id=USER_ID)
 
@@ -81,7 +82,9 @@ async def test_propagates_exchange_code_errors():
         async def exchange_code(self, code):
             raise RuntimeError("provider rejected the code")
 
-    integration = _FailingIntegration(OAuthInstallation(provider_account_id="x", token_payload={}), [])
+    integration = _FailingIntegration(
+        OAuthInstallation(provider_account_id="x", token_payload={}), []
+    )
 
     with pytest.raises(RuntimeError, match="provider rejected the code"):
         await complete_installation(integration, code="bad-code", user_id=USER_ID)
