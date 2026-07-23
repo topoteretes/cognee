@@ -7,6 +7,7 @@ network call. Slack's own OAuth mechanics are covered separately by
 test_slack_adapter.py and test_oauth_state.py.
 """
 
+import importlib
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
@@ -21,6 +22,18 @@ from cognee.modules.integrations.registry import supported_integrations, use_int
 from cognee.modules.users.methods import get_authenticated_user
 
 USER_ID = uuid4()
+
+# The router package's __init__.py does `from .get_integrations_router import
+# get_integrations_router`, which rebinds that name on the package to the
+# *function* — shadowing the submodule Python auto-attaches there on import.
+# String-target patch("...routers.get_integrations_router.X") resolves that
+# name via attribute traversal on some Python versions (3.10) and via
+# importlib.import_module on others (3.12+), so it silently returns the
+# function instead of the module on 3.10 and AttributeErrors. Importing the
+# submodule explicitly sidesteps the shadowed attribute entirely.
+_router_module = importlib.import_module(
+    "cognee.api.v1.integrations.routers.get_integrations_router"
+)
 
 
 class _FakeUser:
@@ -77,8 +90,9 @@ def test_authorize_returns_the_integrations_own_url(client):
 
 
 def test_authorize_surfaces_missing_config_as_503(client):
-    with patch(
-        "cognee.api.v1.integrations.routers.get_integrations_router.make_state",
+    with patch.object(
+        _router_module,
+        "make_state",
         side_effect=RuntimeError("FAKE_SIGNING_SECRET is not configured"),
     ):
         response = client.post("/api/v1/integrations/fake/authorize", follow_redirects=False)
@@ -119,8 +133,9 @@ def test_callback_success_redirects_connected(client):
     from cognee.modules.integrations.oauth_flow import make_state
 
     state = make_state(user_id=USER_ID, signing_secret="fake-secret")
-    with patch(
-        "cognee.api.v1.integrations.routers.get_integrations_router.complete_installation",
+    with patch.object(
+        _router_module,
+        "complete_installation",
         new=AsyncMock(return_value=type("C", (), {"provider_account_id": "ACC1"})()),
     ):
         response = client.get(
@@ -133,8 +148,9 @@ def test_callback_cross_user_conflict_redirects_already_connected(client):
     from cognee.modules.integrations.oauth_flow import make_state
 
     state = make_state(user_id=USER_ID, signing_secret="fake-secret")
-    with patch(
-        "cognee.api.v1.integrations.routers.get_integrations_router.complete_installation",
+    with patch.object(
+        _router_module,
+        "complete_installation",
         new=AsyncMock(side_effect=CrossUserConflictError("ACC1")),
     ):
         response = client.get(
@@ -147,8 +163,9 @@ def test_callback_unexpected_error_redirects_exchange_failed(client):
     from cognee.modules.integrations.oauth_flow import make_state
 
     state = make_state(user_id=USER_ID, signing_secret="fake-secret")
-    with patch(
-        "cognee.api.v1.integrations.routers.get_integrations_router.complete_installation",
+    with patch.object(
+        _router_module,
+        "complete_installation",
         new=AsyncMock(side_effect=RuntimeError("boom")),
     ):
         response = client.get(
@@ -158,8 +175,9 @@ def test_callback_unexpected_error_redirects_exchange_failed(client):
 
 
 def test_connection_status_reports_disconnected_by_default(client):
-    with patch(
-        "cognee.api.v1.integrations.routers.get_integrations_router.get_active_credential_for_user",
+    with patch.object(
+        _router_module,
+        "get_active_credential_for_user",
         new=AsyncMock(return_value=None),
     ):
         response = client.get("/api/v1/integrations/fake/connection")
@@ -176,8 +194,9 @@ def test_connection_status_reports_connected_with_generic_fields(client):
             "created_at": __import__("datetime").datetime(2026, 1, 1),
         },
     )()
-    with patch(
-        "cognee.api.v1.integrations.routers.get_integrations_router.get_active_credential_for_user",
+    with patch.object(
+        _router_module,
+        "get_active_credential_for_user",
         new=AsyncMock(return_value=fake_credential),
     ):
         response = client.get("/api/v1/integrations/fake/connection")
@@ -191,13 +210,15 @@ def test_disconnect_calls_revoke_remote_and_revokes_locally(client):
     fake_credential = type("Cred", (), {"provider_account_id": "ACC1"})()
     integration = supported_integrations["fake"]
     with (
-        patch(
-            "cognee.api.v1.integrations.routers.get_integrations_router.get_active_credential_for_user",
+        patch.object(
+            _router_module,
+            "get_active_credential_for_user",
             new=AsyncMock(return_value=fake_credential),
         ),
         patch.object(integration, "revoke_remote", new=AsyncMock()) as revoke_remote,
-        patch(
-            "cognee.api.v1.integrations.routers.get_integrations_router.revoke_credential_by_account",
+        patch.object(
+            _router_module,
+            "revoke_credential_by_account",
             new=AsyncMock(return_value=True),
         ) as revoke_local,
     ):
@@ -209,8 +230,9 @@ def test_disconnect_calls_revoke_remote_and_revokes_locally(client):
 
 
 def test_disconnect_with_no_active_credential_reports_false(client):
-    with patch(
-        "cognee.api.v1.integrations.routers.get_integrations_router.get_active_credential_for_user",
+    with patch.object(
+        _router_module,
+        "get_active_credential_for_user",
         new=AsyncMock(return_value=None),
     ):
         response = client.delete("/api/v1/integrations/fake/connection")
