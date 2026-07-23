@@ -34,13 +34,19 @@ class CypherSearchRetriever(BaseRetriever):
         try:
             graph_engine = await get_graph_engine()
 
-            # Postgres backends do not support raw Cypher queries
-            from cognee.infrastructure.databases.graph.postgres.adapter import PostgresAdapter
-            from cognee.infrastructure.databases.hybrid.postgres.adapter import (
-                PostgresHybridAdapter,
-            )
+            # Postgres backends do not support raw Cypher queries.
+            # Import adapters lazily: asyncpg is only installed with the postgres extra,
+            # so a missing import means the backend is not Postgres.
+            try:
+                from cognee.infrastructure.databases.graph.postgres.adapter import PostgresAdapter
+                from cognee.infrastructure.databases.hybrid.postgres.adapter import (
+                    PostgresHybridAdapter,
+                )
+                postgres_adapters = (PostgresAdapter, PostgresHybridAdapter)
+            except ImportError:
+                postgres_adapters = ()
 
-            if isinstance(graph_engine, (PostgresAdapter, PostgresHybridAdapter)):
+            if isinstance(graph_engine, postgres_adapters):
                 raise SearchTypeNotSupported(
                     "Cypher search is not supported with the Postgres graph backend. "
                     "Use a Cypher-capable graph backend (Neo4j, Ladybug) for raw Cypher queries."
