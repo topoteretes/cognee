@@ -16,7 +16,8 @@ spec:
     spec:
       containers:
         - name: cognee
-          image: {{ .Values.cognee.image }}
+          image: "{{ .Values.cognee.image.repository }}:{{ .Values.cognee.image.tag }}"
+          imagePullPolicy: {{ .Values.cognee.image.pullPolicy }}
           ports:
             - containerPort: {{ .Values.cognee.port }}
           env:
@@ -47,7 +48,24 @@ spec:
               value: {{ .Values.cognee.env.LLM_MODEL }}
             - name: LLM_PROVIDER
               value: {{ .Values.cognee.env.LLM_PROVIDER }}
+            - name: LLM_ENDPOINT
+              value: "{{ .Values.cognee.env.LLM_ENDPOINT }}"
+            - name: EMBEDDING_PROVIDER
+              value: "{{ .Values.cognee.env.EMBEDDING_PROVIDER }}"
+            - name: EMBEDDING_MODEL
+              value: "{{ .Values.cognee.env.EMBEDDING_MODEL }}"
+            - name: EMBEDDING_DIMENSIONS
+              value: "{{ .Values.cognee.env.EMBEDDING_DIMENSIONS }}"
+            - name: EMBEDDING_ENDPOINT
+              value: "{{ .Values.cognee.env.EMBEDDING_ENDPOINT }}"
           resources:
             limits:
               cpu: {{ .Values.cognee.resources.cpu }}
               memory: {{ .Values.cognee.resources.memory }}
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.cognee.port }}
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 30

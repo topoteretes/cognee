@@ -291,3 +291,10 @@ dev = [
     "pytest-split>=0.11.0,<0.12",
     "ruff>=0.13.1",
 ]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+markers = [
+    "deployment: opt-in deployment e2e tests (excluded from default unit run)",
+    "deployment_graph: deployment e2e exercising the cognify->search graph path via mock LLM",
+]
