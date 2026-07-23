@@ -1604,6 +1604,28 @@ async def cognify_file(
     ]
 
 
+def _format_named_items(items, singular: str, plural: str, limit: int = 50) -> str:
+    """Render a list of {id, name} dicts into human-readable text content.
+
+    Text-only MCP clients (e.g. agents in Cursor) never see structuredContent,
+    so the names have to be serialized into the text channel too — otherwise
+    they only get a count and have to fall back to raw HTTP to learn what
+    exists. Long lists are capped to keep the text payload reasonable; the full
+    set always remains in structuredContent.
+    """
+    count = len(items)
+    if count == 0:
+        return f"No {plural} found."
+    lines = [f"{count} {singular if count == 1 else plural}:"]
+    for item in items[:limit]:
+        name = item.get("name") or "(unnamed)"
+        item_id = item.get("id") or ""
+        lines.append(f"- {name} ({item_id})" if item_id else f"- {name}")
+    if count > limit:
+        lines.append(f"… and {count - limit} more (see structuredContent).")
+    return "\n".join(lines)
+
+
 @mcp.tool(
     name="list_datasets_json",
     description=(
@@ -1624,7 +1646,12 @@ async def list_datasets_json() -> types.CallToolResult:
             datasets.append({"id": str(ds.id), "name": ds.name})
 
     return types.CallToolResult(
-        content=[types.TextContent(type="text", text=f"{len(datasets)} dataset(s).")],
+        content=[
+            types.TextContent(
+                type="text",
+                text=_format_named_items(datasets, "dataset", "datasets"),
+            )
+        ],
         structuredContent={"datasets": datasets},
     )
 
@@ -1674,7 +1701,12 @@ async def list_dataset_data_json(dataset_id: str) -> types.CallToolResult:
 
     data = [{"id": str(item.id), "name": item.name or "(unnamed)"} for item in items]
     return types.CallToolResult(
-        content=[types.TextContent(type="text", text=f"{len(data)} data item(s).")],
+        content=[
+            types.TextContent(
+                type="text",
+                text=_format_named_items(data, "data item", "data items"),
+            )
+        ],
         structuredContent={"data": data},
     )
 
