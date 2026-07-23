@@ -217,6 +217,14 @@ class SessionManager:
             session_feedback=session_feedback,
         )
         await record_session_activity(user_id, session_id, errored=status == "error")
+        await self._record_trace_step_usage(
+            user_id=user_id,
+            session_id=session_id,
+            memory_query=memory_query,
+            memory_context=memory_context,
+            method_params=method_params,
+            method_return_value=method_return_value,
+        )
         await self._maybe_extract_agent_context(
             user_id=user_id,
             session_id=session_id,
@@ -226,6 +234,43 @@ class SessionManager:
             error_message=error_message,
         )
         return trace_id
+
+    async def _record_trace_step_usage(
+        self,
+        *,
+        user_id: str,
+        session_id: str,
+        memory_query: str,
+        memory_context: str,
+        method_params: Any,
+        method_return_value: Any,
+    ) -> None:
+        """Estimate this trace step's token usage and accumulate it onto the
+        session row. Best-effort — never let usage accounting break a write."""
+
+        def _as_text(value: Any) -> str:
+            if value is None:
+                return ""
+            if isinstance(value, str):
+                return value
+            try:
+                import json
+
+                return json.dumps(value, default=str)
+            except (TypeError, ValueError):
+                return str(value)
+
+        try:
+            from cognee.modules.session_lifecycle.usage_tracking import record_transcript_usage
+
+            await record_transcript_usage(
+                session_id=session_id,
+                user_id=user_id,
+                input_text=f"{memory_query}\n{_as_text(method_params)}",
+                output_text=f"{memory_context}\n{_as_text(method_return_value)}",
+            )
+        except Exception as exc:
+            logger.debug("_record_trace_step_usage failed (%s)", exc)
 
     async def _maybe_extract_agent_context(
         self,

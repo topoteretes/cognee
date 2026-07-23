@@ -6,6 +6,11 @@ Call sites that know the active session_id wrap their work in
 opts in) calls ``record_llm_call`` after each LLM completion. The
 tracker accumulates into the ``SessionRecord`` row.
 
+Agent-facing operations (``remember`` and ``@agent_memory`` tool calls)
+don't run under that completion scope, so ``add_agent_trace_step`` calls
+``record_transcript_usage`` to approximate their usage from the trace
+step's text instead — otherwise those sessions would always show $0.
+
 Token counts are approximate — we don't currently extract
 ``response.usage`` from the litellm/instructor client (requires
 changes deeper in the stack). A ~chars/4 heuristic is close enough
@@ -167,3 +172,48 @@ async def record_llm_call(
         )
     except Exception as exc:
         logger.debug("record_llm_call: accumulate failed (%s)", exc)
+
+
+async def record_transcript_usage(
+    *,
+    session_id: str,
+    user_id: "str | UUIDType",
+    input_text: str = "",
+    output_text: str = "",
+) -> None:
+    """Accumulate *estimated* token usage for one transcript step onto its session.
+
+    Agent-facing operations (``remember`` and ``@agent_memory``-decorated tool
+    calls, via ``SessionManager.add_agent_trace_step``) never enter the
+    ``track_session_usage`` completion scope, so their usage is otherwise never
+    counted and the session shows $0. We approximate tokens from the step's own
+    text (the same ~chars/4 heuristic as ``record_llm_call``) and store them in
+    the same ``tokens_in``/``tokens_out`` columns the dashboard reads; cost is
+    derived downstream from the token totals.
+
+    This path is disjoint from ``record_llm_call`` — the completion retrievers
+    that use the usage scope do not emit trace steps — so there is no
+    double-counting. Cost is intentionally left to the caller (the cloud UI
+    prices tokens at the gateway rate), so no ``cost_usd`` is written here.
+    """
+    tokens_in = _estimate_tokens(input_text)
+    tokens_out = _estimate_tokens(output_text)
+    if not tokens_in and not tokens_out:
+        return
+
+    try:
+        uid = user_id if isinstance(user_id, UUIDType) else UUIDType(str(user_id))
+    except (ValueError, TypeError):
+        return
+
+    try:
+        from cognee.modules.session_lifecycle.metrics import accumulate_usage
+
+        await accumulate_usage(
+            session_id=session_id,
+            user_id=uid,
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
+        )
+    except Exception as exc:
+        logger.debug("record_transcript_usage: accumulate failed (%s)", exc)

@@ -320,6 +320,36 @@ class TestSessionManager:
         assert call_kw["session_feedback"] == "Trip plan created successfully."
 
     @pytest.mark.asyncio
+    async def test_add_agent_trace_step_records_transcript_usage(self, sm, mock_cache, monkeypatch):
+        """Each trace step feeds an estimated token count onto the session row so
+        agent sessions (which never enter the completion usage scope) accrue cost."""
+        import cognee.modules.session_lifecycle.usage_tracking as ut
+
+        usage_spy = AsyncMock()
+        monkeypatch.setattr(ut, "record_transcript_usage", usage_spy)
+
+        await sm.add_agent_trace_step(
+            user_id="u1",
+            origin_function="remember",
+            status="success",
+            session_id="s1",
+            memory_query="what did I do",
+            memory_context="context text",
+            method_params={"data": "hello"},
+            method_return_value={"ok": True},
+            generate_feedback_with_llm=False,
+        )
+
+        usage_spy.assert_awaited_once()
+        kw = usage_spy.await_args.kwargs
+        assert kw["session_id"] == "s1"
+        assert kw["user_id"] == "u1"
+        # Inputs (query + params) and outputs (context + return value) are both
+        # folded into the estimate.
+        assert "what did I do" in kw["input_text"] and "hello" in kw["input_text"]
+        assert "context text" in kw["output_text"] and "ok" in kw["output_text"]
+
+    @pytest.mark.asyncio
     async def test_add_agent_trace_step_falls_back_when_summary_is_empty(self, sm, mock_cache):
         """Empty LLM summaries fall back to the deterministic feedback string."""
         with (

@@ -19,7 +19,7 @@ from .metrics import (
     mark_ended,
     touch_session,
 )
-from .usage_tracking import record_llm_call, track_session_usage
+from .usage_tracking import record_llm_call, record_transcript_usage, track_session_usage
 
 __all__ = [
     "SessionListPage",
@@ -33,6 +33,7 @@ __all__ = [
     "list_session_rows",
     "mark_ended",
     "record_llm_call",
+    "record_transcript_usage",
     "touch_session",
     "track_session_usage",
 ]
