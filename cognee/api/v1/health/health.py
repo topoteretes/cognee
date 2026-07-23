@@ -16,9 +16,11 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger()
 
 # Default per-component timeout. A wedged DB/pooler must never let a health
-# check hang — readiness probes need a prompt answer so a half-ready pod stops
-# accepting traffic it cannot serve (CLO-318). Tunable via env for ops.
-DEFAULT_HEALTH_CHECK_TIMEOUT_SECONDS = 5.0
+# check hang forever — readiness probes need a bounded answer so a half-ready
+# pod eventually stops accepting traffic it cannot serve (CLO-318). Set
+# generously so a merely-slow backend isn't flagged unhealthy on a transient
+# blip; tunable via env (HEALTH_CHECK_TIMEOUT_SECONDS) for ops.
+DEFAULT_HEALTH_CHECK_TIMEOUT_SECONDS = 30.0
 
 
 def _health_check_timeout() -> float:
