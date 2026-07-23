@@ -20,7 +20,7 @@ logger = get_logger()
 # pod eventually stops accepting traffic it cannot serve (CLO-318). Set
 # generously so a merely-slow backend isn't flagged unhealthy on a transient
 # blip; tunable via env (HEALTH_CHECK_TIMEOUT_SECONDS) for ops.
-DEFAULT_HEALTH_CHECK_TIMEOUT_SECONDS = 30.0
+DEFAULT_HEALTH_CHECK_TIMEOUT_SECONDS = 60.0
 
 
 def _health_check_timeout() -> float:
