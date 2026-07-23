@@ -7,3 +7,4 @@ building relationships between entities, and managing graph structures.
 
 from .extract_graph_from_data import extract_graph_from_data
 from .extract_graph_from_code import extract_graph_from_code
+from .resolve_temporal_contradictions import resolve_temporal_contradictions
