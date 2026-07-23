@@ -24,6 +24,10 @@ async def close_node(node_id: UUID | str, at_ms: int | None = None) -> bool:
     Returns ``True`` if the node existed and was updated, ``False`` otherwise (e.g. the
     node is not in the graph). Backends that do not implement partial node updates yet
     log a warning and return ``False`` rather than failing silently.
+
+    Last-write-wins: closing an already-closed node overwrites ``valid_to`` (a later or
+    an earlier timestamp), so guard with ``is_valid`` first if you need it to be
+    idempotent.
     """
     from cognee.infrastructure.databases.graph import get_graph_engine
 
