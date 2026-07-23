@@ -691,7 +691,6 @@ def get_datasets_router() -> APIRouter:
             },
         )
 
-        from cognee.modules.data.methods import get_data
         from cognee.modules.data.methods import get_dataset_data
 
         # Verify user has permission to read dataset
@@ -699,7 +698,7 @@ def get_datasets_router() -> APIRouter:
 
         if not dataset:
             return JSONResponse(
-                status_code=404, content={"detail": f"Dataset ({dataset_id}) not found."}
+                status_code=404, content={"message": f"Dataset ({dataset_id}) not found."}
             )
 
         dataset_data = await get_dataset_data(dataset[0].id)
@@ -715,12 +714,10 @@ def get_datasets_router() -> APIRouter:
                 message=f"Data ({data_id}) not found in dataset ({dataset_id})."
             )
 
-        data = await get_data(user.id, data_id)
-
-        if data is None:
-            raise DataNotFoundError(
-                message=f"Data ({data_id}) not found in dataset ({dataset_id})."
-            )
+        # Use the data object already verified to belong to the authorized dataset,
+        # rather than calling get_data() which checks owner_id and would reject
+        # ACL-granted readers who are not the data owner.
+        data = matching_data[0]
 
         raw_location = data.raw_data_location
         parsed_uri = urlparse(raw_location)
