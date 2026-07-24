@@ -5,9 +5,10 @@ Flow (exactly as a caller would do it):
     add(file_two)   -> cognify(run_in_background=True)   # run #2 starts, returns immediately
     gather both runs to completion
 
-The per-dataset asyncio lock in `run_pipeline_per_dataset` serializes everything
-touching the dataset, so the two runs cannot clobber each other. We assert, purely
-from each run's return value (its PipelineRunCompleted.data_ingestion_info):
+The per-dataset pipeline lock in `run_pipeline_per_dataset` serializes everything
+touching the dataset, including runs started by different worker processes, so the
+two runs cannot clobber each other. We assert, purely from each run's return value
+(its PipelineRunCompleted.data_ingestion_info):
 
     * both runs complete successfully (no errored run),
     * they are two distinct pipeline runs, and
