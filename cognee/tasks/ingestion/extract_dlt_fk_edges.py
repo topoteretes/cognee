@@ -1,7 +1,7 @@
 import json
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, List, Optional
-from uuid import uuid5, NAMESPACE_OID
+from uuid import UUID, uuid5, NAMESPACE_OID
 
 from cognee.infrastructure.engine.models.DataPoint import DataPoint
 from cognee.infrastructure.databases.provenance import graph_provenance_write_kwargs
@@ -157,11 +157,14 @@ async def extract_dlt_fk_edges(
             source_table_id = table_node_ids.get(table_name)
             target_table_id = table_node_ids.get(ref_table)
 
+            # Edge tuples carry UUID node ids (slots 0/1), matching the
+            # get_graph_from_model contract that upsert_edges relies on;
+            # the JSON attributes keep string copies.
             if source_table_id:
                 schema_edges.append(
                     (
-                        str(source_table_id),
-                        str(relationship.id),
+                        source_table_id,
+                        relationship.id,
                         "has_foreign_key",
                         {
                             "source_node_id": str(source_table_id),
@@ -173,8 +176,8 @@ async def extract_dlt_fk_edges(
             if target_table_id:
                 schema_edges.append(
                     (
-                        str(relationship.id),
-                        str(target_table_id),
+                        relationship.id,
+                        target_table_id,
                         "references_table",
                         {
                             "source_node_id": str(relationship.id),
@@ -196,8 +199,8 @@ async def extract_dlt_fk_edges(
         if table_node_id:
             schema_edges.append(
                 (
-                    doc_id,
-                    str(table_node_id),
+                    UUID(doc_id),
+                    table_node_id,
                     "is_row_of",
                     {
                         "source_node_id": doc_id,
@@ -221,8 +224,8 @@ async def extract_dlt_fk_edges(
 
             fk_row_edges.append(
                 (
-                    doc_id,
-                    target_data_id,
+                    UUID(doc_id),
+                    UUID(target_data_id),
                     relationship_name,
                     {
                         "source_node_id": doc_id,
