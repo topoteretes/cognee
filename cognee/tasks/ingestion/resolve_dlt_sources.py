@@ -24,11 +24,16 @@ from .create_dlt_source import (
     create_dlt_source_from_connection_string,
     create_dlt_source_from_csv,
 )
+from .config import get_ingestion_config
 from .data_item import DataItem
 from .dlt_row_data import DltRowData
 from .ingest_dlt_source import ingest_dlt_source
 
 logger = get_logger("resolve_dlt_sources")
+
+# Cells longer than this never become ColumnValue nodes — long values are
+# free text, not categorical data, and would produce useless one-off nodes.
+MAX_COLUMN_VALUE_LENGTH = 256
 
 
 async def resolve_dlt_sources(
@@ -62,6 +67,7 @@ async def resolve_dlt_sources(
     write_disposition = kwargs["write_disposition"] if "write_disposition" in kwargs else "replace"
     query = kwargs["query"] if "query" in kwargs else None
     max_rows_per_table = kwargs.get("max_rows_per_table")
+    column_value_columns = kwargs.get("column_value_columns")
 
     # --- Auto-detect structured data (CSV paths / connection strings) ------
     if isinstance(data, str):
@@ -98,7 +104,13 @@ async def resolve_dlt_sources(
             max_rows_per_table=max_rows_per_table,
         )
         source_name = getattr(dlt_item, "name", None) or dataset_name
-        item = await _build_source_manifest_item(rows, source_name, dataset_name, user)
+        item = await _build_source_manifest_item(
+            rows,
+            source_name,
+            dataset_name,
+            user,
+            column_value_columns=column_value_columns,
+        )
         if item is not None:
             expanded_items.append(item)
             manifest_data_ids.add(item.data_id)
@@ -141,6 +153,7 @@ async def _build_source_manifest_item(
     source_name: str,
     dataset_name: str,
     user: User,
+    column_value_columns: Optional[dict] = None,
 ) -> Optional[DataItem]:
     """Build a single manifest DataItem describing a whole DLT source.
 
@@ -149,9 +162,16 @@ async def _build_source_manifest_item(
     columns are stripped. Each unique row keeps a stable ``node_id`` (the same
     id the legacy per-row ingestion used as its Data id) so the graph/vector
     node ids match the previous per-row pipeline output.
+
+    ``column_value_columns`` selects cells to record for ColumnValue node
+    emission ({"table": ["col", ...]}, "*" wildcards); None falls back to the
+    ``dlt_column_value_columns`` ingestion config setting.
     """
     if not rows:
         return None
+
+    if column_value_columns is None:
+        column_value_columns = get_ingestion_config().dlt_column_value_columns
 
     dlt_db_name = rows[0].dlt_db_name
     unique_rows = _dedupe_rows(rows, source_name)
@@ -195,17 +215,19 @@ async def _build_source_manifest_item(
                 "dlt_db_name": row.dlt_db_name,
             }
 
-        manifest_rows.append(
-            {
-                "node_id": str(node_ids[key]),
-                "table_name": row.table_name,
-                "primary_key_column": row.primary_key_column,
-                "primary_key_value": row.primary_key_value,
-                "content_hash": row.content_hash,
-                "text": _build_schema_context_text(row),
-                "fk_references": _resolve_fk_references(row, fk_lookup, missing_fk_targets),
-            }
-        )
+        manifest_row = {
+            "node_id": str(node_ids[key]),
+            "table_name": row.table_name,
+            "primary_key_column": row.primary_key_column,
+            "primary_key_value": row.primary_key_value,
+            "content_hash": row.content_hash,
+            "text": _build_schema_context_text(row),
+            "fk_references": _resolve_fk_references(row, fk_lookup, missing_fk_targets),
+        }
+        column_values = _selected_column_values(row, column_value_columns)
+        if column_values:
+            manifest_row["column_values"] = column_values
+        manifest_rows.append(manifest_row)
 
     if missing_fk_targets:
         sample = ", ".join(
@@ -286,6 +308,36 @@ def _dedupe_rows(rows: List[DltRowData], source_name: str) -> dict[tuple, DltRow
         )
 
     return unique_rows
+
+
+def _selected_column_values(dlt_row: DltRowData, selection: Optional[dict]) -> dict:
+    """Pick row cells that should become shared ColumnValue graph nodes.
+
+    ``selection`` maps table name to a column list; "*" is a wildcard for
+    either side. Primary-key and foreign-key columns are excluded (they are
+    row identity and edges already), as are null, empty, and overlong values.
+    """
+    if not selection:
+        return {}
+    columns = selection.get(dlt_row.table_name) or selection.get("*")
+    if not columns:
+        return {}
+    take_all = "*" in columns
+
+    fk_columns = {fk.get("column", "") for fk in dlt_row.foreign_keys}
+    picked = {}
+    for column, value in dlt_row.row_data.items():
+        if column == dlt_row.primary_key_column or column in fk_columns:
+            continue
+        if not take_all and column not in columns:
+            continue
+        if value is None:
+            continue
+        text = str(value).strip()
+        if not text or len(text) > MAX_COLUMN_VALUE_LENGTH:
+            continue
+        picked[column] = text
+    return picked
 
 
 def _build_schema_context_text(dlt_row: DltRowData) -> str:

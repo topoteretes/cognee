@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Optional
 from uuid import uuid5, NAMESPACE_OID
 
 from cognee.infrastructure.databases.provenance import graph_provenance_write_kwargs
+from cognee.modules.engine.models import ColumnValue
 from cognee.tasks.schema.models import SchemaTable, SchemaRelationship
 from cognee.tasks.storage.index_data_points import index_data_points
 from cognee.shared.logging_utils import get_logger
@@ -35,7 +36,11 @@ async def emit_dlt_schema_graph(
 
     Args:
         tables: {table_name: {"schema_info", "foreign_keys", "dlt_db_name"}}
-        row_records: [{"source_id": str, "table_name": str, "fk_references": [...]}]
+        row_records: [{"source_id": str, "table_name": str, "fk_references": [...],
+            "column_values": {column: value}}] — column_values is optional and
+            produces one shared ColumnValue node per unique (table, column,
+            value) with a column-named edge from the row, so rows sharing a
+            value connect through the same node.
         ctx: optional pipeline context for provenance/ledger registration.
 
     Creates SchemaTable nodes (deterministic uuid5 ids, so re-emitting is an
@@ -60,6 +65,7 @@ async def emit_dlt_schema_graph(
     fk_row_edges = []
     seen_row_edges = set()
     fk_defs_seen = set()  # (table, column, ref_table, ref_column) for dedup
+    column_value_nodes = {}  # node id -> ColumnValue, deduped across rows
 
     # SchemaTable nodes for each source table
     table_node_ids = {}
@@ -198,15 +204,54 @@ async def emit_dlt_schema_graph(
                 )
             )
 
+        # Optional cell-level nodes: one shared ColumnValue node per unique
+        # (table, column, value), edge named after the column. Deterministic
+        # ids make rows sharing a value connect through the same node and
+        # make re-emission across batches an idempotent upsert.
+        for column, value in record.get("column_values", {}).items():
+            value_node_id = uuid5(NAMESPACE_OID, name=f"dlt:colval:{table_name}:{column}:{value}")
+            if value_node_id not in column_value_nodes:
+                column_value_nodes[value_node_id] = ColumnValue(
+                    id=value_node_id,
+                    name=f"{table_name}:{column}:{value}",
+                    properties=f"{column} {value} {table_name}",
+                    description=(
+                        f"Value '{value}' of column '{column}' "
+                        f"in DLT-ingested table '{table_name}'."
+                    ),
+                )
+
+            edge_key = (source_id, str(value_node_id), column)
+            if edge_key in seen_row_edges:
+                continue
+            seen_row_edges.add(edge_key)
+            fk_row_edges.append(
+                (
+                    source_id,
+                    str(value_node_id),
+                    column,
+                    {
+                        "source_node_id": source_id,
+                        "target_node_id": str(value_node_id),
+                        "relationship_name": column,
+                        "edge_text": f"{column} {value}",
+                        "source_table": table_name,
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                    },
+                )
+            )
+
     # Persist to graph
-    if schema_nodes:
-        await graph_engine.add_nodes(schema_nodes, **provenance_kwargs)
-        await index_data_points(schema_nodes)
+    nodes_to_add = schema_nodes + list(column_value_nodes.values())
+    if nodes_to_add:
+        await graph_engine.add_nodes(nodes_to_add, **provenance_kwargs)
+        await index_data_points(nodes_to_add)
         logger.info(
-            "Added %d schema nodes to graph (%d tables, %d relationships).",
-            len(schema_nodes),
+            "Added %d nodes to graph (%d tables, %d relationships, %d column values).",
+            len(nodes_to_add),
             len(table_node_ids),
             relationship_count,
+            len(column_value_nodes),
         )
 
     all_edges = schema_edges + fk_row_edges
@@ -228,7 +273,7 @@ async def emit_dlt_schema_graph(
     stamped_in_graph = provenance_kwargs["source_ref_key"] is not None
     if (
         not stamped_in_graph
-        and (schema_nodes or all_edges)
+        and (nodes_to_add or all_edges)
         and ctx is not None
         and getattr(ctx, "user", None) is not None
         and getattr(ctx, "dataset", None) is not None
@@ -237,9 +282,9 @@ async def emit_dlt_schema_graph(
     ):
         from cognee.modules.graph.methods import upsert_edges, upsert_nodes
 
-        if schema_nodes:
+        if nodes_to_add:
             await upsert_nodes(
-                schema_nodes,
+                nodes_to_add,
                 tenant_id=ctx.user.tenant_id,
                 user_id=ctx.user.id,
                 dataset_id=ctx.dataset.id,
