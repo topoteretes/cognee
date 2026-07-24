@@ -11,6 +11,7 @@ from cognee.modules.retrieval.utils.query_decomposition import (
     DecompositionRunState,
     QueryDecomposition,
     SubqueryRunState,
+    merge_deduplicated_edges,
     normalize_subqueries,
 )
 
@@ -86,6 +87,16 @@ def test_normalize_subqueries_strips_caps_and_falls_back():
         ["", "   "],
     )
     assert fallback == ["Original query"]
+
+
+def test_merge_deduplicated_edges_deduplicates_fresh_logically_equal_edges():
+    first = _make_edge(edge_object_id="edge-1", source_id="a", target_id="b")
+    duplicate = _make_edge(edge_object_id="edge-1", source_id="a", target_id="b")
+    distinct = _make_edge(edge_object_id="edge-2", source_id="a", target_id="b")
+
+    merged = merge_deduplicated_edges([[first], [duplicate, distinct]])
+
+    assert merged == [first, distinct]
 
 
 @pytest.mark.asyncio
