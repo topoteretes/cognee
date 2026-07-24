@@ -103,6 +103,49 @@ async def test_filter_top_k_events_includes_unknown_as_infinite_but_not_in_top_k
     assert all(e["score"] != float("inf") for e in top)
 
 
+# Regression test: in production, ScoredResult.id is a UUID while event["id"] arrives from
+# the graph as a string. filter_top_k_events must normalize both sides to str; otherwise the
+# score lookup misses on every event, all scores become inf, and the vector-similarity
+# ranking is silently discarded (events come back in graph order instead of by relevance).
+# The other tests use string ids on both sides, so they never catch this.
+@pytest.mark.asyncio
+async def test_filter_top_k_events_matches_uuid_scored_results_against_str_event_ids():
+    from uuid import uuid4
+    from cognee.infrastructure.databases.vector.models.ScoredResult import ScoredResult
+
+    tr = TemporalRetriever(top_k=2)
+
+    id_first = uuid4()  # best match (lowest distance)
+    id_second = uuid4()
+    id_third = uuid4()  # not present in the vector results
+
+    # Event ids come from the graph as strings (str() of the node UUID).
+    relevant_events = [
+        {
+            "events": [
+                {"id": str(id_third), "description": "Third - not scored"},
+                {"id": str(id_second), "description": "Second"},
+                {"id": str(id_first), "description": "First"},
+            ]
+        }
+    ]
+
+    # Real ScoredResult objects: .id is a UUID (not a str).
+    scored_results = [
+        ScoredResult(id=id_first, score=0.10, payload={}),
+        ScoredResult(id=id_second, score=0.50, payload={}),
+    ]
+
+    top = await tr.filter_top_k_events(relevant_events, scored_results)
+
+    # Before the fix (UUID keys vs str lookup) every score is inf and the stable sort keeps
+    # graph order -> [third, second]. After the fix the lookup matches, so the two scored
+    # events are returned ordered by ascending distance.
+    assert [e["id"] for e in top] == [str(id_first), str(id_second)]
+    assert top[0]["score"] == 0.10
+    assert top[1]["score"] == 0.50
+
+
 # Test descriptions_to_string with unicode and newlines
 def test_descriptions_to_string_unicode_and_newlines():
     tr = TemporalRetriever()
