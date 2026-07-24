@@ -96,7 +96,10 @@ def agent_memory(
             scope = None
             if config.with_memory or config.with_session_memory or config.save_session_traces:
                 resolved_user = await resolve_agent_user(config)
-                if config.with_memory:
+                if config.with_memory or (
+                    config.dataset_name
+                    and (config.with_session_memory or config.save_session_traces)
+                ):
                     scope = await resolve_agent_dataset_scope(config, resolved_user)
             context = AgentMemoryContext(
                 origin_function=fn.__qualname__,

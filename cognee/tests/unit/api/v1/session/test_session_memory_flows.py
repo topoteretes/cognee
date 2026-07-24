@@ -321,9 +321,18 @@ class TestRememberResult:
         mock_user = MagicMock()
         mock_user.id = "u1"
 
+        mock_dataset = MagicMock()
+        mock_dataset.id = uuid4()
+        mock_dataset.name = "main_dataset"
+        mock_dataset.owner_id = uuid4()
+
         mock_sm = MagicMock()
         mock_sm.is_available = True
         mock_sm.add_qa = AsyncMock()
+
+        mock_db_context = MagicMock()
+        mock_db_context.return_value.__aenter__ = AsyncMock(return_value=None)
+        mock_db_context.return_value.__aexit__ = AsyncMock(return_value=False)
 
         with (
             _patch_remember_startup(),
@@ -332,14 +341,18 @@ class TestRememberResult:
                 AsyncMock(return_value=mock_user),
             ),
             patch.object(
+                _get_remember_module(),
+                "resolve_authorized_user_datasets",
+                AsyncMock(return_value=(mock_user, [mock_dataset])),
+            ),
+            patch(
+                "cognee.context_global_variables.set_database_global_context_variables",
+                mock_db_context,
+            ),
+            patch.object(
                 _mod_sm,
                 "get_session_manager",
                 return_value=mock_sm,
-            ),
-            patch.object(
-                _get_remember_module(),
-                "resolve_authorized_user_datasets",
-                AsyncMock(return_value=(mock_user, "")),
             ),
         ):
             from cognee.api.v1.remember.remember import RememberResult, remember
@@ -350,7 +363,64 @@ class TestRememberResult:
         assert result.status == "session_stored"
         assert result.session_id == "s1"
         assert result.session_ids == ["s1"]
+        assert result.dataset_id == str(mock_dataset.id)
         assert result.elapsed_seconds is not None
+
+
+# ---------------------------------------------------------------------------
+# _resolve_session_dataset: session writes target exactly one owned dataset
+# ---------------------------------------------------------------------------
+
+
+class TestResolveSessionDataset:
+    @pytest.mark.asyncio
+    async def test_returns_single_authorized_dataset(self):
+        mock_user = MagicMock()
+        mock_dataset = MagicMock()
+        mock_dataset.id = uuid4()
+        mock_dataset.owner_id = uuid4()
+
+        with patch.object(
+            _get_remember_module(),
+            "resolve_authorized_user_datasets",
+            AsyncMock(return_value=(mock_user, [mock_dataset])),
+        ):
+            from cognee.api.v1.remember.remember import _resolve_session_dataset
+
+            user, dataset = await _resolve_session_dataset("main_dataset", mock_user)
+
+        assert user is mock_user
+        assert dataset is mock_dataset
+
+    @pytest.mark.asyncio
+    async def test_multiple_datasets_raises(self):
+        mock_user = MagicMock()
+
+        with patch.object(
+            _get_remember_module(),
+            "resolve_authorized_user_datasets",
+            AsyncMock(return_value=(mock_user, [MagicMock(), MagicMock()])),
+        ):
+            from cognee.api.v1.remember.remember import _resolve_session_dataset
+
+            with pytest.raises(ValueError, match="exactly one dataset"):
+                await _resolve_session_dataset("main_dataset", mock_user)
+
+    @pytest.mark.asyncio
+    async def test_dataset_without_owner_raises(self):
+        mock_user = MagicMock()
+        mock_dataset = MagicMock()
+        mock_dataset.owner_id = None
+
+        with patch.object(
+            _get_remember_module(),
+            "resolve_authorized_user_datasets",
+            AsyncMock(return_value=(mock_user, [mock_dataset])),
+        ):
+            from cognee.api.v1.remember.remember import _resolve_session_dataset
+
+            with pytest.raises(ValueError, match="owner"):
+                await _resolve_session_dataset("main_dataset", mock_user)
 
 
 # ---------------------------------------------------------------------------

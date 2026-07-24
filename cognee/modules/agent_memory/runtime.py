@@ -447,7 +447,9 @@ async def retrieve_session_memory_context(context: AgentMemoryContext) -> str:
 
     from cognee.infrastructure.session.get_session_manager import get_session_manager
 
-    session_manager = get_session_manager()
+    session_manager = get_session_manager(
+        dataset_id=context.scope.dataset_id if context.scope is not None else None
+    )
     try:
         feedback_values = await session_manager.get_agent_trace_feedback(
             user_id=str(context.user.id),
@@ -481,7 +483,9 @@ async def persist_trace(context: AgentMemoryContext) -> None:
 
     from cognee.infrastructure.session.get_session_manager import get_session_manager
 
-    session_manager = get_session_manager()
+    session_manager = get_session_manager(
+        dataset_id=context.scope.dataset_id if context.scope is not None else None
+    )
     user_id = str(context.user.id)
     try:
         await session_manager.add_agent_trace_step(
@@ -508,7 +512,9 @@ async def persist_trace(context: AgentMemoryContext) -> None:
     if context.config.persist_session_trace_after is None:
         return
 
-    resolved_session_id = context.config.session_id or session_manager.default_session_id
+    # Resolve through the manager so a dataset-scoped derived default matches
+    # the session the trace step was just written to.
+    resolved_session_id = session_manager._resolve_session_id(context.config.session_id)
 
     try:
         trace_count = await session_manager.get_agent_trace_count(

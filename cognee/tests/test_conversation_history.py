@@ -144,9 +144,27 @@ async def main():
         f"Default session should return non-empty list, got: {result4!r}"
     )
 
-    history_default = await cache_engine.get_latest_qa(str(user.id), "default_session", last_n=10)
+    # An omitted session_id inside a dataset-scoped search resolves to that
+    # dataset's default session ("default_session_<dataset_id>"), so two
+    # datasets can never mix turns in one shared global default.
+    from cognee.modules.data.methods import get_datasets_by_name
+
+    datasets = await get_datasets_by_name([dataset_name], user.id)
+    assert len(datasets) == 1, f"Expected the test dataset to exist, got {datasets!r}"
+    scoped_default_session_id = f"default_session_{datasets[0].id}"
+
+    history_default = await cache_engine.get_latest_qa(
+        str(user.id), scoped_default_session_id, last_n=10
+    )
     our_qa_default = [h for h in history_default if h.question == "Test default session"]
-    assert len(our_qa_default) == 1, "Should find 'Test default session' in default_session"
+    assert len(our_qa_default) == 1, (
+        f"Should find 'Test default session' in {scoped_default_session_id}"
+    )
+
+    legacy_default = await cache_engine.get_latest_qa(str(user.id), "default_session", last_n=10)
+    assert not [h for h in legacy_default if h.question == "Test default session"], (
+        "Dataset-scoped search must not write into the legacy global default_session"
+    )
 
     session_id_rag = "test_session_rag"
 
