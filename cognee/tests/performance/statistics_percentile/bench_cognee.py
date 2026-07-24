@@ -86,9 +86,7 @@ def _resolve_cloud_config(args: argparse.Namespace) -> dict:
         sys.exit("Error: --mock-llm is not supported in cloud mode (LLM runs server-side)")
     api_key = args.tenant_api_key or os.environ.get("COGNEE_API_KEY", "")
     if not api_key:
-        sys.exit(
-            "Error: --tenant-api-key (or COGNEE_API_KEY env var) is required in cloud mode"
-        )
+        sys.exit("Error: --tenant-api-key (or COGNEE_API_KEY env var) is required in cloud mode")
     if not args.tenant_url and not args.create_tenant:
         sys.exit("Error: cloud mode needs --tenant-url or --create-tenant")
     return {
@@ -403,15 +401,11 @@ async def _create_cloud_tenant(
 
         deadline = time.time() + ready_timeout_s
         while True:
-            async with session.get(
-                f"{management_url}/api/v1/tenants/{tenant_id}/status"
-            ) as resp:
+            async with session.get(f"{management_url}/api/v1/tenants/{tenant_id}/status") as resp:
                 if resp.status < 400 and (await resp.json()).get("status") == "healthy":
                     break
             if time.time() > deadline:
-                raise TimeoutError(
-                    f"Tenant {tenant_id} not healthy after {ready_timeout_s:.0f}s"
-                )
+                raise TimeoutError(f"Tenant {tenant_id} not healthy after {ready_timeout_s:.0f}s")
             await asyncio.sleep(2)
 
     # Service URL convention: api.<domain> hosts the controller and
@@ -450,9 +444,7 @@ async def _delete_cloud_dataset_if_exists(client, dataset_name: str) -> None:
             body = await resp.text()
             raise RuntimeError(f"Listing datasets failed ({resp.status}): {body}")
         datasets = await resp.json()
-    existing_names = {
-        record.get("name") for record in datasets if isinstance(record, dict)
-    }
+    existing_names = {record.get("name") for record in datasets if isinstance(record, dict)}
     if dataset_name not in existing_names:
         print(f"  Dataset '{dataset_name}' not present on tenant; nothing to delete")
         return
@@ -696,16 +688,12 @@ async def run_benchmark_cloud(
     print("=" * 60)
     print(f"  Tenant            : {tenant_url}")
     if config.get("create_tenant"):
-        print(
-            f"  Tenant create     : {t_tenant_create:.2f}s  [{status['tenant_create']}]"
-        )
+        print(f"  Tenant create     : {t_tenant_create:.2f}s  [{status['tenant_create']}]")
         print(
             f"  Dataset delete    : {t_dataset_delete:.2f}s  "
             f"[{status.get('dataset_delete', 'skipped')}]"
         )
-        print(
-            f"  Tenant delete     : {t_tenant_delete:.2f}s  [{status['tenant_delete']}]"
-        )
+        print(f"  Tenant delete     : {t_tenant_delete:.2f}s  [{status['tenant_delete']}]")
     print(f"  Memories inserted : {n}")
     print(f"  add time          : {t_add:.2f}s  ({t_add / n:.2f}s per memory)  [{status['add']}]")
     print(f"  cognify time      : {t_cognify:.2f}s  [{status['cognify']}]")
