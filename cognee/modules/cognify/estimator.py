@@ -335,12 +335,14 @@ def _accept_local_file_path() -> bool:
 def _path_candidate(value: str) -> Optional[Path]:
     """The local path this string refers to, or None when it is raw text.
 
-    Mirrors ``save_data_item_to_storage``: remote URLs and missing absolute
-    paths are loud errors, ``file://`` URIs resolve to local paths, everything
-    else that is not an existing file is raw text. Scheme is checked before the
-    newline guard so a trailing-newline URL cannot slip through as text. When
-    ``ACCEPT_LOCAL_FILE_PATH`` is disabled, path references are rejected and
-    relative strings are raw text, exactly as in a real run.
+    Mirrors ``save_data_item_to_storage``: remote URLs are loud errors and
+    ``file://`` URIs resolve to local paths, but a bare string is a file only
+    when it points at one that exists. An absolute-looking string that is not an
+    existing file (e.g. a "/"-prefixed text note) is raw text, exactly as a real
+    run now ingests it. Scheme is checked before the newline guard so a
+    trailing-newline URL cannot slip through as text. When
+    ``ACCEPT_LOCAL_FILE_PATH`` is disabled, an existing *absolute* file path is
+    rejected while relative paths and non-existent strings stay raw text.
     """
     scheme = urlparse(value).scheme.lower()
     if scheme in _UNSUPPORTED_SCHEMES:
@@ -356,20 +358,24 @@ def _path_candidate(value: str) -> Optional[Path]:
     if "\n" in value or "\r" in value or len(value) > 4096:
         return None
 
-    if not _accept_local_file_path():
-        if value.startswith("/"):
-            raise ValueError(f"Local files are not accepted, got {value!r}.")
-        return None
-
     try:
         path = Path(value)
-        if path.exists():
-            return path
+        exists = path.exists()
     except (OSError, ValueError):
         return None
-    if value.startswith("/"):
-        # A real run treats absolute paths as file references and would fail too.
-        raise ValueError(f"dry_run file input does not exist: {value!r}.")
+
+    if exists:
+        if not _accept_local_file_path():
+            # Mirror the ACCEPT_LOCAL_FILE_PATH gate: an existing *absolute* file
+            # path is rejected, while an existing *relative* path falls through to
+            # raw text (save_data_item_to_storage has no reject branch for it).
+            if value.startswith("/"):
+                raise ValueError(f"Local files are not accepted, got {value!r}.")
+            return None
+        return path
+
+    # A non-existent path — absolute or relative — is raw text. A real run no
+    # longer treats a "/"-prefixed string as a file reference unless it exists.
     return None
 
 
