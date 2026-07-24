@@ -20,6 +20,9 @@ from cognee.modules.graph.utils import (
     ensure_default_edge_properties,
     get_graph_from_model,
 )
+from cognee.modules.graph.utils.merge_policy import MergePolicy
+from cognee.modules.graph.utils.canonicalization import load_alias_map
+from cognee.modules.graph.models.MergeRecord import MergeRecord
 from .index_data_points import index_data_points
 from .index_graph_edges import index_graph_edges
 from cognee.modules.engine.models import Triplet
@@ -92,7 +95,12 @@ async def add_data_points(
         nodes.extend(result_nodes)
         edges.extend(result_edges)
 
-    nodes, edges = deduplicate_nodes_and_edges(nodes, edges)
+    alias_map = load_alias_map()
+    merge_policy = MergePolicy()
+    
+    nodes, edges, batch_merge_records = deduplicate_nodes_and_edges(
+        nodes, edges, alias_map=alias_map, merge_policy=merge_policy
+    )
 
     edges = ensure_default_edge_properties(edges, nodes=nodes)
     custom_edges = (
