@@ -20,7 +20,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -161,7 +161,7 @@ def print_report(stats: dict, num_runs: int, config: dict, runs: list[dict]):
 
 
 def generate_html(stats: dict, num_runs: int, config: dict, runs: list[dict], path: Path):
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     pct_keys = ["min", "p50", "p75", "p90", "p95", "p99", "max", "mean"]
 
     # Build table rows

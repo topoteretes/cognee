@@ -267,6 +267,7 @@ exclude = [
 ]
 
 [tool.ruff.lint]
+extend-select = ["DTZ003", "DTZ005"]
 ignore = ["F401"]
 
 [tool.ty.src]

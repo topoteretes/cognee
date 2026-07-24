@@ -59,7 +59,7 @@ def utc_now() -> str:
 
 
 def timestamp() -> str:
-    return datetime.now().strftime("%Y%m%d_%H%M%S")
+    return datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
 
 
 def parse_csv(value: str | None) -> list[str] | None:

@@ -60,7 +60,7 @@ async def modal_run_eval(eval_params=None):
 
     version_name = "baseline"
     benchmark_name = os.environ.get("BENCHMARK", eval_params.get("benchmark", "benchmark"))
-    timestamp = datetime.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    timestamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
     answers_filename = (
         f"{version_name}_{benchmark_name}_{timestamp}_{eval_params.get('answers_path')}"
