@@ -207,8 +207,8 @@ async def _search_session(
     scored.sort(key=lambda x: x[0], reverse=True)
 
     results: list[ResponseQAEntry] = []
-    for _, entry in scored[:top_k]:
-        results.append(ResponseQAEntry(**entry.model_dump(), source="session"))
+    for hits, entry in scored[:top_k]:
+        results.append(ResponseQAEntry(**entry.model_dump(), source="session", score=float(hits)))
 
     return results
 
@@ -278,8 +278,8 @@ async def _search_trace(
     scored.sort(key=lambda x: x[0], reverse=True)
 
     results: list[ResponseAgentTraceEntry] = []
-    for _, entry in scored[:top_k]:
-        results.append(ResponseAgentTraceEntry(**entry.model_dump(), source="trace"))
+    for hits, entry in scored[:top_k]:
+        results.append(ResponseAgentTraceEntry(**entry.model_dump(), source="trace", score=float(hits)))
 
     return results
 
@@ -360,6 +360,7 @@ async def recall(
     user: object | None = None,
     llm_config: LLMConfig | None = None,
     embedding_config: EmbeddingConfig | None = None,
+    score_weights: dict[str, float] | None = None,
 ) -> list[RecallResponse]:
     """Search the knowledge graph for relevant information.
 
@@ -468,6 +469,7 @@ async def recall(
                 context_profile=context_profile,
                 verbose=verbose,
                 include_references=include_references,
+                score_weights=score_weights,
             )
             span.set_attribute(COGNEE_RECALL_SOURCE, "cloud")
             span.set_attribute(COGNEE_RESULT_COUNT, len(results) if results else 0)
@@ -613,9 +615,28 @@ async def recall(
             if auto_fallthrough and src == "graph" and merged:
                 break
             part = await runner()
+            if part:
+                scores = [getattr(r, "score", None) for r in part]
+                valid_scores = [s for s in scores if s is not None]
+                if valid_scores:
+                    min_s = min(valid_scores)
+                    max_s = max(valid_scores)
+                    diff = max_s - min_s
+                    weight = (score_weights or {}).get(src, 1.0)
+                    for r in part:
+                        if getattr(r, "score", None) is not None:
+                            normalized = (
+                                (r.score - min_s) / diff
+                                if diff > 1e-6
+                                else 1.0
+                            )
+                            r.score = normalized * weight
             if src == "session":
                 session_result_count = len(part)
             merged.extend(part)
+
+        merged.sort(key=lambda r: getattr(r, "score", None) or 0.0, reverse=True)
+        merged = merged[:top_k]
 
         if session_result_count:
             span.set_attribute(COGNEE_SESSION_ENTRY_COUNT, session_result_count)
