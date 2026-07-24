@@ -34,6 +34,12 @@ METRICS = [
     "search_time",
     "prune_time_s",
     "db_setup_time_s",
+    # Local + cloud --create-tenant modes (populated-dataset deletion).
+    "dataset_delete_time_s",
+    # Cloud --create-tenant runs only; build_report skips metrics absent
+    # from the run results, so local/fixed-tenant runs are unaffected.
+    "tenant_create_time_s",
+    "tenant_delete_time_s",
 ]
 PERCENTILES = [50, 75, 90, 95, 99]
 LABELS = {
@@ -43,6 +49,9 @@ LABELS = {
     "search_time": "Search",
     "prune_time_s": "Prune",
     "db_setup_time_s": "DB setup",
+    "tenant_create_time_s": "Tenant create (cloud)",
+    "dataset_delete_time_s": "Dataset delete",
+    "tenant_delete_time_s": "Tenant delete (cloud)",
     "wall_time_s": "Wall clock (e2e)",
 }
 
@@ -75,11 +84,18 @@ def run_single(run_num: int, total: int, extra_args: list[str]) -> dict:
     result = subprocess.run(cmd, text=True, cwd=str(COGNEE_DIR))
     wall = time.time() - t0
 
-    if result.returncode != 0:
-        raise RuntimeError(f"Run {run_num} failed with exit code {result.returncode}")
-
-    with open(tmp_path) as f:
-        data = json.load(f)
+    # A non-zero exit with results present is a FAILED RUN (the bench exits 1
+    # after writing its JSON when any phase failed) — keep it as data so the
+    # percentile report covers it; the report itself exits non-zero at the
+    # end. Only a crash that produced no parseable results aborts the report.
+    try:
+        with open(tmp_path) as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        Path(tmp_path).unlink(missing_ok=True)
+        raise RuntimeError(
+            f"Run {run_num} crashed with exit code {result.returncode} and produced no results"
+        )
 
     Path(tmp_path).unlink(missing_ok=True)
     data["wall_time_s"] = round(wall, 3)
@@ -88,7 +104,9 @@ def run_single(run_num: int, total: int, extra_args: list[str]) -> dict:
 
 def build_report(runs: list[dict]) -> dict:
     stats = {}
-    all_metrics = METRICS + ["wall_time_s"]
+    # Only report metrics the runs actually produced: cloud runs carry
+    # tenant metrics, local runs don't, and vice versa for local-only ones.
+    all_metrics = [m for m in METRICS + ["wall_time_s"] if m in runs[0]]
     for metric in all_metrics:
         values = sorted(r[metric] for r in runs)
         entry = {
@@ -153,12 +171,17 @@ def generate_html(stats: dict, num_runs: int, config: dict, runs: list[dict], pa
         cells = "".join(f"<td>{entry[k]:.3f}s</td>" for k in pct_keys)
         table_rows += f"<tr><td class='metric-name'>{label}</td>{cells}</tr>\n"
 
+    # Metrics actually present in this report (build_report filters by what
+    # the runs produced — cloud and local runs carry different sets).
+    all_metrics = list(stats.keys())
+    run_header_cells = "".join(f"<th>{LABELS.get(m, m)}</th>" for m in all_metrics)
+
     # Per-run breakdown rows
     succeeded = sum(1 for r in runs if r.get("success", True))
     failed = num_runs - succeeded
     run_rows = ""
     for i, r in enumerate(runs, 1):
-        cells = "".join(f"<td>{r.get(m, 0):.3f}s</td>" for m in METRICS + ["wall_time_s"])
+        cells = "".join(f"<td>{r.get(m, 0):.3f}s</td>" for m in all_metrics)
         ok = r.get("success", True)
         status_style = "color: var(--green)" if ok else "color: var(--red)"
         status_label = "OK" if ok else "FAIL"
@@ -170,7 +193,6 @@ def generate_html(stats: dict, num_runs: int, config: dict, runs: list[dict], pa
         run_rows += f"<tr><td>Run {i}</td>{cells}</tr>\n"
 
     # Chart data
-    all_metrics = METRICS + ["wall_time_s"]
     chart_labels = json.dumps([LABELS.get(m, m) for m in all_metrics])
     chart_p50 = json.dumps([stats[m]["p50"] for m in all_metrics])
     chart_p90 = json.dumps([stats[m]["p90"] for m in all_metrics])
@@ -248,7 +270,7 @@ def generate_html(stats: dict, num_runs: int, config: dict, runs: list[dict], pa
 
 <h2 class="section-title">Individual Runs</h2>
 <table>
-  <thead><tr><th>Run</th><th>add()</th><th>cognify()</th><th>Total Ingest</th><th>Search</th><th>Prune</th><th>DB Setup</th><th>Wall Clock</th><th>Status</th></tr></thead>
+  <thead><tr><th>Run</th>{run_header_cells}<th>Status</th></tr></thead>
   <tbody>{run_rows}</tbody>
 </table>
 
@@ -337,6 +359,32 @@ def main():
     parser.add_argument(
         "--mock-memories", type=Path, default=None, help="Forward to bench_cognee.py"
     )
+    parser.add_argument(
+        "--tenant-url",
+        default=None,
+        help="Cognee Cloud tenant URL; benchmark runs remotely via cognee.serve()",
+    )
+    parser.add_argument(
+        "--tenant-api-key",
+        default=None,
+        help="API key for the cloud tenant (or set COGNEE_API_KEY)",
+    )
+    parser.add_argument(
+        "--dataset-name",
+        default=None,
+        help="Forward to bench_cognee.py: per-suite dataset name for cloud mode",
+    )
+    parser.add_argument(
+        "--create-tenant",
+        action="store_true",
+        default=False,
+        help="Forward to bench_cognee.py: create+measure+delete a tenant per run",
+    )
+    parser.add_argument(
+        "--management-url",
+        default=None,
+        help="Forward to bench_cognee.py: tenant-controller API base URL",
+    )
     args = parser.parse_args()
 
     extra_args = []
@@ -358,8 +406,24 @@ def main():
         extra_args += ["--mock-llm"]
     if args.mock_memories:
         extra_args += ["--mock-memories", str(args.mock_memories)]
+    if args.tenant_url:
+        extra_args += ["--tenant-url", args.tenant_url]
+    if args.tenant_api_key:
+        extra_args += ["--tenant-api-key", args.tenant_api_key]
+    if args.dataset_name:
+        extra_args += ["--dataset-name", args.dataset_name]
+    if args.create_tenant:
+        extra_args += ["--create-tenant"]
+    if args.management_url:
+        extra_args += ["--management-url", args.management_url]
 
-    mode = " [MOCK LLM]" if args.mock_llm else ""
+    mode = (
+        " [MOCK LLM]"
+        if args.mock_llm
+        else " [CLOUD]"
+        if (args.tenant_url or args.create_tenant)
+        else ""
+    )
     print(f"Starting {args.runs} sequential run(s) of bench_cognee.py...{mode}")
 
     runs = []
@@ -393,6 +457,12 @@ def main():
         print(f"Full report saved to {args.output}")
 
     generate_html(stats, args.runs, config, runs, args.html)
+
+    # Propagate run failures via the exit code AFTER all artifacts are
+    # written, so CI both keeps the report and fails the job.
+    failed = args.runs - sum(1 for r in runs if r.get("success", True))
+    if failed:
+        sys.exit(f"{failed}/{args.runs} benchmark runs failed (report artifacts were written).")
 
 
 if __name__ == "__main__":
