@@ -4,6 +4,7 @@ import os
 import litellm
 
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
+from cognee.infrastructure.llm.config import get_llm_context_config
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.get_llm_client import (
     get_llm_client,
 )
@@ -36,12 +37,42 @@ async def get_max_chunk_tokens() -> int:
     embedding_engine = (await get_vector_engine_async()).embedding_engine
     llm_client = get_llm_client(raise_api_key_error=False)
 
-    # We need to make sure chunk size won't take more than half of LLM max context token size
-    # but it also can't be bigger than the embedding engine max token size
-    llm_cutoff_point = llm_client.max_completion_tokens // 2  # Round down the division
+    llm_config = get_llm_context_config()
+    llm_context_window = get_model_max_context_tokens(llm_config.llm_model)
+    if llm_context_window is None:
+        llm_context_window = llm_client.max_completion_tokens
+
+    # We need to make sure chunk size won't take more than half of the LLM context token size
+    # but it also can't be bigger than the embedding engine max token size.
+    llm_cutoff_point = llm_context_window // 2  # Round down the division
     max_chunk_tokens = min(embedding_engine.max_completion_tokens, llm_cutoff_point)
 
     return max_chunk_tokens
+
+
+def get_model_max_context_tokens(model_name: str) -> int | None:
+    """
+    Retrieve the maximum context-window size for a specified model if it exists.
+
+    Uses LiteLLM model metadata when available and falls back to the legacy model-cost entry.
+    """
+    try:
+        model_info = litellm.get_model_info(model_name)
+    except Exception as exc:
+        logger.debug("Failed to resolve model info for %s: %s", model_name, exc)
+        model_info = {}
+
+    max_context_tokens = model_info.get("max_input_tokens") or model_info.get("max_tokens")
+    if max_context_tokens is None:
+        if model_name in litellm.model_cost and "max_tokens" in litellm.model_cost[model_name]:
+            max_context_tokens = litellm.model_cost[model_name]["max_tokens"]
+
+    if max_context_tokens is None:
+        logger.debug("Model context window not found for %s.", model_name)
+    else:
+        logger.debug("Model context window for %s: %s", model_name, max_context_tokens)
+
+    return max_context_tokens
 
 
 def get_model_max_completion_tokens(model_name: str) -> int | None:
