@@ -15,6 +15,10 @@ max_chunk_size_vals = [8, 32]
 # called directly). Each row must become its own chunk.
 MULTI_ROW_INPUT = "name: John, age: 30\n\nname: Jane, age: 25"
 
+# Two rows separated by consecutive separators, i.e. with a blank row between
+# them (data.split("\n\n") yields ["...", "", "..."]).
+BLANK_ROW_INPUT = "name: John, age: 30\n\n\n\nname: Jane, age: 25"
+
 
 @pytest.mark.parametrize(
     "input_text,max_chunk_size",
@@ -83,4 +87,29 @@ def test_chunk_by_row_multiple_rows_are_independent():
     assert chunk_indices == list(range(len(chunk_indices)))
 
     # Identical rows must have identical sizes (no accumulation across rows).
+    assert chunks[0]["chunk_size"] == chunks[1]["chunk_size"]
+
+
+def test_chunk_by_row_blank_rows_do_not_leak():
+    """A blank row (from consecutive separators) must not leak into the next row.
+
+    Regression test: the row-state reset ran only when the joined row text was
+    non-empty, so a blank row left an empty pair in the accumulator and the
+    following row's chunk was emitted as ", name: ..." — corrupted text, an
+    inflated chunk_size, and a chunk_id derived from the corrupted text.
+    """
+    chunks = list(chunk_by_row(data=BLANK_ROW_INPUT, max_chunk_size=128))
+
+    # The blank row contributes nothing; both real rows keep their exact text.
+    assert [chunk["text"] for chunk in chunks] == [
+        "name: John, age: 30",
+        "name: Jane, age: 25",
+    ]
+
+    # Indices are monotonically increasing across rows.
+    chunk_indices = [chunk["chunk_index"] for chunk in chunks]
+    assert chunk_indices == list(range(len(chunk_indices)))
+
+    # Structurally identical rows must have identical sizes (no size leakage
+    # from the blank row).
     assert chunks[0]["chunk_size"] == chunks[1]["chunk_size"]
