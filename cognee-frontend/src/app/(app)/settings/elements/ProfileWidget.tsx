@@ -1,18 +1,12 @@
 "use client";
 
-import getUser from "@/modules/users/getUser";
-import type CogneeUser from "@/modules/users/CogneeUser";
+import { useCurrentUser } from "@/modules/users/useCurrentUser";
 import { Avatar, Divider, Flex, Stack, Text, TextInput } from "@mantine/core";
 import Image from "next/image";
-import { useEffect, useState } from "react";
 import { tokens } from "@/ui/theme/tokens";
 
 export default function ProfileWidget() {
-  const [user, setUser] = useState<CogneeUser | null>(null);
-
-  useEffect(() => {
-    getUser().then(setUser);
-  }, []);
+  const { data: user } = useCurrentUser();
 
   return (
     <Stack

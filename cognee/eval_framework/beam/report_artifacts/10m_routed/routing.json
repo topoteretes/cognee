@@ -1,0 +1,12 @@
+{
+  "abstention": "hybrid_completion_20_20_qa_v1",
+  "contradiction_resolution": "hybrid_completion_compact_balanced_c10_e10_edges5_f50_qa_v1",
+  "event_ordering": "hybrid_completion_chunkless_graph_e20_edges5_f100_gci20_qa_v1",
+  "information_extraction": "hybrid_completion_chunkless_graph_e20_edges5_f100_gci20_qa_v1",
+  "instruction_following": "hybrid_completion_chunk_wide_c30_e5_edges5_f20_gci5_qa_v1",
+  "knowledge_update": "hybrid_completion_20_20_qa_v1",
+  "multi_session_reasoning": "hybrid_completion_compact_balanced_c10_e10_edges5_f50_qa_v1",
+  "preference_following": "hybrid_completion_fact_gci_c10_e10_edges10_f100_gci5_qa_v1",
+  "summarization": "hybrid_completion_compact_balanced_c10_e10_edges5_f50_qa_v1",
+  "temporal_reasoning": "hybrid_completion_chunkless_graph_e20_edges5_f100_gci20_qa_v1"
+}

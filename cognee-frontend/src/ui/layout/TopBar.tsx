@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { usePathname } from "next/navigation";
-import getUser from "@/modules/users/getUser";
+import { useCurrentUser } from "@/modules/users/useCurrentUser";
 import getLocalUser from "@/modules/users/getLocalUser";
 import CogneeUser from "@/modules/users/CogneeUser";
 import isCloudEnvironment from "@/utils/isCloudEnvironment";
@@ -67,15 +67,16 @@ function PlusIcon() {
 }
 
 export default function TopBar() {
-  const [user, setUser] = useState<CogneeUser>();
+  const [localUser, setLocalUser] = useState<CogneeUser>();
   const cloud = isCloudEnvironment();
+  const { data: cloudUser } = useCurrentUser(cloud);
+  const user = cloud ? cloudUser : localUser;
   const pathname = usePathname();
   const { workspace, workspaces, setWorkspace } = useFilter();
   const { requestCreateWorkspace, availableTenants } = useTenant();
 
   useEffect(() => {
-    if (cloud) { getUser().then(setUser); }
-    else { getLocalUser().then((u) => { if (u) setUser(u); }); }
+    if (!cloud) getLocalUser().then((u) => { if (u) setLocalUser(u); });
   }, [cloud]);
 
   // Derive page label

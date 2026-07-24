@@ -3,6 +3,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
 import { useCogniInstance } from "@/modules/tenant/TenantProvider";
+import { useUser } from "@/modules/users/UserContext";
 import { SEARCH_SESSION_PREFIX } from "@/modules/sessions/getSessions";
 
 export interface PipelineRun { id: string; pipeline_name: string; status: string; dataset_id: string | null; dataset_name: string | null; owner_email: string | null; created_at: string | null; pipeline_run_id: string | null }
@@ -208,6 +209,7 @@ export function AgentActivityTerminal({
   // falls back to firing its own recalls (dashboard demo path).
   onboardingDemo?: OnboardingDemoEntry[] | null;
 }) {
+  const { userMe } = useUser();
   const logRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const atBottomRef = useRef(true);
@@ -223,7 +225,7 @@ export function AgentActivityTerminal({
     try {
       if (localStorage.getItem("cognee-terminal-demo-shown") === "1") return false;
       if (variant === "onboarding") return true;
-      return !!localStorage.getItem("cognee-onboarding-complete");
+      return Boolean(userMe?.onboardingCompletedAt);
     } catch { return false; }
   });
   const [sessionQAs, setSessionQAs] = useState<Record<string, QAItem[]>>({});
