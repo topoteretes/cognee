@@ -163,9 +163,7 @@ async def _resolve_bound_session_dataset(session_id, dataset_ref, user):
     from cognee.modules.session_lifecycle.exceptions import SessionDatasetMismatchError
     from cognee.modules.session_lifecycle.metrics import get_session_dataset
 
-    binding = None
-    if session_id and getattr(user, "id", None) is not None:
-        binding = await get_session_dataset(session_id=session_id, user_id=user.id)
+    binding = await get_session_dataset(session_id=session_id, user_id=user.id)
 
     if binding is not None and dataset_ref in (None, DEFAULT_DATASET_NAME):
         dataset_ref = binding[0]
