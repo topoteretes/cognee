@@ -76,7 +76,7 @@ def _parse_sql_query(query: str) -> tuple:
     """Extract table name and WHERE clause from a SELECT query.
     Returns (table_name, where_clause) or raises ValueError."""
     match = re.match(
-        r"SELECT\s+.+?\s+FROM\s+(\w+)(?:\s+WHERE\s+(.+))?",
+        r"SELECT\s+.+?\s+FROM\s+(\w+(?:\.\w+)*)(?:\s+WHERE\s+(.+))?",
         query.strip(),
         re.IGNORECASE | re.DOTALL,
     )
