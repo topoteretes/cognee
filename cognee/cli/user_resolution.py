@@ -62,9 +62,3 @@ async def _get_default_user_with_recovery():
         await run_migrations()
 
         return await get_default_user()
-
-
-def scoped_session_id(user_id: UUID, session_id: Optional[str] = None) -> str:
-    """Return a session_id scoped to the user so agents don't share history."""
-    base = session_id or "default"
-    return f"{user_id}:{base}"

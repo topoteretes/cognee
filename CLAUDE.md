@@ -530,6 +530,17 @@ response = await llm_client.acreate_structured_output(
 )
 ```
 
+### Custom Exceptions
+Exceptions raised from API-reachable code must subclass `CogneeApiError`
+(`cognee/exceptions/exceptions.py`) — usually via `CogneeValidationError` (422),
+`CogneeSystemError` (500), or another existing subclass — so FastAPI returns a
+proper HTTP status instead of a 500. Convention (see `DatasetNotFoundError`):
+
+- Live in the domain module's own `exceptions.py` (e.g. `cognee/modules/data/exceptions/`)
+- Call `super().__init__(message=..., name="<ClassName>", status_code=status.HTTP_...)`
+- The base class logs on construction — don't log again at the raise site
+- Keep structured fields (ids, names) as attributes so callers can inspect without parsing the message
+
 ## Key Concepts
 
 ### Datasets

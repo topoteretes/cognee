@@ -39,6 +39,8 @@ from cognee.modules.observability import (
 
 logger = get_logger("remember")
 
+DEFAULT_DATASET_NAME = "main_dataset"
+
 
 class RememberKwargs(TypedDict, total=False):
     """Power-user overrides for remember(). Most users never need these."""
@@ -134,17 +136,57 @@ def _data_to_text(data) -> str:
 _SESSION_PLACEHOLDER_PREFIXES = ("[UploadFile]", "[file:", "[BinaryIO", "[SpooledTemporaryFile")
 
 
-async def _add_to_session(session_id: str, data, user):
-    """Add a Q&A entry to the session cache.
+async def _resolve_session_dataset(dataset_ref, user):
+    """Resolve and authorize the single dataset a session write targets.
+
+    Session entries always target exactly one dataset so its UUID can scope
+    the session (per-dataset default IDs, lifecycle attribution, DB context).
+    """
+    user, authorized_datasets = await resolve_authorized_user_datasets(dataset_ref, user)
+    if len(authorized_datasets) != 1:
+        raise ValueError("Session memory must target exactly one dataset")
+    dataset = authorized_datasets[0]
+    if getattr(dataset, "owner_id", None) is None:
+        raise ValueError("Session memory requires a dataset with an owner.")
+    return user, dataset
+
+
+async def _resolve_bound_session_dataset(session_id, dataset_ref, user):
+    """Resolve the dataset for a session write, honoring the session's binding.
+
+    Sessions live in exactly one dataset (``SessionRecord.dataset_id``, filled
+    on first write). Once bound, a session write follows its binding: the
+    default dataset reference inherits it, and naming a different dataset
+    raises ``SessionDatasetMismatchError``. Unbound sessions resolve the
+    caller's reference as before and get bound by the write itself.
+    """
+    from cognee.modules.session_lifecycle.exceptions import SessionDatasetMismatchError
+    from cognee.modules.session_lifecycle.metrics import get_session_dataset
+
+    binding = await get_session_dataset(session_id=session_id, user_id=user.id)
+
+    if binding is not None and dataset_ref in (None, DEFAULT_DATASET_NAME):
+        dataset_ref = binding[0]
+
+    user, dataset = await _resolve_session_dataset(dataset_ref, user)
+
+    if binding is not None and dataset.id != binding[0]:
+        raise SessionDatasetMismatchError(session_id, binding[0], dataset.id)
+    return user, dataset
+
+
+async def _add_to_session(session_id: str, data, user, *, dataset):
+    """Add a Q&A entry to the session cache, scoped to ``dataset``.
 
     Sessions store chat-shaped content (prompts, assistant answers,
     Q&A turns). File-upload data coerces to placeholder strings like
     ``[UploadFile]`` / ``[file: name]`` — those are useless in the
     session cache and pollute recall results, so they're skipped.
     """
+    from cognee.context_global_variables import set_database_global_context_variables
     from cognee.infrastructure.session.get_session_manager import get_session_manager
 
-    sm = get_session_manager()
+    sm = get_session_manager(dataset_id=dataset.id)
     if not sm.is_available:
         logger.warning("remember: session cache not available (enable CACHING=true)")
         return
@@ -164,13 +206,16 @@ async def _add_to_session(session_id: str, data, user):
         )
         return
 
-    await sm.add_qa(
-        user_id=user_id,
-        session_id=session_id,
-        question="",
-        context="",
-        answer=text,
-    )
+    # Session QA indexing uses the vector engine — select the dataset's
+    # database context so session vectors land next to the dataset's data.
+    async with set_database_global_context_variables(dataset.id, dataset.owner_id):
+        await sm.add_qa(
+            user_id=user_id,
+            session_id=session_id,
+            question="",
+            context="",
+            answer=text,
+        )
     logger.info("remember: added entry to session '%s'", session_id)
 
 
@@ -178,6 +223,7 @@ async def _remember_entry(
     entry,
     *,
     dataset_name: str,
+    dataset_id: Optional[UUID] = None,
     session_id: Optional[str],
     user,
     skill_improvement: Optional[dict[str, Any]] = None,
@@ -194,6 +240,7 @@ async def _remember_entry(
         payload = await client.remember_entry(
             entry,
             dataset_name=dataset_name,
+            dataset_id=dataset_id,
             session_id=session_id,
             skill_improvement=skill_improvement,
         )
@@ -219,6 +266,7 @@ async def _remember_entry(
     return await _dispatch_session_entry(
         entry,
         dataset_name=dataset_name,
+        dataset_id=dataset_id,
         session_id=session_id,
         user=user,
         skill_improvement=skill_improvement,
@@ -229,6 +277,7 @@ async def _dispatch_session_entry(
     entry: "MemoryEntry",
     *,
     dataset_name: str,
+    dataset_id: Optional[UUID] = None,
     session_id: Optional[str],
     user,
     skill_improvement: Optional[dict[str, Any]] = None,
@@ -245,7 +294,8 @@ async def _dispatch_session_entry(
 
         run, dataset = await remember_skill_run_entry(
             entry,
-            dataset_name=dataset_name,
+            # The downstream dataset resolver accepts a name or UUID.
+            dataset_name=dataset_id or dataset_name,
             session_id=session_id,
             user=user,
         )
@@ -305,95 +355,80 @@ async def _dispatch_session_entry(
     if not user_id:
         raise ValueError("Could not resolve user for session entry")
 
-    sm = get_session_manager()
+    # Resolve and authorize the target dataset before touching the cache so
+    # the session is scoped to it (lifecycle attribution, per-dataset default
+    # IDs, dataset-local vector indexing).
+    user, dataset = await _resolve_bound_session_dataset(
+        session_id, dataset_id or dataset_name, user
+    )
+
+    sm = get_session_manager(dataset_id=dataset.id)
     if not sm.is_available:
         raise RuntimeError("Session cache unavailable — set CACHING=true to enable session memory")
 
-    # Resolve the dataset UUID for this session so the session_records
-    # row carries dataset_id — otherwise downstream permission filtering
-    # (e.g. the dashboard listing) can't match the session via granted
-    # dataset reads. We backfill via ensure_and_touch_session, which
-    # upserts the row and only sets dataset_id when currently null.
-    try:
-        from uuid import UUID as _UUID
-
-        from cognee.modules.data.methods.get_authorized_dataset import get_authorized_dataset
-        from cognee.modules.session_lifecycle.metrics import ensure_and_touch_session
-
-        resolved_dataset = None
-        try:
-            ds = await get_authorized_dataset(user, dataset_name, "write")
-            if ds is not None:
-                resolved_dataset = ds.id
-        except Exception:
-            # Fall through with None — we still create the session row.
-            resolved_dataset = None
-
-        await ensure_and_touch_session(
-            session_id=session_id,
-            user_id=_UUID(user_id),
-            dataset_id=resolved_dataset,
-        )
-    except Exception as exc:
-        logger.debug("remember: pre-upsert session_record failed (%s)", exc)
-
     result = RememberResult(
         status="session_stored",
-        dataset_name=dataset_name,
+        dataset_name=dataset.name,
+        dataset_id=str(dataset.id),
         session_ids=[session_id],
     )
     result.elapsed_seconds = time.monotonic() - result._started_at
     result.entry_type = entry.type
 
-    if isinstance(entry, QAEntry):
-        qa_id = await sm.add_qa(
-            user_id=user_id,
-            session_id=session_id,
-            question=entry.question,
-            context=entry.context,
-            answer=entry.answer,
-            feedback_text=entry.feedback_text,
-            feedback_score=entry.feedback_score,
-            used_graph_element_ids=entry.used_graph_element_ids,
-        )
-        result.entry_id = qa_id
-        if qa_id is None:
-            result.status = "errored"
-            result.error = "SessionManager.add_qa returned None"
-        return result
+    from cognee.context_global_variables import set_database_global_context_variables
 
-    if isinstance(entry, TraceEntry):
-        trace_id = await sm.add_agent_trace_step(
-            user_id=user_id,
-            session_id=session_id,
-            origin_function=entry.origin_function,
-            status=entry.status,
-            generate_feedback_with_llm=entry.generate_feedback_with_llm,
-            memory_query=entry.memory_query,
-            memory_context=entry.memory_context,
-            method_params=entry.method_params,
-            method_return_value=entry.method_return_value,
-            error_message=entry.error_message,
-        )
-        result.entry_id = trace_id
-        if trace_id is None:
-            result.status = "errored"
-            result.error = "SessionManager.add_agent_trace_step returned None"
-        return result
+    # QA writes index vectors and traces can trigger context extraction —
+    # keep both in the dataset's database context.
+    async with set_database_global_context_variables(dataset.id, dataset.owner_id):
+        if isinstance(entry, QAEntry):
+            qa_id = await sm.add_qa(
+                user_id=user_id,
+                session_id=session_id,
+                question=entry.question,
+                context=entry.context,
+                answer=entry.answer,
+                feedback_text=entry.feedback_text,
+                feedback_score=entry.feedback_score,
+                used_graph_element_ids=entry.used_graph_element_ids,
+            )
+            result.entry_id = qa_id
+            if qa_id is None:
+                result.status = "errored"
+                result.error = "SessionManager.add_qa returned None"
+            return result
 
-    if isinstance(entry, FeedbackEntry):
-        ok = await sm.add_feedback(
-            user_id=user_id,
-            session_id=session_id,
-            qa_id=entry.qa_id,
-            feedback_text=entry.feedback_text,
-            feedback_score=entry.feedback_score,
-        )
-        result.entry_id = entry.qa_id
-        if not ok:
-            result.status = "errored"
-            result.error = f"add_feedback: QA {entry.qa_id} not found in session {session_id}"
-        return result
+        if isinstance(entry, TraceEntry):
+            trace_id = await sm.add_agent_trace_step(
+                user_id=user_id,
+                session_id=session_id,
+                origin_function=entry.origin_function,
+                status=entry.status,
+                generate_feedback_with_llm=entry.generate_feedback_with_llm,
+                memory_query=entry.memory_query,
+                memory_context=entry.memory_context,
+                method_params=entry.method_params,
+                method_return_value=entry.method_return_value,
+                error_message=entry.error_message,
+            )
+            result.entry_id = trace_id
+            if trace_id is None:
+                result.status = "errored"
+                result.error = "SessionManager.add_agent_trace_step returned None"
+            return result
+
+        if isinstance(entry, FeedbackEntry):
+            ok = await sm.add_feedback(
+                user_id=user_id,
+                session_id=session_id,
+                qa_id=entry.qa_id,
+                feedback_text=entry.feedback_text,
+                feedback_score=entry.feedback_score,
+            )
+            result.entry_id = entry.qa_id
+            if not ok:
+                result.status = "errored"
+                result.error = f"add_feedback: QA {entry.qa_id} not found in session {session_id}"
+            return result
 
     raise TypeError(f"Unsupported memory entry type: {type(entry).__name__}")
 
@@ -640,7 +675,7 @@ async def remember(
         "MemoryEntry",
         MemorySource,
     ],
-    dataset_name: str = "main_dataset",
+    dataset_name: str = DEFAULT_DATASET_NAME,
     *,
     dataset_id: Optional[UUID] = None,
     session_id: Optional[str] = None,
@@ -671,10 +706,12 @@ async def remember(
         dataset_name: Target dataset. Defaults to ``"main_dataset"``.
         dataset_id: UUID of an existing dataset to target directly. Takes
             precedence over ``dataset_name``. Not supported for
-            ``MemorySource`` imports or typed ``MemoryEntry`` payloads,
-            which are dataset-name based.
+            ``MemorySource`` imports, which are dataset-name based.
         session_id: Optional session ID. When set, stores data in the
-            session cache instead of the permanent graph.
+            session cache instead of the permanent graph. A session is bound
+            to the dataset of its first write: later session writes follow
+            that binding (the default dataset reference inherits it), and
+            naming a different dataset raises ``SessionDatasetMismatchError``.
         chunk_size: Max tokens per chunk. Auto-calculated when *None*.
         chunker: Text chunking strategy. Defaults to *TextChunker*.
         custom_prompt: Custom prompt for entity extraction.
@@ -786,13 +823,10 @@ async def remember(
     if isinstance(data, MEMORY_ENTRY_TYPES):
         if dry_run:
             raise ValueError("dry_run is supported for add+cognify remember inputs only.")
-        if dataset_id is not None:
-            raise ValueError(
-                "dataset_id is not supported for typed memory entries; use dataset_name."
-            )
         return await _remember_entry(
             data,
             dataset_name=dataset_name,
+            dataset_id=dataset_id,
             session_id=session_id,
             user=kwargs.get("user"),
             skill_improvement=kwargs.get("skill_improvement"),
@@ -1171,19 +1205,19 @@ async def _remember_inner(
         user = await get_default_user()
         shared_kwargs["user"] = user
 
-    # Build the result object — starts as "running"
-    if not dataset_id and dataset_name:
-        # Create dataset if it doesn't exist
-        user, dataset_id = await resolve_authorized_user_datasets(dataset_name, user)
-        dataset_id = dataset_id[0].id if dataset_id else None
-
-    # Session memory: store in session cache, then optionally bridge to graph
+    # Session memory: resolve the one dataset this session targets, store in
+    # the session cache scoped to it, then optionally bridge to graph.
     if session_id:
-        await _add_to_session(session_id, data, user)
+        user, session_dataset = await _resolve_bound_session_dataset(
+            session_id, dataset_id or dataset_name, user
+        )
+        shared_kwargs["user"] = user
+
+        await _add_to_session(session_id, data, user, dataset=session_dataset)
         result = RememberResult(
             status="session_stored",
-            dataset_name=dataset_name,
-            dataset_id=str(dataset_id) if dataset_id else None,
+            dataset_name=session_dataset.name,
+            dataset_id=str(session_dataset.id),
             session_ids=[session_id],
         )
         result.elapsed_seconds = time.monotonic() - result._started_at
@@ -1195,7 +1229,7 @@ async def _remember_inner(
             async def _session_improve():
                 try:
                     await improve(
-                        dataset=dataset_id,
+                        dataset=session_dataset.id,
                         session_ids=[session_id],
                         user=user,
                     )
@@ -1206,6 +1240,12 @@ async def _remember_inner(
             result._task = asyncio.create_task(_session_improve())
 
         return result
+
+    # Build the result object — starts as "running"
+    if not dataset_id and dataset_name:
+        # Create dataset if it doesn't exist
+        user, dataset_id = await resolve_authorized_user_datasets(dataset_name, user)
+        dataset_id = dataset_id[0].id if dataset_id else None
 
     result = RememberResult(
         status="running",

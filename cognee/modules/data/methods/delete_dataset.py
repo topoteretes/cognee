@@ -14,6 +14,7 @@ from cognee.infrastructure.databases.relational import get_relational_engine
 
 async def delete_dataset(dataset: Dataset):
     db_engine = get_relational_engine()
+    dataset_id = dataset.id
 
     async with db_engine.get_async_session() as session:
         if db_engine.engine.dialect.name == "sqlite":
@@ -76,3 +77,10 @@ async def delete_dataset(dataset: Dataset):
         if dataset:
             await session.delete(dataset)
             await session.commit()
+
+    # Sessions live in exactly one dataset and quote its documents — they share
+    # the dataset's blast radius, so delete them (cache content, vectors, and
+    # lifecycle rows) along with it.
+    from cognee.modules.session_lifecycle.metrics import delete_sessions_for_dataset
+
+    await delete_sessions_for_dataset(dataset_id)

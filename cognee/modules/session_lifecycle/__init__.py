@@ -6,16 +6,21 @@ steps; this module only owns lifecycle (status), aggregate counters
 (tokens, cost, duration), and per-session lock primitives.
 """
 
+from .exceptions import SessionDatasetMismatchError
 from .metrics import (
     SessionListPage,
     SessionRowWithStatus,
     SessionStatus,
     accumulate_usage,
+    check_session_dataset_binding,
+    delete_session_lifecycle,
     ensure_and_touch_session,
     ensure_session,
     get_effective_status_sql,
+    get_session_dataset,
     get_session_row,
     list_session_rows,
+    delete_sessions_for_dataset,
     mark_ended,
     touch_session,
 )
@@ -26,13 +31,18 @@ __all__ = [
     "SessionRowWithStatus",
     "SessionStatus",
     "accumulate_usage",
+    "check_session_dataset_binding",
+    "SessionDatasetMismatchError",
+    "delete_session_lifecycle",
     "ensure_and_touch_session",
     "ensure_session",
     "get_effective_status_sql",
+    "get_session_dataset",
     "get_session_row",
     "list_session_rows",
     "mark_ended",
     "record_llm_call",
+    "delete_sessions_for_dataset",
     "touch_session",
     "track_session_usage",
 ]

@@ -321,9 +321,18 @@ class TestRememberResult:
         mock_user = MagicMock()
         mock_user.id = "u1"
 
+        mock_dataset = MagicMock()
+        mock_dataset.id = uuid4()
+        mock_dataset.name = "main_dataset"
+        mock_dataset.owner_id = uuid4()
+
         mock_sm = MagicMock()
         mock_sm.is_available = True
         mock_sm.add_qa = AsyncMock()
+
+        mock_db_context = MagicMock()
+        mock_db_context.return_value.__aenter__ = AsyncMock(return_value=None)
+        mock_db_context.return_value.__aexit__ = AsyncMock(return_value=False)
 
         with (
             _patch_remember_startup(),
@@ -332,14 +341,18 @@ class TestRememberResult:
                 AsyncMock(return_value=mock_user),
             ),
             patch.object(
+                _get_remember_module(),
+                "resolve_authorized_user_datasets",
+                AsyncMock(return_value=(mock_user, [mock_dataset])),
+            ),
+            patch(
+                "cognee.context_global_variables.set_database_global_context_variables",
+                mock_db_context,
+            ),
+            patch.object(
                 _mod_sm,
                 "get_session_manager",
                 return_value=mock_sm,
-            ),
-            patch.object(
-                _get_remember_module(),
-                "resolve_authorized_user_datasets",
-                AsyncMock(return_value=(mock_user, "")),
             ),
         ):
             from cognee.api.v1.remember.remember import RememberResult, remember
@@ -350,7 +363,64 @@ class TestRememberResult:
         assert result.status == "session_stored"
         assert result.session_id == "s1"
         assert result.session_ids == ["s1"]
+        assert result.dataset_id == str(mock_dataset.id)
         assert result.elapsed_seconds is not None
+
+
+# ---------------------------------------------------------------------------
+# _resolve_session_dataset: session writes target exactly one owned dataset
+# ---------------------------------------------------------------------------
+
+
+class TestResolveSessionDataset:
+    @pytest.mark.asyncio
+    async def test_returns_single_authorized_dataset(self):
+        mock_user = MagicMock()
+        mock_dataset = MagicMock()
+        mock_dataset.id = uuid4()
+        mock_dataset.owner_id = uuid4()
+
+        with patch.object(
+            _get_remember_module(),
+            "resolve_authorized_user_datasets",
+            AsyncMock(return_value=(mock_user, [mock_dataset])),
+        ):
+            from cognee.api.v1.remember.remember import _resolve_session_dataset
+
+            user, dataset = await _resolve_session_dataset("main_dataset", mock_user)
+
+        assert user is mock_user
+        assert dataset is mock_dataset
+
+    @pytest.mark.asyncio
+    async def test_multiple_datasets_raises(self):
+        mock_user = MagicMock()
+
+        with patch.object(
+            _get_remember_module(),
+            "resolve_authorized_user_datasets",
+            AsyncMock(return_value=(mock_user, [MagicMock(), MagicMock()])),
+        ):
+            from cognee.api.v1.remember.remember import _resolve_session_dataset
+
+            with pytest.raises(ValueError, match="exactly one dataset"):
+                await _resolve_session_dataset("main_dataset", mock_user)
+
+    @pytest.mark.asyncio
+    async def test_dataset_without_owner_raises(self):
+        mock_user = MagicMock()
+        mock_dataset = MagicMock()
+        mock_dataset.owner_id = None
+
+        with patch.object(
+            _get_remember_module(),
+            "resolve_authorized_user_datasets",
+            AsyncMock(return_value=(mock_user, [mock_dataset])),
+        ):
+            from cognee.api.v1.remember.remember import _resolve_session_dataset
+
+            with pytest.raises(ValueError, match="owner"):
+                await _resolve_session_dataset("main_dataset", mock_user)
 
 
 # ---------------------------------------------------------------------------
@@ -830,3 +900,205 @@ class TestRecallSessionMode:
 
         assert [result.source for result in results] == ["session", "graph"]
         assert authorized_search_mock.await_args.kwargs["dataset_ids"] == [dataset_id]
+
+
+# ---------------------------------------------------------------------------
+# _resolve_bound_session_dataset: session writes follow the session's binding
+# ---------------------------------------------------------------------------
+
+
+class TestResolveBoundSessionDataset:
+    @staticmethod
+    def _dataset(dataset_id=None):
+        dataset = MagicMock()
+        dataset.id = dataset_id or uuid4()
+        dataset.owner_id = uuid4()
+        return dataset
+
+    @staticmethod
+    @contextmanager
+    def _patched(binding, resolved_dataset):
+        """Patch the binding lookup and the dataset resolution around the helper."""
+        mock_user = MagicMock()
+        resolve = AsyncMock(return_value=(mock_user, [resolved_dataset]))
+        with (
+            patch(
+                "cognee.modules.session_lifecycle.metrics.get_session_dataset",
+                AsyncMock(return_value=binding),
+            ),
+            patch.object(_get_remember_module(), "resolve_authorized_user_datasets", resolve),
+        ):
+            yield mock_user, resolve
+
+    @pytest.mark.asyncio
+    async def test_unbound_session_resolves_caller_reference(self):
+        from cognee.api.v1.remember.remember import _resolve_bound_session_dataset
+
+        dataset = self._dataset()
+        with self._patched(binding=None, resolved_dataset=dataset) as (mock_user, resolve):
+            _, resolved = await _resolve_bound_session_dataset("s1", "main_dataset", mock_user)
+
+        assert resolved is dataset
+        resolve.assert_awaited_once_with("main_dataset", mock_user)
+
+    @pytest.mark.asyncio
+    async def test_bound_session_inherits_binding_for_default_reference(self):
+        from cognee.api.v1.remember.remember import _resolve_bound_session_dataset
+
+        bound_id = uuid4()
+        dataset = self._dataset(bound_id)
+        with self._patched(binding=(bound_id, uuid4()), resolved_dataset=dataset) as (
+            mock_user,
+            resolve,
+        ):
+            _, resolved = await _resolve_bound_session_dataset("s1", "main_dataset", mock_user)
+
+        assert resolved is dataset
+        resolve.assert_awaited_once_with(bound_id, mock_user)
+
+    @pytest.mark.asyncio
+    async def test_bound_session_rejects_other_dataset(self):
+        from cognee.api.v1.remember.remember import _resolve_bound_session_dataset
+        from cognee.modules.session_lifecycle.exceptions import SessionDatasetMismatchError
+
+        dataset = self._dataset()
+        with self._patched(binding=(uuid4(), uuid4()), resolved_dataset=dataset) as (
+            mock_user,
+            _,
+        ):
+            with pytest.raises(SessionDatasetMismatchError):
+                await _resolve_bound_session_dataset("s1", "other_dataset", mock_user)
+
+    @pytest.mark.asyncio
+    async def test_bound_session_accepts_matching_dataset(self):
+        from cognee.api.v1.remember.remember import _resolve_bound_session_dataset
+
+        bound_id = uuid4()
+        dataset = self._dataset(bound_id)
+        with self._patched(binding=(bound_id, uuid4()), resolved_dataset=dataset) as (
+            mock_user,
+            _,
+        ):
+            _, resolved = await _resolve_bound_session_dataset("s1", "my_dataset", mock_user)
+
+        assert resolved is dataset
+
+
+# ---------------------------------------------------------------------------
+# improve(session_ids=...): sessions cannot be bridged into a foreign dataset
+# ---------------------------------------------------------------------------
+
+
+class TestImproveSessionValidation:
+    @staticmethod
+    def _user():
+        user = MagicMock()
+        user.id = uuid4()
+        return user
+
+    @pytest.mark.asyncio
+    async def test_nonexistent_dataset_rejects_bound_sessions(self):
+        """Downstream stages create missing datasets — a bound session must not
+        slip through the not-found branch into a brand-new dataset."""
+        from cognee.api.v1.improve.improve import _check_sessions_belong_to_dataset
+        from cognee.modules.session_lifecycle.exceptions import SessionDatasetMismatchError
+
+        with (
+            patch(
+                "cognee.modules.data.methods.get_authorized_existing_datasets",
+                AsyncMock(return_value=[]),
+            ),
+            patch(
+                "cognee.modules.session_lifecycle.metrics.get_session_dataset",
+                AsyncMock(return_value=(uuid4(), uuid4())),
+            ),
+        ):
+            with pytest.raises(SessionDatasetMismatchError):
+                await _check_sessions_belong_to_dataset("new_dataset", ["s1"], self._user())
+
+    @pytest.mark.asyncio
+    async def test_nonexistent_dataset_allows_unbound_sessions(self):
+        from cognee.api.v1.improve.improve import _check_sessions_belong_to_dataset
+
+        with (
+            patch(
+                "cognee.modules.data.methods.get_authorized_existing_datasets",
+                AsyncMock(return_value=[]),
+            ),
+            patch(
+                "cognee.modules.session_lifecycle.metrics.get_session_dataset",
+                AsyncMock(return_value=None),
+            ),
+        ):
+            await _check_sessions_belong_to_dataset("new_dataset", ["s1"], self._user())
+
+    @pytest.mark.asyncio
+    async def test_existing_dataset_delegates_to_binding_check(self):
+        from cognee.api.v1.improve.improve import _check_sessions_belong_to_dataset
+
+        dataset = MagicMock()
+        dataset.id = uuid4()
+        user = self._user()
+        check = AsyncMock()
+        with (
+            patch(
+                "cognee.modules.data.methods.get_authorized_existing_datasets",
+                AsyncMock(return_value=[dataset]),
+            ),
+            patch(
+                "cognee.modules.session_lifecycle.metrics.check_session_dataset_binding",
+                check,
+            ),
+        ):
+            await _check_sessions_belong_to_dataset("docs", ["s1", "s2"], user)
+
+        assert check.await_count == 2
+        check.assert_awaited_with(session_id="s2", user_id=user.id, dataset_id=dataset.id)
+
+
+# ---------------------------------------------------------------------------
+# Agentic retriever: a session-dataset mismatch surfaces instead of being
+# swallowed by the generic storage-failure handler
+# ---------------------------------------------------------------------------
+
+
+class TestAgenticSessionMismatchSurfaces:
+    @staticmethod
+    def _retriever():
+        from cognee.modules.retrieval.agentic_retriever import AgenticRetriever
+
+        user = MagicMock()
+        user.id = uuid4()
+        retriever = AgenticRetriever(user=user, dataset_id=uuid4())
+        retriever.session_id = "s1"
+        retriever._use_session_cache = lambda: True
+        return retriever
+
+    @pytest.mark.asyncio
+    async def test_mismatch_reraises(self):
+        from cognee.modules.session_lifecycle.exceptions import SessionDatasetMismatchError
+
+        retriever = self._retriever()
+        manager = MagicMock()
+        manager.is_available = True
+        manager.add_qa = AsyncMock(side_effect=SessionDatasetMismatchError("s1", uuid4(), uuid4()))
+
+        with patch(
+            "cognee.infrastructure.session.get_session_manager.get_session_manager",
+            return_value=manager,
+        ):
+            with pytest.raises(SessionDatasetMismatchError):
+                await retriever._store_session_qa("q", "ctx", "a", triplets=[])
+
+    @pytest.mark.asyncio
+    async def test_other_storage_errors_stay_swallowed(self):
+        retriever = self._retriever()
+        manager = MagicMock()
+        manager.is_available = True
+        manager.add_qa = AsyncMock(side_effect=RuntimeError("cache down"))
+
+        with patch(
+            "cognee.infrastructure.session.get_session_manager.get_session_manager",
+            return_value=manager,
+        ):
+            await retriever._store_session_qa("q", "ctx", "a", triplets=[])

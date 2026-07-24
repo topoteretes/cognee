@@ -407,6 +407,13 @@ def get_remember_router() -> APIRouter:
             Field(discriminator="type"),
         ]
         dataset_name: str = "main_dataset"
+        dataset_id: Optional[UUID] = Field(
+            default=None,
+            description=(
+                "UUID of an existing writable dataset. Takes precedence over dataset_name "
+                "and is required to target a shared dataset by ID."
+            ),
+        )
         session_id: Optional[str] = Field(
             default=None,
             examples=["claude-code-1718000000"],
@@ -449,6 +456,7 @@ def get_remember_router() -> APIRouter:
             result = await cognee_remember(
                 payload.entry,
                 dataset_name=payload.dataset_name,
+                dataset_id=payload.dataset_id,
                 session_id=payload.session_id,
                 user=user,
                 skill_improvement=payload.skill_improvement,
