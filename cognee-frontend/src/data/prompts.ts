@@ -301,12 +301,7 @@ curl -s "$COGNEE_BASE_URL/api/v1/datasets/?session_id=<session-id>" -H "X-Api-Ke
 // clipboard-only — nothing is sent to our servers; the user pastes and
 // runs the command in their own local terminal.
 
-export const CODEX_SKILLS_CONTENT = `---
-name: cognee-memory
-description: Connects your agent to Cognee Cloud for persistent knowledge graph memory.
----
-
-# Cognee Cloud Memory Skill
+export const CODEX_SKILLS_CONTENT = `# Cognee Cloud Memory Skill
 
 This skill connects Codex to Cognee Cloud for persistent knowledge graph memory.
 

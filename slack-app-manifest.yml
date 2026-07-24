@@ -1,0 +1,91 @@
+# Slack app manifest for the Cognee Slack integration.
+#
+# Paste this into api.slack.com/apps -> Create New App -> From an app manifest,
+# substituting <public-host> with your local tunnel's hostname (e.g. ngrok),
+# since Slack requires a public HTTPS URL for every request_url below — it
+# will not call back into localhost directly.
+#
+# ── Local testing steps ──────────────────────────────────────────────────
+#   1. Start a tunnel to your local cognee backend (port 8000):
+#        ngrok http 8000
+#      Copy the https://<random>.ngrok-free.app hostname it prints.
+#   2. Replace every <public-host> below with that hostname and create the
+#      app from this manifest at api.slack.com/apps.
+#   3. On the app's "Basic Information" page, copy Client ID, Client Secret,
+#      and Signing Secret into your cognee .env (SLACK_CLIENT_ID,
+#      SLACK_CLIENT_SECRET, SLACK_SIGNING_SECRET).
+#   4. Set SLACK_REDIRECT_URI in .env to
+#      https://<public-host>/api/v1/integrations/slack/callback (must
+#      byte-match the redirect_urls entry below).
+#   5. Set SLACK_FRONTEND_BASE_URL in .env to your frontend's origin, e.g.
+#      http://localhost:3000.
+#   6. Restart the cognee backend (uvicorn has no --reload here, so it won't
+#      pick up the new .env values on its own).
+#   7. Install the app to your workspace (Slack prompts for this once the
+#      manifest is saved), then go to /integrations in the frontend and
+#      click Connect under Slack.
+#   8. In Slack, run /cognee-link and open the link it replies with (in a
+#      browser where you're already logged in to Cognee), then click
+#      Confirm — no key to create or paste. This makes /cognee-ask and
+#      "Remember this" use your own memory, not just the workspace
+#      installer's.
+#   9. Run /cognee-ask <your question> in any channel the bot can see (or a
+#      DM with it) to test the full round-trip.
+
+display_information:
+  name: Cognee
+  description: Ask questions, save messages, and recall your team's shared memory — right from Slack.
+  long_description: >-
+    Cognee turns your Slack workspace into a front door for your team's knowledge
+    graph. Ask it a question with /cognee-ask and get an answer pulled straight
+    from what your team already knows — reviewed privately before anything is
+    shared with the channel. Save an important message to memory in one click
+    with the "Remember this" shortcut. Every teammate links their own Cognee
+    account with /cognee-link, so answers and saved messages are always
+    personal, never mixed up with someone else's.
+  background_color: "#6510F4"
+
+features:
+  bot_user:
+    display_name: cognee
+    always_online: true
+  app_home:
+    home_tab_enabled: true
+    messages_tab_enabled: true
+  slash_commands:
+    - command: /cognee-ask
+      url: https://<public-host>/api/v1/slack/commands
+      description: Ask your Cognee memory a question — reviewed privately before you share it
+      usage_hint: what do we know about the Q3 launch?
+    - command: /cognee-link
+      url: https://<public-host>/api/v1/slack/commands
+      description: Get a private link to connect this Slack account to your own Cognee memory
+  shortcuts:
+    - name: Remember this
+      type: message
+      callback_id: remember_this
+      description: Save this message to your own Cognee memory, tagged with who said it and where
+
+oauth_config:
+  redirect_urls:
+    - https://<public-host>/api/v1/integrations/slack/callback
+  scopes:
+    bot:
+      - commands
+      - chat:write
+      - im:write
+      - channels:read
+
+settings:
+  event_subscriptions:
+    request_url: https://<public-host>/api/v1/slack/events
+    bot_events:
+      - app_uninstalled
+      - tokens_revoked
+      - app_home_opened
+  interactivity:
+    is_enabled: true
+    request_url: https://<public-host>/api/v1/slack/interactive
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  token_rotation_enabled: false

@@ -32,6 +32,20 @@ def _import_httpx():
         )
 
 
+def is_connection_error(exc: BaseException) -> bool:
+    """True if *exc* is a transport-level failure — i.e. we could not reach or
+    get a response from the server (connect refused, DNS failure, timeout).
+
+    This is deliberately narrower than "any error": an HTTP 4xx/5xx means the
+    server *is* reachable, so those must not be reported as "cannot connect".
+    """
+    try:
+        import httpx
+    except ImportError:
+        return False
+    return isinstance(exc, httpx.TransportError)
+
+
 class CogneeApiClient:
     """Wrapper around the Cognee REST API with a shared connection pool."""
 
@@ -54,6 +68,12 @@ class CogneeApiClient:
             self._client = httpx.Client(
                 timeout=self.timeout,
                 headers=self._extra_headers,
+                # Collection routes are canonicalised differently across
+                # deployments (cloud serves "/api/v1/datasets/" with a slash,
+                # local OSS serves it without), so a request to the other form
+                # gets a 307.  Follow it automatically.  Safe now that the
+                # server no longer downgrades the redirect to http (CLO-320).
+                follow_redirects=True,
             )
         return self._client
 
@@ -84,12 +104,18 @@ class CogneeApiClient:
     # -- probes ----------------------------------------------------------
 
     def health(self) -> dict:
-        """Probe the server.  Uses a short timeout independent of self.timeout."""
-        httpx = _import_httpx()
-        with httpx.Client(timeout=5.0) as c:
-            r = c.get(self._url("/health"))
-            self._raise_for_status(r)
+        """Probe the server with a short timeout.
+
+        Reuses the shared client so auth headers and redirect handling apply.
+        Returns the parsed body for *any* HTTP response (including a 503 from a
+        degraded backend) — a reachable server must never look like a transport
+        failure.  Only genuine transport errors propagate to the caller.
+        """
+        r = self._get_client().get(self._url("/health"), timeout=5.0)
+        try:
             return r.json()
+        except Exception:
+            return {"status_code": r.status_code, "text": r.text}
 
     # -- add -------------------------------------------------------------
 
@@ -187,12 +213,12 @@ class CogneeApiClient:
     # -- datasets --------------------------------------------------------
 
     def datasets_list(self) -> list[dict]:
-        r = self._get_client().get(self._url("/api/v1/datasets"))
+        r = self._get_client().get(self._url("/api/v1/datasets/"))
         self._raise_for_status(r)
         return r.json()
 
     def datasets_create(self, name: str) -> dict:
-        r = self._get_client().post(self._url("/api/v1/datasets"), json={"name": name})
+        r = self._get_client().post(self._url("/api/v1/datasets/"), json={"name": name})
         self._raise_for_status(r)
         return r.json()
 
@@ -221,7 +247,7 @@ class CogneeApiClient:
         self._raise_for_status(r)
 
     def datasets_delete_all(self) -> None:
-        r = self._get_client().delete(self._url("/api/v1/datasets"))
+        r = self._get_client().delete(self._url("/api/v1/datasets/"))
         self._raise_for_status(r)
 
     # -- remember --------------------------------------------------------
