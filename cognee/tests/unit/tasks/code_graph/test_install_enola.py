@@ -1,6 +1,7 @@
 import hashlib
 import importlib
 import io
+import os
 import tarfile
 
 import pytest
@@ -63,8 +64,14 @@ def test_install_downloads_verifies_and_installs(monkeypatch, tmp_path):
     install_dir = tmp_path / "bin"
     binary_path = install_module.install_enola(install_dir=install_dir)
 
-    assert binary_path == str(install_dir / _expected_binary_name())
-    assert (install_dir / _expected_binary_name()).stat().st_mode & 0o111
+    installed = install_dir / _expected_binary_name()
+    assert binary_path == str(installed)
+    assert installed.is_file()
+    # POSIX execute bits are not modeled on Windows: os.chmod there only toggles
+    # the read-only flag, so st_mode never carries 0o111 no matter what
+    # install_enola sets. On Windows executability comes from the .exe extension.
+    if os.name != "nt":
+        assert installed.stat().st_mode & 0o111
     assert len(calls) == 1
     assert install_module.ENOLA_PINNED_VERSION in calls[0]
 

@@ -295,6 +295,182 @@ async def test_get_filtered_graph_data(adapter):
 
 
 # ---------------------------------------------------------------------------
+# get_neighborhood with edge_types filter
+# Regression for #3585: ALL(rel IN r WHERE ...) over a variable-length path
+# binding crashes Kuzu (RECURSIVE_REL vs LIST). Filter in Python instead.
+# ---------------------------------------------------------------------------
+
+
+class _NeighborhoodNode:
+    """Minimal pydantic-shaped payload compatible with add_nodes."""
+
+    def __init__(self, node_id: str, name: str = "", type: str = ""):
+        self._d = {"id": str(node_id), "name": name, "type": type}
+
+    def model_dump(self):
+        return dict(self._d)
+
+
+@pytest.mark.asyncio
+async def test_get_neighborhood_unfiltered_returns_all_reachable(adapter):
+    nodes = [_NeighborhoodNode(i) for i in ["A", "B", "D"]]
+    await adapter.add_nodes(nodes)
+    await adapter.add_edges(
+        [
+            ("A", "B", "KNOWS", {}),
+            ("A", "D", "WORKS_AT", {}),
+        ]
+    )
+
+    rows, _ = await adapter.get_neighborhood(node_ids=["A"], depth=2)
+    ids = sorted(n for n, _ in rows)
+    assert ids == ["A", "B", "D"]
+
+
+@pytest.mark.asyncio
+async def test_get_neighborhood_edge_type_filter_excludes_other_edges(adapter):
+    """Regression for #3585: edge_types filter must not crash and must exclude
+    neighbors reachable only via disallowed edge types."""
+    nodes = [_NeighborhoodNode(i) for i in ["A", "B", "D"]]
+    await adapter.add_nodes(nodes)
+    await adapter.add_edges(
+        [
+            ("A", "B", "KNOWS", {}),
+            ("A", "D", "WORKS_AT", {}),
+        ]
+    )
+
+    # Filter to KNOWS only — D (reachable only via WORKS_AT) must be excluded.
+    rows, _ = await adapter.get_neighborhood(node_ids=["A"], depth=2, edge_types=["KNOWS"])
+    ids = sorted(n for n, _ in rows)
+    assert ids == ["A", "B"]
+
+    # Symmetric: filter to WORKS_AT only — B must be excluded.
+    rows, _ = await adapter.get_neighborhood(node_ids=["A"], depth=2, edge_types=["WORKS_AT"])
+    ids = sorted(n for n, _ in rows)
+    assert ids == ["A", "D"]
+
+    # Both allowed — full neighborhood.
+    rows, _ = await adapter.get_neighborhood(
+        node_ids=["A"], depth=2, edge_types=["KNOWS", "WORKS_AT"]
+    )
+    ids = sorted(n for n, _ in rows)
+    assert ids == ["A", "B", "D"]
+
+    # No matching edge type — only the seed itself is in the neighborhood.
+    rows, _ = await adapter.get_neighborhood(node_ids=["A"], depth=2, edge_types=["NONEXISTENT"])
+    ids = sorted(n for n, _ in rows)
+    assert ids == ["A"]
+
+
+@pytest.mark.asyncio
+async def test_get_neighborhood_edge_filter_follows_longer_all_allowed_path(adapter):
+    """#3585 semantic guard (the load-bearing case).
+
+    A neighbor reachable via a disallowed SHORT path AND an allowed LONGER path
+    must be included: the filter keeps a neighbor iff SOME path within depth is
+    entirely allowed, matching Neo4j (ALL over relationships(path)) and Postgres
+    (per-hop recursive CTE). The star-graph tests above cannot distinguish this
+    correct semantic from a buggy "exclude if ANY path crosses a disallowed edge",
+    so this case is what actually pins the fix.
+    """
+    nodes = [_NeighborhoodNode(i) for i in ["A", "B", "C"]]
+    await adapter.add_nodes(nodes)
+    await adapter.add_edges(
+        [
+            ("A", "C", "WORKS_AT", {}),  # 1-hop route to C, disallowed under KNOWS
+            ("A", "B", "KNOWS", {}),
+            ("B", "C", "KNOWS", {}),  # A-KNOWS-B-KNOWS-C: a 2-hop all-KNOWS route to C
+        ]
+    )
+
+    # depth 2: C included via the all-KNOWS path, despite the shorter WORKS_AT edge.
+    rows, _ = await adapter.get_neighborhood(node_ids=["A"], depth=2, edge_types=["KNOWS"])
+    assert sorted(n for n, _ in rows) == ["A", "B", "C"]
+
+    # depth 1: within one hop C is only reachable via WORKS_AT -> excluded.
+    rows, _ = await adapter.get_neighborhood(node_ids=["A"], depth=1, edge_types=["KNOWS"])
+    assert sorted(n for n, _ in rows) == ["A", "B"]
+
+
+@pytest.mark.asyncio
+async def test_get_neighborhood_multi_hop_depth_is_a_real_bound(adapter):
+    """depth genuinely bounds a chain (the 1-hop star can't test this), and multi-hop
+    filtering walks the full path via all(rel ...) over more than one relationship."""
+    nodes = [_NeighborhoodNode(i) for i in ["A", "B", "C", "D"]]
+    await adapter.add_nodes(nodes)
+    await adapter.add_edges(
+        [
+            ("A", "B", "KNOWS", {}),
+            ("B", "C", "KNOWS", {}),
+            ("C", "D", "KNOWS", {}),
+        ]
+    )
+
+    rows, _ = await adapter.get_neighborhood(node_ids=["A"], depth=2)
+    assert sorted(n for n, _ in rows) == ["A", "B", "C"]  # D is 3 hops away
+
+    rows, _ = await adapter.get_neighborhood(node_ids=["A"], depth=3, edge_types=["KNOWS"])
+    assert sorted(n for n, _ in rows) == ["A", "B", "C", "D"]
+
+
+@pytest.mark.asyncio
+async def test_get_neighborhood_disallowed_mid_edge_cuts_path(adapter):
+    """A single disallowed edge in the middle of the only route excludes everything
+    beyond it — verifies the per-path all() spans every hop, not just the first."""
+    nodes = [_NeighborhoodNode(i) for i in ["A", "B", "C", "D"]]
+    await adapter.add_nodes(nodes)
+    await adapter.add_edges(
+        [
+            ("A", "B", "KNOWS", {}),
+            ("B", "C", "WORKS_AT", {}),  # only route to C/D crosses WORKS_AT
+            ("C", "D", "KNOWS", {}),
+        ]
+    )
+
+    rows, _ = await adapter.get_neighborhood(node_ids=["A"], depth=3, edge_types=["KNOWS"])
+    assert sorted(n for n, _ in rows) == ["A", "B"]
+
+
+@pytest.mark.asyncio
+async def test_get_neighborhood_multi_seed_union_with_filter(adapter):
+    """Per-seed ego-graphs are unioned and deduped, with the edge_type filter applied
+    across every component."""
+    nodes = [_NeighborhoodNode(i) for i in ["A", "B", "D", "X", "Y"]]
+    await adapter.add_nodes(nodes)
+    await adapter.add_edges(
+        [
+            ("A", "B", "KNOWS", {}),
+            ("A", "D", "WORKS_AT", {}),  # excluded under KNOWS
+            ("X", "Y", "KNOWS", {}),
+        ]
+    )
+
+    rows, _ = await adapter.get_neighborhood(node_ids=["A", "X"], depth=1, edge_types=["KNOWS"])
+    assert sorted(n for n, _ in rows) == ["A", "B", "X", "Y"]
+
+
+@pytest.mark.asyncio
+async def test_get_neighborhood_edge_filter_handles_cycles(adapter):
+    """Kuzu returns walks that revisit nodes; a genuine cycle must neither crash nor
+    duplicate a neighbor, and the per-neighbor dedup set must converge."""
+    nodes = [_NeighborhoodNode(i) for i in ["A", "B", "C"]]
+    await adapter.add_nodes(nodes)
+    await adapter.add_edges(
+        [
+            ("A", "B", "KNOWS", {}),
+            ("B", "C", "KNOWS", {}),
+            ("C", "A", "KNOWS", {}),  # triangle
+        ]
+    )
+
+    rows, _ = await adapter.get_neighborhood(node_ids=["A"], depth=3, edge_types=["KNOWS"])
+    ids = sorted(n for n, _ in rows)
+    assert ids == ["A", "B", "C"]
+    assert len(ids) == len(set(ids))  # no duplicate nodes from revisiting walks
+
+
+# ---------------------------------------------------------------------------
 # get_predecessors / get_successors
 # Known adapter bug: RETURN properties(m) fails with current Kuzu version.
 # ---------------------------------------------------------------------------

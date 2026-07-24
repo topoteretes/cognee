@@ -68,7 +68,7 @@ _RULES: list[tuple[re.Pattern, SearchType, float]] = [
             re.IGNORECASE,
         ),
         SearchType.CODING_RULES,
-        3.0,
+        1.0,
     ),
     # --- Lexical: quoted exact phrases ---
     (

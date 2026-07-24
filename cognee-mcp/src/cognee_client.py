@@ -6,6 +6,7 @@ This module provides a unified interface for interacting with Cognee, supporting
 - API mode: Makes HTTP requests to a running Cognee FastAPI server
 """
 
+import os
 import sys
 import hashlib
 from typing import Optional, Any, List, Dict
@@ -26,6 +27,39 @@ except ImportError:
     from retrieval_utils import get_chunk_neighbors_from_graph, get_document_from_graph
 
 logger = get_logger()
+
+# Read-only GETs (dataset list/status) should fail fast rather than inherit the
+# 300s client timeout intended for long POSTs like cognify: a hung or black-holed
+# GET would otherwise freeze the caller for a full 5 minutes.
+READ_TIMEOUT_SECONDS = 30.0
+
+
+def _default_recall_system_prompt() -> Optional[str]:
+    """Return the server-side default synthesis prompt for recall, if configured.
+
+    Opt-in via environment:
+      COGNEE_MCP_RECALL_SYSTEM_PROMPT       inline prompt text
+      COGNEE_MCP_RECALL_SYSTEM_PROMPT_FILE  path to a file holding the prompt
+
+    Returns None when neither is set, leaving current behaviour untouched.
+    """
+    inline = os.environ.get("COGNEE_MCP_RECALL_SYSTEM_PROMPT")
+    if inline and inline.strip():
+        return inline.strip()
+
+    path = os.environ.get("COGNEE_MCP_RECALL_SYSTEM_PROMPT_FILE")
+    if path:
+        try:
+            with open(path, encoding="utf-8") as handle:
+                text = handle.read().strip()
+        except OSError as error:
+            logger.warning(
+                "Could not read COGNEE_MCP_RECALL_SYSTEM_PROMPT_FILE %s: %s", path, error
+            )
+            return None
+        if text:
+            return text
+    return None
 
 
 class CogneeClient:
@@ -175,7 +209,11 @@ class CogneeClient:
             endpoint = f"{self.api_url}/api/v1/cognify"
             payload = {
                 "datasets": datasets or ["main_dataset"],
-                "run_in_background": False,
+                # Kick cognify off server-side and return immediately instead of
+                # holding the HTTP request open for the whole (minutes-long)
+                # pipeline. The MCP cognify tool already runs in the background
+                # and directs the caller to poll dataset status for completion.
+                "run_in_background": True,
             }
             if custom_prompt:
                 payload["custom_prompt"] = custom_prompt
@@ -370,7 +408,9 @@ class CogneeClient:
             # reports the pipeline run state keyed by dataset id.
             endpoint = f"{self.api_url}/api/v1/datasets/status"
             params = [("dataset", str(d)) for d in dataset_ids]
-            response = await self.client.get(endpoint, params=params, headers=self._get_headers())
+            response = await self.client.get(
+                endpoint, params=params, headers=self._get_headers(), timeout=READ_TIMEOUT_SECONDS
+            )
             response.raise_for_status()
             return response.json()
         else:
@@ -392,8 +432,13 @@ class CogneeClient:
         """
         if self.use_api:
             # API mode: Make HTTP request
-            endpoint = f"{self.api_url}/api/v1/datasets"
-            response = await self.client.get(endpoint, headers=self._get_headers())
+            # Canonical collection route has a trailing slash; calling it
+            # directly avoids a 307 redirect (and the http:// downgrade that
+            # used to black-hole this call — see CLO-320).
+            endpoint = f"{self.api_url}/api/v1/datasets/"
+            response = await self.client.get(
+                endpoint, headers=self._get_headers(), timeout=READ_TIMEOUT_SECONDS
+            )
             response.raise_for_status()
             return response.json()
         else:
@@ -539,6 +584,8 @@ class CogneeClient:
         top_k: int = 15,
     ) -> Any:
         """Search memory via recall() with auto-routing and session awareness."""
+        if not system_prompt:
+            system_prompt = _default_recall_system_prompt()
         if self.use_api:
             endpoint = f"{self.api_url}/api/v1/recall"
             payload = {"query": query_text, "top_k": top_k, "search_type": None}
