@@ -895,3 +895,85 @@ async def test_add_data_points_relational_upserts_happen_before_graph_and_vector
     )
     assert call_order[:3] == ["upsert_nodes", "upsert_edges", "upsert_edges"]
     assert first_graph_index >= 3
+
+
+@pytest.mark.asyncio
+@patch.object(adp_module, "resolve_deterministic_duplicates")
+@patch.object(adp_module, "index_graph_edges")
+@patch.object(adp_module, "index_data_points")
+@patch.object(adp_module, "get_unified_engine")
+@patch.object(adp_module, "deduplicate_nodes_and_edges")
+@patch.object(adp_module, "get_graph_from_model")
+async def test_add_data_points_skips_deterministic_dedup_by_default(
+    mock_get_graph, mock_dedup, mock_get_unified, mock_index_nodes, mock_index_edges, mock_resolve
+):
+    """Without deterministic_dedup=True the resolver is never invoked — behaviour
+    is identical to before the feature."""
+    dp1 = SimplePoint(text="first")
+    dp2 = SimplePoint(text="second")
+    edge1 = (str(dp1.id), str(dp2.id), "related_to", {"edge_text": "connects"})
+
+    mock_get_graph.side_effect = [([dp1], [edge1]), ([dp2], [])]
+    mock_dedup.side_effect = lambda n, e: (n, e)
+    unified, graph_engine, vector_engine = _make_unified_mock()
+    mock_get_unified.return_value = unified
+
+    await add_data_points([dp1, dp2])
+
+    mock_resolve.assert_not_called()
+
+
+@pytest.mark.asyncio
+@patch.object(adp_module, "index_graph_edges")
+@patch.object(adp_module, "index_data_points")
+@patch.object(adp_module, "get_unified_engine")
+@patch.object(adp_module, "deduplicate_nodes_and_edges")
+@patch.object(adp_module, "get_graph_from_model")
+async def test_add_data_points_deterministic_dedup_links_duplicates(
+    mock_get_graph, mock_dedup, mock_get_unified, mock_index_nodes, mock_index_edges
+):
+    """With deterministic_dedup=True, two entities whose names canonicalize to the
+    same key are linked by a `merged_into` edge that reaches the graph write. The
+    real resolver runs (not mocked)."""
+    apple = NamedPoint(name="Apple Inc.")
+    apple_lower = NamedPoint(name="apple inc")
+
+    mock_get_graph.side_effect = [([apple, apple_lower], [])]
+    mock_dedup.side_effect = lambda n, e: (n, e)
+    unified, graph_engine, vector_engine = _make_unified_mock()
+    mock_get_unified.return_value = unified
+
+    await add_data_points([apple], deterministic_dedup=True)
+
+    edges_written = graph_engine.add_edges.await_args_list[0].args[0]
+    merged = [e for e in edges_written if e[2] == "merged_into"]
+
+    assert len(merged) == 1
+    assert {str(merged[0][0]), str(merged[0][1])} == {str(apple.id), str(apple_lower.id)}
+    assert merged[0][3]["resolution"] == "deterministic_key"
+    assert merged[0][3]["canonical_key"] == "apple_inc"
+
+
+@pytest.mark.asyncio
+@patch.object(adp_module, "index_graph_edges")
+@patch.object(adp_module, "index_data_points")
+@patch.object(adp_module, "get_unified_engine")
+@patch.object(adp_module, "deduplicate_nodes_and_edges")
+@patch.object(adp_module, "get_graph_from_model")
+async def test_add_data_points_deterministic_dedup_leaves_distinct_nodes_untouched(
+    mock_get_graph, mock_dedup, mock_get_unified, mock_index_nodes, mock_index_edges
+):
+    """Distinct names add no `merged_into` edge; the enabled path is a no-op when
+    there is nothing to link."""
+    apple = NamedPoint(name="Apple")
+    google = NamedPoint(name="Google")
+
+    mock_get_graph.side_effect = [([apple, google], [])]
+    mock_dedup.side_effect = lambda n, e: (n, e)
+    unified, graph_engine, vector_engine = _make_unified_mock()
+    mock_get_unified.return_value = unified
+
+    await add_data_points([apple], deterministic_dedup=True)
+
+    edges_written = graph_engine.add_edges.await_args_list[0].args[0]
+    assert [e for e in edges_written if e[2] == "merged_into"] == []
