@@ -2,32 +2,11 @@
 
 import asyncio
 from unittest.mock import AsyncMock, patch, MagicMock
-from uuid import UUID, uuid4
 
 import pytest
 
-from cognee.cli.user_resolution import resolve_cli_user, scoped_session_id
+from cognee.cli.user_resolution import resolve_cli_user
 from cognee.infrastructure.databases.exceptions import EntityNotFoundError
-
-
-class TestScopedSessionId:
-    def test_default_session(self):
-        uid = UUID("550e8400-e29b-41d4-a716-446655440000")
-        assert scoped_session_id(uid) == "550e8400-e29b-41d4-a716-446655440000:default"
-
-    def test_custom_session(self):
-        uid = UUID("550e8400-e29b-41d4-a716-446655440000")
-        assert scoped_session_id(uid, "chat-1") == "550e8400-e29b-41d4-a716-446655440000:chat-1"
-
-    def test_none_session_uses_default(self):
-        uid = uuid4()
-        result = scoped_session_id(uid, None)
-        assert result.endswith(":default")
-
-    def test_different_users_different_sessions(self):
-        u1 = uuid4()
-        u2 = uuid4()
-        assert scoped_session_id(u1) != scoped_session_id(u2)
 
 
 class TestResolveCliUser:

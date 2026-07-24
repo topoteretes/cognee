@@ -23,6 +23,7 @@ from cognee.modules.engine.models.SkillRun import ToolCall as SkillRunToolCall
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.utils.completion import generate_completion
 from cognee.modules.retrieval.utils.validate_queries import validate_retriever_input
+from cognee.modules.session_lifecycle.exceptions import SessionDatasetMismatchError
 from cognee.modules.tools.context import active_skills_var, opened_skills_var
 from cognee.modules.tools.errors import (
     ToolInvocationError,
@@ -458,6 +459,10 @@ class AgenticRetriever(GraphCompletionRetriever):
                 used_graph_element_ids=used_graph_element_ids,
                 used_session_context_ids=served_ids,
             )
+        except SessionDatasetMismatchError:
+            # A session bound to another dataset is a caller error, not a
+            # storage hiccup — surface it instead of pretending the turn saved.
+            raise
         except Exception as exc:
             logger.warning("Failed to store agentic session QA: %s", exc)
 

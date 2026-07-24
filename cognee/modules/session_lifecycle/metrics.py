@@ -351,6 +351,112 @@ async def get_session_dataset(
         return None
 
 
+_binding_lookup_failed = False
+
+
+async def check_session_dataset_binding(
+    *,
+    session_id: str,
+    user_id: str | UUIDType,
+    dataset_id: str | UUIDType | None,
+) -> None:
+    """Raise ``SessionDatasetMismatchError`` when a write targets the wrong dataset.
+
+    Sessions live in exactly one dataset: the first write binds the session
+    (``ensure_and_touch_session`` fills ``dataset_id`` once) and every later
+    write must target the same dataset. No-ops when the proposed dataset is
+    unknown, the session has no binding yet, or the binding lookup fails —
+    the session_records table is best-effort infrastructure, so only a
+    genuine mismatch raises.
+
+    Note: check-then-write is not atomic — two concurrent *first* writes to
+    one session can both pass before either binds. Real callers derive one
+    session per conversation with a fixed dataset, so this is accepted; an
+    atomic claim in ``ensure_and_touch_session`` is the fix if that changes.
+    """
+    global _binding_lookup_failed
+    from cognee.modules.session_lifecycle.exceptions import SessionDatasetMismatchError
+
+    if dataset_id is None or not session_id:
+        return
+    try:
+        user_uuid = UUIDType(str(user_id))
+        dataset_uuid = UUIDType(str(dataset_id))
+    except (ValueError, TypeError):
+        return
+
+    try:
+        engine = get_relational_engine()
+        async with engine.get_async_session() as session:
+            bound = (
+                await session.execute(
+                    select(SessionRecord.dataset_id).where(
+                        and_(
+                            SessionRecord.session_id == session_id,
+                            SessionRecord.user_id == user_uuid,
+                        )
+                    )
+                )
+            ).scalar_one_or_none()
+    except Exception as exc:
+        if not _binding_lookup_failed:
+            _binding_lookup_failed = True
+            logger.warning(
+                "Session binding lookup failed (%s); one-dataset-per-session enforcement "
+                "is skipped while lookups fail. Subsequent failures log at debug.",
+                exc,
+            )
+        else:
+            logger.debug(
+                "Session binding lookup failed for %s (%s); skipping enforcement", session_id, exc
+            )
+        return
+
+    if bound is not None and bound != dataset_uuid:
+        raise SessionDatasetMismatchError(session_id, bound, dataset_uuid)
+
+
+async def delete_sessions_for_dataset(dataset_id: UUIDType) -> None:
+    """Delete every session bound to a dataset that is being deleted.
+
+    Sessions live in exactly one dataset and their content quotes its
+    documents, so they share the dataset's blast radius — including sessions
+    that *other* users attributed to a shared dataset. Best-effort: dataset
+    deletion must not fail on the optional session infrastructure.
+    """
+    try:
+        engine = get_relational_engine()
+        async with engine.get_async_session() as session:
+            rows = (
+                await session.execute(
+                    select(SessionRecord.session_id, SessionRecord.user_id).where(
+                        SessionRecord.dataset_id == dataset_id
+                    )
+                )
+            ).all()
+    except Exception as exc:
+        logger.warning("Failed to list sessions of deleted dataset %s: %s", dataset_id, exc)
+        return
+
+    from cognee.infrastructure.session.get_session_manager import get_session_manager
+
+    manager = get_session_manager()
+    for session_id, user_id in rows:
+        try:
+            # Cache content + vectors + lifecycle rows when the cache is available;
+            # the explicit lifecycle delete below covers cache-less deployments
+            # (delete_session no-ops without a cache engine, and it is idempotent).
+            await manager.delete_session(user_id=str(user_id), session_id=session_id)
+            await delete_session_lifecycle(session_id=session_id, user_id=user_id)
+        except Exception as exc:
+            logger.warning(
+                "Failed to delete session %s of deleted dataset %s: %s",
+                session_id,
+                dataset_id,
+                exc,
+            )
+
+
 def get_effective_status_sql():
     """Return a SQL expression that evaluates to the effective status.
 

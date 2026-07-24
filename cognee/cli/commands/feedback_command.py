@@ -53,10 +53,10 @@ Subcommands:
 
         async def run():
             from cognee.api.v1.session import add_feedback
-            from cognee.cli.user_resolution import resolve_cli_user, scoped_session_id
+            from cognee.cli.user_resolution import resolve_cli_user
 
             user = await resolve_cli_user(getattr(args, "user_id", None))
-            sid = scoped_session_id(user.id, args.session_id)
+            sid = args.session_id
 
             ok = await add_feedback(
                 session_id=sid,
@@ -75,10 +75,10 @@ Subcommands:
     def _delete(self, args: argparse.Namespace) -> None:
         async def run():
             from cognee.api.v1.session import delete_feedback
-            from cognee.cli.user_resolution import resolve_cli_user, scoped_session_id
+            from cognee.cli.user_resolution import resolve_cli_user
 
             user = await resolve_cli_user(getattr(args, "user_id", None))
-            sid = scoped_session_id(user.id, args.session_id)
+            sid = args.session_id
 
             ok = await delete_feedback(
                 session_id=sid,

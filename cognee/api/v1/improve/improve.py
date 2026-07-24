@@ -32,6 +32,42 @@ class ImproveKwargs(TypedDict, total=False):
     feedback_alpha: float
 
 
+async def _check_sessions_belong_to_dataset(dataset, session_ids, user):
+    """Sessions live in exactly one dataset — refuse to bridge one into another.
+
+    Resolves the dataset reference, then delegates the per-session check to
+    ``check_session_dataset_binding``. When the dataset does not exist yet
+    (downstream stages create missing datasets), any already-bound session is
+    a mismatch by definition. Resolution *errors* are skipped — downstream
+    stages raise their own, clearer errors for those.
+    """
+    from cognee.modules.data.methods import get_authorized_existing_datasets
+    from cognee.modules.session_lifecycle.exceptions import SessionDatasetMismatchError
+    from cognee.modules.session_lifecycle.metrics import (
+        check_session_dataset_binding,
+        get_session_dataset,
+    )
+
+    try:
+        datasets = await get_authorized_existing_datasets([dataset], "read", user)
+    except Exception as exc:
+        logger.debug("improve: dataset resolution failed (%s); skipping session validation", exc)
+        return
+
+    if not datasets:
+        # The dataset would be created downstream — a bound session cannot move into it.
+        for session_id in session_ids:
+            binding = await get_session_dataset(session_id=session_id, user_id=user.id)
+            if binding is not None:
+                raise SessionDatasetMismatchError(session_id, binding[0], str(dataset))
+        return
+
+    for session_id in session_ids:
+        await check_session_dataset_binding(
+            session_id=session_id, user_id=user.id, dataset_id=datasets[0].id
+        )
+
+
 async def improve(
     dataset: Union[str, UUID] = "main_dataset",
     *,
@@ -134,6 +170,9 @@ async def improve(
         user = kwargs.pop("user", None)
         if user is None:
             user = await get_default_user()
+
+        if session_ids:
+            await _check_sessions_belong_to_dataset(dataset, session_ids, user)
 
         feedback_alpha = kwargs.pop("feedback_alpha", 0.1)
 

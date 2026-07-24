@@ -39,6 +39,8 @@ from cognee.modules.observability import (
 
 logger = get_logger("remember")
 
+DEFAULT_DATASET_NAME = "main_dataset"
+
 
 class RememberKwargs(TypedDict, total=False):
     """Power-user overrides for remember(). Most users never need these."""
@@ -146,6 +148,32 @@ async def _resolve_session_dataset(dataset_ref, user):
     dataset = authorized_datasets[0]
     if getattr(dataset, "owner_id", None) is None:
         raise ValueError("Session memory requires a dataset with an owner.")
+    return user, dataset
+
+
+async def _resolve_bound_session_dataset(session_id, dataset_ref, user):
+    """Resolve the dataset for a session write, honoring the session's binding.
+
+    Sessions live in exactly one dataset (``SessionRecord.dataset_id``, filled
+    on first write). Once bound, a session write follows its binding: the
+    default dataset reference inherits it, and naming a different dataset
+    raises ``SessionDatasetMismatchError``. Unbound sessions resolve the
+    caller's reference as before and get bound by the write itself.
+    """
+    from cognee.modules.session_lifecycle.exceptions import SessionDatasetMismatchError
+    from cognee.modules.session_lifecycle.metrics import get_session_dataset
+
+    binding = None
+    if session_id and getattr(user, "id", None) is not None:
+        binding = await get_session_dataset(session_id=session_id, user_id=user.id)
+
+    if binding is not None and dataset_ref in (None, DEFAULT_DATASET_NAME):
+        dataset_ref = binding[0]
+
+    user, dataset = await _resolve_session_dataset(dataset_ref, user)
+
+    if binding is not None and dataset.id != binding[0]:
+        raise SessionDatasetMismatchError(session_id, binding[0], dataset.id)
     return user, dataset
 
 
@@ -332,7 +360,9 @@ async def _dispatch_session_entry(
     # Resolve and authorize the target dataset before touching the cache so
     # the session is scoped to it (lifecycle attribution, per-dataset default
     # IDs, dataset-local vector indexing).
-    user, dataset = await _resolve_session_dataset(dataset_id or dataset_name, user)
+    user, dataset = await _resolve_bound_session_dataset(
+        session_id, dataset_id or dataset_name, user
+    )
 
     sm = get_session_manager(dataset_id=dataset.id)
     if not sm.is_available:
@@ -647,7 +677,7 @@ async def remember(
         "MemoryEntry",
         MemorySource,
     ],
-    dataset_name: str = "main_dataset",
+    dataset_name: str = DEFAULT_DATASET_NAME,
     *,
     dataset_id: Optional[UUID] = None,
     session_id: Optional[str] = None,
@@ -680,7 +710,10 @@ async def remember(
             precedence over ``dataset_name``. Not supported for
             ``MemorySource`` imports, which are dataset-name based.
         session_id: Optional session ID. When set, stores data in the
-            session cache instead of the permanent graph.
+            session cache instead of the permanent graph. A session is bound
+            to the dataset of its first write: later session writes follow
+            that binding (the default dataset reference inherits it), and
+            naming a different dataset raises ``SessionDatasetMismatchError``.
         chunk_size: Max tokens per chunk. Auto-calculated when *None*.
         chunker: Text chunking strategy. Defaults to *TextChunker*.
         custom_prompt: Custom prompt for entity extraction.
@@ -1177,7 +1210,9 @@ async def _remember_inner(
     # Session memory: resolve the one dataset this session targets, store in
     # the session cache scoped to it, then optionally bridge to graph.
     if session_id:
-        user, session_dataset = await _resolve_session_dataset(dataset_id or dataset_name, user)
+        user, session_dataset = await _resolve_bound_session_dataset(
+            session_id, dataset_id or dataset_name, user
+        )
         shared_kwargs["user"] = user
 
         await _add_to_session(session_id, data, user, dataset=session_dataset)

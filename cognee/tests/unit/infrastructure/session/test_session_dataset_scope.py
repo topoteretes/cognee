@@ -426,3 +426,122 @@ class TestScopedVectorCleanup:
             assert await manager.delete_session(user_id="u1", session_id="s1") is True
 
         assert vectors_mock.await_count == 1
+
+
+class TestOneDatasetBinding:
+    """Sessions live in exactly one dataset: writes must match the binding."""
+
+    @pytest.mark.asyncio
+    async def test_same_dataset_passes(self):
+        from cognee.modules.session_lifecycle.metrics import check_session_dataset_binding
+
+        user_id, dataset_id, _, session_id = await _create_attributed_session()
+
+        await check_session_dataset_binding(
+            session_id=session_id, user_id=user_id, dataset_id=dataset_id
+        )
+
+    @pytest.mark.asyncio
+    async def test_other_dataset_raises(self):
+        from cognee.modules.session_lifecycle.exceptions import SessionDatasetMismatchError
+        from cognee.modules.session_lifecycle.metrics import check_session_dataset_binding
+
+        user_id, dataset_id, _, session_id = await _create_attributed_session()
+
+        with pytest.raises(SessionDatasetMismatchError):
+            await check_session_dataset_binding(
+                session_id=session_id, user_id=user_id, dataset_id=uuid4()
+            )
+
+    @pytest.mark.asyncio
+    async def test_unbound_session_passes_for_any_dataset(self):
+        from cognee.modules.session_lifecycle.metrics import (
+            check_session_dataset_binding,
+            record_session_activity,
+        )
+
+        user_id = uuid4()
+        session_id = f"scope-test-{uuid4()}"
+        engine = get_relational_engine()
+        async with engine.engine.begin() as conn:
+            await conn.run_sync(SessionRecord.metadata.create_all)
+        await record_session_activity(str(user_id), session_id)
+
+        await check_session_dataset_binding(
+            session_id=session_id, user_id=user_id, dataset_id=uuid4()
+        )
+
+    @pytest.mark.asyncio
+    async def test_no_dataset_context_is_a_noop(self):
+        from cognee.modules.session_lifecycle.metrics import check_session_dataset_binding
+
+        await check_session_dataset_binding(session_id="s1", user_id=uuid4(), dataset_id=None)
+
+
+class TestBindingEnforcementWiring:
+    """The one-dataset guard is wired into the real write paths, not just the helper."""
+
+    @pytest.mark.asyncio
+    async def test_add_qa_raises_for_wrong_dataset_context(self):
+        from cognee.modules.session_lifecycle.exceptions import SessionDatasetMismatchError
+
+        user_id, _, _, session_id = await _create_attributed_session()
+        manager = SessionManager(cache_engine=MagicMock(), dataset_id=uuid4())
+
+        with pytest.raises(SessionDatasetMismatchError):
+            await manager.add_qa(
+                user_id=str(user_id), session_id=session_id, question="q", context="", answer="a"
+            )
+
+    @pytest.mark.asyncio
+    async def test_delete_sessions_for_dataset_removes_sessions(self):
+        from cognee.modules.session_lifecycle.metrics import delete_sessions_for_dataset
+
+        user_id, dataset_id, _, session_id = await _create_attributed_session()
+
+        manager = MagicMock()
+        manager.delete_session = AsyncMock(return_value=True)
+        with patch(
+            "cognee.infrastructure.session.get_session_manager.get_session_manager",
+            return_value=manager,
+        ):
+            await delete_sessions_for_dataset(dataset_id)
+
+        # Cache-side deletion was requested for the session's owner...
+        manager.delete_session.assert_awaited_once_with(user_id=str(user_id), session_id=session_id)
+        # ...and the lifecycle row is gone even though the manager was a stub
+        # (the explicit fallback covers cache-less deployments).
+        engine = get_relational_engine()
+        async with engine.get_async_session() as session:
+            row = (
+                await session.execute(
+                    select(SessionRecord).where(SessionRecord.session_id == session_id)
+                )
+            ).scalar_one_or_none()
+        assert row is None
+
+    @pytest.mark.asyncio
+    async def test_run_session_turn_checks_binding_before_answer(self):
+        from cognee.modules.session_lifecycle.exceptions import SessionDatasetMismatchError
+
+        user_id, _, _, session_id = await _create_attributed_session()
+        manager = SessionManager(cache_engine=MagicMock(), dataset_id=uuid4())
+
+        with (
+            patch.object(SessionManager, "is_session_available_for_completion", return_value=True),
+            patch(
+                "cognee.infrastructure.session.session_manager.generate_session_answer",
+                AsyncMock(),
+            ) as generate_answer,
+        ):
+            with pytest.raises(SessionDatasetMismatchError):
+                await manager._run_session_turn(
+                    user_id=str(user_id),
+                    session_id=session_id,
+                    query="q",
+                    context="",
+                    user_prompt_path="",
+                    system_prompt_path="",
+                )
+
+        generate_answer.assert_not_awaited()

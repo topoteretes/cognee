@@ -87,13 +87,9 @@ Otherwise, this is a memory-oriented alias for `cognee search`.
 
             async def run_recall():
                 try:
-                    from cognee.cli.user_resolution import resolve_cli_user, scoped_session_id
-
                     session_kwargs = {}
                     if args.session_id is not None:
-                        user = await resolve_cli_user(getattr(args, "user_id", None))
-                        sid = scoped_session_id(user.id, args.session_id)
-                        session_kwargs["session_id"] = sid
+                        session_kwargs["session_id"] = args.session_id
 
                     if session_only:
                         # Pass query_type=None to trigger session-only search

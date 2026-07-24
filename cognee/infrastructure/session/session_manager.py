@@ -29,6 +29,7 @@ from cognee.modules.observability import (
 )
 from cognee.modules.retrieval.utils.completion import generate_completion
 from cognee.modules.session_lifecycle.metrics import (
+    check_session_dataset_binding,
     delete_session_lifecycle,
     get_session_dataset,
     record_session_activity,
@@ -140,6 +141,12 @@ class SessionManager:
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, skipping add_qa")
             return None
+        # Sessions live in exactly one dataset — refuse to write a turn under a
+        # different dataset context than the session's binding, before any cache
+        # or vector write happens.
+        await check_session_dataset_binding(
+            session_id=session_id, user_id=user_id, dataset_id=self.dataset_id
+        )
 
         data_size = len(answer.encode("utf-8", errors="replace")) if answer else 0
         data_size += len(question.encode("utf-8", errors="replace")) if question else 0
@@ -207,6 +214,10 @@ class SessionManager:
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, skipping add_agent_trace_step")
             return None
+        # Same one-dataset-per-session guard as add_qa.
+        await check_session_dataset_binding(
+            session_id=session_id, user_id=user_id, dataset_id=self.dataset_id
+        )
 
         trace_id = str(uuid.uuid4())
         if generate_feedback_with_llm:
@@ -396,6 +407,12 @@ class SessionManager:
                 system_prompt=system_prompt,
                 response_model=response_model,
             )
+
+        # A mismatched session would raise in add_qa anyway — but only after the
+        # answer was generated. Fail here, before any LLM spend.
+        await check_session_dataset_binding(
+            session_id=session_id, user_id=user_id, dataset_id=self.dataset_id
+        )
 
         if turn_preparation is None:
             turn_preparation = await self.prepare_session_turn(
