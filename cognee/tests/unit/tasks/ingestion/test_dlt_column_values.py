@@ -1,7 +1,8 @@
-"""Tests for optional ColumnValue node emission in the DLT pipeline.
+"""Tests for ColumnValue node emission in the DLT pipeline.
 
-Column selection (resolve_dlt_sources._selected_column_values) supports
-per-table column lists with "*" wildcards on either side; emission
+Column selection resolves per table (resolve_dlt_sources._resolve_column_value_selection:
+explicit lists, "*" for all columns, "auto" cardinality gating) and per row
+(_selected_column_values: pk/fk exclusion, value guards); emission
 (emit_dlt_schema_graph) creates one shared ColumnValue node per unique
 (table, column, value) with a column-named edge from each row.
 """
@@ -18,7 +19,9 @@ from cognee.modules.engine.models import ColumnValue
 from cognee.tasks.ingestion.dlt_row_data import DltRowData
 from cognee.tasks.ingestion.dlt_schema_graph import emit_dlt_schema_graph
 from cognee.tasks.ingestion.resolve_dlt_sources import (
+    ALL_COLUMNS,
     MAX_COLUMN_VALUE_LENGTH,
+    _resolve_column_value_selection,
     _selected_column_values,
 )
 
@@ -27,13 +30,19 @@ graph_engine_module = importlib.import_module(
 )
 
 
-def _row(table_name="orders", row_data=None, foreign_keys=None, primary_key_column="id"):
+def _row(
+    table_name="orders",
+    row_data=None,
+    foreign_keys=None,
+    primary_key_column="id",
+    primary_key_value="1",
+):
     return DltRowData(
         table_name=table_name,
         primary_key_column=primary_key_column,
-        primary_key_value="1",
+        primary_key_value=primary_key_value,
         row_data=row_data or {},
-        content_hash="hash",
+        content_hash=f"hash-{primary_key_value}",
         schema_info=[],
         schema_hash="schema-hash",
         foreign_keys=foreign_keys or [],
@@ -42,43 +51,89 @@ def _row(table_name="orders", row_data=None, foreign_keys=None, primary_key_colu
     )
 
 
+def _unique_rows(rows):
+    return {(row.table_name, row.primary_key_value, row.content_hash): row for row in rows}
+
+
+class TestResolveColumnValueSelection:
+    def test_disabled(self):
+        rows = _unique_rows([_row(row_data={"id": 1, "status": "active"})])
+        assert _resolve_column_value_selection(rows, {}) == {}
+        assert _resolve_column_value_selection(rows, None) == {}
+
+    def test_explicit_columns(self):
+        rows = _unique_rows([_row(row_data={"id": 1, "status": "active"})])
+        resolved = _resolve_column_value_selection(rows, {"orders": ["status"]})
+        assert resolved == {"orders": {"status"}}
+
+    def test_table_wildcard_applies_to_all_tables(self):
+        rows = _unique_rows(
+            [
+                _row(table_name="orders", row_data={"id": 1}),
+                _row(table_name="customers", row_data={"id": 2}),
+            ]
+        )
+        resolved = _resolve_column_value_selection(rows, {"*": ["country"]})
+        assert resolved == {"orders": {"country"}, "customers": {"country"}}
+
+    def test_all_columns_bypasses_cardinality_gate(self):
+        rows = _unique_rows(
+            [
+                _row(row_data={"id": i, "ts": f"2026-07-24T{i:02d}"}, primary_key_value=str(i))
+                for i in range(4)
+            ]
+        )
+        resolved = _resolve_column_value_selection(rows, {"orders": ["*"]})
+        assert resolved == {"orders": {ALL_COLUMNS}}
+
+    def test_auto_keeps_repeating_and_drops_unique_columns(self):
+        # status repeats (2 distinct / 4 rows); ts and text are unique per row.
+        rows = _unique_rows(
+            [
+                _row(
+                    row_data={
+                        "id": i,
+                        "status": "active" if i % 2 else "closed",
+                        "ts": f"2026-07-24T00:00:{i:02d}",
+                        "text": f"unique message {i}",
+                    },
+                    primary_key_value=str(i),
+                )
+                for i in range(4)
+            ]
+        )
+        resolved = _resolve_column_value_selection(rows, {"*": ["auto"]})
+        assert resolved == {"orders": {"status"}}
+
+    def test_auto_single_row_table_yields_nothing(self):
+        # One row cannot share values with anything — no join hub possible.
+        rows = _unique_rows([_row(row_data={"id": 1, "status": "active"})])
+        assert _resolve_column_value_selection(rows, {"*": ["auto"]}) == {}
+
+
 class TestSelectedColumnValues:
     ROW_DATA = {"id": 1, "status": "active", "country": "RS", "customer_id": 7}
     FOREIGN_KEYS = [{"column": "customer_id", "ref_table": "customers", "ref_column": "id"}]
 
-    def test_disabled_by_default(self):
+    def test_no_columns_selected(self):
         row = _row(row_data=self.ROW_DATA)
-        assert _selected_column_values(row, {}) == {}
         assert _selected_column_values(row, None) == {}
+        assert _selected_column_values(row, set()) == {}
 
     def test_specific_columns(self):
         row = _row(row_data=self.ROW_DATA)
-        selected = _selected_column_values(row, {"orders": ["status"]})
-        assert selected == {"status": "active"}
+        assert _selected_column_values(row, {"status"}) == {"status": "active"}
 
-    def test_table_not_selected(self):
-        row = _row(row_data=self.ROW_DATA)
-        assert _selected_column_values(row, {"customers": ["status"]}) == {}
-
-    def test_wildcard_table(self):
-        row = _row(row_data=self.ROW_DATA)
-        assert _selected_column_values(row, {"*": ["country"]}) == {"country": "RS"}
-
-    def test_wildcard_columns_excludes_pk_and_fk(self):
+    def test_all_columns_excludes_pk_and_fk(self):
         row = _row(row_data=self.ROW_DATA, foreign_keys=self.FOREIGN_KEYS)
-        selected = _selected_column_values(row, {"orders": ["*"]})
-        assert selected == {"status": "active", "country": "RS"}
-
-    def test_all_tables_all_columns(self):
-        row = _row(row_data=self.ROW_DATA, foreign_keys=self.FOREIGN_KEYS)
-        assert _selected_column_values(row, {"*": ["*"]}) == {
+        assert _selected_column_values(row, {ALL_COLUMNS}) == {
             "status": "active",
             "country": "RS",
         }
 
     def test_pk_and_fk_excluded_even_when_listed(self):
         row = _row(row_data=self.ROW_DATA, foreign_keys=self.FOREIGN_KEYS)
-        assert _selected_column_values(row, {"orders": ["id", "customer_id"]}) == {}
+        assert _selected_column_values(row, {"id", "customer_id"}) == {}
 
     def test_null_empty_and_overlong_values_skipped(self):
         row = _row(
@@ -90,11 +145,11 @@ class TestSelectedColumnValues:
                 "country": "RS",
             }
         )
-        assert _selected_column_values(row, {"orders": ["*"]}) == {"country": "RS"}
+        assert _selected_column_values(row, {ALL_COLUMNS}) == {"country": "RS"}
 
     def test_values_coerced_to_stripped_strings(self):
         row = _row(row_data={"id": 1, "amount": 42, "status": " active "})
-        assert _selected_column_values(row, {"orders": ["*"]}) == {
+        assert _selected_column_values(row, {ALL_COLUMNS}) == {
             "amount": "42",
             "status": "active",
         }

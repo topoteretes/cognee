@@ -9,14 +9,17 @@ class IngestionConfig(BaseSettings):
     # ingestion of large sources.
     dlt_max_rows_per_table: int = 0
 
-    # Optional cell-level graph nodes for DLT rows: maps table name to the
-    # columns whose values become shared ColumnValue nodes. "*" is a wildcard
-    # on either side — {"*": ["*"]} emits value nodes for every column of
-    # every table, {"orders": ["*"]} for all columns of one table. Empty
-    # (default) disables value-node emission. Beware high-cardinality columns:
-    # every unique value becomes one node and one embedding. Env:
-    # DLT_COLUMN_VALUE_COLUMNS as JSON, or add(..., column_value_columns={...}).
-    dlt_column_value_columns: dict[str, list[str]] = {}
+    # Cell-level graph nodes for DLT rows: maps table name to the columns
+    # whose values become shared ColumnValue nodes. "*" is a wildcard on
+    # either side. Column specs:
+    #   ["auto"] (default, {"*": ["auto"]}) — only columns whose values repeat
+    #       across rows qualify; ids, timestamps, and free text are skipped so
+    #       high-cardinality sources (e.g. Slack messages) stay clean.
+    #   ["*"] — every column, no cardinality gate.
+    #   ["col", ...] — exactly these columns.
+    #   {} — disable value-node emission entirely.
+    # Env: DLT_COLUMN_VALUE_COLUMNS as JSON, or add(..., column_value_columns=...).
+    dlt_column_value_columns: dict[str, list[str]] = {"*": ["auto"]}
 
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
