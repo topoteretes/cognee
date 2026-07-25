@@ -2708,7 +2708,18 @@ class LadybugAdapter(GraphDBInterface):
         Get the k-hop neighborhood subgraph around a set of seed nodes.
 
         Returns all nodes and edges within `depth` hops of any seed node,
-        in the same format as get_graph_data().
+        in the same format as get_graph_data(). A neighbor is included iff there
+        exists a path of length 1..depth reaching it whose every edge type is in
+        `edge_types` (matching the Neo4j/Postgres backends); `edge_types=None` or
+        `[]` disables the filter.
+
+        Performance note: the `edge_types` branch enumerates every path up to
+        `depth` (Kuzu cannot filter a variable-length relationship binding in
+        Cypher — see #3585) and post-filters in Python, so its cost grows
+        combinatorially with node degree × depth on dense graphs. It is intended
+        for shallow, targeted neighborhoods; a future refactor could push per-hop
+        type filtering into Cypher via a fixed-length UNION to return distinct
+        neighbors instead of walks.
         """
         import time
 
@@ -2719,18 +2730,36 @@ class LadybugAdapter(GraphDBInterface):
                 logger.warning("No node IDs provided for neighborhood retrieval.")
                 return [], []
 
-            # Use variable-length path to find all nodes within depth hops
-            path_query = f"""
-            MATCH (seed:Node)-[r*1..{depth}]-(neighbor:Node)
-            WHERE seed.id IN $node_ids{" AND ALL(rel IN r WHERE rel.relationship_name IN $edge_types)" if edge_types else ""}
-            RETURN DISTINCT neighbor.id
-            """
-            params = {"node_ids": node_ids}
+            # Use variable-length path to find all nodes within depth hops.
+            # Kuzu's `r` from `-[r*1..N]-` is a RECURSIVE_REL, not a LIST, so the
+            # engine rejects `ALL(rel IN r WHERE ...)` with a binder error (and an
+            # internal assertion when combined with a parameter reference). When
+            # edge_types is set, fetch paths unfiltered and discard neighbors whose
+            # every path crosses a disallowed edge type (#3585).
             if edge_types:
-                params["edge_types"] = edge_types
-
-            neighbor_rows = await self.query(path_query, params)
-            neighbor_ids = [row[0] for row in neighbor_rows if row[0]]
+                path_query = f"""
+                MATCH (seed:Node)-[r*1..{depth}]-(neighbor:Node)
+                WHERE seed.id IN $node_ids
+                RETURN neighbor.id, r
+                """
+                path_rows = await self.query(path_query, {"node_ids": node_ids})
+                allowed = set(edge_types)
+                neighbor_ids_set: set = set()
+                for neighbor_id, path in path_rows:
+                    if not neighbor_id or neighbor_id in neighbor_ids_set:
+                        continue
+                    rels = path.get("_RELS", []) if isinstance(path, dict) else []
+                    if rels and all(rel.get("relationship_name") in allowed for rel in rels):
+                        neighbor_ids_set.add(neighbor_id)
+                neighbor_ids = list(neighbor_ids_set)
+            else:
+                path_query = f"""
+                MATCH (seed:Node)-[r*1..{depth}]-(neighbor:Node)
+                WHERE seed.id IN $node_ids
+                RETURN DISTINCT neighbor.id
+                """
+                neighbor_rows = await self.query(path_query, {"node_ids": node_ids})
+                neighbor_ids = [row[0] for row in neighbor_rows if row[0]]
 
             # Combine seed nodes and neighbor nodes
             all_ids = list(set(node_ids) | set(neighbor_ids))
