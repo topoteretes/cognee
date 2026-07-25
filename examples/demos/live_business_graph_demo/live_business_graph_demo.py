@@ -41,6 +41,11 @@ DEMO_ROOT = os.environ.get("DEMO_ROOT", "/tmp/cognee_biz_demo")
 os.environ["DATA_ROOT_DIRECTORY"] = os.path.join(DEMO_ROOT, "data")
 os.environ["SYSTEM_ROOT_DIRECTORY"] = os.path.join(DEMO_ROOT, "system")
 os.environ.setdefault("TELEMETRY_DISABLED", "1")
+# The relational engine won't create missing parent directories, and the
+# demo's first DB touch (agent registration) comes before any ingestion
+# path that would create them.
+os.makedirs(os.path.join(DEMO_ROOT, "data"), exist_ok=True)
+os.makedirs(os.path.join(DEMO_ROOT, "system", "databases"), exist_ok=True)
 
 import cognee  # noqa: E402
 from cognee.modules.search.types import SearchType  # noqa: E402
@@ -60,15 +65,15 @@ Nordwind Logistics is a mid-market customer, account owner Sara Lopez.
 Nordwind's main contact is Ines Vogel, VP Operations.
 Both accounts use the Insights Dashboard product."""
 
-MARKETING_CAMPAIGNS = """Marketing report — Q2 campaigns.
-The "Retail Reimagined" campaign targeted retail companies through the
-LinkedIn channel and the email newsletter. It generated the Acme Retail
-opportunity and 40 other leads.
-The "Ops Excellence" webinar series ran on the events channel and brought
-in Nordwind Logistics. Campaign manager for both is Priya Nair.
+SLACK_MESSAGES = """Slack digest — #go-to-market channel.
+Priya Nair: the "Retail Reimagined" campaign is live — targeting retail
+companies through LinkedIn and the email newsletter. It already generated
+the Acme Retail opportunity and 40 other leads.
+Priya Nair: the "Ops Excellence" webinar series ran on the events channel
+and brought in Nordwind Logistics.
 Both campaigns promote the Insights Dashboard product."""
 
-SUPPORT_AND_USAGE = """Support and product usage digest.
+DRIVE_DOCS = """Google Drive — support and product usage review doc.
 Tom Becker from Acme Retail filed ticket #4821 about slow report exports
 in the Insights Dashboard; it was resolved by engineer Milan Kovac.
 Usage analytics show Acme Retail runs 300 dashboard queries daily, while
@@ -78,8 +83,8 @@ decision. Renewal revenue at risk: 80k EUR."""
 
 SOURCES = [
     ("CRM (accounts & contacts)", CRM_NOTES, "crm"),
-    ("Marketing (campaigns & channels)", MARKETING_CAMPAIGNS, "marketing"),
-    ("Support + product usage", SUPPORT_AND_USAGE, "support_usage"),
+    ("Slack (#go-to-market)", SLACK_MESSAGES, "slack"),
+    ("Google Drive (usage reviews)", DRIVE_DOCS, "google_drive"),
 ]
 
 # ── The agent's questions ───────────────────────────────────────────────
@@ -124,6 +129,12 @@ async def connect_agent(with_dataset: bool) -> None:
 
 
 async def main() -> None:
+    # Fresh store: create the relational schema before anything touches it
+    # (agent registration reads the users table before any ingestion runs).
+    from cognee.modules.engine.operations.setup import setup
+
+    await setup()
+
     banner("PHASE 0 · Agent connected")
     await connect_agent(with_dataset=False)
     print(f"   Agent connection '{AGENT_NAME}' registered (type=mcp). No data yet.")
@@ -184,15 +195,15 @@ async def main() -> None:
     print("   maya's agent 'support-analyst' registered and scoped to the dataset.")
 
     await cognee.add(
-        "NovaGraph company handbook: our mission is connected customer knowledge. "
+        "Personal notes: my working playbook. Mission focus is connected customer knowledge. "
         "Escalation policy: enterprise tickets route to the on-call engineer within "
         "one hour. Renewal playbook: accounts with falling adoption get an executive "
         "sponsor call.",
-        dataset_name="org_handbook",
+        dataset_name="personal_notes",
         node_set=["org-knowledge"],
     )
-    await cognee.cognify(["org_handbook"])
-    print("   organizational knowledge added as its own dataset (org_handbook).")
+    await cognee.cognify(["personal_notes"])
+    print("   personal notes added as their own dataset (personal_notes).")
 
     # The TEAM BRAIN: shared working knowledge both people read and write —
     # decisions, conventions, learnings that belong to the team, not a person.

@@ -274,6 +274,10 @@
   .bv-acc b{color:${C.bone};font-weight:700;margin-left:3px;}
   .bv-acc.own{border-color:rgba(67,217,232,.45);color:${C.inflow};}
   .bv-acc.own b{color:${C.inflow};}
+  .bv-acc.editable{cursor:pointer;}
+  .bv-acc.editable:hover{border-color:${C.amber};color:${C.amber};}
+  .bv-acc.editable:hover b{color:${C.amber};}
+  .bv-acc.ghost{border-style:dashed;opacity:.6;}
   .bv-card.external{opacity:.72;border-style:dashed;}
   .bv-card.knowledge{cursor:pointer;}
   .bv-card.knowledge.focused{border-color:${C.inflow};box-shadow:0 0 12px rgba(67,217,232,.2);}
@@ -372,19 +376,60 @@
   }
   function accessChips(uid) {
     const slots = access[uid] || {};
-    return Object.keys(slots).map(did => {
+    const granted = Object.keys(slots).map(did => {
       const d = dsById[did];
       if (!d) return '';
       const slot = slots[did];
-      return `<span class="bv-acc${slot.owns ? ' own' : ''}" data-ds="${did}">${esc(d.name)}
+      return `<span class="bv-acc${slot.owns ? ' own' : ' editable'}" data-uid="${uid}" data-ds="${did}"
+        title="${slot.owns ? 'owner — full control' : 'click to cycle: R → RW → RWS → none (simulated)'}">${esc(d.name)}
         <b>${permCode(slot)}</b></span>`;
-    }).join('');
+    });
+    // Ghost chips: datasets this user CANNOT touch — click to grant (what-if).
+    const ghosts = datasets.filter(d => !slots[d.id]).map(d =>
+      `<span class="bv-acc ghost editable" data-uid="${uid}" data-ds="${d.id}"
+        title="click to grant read (simulated)">+ ${esc(d.name)}</span>`);
+    return granted.concat(ghosts).join('');
+  }
+
+  // What-if permission editing: cycle a user's grant and watch access change.
+  // Simulated on the page; the real call is give_permission_on_dataset /
+  // the '+ share' affordance.
+  let lastGrantChange = null;
+  function cyclePermission(uid, did) {
+    const slots = (access[uid] = access[uid] || {});
+    const slot = slots[did];
+    if (slot && slot.owns) return;   // ownership is not a toggle
+    let label;
+    if (!slot) { slots[did] = { owns: false, perms: new Set(['read']) }; label = 'read'; }
+    else if (!slot.perms.has('write')) { slot.perms.add('write'); label = 'read + write'; }
+    else if (!slot.perms.has('share')) { slot.perms.add('share'); label = 'read + write + share'; }
+    else { delete slots[did]; label = 'no access'; }
+    lastGrantChange = { uid, did, at: performance.now() };
+    const uname = (userNodes.find(x => x.id === uid) || {}).is_current ? 'you'
+      : ((userNodes.find(x => x.id === uid) || {}).name || 'user').split('@')[0];
+    narrate('what-if: ' + uname + ' → ' + ((dsById[did] || {}).name || 'dataset') + ': ' + label +
+      ' (simulated — apply for real with + share)', C.amber);
+    renderOperators();
+    renderKnowledge();
+    hoverUserId = uid;
+    requestDraw();
+  }
+  function wireChips(el) {
+    el.querySelectorAll('.bv-acc.editable').forEach(chip => {
+      chip.addEventListener('click', ev => {
+        ev.stopPropagation();
+        cyclePermission(chip.dataset.uid, chip.dataset.ds);
+      });
+    });
   }
   function accessibleDatasets(uid) {
     return new Set(Object.keys(access[uid] || {}));
   }
+  let hoverUserId = null;
   function wireUserHover(el, uid) {
     el.addEventListener('mouseenter', () => {
+      hoverUserId = uid;
+      requestDraw();
       const ok = accessibleDatasets(uid);
       document.querySelectorAll('[data-dsrow]').forEach(row => {
         row.classList.toggle('bv-dim', !ok.has(row.dataset.dsrow));
@@ -395,12 +440,18 @@
         .forEach(c => c.classList.toggle('bv-dim', !renderedOk));
     });
     el.addEventListener('mouseleave', () => {
+      hoverUserId = null;
+      requestDraw();
       document.querySelectorAll('.bv-dim').forEach(x => x.classList.remove('bv-dim'));
     });
   }
 
-  let orgParent = org;
-  if (tenantNodes.length) {
+  const agentCardEls = {};
+  function renderOperators() {
+    org.innerHTML = '';
+    Object.keys(agentCardEls).forEach(k => delete agentCardEls[k]);
+    let orgParent = org;
+    if (tenantNodes.length) {
     orgParent.appendChild(orgNode('tenant',
       `<div class="t" style="color:${C.haze}">⌂ ${esc(tenantNodes[0].name || 'organization')}</div>
        <div class="s">${userNodes.length} member${userNodes.length === 1 ? '' : 's'}</div>`));
@@ -410,14 +461,13 @@
     orgParent = wrap;
   }
 
-  const agentCardEls = {};
-  const agentsByUser = {};
-  agents.forEach(a => {
-    const uid = agentOwner[a.id] || (userNode && userNode.id);
-    (agentsByUser[uid] = agentsByUser[uid] || []).push(a);
-  });
+    const agentsByUser = {};
+    agents.forEach(a => {
+      const uid = agentOwner[a.id] || (userNode && userNode.id);
+      (agentsByUser[uid] = agentsByUser[uid] || []).push(a);
+    });
 
-  userNodes.forEach(u => {
+    userNodes.forEach(u => {
     const you = !!u.is_current;
     const initials = (you ? 'you' : (u.name || '?')).replace(/@.*/, '').split(/[._\- ]/)
       .map(w => w[0] || '').join('').slice(0, 2).toUpperCase();
@@ -427,31 +477,34 @@
       </div>
       <div class="s" style="margin-left:26px">${esc(u.name || '')}</div>
       <div class="acc" style="margin-left:26px">${accessChips(u.id)}</div>`);
-    userEl.dataset.uid = u.id;
-    wireUserHover(userEl, u.id);
-    orgParent.appendChild(userEl);
+      userEl.dataset.uid = u.id;
+      wireUserHover(userEl, u.id);
+      wireChips(userEl);
+      orgParent.appendChild(userEl);
 
-    const ownAgents = agentsByUser[u.id] || [];
-    if (ownAgents.length) {
-      const agentsWrap = document.createElement('div');
-      agentsWrap.className = 'bv-org-child';
-      orgParent.appendChild(agentsWrap);
-      ownAgents.forEach(a => {
-        const reads = agentReads[a.id] ? [...agentReads[a.id]].join(', ') : null;
-        const el = orgNode('', `<div class="t"><span class="dot" style="background:${C.amber}"></span>${esc(a.name)}
-            <span class="badge">agent</span></div>
-          <div class="s">${reads ? 'reads ' + esc(reads) : 'connected'}</div>`);
-        el.dataset.uid = u.id;
-        wireUserHover(el, u.id);
-        agentsWrap.appendChild(el);
-        agentCardEls[a.id] = el;
-      });
+      const ownAgents = agentsByUser[u.id] || [];
+      if (ownAgents.length) {
+        const agentsWrap = document.createElement('div');
+        agentsWrap.className = 'bv-org-child';
+        orgParent.appendChild(agentsWrap);
+        ownAgents.forEach(a => {
+          const reads = agentReads[a.id] ? [...agentReads[a.id]].join(', ') : null;
+          const el = orgNode('', `<div class="t"><span class="dot" style="background:${C.amber}"></span>${esc(a.name)}
+              <span class="badge">agent</span></div>
+            <div class="s">${reads ? 'reads ' + esc(reads) : 'connected'}</div>`);
+          el.dataset.uid = u.id;
+          wireUserHover(el, u.id);
+          agentsWrap.appendChild(el);
+          agentCardEls[a.id] = el;
+        });
+      }
+    });
+    if (!agents.length) {
+      orgParent.appendChild(orgNode('tenant', `<div class="t" style="color:${C.haze}">+ plug in your agent</div>
+        <div class="s">claude code · mcp · sdk</div>`));
     }
-  });
-  if (!agents.length) {
-    orgParent.appendChild(orgNode('tenant', `<div class="t" style="color:${C.haze}">+ plug in your agent</div>
-      <div class="s">claude code · mcp · sdk</div>`));
   }
+  renderOperators();
 
   // Knowledge estate on the left rail: BRAINS, not rows. Each dataset is a
   // team brain (multiple people can touch it) or a personal brain (owner
@@ -463,6 +516,9 @@
   knowledgeTitle.style.marginTop = '12px';
   knowledgeTitle.textContent = 'knowledge';
   railL.appendChild(knowledgeTitle);
+  const knowledgeWrap = document.createElement('div');
+  knowledgeWrap.id = 'bv-knowledge';
+  railL.appendChild(knowledgeWrap);
 
   const userLabel = uid => {
     const u = userNodes.find(x => x.id === uid);
@@ -470,16 +526,20 @@
     return u.is_current ? 'you' : (u.name || '').split('@')[0];
   };
   // Reverse access index: who can touch each dataset (owner first).
-  const dsUsers = {};
-  Object.keys(access).forEach(uid => {
-    Object.keys(access[uid]).forEach(did => {
-      (dsUsers[did] = dsUsers[did] || []).push({
-        uid, name: userLabel(uid), owns: access[uid][did].owns,
-        perms: access[uid][did].perms,
+  // Recomputed on every render — what-if permission edits change it.
+  let dsUsers = {};
+  function computeDsUsers() {
+    dsUsers = {};
+    Object.keys(access).forEach(uid => {
+      Object.keys(access[uid]).forEach(did => {
+        (dsUsers[did] = dsUsers[did] || []).push({
+          uid, name: userLabel(uid), owns: access[uid][did].owns,
+          perms: access[uid][did].perms,
+        });
       });
     });
-  });
-  Object.values(dsUsers).forEach(list => list.sort((a, b) => (b.owns ? 1 : 0) - (a.owns ? 1 : 0)));
+    Object.values(dsUsers).forEach(list => list.sort((a, b) => (b.owns ? 1 : 0) - (a.owns ? 1 : 0)));
+  }
 
   const brainKeyOf = d => (d.external ? String(d.id).replace(/^dataset:/, '') : 'primary');
 
@@ -541,10 +601,6 @@
   }
   canvas.addEventListener('click', clearKnowledgeFocus);
 
-  // Grouped: team brains first (shared understanding), then personal brains.
-  const teamBrains = datasets.filter(d => (dsUsers[d.id] || []).length > 1);
-  const personalBrains = datasets.filter(d => (dsUsers[d.id] || []).length <= 1);
-
   function brainCard(d, team) {
     const el = document.createElement('div');
     el.className = 'bv-card knowledge' + (d.external ? ' external' : '');
@@ -562,22 +618,35 @@
       if (ev.target.classList.contains('share')) return;
       focusKnowledge(d);
     });
-    railL.appendChild(el);
+    knowledgeWrap.appendChild(el);
   }
   function brainGroupTitle(text) {
     const t = document.createElement('div');
     t.className = 'bv-rail-subtitle';
     t.textContent = text;
-    railL.appendChild(t);
+    knowledgeWrap.appendChild(t);
   }
-  if (teamBrains.length) {
-    brainGroupTitle('team');
-    teamBrains.forEach(d => brainCard(d, true));
+  function renderKnowledge() {
+    computeDsUsers();
+    knowledgeWrap.innerHTML = '';
+    // Grouped: team brains (shared understanding) first, then personal.
+    const teamBrains = datasets.filter(d => (dsUsers[d.id] || []).length > 1);
+    const personalBrains = datasets.filter(d => (dsUsers[d.id] || []).length <= 1);
+    if (teamBrains.length) {
+      brainGroupTitle('team');
+      teamBrains.forEach(d => brainCard(d, true));
+    }
+    if (personalBrains.length) {
+      brainGroupTitle('personal');
+      personalBrains.forEach(d => brainCard(d, false));
+    }
+    // Keep the focus ring after a rebuild.
+    if (knowledgeFocus) {
+      const row = knowledgeWrap.querySelector(`[data-dsrow="${knowledgeFocus}"]`);
+      if (row) row.classList.add('focused');
+    }
   }
-  if (personalBrains.length) {
-    brainGroupTitle('personal');
-    personalBrains.forEach(d => brainCard(d, false));
-  }
+  renderKnowledge();
 
   // ── Simulation ────────────────────────────────────────────────────
   let W = 0, H = 0, dpr = 1;
@@ -885,6 +954,37 @@
         ctx.fill();
       }
     });
+
+    // What-if access lines: hovering an operator draws their reach — a
+    // line to every brain they can touch (fresh grants pulse amber).
+    if (hoverUserId && access[hoverUserId]) {
+      const userCard = document.querySelector(`#bv-org .bv-org-node[data-uid="${hoverUserId}"]`);
+      if (userCard) {
+        const vr = view.getBoundingClientRect();
+        const ur = userCard.getBoundingClientRect();
+        const ux = ur.left - vr.left, uy = ur.top - vr.top + ur.height / 2;
+        Object.keys(access[hoverUserId]).forEach(did => {
+          const row = document.querySelector(`[data-dsrow="${did}"]`);
+          if (!row) return;
+          const rr = row.getBoundingClientRect();
+          const kx = rr.right - vr.left, ky = rr.top - vr.top + rr.height / 2;
+          const fresh = lastGrantChange && lastGrantChange.uid === hoverUserId &&
+            lastGrantChange.did === did && (now - lastGrantChange.at) < 3000;
+          ctx.beginPath();
+          ctx.moveTo(ux, uy);
+          ctx.bezierCurveTo(ux - 160, uy, kx + 160, ky, kx, ky);
+          if (fresh) {
+            const pulse = 0.5 + 0.5 * Math.sin(now / 120);
+            ctx.strokeStyle = `rgba(245,168,60,${0.45 + 0.4 * pulse})`;
+            ctx.lineWidth = 2.2;
+          } else {
+            ctx.strokeStyle = 'rgba(67,217,232,0.4)';
+            ctx.lineWidth = 1.3;
+          }
+          ctx.stroke();
+        });
+      }
+    }
 
     // The ACTIVE brain's card ties into the model it contains.
     document.querySelectorAll('[data-dsrow].knowledge').forEach(card => {

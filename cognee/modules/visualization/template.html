@@ -160,9 +160,9 @@ canvas:active{cursor:grabbing}
 <div id="view-tabs" style="position:fixed;top:0;left:50%;transform:translateX(-50%);z-index:1100;display:flex;gap:2px;align-items:center;background:var(--bg);border:1px solid var(--border);border-top:none;border-radius:0 0 8px 8px;padding:2px 6px;">
   <button class="tab-btn active" data-view="business" style="background:#1F9E6E;color:#fff;border:none;padding:6px 18px;border-radius:6px 6px 0 0;cursor:pointer;font-size:12px;font-weight:600;">Business</button>
   <button class="tab-btn" data-view="graph" style="background:transparent;color:var(--text2);border:none;padding:6px 18px;border-radius:6px 6px 0 0;cursor:pointer;font-size:12px;font-weight:600;">Graph</button>
-  <button class="tab-btn" data-view="schema" style="background:transparent;color:var(--text2);border:none;padding:6px 18px;border-radius:6px 6px 0 0;cursor:pointer;font-size:12px;font-weight:600;">Schema</button>
-  <button class="tab-btn" data-view="memory" style="background:transparent;color:var(--text2);border:none;padding:6px 18px;border-radius:6px 6px 0 0;cursor:pointer;font-size:12px;font-weight:600;">Memory</button>
-  <button class="tab-btn" data-view="semantic" style="background:transparent;color:var(--text2);border:none;padding:6px 18px;border-radius:6px 6px 0 0;cursor:pointer;font-size:12px;font-weight:600;">Semantic</button>
+  <!-- Schema / Memory / Semantic tabs retired: their views stay embedded
+       (the Business view reuses their payloads and live hooks) but the
+       Business + Graph pair is the whole product surface now. -->
 </div>
 
 <button id="theme-toggle" style="position:fixed;top:12px;right:20px;z-index:1200;background:var(--bg2);border:1px solid var(--border);cursor:pointer;font-size:12px;padding:6px 14px;border-radius:8px;color:var(--text);font-family:inherit;font-weight:500;transition:all 0.15s;">Dark mode</button>

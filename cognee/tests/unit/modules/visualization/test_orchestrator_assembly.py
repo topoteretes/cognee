@@ -90,9 +90,13 @@ def test_data_tokens_substituted_as_json(tmp_path):
 
 
 def test_memory_view_scaffolding_wired(tmp_path):
-    """The Memory tab needs its button, container and data payloads."""
+    """The Memory view keeps its container and payloads (the Business view
+    reuses them), but its tab button is retired — Business + Graph are the
+    only tabs."""
     html = _render(tmp_path)
-    assert 'data-view="memory"' in html
+    assert '<button class="tab-btn" data-view="memory"' not in html
+    assert '<button class="tab-btn" data-view="semantic"' not in html
+    assert '<button class="tab-btn" data-view="schema"' not in html
     assert 'id="memory-view"' in html
     # __MEMORY_DATA__ resolves to the memory_map JSON object…
     assert "const memoryMap = {" in html
