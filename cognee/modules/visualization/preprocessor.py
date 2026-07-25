@@ -115,6 +115,13 @@ _TYPE_COLOR_MAP: Dict[str, str] = {
     "SchemaTable": "#A550FF",
     "DatabaseSchema": "#6510F4",
     "SchemaRelationship": "#323332",
+    # Actor-overlay nodes (agents, data sources, the operating user) — shown
+    # on the main graph when visualize_graph(include_actors=True).
+    "Agent": "#FF6B35",
+    "Dataset": "#0EA5E9",
+    "User": "#64748B",
+    "Tenant": "#94A3B8",
+    "Session": "#FDE047",
     "default": "#7c3aed",
 }
 

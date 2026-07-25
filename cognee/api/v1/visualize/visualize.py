@@ -41,6 +41,7 @@ async def visualize_graph(
     max_nodes: int = DEFAULT_MAX_NODES,
     live: bool = False,
     live_events_url: Optional[str] = None,
+    include_actors: bool = True,
 ) -> str:
     """Render the knowledge graph to a self-contained HTML file.
 
@@ -85,6 +86,11 @@ async def visualize_graph(
         live_events_url: Overrides the polled URL. Defaults to
             ``http://localhost:8000/api/v1/visualize/live-events``. Setting
             this implies ``live=True``.
+        include_actors: When True (default), the render includes the actor
+            layer — the user, their registered agent connections, and the
+            dataset(s) as first-class nodes wired to the documents they
+            contain (User —operates→ Agent —reads/writes→ Dataset —contains→
+            documents). Best-effort: an unavailable layer renders nothing.
     """
     if not user:
         user = await get_default_user()
@@ -117,6 +123,17 @@ async def visualize_graph(
             from cognee.modules.visualization.session_events import collect_session_events
 
             search_events = await collect_session_events(user=user, session_ids=session_ids)
+
+        if include_actors and dataset:
+            from cognee.api.v1.visualize.memory_provenance import get_actor_overlay
+
+            graph_node_ids = {str(node_id) for node_id, _ in graph_data[0]}
+            overlay_nodes, overlay_edges = await get_actor_overlay(dataset, user, graph_node_ids)
+            if overlay_nodes:
+                graph_data = (
+                    list(graph_data[0]) + overlay_nodes,
+                    list(graph_data[1]) + overlay_edges,
+                )
 
         if live and not live_events_url:
             live_events_url = "http://localhost:8000/api/v1/visualize/live-events"

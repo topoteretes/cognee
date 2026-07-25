@@ -107,9 +107,26 @@ async def render_page() -> None:
     print(f"   page rendered → {PAGE_PATH} (open it now if you haven't)")
 
 
+AGENT_NAME = "business-copilot"
+
+
+async def connect_agent(with_dataset: bool) -> None:
+    """Register the demo agent connection — a REAL registry entry, so the
+    Agent node on the page comes from the live agents subsystem, not a prop."""
+    await cognee.agents.register(
+        AGENT_NAME,
+        type="mcp",
+        source="mcp",
+        memory_mode="cognee",
+        dataset_names=[DATASET] if with_dataset else None,
+        origin_function="live_business_graph_demo",
+    )
+
+
 async def main() -> None:
     banner("PHASE 0 · Agent connected")
-    print("   The agent is wired to cognee (search API / MCP). No data yet.")
+    await connect_agent(with_dataset=False)
+    print(f"   Agent connection '{AGENT_NAME}' registered (type=mcp). No data yet.")
 
     for index, (label, text, node_set) in enumerate(SOURCES, start=1):
         banner(f"PHASE {index} · Plugging in data source: {label}")
@@ -117,6 +134,11 @@ async def main() -> None:
         print("   ingesting…")
         await cognee.cognify([DATASET])
         print("   entities and relationships extracted.")
+        if index == 1:
+            # The dataset now exists — scope the agent connection to it so the
+            # agent —reads/writes→ dataset edges appear on the page.
+            await connect_agent(with_dataset=True)
+            print(f"   agent '{AGENT_NAME}' scoped to dataset '{DATASET}'.")
         await render_page()
         if index == 1:
             print(f"\n   >>> OPEN {PAGE_PATH} IN A BROWSER NOW <<<")

@@ -230,6 +230,108 @@ def build_provenance_graph(
     return list(nodes.values()), edges
 
 
+def build_actor_overlay(
+    *,
+    user: Optional[UserRecord],
+    agents: List[AgentRecord],
+    datasets: List[DatasetRecord],
+    dataset_data_ids: Dict[str, List[str]],
+    graph_node_ids: set,
+) -> Tuple[List[Node], List[EdgeData]]:
+    """Actor layer for the MAIN graph visualization (pure).
+
+    Unlike :func:`build_provenance_graph` this does not synthesize file nodes —
+    it wires the synthesized actors straight onto the document nodes that are
+    already in the rendered graph (a graph document node's id IS the relational
+    ``Data.id``), so the story reads:
+
+        User —operates→ Agent —reads/writes→ Dataset —contains→ documents…
+
+    ``dataset_data_ids`` maps dataset id → its Data ids; a ``contains`` edge is
+    emitted only when that Data id is present in ``graph_node_ids``, so the
+    overlay never dangles.
+    """
+    nodes: List[Node] = []
+    edges: List[EdgeData] = []
+
+    if user:
+        nodes.append(
+            Node(f"user:{user['id']}", {"type": "User", "name": user.get("name") or "You"})
+        )
+
+    dataset_node_ids = set()
+    for dataset in datasets:
+        dataset_node_id = f"dataset:{dataset['id']}"
+        dataset_node_ids.add(str(dataset["id"]))
+        nodes.append(
+            Node(dataset_node_id, {"type": "Dataset", "name": dataset.get("name") or "Dataset"})
+        )
+        if user and str(dataset.get("owner_id") or "") == str(user["id"]):
+            edges.append(EdgeData(f"user:{user['id']}", dataset_node_id, "owns", {}))
+        for data_id in dataset_data_ids.get(str(dataset["id"]), []):
+            if str(data_id) in graph_node_ids:
+                edges.append(EdgeData(dataset_node_id, str(data_id), "contains", {}))
+
+    for agent in agents:
+        agent_node_id = f"agent:{agent['id']}"
+        nodes.append(
+            Node(agent_node_id, {"type": "Agent", "name": agent.get("name") or str(agent["id"])})
+        )
+        if user and str(agent.get("user_id") or "") == str(user["id"]):
+            edges.append(EdgeData(f"user:{user['id']}", agent_node_id, "operates", {}))
+        for ref in agent.get("datasets") or []:
+            dataset_id = str(ref.get("dataset_id") or "")
+            if dataset_id not in dataset_node_ids:
+                continue
+            edges.append(EdgeData(agent_node_id, f"dataset:{dataset_id}", "reads", {}))
+            if ref.get("role") == "read_write":
+                edges.append(EdgeData(agent_node_id, f"dataset:{dataset_id}", "writes", {}))
+
+    return nodes, edges
+
+
+async def get_actor_overlay(
+    datasets, user, graph_node_ids: set
+) -> Tuple[List[Node], List[EdgeData]]:
+    """Read live actors (user, agent connections, datasets) for the overlay.
+
+    Best-effort: any unavailable layer degrades to an empty overlay so the
+    main visualization always renders.
+
+    Args:
+        datasets: The Dataset ORM objects being rendered.
+        user: The User whose agent connections are shown.
+        graph_node_ids: String ids of nodes already in the rendered graph.
+    """
+    try:
+        from cognee.modules.data.methods import get_dataset_data
+
+        user_record: UserRecord = {
+            "id": str(user.id),
+            "name": getattr(user, "email", None) or "You",
+        }
+        dataset_records: List[DatasetRecord] = [
+            {"id": str(d.id), "name": d.name, "owner_id": str(d.owner_id)} for d in datasets
+        ]
+        dataset_data_ids: Dict[str, List[str]] = {}
+        for dataset in datasets:
+            data_rows = await get_dataset_data(dataset.id)
+            dataset_data_ids[str(dataset.id)] = [str(row.id) for row in data_rows]
+
+        agents = await _read_agents([str(user.id)])
+
+        return build_actor_overlay(
+            user=user_record,
+            agents=agents,
+            datasets=dataset_records,
+            dataset_data_ids=dataset_data_ids,
+            graph_node_ids=graph_node_ids,
+        )
+    except Exception as error:  # noqa: BLE001 — overlay must never break the render
+        logger.warning("Actor overlay unavailable; rendering without it: %s", error)
+        return [], []
+
+
 # ── Live relational readers ──────────────────────────────────────────────────
 
 
