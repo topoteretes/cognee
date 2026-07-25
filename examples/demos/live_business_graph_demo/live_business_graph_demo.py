@@ -146,6 +146,59 @@ async def main() -> None:
         print(f"   watch the page refresh — pausing {PAUSE_SECONDS:.0f}s…")
         await asyncio.sleep(PAUSE_SECONDS)
 
+    banner("PHASE 3.5 · The organization around the data")
+    # A colleague with her own agent, a read grant on the business dataset,
+    # and a separate body of organizational knowledge — so the page shows
+    # who owns what and who can access what, not just a single user.
+    from cognee.modules.users.methods import create_user, get_default_user
+    from cognee.modules.users.permissions.methods import give_permission_on_dataset
+    from cognee.modules.data.methods import get_datasets_by_name
+
+    owner = await get_default_user()
+    try:
+        maya = await create_user(email="maya@novagraph.dev", password="demo-Maya-1")
+        print("   colleague maya@novagraph.dev created.")
+    except Exception:
+        from cognee.modules.users.methods import get_user_by_email
+
+        maya = await get_user_by_email("maya@novagraph.dev")
+        print("   colleague maya@novagraph.dev already exists.")
+    business = (await get_datasets_by_name(DATASET, owner.id))[0]
+    for permission in ("read", "share"):
+        try:
+            await give_permission_on_dataset(maya, business.id, permission)
+        except Exception:
+            pass  # re-runs: grant already exists
+    print(f"   maya granted read+share on '{DATASET}'.")
+    await cognee.agents.register(
+        "support-analyst",
+        user=maya,
+        type="sdk",
+        source="api",
+        memory_mode="session",
+        # By id, not name: name lookup only finds datasets the user OWNS,
+        # and maya has a grant on this one, not ownership.
+        dataset_ids=[str(business.id)],
+        origin_function="live_business_graph_demo",
+    )
+    print("   maya's agent 'support-analyst' registered and scoped to the dataset.")
+
+    await cognee.add(
+        "NovaGraph company handbook: our mission is connected customer knowledge. "
+        "Escalation policy: enterprise tickets route to the on-call engineer within "
+        "one hour. Renewal playbook: accounts with falling adoption get an executive "
+        "sponsor call.",
+        dataset_name="org_handbook",
+        node_set=["org-knowledge"],
+    )
+    await cognee.cognify(["org_handbook"])
+    print("   organizational knowledge added as its own dataset (org_handbook).")
+    await render_page()
+    print(
+        f"   watch the page — operators and knowledge panels now show the org. Pausing {PAUSE_SECONDS:.0f}s…"
+    )
+    await asyncio.sleep(PAUSE_SECONDS)
+
     banner("PHASE 4 · The agent uses the connected business context")
     print("   Switch the page to the Memory tab — each answer's subgraph")
     print("   spotlights as the agent asks:")

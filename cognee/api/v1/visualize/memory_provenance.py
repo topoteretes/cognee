@@ -293,40 +293,201 @@ def build_actor_overlay(
 async def get_actor_overlay(
     datasets, user, graph_node_ids: set
 ) -> Tuple[List[Node], List[EdgeData]]:
-    """Read live actors (user, agent connections, datasets) for the overlay.
+    """Read live actors and governance for the overlay.
 
-    Best-effort: any unavailable layer degrades to an empty overlay so the
-    main visualization always renders.
+    Beyond the basic User→Agent→Dataset chain this reads the ACCESS picture:
+    the current tenant, every user visible in scope (same tenant, or all
+    non-agent users on single-tenant installs), their agent connections,
+    ``owns``/``can_<permission>`` edges from the ACL table, the scope's OTHER
+    datasets (external knowledge layers), and ``has_layer`` edges from
+    rendered datasets to their node_set container nodes — so "who owns what,
+    who can access what" is answerable on the page.
+
+    Best-effort: any unavailable layer degrades gracefully so the main
+    visualization always renders.
 
     Args:
         datasets: The Dataset ORM objects being rendered.
-        user: The User whose agent connections are shown.
+        user: The User whose scope is shown.
         graph_node_ids: String ids of nodes already in the rendered graph.
     """
     try:
-        from cognee.modules.data.methods import get_dataset_data
+        import json as _json
+        from uuid import UUID as _UUID
 
-        user_record: UserRecord = {
-            "id": str(user.id),
-            "name": getattr(user, "email", None) or "You",
-        }
+        from sqlalchemy import select
+        from sqlalchemy.orm import joinedload
+
+        from cognee.infrastructure.databases.relational import get_relational_engine
+        from cognee.modules.data.methods import get_dataset_data
+        from cognee.modules.data.models import Dataset as DatasetModel
+        from cognee.infrastructure.engine.utils import generate_node_id
+        from cognee.modules.users.models import User as UserModel
+        from cognee.modules.users.models.ACL import ACL
+
+        engine = get_relational_engine()
+
+        rendered_ids = {str(d.id) for d in datasets}
         dataset_records: List[DatasetRecord] = [
             {"id": str(d.id), "name": d.name, "owner_id": str(d.owner_id)} for d in datasets
         ]
+
         dataset_data_ids: Dict[str, List[str]] = {}
+        dataset_layers: Dict[str, List[str]] = {}
         for dataset in datasets:
             data_rows = await get_dataset_data(dataset.id)
             dataset_data_ids[str(dataset.id)] = [str(row.id) for row in data_rows]
+            layer_names: set = set()
+            for row in data_rows:
+                try:
+                    for name in _json.loads(row.node_set or "null") or []:
+                        layer_names.add(name)
+                except (TypeError, ValueError):
+                    pass
+            dataset_layers[str(dataset.id)] = sorted(layer_names)
 
-        agents = await _read_agents([str(user.id)])
+        users: Dict[str, Dict[str, Any]] = {
+            str(user.id): {
+                "id": str(user.id),
+                "name": getattr(user, "email", None) or "You",
+                "is_current": True,
+                "tenant_id": str(user.tenant_id) if getattr(user, "tenant_id", None) else None,
+            }
+        }
+        tenant = None
+        external_datasets: List[Dict[str, Any]] = []
+        grants: List[Dict[str, Any]] = []
 
-        return build_actor_overlay(
-            user=user_record,
+        async with engine.get_async_session() as session:
+            if getattr(user, "tenant_id", None):
+                from cognee.modules.users.models import Tenant
+
+                row = await session.get(Tenant, user.tenant_id)
+                if row is not None:
+                    tenant = {"id": str(row.id), "name": row.name or "organization"}
+
+            user_stmt = select(UserModel)
+            if tenant:
+                user_stmt = user_stmt.where(UserModel.tenant_id == user.tenant_id)
+            user_rows = (await session.execute(user_stmt)).scalars().all()
+            # Agent identities are child users — fold them out (they surface
+            # as agent connections under their operator instead).
+            for u in user_rows:
+                if getattr(u, "parent_user_id", None):
+                    continue
+                if str(getattr(u, "email", "")).endswith("@cognee.agent"):
+                    continue
+                uid = str(u.id)
+                if uid not in users:
+                    users[uid] = {
+                        "id": uid,
+                        "name": getattr(u, "email", None) or f"user:{uid[:8]}",
+                        "is_current": False,
+                        "tenant_id": str(u.tenant_id) if getattr(u, "tenant_id", None) else None,
+                    }
+
+            # The knowledge estate: every dataset owned by a visible user.
+            owned_rows = (
+                (
+                    await session.execute(
+                        select(DatasetModel).where(
+                            DatasetModel.owner_id.in_([_UUID(uid) for uid in users])
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            for d in owned_rows:
+                if str(d.id) not in rendered_ids:
+                    external_datasets.append(
+                        {"id": str(d.id), "name": d.name, "owner_id": str(d.owner_id)}
+                    )
+
+            all_dataset_ids = [d.id for d in datasets] + [_UUID(x["id"]) for x in external_datasets]
+            if all_dataset_ids:
+                acl_rows = (
+                    (
+                        await session.execute(
+                            select(ACL)
+                            .options(joinedload(ACL.permission))
+                            .where(ACL.dataset_id.in_(all_dataset_ids))
+                        )
+                    )
+                    .unique()
+                    .scalars()
+                    .all()
+                )
+                for acl in acl_rows:
+                    grants.append(
+                        {
+                            "principal_id": str(acl.principal_id),
+                            "dataset_id": str(acl.dataset_id),
+                            "permission": getattr(acl.permission, "name", None) or "read",
+                        }
+                    )
+
+        agents = await _read_agents(list(users.keys()))
+
+        nodes, edges = build_actor_overlay(
+            user=None,
             agents=agents,
             datasets=dataset_records,
             dataset_data_ids=dataset_data_ids,
             graph_node_ids=graph_node_ids,
         )
+
+        # Governance layer on top of the pure core.
+        if tenant:
+            nodes.append(Node(f"tenant:{tenant['id']}", {"type": "Tenant", "name": tenant["name"]}))
+        for u in users.values():
+            nodes.append(
+                Node(
+                    f"user:{u['id']}",
+                    {"type": "User", "name": u["name"], "is_current": u["is_current"]},
+                )
+            )
+            if tenant and u.get("tenant_id") == tenant["id"]:
+                edges.append(
+                    EdgeData(f"tenant:{tenant['id']}", f"user:{u['id']}", "has_member", {})
+                )
+        for agent in agents:
+            if agent.get("user_id") and str(agent["user_id"]) in users:
+                edges.append(
+                    EdgeData(f"user:{agent['user_id']}", f"agent:{agent['id']}", "operates", {})
+                )
+        for d in external_datasets:
+            nodes.append(
+                Node(f"dataset:{d['id']}", {"type": "Dataset", "name": d["name"], "external": True})
+            )
+        owner_by_dataset = {x["id"]: x.get("owner_id") for x in dataset_records + external_datasets}
+        for dataset_id, owner_id in owner_by_dataset.items():
+            if owner_id and owner_id in users:
+                edges.append(EdgeData(f"user:{owner_id}", f"dataset:{dataset_id}", "owns", {}))
+        seen_grants = set()
+        for g in grants:
+            if g["principal_id"] not in users:
+                continue
+            key = (g["principal_id"], g["dataset_id"], g["permission"])
+            if key in seen_grants:
+                continue
+            seen_grants.add(key)
+            edges.append(
+                EdgeData(
+                    f"user:{g['principal_id']}",
+                    f"dataset:{g['dataset_id']}",
+                    f"can_{g['permission']}",
+                    {},
+                )
+            )
+        # Knowledge layers: rendered dataset → its NodeSet container nodes.
+        for dataset_id, layer_names in dataset_layers.items():
+            for name in layer_names:
+                node_set_id = str(generate_node_id(f"NodeSet:{name}"))
+                if node_set_id in graph_node_ids:
+                    edges.append(EdgeData(f"dataset:{dataset_id}", node_set_id, "has_layer", {}))
+
+        return nodes, edges
     except Exception as error:  # noqa: BLE001 — overlay must never break the render
         logger.warning("Actor overlay unavailable; rendering without it: %s", error)
         return [], []

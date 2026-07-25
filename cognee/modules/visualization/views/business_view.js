@@ -48,6 +48,10 @@
   const byId = window._vizNodeById || {};
   const allNodes = Object.values(byId);
   const allLinks = window._vizLinks || [];
+  // Link endpoints may already be node OBJECTS (the classic Graph view's d3
+  // simulation mutates the shared link array in place) — normalize to ids.
+  function endId(v) { return v && typeof v === 'object' ? v.id : v; }
+  allLinks.forEach(l => { l._sid = endId(l.source); l._tid = endId(l.target); });
 
   // Own copies of entity nodes: story_view pins the shared objects with
   // fx/fy for its column layout, which would freeze this view's force
@@ -59,7 +63,35 @@
   const documents = allNodes.filter(n => n.stage === 'document');
   const agents = allNodes.filter(n => n.type === 'Agent');
   const datasets = allNodes.filter(n => n.type === 'Dataset');
-  const userNode = allNodes.find(n => n.type === 'User') || null;
+  const tenantNodes = allNodes.filter(n => n.type === 'Tenant');
+  const userNodes = allNodes.filter(n => n.type === 'User')
+    .sort((a, b) => (b.is_current ? 1 : 0) - (a.is_current ? 1 : 0));
+  const userNode = userNodes.find(n => n.is_current) || userNodes[0] || null;
+
+  // Governance indexes from the overlay edges: who owns / can touch what,
+  // which user operates which agent, which layers a dataset carries.
+  const access = {};          // userId -> {datasetId -> {owns, perms:Set}}
+  const agentOwner = {};      // agentId -> userId
+  const datasetLayers = {};   // datasetId -> [node_set names]
+  const dsById = {};
+  datasets.forEach(d => { dsById[d.id] = d; });
+  allLinks.forEach(l => {
+    const s = byId[l._sid], t = byId[l._tid];
+    if (!s || !t) return;
+    if (s.type === 'User' && t.type === 'Agent' && l.relation === 'operates') {
+      agentOwner[t.id] = s.id;
+    }
+    if (s.type === 'User' && t.type === 'Dataset' &&
+        (l.relation === 'owns' || String(l.relation).indexOf('can_') === 0)) {
+      const slot = ((access[s.id] = access[s.id] || {})[t.id] =
+        access[s.id][t.id] || { owns: false, perms: new Set() });
+      if (l.relation === 'owns') slot.owns = true;
+      else slot.perms.add(String(l.relation).slice(4));
+    }
+    if (s.type === 'Dataset' && t.type === 'NodeSet' && l.relation === 'has_layer') {
+      (datasetLayers[s.id] = datasetLayers[s.id] || []).push(t.name);
+    }
+  });
   const nodeSets = allNodes.filter(n => n.type === 'NodeSet' && n.name &&
     !['session_learnings', 'user_sessions_from_cache', 'agent_trace_feedbacks'].includes(n.name));
 
@@ -103,18 +135,18 @@
 
   // Entity adjacency (semantic links only — the business relationships).
   const semanticLinks = allLinks.filter(l =>
-    l.edge_class === 'semantic' && byId[l.source] && byId[l.target] &&
-    byId[l.source].stage === 'entity' && byId[l.target].stage === 'entity');
+    l.edge_class === 'semantic' && byId[l._sid] && byId[l._tid] &&
+    byId[l._sid].stage === 'entity' && byId[l._tid].stage === 'entity');
 
   // Cross-source bridges are first-class: the "surprising connections".
   semanticLinks.forEach(l => {
-    const a = setsOf(byId[l.source]), b = setsOf(byId[l.target]);
+    const a = setsOf(byId[l._sid]), b = setsOf(byId[l._tid]);
     l._bridge = a.length && b.length && !a.some(s => b.includes(s));
   });
 
   // Document → entities index (for L2 provenance unfolding).
   const docLinks = allLinks.filter(l => {
-    const s = byId[l.source], t = byId[l.target];
+    const s = byId[l._sid], t = byId[l._tid];
     return s && t && ((s.stage === 'document' && t.stage === 'entity') ||
       (s.stage === 'entity' && t.stage === 'document') ||
       (s.stage === 'chunk' && t.stage === 'entity'));
@@ -123,7 +155,7 @@
   // Agent → sources captions from actor edges.
   const agentReads = {};
   allLinks.forEach(l => {
-    const s = byId[l.source], t = byId[l.target];
+    const s = byId[l._sid], t = byId[l._tid];
     if (s && t && s.type === 'Agent' && (l.relation === 'reads' || l.relation === 'writes')) {
       (agentReads[s.id] = agentReads[s.id] || new Set()).add(t.name || 'dataset');
     }
@@ -180,6 +212,18 @@
   .bv-org-node .dot{width:7px;height:7px;border-radius:50%;flex:none;}
   .bv-org-node.asking{border-color:${C.amber};box-shadow:0 0 12px rgba(245,168,60,.25);}
   .bv-qcount{font-size:10.5px;color:${C.haze};margin-left:auto;}
+  .bv-org-node .acc{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px;}
+  .bv-acc{font-size:9.5px;color:${C.haze};border:1px solid ${C.cardBorder};border-radius:5px;
+    padding:1px 6px;white-space:nowrap;}
+  .bv-acc b{color:${C.bone};font-weight:700;margin-left:3px;}
+  .bv-acc.own{border-color:rgba(67,217,232,.45);color:${C.inflow};}
+  .bv-acc.own b{color:${C.inflow};}
+  .bv-card.external{opacity:.72;border-style:dashed;}
+  .bv-card .live-dot{color:${C.inflow};font-size:8px;vertical-align:2px;}
+  .bv-card .share{position:absolute;right:10px;top:9px;font-size:10px;color:${C.haze};cursor:pointer;
+    opacity:0;transition:opacity .15s;}
+  .bv-card:hover .share{opacity:1;}
+  .bv-dim{opacity:.25 !important;transition:opacity .2s;}
   .bv-rail.compressed{transform:translateX(var(--bv-hide,-160px));opacity:.75;}
   #bv-right.compressed{--bv-hide:160px;}
   #bv-dock{position:absolute;left:0;right:0;bottom:0;z-index:6;
@@ -243,10 +287,10 @@
   ghost.innerHTML = '<div class="t">+ connect a source</div><div class="s">slack · files · crm · anything</div>';
   railL.appendChild(ghost);
 
-  // Operators: one structured hierarchy — tenant → user(s) → agents — the
-  // multi-tenant story in miniature instead of a pile of cards.
+  // Operators: the governance tree — tenant → users → their agents — with
+  // each user's ACCESS spelled out (owner / R / W / share per dataset).
+  // Hovering a user highlights what they can touch; everything else dims.
   const org = document.getElementById('bv-org');
-  const tenantNode = allNodes.find(n => n.type === 'Tenant') || null;
   const questionCount = bakedSearchEvents.filter(e => (e.kind || 'search') === 'search').length;
 
   function orgNode(cls, html) {
@@ -255,35 +299,122 @@
     el.innerHTML = html;
     return el;
   }
+  function permCode(slot) {
+    if (slot.owns) return 'owner';
+    const p = slot.perms;
+    const code = (p.has('read') ? 'R' : '') + (p.has('write') ? 'W' : '') +
+      (p.has('share') ? 'S' : '') + (p.has('delete') ? 'D' : '');
+    return code || 'R';
+  }
+  function accessChips(uid) {
+    const slots = access[uid] || {};
+    return Object.keys(slots).map(did => {
+      const d = dsById[did];
+      if (!d) return '';
+      const slot = slots[did];
+      return `<span class="bv-acc${slot.owns ? ' own' : ''}" data-ds="${did}">${esc(d.name)}
+        <b>${permCode(slot)}</b></span>`;
+    }).join('');
+  }
+  function accessibleDatasets(uid) {
+    return new Set(Object.keys(access[uid] || {}));
+  }
+  function wireUserHover(el, uid) {
+    el.addEventListener('mouseenter', () => {
+      const ok = accessibleDatasets(uid);
+      document.querySelectorAll('[data-dsrow]').forEach(row => {
+        row.classList.toggle('bv-dim', !ok.has(row.dataset.dsrow));
+      });
+      // The rendered dataset's sources dim too when this user can't read it.
+      const renderedOk = datasets.some(d => !d.external && ok.has(d.id));
+      document.querySelectorAll('#bv-left .bv-card:not(.ghost):not([data-dsrow])')
+        .forEach(c => c.classList.toggle('bv-dim', !renderedOk));
+    });
+    el.addEventListener('mouseleave', () => {
+      document.querySelectorAll('.bv-dim').forEach(x => x.classList.remove('bv-dim'));
+    });
+  }
+
   let orgParent = org;
-  if (tenantNode) {
-    orgParent.appendChild(orgNode('tenant', `<div class="t" style="color:${C.haze}">⌂ ${esc(tenantNode.name || 'organization')}</div>`));
+  if (tenantNodes.length) {
+    orgParent.appendChild(orgNode('tenant',
+      `<div class="t" style="color:${C.haze}">⌂ ${esc(tenantNodes[0].name || 'organization')}</div>
+       <div class="s">${userNodes.length} member${userNodes.length === 1 ? '' : 's'}</div>`));
     const wrap = document.createElement('div');
     wrap.className = 'bv-org-child';
     org.appendChild(wrap);
     orgParent = wrap;
   }
-  const userEl = orgNode('', `<div class="t"><span class="dot" style="background:${C.bone}"></span>you
-      <span class="bv-qcount">${questionCount ? questionCount + ' questions' : ''}</span></div>
-    <div class="s">${esc(userNode ? (userNode.name || '') : 'this workspace')}</div>`);
-  orgParent.appendChild(userEl);
-  const agentsWrap = document.createElement('div');
-  agentsWrap.className = 'bv-org-child';
-  orgParent.appendChild(agentsWrap);
 
   const agentCardEls = {};
+  const agentsByUser = {};
   agents.forEach(a => {
-    const reads = agentReads[a.id] ? [...agentReads[a.id]].join(', ') : null;
-    const el = orgNode('', `<div class="t"><span class="dot" style="background:${C.amber}"></span>${esc(a.name)}
-        <span class="badge">agent</span></div>
-      <div class="s">${reads ? 'reads ' + esc(reads) : 'connected'}</div>`);
-    agentsWrap.appendChild(el);
-    agentCardEls[a.id] = el;
+    const uid = agentOwner[a.id] || (userNode && userNode.id);
+    (agentsByUser[uid] = agentsByUser[uid] || []).push(a);
+  });
+
+  userNodes.forEach(u => {
+    const you = !!u.is_current;
+    const userEl = orgNode('', `<div class="t"><span class="dot" style="background:${you ? C.bone : C.haze}"></span>
+        ${you ? 'you' : esc((u.name || '').split('@')[0])}
+        <span class="bv-qcount">${you && questionCount ? questionCount + ' questions' : ''}</span></div>
+      <div class="s">${esc(u.name || '')}</div>
+      <div class="acc">${accessChips(u.id)}</div>`);
+    wireUserHover(userEl, u.id);
+    orgParent.appendChild(userEl);
+
+    const ownAgents = agentsByUser[u.id] || [];
+    if (ownAgents.length) {
+      const agentsWrap = document.createElement('div');
+      agentsWrap.className = 'bv-org-child';
+      orgParent.appendChild(agentsWrap);
+      ownAgents.forEach(a => {
+        const reads = agentReads[a.id] ? [...agentReads[a.id]].join(', ') : null;
+        const el = orgNode('', `<div class="t"><span class="dot" style="background:${C.amber}"></span>${esc(a.name)}
+            <span class="badge">agent</span></div>
+          <div class="s">${reads ? 'reads ' + esc(reads) : 'connected'}</div>`);
+        wireUserHover(el, u.id);
+        agentsWrap.appendChild(el);
+        agentCardEls[a.id] = el;
+      });
+    }
   });
   if (!agents.length) {
-    agentsWrap.appendChild(orgNode('tenant', `<div class="t" style="color:${C.haze}">+ plug in your agent</div>
+    orgParent.appendChild(orgNode('tenant', `<div class="t" style="color:${C.haze}">+ plug in your agent</div>
       <div class="s">claude code · mcp · sdk</div>`));
   }
+
+  // Knowledge estate on the left rail: the rendered dataset with its layers,
+  // then external datasets (other bodies of knowledge in this scope) — each
+  // with its owner and the "+ share" affordance where a grant would happen.
+  const knowledgeTitle = document.createElement('div');
+  knowledgeTitle.className = 'bv-rail-title';
+  knowledgeTitle.style.marginTop = '12px';
+  knowledgeTitle.textContent = 'knowledge';
+  railL.appendChild(knowledgeTitle);
+  const ownerName = uid => {
+    const u = userNodes.find(x => x.id === 'user:' + uid || x.id === uid);
+    if (!u) return null;
+    return u.is_current ? 'you' : (u.name || '').split('@')[0];
+  };
+  function ownerOf(did) {
+    for (const uid of Object.keys(access)) {
+      if (access[uid][did] && access[uid][did].owns) return ownerName(uid);
+    }
+    return null;
+  }
+  datasets.forEach(d => {
+    const el = document.createElement('div');
+    el.className = 'bv-card' + (d.external ? ' external' : '');
+    el.setAttribute('data-dsrow', d.id);
+    const layers = (datasetLayers[d.id] || []).join(' · ');
+    const owner = ownerOf(d.id);
+    el.innerHTML = `<div class="spine" style="background:${d.external ? C.haze : C.inflow}"></div>
+      <div class="t">${esc(d.name)}${d.external ? '' : ' <span class="live-dot">●</span>'}</div>
+      <div class="s">${owner ? 'owned by ' + esc(owner) : ''}${layers ? ' · layers: ' + esc(layers) : ''}${d.external ? ' · separate graph' : ''}</div>
+      <div class="share" title="Grant read/write on this dataset — cognee permissions API (give_permission_on_dataset)">+ share</div>`;
+    railL.appendChild(el);
+  });
 
   // ── Simulation ────────────────────────────────────────────────────
   let W = 0, H = 0, dpr = 1;
@@ -338,7 +469,7 @@
   if (prevIds) entities.forEach(n => { if (!prevIds.has(n.id)) newborn.push(n); });
 
   const sim = d3.forceSimulation(entities)
-    .force('link', d3.forceLink(semanticLinks.map(l => ({ ...l }))).id(d => d.id).distance(110).strength(0.2))
+    .force('link', d3.forceLink(semanticLinks.map(l => ({ source: l._sid, target: l._tid }))).id(d => d.id).distance(110).strength(0.2))
     .force('charge', d3.forceManyBody().strength(-220))
     // Collide radius reserves label room, so names rarely overlap.
     .force('collide', d3.forceCollide().radius(d => d._r + 26))
@@ -548,7 +679,7 @@
     if (best !== hovered) { hovered = best; requestDraw(); }
     if (best) {
       const sets = setsOf(best);
-      const docs = docLinks.filter(l => l.source === best.id || l.target === best.id).length;
+      const docs = docLinks.filter(l => l._sid === best.id || l._tid === best.id).length;
       hover.innerHTML = `<b>${esc(best.name)}</b><br>
         <span style="color:${C.haze}">${esc(best.type || '')}${sets.length ? ' · from ' + esc(sets.join(', ')) : ''}${docs ? ' · seen in ' + docs + ' places' : ''}</span>`;
       hover.style.display = 'block';
@@ -665,7 +796,7 @@
 
     // Edges: gentle arcs (perpendicular bow) instead of straight wires.
     semanticLinks.forEach(l => {
-      const s = E[l.source], t = E[l.target];
+      const s = E[l._sid], t = E[l._tid];
       if (!s || !t || s.x == null || t.x == null) return;
       const inSpot = spot && spot.ids.has(s.id) && spot.ids.has(t.id);
       const dx = t.x - s.x, dy = t.y - s.y;
@@ -682,8 +813,8 @@
     // L2: documents unfold near their entities
     if (level >= 2 || plumbing) {
       docLinks.forEach(l => {
-        const d = byId[l.source].stage !== 'entity' ? byId[l.source] : byId[l.target];
-        const e = E[byId[l.source].stage === 'entity' ? l.source : l.target];
+        const d = byId[l._sid].stage !== 'entity' ? byId[l._sid] : byId[l._tid];
+        const e = E[byId[l._sid].stage === 'entity' ? l._sid : l._tid];
         if (!e || e.x == null) return;
         const dx = e.x + 26 + (hash(d.id) % 20), dy = e.y + 18 + (hash(d.id) * 3 % 16);
         ctx.setLineDash([3 / transform.k, 3 / transform.k]);
