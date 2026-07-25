@@ -1,3 +1,5 @@
+[![MCP Toplist](https://mcptoplist.com/badge/glama%2Ftopoteretes%2Fcognee.svg)](https://mcptoplist.com/server/glama%2Ftopoteretes%2Fcognee)
+
 <div align="center">
   <a href="https://github.com/topoteretes/cognee">
     <img src="https://raw.githubusercontent.com/topoteretes/cognee/refs/heads/dev/assets/cognee-logo-transparent.png" alt="Cognee Logo" height="60">
