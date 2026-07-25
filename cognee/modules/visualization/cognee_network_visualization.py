@@ -26,6 +26,7 @@ from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.files.storage.LocalFileStorage import LocalFileStorage
 from cognee.modules.visualization.preprocessor import preprocess
 from cognee.modules.visualization.views import (
+    business_view,
     inspector,
     memory_map,
     schema_view,
@@ -141,6 +142,8 @@ async def cognee_network_visualization(
     html = html.replace("__MEMORY_VIEW_JS__", memory_map.emit_js(pre))
     html = html.replace("__SEMANTIC_LAYOUT_JS__", semantic_layout.emit_js(pre))
     html = html.replace("__SEMANTIC_VIEW_JS__", semantic_map.emit_js(pre))
+    # Business view last: it reads story_view's window globals at IIFE time.
+    html = html.replace("__BUSINESS_VIEW_JS__", business_view.emit_js(pre))
 
     # 2) Data tokens: substituted last so JSON-embedded ``__SCHEMA_GRAPH_DATA__``
     #    inside the schema JS chunk gets resolved correctly.

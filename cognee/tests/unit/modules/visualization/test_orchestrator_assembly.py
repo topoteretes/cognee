@@ -62,6 +62,19 @@ def test_all_view_modules_contribute(tmp_path):
     assert "labelBudget" in html
     # memory_map.js: lazy-render entry point for the Memory tab
     assert "_renderMemoryView" in html
+    # business_view.js: the default Business tab (LOOM)
+    assert "_renderBusinessView" in html
+    assert "_bvLiveEvent" in html
+
+
+def test_business_view_is_default_tab(tmp_path):
+    """The Business tab ships first and active; the classic Graph view is
+    one click away but no longer the landing experience."""
+    html = _render(tmp_path)
+    assert '<button class="tab-btn active" data-view="business"' in html
+    assert 'id="business-view"' in html
+    # graph container starts hidden (business is visible by default)
+    assert '<div id="graph-view" style="display:none">' in html
 
 
 def test_data_tokens_substituted_as_json(tmp_path):

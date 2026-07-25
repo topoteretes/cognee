@@ -15,6 +15,8 @@
   const searchEvents = __SEARCH_EVENTS__;
 
   const MM = memoryMap || {};
+  // Shared with the Business view's moment reel (cognify-run moments).
+  window._mmTimeline = MM.timeline || [];
   const docsP = MM.documents || [];
   const orphansP = MM.orphan_chunks || [];
   const groupsP = MM.entity_groups || [];

@@ -40,22 +40,20 @@
 // Tab switching logic
 (function(){
   const tabs = document.querySelectorAll('.tab-btn');
-  const graphView = document.getElementById('graph-view');
-  const schemaView = document.getElementById('schema-view');
-  const memoryView = document.getElementById('memory-view');
-  const semanticView = document.getElementById('semantic-view');
+  const VIEWS = ['business', 'graph', 'schema', 'memory', 'semantic'];
   tabs.forEach(btn => {
     btn.addEventListener('click', () => {
       tabs.forEach(t => { t.style.background='transparent'; t.style.color='var(--text2)'; t.classList.remove('active'); });
       btn.style.background='#1F9E6E'; btn.style.color='#fff'; btn.classList.add('active');
       const view = btn.dataset.view;
-      graphView.style.display = view === 'graph' ? '' : 'none';
-      schemaView.style.display = view === 'schema' ? '' : 'none';
-      if (memoryView) memoryView.style.display = view === 'memory' ? '' : 'none';
-      if (semanticView) semanticView.style.display = view === 'semantic' ? '' : 'none';
+      VIEWS.forEach(v => {
+        const el = document.getElementById(v + '-view');
+        if (el) el.style.display = v === view ? '' : 'none';
+      });
       if (view === 'schema' && window._renderSchemaGraph) window._renderSchemaGraph();
       if (view === 'memory' && window._renderMemoryView) window._renderMemoryView();
       if (view === 'semantic' && window._renderSemanticView) window._renderSemanticView();
+      if (view === 'business' && window._renderBusinessView) window._renderBusinessView();
     });
   });
 })();
