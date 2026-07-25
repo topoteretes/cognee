@@ -78,7 +78,8 @@ class FileRecord(_HasId, total=False):
 
 
 class AgentDatasetRef(TypedDict, total=False):
-    dataset_id: str
+    dataset_id: Optional[str]
+    name: Optional[str]
     role: str  # "read" | "read_write"
 
 
@@ -86,6 +87,7 @@ class AgentRecord(_HasId, total=False):
     name: Optional[str]
     user_id: Optional[str]
     session_id: Optional[str]
+    memory_mode: Optional[str]
     datasets: List[AgentDatasetRef]
 
 
@@ -274,9 +276,10 @@ def build_actor_overlay(
 
     for agent in agents:
         agent_node_id = f"agent:{agent['id']}"
-        nodes.append(
-            Node(agent_node_id, {"type": "Agent", "name": agent.get("name") or str(agent["id"])})
-        )
+        agent_props = {"type": "Agent", "name": agent.get("name") or str(agent["id"])}
+        if agent.get("memory_mode"):
+            agent_props["memory_mode"] = agent["memory_mode"]
+        nodes.append(Node(agent_node_id, agent_props))
         if user and str(agent.get("user_id") or "") == str(user["id"]):
             edges.append(EdgeData(f"user:{user['id']}", agent_node_id, "operates", {}))
         for ref in agent.get("datasets") or []:
@@ -429,6 +432,35 @@ async def get_actor_overlay(
 
         agents = await _read_agents(list(users.keys()))
 
+        # Agents registered by dataset NAME carry no id in their registry
+        # refs — resolve against the datasets visible in this scope so their
+        # access renders (and is editable) like everyone else's.
+        name_to_id = {
+            d["name"]: d["id"] for d in dataset_records + external_datasets if d.get("name")
+        }
+        for agent in agents:
+            for ref in agent.get("datasets") or []:
+                if not ref.get("dataset_id") and ref.get("name") in name_to_id:
+                    ref["dataset_id"] = name_to_id[ref["name"]]
+
+        # Session-memory footprint per user (their conversation sessions).
+        session_counts: Dict[str, int] = {}
+        try:
+            from sqlalchemy import func as _func
+
+            from cognee.modules.session_lifecycle.models import SessionRecord
+
+            async with engine.get_async_session() as session:
+                rows = await session.execute(
+                    select(SessionRecord.user_id, _func.count())
+                    .where(SessionRecord.user_id.in_([_UUID(uid) for uid in users]))
+                    .group_by(SessionRecord.user_id)
+                )
+                for uid, count in rows.all():
+                    session_counts[str(uid)] = int(count)
+        except Exception as error:  # noqa: BLE001 — footprint is advisory
+            logger.debug("Session counts unavailable: %s", error)
+
         nodes, edges = build_actor_overlay(
             user=None,
             agents=agents,
@@ -441,12 +473,10 @@ async def get_actor_overlay(
         if tenant:
             nodes.append(Node(f"tenant:{tenant['id']}", {"type": "Tenant", "name": tenant["name"]}))
         for u in users.values():
-            nodes.append(
-                Node(
-                    f"user:{u['id']}",
-                    {"type": "User", "name": u["name"], "is_current": u["is_current"]},
-                )
-            )
+            user_props = {"type": "User", "name": u["name"], "is_current": u["is_current"]}
+            if session_counts.get(u["id"]):
+                user_props["sessions"] = session_counts[u["id"]]
+            nodes.append(Node(f"user:{u['id']}", user_props))
             if tenant and u.get("tenant_id") == tenant["id"]:
                 edges.append(
                     EdgeData(f"tenant:{tenant['id']}", f"user:{u['id']}", "has_member", {})
@@ -531,9 +561,13 @@ async def _read_agents(user_ids: List[str]) -> List[AgentRecord]:
             continue
         seen.add(conn.id)
         refs: List[AgentDatasetRef] = [
-            {"dataset_id": str(ref.id), "role": ref.role or "read"}
+            {
+                "dataset_id": str(ref.id) if getattr(ref, "id", None) else None,
+                "name": getattr(ref, "name", None),
+                "role": ref.role or "read",
+            }
             for ref in (conn.datasets or [])
-            if getattr(ref, "id", None)
+            if getattr(ref, "id", None) or getattr(ref, "name", None)
         ]
         agents.append(
             {
@@ -541,6 +575,7 @@ async def _read_agents(user_ids: List[str]) -> List[AgentRecord]:
                 "name": conn.agent_session_name or conn.id,
                 "user_id": str(conn.user_id) if conn.user_id else None,
                 "session_id": conn.session_id,
+                "memory_mode": getattr(conn, "memory_mode", None),
                 "datasets": refs,
             }
         )

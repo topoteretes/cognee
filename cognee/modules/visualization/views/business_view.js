@@ -287,6 +287,13 @@
   .bv-acc.editable:hover b{color:${C.amber};}
   .bv-acc.ghost{border-style:dashed;opacity:.6;}
   .bv-card.bv-reach{border-color:rgba(67,217,232,.55);box-shadow:0 0 10px rgba(67,217,232,.18);}
+  .bv-card.source{cursor:pointer;}
+  .bv-card.source.focused{border-color:${C.bone};box-shadow:0 0 10px rgba(233,238,246,.15);}
+  .bv-org-node .mem{font-size:9.5px;color:${C.haze};margin:5px 0 0 0;display:flex;gap:4px;align-items:center;}
+  .bv-mem{border:1px dashed ${C.cardBorder};border-radius:5px;padding:1px 6px;opacity:.5;}
+  .bv-mem.on{border-style:solid;opacity:1;color:${C.bone};}
+  .bv-mem.session{cursor:pointer;}
+  .bv-mem.session.on{color:${C.inflow};border-color:rgba(67,217,232,.45);}
   .bv-card.external{opacity:.72;border-style:dashed;}
   .bv-card.knowledge{cursor:pointer;}
   .bv-card.knowledge.focused{border-color:${C.inflow};box-shadow:0 0 12px rgba(67,217,232,.2);}
@@ -348,14 +355,35 @@
   view.appendChild(hover);
 
   // ── Rails ─────────────────────────────────────────────────────────
+  // Clicking a source shows ONLY that source's memory; click again (or the
+  // canvas) to see everything. Session badges reuse the same lens.
+  let focusSets = null;   // Set of node_set names, or null for everything
+  function setFocusSets(sets, label) {
+    focusSets = sets && sets.size ? sets : null;
+    Object.keys(sourceCardEls).forEach(name => {
+      sourceCardEls[name].classList.toggle('focused', !!focusSets && focusSets.has(name));
+      sourceCardEls[name].classList.toggle('bv-dim', !!focusSets && !focusSets.has(name));
+    });
+    if (focusSets) {
+      const n = entities.filter(e => setsOf(e).some(x => focusSets.has(x))).length;
+      narrate('showing only ' + label + ' — ' + n + ' entities · click again for everything', C.inflow);
+    } else if (label) {
+      narrate('showing everything', C.haze);
+    }
+    requestDraw();
+  }
   const sourceCardEls = {};
   sourceNames.forEach(name => {
     const el = document.createElement('div');
-    el.className = 'bv-card';
+    el.className = 'bv-card source';
     const docs = setDocCount[name] || 0, ents = setEntityCount[name] || 0;
     el.innerHTML = `<div class="spine" style="background:${setColor[name]}"></div>
       <div class="t">${esc(name)}</div>
       <div class="s">${ents ? ents + ' entities · ' + docs + ' item' + (docs === 1 ? '' : 's') : 'weaving…'}</div>`;
+    el.addEventListener('click', () => {
+      if (focusSets && focusSets.has(name) && focusSets.size === 1) setFocusSets(null, name);
+      else setFocusSets(new Set([name]), name);
+    });
     railL.appendChild(el);
     sourceCardEls[name] = el;
   });
@@ -501,9 +529,25 @@
         agentsWrap.className = 'bv-org-child';
         orgParent.appendChild(agentsWrap);
         ownAgents.forEach(a => {
+          const mode = a.memory_mode || 'unknown';
+          const hasPermanent = mode === 'cognee' || mode === 'hybrid';
+          const hasSession = mode === 'session' || mode === 'hybrid';
+          const mem = `<div class="mem">memory:
+              <span class="bv-mem${hasPermanent ? ' on' : ''}" title="permanent memory — searches its brains (with_memory)">permanent</span>
+              <span class="bv-mem session${hasSession ? ' on' : ''}" title="session memory — its own conversation history; distilled traces land as session_learnings (with_session_memory)">session</span></div>`;
           const el = orgNode('', `<div class="t"><span class="dot" style="background:${C.amber}"></span>${esc(a.name)}
               <span class="badge">agent</span></div>
+            ${mem}
             <div class="acc">${accessChips(a.id)}</div>`);
+          const sessionBadge = el.querySelector('.bv-mem.session');
+          if (sessionBadge) sessionBadge.addEventListener('click', ev => {
+            ev.stopPropagation();
+            const sessionSets = new Set(allNodes.filter(n => n.type === 'NodeSet' &&
+              ['session_learnings', 'user_sessions_from_cache', 'agent_trace_feedbacks'].includes(n.name))
+              .map(n => n.name));
+            if (sessionSets.size) setFocusSets(sessionSets, a.name + "'s session memory");
+            else narrate(a.name + ' has session memory (conversation history) — no distilled session learnings in this brain yet', C.haze);
+          });
           el.dataset.uid = a.id;
           wireUserHover(el, a.id);
           wireChips(el);
@@ -569,6 +613,7 @@
     brainById = BS.byIdL;
     hovered = null;
     spotlight = null;
+    focusSets = null;
     // Sources rail belongs to the primary brain — mute it while visiting.
     document.querySelectorAll('#bv-left .bv-card:not(.knowledge):not(.ghost), #bv-left .bv-rail-title')
       .forEach(el => el.classList.toggle('bv-muted', key !== 'primary'));
@@ -612,7 +657,7 @@
       fit(true);
     }
   }
-  canvas.addEventListener('click', clearKnowledgeFocus);
+  canvas.addEventListener('click', () => { clearKnowledgeFocus(); if (focusSets) setFocusSets(null); });
 
   function brainCard(d, team) {
     const el = document.createElement('div');
@@ -1031,10 +1076,12 @@
     // the business schema) and the instance layer, driven by zoom.
     const typeAlpha = spot ? 0 : Math.max(0, Math.min(1, (1.55 - transform.k) / 0.25));
     const instAlpha = 1 - typeAlpha;
+    const inLens = n => !focusSets || setsOf(n).some(x => focusSets.has(x));
     typeNodes.forEach(tn => {
-      tn.x = d3.mean(tn.members, m => m.x) || 0;
-      tn.y = d3.mean(tn.members, m => m.y) || 0;
-      tn._r = 14 + 7 * Math.log2(1 + tn.members.length);
+      tn._visible = focusSets ? tn.members.filter(inLens) : tn.members;
+      tn.x = d3.mean(tn._visible.length ? tn._visible : tn.members, m => m.x) || 0;
+      tn.y = d3.mean(tn._visible.length ? tn._visible : tn.members, m => m.y) || 0;
+      tn._r = 14 + 7 * Math.log2(1 + (tn._visible.length || tn.members.length));
     });
     // Relax overlaps between type circles (labels need ~40px of air).
     // Deterministic order + fresh centroids each frame keep this stable.
@@ -1060,6 +1107,7 @@
     if (level <= 1) {
       ctx.textAlign = 'center';
       sourceNames.forEach(name => {
+        if (focusSets && !focusSets.has(name)) return;
         const members = entities.filter(n => setsOf(n).includes(name));
         if (members.length < 2) return;
         const pad = 34;
@@ -1147,6 +1195,7 @@
         group.forEach((tl, idx) => {
           const a = tByName[tl.a], b = tByName[tl.b];
           if (!a || !b) return;
+          if (focusSets && (!a._visible.length || !b._visible.length)) return;
           const dx = b.x - a.x, dy = b.y - a.y;
           // Fan: first relation bows one way, second the other, and so on.
           const bow = (idx % 2 === 0 ? 1 : -1) * (0.10 + Math.floor(idx / 2) * 0.14);
@@ -1189,7 +1238,9 @@
       });
 
       typeNodes.forEach(tn => {
-        const dominant = Object.keys(tn.sets).sort((x, y) => tn.sets[y] - tn.sets[x])[0];
+        if (focusSets && !tn._visible.length) return;
+        const dominant = focusSets ? [...focusSets][0]
+          : Object.keys(tn.sets).sort((x, y) => tn.sets[y] - tn.sets[x])[0];
         const fill = d3.color(dominant ? (setColor[dominant] || '#8A7BD8') : '#8A7BD8');
         ctx.globalAlpha = typeAlpha * dimmed;
         ctx.beginPath();
@@ -1204,7 +1255,8 @@
         ctx.fillText(tn.name, tn.x, tn.y + tn._r + 17);
         ctx.font = '500 11px -apple-system, sans-serif';
         ctx.fillStyle = 'rgba(126,140,166,' + typeAlpha + ')';
-        ctx.fillText(tn.members.length + (tn.members.length === 1 ? ' record' : ' records'), tn.x, tn.y + tn._r + 31);
+        const shown = (tn._visible || tn.members).length;
+        ctx.fillText(shown + (shown === 1 ? ' record' : ' records'), tn.x, tn.y + tn._r + 31);
         ctx.globalAlpha = 1;
       });
     }
@@ -1213,6 +1265,7 @@
     if (instAlpha > 0.01) semanticLinks.forEach(l => {
       const s = E[l._sid], t = E[l._tid];
       if (!s || !t || s.x == null || t.x == null) return;
+      if (focusSets && (!inLens(s) || !inLens(t))) return;
       const inSpot = spot && spot.ids.has(s.id) && spot.ids.has(t.id);
       const dx = t.x - s.x, dy = t.y - s.y;
       const mx = (s.x + t.x) / 2 - dy * 0.12, my = (s.y + t.y) / 2 + dx * 0.12;
@@ -1252,6 +1305,7 @@
     const importanceCut = topImportanceCut();
     ctx.textAlign = 'center';
     if (instAlpha > 0.01) entities.forEach(n => {
+      if (focusSets && !inLens(n) && !(spot && spot.ids.has(n.id))) return;
       if (!showAll && (n.importance || 0) < importanceCut && !(spot && spot.ids.has(n.id))) return;
       const bornAt = newbornAt[n.id];
       let scale = 1;
