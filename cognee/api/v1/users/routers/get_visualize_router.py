@@ -37,6 +37,31 @@ class UserDatasetPair(BaseModel):
     )
 
 
+async def _count_completed_pipeline_runs() -> int:
+    """Completed cognify runs, from the relational store only.
+
+    Best-effort: any failure (fresh install without the table, DB offline)
+    returns 0 so the live-events endpoint never breaks on this counter.
+    """
+    try:
+        from sqlalchemy import func, select
+
+        from cognee.infrastructure.databases.relational import get_relational_engine
+        from cognee.modules.pipelines.models.PipelineRun import PipelineRun, PipelineRunStatus
+
+        engine = get_relational_engine()
+        async with engine.get_async_session() as session:
+            result = await session.execute(
+                select(func.count())
+                .select_from(PipelineRun)
+                .where(PipelineRun.status == PipelineRunStatus.DATASET_PROCESSING_COMPLETED)
+            )
+            return int(result.scalar() or 0)
+    except Exception as error:  # noqa: BLE001 — counter is advisory only
+        logger.debug("Completed-run count unavailable: %s", error)
+        return 0
+
+
 def get_visualize_router() -> APIRouter:
     router = APIRouter()
 
@@ -178,6 +203,10 @@ def get_visualize_router() -> APIRouter:
         ## Notes
         - Best-effort: an unavailable session layer yields an empty list, never an error
         - Events carry ``node_ids``/``edge_ids`` (``used_graph_element_ids`` provenance)
+        - ``completed_runs`` counts completed cognify pipeline runs (relational
+          DB only — never touches the graph store, so embedded single-writer
+          graph databases are not locked). A live page uses an increase as
+          "the graph has grown" and refreshes itself.
         """
         from cognee.modules.visualization.session_events import collect_session_events
 
@@ -187,7 +216,13 @@ def get_visualize_router() -> APIRouter:
             # lexicographic; events without a time are never replayed.
             events = [event for event in events if (event.get("time") or "") > since]
         latest = max((event.get("time") or "" for event in events), default="")
-        return JSONResponse({"events": events, "latest": latest or (since or None)})
+        return JSONResponse(
+            {
+                "events": events,
+                "latest": latest or (since or None),
+                "completed_runs": await _count_completed_pipeline_runs(),
+            }
+        )
 
     @router.post("/multi", response_model=None)
     async def visualize_multi(

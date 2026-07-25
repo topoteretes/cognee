@@ -148,6 +148,10 @@ def test_live_events_url_embedded_and_client_wired(tmp_path):
     # The poller and the memory-view hook it calls are both present.
     assert "window._mmLiveEvent" in html
     assert "live-events-badge" in html
+    # Growth auto-refresh: reload when the backend reports new cognify runs,
+    # returning to the tab that was active before the reload.
+    assert "checkGrowth" in html
+    assert "_liveReloadTab" in html
 
 
 def test_schema_data_is_null_when_omitted(tmp_path):

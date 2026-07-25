@@ -512,6 +512,36 @@ __SEMANTIC_VIEW_JS__
   const LIVE_URL = __LIVE_EVENTS_URL__;
   if (!LIVE_URL) return;
   const POLL_MS = 1500;
+  // After the backend reports new completed cognify runs, wait this long
+  // before reloading so whatever re-renders this HTML file has finished.
+  const GROWTH_SETTLE_MS = 6000;
+
+  // Restore the tab that was active before a growth reload.
+  try {
+    const savedTab = sessionStorage.getItem('_liveReloadTab');
+    if (savedTab) {
+      sessionStorage.removeItem('_liveReloadTab');
+      const btn = document.querySelector('button[data-view="' + savedTab + '"]');
+      if (btn) btn.click();
+    }
+  } catch (e) { /* sessionStorage unavailable (opaque origin) — stay on default tab */ }
+
+  let runsBaseline = null;
+  let reloadArmed = false;
+  function checkGrowth(completedRuns) {
+    if (typeof completedRuns !== 'number') return;
+    if (runsBaseline === null) { runsBaseline = completedRuns; return; }
+    if (completedRuns <= runsBaseline || reloadArmed) return;
+    reloadArmed = true;
+    setBadge(true, 'graph grew — refreshing…');
+    setTimeout(function () {
+      try {
+        const active = document.querySelector('button.tab-btn.active');
+        if (active) sessionStorage.setItem('_liveReloadTab', active.dataset.view);
+      } catch (e) { /* best effort */ }
+      location.reload();
+    }, GROWTH_SETTLE_MS);
+  }
 
   function eventKey(e) {
     return (e.kind || 'search') + '|' + (e.qa_id || '') + '|' + (e.time || '') +
@@ -544,7 +574,8 @@ __SEMANTIC_VIEW_JS__
           if (window._mmLiveEvent) window._mmLiveEvent(e);
         });
         if (data.latest && data.latest > since) since = data.latest;
-        setBadge(true);
+        checkGrowth(data.completed_runs);
+        if (!reloadArmed) setBadge(true);
       } else {
         failures++;
         setBadge(false);
@@ -559,7 +590,7 @@ __SEMANTIC_VIEW_JS__
 
   // Small fixed indicator so it is visible whether live mode is connected.
   let badge = null;
-  function setBadge(connected) {
+  function setBadge(connected, label) {
     if (!badge) {
       badge = document.createElement('div');
       badge.id = 'live-events-badge';
@@ -568,7 +599,7 @@ __SEMANTIC_VIEW_JS__
         'pointer-events:none;opacity:.85;';
       document.body.appendChild(badge);
     }
-    badge.textContent = connected ? '● LIVE' : '○ live: reconnecting…';
+    badge.textContent = label ? '● ' + label : (connected ? '● LIVE' : '○ live: reconnecting…');
     badge.style.background = connected ? 'rgba(46,160,67,.15)' : 'rgba(210,153,34,.15)';
     badge.style.color = connected ? '#2ea043' : '#d29922';
   }
