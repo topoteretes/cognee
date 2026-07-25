@@ -978,38 +978,97 @@
       });
     }
 
-    // MODEL layer: one node per kind of thing, one labeled arrow per way
-    // they relate — the business schema, readable with zero explanation.
+    // MODEL layer: one node per kind of thing, labeled arrows for how they
+    // relate — the business schema, readable with zero explanation.
+    // Parallel relations between the same pair fan out on separate curves,
+    // and every label claims screen space greedily (nodes first) so text
+    // never overlaps text; a label that can't fit anywhere is dropped
+    // rather than drawn into soup (hover still reveals everything).
     if (typeAlpha > 0.01) {
       const tByName = {};
       typeNodes.forEach(tn => { tByName[tn.name] = tn; });
       ctx.textAlign = 'center';
-      typeLinks.forEach(tl => {
-        const a = tByName[tl.a], b = tByName[tl.b];
-        if (!a || !b) return;
-        const dx = b.x - a.x, dy = b.y - a.y;
-        const mx = (a.x + b.x) / 2 - dy * 0.1, my = (a.y + b.y) / 2 + dx * 0.1;
-        ctx.beginPath();
-        ctx.moveTo(a.x, a.y);
-        ctx.quadraticCurveTo(mx, my, b.x, b.y);
-        ctx.strokeStyle = 'rgba(126,140,166,' + (0.55 * typeAlpha * dimmed) + ')';
-        ctx.lineWidth = Math.min(3.4, 1 + tl.count * 0.5) / transform.k;
-        ctx.stroke();
-        // Arrowhead toward b
-        const ang = Math.atan2(b.y - my, b.x - mx);
-        const ax = b.x - Math.cos(ang) * (b._r + 4), ay = b.y - Math.sin(ang) * (b._r + 4);
-        ctx.beginPath();
-        ctx.moveTo(ax, ay);
-        ctx.lineTo(ax - Math.cos(ang - 0.45) * 7, ay - Math.sin(ang - 0.45) * 7);
-        ctx.lineTo(ax - Math.cos(ang + 0.45) * 7, ay - Math.sin(ang + 0.45) * 7);
-        ctx.closePath();
-        ctx.fillStyle = 'rgba(126,140,166,' + (0.6 * typeAlpha * dimmed) + ')';
-        ctx.fill();
-        // Relation label riding the curve midpoint
-        ctx.font = '500 10.5px ui-monospace, monospace';
-        ctx.fillStyle = 'rgba(233,238,246,' + (0.75 * typeAlpha * dimmed) + ')';
-        ctx.fillText(String(tl.relation).replace(/_/g, ' '), mx, my - 4);
+
+      // Occupied label rectangles, in WORLD coordinates (labels scale with
+      // the camera here, so world-space collision is the honest test).
+      const occupied = [];
+      function claim(x, y, w, h) {
+        const rect = { x0: x - w / 2 - 3, x1: x + w / 2 + 3, y0: y - h + 2, y1: y + 4 };
+        for (const r of occupied) {
+          if (rect.x0 < r.x1 && rect.x1 > r.x0 && rect.y0 < r.y1 && rect.y1 > r.y0) return false;
+        }
+        occupied.push(rect);
+        return true;
+      }
+
+      // Node labels get their space FIRST — they always win.
+      typeNodes.forEach(tn => {
+        ctx.font = '700 15px -apple-system, sans-serif';
+        const w = ctx.measureText(tn.name).width;
+        claim(tn.x, tn.y + tn._r + 17, Math.max(w, 70), 30);
+        // The circle itself is off-limits for edge labels too.
+        occupied.push({ x0: tn.x - tn._r, x1: tn.x + tn._r, y0: tn.y - tn._r, y1: tn.y + tn._r });
       });
+
+      // Group parallel relations per unordered pair; fan their curves.
+      const pairs = {};
+      typeLinks.forEach(tl => {
+        const key = [tl.a, tl.b].sort().join('␟');
+        (pairs[key] = pairs[key] || []).push(tl);
+      });
+
+      const qpoint = (ax, ay, mx, my, bx, by, t) => {
+        const u = 1 - t;
+        return [u * u * ax + 2 * u * t * mx + t * t * bx,
+                u * u * ay + 2 * u * t * my + t * t * by];
+      };
+
+      Object.values(pairs).forEach(group => {
+        group.sort((x, y) => y.count - x.count);
+        group.forEach((tl, idx) => {
+          const a = tByName[tl.a], b = tByName[tl.b];
+          if (!a || !b) return;
+          const dx = b.x - a.x, dy = b.y - a.y;
+          // Fan: first relation bows one way, second the other, and so on.
+          const bow = (idx % 2 === 0 ? 1 : -1) * (0.10 + Math.floor(idx / 2) * 0.14);
+          const mx = (a.x + b.x) / 2 - dy * bow, my = (a.y + b.y) / 2 + dx * bow;
+          ctx.beginPath();
+          ctx.moveTo(a.x, a.y);
+          ctx.quadraticCurveTo(mx, my, b.x, b.y);
+          ctx.strokeStyle = 'rgba(126,140,166,' + (0.5 * typeAlpha * dimmed) + ')';
+          ctx.lineWidth = Math.min(3, 1 + tl.count * 0.4) / transform.k;
+          ctx.stroke();
+          // Arrowhead toward b.
+          const ang = Math.atan2(b.y - my, b.x - mx);
+          const ax2 = b.x - Math.cos(ang) * (b._r + 4), ay2 = b.y - Math.sin(ang) * (b._r + 4);
+          ctx.beginPath();
+          ctx.moveTo(ax2, ay2);
+          ctx.lineTo(ax2 - Math.cos(ang - 0.45) * 7, ay2 - Math.sin(ang - 0.45) * 7);
+          ctx.lineTo(ax2 - Math.cos(ang + 0.45) * 7, ay2 - Math.sin(ang + 0.45) * 7);
+          ctx.closePath();
+          ctx.fillStyle = 'rgba(126,140,166,' + (0.6 * typeAlpha * dimmed) + ')';
+          ctx.fill();
+
+          // Label: try a few spots along the curve; draw on a dark pill so
+          // it stays readable over hulls and crossing edges.
+          const text = String(tl.relation).replace(/_/g, ' ');
+          ctx.font = '500 10.5px ui-monospace, monospace';
+          const tw = ctx.measureText(text).width;
+          for (const t of [0.5, 0.34, 0.66, 0.22, 0.78]) {
+            const [lx, ly] = qpoint(a.x, a.y, mx, my, b.x, b.y, t);
+            if (!claim(lx, ly, tw, 14)) continue;
+            ctx.globalAlpha = typeAlpha * dimmed;
+            roundRect(ctx, lx - tw / 2 - 5, ly - 11, tw + 10, 15, 7);
+            ctx.fillStyle = 'rgba(14,21,38,0.88)';
+            ctx.fill();
+            ctx.fillStyle = 'rgba(233,238,246,0.85)';
+            ctx.fillText(text, lx, ly);
+            ctx.globalAlpha = 1;
+            break;
+          }
+        });
+      });
+
       typeNodes.forEach(tn => {
         const dominant = Object.keys(tn.sets).sort((x, y) => tn.sets[y] - tn.sets[x])[0];
         const fill = d3.color(dominant ? (setColor[dominant] || '#8A7BD8') : '#8A7BD8');
