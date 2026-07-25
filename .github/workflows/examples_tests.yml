@@ -354,6 +354,8 @@ jobs:
         run: uv run python ./examples/configurations/permissions_example/user_permissions_and_access_control_example.py
 
   # Docling test - NO container (runs on macOS, container only works on Linux)
+  # Uses docling-full: the test converts PDF/PNG through docling's ML pipeline,
+  # which the slim `docling` extra intentionally leaves out.
   test_docling_add:
     name: Run Add with Docling Test
     runs-on: macos-15
@@ -365,7 +367,7 @@ jobs:
         uses: ./.github/actions/cognee_setup
         with:
           python-version: '3.11.x'
-          extra-dependencies: 'docling'
+          extra-dependencies: 'docling-full'
 
       - name: Run Docling Test
         env:
@@ -380,5 +382,26 @@ jobs:
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
         run: |
-          uv sync --extra docling
+          uv sync --extra docling-full
           uv run python ./cognee/tests/test_add_docling_document.py
+
+  # Guards the slim docling profile (COG-5924): the loader must convert
+  # office/web formats on `--extra docling` without torch installed.
+  # Needs no LLM secrets - it drives DoclingLoader directly.
+  test_docling_slim:
+    name: Run Docling Slim Loader Test
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+          extra-dependencies: 'docling'
+
+      - name: Run Docling Slim Loader Test
+        env:
+          ENV: 'dev'
+        run: uv run python ./cognee/tests/test_docling_slim_loader.py

@@ -49,7 +49,8 @@ pre-commit install
 - **graphiti** - Graphiti-core integration
 - **baml** - BAML structured output
 - **dlt** - Data load tool (dlt) integration
-- **docling** - Docling document processing
+- **docling** - Docling document processing, slim profile without torch (office/HTML/email/markdown/LaTeX formats)
+- **docling-full** - Full docling install with torch-based ML models (adds PDF/image conversion through docling; conflicts with **codegraph** due to tree-sitter pins)
 - **codegraph** - Code graph extraction
 - **evals** - Evaluation tools
 - **deepeval** - DeepEval testing framework
