@@ -87,9 +87,15 @@ def test_inspect_command_execution(capsys):
             for perm in ("read", "write", "share", "delete"):
                 await give_permission_on_dataset(user, dataset.id, perm)
 
-        # Add raw items (this populates Data table)
+        # Add raw items (this populates Data table). Two items so the
+        # --limit regression test can distinguish "displayed" from "total".
         await cognee.add(
             data="Hello world from inspect CLI tests.",
+            dataset_name="test_inspect_dataset",
+            user=user,
+        )
+        await cognee.add(
+            data="A second document for limit and token-count testing.",
             dataset_name="test_inspect_dataset",
             user=user,
         )
@@ -169,6 +175,10 @@ def test_inspect_command_execution(capsys):
         assert parsed["totals"]["graph_nodes_count"] == 42
         assert parsed["totals"]["graph_edges_count"] == 128
         assert parsed["sessions_by_status"]["completed"] == 1
+        # Un-cognified data carries a negative token_count sentinel; it must
+        # not leak into sums or per-item output.
+        assert parsed["totals"]["token_count"] == 0
+        assert all(item["token_count"] is None for item in parsed["recent_ingests"])
 
     # Test 3: dataset drill-down (table format)
     args_ds = argparse.Namespace(
@@ -193,7 +203,27 @@ def test_inspect_command_execution(capsys):
     output_ds_json = run_cmd(args_ds_json)
     parsed_ds = json.loads(output_ds_json)
     assert parsed_ds["dataset_name"] == "test_inspect_dataset"
-    assert len(parsed_ds["documents"]) == 1
+    assert len(parsed_ds["documents"]) == 2
+    assert parsed_ds["totals"]["document_count"] == 2
+    # Negative token_count sentinels must not leak into totals or documents.
+    assert parsed_ds["totals"]["token_count"] == 0
+    assert all(doc["token_count"] is None for doc in parsed_ds["documents"])
+
+    # Test 4b: --limit truncates the displayed documents but NOT the totals
+    args_ds_limit = argparse.Namespace(
+        inspect_action="dataset",
+        name_or_id="test_inspect_dataset",
+        limit=1,
+        json=True,
+        user_id=str(user.id),
+    )
+    parsed_ds_limited = json.loads(run_cmd(args_ds_limit))
+    assert len(parsed_ds_limited["documents"]) == 1
+    assert parsed_ds_limited["totals"]["document_count"] == 2
+    assert (
+        parsed_ds_limited["totals"]["storage_size_bytes"]
+        == parsed_ds["totals"]["storage_size_bytes"]
+    )
 
     # Test 5: sessions (table format)
     args_sess = argparse.Namespace(
@@ -238,19 +268,23 @@ def test_inspect_command_execution(capsys):
     )
     output_recent_json = run_cmd(args_recent_json)
     parsed_recent = json.loads(output_recent_json)
-    assert len(parsed_recent) == 1
+    assert len(parsed_recent) == 2
     assert parsed_recent[0]["dataset_name"] == "test_inspect_dataset"
 
     # Test 9: Access Control Overview for Unauthorized User
     from cognee.modules.users.methods import create_user
+
     async def create_unauth():
         return await create_user(
             email="unauthorized_inspect@example.com",
             password="password123",
         )
+
     unauthorized_user = _mock_run(create_unauth())
 
-    with patch("cognee.infrastructure.databases.graph.get_graph_engine", return_value=mock_graph_engine):
+    with patch(
+        "cognee.infrastructure.databases.graph.get_graph_engine", return_value=mock_graph_engine
+    ):
         args_unauth_overview = argparse.Namespace(
             inspect_action="overview",
             json=True,

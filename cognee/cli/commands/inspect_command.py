@@ -11,6 +11,18 @@ import cognee.cli.echo as fmt
 from cognee.cli.exceptions import CliCommandException
 
 
+def _normalized_token_count(token_count):
+    """Return a real token count, or None when it is unknown.
+
+    Data that was added but not yet cognified carries a negative sentinel
+    (e.g. -1) in ``token_count``; summing or displaying those leaks values
+    like ``Total Tokens: -2``. Treat anything below zero as "not counted".
+    """
+    if token_count is None or token_count < 0:
+        return None
+    return token_count
+
+
 def _format_size(size_bytes: int) -> str:
     if size_bytes is None:
         return "0 B"
@@ -168,7 +180,7 @@ Subcommands:
                     item_count = len(items)
                     size_sum = sum(item.data_size for item in items if item.data_size is not None)
                     token_sum = sum(
-                        item.token_count for item in items if item.token_count is not None
+                        _normalized_token_count(item.token_count) or 0 for item in items
                     )
 
                     datasets_info.append(
@@ -241,7 +253,7 @@ Subcommands:
                         "dataset_name": ds_name,
                         "mime_type": item.mime_type,
                         "size_bytes": item.data_size,
-                        "token_count": item.token_count,
+                        "token_count": _normalized_token_count(item.token_count),
                         "created_at": item.created_at.isoformat() if item.created_at else None,
                     }
                 )
@@ -351,10 +363,11 @@ Subcommands:
             )
 
             total_size = sum(item.data_size for item in items if item.data_size is not None)
-            total_tokens = sum(item.token_count for item in items if item.token_count is not None)
+            total_tokens = sum(_normalized_token_count(item.token_count) or 0 for item in items)
             last_activity = items[0].created_at if items else None
+            total_documents = len(items)
 
-            # Apply limit if specified
+            # Apply limit if specified (display only — totals above cover all items)
             if args.limit is not None:
                 items = items[: args.limit]
 
@@ -366,7 +379,7 @@ Subcommands:
                         "name": item.name,
                         "mime_type": item.mime_type,
                         "size_bytes": item.data_size,
-                        "token_count": item.token_count,
+                        "token_count": _normalized_token_count(item.token_count),
                         "created_at": item.created_at.isoformat() if item.created_at else None,
                     }
                 )
@@ -378,7 +391,7 @@ Subcommands:
                     "owner_id": str(dataset.owner_id),
                     "created_at": dataset.created_at.isoformat() if dataset.created_at else None,
                     "totals": {
-                        "document_count": len(items),
+                        "document_count": total_documents,
                         "storage_size_bytes": total_size,
                         "token_count": total_tokens,
                     },
@@ -404,9 +417,10 @@ Subcommands:
                 doc_name = doc["name"]
                 if len(doc_name) > 22:
                     doc_name = doc_name[:19] + "..."
+                tokens_display = doc["token_count"] if doc["token_count"] is not None else "N/A"
                 fmt.echo(
                     f"{doc['id']:<38} {doc_name:<25} {doc['mime_type'][:12]:<12} "
-                    f"{_format_size(doc['size_bytes']):<10} {doc['token_count'] or 0:<8}"
+                    f"{_format_size(doc['size_bytes']):<10} {tokens_display:<8}"
                 )
             fmt.echo("-" * 95)
             fmt.echo("")
@@ -481,7 +495,7 @@ Subcommands:
                         "dataset_name": ds_name,
                         "mime_type": item.mime_type,
                         "size_bytes": item.data_size,
-                        "token_count": item.token_count,
+                        "token_count": _normalized_token_count(item.token_count),
                         "created_at": item.created_at.isoformat() if item.created_at else None,
                     }
                 )
