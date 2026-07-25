@@ -133,16 +133,19 @@
   view.innerHTML = `
     <div id="bv-canvas-wrap"><canvas id="bv-canvas"></canvas></div>
     <div id="bv-left" class="bv-rail"><div class="bv-rail-title">sources</div></div>
-    <div id="bv-right" class="bv-rail"><div class="bv-rail-title">agents</div></div>
+    <div id="bv-right" class="bv-rail"><div class="bv-rail-title">operators</div><div id="bv-org"></div></div>
     <div id="bv-chip"></div>
-    <div id="bv-bottom">
-      <button id="bv-play" title="Play the story">▶</button>
-      <div id="bv-reel"></div>
-      <div id="bv-altimeter">
-        <span data-l="0" class="on">Business</span><span data-l="1">Players</span><span data-l="2">Connections</span><span data-l="3">Records</span>
+    <div id="bv-answer"></div>
+    <div id="bv-dock">
+      <div id="bv-narration-row"><span id="bv-narration-text"></span></div>
+      <div id="bv-dock-row">
+        <button id="bv-play" title="Play the story">▶</button>
+        <div id="bv-reel"></div>
+        <div id="bv-altimeter">
+          <span data-l="0" class="on">Business</span><span data-l="1">Players</span><span data-l="2">Connections</span><span data-l="3">Records</span>
+        </div>
       </div>
-    </div>
-    <div id="bv-narration"><span id="bv-narration-text"></span></div>`;
+    </div>`;
 
   const css = document.createElement('style');
   css.textContent = `
@@ -163,15 +166,28 @@
   .bv-card.ghost{border-style:dashed;color:${C.haze};background:transparent;}
   .bv-card.flash{border-color:${C.inflow};}
   .bv-card.lift{transform:translateY(-2px);border-color:${C.amber};}
-  .bv-qa{background:${C.card};border:1px solid ${C.cardBorder};border-left:3px solid ${C.amber};border-radius:10px;
-    padding:9px 11px;cursor:pointer;}
-  .bv-qa .q{font-size:12px;font-weight:600;} .bv-qa .a{font-size:11px;color:${C.haze};margin-top:4px;
-    display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;}
+  #bv-org{display:flex;flex-direction:column;}
+  .bv-org-node{position:relative;padding:8px 10px 8px 14px;background:${C.card};border:1px solid ${C.cardBorder};
+    border-radius:10px;margin-bottom:2px;}
+  .bv-org-node .t{font-size:12.5px;font-weight:600;display:flex;align-items:center;gap:6px;}
+  .bv-org-node .s{font-size:10.5px;color:${C.haze};margin-top:1px;}
+  .bv-org-node.tenant{background:transparent;border-style:dashed;}
+  .bv-org-node .badge{font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:${C.deepfield};
+    background:${C.amber};border-radius:4px;padding:1px 5px;font-weight:700;}
+  .bv-org-child{margin-left:14px;position:relative;}
+  .bv-org-child::before{content:'';position:absolute;left:-8px;top:-2px;bottom:14px;width:1px;background:${C.cardBorder};}
+  .bv-org-child::after{content:'';position:absolute;left:-8px;top:20px;width:8px;height:1px;background:${C.cardBorder};}
+  .bv-org-node .dot{width:7px;height:7px;border-radius:50%;flex:none;}
+  .bv-org-node.asking{border-color:${C.amber};box-shadow:0 0 12px rgba(245,168,60,.25);}
+  .bv-qcount{font-size:10.5px;color:${C.haze};margin-left:auto;}
   .bv-rail.compressed{transform:translateX(var(--bv-hide,-160px));opacity:.75;}
   #bv-right.compressed{--bv-hide:160px;}
-  #bv-bottom{position:absolute;left:0;right:0;bottom:34px;height:44px;display:flex;align-items:center;gap:10px;
-    padding:0 16px;z-index:6;}
-  #bv-play{width:30px;height:30px;border-radius:50%;border:1px solid ${C.cardBorder};background:${C.card};
+  #bv-dock{position:absolute;left:0;right:0;bottom:0;z-index:6;
+    background:linear-gradient(transparent, rgba(14,21,38,.96) 55%);padding:6px 16px 10px;}
+  #bv-narration-row{height:24px;display:flex;align-items:center;justify-content:center;}
+  #bv-narration-text{font-size:12.5px;color:${C.haze};letter-spacing:.01em;transition:opacity .4s;}
+  #bv-dock-row{display:flex;align-items:center;gap:10px;height:36px;}
+  #bv-play{width:28px;height:28px;border-radius:50%;border:1px solid ${C.cardBorder};background:${C.card};
     color:${C.bone};cursor:pointer;font-size:11px;flex:none;}
   #bv-play.playing{border-color:${C.amber};color:${C.amber};}
   #bv-reel{flex:1;display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;align-items:center;}
@@ -184,11 +200,17 @@
     border-radius:8px;padding:3px;}
   #bv-altimeter span{font-size:11px;padding:3px 10px;border-radius:6px;color:${C.haze};cursor:pointer;}
   #bv-altimeter span.on{background:${C.deeplift};color:${C.bone};}
-  #bv-narration{position:absolute;left:0;right:0;bottom:0;height:30px;display:flex;align-items:center;
-    justify-content:center;z-index:6;background:linear-gradient(transparent, rgba(14,21,38,.9) 40%);}
-  #bv-narration-text{font-size:12.5px;color:${C.haze};letter-spacing:.01em;transition:opacity .4s;}
+  #bv-answer{position:absolute;left:50%;transform:translateX(-50%);bottom:84px;max-width:560px;z-index:7;
+    display:none;background:rgba(26,36,56,.96);border:1px solid rgba(245,168,60,.5);border-radius:12px;
+    padding:12px 16px;backdrop-filter:blur(4px);}
+  #bv-answer .q{font-size:13px;font-weight:600;color:${C.amber};}
+  #bv-answer .a{font-size:12px;color:${C.bone};margin-top:6px;line-height:1.5;max-height:120px;overflow-y:auto;}
+  #bv-answer .x{position:absolute;top:6px;right:10px;color:${C.haze};cursor:pointer;font-size:14px;}
   #bv-chip{position:absolute;right:216px;top:64px;z-index:7;display:none;background:${C.card};
     border:1px solid ${C.amber};color:${C.amber};font-size:11px;border-radius:14px;padding:4px 12px;cursor:pointer;}
+  /* The template's LIVE badge sits at the bottom-right corner, which the
+     dock now owns — lift it above the dock while the Business tab is up. */
+  #live-events-badge{bottom:56px !important;}
   #business-view .bv-hovercard{position:absolute;z-index:8;background:${C.card};border:1px solid ${C.cardBorder};
     border-radius:8px;padding:8px 10px;font-size:11px;pointer-events:none;display:none;max-width:240px;}
   `;
@@ -221,33 +243,47 @@
   ghost.innerHTML = '<div class="t">+ connect a source</div><div class="s">slack · files · crm · anything</div>';
   railL.appendChild(ghost);
 
-  if (userNode) {
-    const chip = document.createElement('div');
-    chip.className = 'bv-card ghost';
-    chip.style.borderStyle = 'solid';
-    chip.innerHTML = `<div class="t" style="color:${C.bone}">you</div><div class="s">${esc(userNode.name || '')}</div>`;
-    railR.appendChild(chip);
+  // Operators: one structured hierarchy — tenant → user(s) → agents — the
+  // multi-tenant story in miniature instead of a pile of cards.
+  const org = document.getElementById('bv-org');
+  const tenantNode = allNodes.find(n => n.type === 'Tenant') || null;
+  const questionCount = bakedSearchEvents.filter(e => (e.kind || 'search') === 'search').length;
+
+  function orgNode(cls, html) {
+    const el = document.createElement('div');
+    el.className = 'bv-org-node' + (cls ? ' ' + cls : '');
+    el.innerHTML = html;
+    return el;
   }
+  let orgParent = org;
+  if (tenantNode) {
+    orgParent.appendChild(orgNode('tenant', `<div class="t" style="color:${C.haze}">⌂ ${esc(tenantNode.name || 'organization')}</div>`));
+    const wrap = document.createElement('div');
+    wrap.className = 'bv-org-child';
+    org.appendChild(wrap);
+    orgParent = wrap;
+  }
+  const userEl = orgNode('', `<div class="t"><span class="dot" style="background:${C.bone}"></span>you
+      <span class="bv-qcount">${questionCount ? questionCount + ' questions' : ''}</span></div>
+    <div class="s">${esc(userNode ? (userNode.name || '') : 'this workspace')}</div>`);
+  orgParent.appendChild(userEl);
+  const agentsWrap = document.createElement('div');
+  agentsWrap.className = 'bv-org-child';
+  orgParent.appendChild(agentsWrap);
+
   const agentCardEls = {};
   agents.forEach(a => {
-    const el = document.createElement('div');
-    el.className = 'bv-card';
     const reads = agentReads[a.id] ? [...agentReads[a.id]].join(', ') : null;
-    el.innerHTML = `<div class="spine" style="background:${C.amber}"></div>
-      <div class="t">◆ ${esc(a.name)}</div>
-      <div class="s">${reads ? 'reads ' + esc(reads) : 'connected'}</div>`;
-    railR.appendChild(el);
+    const el = orgNode('', `<div class="t"><span class="dot" style="background:${C.amber}"></span>${esc(a.name)}
+        <span class="badge">agent</span></div>
+      <div class="s">${reads ? 'reads ' + esc(reads) : 'connected'}</div>`);
+    agentsWrap.appendChild(el);
     agentCardEls[a.id] = el;
   });
   if (!agents.length) {
-    const el = document.createElement('div');
-    el.className = 'bv-card ghost';
-    el.innerHTML = '<div class="t">+ plug in your agent</div><div class="s">claude code · mcp · sdk</div>';
-    railR.appendChild(el);
+    agentsWrap.appendChild(orgNode('tenant', `<div class="t" style="color:${C.haze}">+ plug in your agent</div>
+      <div class="s">claude code · mcp · sdk</div>`));
   }
-  const qaStack = document.createElement('div');
-  qaStack.style.cssText = 'display:flex;flex-direction:column;gap:8px;margin-top:6px;';
-  railR.appendChild(qaStack);
 
   // ── Simulation ────────────────────────────────────────────────────
   let W = 0, H = 0, dpr = 1;
@@ -389,7 +425,7 @@
     if (!ids.size) return;
     spotlight = { ids, until: performance.now() + 9000, question: evt.question };
     const card = agentCardEls[agentId] || Object.values(agentCardEls)[0];
-    if (card) { card.classList.add('lift'); setTimeout(() => card.classList.remove('lift'), 6500); }
+    if (card) { card.classList.add('asking'); setTimeout(() => card.classList.remove('asking'), 9000); }
     narrate('agent asked: “' + trunc(evt.question, 70) + '” — ' + ids.size + ' connected facts produced the answer', C.amber);
     // Camera to the retrieved subgraph's bbox (entities only).
     const hit = entities.filter(n => ids.has(n.id));
@@ -401,17 +437,23 @@
         .call(zoom.transform, d3.zoomIdentity.translate(W / 2, H / 2).scale(k)
           .translate(-(minX + maxX) / 2, -(minY + maxY) / 2));
     }
+    showAnswer(evt);
     requestDraw();
     setTimeout(requestDraw, 9500);
   }
 
-  function dockQA(evt) {
-    const el = document.createElement('div');
-    el.className = 'bv-qa';
-    el.innerHTML = `<div class="q">${esc(trunc(evt.question || '', 90))}</div><div class="a">${esc(evt.answer || '')}</div>`;
-    el.addEventListener('click', () => { lastInteraction = 0; playSearchEvent(evt); });
-    qaStack.prepend(el);
-    while (qaStack.children.length > 3) qaStack.removeChild(qaStack.lastChild);
+  // One floating answer card above the dock — the agent "speaking" — instead
+  // of a stack of cards competing with the operators panel.
+  const answerEl = document.getElementById('bv-answer');
+  let answerTimer = null;
+  function showAnswer(evt) {
+    answerEl.innerHTML = `<div class="x">✕</div>
+      <div class="q">${esc(trunc(evt.question || '', 120))}</div>
+      <div class="a">${esc(evt.answer || '')}</div>`;
+    answerEl.style.display = 'block';
+    answerEl.querySelector('.x').addEventListener('click', () => { answerEl.style.display = 'none'; });
+    clearTimeout(answerTimer);
+    answerTimer = setTimeout(() => { answerEl.style.display = 'none'; }, 14000);
   }
 
   // Live events: never steal the camera mid-interaction. If the presenter
@@ -419,7 +461,6 @@
   window._bvLiveEvent = function (evt) {
     if (!evt || evt.kind === 'improve') return;
     addMoment(evt, true);
-    dockQA(evt);
     const idleFor = performance.now() - lastInteraction;
     if (lastInteraction === 0 || idleFor > 8000) playSearchEvent(evt);
     else {
@@ -476,7 +517,7 @@
     }, false);
   });
   bakedSearchEvents.filter(e => (e.kind || 'search') === 'search' && (e.node_ids || []).length)
-    .forEach(e => { addMoment(e, true); dockQA(e); });
+    .forEach(e => addMoment(e, true));
 
   const playBtn = document.getElementById('bv-play');
   let playing = null;
@@ -580,30 +621,61 @@
     const spot = spotlight && now < spotlight.until ? spotlight : (spotlight = null);
     const dimmed = spot ? 0.16 : 1;
 
-    // Region captions (L0/L1)
+    // Source territories: soft convex hulls shaded in the source's color,
+    // with the caption riding the hull's crown (L0/L1).
     if (level <= 1) {
-      ctx.font = '600 13px -apple-system, sans-serif';
       ctx.textAlign = 'center';
       sourceNames.forEach(name => {
         const members = entities.filter(n => setsOf(n).includes(name));
         if (members.length < 2) return;
-        const mx = d3.mean(members, n => n.x), my = Math.min(...members.map(n => n.y)) - 34;
-        ctx.fillStyle = 'rgba(126,140,166,' + 0.5 * dimmed + ')';
-        ctx.fillText('· ' + name + ' ·', mx, my);
+        const pad = 34;
+        const pts = [];
+        members.forEach(n => {
+          for (let a = 0; a < 8; a++) {
+            pts.push([n.x + Math.cos(a * Math.PI / 4) * (n._r + pad),
+                      n.y + Math.sin(a * Math.PI / 4) * (n._r + pad)]);
+          }
+        });
+        const hull = d3.polygonHull(pts);
+        if (!hull) return;
+        const col = d3.color(setColor[name] || '#888');
+        ctx.beginPath();
+        // Smooth the hull with quadratic midpoint curves.
+        for (let i = 0; i < hull.length; i++) {
+          const p = hull[i], q = hull[(i + 1) % hull.length];
+          const mx = (p[0] + q[0]) / 2, my = (p[1] + q[1]) / 2;
+          if (i === 0) ctx.moveTo(mx, my);
+          else ctx.quadraticCurveTo(p[0], p[1], mx, my);
+        }
+        const p0 = hull[0], p1 = hull[1 % hull.length];
+        ctx.quadraticCurveTo(p0[0], p0[1], (p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2);
+        ctx.closePath();
+        ctx.fillStyle = `rgba(${col.r},${col.g},${col.b},${0.06 * dimmed})`;
+        ctx.fill();
+        ctx.strokeStyle = `rgba(${col.r},${col.g},${col.b},${0.22 * dimmed})`;
+        ctx.lineWidth = 1 / transform.k;
+        ctx.stroke();
+        const cxm = d3.mean(members, n => n.x);
+        const topY = Math.min(...hull.map(p => p[1])) - 12;
+        ctx.font = '600 13px -apple-system, sans-serif';
+        ctx.fillStyle = `rgba(${col.r},${col.g},${col.b},${0.85 * dimmed})`;
+        ctx.fillText(name, cxm, topY);
       });
     }
 
-    // Edges
+    // Edges: gentle arcs (perpendicular bow) instead of straight wires.
     semanticLinks.forEach(l => {
       const s = E[l.source], t = E[l.target];
       if (!s || !t || s.x == null || t.x == null) return;
       const inSpot = spot && spot.ids.has(s.id) && spot.ids.has(t.id);
+      const dx = t.x - s.x, dy = t.y - s.y;
+      const mx = (s.x + t.x) / 2 - dy * 0.12, my = (s.y + t.y) / 2 + dx * 0.12;
       ctx.beginPath();
       ctx.moveTo(s.x, s.y);
-      ctx.lineTo(t.x, t.y);
-      if (inSpot) { ctx.strokeStyle = C.amber; ctx.lineWidth = 1.6 / transform.k; }
-      else if (l._bridge) { ctx.strokeStyle = 'rgba(233,238,246,' + 0.4 * dimmed + ')'; ctx.lineWidth = 1.4 / transform.k; ctx.setLineDash([]); }
-      else { ctx.strokeStyle = 'rgba(126,140,166,' + 0.45 * dimmed + ')'; ctx.lineWidth = 1.1 / transform.k; }
+      ctx.quadraticCurveTo(mx, my, t.x, t.y);
+      if (inSpot) { ctx.strokeStyle = C.amber; ctx.lineWidth = 1.8 / transform.k; }
+      else if (l._bridge) { ctx.strokeStyle = 'rgba(233,238,246,' + 0.42 * dimmed + ')'; ctx.lineWidth = 1.4 / transform.k; }
+      else { ctx.strokeStyle = 'rgba(126,140,166,' + 0.4 * dimmed + ')'; ctx.lineWidth = 1.1 / transform.k; }
       ctx.stroke();
     });
 
