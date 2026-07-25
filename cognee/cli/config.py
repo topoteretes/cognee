@@ -30,6 +30,7 @@ COMMAND_DESCRIPTIONS = {
     "history": "List the data-migration chain, newest first",
     "current": "Show each database's stamped migration revision (and last failure, if any)",
     "push": "Upload a local dataset's knowledge graph to Cognee Cloud",
+    "install": "Configure a coding agent (Claude Code, Cursor, OpenCode) to use cognee as its MCP memory",
 }
 
 # Search type choices
