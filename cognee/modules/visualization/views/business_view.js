@@ -219,6 +219,11 @@
   .bv-acc.own{border-color:rgba(67,217,232,.45);color:${C.inflow};}
   .bv-acc.own b{color:${C.inflow};}
   .bv-card.external{opacity:.72;border-style:dashed;}
+  .bv-card.knowledge{cursor:pointer;}
+  .bv-card.knowledge.focused{border-color:${C.inflow};box-shadow:0 0 12px rgba(67,217,232,.2);}
+  .bv-card .brain{font-size:8.5px;letter-spacing:.05em;text-transform:uppercase;border:1px solid ${C.cardBorder};
+    color:${C.haze};border-radius:4px;padding:1px 5px;margin-left:6px;font-weight:600;vertical-align:1px;}
+  .bv-card .brain.team{border-color:rgba(67,217,232,.45);color:${C.inflow};}
   .bv-card .live-dot{color:${C.inflow};font-size:8px;vertical-align:2px;}
   .bv-card .share{position:absolute;right:10px;top:9px;font-size:10px;color:${C.haze};cursor:pointer;
     opacity:0;transition:opacity .15s;}
@@ -360,6 +365,7 @@
         <span class="bv-qcount">${you && questionCount ? questionCount + ' questions' : ''}</span></div>
       <div class="s">${esc(u.name || '')}</div>
       <div class="acc">${accessChips(u.id)}</div>`);
+    userEl.dataset.uid = u.id;
     wireUserHover(userEl, u.id);
     orgParent.appendChild(userEl);
 
@@ -373,6 +379,7 @@
         const el = orgNode('', `<div class="t"><span class="dot" style="background:${C.amber}"></span>${esc(a.name)}
             <span class="badge">agent</span></div>
           <div class="s">${reads ? 'reads ' + esc(reads) : 'connected'}</div>`);
+        el.dataset.uid = u.id;
         wireUserHover(el, u.id);
         agentsWrap.appendChild(el);
         agentCardEls[a.id] = el;
@@ -384,35 +391,83 @@
       <div class="s">claude code · mcp · sdk</div>`));
   }
 
-  // Knowledge estate on the left rail: the rendered dataset with its layers,
-  // then external datasets (other bodies of knowledge in this scope) — each
-  // with its owner and the "+ share" affordance where a grant would happen.
+  // Knowledge estate on the left rail: BRAINS, not rows. Each dataset is a
+  // team brain (multiple people can touch it) or a personal brain (owner
+  // only), it names who it belongs to, and CLICKING it shows what it applies
+  // to — the people with access light up in the Operators tree and, for the
+  // rendered brain, the camera fits its territories.
   const knowledgeTitle = document.createElement('div');
   knowledgeTitle.className = 'bv-rail-title';
   knowledgeTitle.style.marginTop = '12px';
   knowledgeTitle.textContent = 'knowledge';
   railL.appendChild(knowledgeTitle);
-  const ownerName = uid => {
-    const u = userNodes.find(x => x.id === 'user:' + uid || x.id === uid);
+
+  const userLabel = uid => {
+    const u = userNodes.find(x => x.id === uid);
     if (!u) return null;
     return u.is_current ? 'you' : (u.name || '').split('@')[0];
   };
-  function ownerOf(did) {
-    for (const uid of Object.keys(access)) {
-      if (access[uid][did] && access[uid][did].owns) return ownerName(uid);
-    }
-    return null;
+  // Reverse access index: who can touch each dataset (owner first).
+  const dsUsers = {};
+  Object.keys(access).forEach(uid => {
+    Object.keys(access[uid]).forEach(did => {
+      (dsUsers[did] = dsUsers[did] || []).push({
+        uid, name: userLabel(uid), owns: access[uid][did].owns,
+        perms: access[uid][did].perms,
+      });
+    });
+  });
+  Object.values(dsUsers).forEach(list => list.sort((a, b) => (b.owns ? 1 : 0) - (a.owns ? 1 : 0)));
+
+  let knowledgeFocus = null;   // dataset id currently focused
+  function clearKnowledgeFocus() {
+    knowledgeFocus = null;
+    document.querySelectorAll('.bv-dim').forEach(x => x.classList.remove('bv-dim'));
+    document.querySelectorAll('[data-dsrow].focused').forEach(x => x.classList.remove('focused'));
   }
+  function focusKnowledge(d) {
+    if (knowledgeFocus === d.id) { clearKnowledgeFocus(); return; }
+    clearKnowledgeFocus();
+    knowledgeFocus = d.id;
+    const holders = dsUsers[d.id] || [];
+    const holderIds = new Set(holders.map(h => h.uid));
+    // Light up who this brain applies to; dim everyone else.
+    document.querySelectorAll('#bv-org .bv-org-node').forEach(el => {
+      const uid = el.dataset.uid;
+      el.classList.toggle('bv-dim', !!uid && !holderIds.has(uid));
+    });
+    document.querySelectorAll('[data-dsrow]').forEach(row => {
+      row.classList.toggle('bv-dim', row.dataset.dsrow !== d.id);
+      row.classList.toggle('focused', row.dataset.dsrow === d.id);
+    });
+    const who = holders.map(h => h.name + (h.owns ? ' (owner)' : '')).join(', ');
+    const layers = (datasetLayers[d.id] || []);
+    if (d.external) {
+      narrate(`${d.name} — ${holders.length > 1 ? 'team' : 'personal'} brain of ${who || 'this workspace'} · lives in its own graph, not shown here`, C.inflow);
+    } else {
+      narrate(`${d.name} — ${holders.length > 1 ? 'team' : 'personal'} brain shared by ${who} · ${layers.length} layers · ${entities.length} entities below`, C.inflow);
+      fit(true);
+    }
+  }
+  canvas.addEventListener('click', clearKnowledgeFocus);
+
   datasets.forEach(d => {
     const el = document.createElement('div');
-    el.className = 'bv-card' + (d.external ? ' external' : '');
+    el.className = 'bv-card knowledge' + (d.external ? ' external' : '');
     el.setAttribute('data-dsrow', d.id);
+    const holders = dsUsers[d.id] || [];
+    const team = holders.length > 1;
     const layers = (datasetLayers[d.id] || []).join(' · ');
-    const owner = ownerOf(d.id);
+    const who = holders.map(h => h.name).filter(Boolean).join(' + ') || 'this workspace';
     el.innerHTML = `<div class="spine" style="background:${d.external ? C.haze : C.inflow}"></div>
-      <div class="t">${esc(d.name)}${d.external ? '' : ' <span class="live-dot">●</span>'}</div>
-      <div class="s">${owner ? 'owned by ' + esc(owner) : ''}${layers ? ' · layers: ' + esc(layers) : ''}${d.external ? ' · separate graph' : ''}</div>
+      <div class="t">${esc(d.name)}${d.external ? '' : ' <span class="live-dot">●</span>'}
+        <span class="brain ${team ? 'team' : ''}">${team ? 'team brain' : 'personal brain'}</span></div>
+      <div class="s">${esc(who)}${layers ? ' · ' + esc(layers) : ''}${d.external ? ' · own graph' : ''}</div>
       <div class="share" title="Grant read/write on this dataset — cognee permissions API (give_permission_on_dataset)">+ share</div>`;
+    el.addEventListener('click', ev => {
+      if (ev.target.classList.contains('share')) return;
+      focusKnowledge(d);
+    });
     railL.appendChild(el);
   });
 
@@ -744,6 +799,20 @@
         ctx.fillStyle = 'rgba(67,217,232,' + (0.5 * (1 - t)) + ')';
         ctx.fill();
       }
+    });
+
+    // The rendered brain's card ties into the whole model.
+    document.querySelectorAll('[data-dsrow].knowledge:not(.external)').forEach(card => {
+      const r = card.getBoundingClientRect(), vr = view.getBoundingClientRect();
+      const x0 = r.right - vr.left, y0 = r.top - vr.top + r.height / 2;
+      const cxs = transform.applyX(cx()), cys = transform.applyY(cy());
+      ctx.beginPath();
+      ctx.moveTo(x0, y0);
+      ctx.bezierCurveTo(x0 + 110, y0, cxs - 140, cys, cxs, cys);
+      ctx.strokeStyle = knowledgeFocus === card.dataset.dsrow
+        ? 'rgba(67,217,232,0.5)' : 'rgba(67,217,232,0.12)';
+      ctx.lineWidth = knowledgeFocus === card.dataset.dsrow ? 1.6 : 1;
+      ctx.stroke();
     });
 
     ctx.translate(transform.x, transform.y);
