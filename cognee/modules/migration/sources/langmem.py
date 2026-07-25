@@ -83,7 +83,5 @@ class LangMemSource(MemorySource):
                     item.get("created_at") or item.get("createdAt") or item.get("timestamp")
                 ),
                 updated_at=parse_timestamp(item.get("updated_at") or item.get("updatedAt")),
-                metadata={"langmem_metadata": item.get("metadata")}
-                if item.get("metadata")
-                else {},
+                metadata={"langmem_metadata": item.get("metadata")} if item.get("metadata") else {},
             )
