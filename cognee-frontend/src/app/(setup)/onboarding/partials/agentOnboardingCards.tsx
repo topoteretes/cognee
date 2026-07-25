@@ -10,11 +10,24 @@ export interface AgentOnboardingCard {
   node?: React.ReactNode;
 }
 
+// Identifies which snippet was copied — `onboarding_creds_copied` fires for every
+// copy button on the page (creds, install commands, prompts, /exit), so this is
+// the only way to tell a real credentials copy from the rest downstream.
+export type OnboardingCopyTarget =
+  | "api_credentials"
+  | "marketplace_add"
+  | "plugin_install"
+  | "hooks_enable"
+  | "upload_memory_prompt"
+  | "upload_sample_prompt"
+  | "exit_command"
+  | "recall_sample_prompt";
+
 // Single-line code block: shows ONE line, truncates the rest with an ellipsis (…)
 // so long commands never wrap or overflow on small screens. `code` is what's
 // shown; `toCopy` (when set) is the full multi-line command that's copied.
-export function OnboardingInlineCode({ code, toCopy, loading, placeholder = "Preparing…", agent }: {
-  code: string; toCopy?: string; loading?: boolean; placeholder?: string; agent?: "claude-code" | "codex";
+export function OnboardingInlineCode({ code, toCopy, loading, placeholder = "Preparing…", agent, copyTarget }: {
+  code: string; toCopy?: string; loading?: boolean; placeholder?: string; agent?: "claude-code" | "codex"; copyTarget: OnboardingCopyTarget;
 }) {
   const [copied, setCopied] = useState(false);
   const track = useOnboardingTrackEvent();
@@ -23,7 +36,7 @@ export function OnboardingInlineCode({ code, toCopy, loading, placeholder = "Pre
     navigator.clipboard.writeText(toCopy ?? code);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
-    track({ pageName: "Onboarding", eventName: "onboarding_creds_copied", additionalProperties: agent ? { agent } : {} });
+    track({ pageName: "Onboarding", eventName: "onboarding_creds_copied", additionalProperties: { copy_target: copyTarget, ...(agent ? { agent } : {}) } });
   };
   return (
     <div
@@ -80,7 +93,7 @@ export function buildAgentOnboardingCards(params: {
   const credsCard: AgentOnboardingCard = {
     title: "Copy your API credentials",
     description: "Open a terminal and run these to point your agent at your Cognee memory.",
-    node: <OnboardingInlineCode code={`export COGNEE_BASE_URL="${baseUrl}"`} toCopy={credsCode} loading={!credsReady} placeholder="Preparing your credentials…" agent={agent} />,
+    node: <OnboardingInlineCode code={`export COGNEE_BASE_URL="${baseUrl}"`} toCopy={credsCode} loading={!credsReady} placeholder="Preparing your credentials…" agent={agent} copyTarget="api_credentials" />,
   };
   const allSetCard: AgentOnboardingCard = {
     title: "You're all set",
@@ -113,8 +126,8 @@ export function buildAgentOnboardingCards(params: {
           description: "Run these in your terminal one at a time — register the Cognee marketplace, then install the memory plugin.",
           node: (
             <div style={{ display: "flex", flexDirection: "column", gap: 8, width: "100%" }}>
-              <OnboardingInlineCode code={CLAUDE_MARKETPLACE_ADD} agent={agent} />
-              <OnboardingInlineCode code={CLAUDE_PLUGIN_INSTALL} agent={agent} />
+              <OnboardingInlineCode code={CLAUDE_MARKETPLACE_ADD} agent={agent} copyTarget="marketplace_add" />
+              <OnboardingInlineCode code={CLAUDE_PLUGIN_INSTALL} agent={agent} copyTarget="plugin_install" />
             </div>
           ),
         },
@@ -125,11 +138,11 @@ export function buildAgentOnboardingCards(params: {
             <div style={{ display: "flex", flexDirection: "column", gap: 14, width: "100%" }}>
               <div>
                 <div style={{ fontSize: 13, fontWeight: 600, color: "#EDECEA", marginBottom: 6 }}>Option A · Your existing memory</div>
-                <OnboardingInlineCode code={UPLOAD_MEMORY_PROMPT} agent={agent} />
+                <OnboardingInlineCode code={UPLOAD_MEMORY_PROMPT} agent={agent} copyTarget="upload_memory_prompt" />
               </div>
               <div>
                 <div style={{ fontSize: 13, fontWeight: 600, color: "#EDECEA", marginBottom: 6 }}>Option B · Try it with a sample</div>
-                <OnboardingInlineCode code={UPLOAD_SAMPLE_PROMPT} agent={agent} />
+                <OnboardingInlineCode code={UPLOAD_SAMPLE_PROMPT} agent={agent} copyTarget="upload_sample_prompt" />
               </div>
               <ConnectStatus verified={connectVerified} />
             </div>
@@ -144,11 +157,11 @@ export function buildAgentOnboardingCards(params: {
             <div style={{ display: "flex", flexDirection: "column", gap: 10, width: "100%" }}>
               <div>
                 <div style={{ fontSize: 13, fontWeight: 600, color: "#EDECEA", marginBottom: 6 }}>First, run this to start a fresh session</div>
-                <OnboardingInlineCode code="/exit" agent={agent} />
+                <OnboardingInlineCode code="/exit" agent={agent} copyTarget="exit_command" />
               </div>
               <div>
                 <div style={{ fontSize: 13, fontWeight: 600, color: "#EDECEA", marginBottom: 6 }}>Then ask</div>
-                <OnboardingInlineCode code={RECALL_SAMPLE_PROMPT} agent={agent} />
+                <OnboardingInlineCode code={RECALL_SAMPLE_PROMPT} agent={agent} copyTarget="recall_sample_prompt" />
               </div>
               <ConnectStatus verified={connectVerified} />
             </div>
@@ -163,9 +176,9 @@ export function buildAgentOnboardingCards(params: {
           description: "Run these in your terminal one at a time — enable Codex hooks, register the Cognee marketplace, then install the memory plugin.",
           node: (
             <div style={{ display: "flex", flexDirection: "column", gap: 8, width: "100%" }}>
-              <OnboardingInlineCode code={CODEX_HOOKS_ENABLE} agent={agent} />
-              <OnboardingInlineCode code={CODEX_MARKETPLACE_ADD} agent={agent} />
-              <OnboardingInlineCode code={CODEX_PLUGIN_INSTALL} agent={agent} />
+              <OnboardingInlineCode code={CODEX_HOOKS_ENABLE} agent={agent} copyTarget="hooks_enable" />
+              <OnboardingInlineCode code={CODEX_MARKETPLACE_ADD} agent={agent} copyTarget="marketplace_add" />
+              <OnboardingInlineCode code={CODEX_PLUGIN_INSTALL} agent={agent} copyTarget="plugin_install" />
             </div>
           ),
         },
@@ -176,11 +189,11 @@ export function buildAgentOnboardingCards(params: {
             <div style={{ display: "flex", flexDirection: "column", gap: 14, width: "100%" }}>
               <div>
                 <div style={{ fontSize: 13, fontWeight: 600, color: "#EDECEA", marginBottom: 6 }}>Option A · Your existing memory</div>
-                <OnboardingInlineCode code={UPLOAD_MEMORY_PROMPT} agent={agent} />
+                <OnboardingInlineCode code={UPLOAD_MEMORY_PROMPT} agent={agent} copyTarget="upload_memory_prompt" />
               </div>
               <div>
                 <div style={{ fontSize: 13, fontWeight: 600, color: "#EDECEA", marginBottom: 6 }}>Option B · Try it with a sample</div>
-                <OnboardingInlineCode code={UPLOAD_SAMPLE_PROMPT} agent={agent} />
+                <OnboardingInlineCode code={UPLOAD_SAMPLE_PROMPT} agent={agent} copyTarget="upload_sample_prompt" />
               </div>
               <ConnectStatus verified={connectVerified} />
             </div>
@@ -195,11 +208,11 @@ export function buildAgentOnboardingCards(params: {
             <div style={{ display: "flex", flexDirection: "column", gap: 10, width: "100%" }}>
               <div>
                 <div style={{ fontSize: 13, fontWeight: 600, color: "#EDECEA", marginBottom: 6 }}>First, run this to start a fresh session</div>
-                <OnboardingInlineCode code="/exit" agent={agent} />
+                <OnboardingInlineCode code="/exit" agent={agent} copyTarget="exit_command" />
               </div>
               <div>
                 <div style={{ fontSize: 13, fontWeight: 600, color: "#EDECEA", marginBottom: 6 }}>Then ask</div>
-                <OnboardingInlineCode code={RECALL_SAMPLE_PROMPT} agent={agent} />
+                <OnboardingInlineCode code={RECALL_SAMPLE_PROMPT} agent={agent} copyTarget="recall_sample_prompt" />
               </div>
               <ConnectStatus verified={connectVerified} />
             </div>

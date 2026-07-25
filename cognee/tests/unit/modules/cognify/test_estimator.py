@@ -240,9 +240,10 @@ async def test_directories_are_rejected(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_missing_absolute_path_is_rejected():
-    with pytest.raises(ValueError, match="does not exist"):
-        await estimator._input_to_texts("/no/such/file.txt")
+async def test_missing_absolute_path_is_raw_text():
+    # A "/"-prefixed string that is not an existing file is ingested as text by
+    # a real run (see #3887), so dry_run must price it as text, not reject it.
+    assert await estimator._input_to_texts("/no/such/file.txt") == ["/no/such/file.txt"]
 
 
 @pytest.mark.asyncio
@@ -254,10 +255,15 @@ async def test_local_paths_are_rejected_when_gate_disabled(tmp_path, monkeypatch
     file_path = tmp_path / "notes.txt"
     file_path.write_text("stored text")
 
+    # An existing local file is rejected, whether named by file:// URI or by an
+    # absolute path — the gate must reject exactly what a real run rejects.
     with pytest.raises(ValueError, match="not accepted"):
         await estimator._input_to_texts(file_path.as_uri())
     with pytest.raises(ValueError, match="not accepted"):
-        await estimator._input_to_texts("/no/such/file.txt")
+        await estimator._input_to_texts(str(file_path))
+    # A non-existent absolute path is raw text even with the gate off: a real run
+    # saves it as text because it is not an existing local file (see #3887).
+    assert await estimator._input_to_texts("/no/such/file.txt") == ["/no/such/file.txt"]
     # A real run treats a relative path to an existing file as raw text when
     # the gate is off.
     monkeypatch.chdir(tmp_path)

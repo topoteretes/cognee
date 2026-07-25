@@ -26,11 +26,13 @@ class CloudClient:
 
     # Default for ordinary API calls: aiohttp's standard 5-minute total,
     # with connect failures surfacing quickly.
-    DEFAULT_TIMEOUT = aiohttp.ClientTimeout(total=300, sock_connect=30)
+    # 600s: long-running blocking operations (e.g. cognify over a large
+    # dataset) can legitimately take many minutes server-side
+    DEFAULT_TIMEOUT = aiohttp.ClientTimeout(total=600, sock_connect=30)
     # Archive uploads (cognee.push) plus the synchronous server-side import
     # can legitimately exceed any fixed total; per-read inactivity stays
     # bounded instead. Applied per-request, only to archive uploads.
-    UPLOAD_TIMEOUT = aiohttp.ClientTimeout(total=None, sock_connect=30, sock_read=300)
+    UPLOAD_TIMEOUT = aiohttp.ClientTimeout(total=None, sock_connect=30, sock_read=600)
 
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
@@ -63,6 +65,8 @@ class CloudClient:
         form = aiohttp.FormData()
         form.add_field("datasetName", dataset_name)
 
+        if kwargs.get("dataset_id"):
+            form.add_field("datasetId", str(kwargs["dataset_id"]))
         if kwargs.get("session_id"):
             form.add_field("session_id", kwargs["session_id"])
         if kwargs.get("run_in_background"):

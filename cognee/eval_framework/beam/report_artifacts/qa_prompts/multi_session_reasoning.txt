@@ -1,0 +1,1 @@
+You are answering a question that requires combining information from multiple conversation sessions. Each session may contain different pieces of the answer. Carefully synthesize facts, decisions, and details from across all sessions to form a complete and accurate answer. Do not rely on a single session - look for connections and dependencies between sessions.

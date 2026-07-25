@@ -45,7 +45,6 @@ class RememberKwargs(TypedDict, total=False):
 
     graph_model: Any
     node_set: List[str]
-    dataset_id: UUID
     preferred_loaders: list
     incremental_loading: bool
     data_cache: bool
@@ -71,7 +70,6 @@ class RememberKwargs(TypedDict, total=False):
 # Kept in sync with RememberKwargs above and the add()/cognify() signatures.
 _ADD_ONLY = frozenset(
     {
-        "dataset_id",
         "node_set",
         "preferred_loaders",
         "importance_weight",
@@ -571,6 +569,11 @@ class RememberResult:
         # remember() always processes a single dataset, so take the first.
         ds_id, run_info = next(iter(cognify_result.items()))
         self.dataset_id = str(ds_id)
+        # A dataset_id-only call leaves dataset_name at its default; the
+        # pipeline result knows the real name, so prefer it.
+        run_dataset_name = getattr(run_info, "dataset_name", None)
+        if run_dataset_name:
+            self.dataset_name = run_dataset_name
 
         if hasattr(run_info, "status"):
             self.status = "errored" if "Errored" in run_info.status else "completed"
@@ -639,6 +642,7 @@ async def remember(
     ],
     dataset_name: str = "main_dataset",
     *,
+    dataset_id: Optional[UUID] = None,
     session_id: Optional[str] = None,
     chunk_size: Optional[int] = None,
     chunker: Optional[Any] = None,
@@ -665,6 +669,10 @@ async def remember(
     Args:
         data: The data to store (text, file paths, binary streams, etc.).
         dataset_name: Target dataset. Defaults to ``"main_dataset"``.
+        dataset_id: UUID of an existing dataset to target directly. Takes
+            precedence over ``dataset_name``. Not supported for
+            ``MemorySource`` imports or typed ``MemoryEntry`` payloads,
+            which are dataset-name based.
         session_id: Optional session ID. When set, stores data in the
             session cache instead of the permanent graph.
         chunk_size: Max tokens per chunk. Auto-calculated when *None*.
@@ -725,6 +733,10 @@ async def remember(
     if isinstance(data, MemorySource):
         if dry_run:
             raise ValueError("dry_run is not supported for MemorySource imports.")
+        if dataset_id is not None:
+            raise ValueError(
+                "dataset_id is not supported for MemorySource imports; use dataset_name."
+            )
 
         from cognee.api.v1.serve.state import get_remote_client
         from cognee.modules.migration.import_source import import_memory_source
@@ -774,6 +786,10 @@ async def remember(
     if isinstance(data, MEMORY_ENTRY_TYPES):
         if dry_run:
             raise ValueError("dry_run is supported for add+cognify remember inputs only.")
+        if dataset_id is not None:
+            raise ValueError(
+                "dataset_id is not supported for typed memory entries; use dataset_name."
+            )
         return await _remember_entry(
             data,
             dataset_name=dataset_name,
@@ -827,6 +843,7 @@ async def remember(
             additional_properties={
                 "mode": mode,
                 "dataset_name": dataset_name,
+                "dataset_id": str(dataset_id) if dataset_id else "",
                 "data_size_bytes": data_size,
                 "item_count": item_count,
                 "session_id": session_id or "",
@@ -839,6 +856,7 @@ async def remember(
         return await _remember_inner(
             data,
             dataset_name,
+            dataset_id=dataset_id,
             session_id=session_id,
             chunk_size=chunk_size,
             chunker=chunker,
@@ -877,6 +895,7 @@ async def _remember_inner(
     data,
     dataset_name,
     *,
+    dataset_id=None,
     session_id,
     chunk_size,
     chunker,
@@ -895,6 +914,7 @@ async def _remember_inner(
         return await client.remember(
             data,
             dataset_name,
+            dataset_id=dataset_id,
             session_id=session_id,
             chunk_size=chunk_size,
             custom_prompt=custom_prompt,
@@ -908,7 +928,7 @@ async def _remember_inner(
     # dataset this call targets (dataset_id override, else dataset_name).
     from cognee.modules.migrations.startup import run_migrations_and_block
 
-    await run_migrations_and_block(kwargs.get("dataset_id") or dataset_name, kwargs.get("user"))
+    await run_migrations_and_block(dataset_id or dataset_name, kwargs.get("user"))
 
     # Normalize "" to None — HTML forms and Swagger UI submit untouched
     # optional fields as empty strings.
@@ -974,7 +994,7 @@ async def _remember_inner(
         result = RememberResult(
             status="completed",
             dataset_name=dataset_name,
-            dataset_id=str(kwargs.get("dataset_id")) if kwargs.get("dataset_id") else None,
+            dataset_id=str(dataset_id) if dataset_id else None,
             session_ids=None,
         )
         result.items = []
@@ -983,7 +1003,7 @@ async def _remember_inner(
             await run_custom_pipeline(
                 tasks=get_code_graph_tasks(str(repo_path), index_vectors=bool(index_vectors)),
                 data=str(repo_path),
-                dataset=kwargs.get("dataset_id") or dataset_name,
+                dataset=dataset_id or dataset_name,
                 user=kwargs.get("user"),
                 pipeline_name="code_graph_pipeline",
                 # The default (graph-only) pipeline performs no LLM or embedding
@@ -1010,7 +1030,6 @@ async def _remember_inner(
         await setup()
 
         user = kwargs.get("user")
-        dataset_id = kwargs.get("dataset_id")
         dataset_ref = dataset_id or dataset_name
         user, authorized_datasets = await resolve_authorized_user_datasets(dataset_ref, user)
         dataset = authorized_datasets[0]
@@ -1138,8 +1157,6 @@ async def _remember_inner(
     if remaining:
         raise TypeError(f"Unexpected keyword arguments: {', '.join(remaining)}")
 
-    dataset_id = add_kwargs.pop("dataset_id", None) or shared_kwargs.get("dataset_id")
-
     # Ensure database is initialized (same as add() does internally).
     # Must run before get_default_user() which queries the DB.
     from cognee.modules.engine.operations.setup import setup
@@ -1154,12 +1171,19 @@ async def _remember_inner(
         user = await get_default_user()
         shared_kwargs["user"] = user
 
+    # Build the result object — starts as "running"
+    if not dataset_id and dataset_name:
+        # Create dataset if it doesn't exist
+        user, dataset_id = await resolve_authorized_user_datasets(dataset_name, user)
+        dataset_id = dataset_id[0].id if dataset_id else None
+
     # Session memory: store in session cache, then optionally bridge to graph
     if session_id:
         await _add_to_session(session_id, data, user)
         result = RememberResult(
             status="session_stored",
             dataset_name=dataset_name,
+            dataset_id=str(dataset_id) if dataset_id else None,
             session_ids=[session_id],
         )
         result.elapsed_seconds = time.monotonic() - result._started_at
@@ -1168,16 +1192,10 @@ async def _remember_inner(
         if self_improvement:
             from cognee.api.v1.improve import improve
 
-            # Create/authorize the target dataset before launching the
-            # background improve. Otherwise it bridges into a dataset that was
-            # never created, and every bridge stage fails on write/read
-            # authorization. Mirrors the permanent path below.
-            user, _ = await resolve_authorized_user_datasets(dataset_name, user)
-
             async def _session_improve():
                 try:
                     await improve(
-                        dataset=dataset_name,
+                        dataset=dataset_id,
                         session_ids=[session_id],
                         user=user,
                     )
@@ -1189,11 +1207,6 @@ async def _remember_inner(
 
         return result
 
-    # Build the result object — starts as "running"
-    if not dataset_id and dataset_name:
-        # Create dataset if it doesn't exist
-        user, dataset_id = await resolve_authorized_user_datasets(dataset_name, user)
-        dataset_id = dataset_id[0].id if dataset_id else None
     result = RememberResult(
         status="running",
         dataset_name=dataset_name,
@@ -1229,7 +1242,7 @@ async def _remember_inner(
             from cognee.api.v1.improve import improve
 
             logger.info("remember: running self-improvement on dataset '%s'", dataset_name)
-            improve_kwargs = {"dataset": dataset_name, "user": user}
+            improve_kwargs = {"dataset": dataset_id or dataset_name, "user": user}
             if session_ids:
                 improve_kwargs["session_ids"] = session_ids
             await improve(**improve_kwargs)

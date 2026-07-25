@@ -839,3 +839,46 @@ async def test_session_context_reads_exclude_expired(adapter):
     await adapter.create_session_context_entry("u1", "s1", _ctx("c1"))
     await _backdate_expirations(adapter, cache_session_context, _past(), entry_id="c1")
     assert await adapter.get_session_context_entries("u1", "s1") == []
+
+
+@pytest.mark.asyncio
+async def test_uuid_ids_write_and_read_as_string_keys(adapter):
+    """uuid.UUID ids must key the same rows as their string form.
+
+    Callers sometimes hold ``user.id`` as a ``uuid.UUID``; on Postgres the
+    asyncpg bind cast then parses as ``text = uuid`` (42883) and on sqlite the
+    driver rejects the bind. The StringKey column type stringifies every bind.
+    """
+    user_uuid, session_uuid = uuid4(), uuid4()
+    await adapter.create_qa_entry(user_uuid, session_uuid, "Q", "C", "A", qa_id="id1")
+
+    via_uuid = await adapter.get_all_qa_entries(user_uuid, session_uuid)
+    via_str = await adapter.get_all_qa_entries(str(user_uuid), str(session_uuid))
+    assert [entry.qa_id for entry in via_uuid] == ["id1"]
+    assert [entry.qa_id for entry in via_str] == ["id1"]
+
+    latest = await adapter.get_latest_qa_entries(user_uuid, session_uuid, last_n=5)
+    assert [entry.qa_id for entry in latest] == ["id1"]
+
+
+@pytest.mark.asyncio
+async def test_uuid_ids_across_trace_context_and_usage(adapter):
+    """UUID user ids work for traces, session context, and usage logs alike."""
+    user_uuid, session_uuid = uuid4(), uuid4()
+
+    await adapter.append_agent_trace_step(
+        user_uuid, session_uuid, trace_id="t1", origin_function="f", status="ok"
+    )
+    traces = await adapter.get_agent_trace_session(str(user_uuid), str(session_uuid))
+    assert [trace.trace_id for trace in traces] == ["t1"]
+
+    await adapter.create_session_context_entry(user_uuid, session_uuid, _ctx("c1"))
+    entries = await adapter.get_session_context_entries(str(user_uuid), str(session_uuid))
+    assert [entry["id"] for entry in entries] == ["c1"]
+    assert await adapter.update_session_context_entry(user_uuid, session_uuid, "c1", {"note": "n"})
+
+    await adapter.log_usage(user_uuid, {"call": "search"})
+    assert len(await adapter.get_usage_logs(str(user_uuid))) == 1
+
+    assert await adapter.delete_session(user_uuid, session_uuid) is True
+    assert await adapter.get_all_qa_entries(str(user_uuid), str(session_uuid)) == []

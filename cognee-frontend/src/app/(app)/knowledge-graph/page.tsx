@@ -31,7 +31,7 @@ const STATUS_CFG: Record<DisplayStatus, { label: string; color: string; dotBg: s
 
 export default function KnowledgeGraphPage() {
   const { cogniInstance, isInitializing } = useCogniInstance();
-  const { datasets, selectedDataset } = useFilter();
+  const { datasets, selectedDataset, refreshDatasets } = useFilter();
 
   const [iframeSrc, setIframeSrc] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -145,7 +145,7 @@ export default function KnowledgeGraphPage() {
         </div>
 
         <button
-          onClick={() => setVizRefreshKey((k) => k + 1)}
+          onClick={() => { refreshDatasets(); setVizRefreshKey((k) => k + 1); }}
           style={{ background: "rgba(0,0,0,0.75)", border: "1px solid rgba(255,255,255,0.18)", color: "#EDECEA", borderRadius: 7, padding: "6px 10px", fontSize: 12, fontWeight: 500, cursor: "pointer", display: "flex", alignItems: "center", gap: 5 }}
           title="Refresh"
         >
