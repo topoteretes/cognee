@@ -542,7 +542,12 @@
           const sessionBadge = el.querySelector('.bv-mem.session');
           if (sessionBadge) sessionBadge.addEventListener('click', ev => {
             ev.stopPropagation();
-            showSessionMemory(a.name);
+            showSessionMemory(a);
+          });
+          el.style.cursor = 'pointer';
+          el.addEventListener('click', ev => {
+            if (ev.target.closest('.bv-acc')) return;
+            showSessionMemory(a);
           });
           el.dataset.uid = a.id;
           wireUserHover(el, a.id);
@@ -915,20 +920,30 @@
   // and the DISTILLED memory improve() writes into the graph as the
   // session_learnings / user_sessions_from_cache node sets — shown by
   // pointing the source lens at those sets.
-  function showSessionMemory(agentName) {
+  function showSessionMemory(agent) {
+    const agentName = agent.name;
     const sessionSets = new Set(allNodes.filter(n => n.type === 'NodeSet' && n.name &&
       /^(session_learnings|user_sessions_from_cache|agent_trace_feedbacks)/.test(n.name))
       .map(n => n.name));
-    const qas = bakedSearchEvents.filter(e => (e.kind || 'search') === 'search' && e.question);
+    // The agent's OWN conversation history: events from its registered
+    // session. Falls back honestly when it never ran a session itself.
+    const own = agent.session_id
+      ? bakedSearchEvents.filter(e => (e.kind || 'search') === 'search' && e.question &&
+          e.session_id === agent.session_id)
+      : [];
+    const qas = own;
     const distilled = sessionSets.size
       ? `<div class="a" style="color:${C.inflow};margin-top:8px">✦ distilled into the graph as: ${[...sessionSets].map(esc).join(', ')} — now lensed below</div>`
       : `<div class="a" style="color:${C.haze};margin-top:8px">nothing distilled into the graph yet — run improve() with session_ids to turn this history into session_learnings</div>`;
+    const sessionLabel = agent.session_id
+      ? `session “${esc(agent.session_id)}” · ${qas.length} exchange${qas.length === 1 ? '' : 's'}`
+      : 'no session of its own yet — it has not run with a session_id';
     answerEl.innerHTML = `<div class="x">✕</div>
-      <div class="q">${esc(agentName)} — session memory (conversation history)</div>
+      <div class="q">${esc(agentName)} — session memory</div>
+      <div class="a" style="color:${C.haze}">${sessionLabel}</div>
       <div class="a">${qas.length ? qas.map(e =>
         `<div style="margin-bottom:7px"><b style="color:${C.bone}">⌕ ${esc(trunc(e.question, 90))}</b><br>
-         <span style="color:${C.haze}">${esc(trunc(e.answer || '', 140))}</span></div>`).join('')
-        : 'no conversation history in this snapshot'}
+         <span style="color:${C.haze}">${esc(trunc(e.answer || '', 140))}</span></div>`).join('') : ''}
       ${distilled}</div>`;
     answerEl.style.display = 'block';
     answerEl.querySelector('.x').addEventListener('click', () => { answerEl.style.display = 'none'; });

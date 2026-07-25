@@ -279,6 +279,8 @@ def build_actor_overlay(
         agent_props = {"type": "Agent", "name": agent.get("name") or str(agent["id"])}
         if agent.get("memory_mode"):
             agent_props["memory_mode"] = agent["memory_mode"]
+        if agent.get("session_id"):
+            agent_props["session_id"] = agent["session_id"]
         nodes.append(Node(agent_node_id, agent_props))
         if user and str(agent.get("user_id") or "") == str(user["id"]):
             edges.append(EdgeData(f"user:{user['id']}", agent_node_id, "operates", {}))

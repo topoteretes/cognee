@@ -123,6 +123,9 @@ async def connect_agent(with_dataset: bool) -> None:
         type="mcp",
         source="mcp",
         memory_mode="cognee",
+        # Its OWN session: phase-4 questions run under it, so the agent card
+        # shows the agent's conversation history, not the operator's.
+        session_id="copilot-session",
         dataset_names=[DATASET] if with_dataset else None,
         origin_function="live_business_graph_demo",
     )
@@ -190,9 +193,19 @@ async def main() -> None:
         # By id, not name: name lookup only finds datasets the user OWNS,
         # and maya has a grant on this one, not ownership.
         dataset_ids=[str(business.id)],
+        session_id="analyst-session",
         origin_function="live_business_graph_demo",
     )
     print("   maya's agent 'support-analyst' registered and scoped to the dataset.")
+    await cognee.search(
+        query_text="Which support tickets affected customer adoption?",
+        query_type=SearchType.GRAPH_COMPLETION,
+        dataset_ids=[business.id],
+        top_k=8,
+        session_id="analyst-session",
+        user=maya,
+    )
+    print("   support-analyst asked its first question in its own session.")
 
     await cognee.add(
         "Personal notes: my working playbook. Mission focus is connected customer knowledge. "
@@ -239,6 +252,7 @@ async def main() -> None:
             query_type=SearchType.GRAPH_COMPLETION,
             datasets=[DATASET],
             top_k=10,
+            session_id="copilot-session",
         )
         answer = ""
         if results and isinstance(results[0], dict):

@@ -123,6 +123,42 @@ async def visualize_graph(
             from cognee.modules.visualization.session_events import collect_session_events
 
             search_events = await collect_session_events(user=user, session_ids=session_ids)
+            # Agents can be operated by OTHER users in scope (e.g. a
+            # colleague's agent) — fold their sessions in too so agent
+            # cards can show their own conversation history. Best-effort
+            # and same-scope only.
+            if include_actors:
+                try:
+                    from sqlalchemy import select as _select
+
+                    from cognee.infrastructure.databases.relational import (
+                        get_relational_engine,
+                    )
+                    from cognee.modules.users.models import User as UserModel
+
+                    engine = get_relational_engine()
+                    async with engine.get_async_session() as db:
+                        stmt = _select(UserModel)
+                        if getattr(user, "tenant_id", None):
+                            stmt = stmt.where(UserModel.tenant_id == user.tenant_id)
+                        others = [
+                            u
+                            for u in (await db.execute(stmt)).scalars().all()
+                            if str(u.id) != str(user.id)
+                            and not getattr(u, "parent_user_id", None)
+                            and not str(getattr(u, "email", "")).endswith("@cognee.agent")
+                        ]
+                    seen_keys = {
+                        (e.get("session_id"), e.get("qa_id")) for e in (search_events or [])
+                    }
+                    for other in others:
+                        for event in await collect_session_events(user=other):
+                            key = (event.get("session_id"), event.get("qa_id"))
+                            if key not in seen_keys:
+                                seen_keys.add(key)
+                                search_events.append(event)
+                except Exception as error:  # noqa: BLE001 — extra sessions are best-effort
+                    logger.debug("Cross-user session events skipped: %s", error)
 
         if include_actors and dataset:
             from cognee.api.v1.visualize.memory_provenance import get_actor_overlay
