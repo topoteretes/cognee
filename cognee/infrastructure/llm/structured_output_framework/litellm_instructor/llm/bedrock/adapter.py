@@ -7,6 +7,9 @@ from litellm.exceptions import ContentPolicyViolationError
 from pydantic import BaseModel
 
 from cognee.infrastructure.files.storage.s3_config import get_s3_config
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.instructor_modes import (
+    get_instructor_mode,
+)
 from cognee.infrastructure.llm.exceptions import (
     ContentPolicyFilterError,
     LLMPaymentRequiredError,
@@ -40,7 +43,7 @@ class BedrockAdapter(LLMInterface):
     """
 
     name = "Bedrock"
-    default_instructor_mode = "json_schema_mode"
+    default_instructor_mode = get_instructor_mode("bedrock")
 
     MAX_RETRIES = 2
 
