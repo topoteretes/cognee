@@ -350,6 +350,35 @@ async def aevict_graph_engines_for_database(graph_database_name: str) -> int:
     return evicted
 
 
+def evict_graph_engines_for_url(graph_database_url: str) -> int:
+    """Evict every cached graph engine bound to *graph_database_url*.
+
+    Counterpart of :func:`evict_graph_engines_for_database` for handlers whose
+    per-dataset databases share one database name but differ by connection url
+    — with the ``neo4j_community`` handler every dataset's database is named
+    ``neo4j`` inside its own container, so the bolt url (unique host port) is
+    the only key field that identifies the dataset's engines.
+
+    Returns the number of evicted entries.
+    """
+    if not graph_database_url:
+        raise ValueError("graph_database_url must be a non-empty url")
+    return _create_graph_engine.cache_evict_matching(graph_database_url=graph_database_url)
+
+
+async def aevict_graph_engines_for_url(graph_database_url: str) -> int:
+    """Evict every cached graph engine bound to *graph_database_url* and wait
+    until their in-flight closes have completed. Use before removing the
+    database's backing container so a teardown that is already running cannot
+    race the removal.
+
+    Returns the number of evicted entries.
+    """
+    evicted = evict_graph_engines_for_url(graph_database_url)
+    await _create_graph_engine.cache_await_closed(graph_database_url=graph_database_url)
+    return evicted
+
+
 def is_graph_engine_cached(**kwargs) -> bool:
     """Check whether a graph engine entry exists in the cache without creating."""
     normalized = _normalize_optional_create_graph_engine_params(kwargs)
@@ -437,6 +466,19 @@ def _create_graph_engine(
     if graph_database_provider == "neo4j":
         if not graph_database_url:
             raise EnvironmentError("Missing required Neo4j URL.")
+
+        if graph_dataset_database_handler == "neo4j_community":
+            # Per-dataset Neo4j Community containers: the adapter's close()
+            # (triggered by cache eviction) also stops the dataset's container.
+            from .neo4j_driver.neo4j_community_adapter import Neo4jCommunityAdapter
+
+            return Neo4jCommunityAdapter(
+                graph_database_url=graph_database_url,
+                graph_database_username=graph_database_username or None,
+                graph_database_password=graph_database_password or None,
+                graph_database_name=graph_database_name or None,
+                graph_database_allow_anonymous=graph_database_allow_anonymous,
+            )
 
         from .neo4j_driver.adapter import Neo4jAdapter
 
