@@ -139,11 +139,20 @@
     const docs = nodesArr.filter(n => n.stage === 'document');
     const SESSION_SET = name => /^(session_learnings|user_sessions_from_cache|agent_trace_feedbacks)/.test(name);
     const sets = nodesArr.filter(n => n.type === 'NodeSet' && n.name && !SESSION_SET(n.name));
+    const sessionSetNodes = nodesArr.filter(n => n.type === 'NodeSet' && n.name && SESSION_SET(n.name));
 
     const srcNames = sets.length ? sets.map(n => n.name)
       : [...new Set(ents.flatMap(setsOf))];
     const colors = {};
     srcNames.forEach((s, i) => { colors[s] = colorForSet(s, i, colorsMap); });
+    // Session-memory sets wear the AGENT color family (amber): this memory
+    // exists because agents talked. Shades keep the three layers apart.
+    const AGENT_SET_SHADES = { session_learnings: '#F5A83C', user_sessions_from_cache: '#E08E1B', agent_trace_feedbacks: '#FFC46B' };
+    sessionSetNodes.forEach(n => {
+      const base = Object.keys(AGENT_SET_SHADES).find(k => n.name.indexOf(k) === 0);
+      colors[n.name] = AGENT_SET_SHADES[base] || '#F5A83C';
+    });
+    const isSessionSet = SESSION_SET;
 
     const entCount = {}, docCount = {};
     ents.forEach(n => setsOf(n).forEach(s => { entCount[s] = (entCount[s] || 0) + 1; }));
@@ -199,7 +208,7 @@
     });
 
     return {
-      byIdL, entities: ents, E: EL, sourceNames: srcNames, setColor: colors,
+      byIdL, entities: ents, E: EL, sourceNames: srcNames, setColor: colors, isSessionSet,
       setEntityCount: entCount, setDocCount: docCount,
       semanticLinks: semLinks, docLinks: dLinks, anchors: anchorsL,
       typeNodes: Object.values(typeNodes), typeLinks: Object.values(typeLinks),
@@ -213,7 +222,7 @@
     docLinks = BS.docLinks, sourceNames = BS.sourceNames, setColor = BS.setColor,
     setEntityCount = BS.setEntityCount, setDocCount = BS.setDocCount,
     anchors = BS.anchors, importanceMax = BS.importanceMax, brainById = BS.byIdL,
-    typeNodes = BS.typeNodes, typeLinks = BS.typeLinks;
+    typeNodes = BS.typeNodes, typeLinks = BS.typeLinks, isSessionSet = BS.isSessionSet;
 
   // Agent → sources captions from actor edges.
   const agentReads = {};
@@ -293,7 +302,7 @@
   .bv-mem{border:1px dashed ${C.cardBorder};border-radius:5px;padding:1px 6px;opacity:.5;}
   .bv-mem.on{border-style:solid;opacity:1;color:${C.bone};}
   .bv-mem.session{cursor:pointer;}
-  .bv-mem.session.on{color:${C.inflow};border-color:rgba(67,217,232,.45);}
+  .bv-mem.session.on{color:${C.amber};border-color:rgba(245,168,60,.45);}
   .bv-card.external{opacity:.72;border-style:dashed;}
   .bv-card.knowledge{cursor:pointer;}
   .bv-card.knowledge.focused{border-color:${C.inflow};box-shadow:0 0 12px rgba(67,217,232,.2);}
@@ -610,7 +619,7 @@
     BS = computeBrainState(nodesArr, linksArr, colorsMap);
     ({ entities, E, semanticLinks, docLinks, sourceNames, setColor,
        setEntityCount, setDocCount, anchors, importanceMax,
-       typeNodes, typeLinks } = BS);
+       typeNodes, typeLinks, isSessionSet } = BS);
     brainById = BS.byIdL;
     hovered = null;
     spotlight = null;
@@ -949,7 +958,7 @@
     answerEl.querySelector('.x').addEventListener('click', () => { answerEl.style.display = 'none'; });
     clearTimeout(answerTimer);
     answerTimer = setTimeout(() => { answerEl.style.display = 'none'; }, 20000);
-    if (sessionSets.size) setFocusSets(sessionSets, 'distilled session memory');
+    if (sessionSets.size) setFocusSets(sessionSets, 'distilled session memory (agent-made, in amber)');
   }
 
   // ── Hover ─────────────────────────────────────────────────────────
@@ -1144,8 +1153,7 @@
     // with the caption riding the hull's crown (L0/L1).
     if (level <= 1) {
       ctx.textAlign = 'center';
-      sourceNames.forEach(name => {
-        if (focusSets && !focusSets.has(name)) return;
+      (focusSets ? [...focusSets] : sourceNames).forEach(name => {
         const members = entities.filter(n => setsOf(n).includes(name));
         if (members.length < 2) return;
         const pad = 34;
@@ -1277,8 +1285,9 @@
 
       typeNodes.forEach(tn => {
         if (focusSets && !tn._visible.length) return;
+        const ranked = Object.keys(tn.sets).sort((x, y) => tn.sets[y] - tn.sets[x]);
         const dominant = focusSets ? [...focusSets][0]
-          : Object.keys(tn.sets).sort((x, y) => tn.sets[y] - tn.sets[x])[0];
+          : (ranked.find(x => !isSessionSet(x)) || ranked[0]);
         const fill = d3.color(dominant ? (setColor[dominant] || '#8A7BD8') : '#8A7BD8');
         ctx.globalAlpha = typeAlpha * dimmed;
         ctx.beginPath();
@@ -1368,15 +1377,20 @@
         ctx.lineWidth = 1.2 / transform.k; ctx.stroke();
       }
       const sets = setsOf(n);
+      const sourceSets = sets.filter(x => !isSessionSet(x));
+      const sessionMember = sets.length > sourceSets.length;
+      const fillSet = sourceSets[0] || sets[0];
       ctx.globalAlpha = alpha;
       ctx.beginPath();
       ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
-      ctx.fillStyle = sets.length ? (setColor[sets[0]] || '#6510F4') : '#8A7BD8';
+      ctx.fillStyle = fillSet ? (setColor[fillSet] || '#6510F4') : '#8A7BD8';
       ctx.fill();
-      if (sets.length > 1) {
+      // Rings: second source set, or the agent-amber session membership.
+      if (sourceSets.length > 1 || sessionMember) {
         ctx.beginPath();
         ctx.arc(n.x, n.y, r + 2.2 / transform.k, 0, Math.PI * 2);
-        ctx.strokeStyle = setColor[sets[1]] || C.bone;
+        ctx.strokeStyle = sessionMember && sourceSets.length <= 1
+          ? C.amber : (setColor[sourceSets[1]] || (sessionMember ? C.amber : C.bone));
         ctx.lineWidth = 1.6 / transform.k;
         ctx.stroke();
       }
