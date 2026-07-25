@@ -67,10 +67,10 @@ def get_provenance_config() -> ProvenanceConfig:
     mode = config.provenance_mode
     if mode not in _VALID_MODES:
         from cognee.shared.logging_utils import get_logger
+
         logger = get_logger("provenance_config")
         logger.warning(
-            "Unknown COGNEE_PROVENANCE_MODE=%r — falling back to 'lightweight'. "
-            "Valid values: %s",
+            "Unknown COGNEE_PROVENANCE_MODE=%r — falling back to 'lightweight'. Valid values: %s",
             mode,
             ", ".join(sorted(_VALID_MODES)),
         )
