@@ -179,6 +179,13 @@
       const r = srcNames.length > 1 ? 300 : 0;
       anchorsL[s] = { x: Math.cos(angle) * r * 1.25, y: Math.sin(angle) * r * 0.6 };
     });
+    // Session-memory sets live on their own arc BELOW the sources — without
+    // an anchor those entities all pull to (0,0) and bury the center.
+    const sessionNames = sessionSetNodes.map(n => n.name);
+    sessionNames.forEach((name, i) => {
+      const spread = (i - (sessionNames.length - 1) / 2) * 0.55;
+      anchorsL[name] = { x: Math.sin(spread) * 480, y: 430 + Math.abs(spread) * 60 };
+    });
 
     // The BUSINESS MODEL layer (L0): entity TYPES and how they relate —
     // "campaign generates customer", not individual campaigns. Types float
@@ -735,7 +742,10 @@
     return { x: x / sets.length, y: y / sets.length };
   }
 
-  const storeKey = 'bv-state:' + location.pathname;
+  // Versioned: bump when anchor/layout logic changes, otherwise cached
+  // positions from the previous layout resurrect through beforeunload.
+  const LAYOUT_VERSION = 2;
+  const storeKey = 'bv-state:v' + LAYOUT_VERSION + ':' + location.pathname;
   let sim = null;
   let prevIds = null;
   const newborn = [];
@@ -844,8 +854,8 @@
     const xs = entities.map(n => n.x), ys = entities.map(n => n.y);
     const minX = Math.min(...xs) - 60, maxX = Math.max(...xs) + 60;
     const minY = Math.min(...ys) - 60, maxY = Math.max(...ys) + 60;
-    const k = Math.min(1.5, 0.85 * Math.min((W - 420) / (maxX - minX || 1), (H - 160) / (maxY - minY || 1)));
-    const t = d3.zoomIdentity.translate(W / 2, H / 2 - 20).scale(k)
+    const k = Math.min(1.5, 0.85 * Math.min((W - 420) / (maxX - minX || 1), (H - 210) / (maxY - minY || 1)));
+    const t = d3.zoomIdentity.translate(W / 2, H / 2 - 34).scale(k)
       .translate(-(minX + maxX) / 2, -(minY + maxY) / 2);
     (animate ? d3.select(canvas).transition().duration(700) : d3.select(canvas)).call(zoom.transform, t);
   }
@@ -1433,9 +1443,9 @@
   }
 
   function topImportanceCut() {
-    if (entities.length <= 60) return 0;
+    if (entities.length <= 150) return 0;
     const sorted = entities.map(n => n.importance || 0).sort((a, b) => b - a);
-    return sorted[49] || 0;
+    return sorted[99] || 0;
   }
 
   // ── Helpers ───────────────────────────────────────────────────────
