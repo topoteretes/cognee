@@ -39,6 +39,8 @@ async def visualize_graph(
     neighborhood_depth: int = DEFAULT_NEIGHBORHOOD_DEPTH,
     neighborhood_seed_top_k: int = DEFAULT_SEED_TOP_K,
     max_nodes: int = DEFAULT_MAX_NODES,
+    live: bool = False,
+    live_events_url: Optional[str] = None,
 ) -> str:
     """Render the knowledge graph to a self-contained HTML file.
 
@@ -73,6 +75,16 @@ async def visualize_graph(
         neighborhood_depth: k-hop expansion depth around the seeds (default 2).
         neighborhood_seed_top_k: Maximum number of seed nodes (default 10).
         max_nodes: Hard cap on rendered nodes after expansion (default 500).
+        live: When True, the rendered page polls the backend's
+            ``/api/v1/visualize/live-events`` endpoint and spotlights each new
+            search's retrieved subgraph on the Memory tab as it happens —
+            keep the page open and run searches to watch them light up.
+            Requires the cognee API server to be running (and reachable under
+            ``live_events_url``); searches must run with session memory
+            enabled (the default) for their provenance to be recorded.
+        live_events_url: Overrides the polled URL. Defaults to
+            ``http://localhost:8000/api/v1/visualize/live-events``. Setting
+            this implies ``live=True``.
     """
     if not user:
         user = await get_default_user()
@@ -106,8 +118,14 @@ async def visualize_graph(
 
             search_events = await collect_session_events(user=user, session_ids=session_ids)
 
+        if live and not live_events_url:
+            live_events_url = "http://localhost:8000/api/v1/visualize/live-events"
+
         graph = await cognee_network_visualization(
-            graph_data, destination_file_path, search_events=search_events
+            graph_data,
+            destination_file_path,
+            search_events=search_events,
+            live_events_url=live_events_url,
         )
 
         if destination_file_path:

@@ -84,6 +84,7 @@ async def cognee_network_visualization(
     destination_file_path: Optional[str] = None,
     schema_data: Optional[dict] = None,
     search_events: Optional[list] = None,
+    live_events_url: Optional[str] = None,
 ) -> str:
     """Render the graph to a self-contained HTML file and return the HTML.
 
@@ -115,6 +116,10 @@ async def cognee_network_visualization(
             =True)`` collects these automatically from the session layer via
             ``cognee.modules.visualization.session_events``; pass them
             explicitly only for custom pipelines.
+        live_events_url: URL of the ``/api/v1/visualize/live-events`` endpoint.
+            When set, the rendered page polls it and spotlights each new
+            search's retrieved subgraph on the Memory tab as it happens.
+            ``None`` (default) renders the usual static snapshot.
 
     Returns:
         The full HTML as a string.
@@ -157,6 +162,10 @@ async def cognee_network_visualization(
     # __SEARCH_EVENTS__ token would fail the no-placeholder assembly test.
     html = html.replace("__MEMORY_DATA__", _safe_json_embed(pre.memory_map or {}))
     html = html.replace("__SEARCH_EVENTS__", _safe_json_embed(search_events or []))
+    html = html.replace(
+        "__LIVE_EVENTS_URL__",
+        _safe_json_embed(live_events_url) if live_events_url else "null",
+    )
     # Semantic tokens: null when there are no embeddings, so the tab renders a
     # friendly empty state without leaving a placeholder behind.
     html = html.replace(

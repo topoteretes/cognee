@@ -143,6 +143,52 @@ def get_visualize_router() -> APIRouter:
             logger.exception("Visualization failed for dataset %s", dataset_id)
             return JSONResponse(status_code=409, content={"error": str(error)})
 
+    @router.get("/live-events", response_model=None)
+    async def visualize_live_events(
+        since: Optional[str] = Query(
+            None,
+            description=(
+                "ISO-8601 timestamp; only events strictly newer than this are "
+                "returned. Omit to fetch the full recent history."
+            ),
+        ),
+        session_ids: Optional[List[str]] = Query(
+            None,
+            description="Restrict to these session ids. Defaults to the user's recent sessions.",
+        ),
+        user: User = Depends(get_authenticated_user),
+    ):
+        """
+        Return memory-operation events (searches and feedback) for live visualization.
+
+        Serves the polling client embedded in HTML rendered with
+        ``visualize_graph(live=True)``: each search that runs with session memory
+        records the graph elements that produced its answer, and this endpoint
+        exposes those as renderer-ready ``search``/``improve`` events so an open
+        visualization can spotlight retrieved subgraphs as they happen.
+
+        ## Query Parameters
+        - **since** (str): ISO timestamp watermark; only newer events are returned
+        - **session_ids** (list[str]): Explicit sessions to read (default: recent)
+
+        ## Response
+        ``{"events": [...], "latest": "<max event time or null>"}`` — event shape
+        matches the ``search_events`` contract of ``cognee_network_visualization``.
+
+        ## Notes
+        - Best-effort: an unavailable session layer yields an empty list, never an error
+        - Events carry ``node_ids``/``edge_ids`` (``used_graph_element_ids`` provenance)
+        """
+        from cognee.modules.visualization.session_events import collect_session_events
+
+        events = await collect_session_events(user=user, session_ids=session_ids)
+        if since:
+            # Event times are ISO-8601 strings, so the watermark comparison is
+            # lexicographic; events without a time are never replayed.
+            events = [event for event in events if (event.get("time") or "") > since]
+        latest = max((event.get("time") or "" for event in events), default="")
+        return JSONResponse({"events": events, "latest": latest or (since or None)})
+
     @router.post("/multi", response_model=None)
     async def visualize_multi(
         pairs: List[UserDatasetPair],

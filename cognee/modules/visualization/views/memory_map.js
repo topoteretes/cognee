@@ -924,4 +924,22 @@
 
     built = true;
   };
+
+  // ── Live mode: operation events pushed at runtime by the poller ───
+  // The template's live-events client (enabled via visualize_graph(live=True))
+  // calls this with each new search/improve event. Before the Memory tab is
+  // first rendered the event is only queued (buildRail picks it up on open);
+  // afterwards the rail is rebuilt and the newest event auto-spotlights.
+  window._mmLiveEvent = function (evt) {
+    if (!evt) return;
+    searchEvents.push(evt);
+    if (!built || !L) return;
+    buildRail();
+    let railIdx = -1;
+    for (let i = 0; i < railItems.length; i++) {
+      if (railItems[i].search === evt) railIdx = i;
+    }
+    if (evt.kind === 'improve') applyImprove(evt, railIdx);
+    else applySearch(evt, railIdx);
+  };
 })();

@@ -499,5 +499,82 @@ __MEMORY_VIEW_JS__
 __SEMANTIC_LAYOUT_JS__
 __SEMANTIC_VIEW_JS__
 </script>
+
+<script>
+// ── Live events client ──────────────────────────────────────────────
+// Enabled when the page is rendered with visualize_graph(live=True):
+// __LIVE_EVENTS_URL__ resolves to the /api/v1/visualize/live-events URL
+// (JSON string) instead of null. Polls the backend and feeds each new
+// search/improve event into the Memory tab's spotlight renderer
+// (window._mmLiveEvent), so retrieved subgraphs light up as searches run.
+(function () {
+  'use strict';
+  const LIVE_URL = __LIVE_EVENTS_URL__;
+  if (!LIVE_URL) return;
+  const POLL_MS = 1500;
+
+  function eventKey(e) {
+    return (e.kind || 'search') + '|' + (e.qa_id || '') + '|' + (e.time || '') +
+      '|' + (e.question || '');
+  }
+
+  // Events baked into the page at render time are already on the timeline;
+  // seed the dedup set and watermark so they are not re-announced.
+  const seen = new Set();
+  let since = '';
+  (__SEARCH_EVENTS__ || []).forEach(function (e) {
+    seen.add(eventKey(e));
+    if ((e.time || '') > since) since = e.time;
+  });
+
+  let failures = 0;
+  async function tick() {
+    try {
+      const url = LIVE_URL +
+        (since ? (LIVE_URL.indexOf('?') >= 0 ? '&' : '?') +
+          'since=' + encodeURIComponent(since) : '');
+      const res = await fetch(url, { headers: { Accept: 'application/json' } });
+      if (res.ok) {
+        failures = 0;
+        const data = await res.json();
+        (data.events || []).forEach(function (e) {
+          const k = eventKey(e);
+          if (seen.has(k)) return;
+          seen.add(k);
+          if (window._mmLiveEvent) window._mmLiveEvent(e);
+        });
+        if (data.latest && data.latest > since) since = data.latest;
+        setBadge(true);
+      } else {
+        failures++;
+        setBadge(false);
+      }
+    } catch (err) {
+      failures++;
+      setBadge(false);
+    }
+    // Back off (max 10s) while the backend is unreachable; recover instantly.
+    setTimeout(tick, failures ? Math.min(POLL_MS * (failures + 1), 10000) : POLL_MS);
+  }
+
+  // Small fixed indicator so it is visible whether live mode is connected.
+  let badge = null;
+  function setBadge(connected) {
+    if (!badge) {
+      badge = document.createElement('div');
+      badge.id = 'live-events-badge';
+      badge.style.cssText = 'position:fixed;right:12px;bottom:12px;z-index:9999;' +
+        'font:11px/1.6 system-ui,sans-serif;padding:2px 10px;border-radius:10px;' +
+        'pointer-events:none;opacity:.85;';
+      document.body.appendChild(badge);
+    }
+    badge.textContent = connected ? '● LIVE' : '○ live: reconnecting…';
+    badge.style.background = connected ? 'rgba(46,160,67,.15)' : 'rgba(210,153,34,.15)';
+    badge.style.color = connected ? '#2ea043' : '#d29922';
+  }
+
+  tick();
+})();
+</script>
 </body>
 </html>

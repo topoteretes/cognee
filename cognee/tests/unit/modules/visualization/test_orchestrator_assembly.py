@@ -128,6 +128,28 @@ def test_search_events_kwarg_is_embedded(tmp_path):
     assert '"question": "Who knows Bob?"' in html
 
 
+def test_live_events_url_null_by_default(tmp_path):
+    """Without ``live_events_url`` the page stays a static snapshot: the
+    poller sees null and returns immediately."""
+    html = _render(tmp_path)
+    assert "const LIVE_URL = null" in html
+
+
+def test_live_events_url_embedded_and_client_wired(tmp_path):
+    """``live_events_url=`` enables the polling client, which feeds new
+    events into the Memory tab's runtime hook."""
+    url = "http://localhost:8000/api/v1/visualize/live-events"
+    html = asyncio.run(
+        cognee_network_visualization(
+            _minimal_graph(), str(tmp_path / "out.html"), live_events_url=url
+        )
+    )
+    assert f'const LIVE_URL = "{url}"' in html
+    # The poller and the memory-view hook it calls are both present.
+    assert "window._mmLiveEvent" in html
+    assert "live-events-badge" in html
+
+
 def test_schema_data_is_null_when_omitted(tmp_path):
     """The orchestrator emits the literal ``null`` for ``__SCHEMA_DATA__``
     when no schema_data is passed — JS handlers test for it."""
