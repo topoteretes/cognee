@@ -4,6 +4,11 @@ Consolidated tests for API endpoint error responses and basic endpoint functiona
 Tests cover:
 - Error handling (PipelineRunErrored → 422, PermissionDenied → 403, etc.)
 - Basic endpoint functionality (happy path with mocked backends)
+
+All API-function mocks go through ``monkeypatch.setattr`` so they are restored
+after each test — a bare ``pkg.fn = AsyncMock(...)`` assignment leaks into every
+test that runs later in the suite (remember()/cognify() resolve these package
+attributes lazily at call time).
 """
 
 import importlib
@@ -92,10 +97,10 @@ class TestAddEndpoint:
         )
         assert resp.status_code == 400
 
-    def test_add_pipeline_errored_returns_500(self, client):
+    def test_add_pipeline_errored_returns_500(self, client, monkeypatch):
         import cognee.api.v1.add as add_pkg
 
-        add_pkg.add = AsyncMock(return_value=_make_errored())
+        monkeypatch.setattr(add_pkg, "add", AsyncMock(return_value=_make_errored()))
 
         resp = client.post(
             "/add",
@@ -107,11 +112,11 @@ class TestAddEndpoint:
         assert body["error"] == "Pipeline run errored"
         assert "detail" in body
 
-    def test_add_success_returns_200(self, client):
+    def test_add_success_returns_200(self, client, monkeypatch):
         import cognee.api.v1.add as add_pkg
 
         completed = _make_completed()
-        add_pkg.add = AsyncMock(return_value=completed)
+        monkeypatch.setattr(add_pkg, "add", AsyncMock(return_value=completed))
 
         resp = client.post(
             "/add",
@@ -123,10 +128,10 @@ class TestAddEndpoint:
         assert body["status"] == "completed"
         assert body["dataset_name"] == "test_dataset"
 
-    def test_add_internal_error_returns_500(self, client):
+    def test_add_internal_error_returns_500(self, client, monkeypatch):
         import cognee.api.v1.add as add_pkg
 
-        add_pkg.add = AsyncMock(side_effect=RuntimeError("unexpected"))
+        monkeypatch.setattr(add_pkg, "add", AsyncMock(side_effect=RuntimeError("unexpected")))
 
         resp = client.post(
             "/add",
@@ -176,10 +181,12 @@ class TestCognifyEndpoint:
         resp = client.post("/cognify", json={})
         assert resp.status_code == 400
 
-    def test_cognify_pipeline_errored_returns_500(self, client):
+    def test_cognify_pipeline_errored_returns_500(self, client, monkeypatch):
         import cognee.api.v1.cognify as cognify_pkg
 
-        cognify_pkg.cognify = AsyncMock(return_value={"run": _make_errored()})
+        monkeypatch.setattr(
+            cognify_pkg, "cognify", AsyncMock(return_value={"run": _make_errored()})
+        )
 
         resp = client.post(
             "/cognify",
@@ -189,11 +196,13 @@ class TestCognifyEndpoint:
         body = resp.json()
         assert body["error"] == "Pipeline run errored"
 
-    def test_cognify_success_returns_200(self, client):
+    def test_cognify_success_returns_200(self, client, monkeypatch):
         import cognee.api.v1.cognify as cognify_pkg
 
         completed = _make_completed()
-        cognify_pkg.cognify = AsyncMock(return_value={str(MOCK_DATASET_ID): completed})
+        monkeypatch.setattr(
+            cognify_pkg, "cognify", AsyncMock(return_value={str(MOCK_DATASET_ID): completed})
+        )
 
         resp = client.post(
             "/cognify",
@@ -217,10 +226,12 @@ class TestCognifyEndpoint:
         cognify.assert_awaited_once()
         assert cognify.await_args.kwargs["chunk_size"] == 42
 
-    def test_cognify_internal_error_returns_500(self, client):
+    def test_cognify_internal_error_returns_500(self, client, monkeypatch):
         import cognee.api.v1.cognify as cognify_pkg
 
-        cognify_pkg.cognify = AsyncMock(side_effect=RuntimeError("unexpected"))
+        monkeypatch.setattr(
+            cognify_pkg, "cognify", AsyncMock(side_effect=RuntimeError("unexpected"))
+        )
 
         resp = client.post(
             "/cognify",
@@ -229,10 +240,12 @@ class TestCognifyEndpoint:
         assert resp.status_code == 500
         assert resp.json()["error"] == "Internal server error"
 
-    def test_cognify_llm_payment_required_returns_402(self, client):
+    def test_cognify_llm_payment_required_returns_402(self, client, monkeypatch):
         import cognee.api.v1.cognify as cognify_pkg
 
-        cognify_pkg.cognify = AsyncMock(side_effect=LLMPaymentRequiredError())
+        monkeypatch.setattr(
+            cognify_pkg, "cognify", AsyncMock(side_effect=LLMPaymentRequiredError())
+        )
 
         resp = client.post(
             "/cognify",
@@ -248,10 +261,14 @@ class TestCognifyEndpoint:
 
 
 class TestSearchEndpoint:
-    def test_search_permission_denied_returns_403(self, client):
+    def test_search_permission_denied_returns_403(self, client, monkeypatch):
         import cognee.api.v1.search as search_pkg
 
-        search_pkg.search = AsyncMock(side_effect=PermissionDeniedError("no access to dataset"))
+        monkeypatch.setattr(
+            search_pkg,
+            "search",
+            AsyncMock(side_effect=PermissionDeniedError("no access to dataset")),
+        )
 
         resp = client.post(
             "/search",
@@ -264,17 +281,21 @@ class TestSearchEndpoint:
         body = resp.json()
         assert body["error"] == "Permission denied"
 
-    def test_search_success_returns_200(self, client):
+    def test_search_success_returns_200(self, client, monkeypatch):
         import cognee.api.v1.search as search_pkg
 
-        search_pkg.search = AsyncMock(
-            return_value=[
-                {
-                    "search_result": "Cognee is an AI memory platform.",
-                    "dataset_id": str(MOCK_DATASET_ID),
-                    "dataset_name": "test_dataset",
-                }
-            ]
+        monkeypatch.setattr(
+            search_pkg,
+            "search",
+            AsyncMock(
+                return_value=[
+                    {
+                        "search_result": "Cognee is an AI memory platform.",
+                        "dataset_id": str(MOCK_DATASET_ID),
+                        "dataset_name": "test_dataset",
+                    }
+                ]
+            ),
         )
 
         resp = client.post(
@@ -289,10 +310,10 @@ class TestSearchEndpoint:
         assert len(body) == 1
         assert "Cognee" in body[0]["search_result"]
 
-    def test_search_internal_error_returns_500(self, client):
+    def test_search_internal_error_returns_500(self, client, monkeypatch):
         import cognee.api.v1.search as search_pkg
 
-        search_pkg.search = AsyncMock(side_effect=RuntimeError("unexpected"))
+        monkeypatch.setattr(search_pkg, "search", AsyncMock(side_effect=RuntimeError("unexpected")))
 
         resp = client.post(
             "/search",
@@ -301,10 +322,10 @@ class TestSearchEndpoint:
         assert resp.status_code == 500
         assert resp.json()["error"] == "Internal server error"
 
-    def test_search_llm_payment_required_returns_402(self, client):
+    def test_search_llm_payment_required_returns_402(self, client, monkeypatch):
         import cognee.api.v1.search as search_pkg
 
-        search_pkg.search = AsyncMock(side_effect=LLMPaymentRequiredError())
+        monkeypatch.setattr(search_pkg, "search", AsyncMock(side_effect=LLMPaymentRequiredError()))
 
         resp = client.post(
             "/search",
@@ -324,10 +345,12 @@ class TestMemifyEndpoint:
         resp = client.post("/memify", json={})
         assert resp.status_code == 400
 
-    def test_memify_pipeline_errored_returns_500(self, client):
+    def test_memify_pipeline_errored_returns_500(self, client, monkeypatch):
         import cognee.modules.memify as memify_pkg
 
-        memify_pkg.memify = AsyncMock(return_value=_make_errored(error="memify failed"))
+        monkeypatch.setattr(
+            memify_pkg, "memify", AsyncMock(return_value=_make_errored(error="memify failed"))
+        )
 
         resp = client.post(
             "/memify",
@@ -337,11 +360,11 @@ class TestMemifyEndpoint:
         body = resp.json()
         assert body["error"] == "Pipeline run errored"
 
-    def test_memify_success_returns_200(self, client):
+    def test_memify_success_returns_200(self, client, monkeypatch):
         import cognee.modules.memify as memify_pkg
 
         completed = _make_completed()
-        memify_pkg.memify = AsyncMock(return_value=completed.model_dump())
+        monkeypatch.setattr(memify_pkg, "memify", AsyncMock(return_value=completed.model_dump()))
 
         resp = client.post(
             "/memify",
@@ -351,10 +374,10 @@ class TestMemifyEndpoint:
         body = resp.json()
         assert body["status"] == "completed"
 
-    def test_memify_internal_error_returns_500(self, client):
+    def test_memify_internal_error_returns_500(self, client, monkeypatch):
         import cognee.modules.memify as memify_pkg
 
-        memify_pkg.memify = AsyncMock(side_effect=RuntimeError("unexpected"))
+        monkeypatch.setattr(memify_pkg, "memify", AsyncMock(side_effect=RuntimeError("unexpected")))
 
         resp = client.post(
             "/memify",
@@ -370,10 +393,14 @@ class TestMemifyEndpoint:
 
 
 class TestUpdateEndpoint:
-    def test_update_pipeline_errored_returns_500(self, client):
+    def test_update_pipeline_errored_returns_500(self, client, monkeypatch):
         import cognee.api.v1.update as update_pkg
 
-        update_pkg.update = AsyncMock(return_value={"run": _make_errored(error="update failed")})
+        monkeypatch.setattr(
+            update_pkg,
+            "update",
+            AsyncMock(return_value={"run": _make_errored(error="update failed")}),
+        )
 
         resp = client.patch(
             "/update",
@@ -385,11 +412,13 @@ class TestUpdateEndpoint:
         body = resp.json()
         assert body["error"] == "Pipeline run errored"
 
-    def test_update_success_returns_200(self, client):
+    def test_update_success_returns_200(self, client, monkeypatch):
         import cognee.api.v1.update as update_pkg
 
         completed = _make_completed()
-        update_pkg.update = AsyncMock(return_value={str(MOCK_DATASET_ID): completed})
+        monkeypatch.setattr(
+            update_pkg, "update", AsyncMock(return_value={str(MOCK_DATASET_ID): completed})
+        )
 
         resp = client.patch(
             "/update",
@@ -399,10 +428,10 @@ class TestUpdateEndpoint:
         )
         assert resp.status_code == 200
 
-    def test_update_internal_error_returns_500(self, client):
+    def test_update_internal_error_returns_500(self, client, monkeypatch):
         import cognee.api.v1.update as update_pkg
 
-        update_pkg.update = AsyncMock(side_effect=RuntimeError("unexpected"))
+        monkeypatch.setattr(update_pkg, "update", AsyncMock(side_effect=RuntimeError("unexpected")))
 
         resp = client.patch(
             "/update",
