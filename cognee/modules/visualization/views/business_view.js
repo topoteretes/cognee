@@ -137,8 +137,8 @@
     const EL = {};
     ents.forEach(n => { EL[n.id] = n; });
     const docs = nodesArr.filter(n => n.stage === 'document');
-    const sets = nodesArr.filter(n => n.type === 'NodeSet' && n.name &&
-      !['session_learnings', 'user_sessions_from_cache', 'agent_trace_feedbacks'].includes(n.name));
+    const SESSION_SET = name => /^(session_learnings|user_sessions_from_cache|agent_trace_feedbacks)/.test(name);
+    const sets = nodesArr.filter(n => n.type === 'NodeSet' && n.name && !SESSION_SET(n.name));
 
     const srcNames = sets.length ? sets.map(n => n.name)
       : [...new Set(ents.flatMap(setsOf))];
@@ -542,11 +542,7 @@
           const sessionBadge = el.querySelector('.bv-mem.session');
           if (sessionBadge) sessionBadge.addEventListener('click', ev => {
             ev.stopPropagation();
-            const sessionSets = new Set(allNodes.filter(n => n.type === 'NodeSet' &&
-              ['session_learnings', 'user_sessions_from_cache', 'agent_trace_feedbacks'].includes(n.name))
-              .map(n => n.name));
-            if (sessionSets.size) setFocusSets(sessionSets, a.name + "'s session memory");
-            else narrate(a.name + ' has session memory (conversation history) — no distilled session learnings in this brain yet', C.haze);
+            showSessionMemory(a.name);
           });
           el.dataset.uid = a.id;
           wireUserHover(el, a.id);
@@ -913,6 +909,33 @@
 
   // Moment reel removed for now (questions + pipeline chips) — live agent
   // spotlights and the floating answer card remain the Q&A surface.
+
+  // Session memory has TWO surfaces: the raw conversation history (the
+  // session cache — shown here as a panel from the baked search events)
+  // and the DISTILLED memory improve() writes into the graph as the
+  // session_learnings / user_sessions_from_cache node sets — shown by
+  // pointing the source lens at those sets.
+  function showSessionMemory(agentName) {
+    const sessionSets = new Set(allNodes.filter(n => n.type === 'NodeSet' && n.name &&
+      /^(session_learnings|user_sessions_from_cache|agent_trace_feedbacks)/.test(n.name))
+      .map(n => n.name));
+    const qas = bakedSearchEvents.filter(e => (e.kind || 'search') === 'search' && e.question);
+    const distilled = sessionSets.size
+      ? `<div class="a" style="color:${C.inflow};margin-top:8px">✦ distilled into the graph as: ${[...sessionSets].map(esc).join(', ')} — now lensed below</div>`
+      : `<div class="a" style="color:${C.haze};margin-top:8px">nothing distilled into the graph yet — run improve() with session_ids to turn this history into session_learnings</div>`;
+    answerEl.innerHTML = `<div class="x">✕</div>
+      <div class="q">${esc(agentName)} — session memory (conversation history)</div>
+      <div class="a">${qas.length ? qas.map(e =>
+        `<div style="margin-bottom:7px"><b style="color:${C.bone}">⌕ ${esc(trunc(e.question, 90))}</b><br>
+         <span style="color:${C.haze}">${esc(trunc(e.answer || '', 140))}</span></div>`).join('')
+        : 'no conversation history in this snapshot'}
+      ${distilled}</div>`;
+    answerEl.style.display = 'block';
+    answerEl.querySelector('.x').addEventListener('click', () => { answerEl.style.display = 'none'; });
+    clearTimeout(answerTimer);
+    answerTimer = setTimeout(() => { answerEl.style.display = 'none'; }, 20000);
+    if (sessionSets.size) setFocusSets(sessionSets, 'distilled session memory');
+  }
 
   // ── Hover ─────────────────────────────────────────────────────────
   let hovered = null;
