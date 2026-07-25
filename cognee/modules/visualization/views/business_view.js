@@ -278,6 +278,7 @@
   .bv-acc.editable:hover{border-color:${C.amber};color:${C.amber};}
   .bv-acc.editable:hover b{color:${C.amber};}
   .bv-acc.ghost{border-style:dashed;opacity:.6;}
+  .bv-card.bv-reach{border-color:rgba(67,217,232,.55);box-shadow:0 0 10px rgba(67,217,232,.18);}
   .bv-card.external{opacity:.72;border-style:dashed;}
   .bv-card.knowledge{cursor:pointer;}
   .bv-card.knowledge.focused{border-color:${C.inflow};box-shadow:0 0 12px rgba(67,217,232,.2);}
@@ -433,6 +434,7 @@
       const ok = accessibleDatasets(uid);
       document.querySelectorAll('[data-dsrow]').forEach(row => {
         row.classList.toggle('bv-dim', !ok.has(row.dataset.dsrow));
+        row.classList.toggle('bv-reach', ok.has(row.dataset.dsrow));
       });
       // The rendered dataset's sources dim too when this user can't read it.
       const renderedOk = datasets.some(d => !d.external && ok.has(d.id));
@@ -443,6 +445,7 @@
       hoverUserId = null;
       requestDraw();
       document.querySelectorAll('.bv-dim').forEach(x => x.classList.remove('bv-dim'));
+      document.querySelectorAll('.bv-reach').forEach(x => x.classList.remove('bv-reach'));
     });
   }
 
@@ -955,34 +958,40 @@
       }
     });
 
-    // What-if access lines: hovering an operator draws their reach — a
-    // line to every brain they can touch (fresh grants pulse amber).
-    if (hoverUserId && access[hoverUserId]) {
-      const userCard = document.querySelector(`#bv-org .bv-org-node[data-uid="${hoverUserId}"]`);
-      if (userCard) {
+    // Grant pulse: when a permission just changed, ONE transient signal
+    // travels from the operator's card to that brain's card and fades —
+    // the connection is shown as an event, not a permanent line stretched
+    // across the screen. (Hover-reach is shown on the cards themselves.)
+    if (lastGrantChange && now - lastGrantChange.at < 2600) {
+      const userCard = document.querySelector(`#bv-org .bv-org-node[data-uid="${lastGrantChange.uid}"]`);
+      const row = document.querySelector(`[data-dsrow="${lastGrantChange.did}"]`);
+      if (userCard && row) {
         const vr = view.getBoundingClientRect();
         const ur = userCard.getBoundingClientRect();
+        const rr = row.getBoundingClientRect();
         const ux = ur.left - vr.left, uy = ur.top - vr.top + ur.height / 2;
-        Object.keys(access[hoverUserId]).forEach(did => {
-          const row = document.querySelector(`[data-dsrow="${did}"]`);
-          if (!row) return;
-          const rr = row.getBoundingClientRect();
-          const kx = rr.right - vr.left, ky = rr.top - vr.top + rr.height / 2;
-          const fresh = lastGrantChange && lastGrantChange.uid === hoverUserId &&
-            lastGrantChange.did === did && (now - lastGrantChange.at) < 3000;
+        const kx = rr.right - vr.left, ky = rr.top - vr.top + rr.height / 2;
+        const age = (now - lastGrantChange.at) / 2600;
+        const fade = 1 - age;
+        // Faint guide arc while the pulse runs…
+        ctx.beginPath();
+        ctx.moveTo(ux, uy);
+        ctx.bezierCurveTo(ux - 180, uy, kx + 180, ky, kx, ky);
+        ctx.strokeStyle = `rgba(245,168,60,${0.16 * fade})`;
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        // …and two bright dots sweeping operator → brain along it.
+        for (let sweep = 0; sweep < 2; sweep++) {
+          const t = ((now - lastGrantChange.at) / 1300 - sweep * 0.5);
+          if (t < 0 || t > 1) continue;
+          const px = bez(ux, ux - 180, kx + 180, kx, t);
+          const py = bez(uy, uy, ky, ky, t);
           ctx.beginPath();
-          ctx.moveTo(ux, uy);
-          ctx.bezierCurveTo(ux - 160, uy, kx + 160, ky, kx, ky);
-          if (fresh) {
-            const pulse = 0.5 + 0.5 * Math.sin(now / 120);
-            ctx.strokeStyle = `rgba(245,168,60,${0.45 + 0.4 * pulse})`;
-            ctx.lineWidth = 2.2;
-          } else {
-            ctx.strokeStyle = 'rgba(67,217,232,0.4)';
-            ctx.lineWidth = 1.3;
-          }
-          ctx.stroke();
-        });
+          ctx.arc(px, py, 3.2, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(245,168,60,${0.9 * fade})`;
+          ctx.fill();
+        }
+        requestDraw();
       }
     }
 

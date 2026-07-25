@@ -1114,6 +1114,32 @@ class LadybugAdapter(GraphDBInterface):
         try:
             now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
 
+            # ON MATCH replaces the whole ``properties`` JSON blob, which would
+            # clobber ``belongs_to_set`` when a DataPoint is re-cognified under
+            # a different node_set (the Neo4j adapter unions this in-query; the
+            # blob column forces the union to happen here in Python). Read the
+            # existing tags for the incoming ids and merge them in.
+            existing_sets: dict = {}
+            incoming_ids = [
+                str(getattr(node, "id", "")) for node in nodes if getattr(node, "id", None)
+            ]
+            if incoming_ids:
+                try:
+                    rows = await self.query(
+                        "MATCH (n:Node) WHERE n.id IN $ids RETURN n.id AS id, n.properties AS properties",
+                        {"ids": incoming_ids},
+                    )
+                    for row in rows or []:
+                        try:
+                            blob = json.loads(row[1] or "{}")
+                            tags = blob.get("belongs_to_set")
+                            if tags:
+                                existing_sets[str(row[0])] = list(tags)
+                        except (TypeError, ValueError):
+                            continue
+                except Exception as error:  # noqa: BLE001 — merge is best-effort
+                    logger.debug(f"belongs_to_set pre-read skipped: {error}")
+
             # Prepare all nodes data
             node_params = []
             for node in nodes:
@@ -1132,6 +1158,15 @@ class LadybugAdapter(GraphDBInterface):
                 # Provenance lives in declared STRING columns, never the JSON blob.
                 for key in PROVENANCE_COLUMNS:
                     properties.pop(key, None)
+
+                # Union with the node's previously stored dataset tags so a
+                # re-cognify under another node_set ADDS membership, matching
+                # the additive belongs_to_set edges.
+                previous_tags = existing_sets.get(core_properties["id"])
+                if previous_tags:
+                    incoming_tags = properties.get("belongs_to_set") or []
+                    merged = list(dict.fromkeys(list(incoming_tags) + previous_tags))
+                    properties["belongs_to_set"] = merged
 
                 node_params.append(
                     {
