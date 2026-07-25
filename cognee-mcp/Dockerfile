@@ -80,14 +80,30 @@ ENV PATH="/app/.venv/bin:$PATH"
 
 # Set environment variables for MCP server
 ENV PYTHONUNBUFFERED=1
-ENV MCP_LOG_LEVEL=DEBUG
 ENV PYTHONPATH=/app
+# Give the non-root user a stable, writable HOME so Kuzu/Ladybug caches its
+# downloaded extensions in a consistent location across build and runtime.
+ENV HOME=/app
 
 # Add labels for API mode usage
 LABEL org.opencontainers.image.description="Cognee MCP Server with API mode support"
 
 USER cognee
 
+# Pre-install Kuzu/Ladybug's JSON extension at build time (network is available
+# here) so it is baked into the image. Runs the same install path the app uses,
+# as the same user with the same HOME, so the cached extension lands exactly
+# where the running server looks for it — avoiding the "Extension: json ... has
+# not been installed" Binder error when recall runs in a network-restricted
+# container. Best-effort: a failed download must not break the image build.
+RUN python -c "from cognee_db_workers._kuzu_helpers import install_json_extension_local; install_json_extension_local(buffer_pool_size=268435456)" \
+    || echo "WARNING: JSON extension pre-install skipped (no network at build time); it will be installed on first run if the container has network access."
+
 # Use the application name from pyproject.toml for normal operation
 # For testing, we'll override this with a direct command
 ENTRYPOINT ["/app/entrypoint.sh"]
+
+# Only the HTTP/SSE transports serve an HTTP server; in the default stdio mode
+# there is nothing to probe, so report healthy without hitting the network.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+  CMD [ "${TRANSPORT_MODE:-stdio}" = "stdio" ] || python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=5)"

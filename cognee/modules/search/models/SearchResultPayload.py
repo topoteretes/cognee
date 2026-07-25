@@ -16,7 +16,9 @@ class SearchResultPayload(BaseModel):
 
     result_object: Any = None
     context: Optional[Union[str, List[str]]] = None
-    completion: Optional[Union[str, List[str], List[dict]]] = None
+    # NOTE: dict must precede BaseModel in the union so a plain dict validates
+    # as-is instead of being coerced into an empty bare BaseModel.
+    completion: Optional[Union[str, List[str], List[dict], dict, BaseModel, List[BaseModel]]] = None
 
     # TODO: Add return_type info
     search_type: SearchType
@@ -52,6 +54,17 @@ class SearchResultPayload(BaseModel):
         else:
             # Fallback for the object itself
             return v if is_simple(v) else str(v)
+
+    @field_serializer("completion")
+    def serialize_completion(self, v: Any):
+        """Serialize completion field. Supports str, list, dict, and Pydantic BaseModel."""
+        if v is None:
+            return None
+        if isinstance(v, BaseModel):
+            return v.model_dump()
+        if isinstance(v, list):
+            return [item.model_dump() if isinstance(item, BaseModel) else item for item in v]
+        return v
 
     @property
     def result(self) -> Any:

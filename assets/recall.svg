@@ -1,0 +1,70 @@
+<svg viewBox="0 0 740 400" xmlns="http://www.w3.org/2000/svg" role="img" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif">
+<title>recall() answering a question from the memory graph</title>
+<desc>cognee.recall() reads "Where is cognee based?", lights up the path from the cognee node along the "based in" edge to Berlin, and returns the grounded answer "cognee is based in Berlin".</desc>
+<defs>
+<filter id="glow" x="-80%" y="-80%" width="260%" height="260%"><feGaussianBlur stdDeviation="4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+<filter id="softglow" x="-120%" y="-120%" width="340%" height="340%"><feGaussianBlur stdDeviation="7" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+</defs>
+
+<rect x="0" y="0" width="740" height="400" fill="#0a0a0d"/>
+
+<text x="40" y="42" font-size="21" font-weight="700" fill="#f3f0fa">Ask a question and get answers grounded in your graph</text>
+<rect x="42" y="52" width="46" height="3" rx="1.5" fill="#a974ff"/>
+
+<g>
+<rect x="556" y="92" width="156" height="28" rx="14" fill="#19132b" stroke="#6b4fb0" stroke-width="1"/>
+<circle cx="574" cy="106" r="4" fill="#b98cff" filter="url(#glow)"/>
+<text x="588" y="110.5" font-size="12.5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" fill="#cdbcf2">cognee.recall()</text>
+</g>
+
+<g font-size="15">
+<rect x="120" y="100" width="67" height="23" rx="5" fill="#3a2566" opacity="0"><animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.10;0.18;0.86;1" dur="7s" repeatCount="indefinite"/></rect>
+<text x="52" y="116.5" fill="#9b93ab">Where</text>
+<text x="102" y="116.5" fill="#9b93ab">is</text>
+<text x="127" y="116.5" fill="#f3f0fa" font-weight="700">cognee</text>
+<text x="195" y="116.5" fill="#9b93ab">based?</text>
+</g>
+
+<g>
+<g stroke="#332d44" stroke-width="2" fill="none">
+<line x1="165" y1="322" x2="120" y2="272"/>
+<line x1="165" y1="322" x2="150" y2="374"/>
+</g>
+<circle cx="165" cy="322" r="12" fill="#564f6b"/>
+<circle cx="120" cy="272" r="9" fill="#433c57"/>
+<circle cx="150" cy="374" r="9" fill="#433c57"/>
+<text x="92" y="352" font-size="10.5" fill="#7d7590">existing memory</text>
+</g>
+
+<line x1="470" y1="302" x2="177" y2="322" stroke="#463a66" stroke-width="2"/>
+<line x1="410" y1="160" x2="535" y2="215" stroke="#463a66" stroke-width="2.5"/>
+<line x1="535" y1="215" x2="470" y2="302" stroke="#463a66" stroke-width="2.5"/>
+
+<line x1="535" y1="215" x2="470" y2="302" stroke="#b98cff" stroke-width="2.5" stroke-dasharray="108" stroke-dashoffset="108" filter="url(#glow)">
+<animate attributeName="stroke-dashoffset" values="108;108;0;0;108" keyTimes="0;0.36;0.5;0.86;1" dur="7s" repeatCount="indefinite"/>
+</line>
+<text x="505" y="262" font-size="11" fill="#c4a6ff" text-anchor="middle" opacity="0"><animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.42;0.5;0.86;1" dur="7s" repeatCount="indefinite"/>based in</text>
+
+<circle cx="410" cy="160" r="12" fill="#6b4fb0" filter="url(#softglow)"/>
+<text x="410" y="135" font-size="12.5" font-weight="700" fill="#c9c2da" text-anchor="middle">Vasilije</text>
+
+<circle cx="535" cy="215" r="22" fill="none" stroke="#b98cff" stroke-width="2" opacity="0"><animate attributeName="r" values="12;12;26;12;12" keyTimes="0;0.24;0.34;0.42;1" dur="7s" repeatCount="indefinite"/><animate attributeName="opacity" values="0;0;0.9;0;0" keyTimes="0;0.24;0.32;0.42;1" dur="7s" repeatCount="indefinite"/></circle>
+<circle cx="535" cy="215" r="13" fill="#a974ff" filter="url(#softglow)"/>
+<text x="535" y="190" font-size="12.5" font-weight="700" fill="#f3f0fa" text-anchor="middle">cognee</text>
+
+<circle cx="470" cy="302" r="22" fill="none" stroke="#d9bcff" stroke-width="2" opacity="0"><animate attributeName="r" values="13;13;13;28;13;13" keyTimes="0;0.5;0.52;0.62;0.7;1" dur="7s" repeatCount="indefinite"/><animate attributeName="opacity" values="0;0;0;0.9;0;0" keyTimes="0;0.5;0.52;0.6;0.7;1" dur="7s" repeatCount="indefinite"/></circle>
+<circle cx="470" cy="302" r="13" fill="#7a5cc0" filter="url(#softglow)"><animate attributeName="fill" values="#7a5cc0;#7a5cc0;#d9bcff;#d9bcff;#7a5cc0" keyTimes="0;0.52;0.6;0.86;1" dur="7s" repeatCount="indefinite"/></circle>
+<text x="470" y="339" font-size="12.5" font-weight="700" fill="#f3f0fa" text-anchor="middle">Berlin</text>
+
+<circle r="5" fill="#f0e4ff" filter="url(#glow)" opacity="0">
+<animate attributeName="cx" values="535;535;470" keyTimes="0;0.36;0.5" dur="7s" repeatCount="indefinite"/>
+<animate attributeName="cy" values="215;215;302" keyTimes="0;0.36;0.5" dur="7s" repeatCount="indefinite"/>
+<animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.36;0.42;0.5;0.54" dur="7s" repeatCount="indefinite"/>
+</circle>
+
+<g opacity="0"><animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.6;0.7;0.86;1" dur="7s" repeatCount="indefinite"/>
+<rect x="350" y="352" width="240" height="28" rx="14" fill="#19132b" stroke="#6b4fb0" stroke-width="1"/>
+<circle cx="368" cy="366" r="4" fill="#b98cff" filter="url(#glow)"/>
+<text x="382" y="370.5" font-size="13" fill="#cdbcf2">cognee is based in Berlin</text>
+</g>
+</svg>

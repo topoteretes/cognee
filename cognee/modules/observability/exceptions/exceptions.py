@@ -13,5 +13,5 @@ class UnsupportedObserverError(CogneeConfigurationError):
         name: str = "UnsupportedObserverError",
         status_code: int = status.HTTP_400_BAD_REQUEST,
     ):
-        message = f"Unsupported observer (monitoring tool): {observer}. Supported values are: none, langfuse."
+        message = f"Unsupported observer (monitoring tool): {observer}. Supported values are: none."
         super().__init__(message, name, status_code)

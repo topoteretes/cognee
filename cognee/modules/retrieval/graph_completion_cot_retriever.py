@@ -4,6 +4,7 @@ from typing import Optional, List, Type, Any, Union
 
 from pydantic import BaseModel
 
+from cognee.base_config import get_base_config
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.modules.retrieval.utils.query_state import QueryState
 from cognee.modules.retrieval.utils.validate_queries import validate_retriever_input
@@ -64,12 +65,13 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
         node_name_filter_operator: str = "OR",
         wide_search_top_k: Optional[int] = 100,
         triplet_distance_penalty: Optional[float] = 6.5,
-        feedback_influence: float = 0.0,
+        feedback_influence: float = get_base_config().default_feedback_influence,
         max_iter: int = 4,
         session_id: Optional[str] = None,
         response_model: Type = str,
         neighborhood_depth: Optional[int] = None,
         neighborhood_seed_top_k: Optional[int] = 10,
+        include_references: bool = False,
     ):
         super().__init__(
             user_prompt_path=user_prompt_path,
@@ -86,6 +88,7 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
             response_model=response_model,
             neighborhood_depth=neighborhood_depth,
             neighborhood_seed_top_k=neighborhood_seed_top_k,
+            include_references=include_references,
         )
         self.validation_system_prompt_path = validation_system_prompt_path
         self.validation_user_prompt_path = validation_user_prompt_path
@@ -125,6 +128,13 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
                     include_context=False,
                 )
                 conversation_history = history if isinstance(history, str) else ""
+                # Prepend the active session-context guidance block above the (history-only) CoT
+                # intermediate-round context. Gated + fail-open: never blocks CoT reasoning.
+                block = await self._maybe_active_context_block(sm, str(user_id), query)
+                if block:
+                    conversation_history = (
+                        block + "\n\n" + conversation_history if conversation_history else block
+                    )
 
         # Normalize single query to batch for uniform processing
         effective_batch = [query] if query else query_batch
@@ -138,6 +148,33 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
         if query:
             return triplets[0]
         return triplets
+
+    async def _maybe_active_context_block(self, sm, user_id: str, query: Optional[str]) -> str:
+        """Render the active session-context block for the CoT intermediate rounds.
+
+        Gated on caching + auto_feedback. Fully fail-open: returns "" on any error or
+        when the layer is disabled, so it can never block chain-of-thought reasoning.
+        """
+        try:
+            from cognee.infrastructure.databases.cache.config import CacheConfig
+            from cognee.infrastructure.session.session_context_builder import (
+                build_active_context_block,
+            )
+
+            cache_config = CacheConfig()
+            if not (cache_config.caching and cache_config.auto_feedback):
+                return ""
+
+            block, _served_ids = await build_active_context_block(
+                session_manager=sm,
+                user_id=user_id,
+                session_id=sm._resolve_session_id(self.session_id),
+                query=query or "",
+            )
+            return block or ""
+        except Exception as exc:
+            logger.warning("CoT active session-context block failed: %s", exc)
+            return ""
 
     # -- CoT orchestrator --
 

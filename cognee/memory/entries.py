@@ -16,6 +16,11 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator
 
+from cognee.shared.logging_utils import get_logger
+
+
+logger = get_logger("memory.entries")
+
 
 class QAEntry(BaseModel):
     """A Q&A turn stored in the session cache.
@@ -25,9 +30,9 @@ class QAEntry(BaseModel):
     """
 
     type: Literal["qa"] = "qa"
-    question: str
-    answer: str
-    context: str = ""
+    question: str = Field(examples=["What is the capital of France?"])
+    answer: str = Field(examples=["The capital of France is Paris."])
+    context: str = Field(default="", examples=["Retrieved from geography_notes.md"])
     feedback_text: Optional[str] = None
     feedback_score: Optional[int] = None
     used_graph_element_ids: Optional[dict] = None
@@ -42,7 +47,10 @@ class TraceEntry(BaseModel):
     """
 
     type: Literal["trace"] = "trace"
-    origin_function: str
+    origin_function: str = Field(
+        examples=["search_codebase"],
+        description="Name of the tool/function whose execution this trace step records.",
+    )
     status: Literal["success", "error"] = "success"
     method_params: Optional[dict] = None
     method_return_value: Optional[Any] = None
@@ -61,7 +69,13 @@ class FeedbackEntry(BaseModel):
     """
 
     type: Literal["feedback"] = "feedback"
-    qa_id: str
+    qa_id: str = Field(
+        examples=["c4d5e6f7-8a9b-4c0d-9e1f-2a3b4c5d6e7f"],
+        description=(
+            "entry_id returned by a previous qa remember call — use it to chain "
+            "feedback to that QA."
+        ),
+    )
     feedback_text: Optional[str] = None
     feedback_score: Optional[int] = None
 
@@ -121,10 +135,13 @@ MemoryEntry = Union[QAEntry, TraceEntry, FeedbackEntry, SkillRunEntry]
 MEMORY_ENTRY_TYPES = (QAEntry, TraceEntry, FeedbackEntry, SkillRunEntry)
 
 
-RecallScope = Literal["auto", "graph", "session", "trace", "graph_context", "all"]
+RecallScope = Literal[
+    "auto", "graph", "session", "trace", "graph_context", "session_context", "all"
+]
 
 
-_VALID_SCOPES = {"auto", "graph", "session", "trace", "graph_context", "all"}
+_DEPRECATED_SCOPE_ALIASES = {"graph_context": "graph"}
+_VALID_SCOPES = {"auto", "graph", "session", "trace", "graph_context", "session_context", "all"}
 
 
 def normalize_scope(scope: Optional[Union[str, list[str]]]) -> list[str]:
@@ -132,7 +149,7 @@ def normalize_scope(scope: Optional[Union[str, list[str]]]) -> list[str]:
 
     Accepts ``None``, a single string, or a list of strings. Returns a
     deduplicated list of concrete sources (``graph``, ``session``,
-    ``trace``, ``graph_context``). ``None`` and ``"auto"`` expand later
+    ``trace``, ``session_context``). ``None`` and ``"auto"`` expand later
     based on whether a session_id is present; this function just
     canonicalizes the input.
 
@@ -151,8 +168,15 @@ def normalize_scope(scope: Optional[Union[str, list[str]]]) -> list[str]:
             f"Unknown recall scope(s): {unknown}. Valid values: {sorted(_VALID_SCOPES)}"
         )
 
+    if any(s in _DEPRECATED_SCOPE_ALIASES for s in scopes):
+        logger.warning(
+            "Recall scope 'graph_context' is deprecated and now maps to 'graph'. "
+            "Use scope='graph' instead."
+        )
+        scopes = [_DEPRECATED_SCOPE_ALIASES.get(s, s) for s in scopes]
+
     if "all" in scopes:
-        return ["graph", "session", "trace", "graph_context"]
+        return ["graph", "session", "trace", "session_context"]
 
     # Dedupe while preserving order
     seen: set = set()

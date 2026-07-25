@@ -1,3 +1,4 @@
+import asyncio
 import sys
 import tempfile
 from types import SimpleNamespace
@@ -54,11 +55,11 @@ class _InMemoryRedisList:
         self.data.clear()
 
 
-@pytest.fixture(params=["fs", "redis"])
+@pytest.fixture(params=["fs", "redis", "sqlite"])
 def sdk_uses_session_manager(request):
     """
-    SessionManager backed by either FsCache or in-memory Redis; SDK is patched to use it.
-    Tests run twice (once per backend).
+    SessionManager backed by FsCache, in-memory Redis, or SQL (aiosqlite); SDK is
+    patched to use it. Tests run once per backend.
     """
     backend = request.param
     if backend == "fs":
@@ -80,7 +81,7 @@ def sdk_uses_session_manager(request):
                 ):
                     yield session_manager
                 adapter.cache.close()
-    else:
+    elif backend == "redis":
         store = _InMemoryRedisList()
         patch_mod = "cognee.infrastructure.databases.cache.redis.RedisAdapter"
         with (
@@ -99,6 +100,21 @@ def sdk_uses_session_manager(request):
                 return_value=session_manager,
             ):
                 yield session_manager
+    else:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            from cognee.infrastructure.databases.cache.sql.SqlCacheAdapter import (
+                SqlCacheAdapter,
+            )
+
+            adapter = SqlCacheAdapter(f"sqlite+aiosqlite:///{tmpdir}/cache.db")
+            session_manager = SessionManager(cache_engine=adapter)
+            with patch.object(
+                _session_module(),
+                "get_session_manager",
+                return_value=session_manager,
+            ):
+                yield session_manager
+            asyncio.run(adapter.close())
 
 
 @pytest.mark.asyncio

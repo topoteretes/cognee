@@ -377,7 +377,7 @@ async def cognify(
                 await cognee_client.cognify(
                     datasets=[dataset_name], custom_prompt=custom_prompt, graph_model=graph_model
                 )
-                logger.info("Cognify process finished.")
+                logger.info("Cognify submitted; running in the background on the server.")
             except Exception as e:
                 logger.error("Cognify process failed.")
                 raise ValueError(f"Failed to cognify: {str(e)}") from e
@@ -495,7 +495,7 @@ async def save_interaction(data: str) -> list:
 
 @log_usage(function_name="MCP search", log_type="mcp_tool")
 async def search(
-    search_query: str, search_type: str, top_k: int = 10, datasets: str = None
+    search_query: str, search_type: str, top_k: int = 15, datasets: str = None
 ) -> list:
     """
     Search and query the knowledge graph for insights, information, and connections.
@@ -1133,7 +1133,8 @@ async def recall(
     search_type: str = None,
     datasets: str = None,
     session_id: str = None,
-    top_k: int = 10,
+    system_prompt: str = None,
+    top_k: int = 15,
 ) -> list:
     """Search memory with auto-routing and session awareness.
 
@@ -1156,6 +1157,10 @@ async def recall(
         Comma-separated dataset names to search within.
     session_id : str, optional
         Session ID for session-first search.
+    system_prompt : str, optional
+        Override the synthesis prompt for completion searches. When omitted,
+        falls back to COGNEE_MCP_RECALL_SYSTEM_PROMPT / _FILE if configured
+        on the server.
     top_k : int
         Maximum results to return (default: 10).
     """
@@ -1168,6 +1173,7 @@ async def recall(
                 search_type=search_type,
                 datasets=dataset_list,
                 session_id=session_id,
+                system_prompt=system_prompt,
                 top_k=normalized_top_k,
             )
             return [
@@ -1300,24 +1306,33 @@ async def cognify_status(
     - Use `pipelines` to restrict to specific pipeline names
     - Status information includes job progress, execution time, and completion status
     - The status is returned in string format for easy reading
-    - This operation is not available in API mode
+    - In API mode the dataset id is resolved over HTTP and status is read
+      from the server's `GET /api/v1/datasets/status` endpoint
     """
     dataset_name = dataset_name or _agent_scoped_default_dataset()
     with redirect_stdout(sys.stderr):
         try:
             if cognee_client.use_api:
-                return [
-                    types.TextContent(
-                        type="text",
-                        text="❌ Pipeline status is not available in API mode",
-                    )
-                ]
+                # API mode: resolve the dataset id over HTTP (no local cognee
+                # instance exists in this process) before querying status.
+                datasets = await cognee_client.list_datasets()
+                dataset_id = next(
+                    (d["id"] for d in datasets if d.get("name") == dataset_name), None
+                )
+                if dataset_id is None:
+                    return [
+                        types.TextContent(
+                            type="text",
+                            text=f"❌ Dataset '{dataset_name}' not found via API",
+                        )
+                    ]
+            else:
+                from cognee.modules.data.methods.get_unique_dataset_id import get_unique_dataset_id
+                from cognee.modules.users.methods import get_default_user
 
-            from cognee.modules.data.methods.get_unique_dataset_id import get_unique_dataset_id
-            from cognee.modules.users.methods import get_default_user
+                user = await get_default_user()
+                dataset_id = await get_unique_dataset_id(dataset_name, user)
 
-            user = await get_default_user()
-            dataset_id = await get_unique_dataset_id(dataset_name, user)
             requested_pipelines = list(dict.fromkeys(pipelines or ["cognify_pipeline"]))
 
             if len(requested_pipelines) == 1:
@@ -1591,6 +1606,28 @@ async def cognify_file(
     ]
 
 
+def _format_named_items(items, singular: str, plural: str, limit: int = 50) -> str:
+    """Render a list of {id, name} dicts into human-readable text content.
+
+    Text-only MCP clients (e.g. agents in Cursor) never see structuredContent,
+    so the names have to be serialized into the text channel too — otherwise
+    they only get a count and have to fall back to raw HTTP to learn what
+    exists. Long lists are capped to keep the text payload reasonable; the full
+    set always remains in structuredContent.
+    """
+    count = len(items)
+    if count == 0:
+        return f"No {plural} found."
+    lines = [f"{count} {singular if count == 1 else plural}:"]
+    for item in items[:limit]:
+        name = item.get("name") or "(unnamed)"
+        item_id = item.get("id") or ""
+        lines.append(f"- {name} ({item_id})" if item_id else f"- {name}")
+    if count > limit:
+        lines.append(f"… and {count - limit} more (see structuredContent).")
+    return "\n".join(lines)
+
+
 @mcp.tool(
     name="list_datasets_json",
     description=(
@@ -1611,7 +1648,12 @@ async def list_datasets_json() -> types.CallToolResult:
             datasets.append({"id": str(ds.id), "name": ds.name})
 
     return types.CallToolResult(
-        content=[types.TextContent(type="text", text=f"{len(datasets)} dataset(s).")],
+        content=[
+            types.TextContent(
+                type="text",
+                text=_format_named_items(datasets, "dataset", "datasets"),
+            )
+        ],
         structuredContent={"datasets": datasets},
     )
 
@@ -1661,7 +1703,12 @@ async def list_dataset_data_json(dataset_id: str) -> types.CallToolResult:
 
     data = [{"id": str(item.id), "name": item.name or "(unnamed)"} for item in items]
     return types.CallToolResult(
-        content=[types.TextContent(type="text", text=f"{len(data)} data item(s).")],
+        content=[
+            types.TextContent(
+                type="text",
+                text=_format_named_items(data, "data item", "data items"),
+            )
+        ],
         structuredContent={"data": data},
     )
 
@@ -1901,15 +1948,17 @@ async def main():
     # Cognee API connection options
     parser.add_argument(
         "--api-url",
-        default=None,
-        help="Base URL of a running Cognee FastAPI server (e.g., http://localhost:8000). "
-        "If provided, the MCP server will connect to the API instead of using cognee directly.",
+        default=os.getenv("COGNEE_BASE_URL"),
+        help="Base URL of a running Cognee FastAPI server or Cognee Cloud tenant "
+        "(e.g., https://<tenant>.cognee.ai). If provided, the MCP server connects to the "
+        "API instead of using cognee directly. Can also be set via the COGNEE_BASE_URL env var.",
     )
 
     parser.add_argument(
         "--api-token",
-        default=None,
-        help="Authentication token for the API (optional, required if API has authentication enabled).",
+        default=os.getenv("COGNEE_API_KEY"),
+        help="Authentication token for the API, sent as X-Api-Key (required if the API has "
+        "authentication enabled). Can also be set via the COGNEE_API_KEY env var.",
     )
 
     # Cognee Cloud connection options
@@ -1958,8 +2007,15 @@ async def main():
 
         logger.info("Running database migrations...")
 
-        await setup()
-        await run_migrations()
+        # Database setup and migrations print progress and "table already
+        # exists" notices to stdout. In stdio transport stdout is the JSON-RPC
+        # channel, so route that output to stderr — the same guard every tool
+        # applies around its cognee calls.
+        with redirect_stdout(sys.stderr):
+            await setup()
+            # Full startup migrations (relational schema + graph/vector revision
+            # chains) — MCP writes new-scheme data, so it must migrate like the API.
+            await run_migrations()
 
         logger.info("Database migrations done.")
     elif not is_remote:

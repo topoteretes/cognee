@@ -5,6 +5,7 @@ from cognee.shared.logging_utils import get_logger
 from typing import List, Optional
 import numpy as np
 import math
+import re
 from tenacity import (
     retry,
     stop_after_delay,
@@ -17,16 +18,12 @@ import os
 from urllib.parse import urlparse
 import httpx
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
-from cognee.infrastructure.databases.exceptions import EmbeddingException
-from cognee.infrastructure.llm.tokenizer.HuggingFace import (
-    HuggingFaceTokenizer,
+from cognee.infrastructure.databases.exceptions import (
+    EmbeddingContextWindowTooSmallError,
+    EmbeddingException,
 )
-from cognee.infrastructure.llm.tokenizer.Mistral import (
-    MistralTokenizer,
-)
-from cognee.infrastructure.llm.tokenizer.TikToken import (
-    TikTokenTokenizer,
-)
+
+from cognee.infrastructure.llm.tokenizer.resolver import resolve_embedding_tokenizer
 from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager
 from cognee.infrastructure.databases.vector.embeddings.utils import (
     sanitize_embedding_text_inputs,
@@ -35,6 +32,13 @@ from cognee.infrastructure.databases.vector.embeddings.utils import (
 
 litellm.set_verbose = False
 logger = get_logger("LiteLLMEmbeddingEngine")
+
+# Over-length embedding input: litellm maps chat "context length" 400s to
+# ContextWindowExceededError, but the embeddings API returns a plain
+# BadRequestError (e.g. OpenAI 400 "maximum input length is 8192 tokens"). Match
+# those by message so the split/pool recovery below can handle them too. Kept
+# narrow to length/token-limit phrasings so genuinely-bad requests still fail fast.
+_EMBED_LENGTH_ERROR_RE = re.compile(r"maximum\s+input\s+length", re.IGNORECASE)
 
 
 class LiteLLMEmbeddingEngine(EmbeddingEngine):
@@ -105,7 +109,11 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         stop=stop_after_delay(128),
         wait=wait_exponential_jitter(2, 128),
         retry=retry_if_not_exception_type(
-            (litellm.exceptions.NotFoundError, asyncio.CancelledError)
+            (
+                EmbeddingContextWindowTooSmallError,
+                litellm.exceptions.NotFoundError,
+                asyncio.CancelledError,
+            )
         ),
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
@@ -147,6 +155,24 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                         "api_base": self.endpoint,
                         "api_version": self.api_version,
                     }
+                    # Older LiteLLM releases serialize an omitted encoding format as null,
+                    # which OpenRouter rejects (it only accepts "float"/"base64"). Cognee
+                    # always consumes float vectors, so make the valid format explicit for
+                    # every OpenRouter route: the "openrouter/" model prefix, an explicit
+                    # provider, or a custom endpoint aimed at openrouter.ai. The last case
+                    # (an unprefixed model + endpoint) is driven through litellm's OpenAI
+                    # handler -- the branch that historically injected the null -- so it is
+                    # the one that still needs the guard on current litellm. We keep this
+                    # scoped to OpenRouter because providers such as gemini/bedrock/vertex_ai
+                    # reject encoding_format and cognee does not enable litellm.drop_params.
+                    routed_to_openrouter = (
+                        (self.provider or "").lower() == "openrouter"
+                        or (self.model or "").lower().startswith("openrouter/")
+                        or "openrouter.ai" in (self.endpoint or "").lower()
+                    )
+                    if routed_to_openrouter:
+                        embedding_kwargs["encoding_format"] = "float"
+
                     # Pass through target embedding dimensions when supported
                     if self.dimensions is not None:
                         embedding_kwargs["dimensions"] = self.dimensions
@@ -160,7 +186,17 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                 embedding_response = [data["embedding"] for data in response.data]
                 return handle_embedding_response(text, embedding_response, self.dimensions)
 
-        except litellm.exceptions.ContextWindowExceededError as error:
+        except litellm.exceptions.BadRequestError as error:
+            # ContextWindowExceededError subclasses BadRequestError. litellm raises
+            # it for chat context-length errors, but the embeddings API returns a
+            # plain BadRequestError for over-length input (OpenAI 400: "maximum input
+            # length is 8192 tokens"). Recover (split + pool) for both; re-raise any
+            # other BadRequest unchanged so genuinely bad requests still fail fast.
+            if not (
+                isinstance(error, litellm.exceptions.ContextWindowExceededError)
+                or _EMBED_LENGTH_ERROR_RE.search(str(error))
+            ):
+                raise
             if isinstance(text, list) and len(text) > 1:
                 mid = math.ceil(len(text) / 2)
                 left, right = text[:mid], text[mid:]
@@ -176,6 +212,8 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                 logger.debug(f"Pooling embeddings of text string with size: {len(text[0])}")
                 s = text[0]
                 third = len(s) // 3
+                if third == 0:
+                    raise EmbeddingContextWindowTooSmallError from error
                 # We are using thirds to intentionally have overlap between split parts
                 # for better embedding calculation
                 left_part, right_part = s[: third * 2], s[third:]
@@ -190,7 +228,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                 pooled = (np.array(left_vec) + np.array(right_vec)) / 2
                 return [pooled.tolist()]
 
-            logger.error("Context window exceeded for embedding text: %s", str(error))
+            logger.error("Embedding input exceeds the model's max length: %s", str(error))
             raise error
 
         except asyncio.TimeoutError as e:
@@ -256,46 +294,21 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         """
         Load and return the appropriate tokenizer for the specified model based on the provider.
 
+        Delegates to :func:`resolve_embedding_tokenizer` so the model to tokenizer
+        mapping (and mismatch warnings) live in one place (issue #3646).
+
         Returns:
         --------
 
             The tokenizer instance compatible with the model.
         """
         logger.debug(f"Loading tokenizer for model {self.model}...")
-        # If model also contains provider information, extract only model information
-        # Split only on the first "/" to preserve model names like "BAAI/bge-m3"
-        model = self.model.split("/", 1)[-1] if "/" in self.model else self.model
-
-        if "openai" in self.provider.lower():
-            tokenizer = TikTokenTokenizer(
-                model=model, max_completion_tokens=self.max_completion_tokens
-            )
-        elif "gemini" in self.provider.lower():
-            # Since Gemini tokenization needs to send an API request to get the token count we will use TikToken to
-            # count tokens as we calculate tokens word by word
-            tokenizer = TikTokenTokenizer(
-                model=None, max_completion_tokens=self.max_completion_tokens
-            )
-            # Note: Gemini Tokenizer expects an LLM model as input and not the embedding model
-            # tokenizer = GeminiTokenizer(
-            #     llm_model=llm_model, max_completion_tokens=self.max_completion_tokens
-            # )
-        elif "mistral" in self.provider.lower():
-            tokenizer = MistralTokenizer(
-                model=model, max_completion_tokens=self.max_completion_tokens
-            )
-        else:
-            try:
-                tokenizer = HuggingFaceTokenizer(
-                    model=self.model.replace("hosted_vllm/", ""),
-                    max_completion_tokens=self.max_completion_tokens,
-                )
-            except Exception as e:
-                logger.warning(f"Could not get tokenizer from HuggingFace due to: {e}")
-                logger.info("Switching to TikToken default tokenizer.")
-                tokenizer = TikTokenTokenizer(
-                    model=None, max_completion_tokens=self.max_completion_tokens
-                )
-
+        # Strip the vLLM routing prefix so the bare HuggingFace repo is resolvable.
+        model = self.model.replace("hosted_vllm/", "")
+        tokenizer = resolve_embedding_tokenizer(
+            provider=self.provider,
+            model=model,
+            max_completion_tokens=self.max_completion_tokens,
+        )
         logger.debug(f"Tokenizer loaded for model: {self.model}")
         return tokenizer

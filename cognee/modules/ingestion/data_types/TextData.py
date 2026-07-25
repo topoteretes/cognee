@@ -1,31 +1,31 @@
-from typing import BinaryIO
+from typing import BinaryIO, AsyncGenerator
 from contextlib import asynccontextmanager
 import hashlib
 from .IngestionData import IngestionData
 
 
-def create_text_data(data: str):
+def create_text_data(data: str) -> "TextData":
     return TextData(data)
 
 
 class TextData(IngestionData):
     data: str = None
-    metadata = None
+    metadata: dict = None
 
-    def __init__(self, data: BinaryIO):
+    def __init__(self, data: BinaryIO) -> None:
         self.data = data
 
-    def get_identifier(self):
+    def get_identifier(self) -> str:
         metadata = self.get_metadata()
 
         return metadata["content_hash"]
 
-    def get_metadata(self):
+    def get_metadata(self) -> dict:
         self.ensure_metadata()
 
         return self.metadata
 
-    def ensure_metadata(self):
+    def ensure_metadata(self) -> None:
         if self.metadata is None:
             self.metadata = {}
 
@@ -35,5 +35,5 @@ class TextData(IngestionData):
         self.metadata["content_hash"] = hash_contents
 
     @asynccontextmanager
-    async def get_data(self):
+    async def get_data(self) -> AsyncGenerator[str, None]:
         yield self.data

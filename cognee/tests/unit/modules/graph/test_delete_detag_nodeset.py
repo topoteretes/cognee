@@ -14,6 +14,7 @@ from uuid import uuid4
 import pytest
 
 from cognee.modules.engine.utils.generate_edge_id import generate_edge_id
+from cognee.modules.graph.models.EdgeType import EdgeType
 
 delete_from_graph_and_vector_module = importlib.import_module(
     "cognee.modules.graph.methods.delete_from_graph_and_vector"
@@ -49,8 +50,8 @@ async def test_detag_called_with_removed_nodeset_names():
         ),
         patch.object(
             delete_from_graph_and_vector_module,
-            "get_vector_engine",
-            lambda: vector_engine,
+            "get_vector_engine_async",
+            AsyncMock(return_value=vector_engine),
         ),
         patch.object(
             delete_from_graph_and_vector_module,
@@ -91,8 +92,8 @@ async def test_detag_skipped_when_no_nodeset_in_batch():
         ),
         patch.object(
             delete_from_graph_and_vector_module,
-            "get_vector_engine",
-            lambda: vector_engine,
+            "get_vector_engine_async",
+            AsyncMock(return_value=vector_engine),
         ),
         patch.object(
             delete_from_graph_and_vector_module,
@@ -139,8 +140,8 @@ async def test_delete_uses_edge_text_for_edge_type_delete_ids():
         ),
         patch.object(
             delete_from_graph_and_vector_module,
-            "get_vector_engine",
-            lambda: vector_engine,
+            "get_vector_engine_async",
+            AsyncMock(return_value=vector_engine),
         ),
         patch.object(
             delete_from_graph_and_vector_module,
@@ -162,8 +163,8 @@ async def test_delete_uses_edge_text_for_edge_type_delete_ids():
 
     vector_engine.delete_data_points.assert_any_await(
         "EdgeType_relationship_name",
-        [str(generate_edge_id("Alice works at Acme."))],
+        [str(EdgeType.id_for("Alice works at Acme."))],
     )
     graph_engine.delete_nodes.assert_awaited_once_with(
-        [str(generate_edge_id("Alice works at Acme."))]
+        [str(EdgeType.id_for("Alice works at Acme."))]
     )

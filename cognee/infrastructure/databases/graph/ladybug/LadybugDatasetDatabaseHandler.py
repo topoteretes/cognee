@@ -2,15 +2,14 @@ import os
 from uuid import UUID
 from typing import Optional
 
-from cognee.infrastructure.databases.graph.config import get_graph_config
 from cognee.infrastructure.databases.graph.get_graph_engine import (
-    create_graph_engine,
-    evict_graph_engine,
+    aevict_graph_engines_for_database,
 )
 from cognee.base_config import get_base_config
 from cognee.modules.users.models import User
 from cognee.modules.users.models import DatasetDatabase
 from cognee.infrastructure.databases.dataset_database_handler import DatasetDatabaseHandlerInterface
+from cognee.infrastructure.files.storage.get_file_storage import get_file_storage
 
 
 class LadybugDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
@@ -63,30 +62,27 @@ class LadybugDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
         databases_directory_path = os.path.join(
             base_config.system_root_directory, "databases", str(dataset_database.owner_id)
         )
-        graph_file_path = os.path.join(
-            databases_directory_path, dataset_database.graph_database_name
-        )
-        graph_config = get_graph_config()
-        # Build the kwargs once so the evict call uses the exact same key
-        # the cognify-time ``create_graph_engine`` call produced. Missing
-        # any context-sourced field here (e.g. subprocess flag) puts the
-        # entry on a different key and the eviction silently misses.
-        engine_kwargs = dict(
-            graph_database_provider=dataset_database.graph_database_provider,
-            graph_database_url=dataset_database.graph_database_url,
-            graph_database_name=dataset_database.graph_database_name,
-            graph_database_key=dataset_database.graph_database_key,
-            graph_file_path=graph_file_path,
-            graph_database_username="",
-            graph_database_password="",
-            graph_dataset_database_handler="",
-            graph_database_port="",
-            graph_database_subprocess_enabled=graph_config.graph_database_subprocess_enabled,
-            kuzu_num_threads=graph_config.kuzu_num_threads,
-            kuzu_buffer_pool_size=graph_config.kuzu_buffer_pool_size,
-            kuzu_max_db_size=graph_config.kuzu_max_db_size,
-        )
-        graph_engine = create_graph_engine(**engine_kwargs)
-        await graph_engine.delete_graph()
-        evict_graph_engine(**engine_kwargs)
-        await graph_engine.close()
+        graph_db_name = dataset_database.graph_database_name
+
+        # Never open the database to drop it: opening spawns a fresh engine
+        # (in subprocess mode, a worker that must take the on-disk file lock)
+        # which races the just-torn-down one. Evict every cached engine for
+        # this database — the same DB can sit under multiple cache keys —
+        # wait for their in-flight closes to finish (a close deferred behind
+        # an idle holder is not waited on; see aevict_graph_engines_for_database),
+        # then remove the files directly. Server-backed handlers (e.g.
+        # Postgres) are different on purpose: they drop the per-dataset
+        # database over a connection, so no file handling applies there.
+        await aevict_graph_engines_for_database(graph_db_name)
+
+        file_storage = get_file_storage(databases_directory_path)
+        if await file_storage.is_file(graph_db_name):
+            await file_storage.remove(graph_db_name)
+            # A clean close checkpoints and removes the WAL; the lock file and
+            # a leftover WAL from a crashed worker must not survive the drop,
+            # or a same-name recreate would replay stale data.
+            for companion_file in (f"{graph_db_name}.lock", f"{graph_db_name}.wal"):
+                if await file_storage.is_file(companion_file):
+                    await file_storage.remove(companion_file)
+        else:
+            await file_storage.remove_all(graph_db_name)

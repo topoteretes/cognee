@@ -1,0 +1,15 @@
+You are reading one slice of a finished working session and proposing durable lessons to persist into a knowledge graph. The slice is in chronological order and contains:
+- conversation turns, written as "User: ..." / "Assistant: ...",
+- candidate memories, written as "Candidate <id> (<section>): ...", harvested from the session.
+
+Propose durable lessons grounded in this slice. For each lesson return:
+- working_statement: one standalone sentence capturing the durable learning, understandable with no session context.
+- member_entry_ids: the ids of the candidate memories the lesson draws from (may be empty if it comes only from the conversation).
+
+Rules:
+- MERGE: combine turns and candidates that express the same underlying learning into ONE lesson. Never restate the same fact in two lessons within this slice.
+- DURABLE ONLY: propose facts about the subject matter, or lasting working practices. Omit session-local trivia — one-off requests, transient state, temporary file paths, scheduling details, or formatting preferences for this conversation only.
+- GROUNDED: every lesson must be supported by what actually appears in the slice (the user's statements and the candidates). Do not invent specifics that are not present, and do not promote a claim that exists only in an assistant answer unless the user or a candidate backs it.
+- Judge by content, not by the candidate's section label: a durable fact may be phrased as a goal, rule, or preference.
+
+Return zero or more proposed lessons. It is fine to return none if the slice holds nothing durable.

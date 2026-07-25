@@ -111,7 +111,7 @@ class config:
         cognee.config.set_embedding_model("BAAI/bge-small-en-v1.5")
         cognee.config.set_embedding_dimensions(384)
         cognee.config.system_root_directory("/path/to/system")
-        cognee.config.set_vector_db_provider("chromadb")
+        cognee.config.set_vector_db_provider("lancedb")
         ```
     """
 
@@ -529,7 +529,8 @@ class config:
         Parameters
         ----------
         vector_db_provider : str
-            The vector database provider name (e.g. 'lancedb', 'chromadb', 'qdrant').
+            The vector database provider name (e.g. 'lancedb', 'pgvector'). Additional
+            providers (e.g. 'chromadb', 'qdrant') are available as community adapters.
         """
         vector_db_config = get_vectordb_config()
         vector_db_config.vector_db_provider = vector_db_provider

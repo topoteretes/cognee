@@ -34,9 +34,7 @@ jobs:
       LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
       EMBEDDING_DIMENSIONS: 300
       EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-      EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
       EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-      EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -47,7 +45,7 @@ jobs:
         uses: ./.github/actions/cognee_setup
         with:
           python-version: '3.11.x'
-          extra-dependencies: "scraping"
+          extra-dependencies: "scraping fastembed"
 
       - name: Run Retrieval Tests
         run: uv run pytest cognee/tests/integration/retrieval/ --splits 4 --group ${{ matrix.split-group }}
@@ -70,9 +68,7 @@ jobs:
       LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
       EMBEDDING_DIMENSIONS: 300
       EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-      EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
       EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-      EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -106,9 +102,7 @@ jobs:
       LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
       EMBEDDING_DIMENSIONS: 300
       EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-      EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
       EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-      EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -119,7 +113,9 @@ jobs:
         uses: ./.github/actions/cognee_setup
         with:
           python-version: '3.11.x'
-          extra-dependencies: "scraping"
+          # fastembed so the embedding tokenizer delegation tests can import
+          # FastembedEmbeddingEngine.
+          extra-dependencies: "scraping fastembed"
 
       - name: Run Infrastructure Tests
         run: uv run pytest cognee/tests/integration/infrastructure/ --splits 3 --group ${{ matrix.split-group }}
@@ -138,9 +134,7 @@ jobs:
       LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
       EMBEDDING_DIMENSIONS: 300
       EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-      EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
       EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-      EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -180,9 +174,7 @@ jobs:
       LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
       EMBEDDING_DIMENSIONS: 300
       EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-      EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
       EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-      EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
       CACHE_HOST: redis
     steps:
       - name: Check out repository

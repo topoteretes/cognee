@@ -35,9 +35,9 @@ def _extract_dataset_id_from_remember(remember_result):
 async def _reset_engines_and_prune() -> None:
     """Reset db engine caches and prune data/system."""
     try:
-        from cognee.infrastructure.databases.vector import get_vector_engine
+        from cognee.infrastructure.databases.vector import get_vector_engine_async
 
-        vector_engine = get_vector_engine()
+        vector_engine = await get_vector_engine_async()
         if hasattr(vector_engine, "engine") and hasattr(vector_engine.engine, "dispose"):
             await vector_engine.engine.dispose(close=True)
     except Exception:
@@ -145,7 +145,9 @@ async def test_permissions_example_flow(permissions_example_env):
         )
     assert isinstance(recall_results, list) and len(recall_results) == 1
     assert recall_results[0].dataset_name == "AI"
-    assert recall_results[0].text == "MOCK_ANSWER"
+    # GRAPH_COMPLETION appends an "Evidence:" section when include_references is
+    # enabled (off by default), so match the mocked completion as a prefix.
+    assert recall_results[0].text.startswith("MOCK_ANSWER")
 
     # user_1 can't read dataset owned by user_2.
     with pytest.raises(PermissionDeniedError):
@@ -178,7 +180,9 @@ async def test_permissions_example_flow(permissions_example_env):
         )
     assert isinstance(recall_results, list) and len(recall_results) == 1
     assert recall_results[0].dataset_name == "QUANTUM"
-    assert recall_results[0].text == "MOCK_ANSWER"
+    # GRAPH_COMPLETION appends an "Evidence:" section when include_references is
+    # enabled (off by default), so match the mocked completion as a prefix.
+    assert recall_results[0].text.startswith("MOCK_ANSWER")
 
     # Tenant + role scenario.
     tenant_id = await create_tenant("CogneeLab", user_2.id)
@@ -223,7 +227,9 @@ async def test_permissions_example_flow(permissions_example_env):
         )
     assert isinstance(recall_results, list) and len(recall_results) == 1
     assert recall_results[0].dataset_name == "QUANTUM_COGNEE_LAB"
-    assert recall_results[0].text == "MOCK_ANSWER"
+    # GRAPH_COMPLETION appends an "Evidence:" section when include_references is
+    # enabled (off by default), so match the mocked completion as a prefix.
+    assert recall_results[0].text.startswith("MOCK_ANSWER")
 
     # Remove user_3 from tenant (tenant owner user_2 removes user_3).
     await remove_user_from_tenant(user_id=user_3.id, tenant_id=tenant_id, owner_id=user_2.id)

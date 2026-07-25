@@ -115,12 +115,16 @@ async def _load_skill_nodes(name: Optional[str] = None):
 def _coerce_skill(raw) -> Optional[Skill]:
     if isinstance(raw, Skill):
         return raw
+    node_id = None
     if isinstance(raw, (list, tuple)) and len(raw) > 1:
+        node_id = raw[0]
         raw = raw[1]
     data = raw.model_dump() if hasattr(raw, "model_dump") else raw
     if not isinstance(data, dict):
         return None
     data = {k: v for k, v in data.items() if k != "metadata"}
+    if node_id is not None and "id" not in data:
+        data["id"] = node_id
     try:
         return Skill.model_validate(data)
     except Exception:

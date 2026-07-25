@@ -4,6 +4,7 @@ from typing import Union, Optional
 from uuid import UUID
 
 from cognee.modules.cognify.config import get_cognify_config
+from cognee.modules.cognify.rollback import cognify_rollback_handler
 from cognee.modules.ontology.ontology_env_config import get_ontology_env_config
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.data_models import KnowledgeGraph
@@ -11,6 +12,8 @@ from cognee.infrastructure.llm import get_max_chunk_tokens
 
 from cognee.modules.pipelines import run_pipeline
 from cognee.modules.pipelines.tasks.task import Task
+from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
+from cognee.infrastructure.llm.config import LLMConfig
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.ontology.ontology_config import Config
 from cognee.modules.ontology.get_default_ontology_resolver import (
@@ -24,6 +27,7 @@ from cognee.tasks.documents import (
     extract_chunks_from_documents,
 )
 from cognee.tasks.graph.extract_graph_and_summarize import extract_graph_and_summarize
+from cognee.tasks.graph import detect_contradictions
 from cognee.tasks.storage import add_data_points
 from cognee.tasks.ingestion.extract_dlt_fk_edges import extract_dlt_fk_edges
 from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
@@ -35,9 +39,6 @@ from cognee.modules.observability import new_span, COGNEE_PIPELINE_NAME, COGNEE_
 
 
 logger = get_logger("cognify")
-
-
-update_status_lock = asyncio.Lock()
 
 
 async def cognify(
@@ -55,6 +56,10 @@ async def cognify(
     custom_prompt: Optional[str] = None,
     temporal_cognify: bool = False,
     data_per_batch: int = 20,
+    llm_config: Optional[LLMConfig] = None,
+    embedding_config: Optional[EmbeddingConfig] = None,
+    data_cache: bool = True,
+    dry_run: bool = False,
     **kwargs,
 ):
     """
@@ -120,9 +125,12 @@ async def cognify(
                       If provided, this prompt will be used instead of the default prompts for
                       knowledge graph extraction. The prompt should guide the LLM on how to
                       extract entities and relationships from the text content.
+        dry_run: If True, return a stage-level estimate of LLM token usage and rough cost
+                 without making LLM calls or writing graph results. The estimate covers all
+                 data in the selected dataset(s); an incremental run may process fewer items.
 
     Returns:
-        Union[dict, list[PipelineRunInfo]]:
+        Union[dict, list[PipelineRunInfo], DryRunEstimate]:
             - **Blocking mode**: Dictionary mapping dataset_id -> PipelineRunInfo with:
                 * Processing status (completed/failed/in_progress)
                 * Extracted entity and relationship counts
@@ -201,6 +209,11 @@ async def cognify(
 
     client = get_remote_client()
     if client is not None:
+        if dry_run:
+            raise ValueError(
+                "dry_run is not supported while connected to a remote Cognee instance. "
+                "Call cognee.disconnect() to estimate against local data."
+            )
         return await client.cognify(
             datasets,
             chunk_size=chunk_size,
@@ -213,6 +226,10 @@ async def cognify(
         span.set_attribute(COGNEE_PIPELINE_NAME, "cognify")
         if datasets is not None:
             span.set_attribute("cognee.cognify.datasets", str(datasets))
+
+        from cognee.modules.migrations.startup import run_migrations_and_block
+
+        await run_migrations_and_block(datasets, user)
 
         if config is None:
             ontology_config = get_ontology_env_config()
@@ -232,6 +249,20 @@ async def cognify(
                 config: Config = {
                     "ontology_config": {"ontology_resolver": get_default_ontology_resolver()}
                 }
+
+        if dry_run:
+            if temporal_cognify:
+                raise ValueError("dry_run is supported for the default cognify pipeline only.")
+            from cognee.modules.cognify.estimator import estimate_cognify_dry_run
+
+            return await estimate_cognify_dry_run(
+                datasets,
+                user=user,
+                graph_model=graph_model,
+                chunker=chunker,
+                chunk_size=chunk_size or await get_max_chunk_tokens(),
+                custom_prompt=custom_prompt,
+            )
 
         if temporal_cognify:
             tasks = await get_temporal_tasks(
@@ -264,9 +295,13 @@ async def cognify(
             vector_db_config=vector_db_config,
             graph_db_config=graph_db_config,
             incremental_loading=incremental_loading,
-            use_pipeline_cache=True,
+            use_pipeline_cache=False,
             pipeline_name="cognify_pipeline",
             data_per_batch=data_per_batch,
+            rollback_handler=cognify_rollback_handler,
+            llm_config=llm_config,
+            embedding_config=embedding_config,
+            data_cache=data_cache,
         )
 
         dataset_desc = str(datasets) if datasets else "all datasets"
@@ -307,6 +342,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
 
     cognify_config = get_cognify_config()
     embed_triplets = cognify_config.triplet_embedding
+    check_contradictions = cognify_config.contradiction_detection
 
     if chunks_per_batch is None:
         chunks_per_batch = (
@@ -319,7 +355,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
         # EXTRACT: split Documents into semantic text chunks
         Task(
             extract_chunks_from_documents,
-            max_chunk_size=chunk_size or get_max_chunk_tokens(),
+            max_chunk_size=chunk_size or await get_max_chunk_tokens(),
             chunker=chunker,
         ),
         # COGNIFY: LLM-extract entities and relationships into a knowledge graph
@@ -339,6 +375,15 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
             task_config={"batch_size": chunks_per_batch},
         ),
         Task(extract_dlt_fk_edges),
+        # COGNIFY (opt-in): flag facts in this ingestion that contradict facts
+        # already in the graph. Runs last so both new and existing facts are
+        # persisted and comparable. Default OFF — when the flag is off this spread
+        # is empty and the task list is identical to the pre-detection pipeline.
+        *(
+            [Task(detect_contradictions, task_config={"batch_size": chunks_per_batch})]
+            if check_contradictions
+            else []
+        ),
     ]
 
     return default_tasks
@@ -378,7 +423,7 @@ async def get_temporal_tasks(
         # EXTRACT: split Documents into semantic text chunks
         Task(
             extract_chunks_from_documents,
-            max_chunk_size=chunk_size or get_max_chunk_tokens(),
+            max_chunk_size=chunk_size or await get_max_chunk_tokens(),
             chunker=chunker,
         ),
         # COGNIFY: extract temporal events and timestamps from chunks

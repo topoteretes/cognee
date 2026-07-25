@@ -7,9 +7,14 @@ from litellm.exceptions import ContentPolicyViolationError
 from pydantic import BaseModel
 
 from cognee.infrastructure.files.storage.s3_config import get_s3_config
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.instructor_modes import (
+    get_instructor_mode,
+)
 from cognee.infrastructure.llm.exceptions import (
     ContentPolicyFilterError,
+    LLMPaymentRequiredError,
     MissingSystemPromptPathError,
+    is_budget_exhausted_error,
 )
 from cognee.infrastructure.llm.prompts.read_query_prompt import read_query_prompt
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.llm_interface import (
@@ -38,9 +43,9 @@ class BedrockAdapter(LLMInterface):
     """
 
     name = "Bedrock"
-    default_instructor_mode = "json_schema_mode"
+    default_instructor_mode = get_instructor_mode("bedrock")
 
-    MAX_RETRIES = 5
+    MAX_RETRIES = 2
 
     def __init__(
         self,
@@ -132,8 +137,12 @@ class BedrockAdapter(LLMInterface):
             raise ContentPolicyFilterError(
                 f"The provided input contains content that is not aligned with our content policy: {text_input}"
             )
+        except Exception as e:
+            if is_budget_exhausted_error(e):
+                raise LLMPaymentRequiredError() from e
+            raise
 
-    async def create_transcript(self, input: str) -> TranscriptionReturnType | None:
+    async def create_transcript(self, input: str, **kwargs: Any) -> TranscriptionReturnType | None:
         raise NotImplementedError
 
     async def transcribe_image(self, input: str) -> Any:

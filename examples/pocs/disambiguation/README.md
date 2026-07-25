@@ -26,7 +26,7 @@ Parameters (differences vs `cognee.cognify()`):
 - `temporal_cognify`: Present but unused in this POC.
 - `**kwargs`: Passed through to the POC extractor (used for `vector_search_limit`).
 
-`poc_extract_graph_from_data_with_entity_disambiguation.py`
+`extract_graph_from_data_with_entity_disambiguation.py`
 - Implements `extract_graph_from_data_with_entity_disambiguation(...)` which:
   - Looks up existing entities from the vector DB collection `Entity_name`.
   - Appends the top matches to the prompt (`custom_prompt`) as candidate aliases.
@@ -39,13 +39,13 @@ Parameters (differences vs `extract_graph_from_data`):
 - `custom_prompt`: Prompt string to seed the LLM; will be extended with vector matches.
 - `vector_search_limit` (via `**kwargs`): Number of existing entities to retrieve (default 5).
 
-`poc_disambiguate_entities_example.py`
+`disambiguate_entities_example.py`
 - End-to-end runnable example that:
   - Prunes existing Cognee data.
-  - Reads a small example file line-by-line from `poc_disambiguation/data/`.
+  - Reads a small example file line-by-line from `disambiguation/data/`.
   - Adds each line as a separate datapoint.
   - Runs either the POC pipeline (`use_poc=True`) or the standard `cognee.cognify()`.
-  - Writes graph visualizations to `poc_disambiguation/results/`.
+  - Writes graph visualizations to `disambiguation/results/`.
 
 Key parameters:
 - `use_poc`: If true, runs `disambiguate_entities_pipeline` after each added line.
@@ -53,8 +53,8 @@ Key parameters:
 - `custom_prompt`: Prompt template read from `prompts/prompt1.txt`.
 
 Outputs:
-- `results/cognify_simple_<example>_poc_graph.html`
-- `results/cognify_simple_<example>_graph.html`
+- `results/poc_cognify_disambiguate_<example>_result.html` (when `use_poc=True`)
+- `results/cognify_disambiguate_<example>_result.html` (when `use_poc=False`)
 
 ## Examples And Data
 

@@ -27,6 +27,11 @@ NAMESPACE = UUID("a1b2c3d4-e5f6-7890-abcd-ef1234567890")
 
 _DESCRIPTION_ALIASES = ("description", "summary", "short_description", "about")
 _TOOLS_ALIASES = ("allowed-tools", "allowed_tools", "declared_tools", "tools")
+_MAINTAINER_ALIASES = ("maintainer", "company", "author", "publisher", "vendor", "org")
+_MAINTAINER_URL_ALIASES = ("maintainer_url", "maintainer-url", "url", "homepage", "website")
+_VERSION_ALIASES = ("version", "ver")
+_TAGS_ALIASES = ("tags", "categories", "labels")
+_LICENSE_ALIASES = ("license", "licence")
 
 
 def _deterministic_id(namespace_key: str) -> UUID:
@@ -97,6 +102,20 @@ def _extract_tools(frontmatter: Dict[str, Any]) -> List[str]:
     return [tool.strip() for tool in re.split(r"[\s,]+", str(raw)) if tool.strip()]
 
 
+def _extract_str(frontmatter: Dict[str, Any], aliases: tuple[str, ...]) -> str:
+    raw = _pop_first(frontmatter, aliases)
+    return str(raw).strip() if raw is not None else ""
+
+
+def _extract_list(frontmatter: Dict[str, Any], aliases: tuple[str, ...]) -> List[str]:
+    raw = _pop_first(frontmatter, aliases)
+    if raw is None:
+        return []
+    if isinstance(raw, list):
+        return [str(item).strip() for item in raw if str(item).strip()]
+    return [item.strip() for item in re.split(r"[\s,]+", str(raw)) if item.strip()]
+
+
 def _skill_slug(skill_file: Path) -> str:
     return skill_file.parent.name
 
@@ -126,6 +145,11 @@ def parse_skill_file(
     name = skill_key or _skill_slug(skill_md)
     description = _extract_description(frontmatter, body)
     declared_tools = _extract_tools(frontmatter)
+    maintainer = _extract_str(frontmatter, _MAINTAINER_ALIASES)
+    maintainer_url = _extract_str(frontmatter, _MAINTAINER_URL_ALIASES)
+    skill_version = _extract_str(frontmatter, _VERSION_ALIASES)
+    tags = _extract_list(frontmatter, _TAGS_ALIASES)
+    license_name = _extract_str(frontmatter, _LICENSE_ALIASES)
     source_file = _normalize_path(skill_md)
     source_dir = _normalize_path(skill_md.parent)
     skill_text = _build_search_text(name, description, body)
@@ -136,6 +160,12 @@ def parse_skill_file(
         description=description,
         procedure=body,
         declared_tools=declared_tools,
+        maintainer=maintainer,
+        maintainer_url=maintainer_url,
+        skill_version=skill_version,
+        tags=tags,
+        license=license_name,
+        source_repo_url=source_repo,
         source_file=source_file,
         source_dir=source_dir,
         content_hash=_content_hash(raw_text),
