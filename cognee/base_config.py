@@ -1,4 +1,5 @@
 import os
+import base64
 from pathlib import Path
 from typing import Optional
 from functools import lru_cache
@@ -37,6 +38,32 @@ class BaseConfig(BaseSettings):
         self.system_root_directory = ensure_absolute_path(self.system_root_directory)
         self.logs_root_directory = ensure_absolute_path(self.logs_root_directory)
 
+        # Langfuse rides the existing OTLP pipeline as just another destination.
+        # When LANGFUSE_* keys are set, derive the OTLP endpoint + Basic-auth header
+        # and turn tracing on. Fully opt-in: nothing changes unless a key is present.
+        if self.langfuse_public_key or self.langfuse_secret_key:
+            if not (self.langfuse_public_key and self.langfuse_secret_key):
+                raise ValueError(
+                    "Both LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY must be provided together."
+                )
+
+            auth_str = f"{self.langfuse_public_key}:{self.langfuse_secret_key}"
+            auth_b64 = base64.b64encode(auth_str.encode("utf-8")).decode("utf-8")
+
+            # LANGFUSE_HOST is canonical; fall back to LANGFUSE_BASE_URL, then Langfuse cloud.
+            host = (
+                self.langfuse_host or os.getenv("LANGFUSE_BASE_URL") or "https://cloud.langfuse.com"
+            )
+
+            # Respect an explicit OTLP endpoint/headers if the user already set one.
+            if not self.otel_exporter_otlp_endpoint:
+                self.otel_exporter_otlp_endpoint = f"{host.rstrip('/')}/api/public/otel/v1/traces"
+
+            if not self.otel_exporter_otlp_headers:
+                self.otel_exporter_otlp_headers = f"Authorization=Basic {auth_b64}"
+
+            self.cognee_tracing_enabled = True
+
         return self
 
     default_user_email: Optional[str] = os.getenv("DEFAULT_USER_EMAIL")
@@ -51,6 +78,13 @@ class BaseConfig(BaseSettings):
     otel_service_name: str = os.getenv("OTEL_SERVICE_NAME", "cognee")
     otel_exporter_otlp_endpoint: Optional[str] = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
     otel_exporter_otlp_headers: Optional[str] = os.getenv("OTEL_EXPORTER_OTLP_HEADERS")
+
+    # Langfuse configuration. Read from the env by pydantic-settings at load time
+    # (LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY / LANGFUSE_HOST); host falls back to
+    # LANGFUSE_BASE_URL, then Langfuse cloud (see validate_paths).
+    langfuse_public_key: Optional[str] = None
+    langfuse_secret_key: Optional[str] = None
+    langfuse_host: Optional[str] = None
 
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 

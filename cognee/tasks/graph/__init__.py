@@ -8,3 +8,4 @@ building relationships between entities, and managing graph structures.
 from .extract_graph_from_data import extract_graph_from_data
 from .extract_graph_from_code import extract_graph_from_code
 from .canonicalize_entities import canonicalize_entities
+from .detect_contradictions import detect_contradictions

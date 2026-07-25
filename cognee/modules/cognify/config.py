@@ -17,6 +17,11 @@ class CognifyConfig(BaseSettings):
     canonicalization_confidence_threshold: float = 0.85
     canonicalization_max_pairs: int = 200
     canonicalization_judge_batch_size: int = 8
+    # Opt-in contradiction detection (issue #3699). Default OFF so the standard
+    # cognify pipeline is unchanged. Tunables gate the verdict and the LLM payload.
+    contradiction_detection: bool = False
+    contradiction_confidence_threshold: float = 0.5
+    contradiction_max_facts: int = 500
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
     def to_dict(self) -> dict:
@@ -30,6 +35,9 @@ class CognifyConfig(BaseSettings):
             "canonicalization_confidence_threshold": self.canonicalization_confidence_threshold,
             "canonicalization_max_pairs": self.canonicalization_max_pairs,
             "canonicalization_judge_batch_size": self.canonicalization_judge_batch_size,
+            "contradiction_detection": self.contradiction_detection,
+            "contradiction_confidence_threshold": self.contradiction_confidence_threshold,
+            "contradiction_max_facts": self.contradiction_max_facts,
         }
 
 

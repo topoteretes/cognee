@@ -36,6 +36,15 @@ class EvalConfig(BaseSettings):
     # Visualization
     dashboard: bool = True
 
+    # Reproducibility
+    seed: int = 42  # Seed for deterministic corpus sampling across runs
+
+    # Optional directory for run artifacts. When set, the runner namespaces
+    # artifacts under "<results_dir>/<benchmark>_<engine>/" so successive runs
+    # are comparable instead of overwriting each other. When unset, artifacts are
+    # written to the current working directory (legacy behavior).
+    results_dir: Optional[str] = None
+
     # file paths
     questions_path: str = "questions_output.json"
     answers_path: str = "answers_output.json"
@@ -61,6 +70,8 @@ class EvalConfig(BaseSettings):
             "evaluation_metrics": self.evaluation_metrics,
             "calculate_metrics": self.calculate_metrics,
             "dashboard": self.dashboard,
+            "seed": self.seed,
+            "results_dir": self.results_dir,
             "questions_path": self.questions_path,
             "answers_path": self.answers_path,
             "metrics_path": self.metrics_path,

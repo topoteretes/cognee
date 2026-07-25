@@ -17,10 +17,14 @@ from tenacity import (
 )
 
 from cognee.infrastructure.llm.retry_config import (
+    llm_retry_condition,
     llm_retry_stop_condition,
 )
 
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.instructor_modes import (
+    get_instructor_mode,
+)
 from cognee.infrastructure.llm.exceptions import (
     ContentPolicyFilterError,
     LLMPaymentRequiredError,
@@ -62,7 +66,7 @@ class OpenAIAdapter(GenericAPIAdapter):
     - MAX_RETRIES
     """
 
-    default_instructor_mode = "json_schema_mode"
+    default_instructor_mode = get_instructor_mode("openai")
     MAX_RETRIES = 2
 
     """Adapter for OpenAI's GPT-3, GPT=4 API"""
@@ -117,14 +121,7 @@ class OpenAIAdapter(GenericAPIAdapter):
     @retry(
         stop=llm_retry_stop_condition,
         wait=wait_exponential_jitter(8, 128),
-        retry=retry_if_not_exception_type(
-            (
-                litellm.exceptions.NotFoundError,
-                litellm.exceptions.AuthenticationError,
-                asyncio.CancelledError,
-                LLMPaymentRequiredError,
-            )
-        ),
+        retry=llm_retry_condition,
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )

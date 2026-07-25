@@ -429,6 +429,7 @@ async def _delete_dlt_orphans(
     from cognee.modules.graph.methods.delete_data_nodes_and_edges import (
         delete_data_nodes_and_edges,
     )
+    from cognee.context_global_variables import set_database_global_context_variables
 
     # Find the dataset — if it doesn't exist yet this is a first ingestion,
     # so there can be no orphans.
@@ -459,23 +460,31 @@ async def _delete_dlt_orphans(
     )
 
     failed: list = []
-    for orphan in orphans:
-        try:
-            # Always attempt graph+vector cleanup. delete_data_nodes_and_edges
-            # handles both provenance modes and no-ops when there is nothing to
-            # remove; gating on has_data_related_nodes (a relational-ledger-only
-            # check) wrongly skipped cleanup for graph-provenance graphs (the
-            # default), leaving a forgotten row's chunks/entities in the graph +
-            # vector stores and still retrievable.
-            await delete_data_nodes_and_edges(dataset.id, orphan.id, user.id)
-            await delete_data(orphan, dataset.id)
-        except Exception:
-            failed.append(orphan.id)
-            logger.warning(
-                "Failed to delete orphaned dlt row data_id=%s, skipping.",
-                orphan.id,
-                exc_info=True,
-            )
+    # The graph + vector engines are dataset-scoped under access control, so run
+    # the per-orphan delete inside the dataset DB context (mirrors the canonical
+    # datasets.delete_data routing). Without it, cleanup resolves the *default*
+    # engines — the background-ingest path invokes orphan_cleanup before any
+    # pipeline establishes the context — so the graph + vector purge silently
+    # targets the wrong DB and leaves the forgotten row's chunks/entities
+    # searchable under ENABLE_BACKEND_ACCESS_CONTROL.
+    async with set_database_global_context_variables(dataset.id, dataset.owner_id):
+        for orphan in orphans:
+            try:
+                # Always attempt graph+vector cleanup. delete_data_nodes_and_edges
+                # handles both provenance modes and no-ops when there is nothing to
+                # remove; gating on has_data_related_nodes (a relational-ledger-only
+                # check) wrongly skipped cleanup for graph-provenance graphs (the
+                # default), leaving a forgotten row's chunks/entities in the graph +
+                # vector stores and still retrievable.
+                await delete_data_nodes_and_edges(dataset.id, orphan.id, user.id)
+                await delete_data(orphan, dataset.id)
+            except Exception:
+                failed.append(orphan.id)
+                logger.warning(
+                    "Failed to delete orphaned dlt row data_id=%s, skipping.",
+                    orphan.id,
+                    exc_info=True,
+                )
 
     if failed:
         # Surface partial-cleanup failures loudly: the stale rows remain across

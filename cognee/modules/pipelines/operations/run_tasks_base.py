@@ -12,6 +12,7 @@ from cognee.modules.observability import (
     COGNEE_RESULT_SUMMARY,
     COGNEE_RESULT_COUNT,
 )
+from cognee.modules.pipelines.provenance_config import get_provenance_config
 from cognee.infrastructure.engine import DataPoint
 from ..tasks.task import Task
 
@@ -201,8 +202,13 @@ async def handle_task(
             # Reuse the visited set across tasks so already-stamped
             # DataPoints are skipped in subsequent pipeline stages.
             provenance_visited = ctx._provenance_visited if ctx else None
-
+            _provenance_config = get_provenance_config()
             async for result_data in running_task.execute(args, kwargs, next_task_batch_size):
+                if not _provenance_config.is_disabled():
+                    _stamp_provenance(
+                        result_data,
+                        pipe_name,
+                    )
                 if isinstance(result_data, list):
                     result_count += len(result_data)
                 else:

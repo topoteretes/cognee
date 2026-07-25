@@ -6,19 +6,21 @@ import threading
 from typing import Any, cast
 
 import instructor
-import litellm
 from instructor.core.patch import InstructorChatCompletionCreate
 from openai import AsyncOpenAI
 from pydantic import BaseModel
 from tenacity import (
     before_sleep_log,
     retry,
-    retry_if_not_exception_type,
     wait_exponential_jitter,
+)
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.instructor_modes import (
+    get_instructor_mode,
 )
 from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError, is_budget_exhausted_error
 
 from cognee.infrastructure.llm.retry_config import (
+    llm_retry_condition,
     llm_retry_stop_condition,
 )
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.types import (
@@ -66,7 +68,7 @@ class LlamaCppAPIAdapter(LLMInterface):
     model: str | None
     model_path: str | None
     mode_type: str  # "server" or "local"
-    default_instructor_mode = instructor.Mode.JSON
+    default_instructor_mode = get_instructor_mode("llama_cpp")
 
     def __init__(
         self,
@@ -157,14 +159,7 @@ class LlamaCppAPIAdapter(LLMInterface):
     @retry(
         stop=llm_retry_stop_condition,
         wait=wait_exponential_jitter(8, 128),
-        retry=retry_if_not_exception_type(
-            (
-                litellm.exceptions.NotFoundError,
-                litellm.exceptions.AuthenticationError,
-                asyncio.CancelledError,
-                LLMPaymentRequiredError,
-            )
-        ),
+        retry=llm_retry_condition,
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
