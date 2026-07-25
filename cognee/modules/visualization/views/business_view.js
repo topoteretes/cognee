@@ -80,6 +80,14 @@
     if (s.type === 'User' && t.type === 'Agent' && l.relation === 'operates') {
       agentOwner[t.id] = s.id;
     }
+    // Agents hold access too (their connection's dataset scope) — same
+    // granular what-if model as users, keyed by the agent's own id.
+    if (s.type === 'Agent' && t.type === 'Dataset' &&
+        (l.relation === 'reads' || l.relation === 'writes')) {
+      const slot = ((access[s.id] = access[s.id] || {})[t.id] =
+        access[s.id][t.id] || { owns: false, perms: new Set() });
+      slot.perms.add(l.relation === 'reads' ? 'read' : 'write');
+    }
     if (s.type === 'User' && t.type === 'Dataset' &&
         (l.relation === 'owns' || String(l.relation).indexOf('can_') === 0)) {
       const slot = ((access[s.id] = access[s.id] || {})[t.id] =
@@ -406,8 +414,10 @@
     else if (!slot.perms.has('share')) { slot.perms.add('share'); label = 'read + write + share'; }
     else { delete slots[did]; label = 'no access'; }
     lastGrantChange = { uid, did, at: performance.now() };
-    const uname = (userNodes.find(x => x.id === uid) || {}).is_current ? 'you'
-      : ((userNodes.find(x => x.id === uid) || {}).name || 'user').split('@')[0];
+    const principal = userNodes.find(x => x.id === uid) || agents.find(x => x.id === uid) || {};
+    const uname = principal.is_current ? 'you'
+      : principal.type === 'Agent' ? (principal.name || 'agent') + ' (agent)'
+      : (principal.name || 'user').split('@')[0];
     narrate('what-if: ' + uname + ' → ' + ((dsById[did] || {}).name || 'dataset') + ': ' + label +
       ' (simulated — apply for real with + share)', C.amber);
     renderOperators();
@@ -491,12 +501,12 @@
         agentsWrap.className = 'bv-org-child';
         orgParent.appendChild(agentsWrap);
         ownAgents.forEach(a => {
-          const reads = agentReads[a.id] ? [...agentReads[a.id]].join(', ') : null;
           const el = orgNode('', `<div class="t"><span class="dot" style="background:${C.amber}"></span>${esc(a.name)}
               <span class="badge">agent</span></div>
-            <div class="s">${reads ? 'reads ' + esc(reads) : 'connected'}</div>`);
-          el.dataset.uid = u.id;
-          wireUserHover(el, u.id);
+            <div class="acc">${accessChips(a.id)}</div>`);
+          el.dataset.uid = a.id;
+          wireUserHover(el, a.id);
+          wireChips(el);
           agentsWrap.appendChild(el);
           agentCardEls[a.id] = el;
         });
@@ -533,7 +543,7 @@
   let dsUsers = {};
   function computeDsUsers() {
     dsUsers = {};
-    Object.keys(access).forEach(uid => {
+    Object.keys(access).filter(uid => uid.indexOf('user:') === 0).forEach(uid => {
       Object.keys(access[uid]).forEach(did => {
         (dsUsers[did] = dsUsers[did] || []).push({
           uid, name: userLabel(uid), owns: access[uid][did].owns,
