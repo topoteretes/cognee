@@ -63,19 +63,21 @@ def llm_rate_limiter_context_manager():
 
 def embedding_rate_limiter_context_manager():
     global _embedding_rate_limiter
-    # NOTE: Import inside function to avoid a circular import at module load.
-    # On this branch the embedding rate-limit knobs still live on LLMConfig
-    # (dev's move to EmbeddingConfig is not part of this release).
-    from cognee.infrastructure.llm.config import get_llm_config
+    # NOTE: Import inside function to avoid a circular import at module load
+    # (embedding engines, which EmbeddingConfig is reached through, import
+    # this module).
+    from cognee.infrastructure.databases.vector.embeddings.config import (
+        get_embedding_config,
+    )
 
-    llm_config = get_llm_config()
-    if not llm_config.embedding_rate_limit_enabled:
+    embedding_config = get_embedding_config()
+    if not embedding_config.embedding_rate_limit_enabled:
         #  Return a no-op context manager if rate limiting is disabled
         return nullcontext()
 
     if _embedding_rate_limiter is None:
         _embedding_rate_limiter = AsyncLimiter(
-            llm_config.embedding_rate_limit_requests,
-            llm_config.embedding_rate_limit_interval,
+            embedding_config.embedding_rate_limit_requests,
+            embedding_config.embedding_rate_limit_interval,
         )
     return _embedding_rate_limiter

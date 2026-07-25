@@ -87,6 +87,31 @@ class LLMQuotaExceededError(CogneeValidationError):
         super().__init__(message=message, name="LLMQuotaExceededError")
 
 
+class ProviderNotDeducibleError(CogneeValidationError):
+    """
+    Raised when ``llm_provider`` is not set and cannot be inferred from the
+    ``llm_model`` prefix because the prefix is not a provider cognee supports.
+
+    The message names the supported providers and points OpenAI-compatible or
+    other litellm-routed prefixes (e.g. ``openrouter/``, ``groq/``, ``deepseek/``)
+    at ``LLM_PROVIDER="custom"``, so the user is told exactly what to set.
+    """
+
+    def __init__(self, model: str) -> None:
+        # Imported lazily: config.py is fully loaded by the time this is raised
+        # (from its own validator), while importing it at module top is circular.
+        from cognee.infrastructure.llm.config import KNOWN_LLM_PROVIDERS
+
+        supported = ", ".join(sorted(KNOWN_LLM_PROVIDERS))
+        message = (
+            f"Could not infer an LLM provider from LLM_MODEL={model!r}: its prefix "
+            f"is not a provider cognee supports. Set LLM_PROVIDER explicitly to one "
+            f"of: {supported}. For OpenAI-compatible or other litellm-routed "
+            f'endpoints (e.g. openrouter, groq, deepseek), use LLM_PROVIDER="custom".'
+        )
+        super().__init__(message=message, name="ProviderNotDeducibleError")
+
+
 class MissingSystemPromptPathError(CogneeValidationError):
     def __init__(
         self,

@@ -13,6 +13,9 @@ from cognee.infrastructure.llm.retry_config import (
     llm_retry_condition,
     llm_retry_stop_condition,
 )
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.instructor_modes import (
+    get_instructor_mode,
+)
 from cognee.infrastructure.llm.exceptions import (
     ContentPolicyFilterError,
     LLMPaymentRequiredError,
@@ -43,7 +46,7 @@ class BedrockAdapter(LLMInterface):
     """
 
     name = "Bedrock"
-    default_instructor_mode = "json_schema_mode"
+    default_instructor_mode = get_instructor_mode("bedrock")
 
     MAX_RETRIES = 2
 
