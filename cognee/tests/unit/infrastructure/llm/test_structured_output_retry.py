@@ -18,13 +18,16 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from pydantic import BaseModel
+from cognee.infrastructure.llm.exceptions import LLMQuotaExceededError
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.openai.adapter import (
     OpenAIAdapter,
 )
 from cognee.infrastructure.llm.retry_config import (
     LLM_MIN_RETRY_ATTEMPTS,
     LLM_MIN_RETRY_SECONDS,
+    is_quota_or_billing_error,
     llm_retry_stop_condition,
+    should_retry_llm_exception,
 )
 
 _MODULE = (
@@ -51,6 +54,50 @@ def _build_adapter() -> OpenAIAdapter:
 
 
 # --------------------------------------------------------------------------- #
+# 0. Quota/billing classification: exhausted quota is terminal, transient
+#    provider failures (including per-minute rate limits) stay retryable.
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize(
+    "error",
+    [
+        RuntimeError("insufficient_quota: You exceeded your current quota."),
+        RuntimeError({"error": {"code": "quota_exceeded", "type": "billing"}}),
+        RuntimeError("Your credit balance is too low to access the API."),
+    ],
+)
+def test_quota_and_billing_errors_are_terminal(error):
+    assert is_quota_or_billing_error(error) is True
+    assert should_retry_llm_exception(error) is False
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        RuntimeError("temporary billing service unavailable"),
+        RuntimeError("Rate limit exceeded, please try again in 20s."),
+        # Gemini free tier returns this exact wording for recoverable per-minute
+        # limits (status RESOURCE_EXHAUSTED); it must stay retryable.
+        RuntimeError(
+            "You exceeded your current quota, please check your plan and billing "
+            "details. status: RESOURCE_EXHAUSTED"
+        ),
+        RuntimeError("boom"),
+    ],
+)
+def test_transient_errors_stay_retryable(error):
+    assert is_quota_or_billing_error(error) is False
+    assert should_retry_llm_exception(error) is True
+
+
+def test_quota_error_is_found_on_the_cause_chain():
+    wrapper = RuntimeError("instructor retries exhausted")
+    wrapper.__cause__ = RuntimeError("insufficient_quota")
+
+    assert is_quota_or_billing_error(wrapper) is True
+    assert should_retry_llm_exception(wrapper) is False
+
+
+# --------------------------------------------------------------------------- #
 # 1. The combined stop predicate in isolation: stop ONLY when both floors meet.
 # --------------------------------------------------------------------------- #
 @pytest.mark.parametrize(
@@ -67,6 +114,61 @@ def test_combined_stop_requires_both_conditions(attempts, elapsed, should_stop):
     # Exercise the actual shared predicate the adapters are decorated with.
     state = SimpleNamespace(attempt_number=attempts, seconds_since_start=elapsed)
     assert llm_retry_stop_condition(state) is should_stop
+
+
+# --------------------------------------------------------------------------- #
+# 1b. A quota error through the real adapter is NOT retried: exactly one
+#     attempt, then the provider error propagates (issue #3643).
+# --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_structured_output_does_not_retry_quota_errors():
+    adapter = _build_adapter()
+    adapter.aclient = Mock()
+    adapter.aclient.chat.completions.create = AsyncMock(
+        side_effect=RuntimeError("insufficient_quota: exceeded your current quota")
+    )
+
+    with patch(f"{_MODULE}.llm_rate_limiter_context_manager", _null_rate_limiter):
+        with pytest.raises(RuntimeError, match="insufficient_quota"):
+            await adapter.acreate_structured_output("hi", "system", _Resp)
+
+    assert adapter.aclient.chat.completions.create.await_count == 1
+
+
+# --------------------------------------------------------------------------- #
+# 1c. LLMGateway converts the raw provider error into the actionable
+#     LLMQuotaExceededError — for every provider and framework, since all
+#     structured-output calls flow through the gateway.
+# --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_llm_gateway_converts_quota_errors():
+    # Resolve modules via sys.modules, not a dotted patch string: the llm package
+    # re-exports the LLMGateway *class*, so "cognee.infrastructure.llm.LLMGateway"
+    # can resolve to the class instead of the module (order-dependent across Python
+    # versions). sys.modules is keyed by name and always gives the module.
+    import sys
+    import cognee.infrastructure.llm.LLMGateway  # noqa: F401 — ensure in sys.modules
+    import cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.get_llm_client  # noqa: E501,F401
+
+    gateway_module = sys.modules["cognee.infrastructure.llm.LLMGateway"]
+    get_llm_client_module = sys.modules[
+        "cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.get_llm_client"
+    ]
+
+    failing_client = Mock()
+    failing_client.acreate_structured_output = AsyncMock(
+        side_effect=RuntimeError("insufficient_quota: exceeded your current quota")
+    )
+    fake_config = SimpleNamespace(structured_output_framework="instructor", llm_model="gpt-4o-mini")
+
+    with (
+        patch.object(gateway_module, "get_llm_config", return_value=fake_config),
+        patch.object(get_llm_client_module, "get_llm_client", return_value=failing_client),
+    ):
+        with pytest.raises(LLMQuotaExceededError, match="not retryable"):
+            await gateway_module.LLMGateway.acreate_structured_output("hi", "system", _Resp)
+
+    assert failing_client.acreate_structured_output.await_count == 1
 
 
 # --------------------------------------------------------------------------- #

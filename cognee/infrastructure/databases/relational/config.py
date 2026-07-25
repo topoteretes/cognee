@@ -23,6 +23,12 @@ class RelationalConfig(BaseSettings):
     db_provider: str = "sqlite"
     database_connect_args: Union[str, None] = None
     pool_args: Union[str, None] = None
+    # Turso (libSQL) specific settings. Only used when db_provider == "turso".
+    # db_turso_url: remote Turso database URL (e.g. "libsql://<db>.turso.io").
+    #   Leave unset for a purely local/embedded libSQL file (uses db_path/db_name).
+    # db_turso_auth_token: auth token for the remote Turso database.
+    db_turso_url: Union[str, None] = None
+    db_turso_auth_token: Union[str, None] = None
 
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
@@ -79,6 +85,8 @@ class RelationalConfig(BaseSettings):
             "db_provider": self.db_provider,
             "database_connect_args": self.database_connect_args,
             "pool_args": self.pool_args,
+            "db_turso_url": self.db_turso_url,
+            "db_turso_auth_token": self.db_turso_auth_token,
         }
 
 

@@ -28,7 +28,8 @@ class SearchPayloadDTO(InDTO):
         default=SearchType.GRAPH_COMPLETION,
         description=(
             "Retrieval strategy. Common values: GRAPH_COMPLETION (default, graph context + LLM"
-            " answer), RAG_COMPLETION, CHUNKS, SUMMARIES, TEMPORAL, FEELING_LUCKY (auto-select),"
+            " answer), CODE (deterministic code graph), RAG_COMPLETION, CHUNKS, SUMMARIES,"
+            " TEMPORAL, FEELING_LUCKY (auto-select),"
             " AGENTIC_COMPLETION (enables skills/tools/max_iter)."
         ),
     )
@@ -95,6 +96,13 @@ class SearchPayloadDTO(InDTO):
     include_references: bool = Field(
         default=False,
         description="Attach source references to completion-type results.",
+    )
+    code_query: Optional[dict[str, Any]] = Field(
+        default=None,
+        description=(
+            "Structured arguments for search_type=CODE. Set operation to query_facts, "
+            "explore, traverse, find_path, or impact_analysis."
+        ),
     )
 
 
@@ -184,6 +192,7 @@ def get_search_router() -> APIRouter:
         - **tools** (Optional[List[str]]): Tool whitelist for AGENTIC_COMPLETION searches
         - **max_iter** (Optional[int]): Max agentic iterations, must be >= 1 (AGENTIC_COMPLETION only)
         - **include_references** (bool): Attach source references to completion-type results (default: true)
+        - **code_query** (Optional[dict]): Structured operation arguments for CODE search
 
         ## Response
         Returns a list of search results containing relevant nodes from the graph.
@@ -216,6 +225,7 @@ def get_search_router() -> APIRouter:
                 "tools": payload.tools,
                 "max_iter": payload.max_iter,
                 "include_references": payload.include_references,
+                "code_query": payload.code_query,
                 "cognee_version": cognee_version,
             },
         )
@@ -240,6 +250,7 @@ def get_search_router() -> APIRouter:
                 tools=payload.tools,
                 max_iter=payload.max_iter,
                 include_references=payload.include_references,
+                code_query=payload.code_query,
             )
 
             return jsonable_encoder(results)

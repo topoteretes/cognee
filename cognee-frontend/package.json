@@ -6,7 +6,7 @@
     "dev": "next dev --turbopack",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
+    "lint": "eslint .",
     "check:tracking-plan": "node scripts/check-tracking-plan.js"
   },
   "dependencies": {
@@ -16,6 +16,7 @@
     "@mantine/hooks": "^8.3.13",
     "@mantine/modals": "^8.3.13",
     "@mantine/notifications": "^8.3.14",
+    "@tanstack/react-query": "^5.101.2",
     "classnames": "^2.5.1",
     "culori": "^4.0.2",
     "d3-force-3d": "^3.0.6",

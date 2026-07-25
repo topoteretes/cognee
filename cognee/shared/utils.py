@@ -269,8 +269,13 @@ def send_telemetry(event_name: str, user_id: str | UUID, additional_properties: 
         },
     }
 
-    loop = asyncio.get_running_loop()
-    loop.create_task(_send_telemetry_request(payload))
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(_send_telemetry_request(payload))
+    except RuntimeError:
+        # No running event loop (shutdown, sync context, etc.) — telemetry is
+        # best-effort; dropping the event is better than crashing the caller.
+        pass
 
 
 def embed_logo(p: Any, layout_scale: float, logo_alpha: float, position: str):

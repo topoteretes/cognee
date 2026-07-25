@@ -32,6 +32,7 @@ from cognee.modules.retrieval.graph_completion_context_extension_retriever impor
 from cognee.modules.retrieval.cypher_search_retriever import CypherSearchRetriever
 from cognee.modules.retrieval.natural_language_retriever import NaturalLanguageRetriever
 from cognee.modules.retrieval.agentic_retriever import AgenticRetriever
+from cognee.modules.retrieval.code_retriever import CodeRetriever
 from cognee.context_global_variables import session_user
 
 
@@ -76,6 +77,10 @@ async def get_search_type_retriever_instance(
 
     # Registry mapping search types to their corresponding retriever classes and input parameters
     search_core_registry: dict[SearchType, Tuple[BaseRetriever, dict]] = {
+        SearchType.CODE: (
+            CodeRetriever,
+            {"config": retriever_specific_config},
+        ),
         SearchType.SUMMARIES: (SummariesRetriever, {"top_k": top_k, "session_id": session_id}),
         SearchType.CHUNKS: (
             ChunksRetriever,
