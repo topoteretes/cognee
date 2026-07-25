@@ -38,6 +38,12 @@ def dispatch(args: argparse.Namespace) -> None:
     command = args.command
     user_id = getattr(args, "user_id", None)
 
+    if getattr(args, "dry_run", False):
+        raise RuntimeError(
+            "--dry-run is not supported in --api-url mode. "
+            "Run without --api-url to estimate locally without remote side effects."
+        )
+
     # Build optional auth header so the server can identify the caller.
     headers: dict[str, str] = {}
     if user_id:

@@ -74,6 +74,19 @@ class UnsupportedLLMProviderError(CogneeValidationError):
         super().__init__(message=message, name="UnsupportedLLMProviderError")
 
 
+class LLMQuotaExceededError(CogneeValidationError):
+    """Raised when an LLM provider reports non-retryable quota or billing exhaustion."""
+
+    def __init__(self, detail: str | None = None) -> None:
+        message = (
+            "LLM provider quota or billing limit was reached. This is not retryable. "
+            "Check the provider billing/quota dashboard, raise the limit, or switch credentials."
+        )
+        if detail:
+            message = f"{message} Provider error: {detail}"
+        super().__init__(message=message, name="LLMQuotaExceededError")
+
+
 class MissingSystemPromptPathError(CogneeValidationError):
     def __init__(
         self,
@@ -81,3 +94,22 @@ class MissingSystemPromptPathError(CogneeValidationError):
     ) -> None:
         message = "No system prompt path provided."
         super().__init__(message, name)
+
+
+class MCPSamplingUnavailableError(CogneeValidationError):
+    """
+    Raised when `LLM_PROVIDER=mcp-sampling` is selected but no host MCP sampling
+    session is available (cognee is not running inside an MCP server, or the host
+    did not grant the `sampling` capability).
+    """
+
+    def __init__(
+        self,
+        message: str = (
+            "No MCP sampling session is available. LLM_PROVIDER=mcp-sampling only works while "
+            "cognee runs as an MCP server inside a host that grants the `sampling` capability "
+            "(support varies by host). Set LLM_PROVIDER to a provider with credentials, or "
+            "run inside such a host."
+        ),
+    ) -> None:
+        super().__init__(message=message, name="MCPSamplingUnavailableError")

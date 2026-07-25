@@ -70,6 +70,11 @@ After successful cognify processing, use `cognee search` to query the knowledge 
             type=int,
             help="Number of chunks to process per task batch (try 50 for large single documents).",
         )
+        parser.add_argument(
+            "--dry-run",
+            action="store_true",
+            help="Estimate LLM token usage and cost without running extraction",
+        )
 
     def execute(self, args: argparse.Namespace) -> None:
         try:
@@ -88,9 +93,11 @@ After successful cognify processing, use `cognee search` to query the knowledge 
             # Prepare datasets parameter
             datasets = args.datasets if args.datasets else None
             dataset_msg = f" for datasets {datasets}" if datasets else " for all available data"
-            fmt.echo(f"Starting cognification{dataset_msg}...")
+            dry_run = getattr(args, "dry_run", False)
+            action = "Estimating cognification" if dry_run else "Starting cognification"
+            fmt.echo(f"{action}{dataset_msg}...")
 
-            if args.verbose:
+            if args.verbose and not dry_run:
                 fmt.note("This process will analyze your data and build knowledge graphs.")
                 fmt.note("Depending on data size, this may take several minutes.")
                 if args.background:
@@ -153,12 +160,17 @@ After successful cognify processing, use `cognee search` to query the knowledge 
                         config=config,
                         run_in_background=args.background,
                         chunks_per_batch=getattr(args, "chunks_per_batch", None),
+                        dry_run=dry_run,
                     )
                     return result
                 except Exception as e:
                     raise CliCommandInnerException(f"Failed to cognify: {str(e)}") from e
 
             result = asyncio.run(run_cognify())
+
+            if dry_run:
+                fmt.echo(str(result))
+                return
 
             if args.background:
                 fmt.success("Cognification started in background!")

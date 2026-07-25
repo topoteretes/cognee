@@ -23,6 +23,28 @@ class TestCanDispatch:
 
 
 class TestDispatchRouting:
+    @pytest.mark.parametrize("command", ["cognify", "remember"])
+    @patch("cognee.cli.api_dispatch.CogneeApiClient")
+    def test_dry_run_rejected_before_remote_request(self, MockClient, command):
+        args = argparse.Namespace(
+            api_url="http://localhost:8000",
+            command=command,
+            user_id=None,
+            dry_run=True,
+            data=["test"],
+            dataset_name="ds",
+            datasets=None,
+            background=False,
+            chunker="TextChunker",
+            chunk_size=None,
+            chunks_per_batch=None,
+        )
+
+        with pytest.raises(RuntimeError, match="--dry-run is not supported in --api-url mode"):
+            dispatch(args)
+
+        MockClient.assert_not_called()
+
     @patch("cognee.cli.api_dispatch.CogneeApiClient")
     def test_unsupported_command_raises(self, MockClient):
         mock_instance = MagicMock()

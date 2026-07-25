@@ -32,6 +32,8 @@ class RedisAdapter(CacheDBInterface):
         timeout=240,
         blocking_timeout=300,
         connection_timeout=30,
+        ssl: bool = False,
+        ssl_cert_reqs: str = "required",
         session_ttl_seconds: int | None = 604800,
     ):
         """Initialize sync/async Redis clients and validate connectivity up front."""
@@ -48,6 +50,8 @@ class RedisAdapter(CacheDBInterface):
                 port=port,
                 username=username,
                 password=password,
+                ssl=ssl,
+                ssl_cert_reqs=ssl_cert_reqs,
                 socket_connect_timeout=connection_timeout,
                 socket_timeout=connection_timeout,
             )
@@ -56,6 +60,8 @@ class RedisAdapter(CacheDBInterface):
                 port=port,
                 username=username,
                 password=password,
+                ssl=ssl,
+                ssl_cert_reqs=ssl_cert_reqs,
                 decode_responses=True,
                 socket_connect_timeout=connection_timeout,
             )

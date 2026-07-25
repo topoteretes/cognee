@@ -1,7 +1,7 @@
 "use client";
 
 import { captureException, recordUploadSuccess, recordUploadFailure } from "@/utils/monitoring";
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useCogniInstance, useTenant } from "@/modules/tenant/TenantProvider";
 import PageLoading from "@/ui/elements/PageLoading";
 import { useFilter } from "@/ui/layout/FilterContext";
@@ -10,6 +10,7 @@ import getDatasetData from "@/modules/datasets/getDatasetData";
 import createDataset from "@/modules/datasets/createDataset";
 import deleteDataset from "@/modules/datasets/deleteDataset";
 import pollDatasetStatus, { type DatasetProcessingStatus } from "@/modules/datasets/pollDatasetStatus";
+import { useDatasetStatuses } from "@/modules/datasets/useDatasetStatuses";
 import { TrackPageView, trackEvent } from "@/modules/analytics";
 import { loadGraphModelsConfig } from "@/modules/configuration/userConfiguration";
 import rememberData from "@/modules/ingestion/rememberData";
@@ -168,43 +169,8 @@ export default function DatasetsPage() {
   const [pasteText, setPasteText]           = useState("");
   const [pasting, setPasting]               = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-  const pollRef  = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const fetchStatuses = useCallback(async (ids: string[]) => {
-    if (!cogniInstance || !ids.length) return;
-    try {
-      const resp = await cogniInstance.fetch("/v1/datasets/status");
-      if (!resp.ok) return;
-      const data: Record<string, DatasetProcessingStatus> = await resp.json();
-      let completedSelectedId: string | null = null;
-      setDatasets((prev) => {
-        return prev.map((d) => {
-          const raw = data[d.id];
-          if (!raw) return d;
-          const newStatus = mapProcessingStatus(raw, d.documents);
-          if (newStatus !== d.status) {
-            // When the selected brain finishes, schedule a file list refresh
-            if (d.id === selectedId && (d.status === "pending" || d.status === "running") && newStatus === "completed") {
-              completedSelectedId = d.id;
-            }
-            return { ...d, status: newStatus };
-          }
-          return d;
-        });
-      });
-      if (completedSelectedId) {
-        getDatasetData(completedSelectedId, cogniInstance)
-          .then((docs) => {
-            setSelectedDocs(Array.isArray(docs) ? docs : []);
-            setDatasets((prev) => prev.map((d) => d.id === completedSelectedId ? { ...d, documents: Array.isArray(docs) ? docs.length : d.documents } : d));
-          })
-          .catch((err) => {
-            console.error("Failed to fetch dataset documents:", err);
-            setSelectedDocs([]);
-          });
-      }
-    } catch { /* graceful */ }
-  }, [cogniInstance, selectedId]);
+  const { statuses } = useDatasetStatuses(datasets.length > 0);
 
   useEffect(() => {
     if (!cogniInstance || isInitializing) return;
@@ -212,16 +178,36 @@ export default function DatasetsPage() {
     loadGraphModelsConfig(cogniInstance)
       .then((cfg) => setOutdated(new Set(cfg.outdatedDatasets ?? [])))
       .catch((err) => { console.error("Failed to load graph models config:", err); });
-    return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, [cogniInstance, isInitializing]);
 
   useEffect(() => {
-    if (pollRef.current) clearInterval(pollRef.current);
-    const hasActive = datasets.some((d) => d.status === "pending" || d.status === "running");
-    if (!hasActive || !cogniInstance) return;
-    pollRef.current = setInterval(() => fetchStatuses(datasets.map((d) => d.id)), 5000);
-    return () => { if (pollRef.current) clearInterval(pollRef.current); };
-  }, [datasets, cogniInstance, fetchStatuses]);
+    if (!cogniInstance || Object.keys(statuses).length === 0) return;
+    let completedSelectedId: string | null = null;
+    setDatasets((prev) =>
+      prev.map((d) => {
+        const raw = statuses[d.id];
+        if (!raw) return d;
+        const newStatus = mapProcessingStatus(raw, d.documents);
+        if (newStatus === d.status) return d;
+        // When the selected brain finishes, schedule a file list refresh
+        if (d.id === selectedId && (d.status === "pending" || d.status === "running") && newStatus === "completed") {
+          completedSelectedId = d.id;
+        }
+        return { ...d, status: newStatus };
+      }),
+    );
+    if (completedSelectedId) {
+      getDatasetData(completedSelectedId, cogniInstance)
+        .then((docs) => {
+          setSelectedDocs(Array.isArray(docs) ? docs : []);
+          setDatasets((prev) => prev.map((d) => d.id === completedSelectedId ? { ...d, documents: Array.isArray(docs) ? docs.length : d.documents } : d));
+        })
+        .catch((err) => {
+          console.error("Failed to fetch dataset documents:", err);
+          setSelectedDocs([]);
+        });
+    }
+  }, [statuses, cogniInstance, selectedId]);
 
   async function loadDatasets() {
     if (!cogniInstance) return;
@@ -237,7 +223,10 @@ export default function DatasetsPage() {
       setDatasets(initial);
       setLoading(false);
 
-      const statusResp = await cogniInstance.fetch("/v1/datasets/status").catch(() => null);
+      const statusResp = await cogniInstance.fetch("/v1/datasets/status").catch((err) => {
+        console.error("Failed to fetch dataset processing status:", err);
+        return null;
+      });
       const statusData: Record<string, DatasetProcessingStatus> = statusResp?.ok ? await statusResp.json() : {};
 
       for (const ds of list) {
