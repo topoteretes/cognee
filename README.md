@@ -187,6 +187,10 @@ Prefer containers? Cognee publishes prebuilt images to Docker Hub on every push 
 [`cognee/cognee`](https://hub.docker.com/r/cognee/cognee) (the API server) and
 [`cognee/cognee-mcp`](https://hub.docker.com/r/cognee/cognee-mcp) (the MCP server).
 
+> **Just want to try it?** Follow the
+> [minimal docker-compose try-out](docs/minimal-docker-compose.md) — a single
+> copy-pasteable compose file that runs the prebuilt image, no clone or build needed.
+
 ### Option A — Docker Compose (build from source)
 
 Clone the repo, create a `.env` with at least `LLM_API_KEY`, then:
