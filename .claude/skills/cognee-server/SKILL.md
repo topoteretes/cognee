@@ -49,8 +49,9 @@ auth off you must set `ENABLE_BACKEND_ACCESS_CONTROL=false`.
 ## Graph visualization without the full UI
 
 ```python
-from cognee.api.v1.visualize import start_visualization_server
-await start_visualization_server(port=8080)
+from cognee.api.v1.visualize import visualization_server
+
+shutdown = visualization_server(port=8080)  # synchronous; returns a shutdown callable
 ```
 
 ## Troubleshooting

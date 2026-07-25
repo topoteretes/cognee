@@ -1,6 +1,6 @@
 ---
 name: cognee-integrations
-description: Use when the user wants to connect cognee to external services — switching LLM or embedding providers (OpenAI, Azure, Gemini, Anthropic, Ollama, OpenRouter), changing databases (Postgres, PGVector, ChromaDB, Neo4j, Neptune), S3 storage, or the MCP server for IDE integration.
+description: Use when the user wants to connect cognee to external services — switching LLM or embedding providers (OpenAI, Azure, Gemini, Anthropic, Ollama, OpenRouter), changing databases (Postgres, PGVector, Neo4j, Neptune, Turso), S3 storage, or the MCP server for IDE integration.
 ---
 
 # Set up cognee integrations
@@ -17,7 +17,7 @@ Default is OpenAI (`LLM_API_KEY` is all you need). To switch, set
 `LLM_ENDPOINT` / `LLM_API_VERSION`:
 
 - **Azure OpenAI**: `LLM_PROVIDER=azure`, `LLM_MODEL=azure/gpt-4o-mini`, endpoint + api version required.
-- **Gemini** (`cognee[gemini]`): `LLM_PROVIDER=gemini`, `LLM_MODEL=gemini/gemini-2.0-flash-exp`.
+- **Gemini** (no extra needed): `LLM_PROVIDER=gemini`, `LLM_MODEL=gemini/gemini-2.0-flash-exp`.
 - **Anthropic** (`cognee[anthropic]`): `LLM_PROVIDER=anthropic`, model e.g. `claude-3-5-sonnet-20241022`.
 - **Ollama, local** (`cognee[ollama]`): `LLM_PROVIDER=ollama`, `LLM_ENDPOINT=http://localhost:11434/v1`, and set the embedding block + `HUGGINGFACE_TOKENIZER` too.
 - **Custom / OpenRouter / vLLM**: `LLM_PROVIDER=custom` with the provider's OpenAI-compatible endpoint.
@@ -33,8 +33,12 @@ either keep a valid OpenAI key or configure both.
 - **Relational** (`DB_PROVIDER`): sqlite (default) or postgres
   (`cognee[postgres]`; host/port/user/password/name via `DB_*` vars).
 - **Vector** (`VECTOR_DB_PROVIDER`): lancedb (default), pgvector
-  (`cognee[postgres]`, needs `VECTOR_DB_URL`), chromadb (`cognee[chromadb]`),
-  qdrant, weaviate, milvus.
+  (`cognee[postgres]`, needs `VECTOR_DB_URL`), neptune_analytics
+  (`cognee[neptune]`), turso (`cognee[turso]`). Anything else (ChromaDB,
+  Qdrant, Weaviate, Milvus, …) lives in community adapters — install from
+  https://github.com/topoteretes/cognee-community and register with
+  `use_vector_adapter` before use; setting `VECTOR_DB_PROVIDER` alone raises
+  "Unsupported vector database provider".
 - **Graph** (`GRAPH_DATABASE_PROVIDER`): ladybug (default), neo4j
   (`cognee[neo4j]`, bolt URL + credentials), neptune (`cognee[neptune]`),
   ladybug-remote, postgres (no raw Cypher / natural-language search).
@@ -47,7 +51,7 @@ host services with `DB_HOST=host.docker.internal`.
 
 - **S3 storage** (`cognee[aws]`): `STORAGE_BACKEND=s3` + bucket/credentials,
   and point `DATA_ROOT_DIRECTORY`/`SYSTEM_ROOT_DIRECTORY` at `s3://` paths.
-- **Session cache**: `CACHE_BACKEND` = sqlite (default) | postgres | redis | fs.
+- **Session cache**: `CACHE_BACKEND` = sqlite (default) | postgres | redis | fs | tapes.
 - **Ontologies**: `ONTOLOGY_FILE_PATH` to an OWL file, resolver/matching via
   `ONTOLOGY_RESOLVER` / `MATCHING_STRATEGY`.
 
