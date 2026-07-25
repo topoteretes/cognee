@@ -163,10 +163,38 @@
       anchorsL[s] = { x: Math.cos(angle) * r * 1.25, y: Math.sin(angle) * r * 0.6 };
     });
 
+    // The BUSINESS MODEL layer (L0): entity TYPES and how they relate —
+    // "campaign generates customer", not individual campaigns. Types float
+    // at the centroid of their members, so both layers share one space.
+    const typeName = {};
+    linksArr.forEach(l => {
+      const s = byIdL[l._sid], t = byIdL[l._tid];
+      if (s && t && s.stage === 'entity' && t.stage === 'type' &&
+          (l.relation === 'is_a' || l.relation === 'instance_of')) {
+        typeName[s.id] = t.name;
+      }
+    });
+    const typeNodes = {};
+    ents.forEach(n => {
+      const tn = typeName[n.id] || 'other';
+      const bucket = (typeNodes[tn] = typeNodes[tn] || { name: tn, members: [], sets: {} });
+      bucket.members.push(n);
+      setsOf(n).forEach(s => { bucket.sets[s] = (bucket.sets[s] || 0) + 1; });
+    });
+    const typeLinks = {};
+    semLinks.forEach(l => {
+      const a = typeName[l._sid] || 'other', b = typeName[l._tid] || 'other';
+      if (a === b) return;
+      const key = a + '→' + b + '|' + (l.relation || 'related');
+      const slot = (typeLinks[key] = typeLinks[key] || { a, b, relation: l.relation || 'related', count: 0 });
+      slot.count += 1;
+    });
+
     return {
       byIdL, entities: ents, E: EL, sourceNames: srcNames, setColor: colors,
       setEntityCount: entCount, setDocCount: docCount,
       semanticLinks: semLinks, docLinks: dLinks, anchors: anchorsL,
+      typeNodes: Object.values(typeNodes), typeLinks: Object.values(typeLinks),
       importanceMax: Math.max(...ents.map(n => n.importance || 0), 1),
     };
   }
@@ -176,7 +204,8 @@
   let entities = BS.entities, E = BS.E, semanticLinks = BS.semanticLinks,
     docLinks = BS.docLinks, sourceNames = BS.sourceNames, setColor = BS.setColor,
     setEntityCount = BS.setEntityCount, setDocCount = BS.setDocCount,
-    anchors = BS.anchors, importanceMax = BS.importanceMax, brainById = BS.byIdL;
+    anchors = BS.anchors, importanceMax = BS.importanceMax, brainById = BS.byIdL,
+    typeNodes = BS.typeNodes, typeLinks = BS.typeLinks;
 
   // Agent → sources captions from actor edges.
   const agentReads = {};
@@ -197,8 +226,7 @@
     <div id="bv-dock">
       <div id="bv-narration-row"><span id="bv-narration-text"></span></div>
       <div id="bv-dock-row">
-        <button id="bv-play" title="Play the story">▶</button>
-        <div id="bv-reel"></div>
+        <div style="flex:1"></div>
         <div id="bv-altimeter">
           <span data-l="0" class="on">Business</span><span data-l="1">Players</span><span data-l="2">Connections</span><span data-l="3">Records</span>
         </div>
@@ -225,16 +253,18 @@
   .bv-card.flash{border-color:${C.inflow};}
   .bv-card.lift{transform:translateY(-2px);border-color:${C.amber};}
   #bv-org{display:flex;flex-direction:column;}
-  .bv-org-node{position:relative;padding:8px 10px 8px 14px;background:${C.card};border:1px solid ${C.cardBorder};
-    border-radius:10px;margin-bottom:2px;}
+  .bv-org-node{position:relative;padding:9px 11px 9px 12px;background:${C.card};border:1px solid ${C.cardBorder};
+    border-radius:10px;margin-bottom:8px;}
   .bv-org-node .t{font-size:12.5px;font-weight:600;display:flex;align-items:center;gap:6px;}
   .bv-org-node .s{font-size:10.5px;color:${C.haze};margin-top:1px;}
   .bv-org-node.tenant{background:transparent;border-style:dashed;}
   .bv-org-node .badge{font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:${C.deepfield};
     background:${C.amber};border-radius:4px;padding:1px 5px;font-weight:700;}
-  .bv-org-child{margin-left:14px;position:relative;}
-  .bv-org-child::before{content:'';position:absolute;left:-8px;top:-2px;bottom:14px;width:1px;background:${C.cardBorder};}
-  .bv-org-child::after{content:'';position:absolute;left:-8px;top:20px;width:8px;height:1px;background:${C.cardBorder};}
+  .bv-org-child{margin-left:18px;position:relative;margin-bottom:4px;}
+  .bv-org-child::before{content:'';position:absolute;left:-10px;top:-6px;bottom:16px;width:1px;background:${C.cardBorder};}
+  .bv-org-child::after{content:'';position:absolute;left:-10px;top:20px;width:10px;height:1px;background:${C.cardBorder};}
+  .bv-avatar{width:20px;height:20px;border-radius:50%;flex:none;display:inline-flex;align-items:center;
+    justify-content:center;font-size:9px;font-weight:700;letter-spacing:.02em;}
   .bv-org-node .dot{width:7px;height:7px;border-radius:50%;flex:none;}
   .bv-org-node.asking{border-color:${C.amber};box-shadow:0 0 12px rgba(245,168,60,.25);}
   .bv-qcount{font-size:10.5px;color:${C.haze};margin-left:auto;}
@@ -389,11 +419,14 @@
 
   userNodes.forEach(u => {
     const you = !!u.is_current;
-    const userEl = orgNode('', `<div class="t"><span class="dot" style="background:${you ? C.bone : C.haze}"></span>
+    const initials = (you ? 'you' : (u.name || '?')).replace(/@.*/, '').split(/[._\- ]/)
+      .map(w => w[0] || '').join('').slice(0, 2).toUpperCase();
+    const userEl = orgNode('', `<div class="t">
+        <span class="bv-avatar" style="background:${you ? C.bone : C.deeplift};color:${you ? C.deepfield : C.haze};border:1px solid ${C.cardBorder}">${initials}</span>
         ${you ? 'you' : esc((u.name || '').split('@')[0])}
-        <span class="bv-qcount">${you && questionCount ? questionCount + ' questions' : ''}</span></div>
-      <div class="s">${esc(u.name || '')}</div>
-      <div class="acc">${accessChips(u.id)}</div>`);
+      </div>
+      <div class="s" style="margin-left:26px">${esc(u.name || '')}</div>
+      <div class="acc" style="margin-left:26px">${accessChips(u.id)}</div>`);
     userEl.dataset.uid = u.id;
     wireUserHover(userEl, u.id);
     orgParent.appendChild(userEl);
@@ -458,7 +491,8 @@
     const colorsMap = key === 'primary' ? nodeSetColors : (payload.node_set_colors || {});
     BS = computeBrainState(nodesArr, linksArr, colorsMap);
     ({ entities, E, semanticLinks, docLinks, sourceNames, setColor,
-       setEntityCount, setDocCount, anchors, importanceMax } = BS);
+       setEntityCount, setDocCount, anchors, importanceMax,
+       typeNodes, typeLinks } = BS);
     brainById = BS.byIdL;
     hovered = null;
     spotlight = null;
@@ -724,7 +758,6 @@
   // touched anything in the last 8s, dock a quiet chip instead.
   window._bvLiveEvent = function (evt) {
     if (!evt || evt.kind === 'improve') return;
-    addMoment(evt, true);
     const idleFor = performance.now() - lastInteraction;
     if (lastInteraction === 0 || idleFor > 8000) playSearchEvent(evt);
     else {
@@ -751,59 +784,33 @@
     narrationTimer = setTimeout(() => { narration.style.opacity = 0.55; }, 9000);
   }
 
-  // ── Moment reel + auto-play ───────────────────────────────────────
-  const reel = document.getElementById('bv-reel');
-  const moments = [];
-  function addMoment(m, isQuestion) {
-    const el = document.createElement('div');
-    el.className = 'bv-moment' + (isQuestion ? ' q' : '');
-    el.textContent = isQuestion ? '? ' + trunc(m.question || 'question', 26) : m.label;
-    const entry = { data: m, el, isQuestion };
-    el.addEventListener('click', () => { lastInteraction = 0; playMoment(entry); });
-    moments.push(entry);
-    reel.appendChild(el);
-    reel.scrollLeft = reel.scrollWidth;
-  }
-  function playMoment(entry) {
-    moments.forEach(m => m.el.classList.remove('on'));
-    entry.el.classList.add('on');
-    if (entry.isQuestion) playSearchEvent(entry.data);
-    else {
-      narrate(entry.data.label + ' — ' + entry.data.detail, C.inflow);
-      fit(true);
-    }
-  }
-  // Seed: cognify runs (via memory view's timeline when exposed) + baked Q&A.
-  (window._mmTimeline || []).forEach(run => {
-    addMoment({
-      label: (run.label || 'data added'),
-      detail: (run.node_count || '?') + ' elements joined the model',
-    }, false);
-  });
-  bakedSearchEvents.filter(e => (e.kind || 'search') === 'search' && (e.node_ids || []).length)
-    .forEach(e => addMoment(e, true));
-
-  const playBtn = document.getElementById('bv-play');
-  let playing = null;
-  playBtn.addEventListener('click', () => {
-    if (playing) { clearInterval(playing); playing = null; playBtn.classList.remove('playing'); return; }
-    if (!moments.length) return;
-    playBtn.classList.add('playing');
-    let i = 0;
-    lastInteraction = 0;
-    playMoment(moments[0]);
-    playing = setInterval(() => {
-      i += 1;
-      if (i >= moments.length) { clearInterval(playing); playing = null; playBtn.classList.remove('playing'); fit(true); return; }
-      lastInteraction = 0;
-      playMoment(moments[i]);
-    }, 8000);
-  });
+  // Moment reel removed for now (questions + pipeline chips) — live agent
+  // spotlights and the floating answer card remain the Q&A surface.
 
   // ── Hover ─────────────────────────────────────────────────────────
   let hovered = null;
   canvas.addEventListener('mousemove', ev => {
     const [mx, my] = worldPoint(ev);
+    // Model layer hover: nearest type node with a member peek.
+    if (transform.k < 1.4 && !spotlight) {
+      let bestT = null;
+      typeNodes.forEach(tn => {
+        if (tn.x == null) return;
+        const d = Math.hypot(tn.x - mx, tn.y - my);
+        if (d < (tn._r || 20) + 8 && (!bestT || d < bestT._d)) { bestT = tn; bestT._d = d; }
+      });
+      if (bestT) {
+        const names = bestT.members.slice(0, 5).map(m => m.name).join(', ');
+        hover.innerHTML = `<b>${esc(bestT.name)}</b> · ${bestT.members.length} record${bestT.members.length === 1 ? '' : 's'}<br>
+          <span style="color:${C.haze}">${esc(names)}${bestT.members.length > 5 ? '…' : ''}<br>zoom in to explore</span>`;
+        hover.style.display = 'block';
+        hover.style.left = Math.min(ev.offsetX + 14, W - 260) + 'px';
+        hover.style.top = (ev.offsetY + 14) + 'px';
+        if (hovered) { hovered = null; requestDraw(); }
+        return;
+      }
+      hover.style.display = 'none';
+    }
     let best = null, bestD = 18 / transform.k;
     entities.forEach(n => {
       const d = Math.hypot(n.x - mx, n.y - my);
@@ -843,8 +850,8 @@
     narrate('cognify complete — ' + newborn.length + ' new entities joined the model' + (src ? ' from ' + src : ''), C.inflow);
     const card = sourceCardEls[src];
     if (card) { card.classList.add('flash'); setTimeout(() => card.classList.remove('flash'), 2000); }
-  } else if (moments.length) {
-    narrate('this is your business — ' + entities.length + ' entities from ' + sourceNames.length +
+  } else {
+    narrate('this is your business — ' + typeNodes.length + ' kinds of things across ' + sourceNames.length +
       ' source' + (sourceNames.length === 1 ? '' : 's') + ', one connected model');
   }
 
@@ -901,6 +908,34 @@
     const spot = spotlight && now < spotlight.until ? spotlight : (spotlight = null);
     const dimmed = spot ? 0.16 : 1;
 
+    // Crossfade between the MODEL layer (entity types + named relations,
+    // the business schema) and the instance layer, driven by zoom.
+    const typeAlpha = spot ? 0 : Math.max(0, Math.min(1, (1.55 - transform.k) / 0.25));
+    const instAlpha = 1 - typeAlpha;
+    typeNodes.forEach(tn => {
+      tn.x = d3.mean(tn.members, m => m.x) || 0;
+      tn.y = d3.mean(tn.members, m => m.y) || 0;
+      tn._r = 14 + 7 * Math.log2(1 + tn.members.length);
+    });
+    // Relax overlaps between type circles (labels need ~40px of air).
+    // Deterministic order + fresh centroids each frame keep this stable.
+    for (let pass = 0; pass < 12; pass++) {
+      for (let i = 0; i < typeNodes.length; i++) {
+        for (let j = i + 1; j < typeNodes.length; j++) {
+          const a = typeNodes[i], b = typeNodes[j];
+          const dx = b.x - a.x, dy = b.y - a.y;
+          const dist = Math.hypot(dx, dy) || 1;
+          const min = a._r + b._r + 46;
+          if (dist < min) {
+            const push = (min - dist) / 2;
+            const ux = dx / dist, uy = dy / dist;
+            a.x -= ux * push; a.y -= uy * push;
+            b.x += ux * push; b.y += uy * push;
+          }
+        }
+      }
+    }
+
     // Source territories: soft convex hulls shaded in the source's color,
     // with the caption riding the hull's crown (L0/L1).
     if (level <= 1) {
@@ -943,8 +978,61 @@
       });
     }
 
+    // MODEL layer: one node per kind of thing, one labeled arrow per way
+    // they relate — the business schema, readable with zero explanation.
+    if (typeAlpha > 0.01) {
+      const tByName = {};
+      typeNodes.forEach(tn => { tByName[tn.name] = tn; });
+      ctx.textAlign = 'center';
+      typeLinks.forEach(tl => {
+        const a = tByName[tl.a], b = tByName[tl.b];
+        if (!a || !b) return;
+        const dx = b.x - a.x, dy = b.y - a.y;
+        const mx = (a.x + b.x) / 2 - dy * 0.1, my = (a.y + b.y) / 2 + dx * 0.1;
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y);
+        ctx.quadraticCurveTo(mx, my, b.x, b.y);
+        ctx.strokeStyle = 'rgba(126,140,166,' + (0.55 * typeAlpha * dimmed) + ')';
+        ctx.lineWidth = Math.min(3.4, 1 + tl.count * 0.5) / transform.k;
+        ctx.stroke();
+        // Arrowhead toward b
+        const ang = Math.atan2(b.y - my, b.x - mx);
+        const ax = b.x - Math.cos(ang) * (b._r + 4), ay = b.y - Math.sin(ang) * (b._r + 4);
+        ctx.beginPath();
+        ctx.moveTo(ax, ay);
+        ctx.lineTo(ax - Math.cos(ang - 0.45) * 7, ay - Math.sin(ang - 0.45) * 7);
+        ctx.lineTo(ax - Math.cos(ang + 0.45) * 7, ay - Math.sin(ang + 0.45) * 7);
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(126,140,166,' + (0.6 * typeAlpha * dimmed) + ')';
+        ctx.fill();
+        // Relation label riding the curve midpoint
+        ctx.font = '500 10.5px ui-monospace, monospace';
+        ctx.fillStyle = 'rgba(233,238,246,' + (0.75 * typeAlpha * dimmed) + ')';
+        ctx.fillText(String(tl.relation).replace(/_/g, ' '), mx, my - 4);
+      });
+      typeNodes.forEach(tn => {
+        const dominant = Object.keys(tn.sets).sort((x, y) => tn.sets[y] - tn.sets[x])[0];
+        const fill = d3.color(dominant ? (setColor[dominant] || '#8A7BD8') : '#8A7BD8');
+        ctx.globalAlpha = typeAlpha * dimmed;
+        ctx.beginPath();
+        ctx.arc(tn.x, tn.y, tn._r, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(${fill.r},${fill.g},${fill.b},0.28)`;
+        ctx.fill();
+        ctx.strokeStyle = `rgba(${fill.r},${fill.g},${fill.b},0.9)`;
+        ctx.lineWidth = 1.6 / transform.k;
+        ctx.stroke();
+        ctx.font = '700 15px -apple-system, sans-serif';
+        ctx.fillStyle = 'rgba(233,238,246,' + typeAlpha + ')';
+        ctx.fillText(tn.name, tn.x, tn.y + tn._r + 17);
+        ctx.font = '500 11px -apple-system, sans-serif';
+        ctx.fillStyle = 'rgba(126,140,166,' + typeAlpha + ')';
+        ctx.fillText(tn.members.length + (tn.members.length === 1 ? ' record' : ' records'), tn.x, tn.y + tn._r + 31);
+        ctx.globalAlpha = 1;
+      });
+    }
+
     // Edges: gentle arcs (perpendicular bow) instead of straight wires.
-    semanticLinks.forEach(l => {
+    if (instAlpha > 0.01) semanticLinks.forEach(l => {
       const s = E[l._sid], t = E[l._tid];
       if (!s || !t || s.x == null || t.x == null) return;
       const inSpot = spot && spot.ids.has(s.id) && spot.ids.has(t.id);
@@ -953,10 +1041,12 @@
       ctx.beginPath();
       ctx.moveTo(s.x, s.y);
       ctx.quadraticCurveTo(mx, my, t.x, t.y);
+      ctx.globalAlpha = instAlpha;
       if (inSpot) { ctx.strokeStyle = C.amber; ctx.lineWidth = 1.8 / transform.k; }
       else if (l._bridge) { ctx.strokeStyle = 'rgba(233,238,246,' + 0.42 * dimmed + ')'; ctx.lineWidth = 1.4 / transform.k; }
       else { ctx.strokeStyle = 'rgba(126,140,166,' + 0.4 * dimmed + ')'; ctx.lineWidth = 1.1 / transform.k; }
       ctx.stroke();
+      ctx.globalAlpha = 1;
     });
 
     // L2: documents unfold near their entities
@@ -983,7 +1073,7 @@
     const showAll = level >= 1;
     const importanceCut = topImportanceCut();
     ctx.textAlign = 'center';
-    entities.forEach(n => {
+    if (instAlpha > 0.01) entities.forEach(n => {
       if (!showAll && (n.importance || 0) < importanceCut && !(spot && spot.ids.has(n.id))) return;
       const bornAt = newbornAt[n.id];
       let scale = 1;
@@ -994,7 +1084,7 @@
       const breathe = 1 + 0.045 * Math.sin(now / 1400 + hash(n.id));
       const r = n._r * breathe * scale;
       const inSpot = spot && spot.ids.has(n.id);
-      const alpha = spot ? (inSpot ? 1 : 0.16) : 1;
+      const alpha = (spot ? (inSpot ? 1 : 0.16) : 1) * instAlpha;
 
       if (inSpot) {
         ctx.beginPath();
