@@ -1,9 +1,12 @@
 FROM ghcr.io/astral-sh/uv:python3.11-bookworm-slim
 
 # Set environment variables
-ENV PIP_NO_CACHE_DIR=true
 ENV PYTHONPATH=/app
 ENV SKIP_MIGRATIONS=true
+# uv sync installs into /app/.venv (unlike the old poetry setup, which installed
+# into the system interpreter) — put it on PATH so plain `python` finds the deps.
+ENV VIRTUAL_ENV=/app/.venv
+ENV PATH="/app/.venv/bin:${PATH}"
 
 # System dependencies
 RUN apt-get update && apt-get install -y \
