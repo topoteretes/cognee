@@ -58,7 +58,7 @@ class LLMConfig(BaseSettings):
     - stage_config
     """
 
-    structured_output_framework: str = "instructor"
+    structured_output_framework: str = "litellm_native"
     llm_instructor_mode: str = ""
     llm_provider: str = "openai"
     llm_model: str = "openai/gpt-5-mini"
