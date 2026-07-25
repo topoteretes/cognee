@@ -40,6 +40,10 @@
 
   const nodeSetColors = __NODESET_COLORS__ || {};
   const bakedSearchEvents = __SEARCH_EVENTS__ || [];
+  // Every other brain the user can read, preprocessed server-side:
+  // {datasetId: {name, nodes, links, node_set_colors}}.
+  const brainsData = __BRAINS_DATA__ || {};
+  let activeBrainKey = 'primary';
 
   // ── Payload adapter ───────────────────────────────────────────────
   // Sources are node_sets when they exist (the true source dimension —
@@ -53,14 +57,9 @@
   function endId(v) { return v && typeof v === 'object' ? v.id : v; }
   allLinks.forEach(l => { l._sid = endId(l.source); l._tid = endId(l.target); });
 
-  // Own copies of entity nodes: story_view pins the shared objects with
-  // fx/fy for its column layout, which would freeze this view's force
-  // simulation. Copies keep the LOOM layout independent.
-  const entities = allNodes.filter(n => n.stage === 'entity')
-    .map(n => Object.assign({}, n, { x: undefined, y: undefined, fx: null, fy: null, vx: 0, vy: 0 }));
-  const E = {};
-  entities.forEach(n => { E[n.id] = n; });
-  const documents = allNodes.filter(n => n.stage === 'document');
+  // NOTE: entity copies are built per-brain in computeBrainState below —
+  // story_view pins the shared node objects with fx/fy, so every brain
+  // state works on its own copies.
   const agents = allNodes.filter(n => n.type === 'Agent');
   const datasets = allNodes.filter(n => n.type === 'Dataset');
   const tenantNodes = allNodes.filter(n => n.type === 'Tenant');
@@ -92,18 +91,11 @@
       (datasetLayers[s.id] = datasetLayers[s.id] || []).push(t.name);
     }
   });
-  const nodeSets = allNodes.filter(n => n.type === 'NodeSet' && n.name &&
-    !['session_learnings', 'user_sessions_from_cache', 'agent_trace_feedbacks'].includes(n.name));
-
   function setsOf(n) {
     if (Array.isArray(n.belongs_to_set) && n.belongs_to_set.length) return n.belongs_to_set;
     if (n.source_node_set) return String(n.source_node_set).split(',').map(s => s.trim()).filter(Boolean);
     return [];
   }
-
-  // Source list: node_sets preferred, datasets as fallback cards.
-  const sourceNames = nodeSets.length ? nodeSets.map(n => n.name) : datasets.map(n => n.name);
-  const usingSets = nodeSets.length > 0;
 
   // Guard the answer-amber encoding: nudge any source color too close to
   // amber's hue so "amber = live signal" stays unambiguous.
@@ -111,8 +103,8 @@
     const d = Math.abs(a - b) % 360;
     return d > 180 ? 360 - d : d;
   }
-  function colorForSet(name, i) {
-    let hex = nodeSetColors[name];
+  function colorForSet(name, i, colorsMap) {
+    let hex = (colorsMap || {})[name];
     if (!hex) {
       const hue = (i * 137.508 + 200) % 360;
       return d3.hsl(hue, 0.55, 0.62).formatHex();
@@ -124,33 +116,67 @@
     }
     return hex;
   }
-  const setColor = {};
-  sourceNames.forEach((s, i) => { setColor[s] = colorForSet(s, i); });
 
-  // Per-source membership counts (entities + documents credited to it).
-  const setEntityCount = {};
-  const setDocCount = {};
-  entities.forEach(n => setsOf(n).forEach(s => { setEntityCount[s] = (setEntityCount[s] || 0) + 1; }));
-  documents.forEach(n => setsOf(n).forEach(s => { setDocCount[s] = (setDocCount[s] || 0) + 1; }));
+  // Everything the canvas needs about ONE brain, computed from that brain's
+  // own node/link arrays — so switching brains is just recomputing this.
+  function computeBrainState(nodesArr, linksArr, colorsMap) {
+    const byIdL = {};
+    nodesArr.forEach(n => { byIdL[n.id] = n; });
+    linksArr.forEach(l => { l._sid = endId(l.source); l._tid = endId(l.target); });
 
-  // Entity adjacency (semantic links only — the business relationships).
-  const semanticLinks = allLinks.filter(l =>
-    l.edge_class === 'semantic' && byId[l._sid] && byId[l._tid] &&
-    byId[l._sid].stage === 'entity' && byId[l._tid].stage === 'entity');
+    const ents = nodesArr.filter(n => n.stage === 'entity')
+      .map(n => Object.assign({}, n, { x: undefined, y: undefined, fx: null, fy: null, vx: 0, vy: 0 }));
+    const EL = {};
+    ents.forEach(n => { EL[n.id] = n; });
+    const docs = nodesArr.filter(n => n.stage === 'document');
+    const sets = nodesArr.filter(n => n.type === 'NodeSet' && n.name &&
+      !['session_learnings', 'user_sessions_from_cache', 'agent_trace_feedbacks'].includes(n.name));
 
-  // Cross-source bridges are first-class: the "surprising connections".
-  semanticLinks.forEach(l => {
-    const a = setsOf(byId[l._sid]), b = setsOf(byId[l._tid]);
-    l._bridge = a.length && b.length && !a.some(s => b.includes(s));
-  });
+    const srcNames = sets.length ? sets.map(n => n.name)
+      : [...new Set(ents.flatMap(setsOf))];
+    const colors = {};
+    srcNames.forEach((s, i) => { colors[s] = colorForSet(s, i, colorsMap); });
 
-  // Document → entities index (for L2 provenance unfolding).
-  const docLinks = allLinks.filter(l => {
-    const s = byId[l._sid], t = byId[l._tid];
-    return s && t && ((s.stage === 'document' && t.stage === 'entity') ||
-      (s.stage === 'entity' && t.stage === 'document') ||
-      (s.stage === 'chunk' && t.stage === 'entity'));
-  });
+    const entCount = {}, docCount = {};
+    ents.forEach(n => setsOf(n).forEach(s => { entCount[s] = (entCount[s] || 0) + 1; }));
+    docs.forEach(n => setsOf(n).forEach(s => { docCount[s] = (docCount[s] || 0) + 1; }));
+
+    const semLinks = linksArr.filter(l =>
+      l.edge_class === 'semantic' && byIdL[l._sid] && byIdL[l._tid] &&
+      byIdL[l._sid].stage === 'entity' && byIdL[l._tid].stage === 'entity');
+    semLinks.forEach(l => {
+      const a = setsOf(byIdL[l._sid]), b = setsOf(byIdL[l._tid]);
+      l._bridge = a.length && b.length && !a.some(s => b.includes(s));
+    });
+
+    const dLinks = linksArr.filter(l => {
+      const s = byIdL[l._sid], t = byIdL[l._tid];
+      return s && t && ((s.stage === 'document' && t.stage === 'entity') ||
+        (s.stage === 'entity' && t.stage === 'document') ||
+        (s.stage === 'chunk' && t.stage === 'entity'));
+    });
+
+    const anchorsL = {};
+    srcNames.forEach((s, i) => {
+      const angle = (i / Math.max(srcNames.length, 1)) * Math.PI * 2 - Math.PI / 2;
+      const r = srcNames.length > 1 ? 300 : 0;
+      anchorsL[s] = { x: Math.cos(angle) * r * 1.25, y: Math.sin(angle) * r * 0.6 };
+    });
+
+    return {
+      byIdL, entities: ents, E: EL, sourceNames: srcNames, setColor: colors,
+      setEntityCount: entCount, setDocCount: docCount,
+      semanticLinks: semLinks, docLinks: dLinks, anchors: anchorsL,
+      importanceMax: Math.max(...ents.map(n => n.importance || 0), 1),
+    };
+  }
+
+  // Mutable brain bindings — reassigned on brain switch.
+  let BS = computeBrainState(allNodes, allLinks, nodeSetColors);
+  let entities = BS.entities, E = BS.E, semanticLinks = BS.semanticLinks,
+    docLinks = BS.docLinks, sourceNames = BS.sourceNames, setColor = BS.setColor,
+    setEntityCount = BS.setEntityCount, setDocCount = BS.setDocCount,
+    anchors = BS.anchors, importanceMax = BS.importanceMax, brainById = BS.byIdL;
 
   // Agent → sources captions from actor edges.
   const agentReads = {};
@@ -229,6 +255,9 @@
     opacity:0;transition:opacity .15s;}
   .bv-card:hover .share{opacity:1;}
   .bv-dim{opacity:.25 !important;transition:opacity .2s;}
+  .bv-muted{opacity:.35;transition:opacity .25s;}
+  .bv-rail-subtitle{font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:${C.haze};
+    opacity:.7;padding:4px 4px 0;}
   .bv-rail.compressed{transform:translateX(var(--bv-hide,-160px));opacity:.75;}
   #bv-right.compressed{--bv-hide:160px;}
   #bv-dock{position:absolute;left:0;right:0;bottom:0;z-index:6;
@@ -419,6 +448,27 @@
   });
   Object.values(dsUsers).forEach(list => list.sort((a, b) => (b.owns ? 1 : 0) - (a.owns ? 1 : 0)));
 
+  const brainKeyOf = d => (d.external ? String(d.id).replace(/^dataset:/, '') : 'primary');
+
+  function switchToBrain(key, payload) {
+    if (key === activeBrainKey) return;
+    activeBrainKey = key;
+    const nodesArr = key === 'primary' ? allNodes : payload.nodes;
+    const linksArr = key === 'primary' ? allLinks : payload.links;
+    const colorsMap = key === 'primary' ? nodeSetColors : (payload.node_set_colors || {});
+    BS = computeBrainState(nodesArr, linksArr, colorsMap);
+    ({ entities, E, semanticLinks, docLinks, sourceNames, setColor,
+       setEntityCount, setDocCount, anchors, importanceMax } = BS);
+    brainById = BS.byIdL;
+    hovered = null;
+    spotlight = null;
+    // Sources rail belongs to the primary brain — mute it while visiting.
+    document.querySelectorAll('#bv-left .bv-card:not(.knowledge):not(.ghost), #bv-left .bv-rail-title')
+      .forEach(el => el.classList.toggle('bv-muted', key !== 'primary'));
+    startSimulation(key === 'primary');
+    setTimeout(() => fit(true), 400);
+  }
+
   let knowledgeFocus = null;   // dataset id currently focused
   function clearKnowledgeFocus() {
     knowledgeFocus = null;
@@ -426,7 +476,9 @@
     document.querySelectorAll('[data-dsrow].focused').forEach(x => x.classList.remove('focused'));
   }
   function focusKnowledge(d) {
-    if (knowledgeFocus === d.id) { clearKnowledgeFocus(); return; }
+    const key = brainKeyOf(d);
+    const payload = d.external ? brainsData[key] : null;
+    if (knowledgeFocus === d.id && activeBrainKey === key) { clearKnowledgeFocus(); return; }
     clearKnowledgeFocus();
     knowledgeFocus = d.id;
     const holders = dsUsers[d.id] || [];
@@ -437,39 +489,61 @@
       el.classList.toggle('bv-dim', !!uid && !holderIds.has(uid));
     });
     document.querySelectorAll('[data-dsrow]').forEach(row => {
-      row.classList.toggle('bv-dim', row.dataset.dsrow !== d.id);
       row.classList.toggle('focused', row.dataset.dsrow === d.id);
     });
     const who = holders.map(h => h.name + (h.owns ? ' (owner)' : '')).join(', ');
-    const layers = (datasetLayers[d.id] || []);
-    if (d.external) {
-      narrate(`${d.name} — ${holders.length > 1 ? 'team' : 'personal'} brain of ${who || 'this workspace'} · lives in its own graph, not shown here`, C.inflow);
+    const kind = holders.length > 1 ? 'team' : 'personal';
+    if (d.external && payload) {
+      switchToBrain(key, payload);
+      narrate(`viewing ${d.name} — ${kind} brain of ${who || 'this workspace'} · ${entities.length} entities`, C.inflow);
+    } else if (d.external) {
+      narrate(`${d.name} — ${kind} brain of ${who || 'this workspace'} · no read access to its graph`, C.inflow);
     } else {
-      narrate(`${d.name} — ${holders.length > 1 ? 'team' : 'personal'} brain shared by ${who} · ${layers.length} layers · ${entities.length} entities below`, C.inflow);
+      switchToBrain('primary');
+      const layers = (datasetLayers[d.id] || []);
+      narrate(`${d.name} — ${kind} brain shared by ${who} · ${layers.length} layers · ${entities.length} entities below`, C.inflow);
       fit(true);
     }
   }
   canvas.addEventListener('click', clearKnowledgeFocus);
 
-  datasets.forEach(d => {
+  // Grouped: team brains first (shared understanding), then personal brains.
+  const teamBrains = datasets.filter(d => (dsUsers[d.id] || []).length > 1);
+  const personalBrains = datasets.filter(d => (dsUsers[d.id] || []).length <= 1);
+
+  function brainCard(d, team) {
     const el = document.createElement('div');
     el.className = 'bv-card knowledge' + (d.external ? ' external' : '');
     el.setAttribute('data-dsrow', d.id);
     const holders = dsUsers[d.id] || [];
-    const team = holders.length > 1;
     const layers = (datasetLayers[d.id] || []).join(' · ');
     const who = holders.map(h => h.name).filter(Boolean).join(' + ') || 'this workspace';
-    el.innerHTML = `<div class="spine" style="background:${d.external ? C.haze : C.inflow}"></div>
+    const openable = !d.external || !!brainsData[brainKeyOf(d)];
+    el.innerHTML = `<div class="spine" style="background:${team ? C.inflow : C.haze}"></div>
       <div class="t">${esc(d.name)}${d.external ? '' : ' <span class="live-dot">●</span>'}
-        <span class="brain ${team ? 'team' : ''}">${team ? 'team brain' : 'personal brain'}</span></div>
-      <div class="s">${esc(who)}${layers ? ' · ' + esc(layers) : ''}${d.external ? ' · own graph' : ''}</div>
+        <span class="brain ${team ? 'team' : ''}">${team ? 'team' : 'personal'}</span></div>
+      <div class="s">${esc(who)}${layers ? ' · ' + esc(layers) : ''}${openable ? '' : ' · no access'}</div>
       <div class="share" title="Grant read/write on this dataset — cognee permissions API (give_permission_on_dataset)">+ share</div>`;
     el.addEventListener('click', ev => {
       if (ev.target.classList.contains('share')) return;
       focusKnowledge(d);
     });
     railL.appendChild(el);
-  });
+  }
+  function brainGroupTitle(text) {
+    const t = document.createElement('div');
+    t.className = 'bv-rail-subtitle';
+    t.textContent = text;
+    railL.appendChild(t);
+  }
+  if (teamBrains.length) {
+    brainGroupTitle('team');
+    teamBrains.forEach(d => brainCard(d, true));
+  }
+  if (personalBrains.length) {
+    brainGroupTitle('personal');
+    personalBrains.forEach(d => brainCard(d, false));
+  }
 
   // ── Simulation ────────────────────────────────────────────────────
   let W = 0, H = 0, dpr = 1;
@@ -482,13 +556,6 @@
   resize();
   window.addEventListener('resize', () => { resize(); draw(); });
 
-  // Region anchors: each source gets an angle slice around center.
-  const anchors = {};
-  sourceNames.forEach((s, i) => {
-    const angle = (i / Math.max(sourceNames.length, 1)) * Math.PI * 2 - Math.PI / 2;
-    const r = sourceNames.length > 1 ? 300 : 0;
-    anchors[s] = { x: Math.cos(angle) * r * 1.25, y: Math.sin(angle) * r * 0.6 };
-  });
   function anchorOf(n) {
     const sets = setsOf(n);
     if (!sets.length) return { x: 0, y: 0 };
@@ -497,50 +564,60 @@
     return { x: x / sets.length, y: y / sets.length };
   }
 
-  const importanceMax = Math.max(...entities.map(n => n.importance || 0), 1);
-  entities.forEach(n => {
-    n._r = 5 + 11 * ((n.importance || 0) / importanceMax);
-    const a = anchorOf(n);
-    n.x = a.x + (Math.sin(hash(n.id)) * 150);
-    n.y = a.y + (Math.cos(hash(n.id) * 2) * 110);
-  });
-
-  // Restore cached positions so growth reloads read as growth, not reshuffle.
   const storeKey = 'bv-state:' + location.pathname;
+  let sim = null;
   let prevIds = null;
-  try {
-    const saved = JSON.parse(localStorage.getItem(storeKey) || 'null');
-    if (saved && saved.ids) {
-      prevIds = new Set(saved.ids);
-      entities.forEach(n => {
-        const p = saved.pos && saved.pos[n.id];
-        if (p) { n.x = p[0]; n.y = p[1]; }
-      });
-    }
-  } catch (e) { /* storage unavailable */ }
-
-  // New-since-last-render entities materialize from their source's card.
   const newborn = [];
-  if (prevIds) entities.forEach(n => { if (!prevIds.has(n.id)) newborn.push(n); });
 
-  const sim = d3.forceSimulation(entities)
-    .force('link', d3.forceLink(semanticLinks.map(l => ({ source: l._sid, target: l._tid }))).id(d => d.id).distance(110).strength(0.2))
-    .force('charge', d3.forceManyBody().strength(-220))
-    // Collide radius reserves label room, so names rarely overlap.
-    .force('collide', d3.forceCollide().radius(d => d._r + 26))
-    .force('ax', d3.forceX(d => anchorOf(d).x).strength(0.07))
-    .force('ay', d3.forceY(d => anchorOf(d).y).strength(0.07))
-    .alpha(prevIds ? 0.08 : 0.9)
-    .on('tick', () => requestDraw());
+  function startSimulation(useCache) {
+    if (sim) sim.stop();
+    entities.forEach(n => {
+      n._r = 5 + 11 * ((n.importance || 0) / importanceMax);
+      const a = anchorOf(n);
+      n.x = a.x + (Math.sin(hash(n.id)) * 150);
+      n.y = a.y + (Math.cos(hash(n.id) * 2) * 110);
+    });
+
+    prevIds = null;
+    newborn.length = 0;
+    if (useCache) {
+      // Restore cached positions so growth reloads read as growth, not
+      // reshuffle; ids not seen before materialize as newborns.
+      try {
+        const saved = JSON.parse(localStorage.getItem(storeKey) || 'null');
+        if (saved && saved.ids) {
+          prevIds = new Set(saved.ids);
+          entities.forEach(n => {
+            const p = saved.pos && saved.pos[n.id];
+            if (p) { n.x = p[0]; n.y = p[1]; }
+          });
+          entities.forEach(n => { if (!prevIds.has(n.id)) newborn.push(n); });
+        }
+      } catch (e) { /* storage unavailable */ }
+    }
+
+    sim = d3.forceSimulation(entities)
+      .force('link', d3.forceLink(semanticLinks.map(l => ({ source: l._sid, target: l._tid }))).id(d => d.id).distance(110).strength(0.2))
+      .force('charge', d3.forceManyBody().strength(-220))
+      // Collide radius reserves label room, so names rarely overlap.
+      .force('collide', d3.forceCollide().radius(d => d._r + 26))
+      .force('ax', d3.forceX(d => anchorOf(d).x).strength(0.07))
+      .force('ay', d3.forceY(d => anchorOf(d).y).strength(0.07))
+      .alpha(useCache && prevIds ? 0.08 : 0.9)
+      .on('tick', () => requestDraw());
+    if (useCache) sim.on('end', persist);
+  }
 
   function persist() {
+    // Growth detection only tracks the PRIMARY brain's layout.
+    if (activeBrainKey !== 'primary') return;
     try {
       const pos = {};
       entities.forEach(n => { pos[n.id] = [Math.round(n.x), Math.round(n.y)]; });
       localStorage.setItem(storeKey, JSON.stringify({ ids: entities.map(n => n.id), pos }));
     } catch (e) { /* best effort */ }
   }
-  sim.on('end', persist);
+  startSimulation(true);
   window.addEventListener('beforeunload', persist);
 
   // ── Camera + semantic zoom ────────────────────────────────────────
@@ -609,6 +686,7 @@
   function playSearchEvent(evt, agentId) {
     const ids = new Set(evt.node_ids || []);
     if (!ids.size) return;
+    if (activeBrainKey !== 'primary') switchToBrain('primary');
     spotlight = { ids, until: performance.now() + 9000, question: evt.question };
     const card = agentCardEls[agentId] || Object.values(agentCardEls)[0];
     if (card) { card.classList.add('asking'); setTimeout(() => card.classList.remove('asking'), 9000); }
@@ -777,7 +855,7 @@
     ctx.clearRect(0, 0, W, H);
 
     // Filaments: source cards → their region centroid (screen space mix).
-    sourceNames.forEach(name => {
+    if (activeBrainKey === 'primary') sourceNames.forEach(name => {
       const card = sourceCardEls[name];
       if (!card) return;
       const r = card.getBoundingClientRect(), vr = view.getBoundingClientRect();
@@ -801,17 +879,19 @@
       }
     });
 
-    // The rendered brain's card ties into the whole model.
-    document.querySelectorAll('[data-dsrow].knowledge:not(.external)').forEach(card => {
+    // The ACTIVE brain's card ties into the model it contains.
+    document.querySelectorAll('[data-dsrow].knowledge').forEach(card => {
+      const key = card.classList.contains('external')
+        ? card.dataset.dsrow.replace(/^dataset:/, '') : 'primary';
+      if (key !== activeBrainKey) return;
       const r = card.getBoundingClientRect(), vr = view.getBoundingClientRect();
       const x0 = r.right - vr.left, y0 = r.top - vr.top + r.height / 2;
       const cxs = transform.applyX(cx()), cys = transform.applyY(cy());
       ctx.beginPath();
       ctx.moveTo(x0, y0);
       ctx.bezierCurveTo(x0 + 110, y0, cxs - 140, cys, cxs, cys);
-      ctx.strokeStyle = knowledgeFocus === card.dataset.dsrow
-        ? 'rgba(67,217,232,0.5)' : 'rgba(67,217,232,0.12)';
-      ctx.lineWidth = knowledgeFocus === card.dataset.dsrow ? 1.6 : 1;
+      ctx.strokeStyle = 'rgba(67,217,232,0.45)';
+      ctx.lineWidth = 1.4;
       ctx.stroke();
     });
 
@@ -882,8 +962,8 @@
     // L2: documents unfold near their entities
     if (level >= 2 || plumbing) {
       docLinks.forEach(l => {
-        const d = byId[l._sid].stage !== 'entity' ? byId[l._sid] : byId[l._tid];
-        const e = E[byId[l._sid].stage === 'entity' ? l._sid : l._tid];
+        const d = brainById[l._sid].stage !== 'entity' ? brainById[l._sid] : brainById[l._tid];
+        const e = E[brainById[l._sid].stage === 'entity' ? l._sid : l._tid];
         if (!e || e.x == null) return;
         const dx = e.x + 26 + (hash(d.id) % 20), dy = e.y + 18 + (hash(d.id) * 3 % 16);
         ctx.setLineDash([3 / transform.k, 3 / transform.k]);
@@ -956,7 +1036,7 @@
     });
 
     // L3: plumbing — everything else, dimmed gray
-    if (plumbing) {
+    if (plumbing && activeBrainKey === 'primary') {
       ctx.globalAlpha = 0.35;
       allNodes.forEach(n => {
         if (n.stage === 'entity' || n.x != null) return;

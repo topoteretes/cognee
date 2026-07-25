@@ -193,6 +193,25 @@ async def main() -> None:
     )
     await cognee.cognify(["org_handbook"])
     print("   organizational knowledge added as its own dataset (org_handbook).")
+
+    # The TEAM BRAIN: shared working knowledge both people read and write —
+    # decisions, conventions, learnings that belong to the team, not a person.
+    await cognee.add(
+        "Team decisions log. Decision: Acme Retail renewal is our top Q3 priority, "
+        "owner Sara Lopez. Convention: every escalated ticket gets a post-mortem "
+        "note. Learning: campaigns convert best when paired with a webinar. "
+        "Decision: Nordwind Logistics gets an executive sponsor call in July.",
+        dataset_name="team_brain",
+        node_set=["team-decisions"],
+    )
+    await cognee.cognify(["team_brain"])
+    team_ds = (await get_datasets_by_name("team_brain", owner.id))[0]
+    for permission in ("read", "write"):
+        try:
+            await give_permission_on_dataset(maya, team_ds.id, permission)
+        except Exception:
+            pass
+    print("   team brain created and shared with the whole team (read+write).")
     await render_page()
     print(
         f"   watch the page — operators and knowledge panels now show the org. Pausing {PAUSE_SECONDS:.0f}s…"

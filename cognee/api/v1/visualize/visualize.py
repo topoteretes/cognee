@@ -135,6 +135,31 @@ async def visualize_graph(
                     list(graph_data[1]) + overlay_edges,
                 )
 
+        # Every OTHER brain the user can read gets its graph embedded too, so
+        # the Business view can switch brains client-side instead of telling
+        # the user a personal brain "lives in another graph".
+        extra_brains = {}
+        if include_actors and dataset:
+            try:
+                from cognee.modules.users.permissions.methods import (
+                    get_all_user_permission_datasets,
+                )
+
+                readable = await get_all_user_permission_datasets(user, "read")
+                rendered_id = str(dataset[0].id)
+                seen = {rendered_id}
+                for other in readable:
+                    other_id = str(other.id)
+                    if other_id in seen:
+                        continue
+                    seen.add(other_id)
+                    async with set_database_global_context_variables(other.id, other.owner_id):
+                        other_engine = await get_graph_engine()
+                        other_graph = await other_engine.get_graph_data()
+                    extra_brains[other_id] = {"name": other.name, "graph_data": other_graph}
+            except Exception as error:  # noqa: BLE001 — extra brains are best-effort
+                logger.warning("Extra brains unavailable; rendering without them: %s", error)
+
         if live and not live_events_url:
             live_events_url = "http://localhost:8000/api/v1/visualize/live-events"
 
@@ -143,6 +168,7 @@ async def visualize_graph(
             destination_file_path,
             search_events=search_events,
             live_events_url=live_events_url,
+            extra_brains=extra_brains,
         )
 
         if destination_file_path:

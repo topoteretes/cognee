@@ -86,6 +86,7 @@ async def cognee_network_visualization(
     schema_data: Optional[dict] = None,
     search_events: Optional[list] = None,
     live_events_url: Optional[str] = None,
+    extra_brains: Optional[dict] = None,
 ) -> str:
     """Render the graph to a self-contained HTML file and return the HTML.
 
@@ -169,6 +170,21 @@ async def cognee_network_visualization(
         "__LIVE_EVENTS_URL__",
         _safe_json_embed(live_events_url) if live_events_url else "null",
     )
+    # Other readable brains, preprocessed to the same renderer-facing shape,
+    # so the Business view can switch between them client-side.
+    brains_payload = {}
+    for brain_id, brain in (extra_brains or {}).items():
+        try:
+            brain_pre = preprocess(brain["graph_data"])
+            brains_payload[brain_id] = {
+                "name": brain.get("name") or "brain",
+                "nodes": brain_pre.nodes,
+                "links": brain_pre.links,
+                "node_set_colors": brain_pre.color_maps["node_set"],
+            }
+        except Exception as exc:  # noqa: BLE001 — a broken brain must not sink the render
+            logger.warning("Skipping brain %s in visualization: %s", brain_id, exc)
+    html = html.replace("__BRAINS_DATA__", _safe_json_embed(brains_payload))
     # Semantic tokens: null when there are no embeddings, so the tab renders a
     # friendly empty state without leaving a placeholder behind.
     html = html.replace(
