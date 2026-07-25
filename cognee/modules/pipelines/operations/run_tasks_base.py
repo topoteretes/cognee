@@ -204,26 +204,22 @@ async def handle_task(
             provenance_visited = ctx._provenance_visited if ctx else None
             _provenance_config = get_provenance_config()
             async for result_data in running_task.execute(args, kwargs, next_task_batch_size):
-                if not _provenance_config.is_disabled():
-                    _stamp_provenance(
-                        result_data,
-                        pipe_name,
-                    )
                 if isinstance(result_data, list):
                     result_count += len(result_data)
                 else:
                     result_count += 1
 
-                _stamp_provenance(
-                    result_data,
-                    pipe_name,
-                    task_name,
-                    visited=provenance_visited,
-                    node_set=input_node_set,
-                    user_label=user_label,
-                    content_hash=input_content_hash,
-                    task_index=task_index,
-                )
+                if not _provenance_config.is_disabled():
+                    _stamp_provenance(
+                        result_data,
+                        pipe_name,
+                        task_name,
+                        visited=provenance_visited,
+                        node_set=input_node_set,
+                        user_label=user_label,
+                        content_hash=input_content_hash,
+                        task_index=task_index,
+                    )
 
                 async for result in run_tasks_base(leftover_tasks, result_data, user, ctx):
                     yield result
