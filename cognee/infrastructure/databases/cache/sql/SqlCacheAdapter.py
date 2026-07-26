@@ -9,7 +9,18 @@ from hashlib import sha256
 from typing import List, Optional
 
 from pydantic import ValidationError
-from sqlalchemy import create_engine, delete, event, func, insert, or_, select, text, update
+from sqlalchemy import (
+    create_engine,
+    delete,
+    event,
+    func,
+    insert,
+    inspect,
+    or_,
+    select,
+    text,
+    update,
+)
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -26,6 +37,7 @@ from cognee.modules.storage.utils import JSONEncoder
 from cognee.shared.logging_utils import get_logger
 
 from .tables import (
+    UQ_CACHE_SESSION_CONTEXT_ENTRY,
     cache_kv,
     cache_metadata,
     cache_qa_entries,
@@ -161,6 +173,11 @@ class SqlCacheAdapter(CacheDBInterface):
         self._initialized = False
         self._init_lock = asyncio.Lock()
         self._last_purge = 0.0
+        # Whether the unique index backing session-context upserts is in place;
+        # when the in-place upgrade of a legacy table fails, writes fall back to
+        # plain inserts (the pre-index behavior) instead of erroring on
+        # ON CONFLICT with no matching index.
+        self._session_context_unique = False
 
     # --------------------------------------------------------------------- #
     # Initialization / shared helpers
@@ -180,7 +197,55 @@ class SqlCacheAdapter(CacheDBInterface):
                 error_msg = f"Failed to connect to SQL cache database: {error}"
                 logger.error(error_msg)
                 raise CacheConnectionError(error_msg) from error
+            self._session_context_unique = await self._migrate_session_context_uniqueness()
             self._initialized = True
+
+    async def _migrate_session_context_uniqueness(self) -> bool:
+        """Upgrade pre-existing ``cache_session_context`` tables to the unique index.
+
+        ``create_all(checkfirst=True)`` never alters an existing table, so
+        databases created before ``uq_cache_session_context_entry`` existed have
+        no uniqueness guarantee on (user_id, session_id, entry_id) and a retried
+        write could stack duplicate rows. Collapse each duplicate group to its
+        newest row, then add the index. Returns True when the index is in place.
+        Failure is non-fatal: writes fall back to plain inserts and
+        update_session_context_entry self-heals duplicates, so the next
+        initialization can retry.
+        """
+        try:
+            async with self.engine.begin() as connection:
+                index_names = await connection.run_sync(
+                    lambda sync_connection: [
+                        index.get("name")
+                        for index in inspect(sync_connection).get_indexes("cache_session_context")
+                    ]
+                )
+                if UQ_CACHE_SESSION_CONTEXT_ENTRY in index_names:
+                    return True
+                newest_per_entry = select(func.max(cache_session_context.c.seq)).group_by(
+                    cache_session_context.c.user_id,
+                    cache_session_context.c.session_id,
+                    cache_session_context.c.entry_id,
+                )
+                await connection.execute(
+                    delete(cache_session_context).where(
+                        cache_session_context.c.seq.not_in(newest_per_entry)
+                    )
+                )
+                await connection.execute(
+                    text(
+                        f"CREATE UNIQUE INDEX IF NOT EXISTS {UQ_CACHE_SESSION_CONTEXT_ENTRY} "
+                        "ON cache_session_context (user_id, session_id, entry_id)"
+                    )
+                )
+            return True
+        except Exception as error:
+            logger.warning(
+                "Could not enforce session-context uniqueness "
+                "(falling back to non-upsert writes until next initialization): %s",
+                error,
+            )
+            return False
 
     @staticmethod
     def _now() -> datetime:
@@ -839,6 +904,10 @@ class SqlCacheAdapter(CacheDBInterface):
 
         The caller validates the payload; we only promote its ``id`` to the
         ``entry_id`` column so updates can target a single row directly.
+
+        Idempotent under client retries: re-sending the same (user, session,
+        entry id) replaces the stored payload in place instead of stacking a
+        duplicate row.
         """
         await self._ensure_initialized()
         # Redis/FS append regardless of "id" (an id-less entry is simply never
@@ -846,20 +915,39 @@ class SqlCacheAdapter(CacheDBInterface):
         # only to satisfy the NOT NULL column; the stored payload is untouched.
         entry_id = entry_dump.get("id") or str(uuid.uuid4())
         try:
+            row_values = dict(
+                user_id=user_id,
+                session_id=session_id,
+                entry_id=entry_id,
+                payload=entry_dump,
+                expires_at=self._session_expiry(),
+            )
+            if self._session_context_unique:
+                if self._is_postgres:
+                    from sqlalchemy.dialects.postgresql import insert as upsert_insert
+                else:
+                    from sqlalchemy.dialects.sqlite import insert as upsert_insert
+
+                statement = upsert_insert(cache_session_context).values(**row_values)
+                statement = statement.on_conflict_do_update(
+                    index_elements=[
+                        cache_session_context.c.user_id,
+                        cache_session_context.c.session_id,
+                        cache_session_context.c.entry_id,
+                    ],
+                    set_={
+                        "payload": statement.excluded.payload,
+                        "expires_at": statement.excluded.expires_at,
+                    },
+                )
+            else:
+                statement = insert(cache_session_context).values(**row_values)
             async with self.sessionmaker() as session, session.begin():
                 await self._lock_session_writes(session, cache_session_context, user_id, session_id)
                 await self._purge_session_expired(
                     session, cache_session_context, user_id, session_id
                 )
-                await session.execute(
-                    insert(cache_session_context).values(
-                        user_id=user_id,
-                        session_id=session_id,
-                        entry_id=entry_id,
-                        payload=entry_dump,
-                        expires_at=self._session_expiry(),
-                    )
-                )
+                await session.execute(statement)
                 await self._refresh_session_ttl(session, cache_session_context, user_id, session_id)
         except Exception as error:
             error_msg = f"Unexpected error while adding session context to SQL cache: {error}"
@@ -892,6 +980,10 @@ class SqlCacheAdapter(CacheDBInterface):
         """Shallow-merge ``merge`` into the entry whose id is ``entry_id``.
 
         Returns True if a matching entry was updated, False otherwise.
+
+        Duplicate rows for the key (possible in databases predating the unique
+        index) are self-healed: the newest row is kept and updated, the rest
+        are pruned, instead of erroring on every write until manual cleanup.
         """
         await self._ensure_initialized()
         attempt = 0
@@ -902,24 +994,31 @@ class SqlCacheAdapter(CacheDBInterface):
                         session, cache_session_context, user_id, session_id
                     )
                     result = await session.execute(
-                        select(cache_session_context.c.payload)
+                        select(cache_session_context.c.seq, cache_session_context.c.payload)
                         .where(
                             self._session_filter(cache_session_context, user_id, session_id),
                             cache_session_context.c.entry_id == entry_id,
                             self._not_expired(cache_session_context),
                         )
+                        .order_by(cache_session_context.c.seq.desc())
                         .with_for_update()
                     )
-                    payload = result.scalar_one_or_none()
-                    if payload is None:
+                    rows = result.all()
+                    if not rows:
                         return False
+                    newest_seq, payload = rows[0]
+                    if len(rows) > 1:
+                        await session.execute(
+                            delete(cache_session_context).where(
+                                cache_session_context.c.seq.in_(
+                                    [duplicate_seq for duplicate_seq, _ in rows[1:]]
+                                )
+                            )
+                        )
                     merged = {**dict(payload), **merge}
                     await session.execute(
                         update(cache_session_context)
-                        .where(
-                            self._session_filter(cache_session_context, user_id, session_id),
-                            cache_session_context.c.entry_id == entry_id,
-                        )
+                        .where(cache_session_context.c.seq == newest_seq)
                         .values(payload=merged)
                     )
                     await self._refresh_session_ttl(

@@ -114,7 +114,7 @@ Index(
     sqlite_where=cache_trace_entries.c.expires_at.isnot(None),
 )
 
-# Session-context entries: append-only, kind-discriminated ("context"/"feedback").
+# Session-context entries: kind-discriminated ("context"/"feedback").
 # entry_id is promoted from the payload's "id" to a column for direct UPDATE,
 # mirroring how cache_qa_entries promotes qa_id.
 cache_session_context = Table(
@@ -127,6 +127,20 @@ cache_session_context = Table(
     Column("payload", _payload_type(), nullable=False),
     Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
     Column("expires_at", DateTime(timezone=True), nullable=True),
+)
+
+# One row per (user, session, entry) so a retried write updates in place instead
+# of stacking duplicates. Declared as a unique Index rather than a UniqueConstraint
+# so tables created before it existed can be upgraded in place with
+# CREATE UNIQUE INDEX IF NOT EXISTS — see SqlCacheAdapter._ensure_initialized.
+UQ_CACHE_SESSION_CONTEXT_ENTRY = "uq_cache_session_context_entry"
+
+Index(
+    UQ_CACHE_SESSION_CONTEXT_ENTRY,
+    cache_session_context.c.user_id,
+    cache_session_context.c.session_id,
+    cache_session_context.c.entry_id,
+    unique=True,
 )
 
 Index(

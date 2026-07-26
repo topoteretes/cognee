@@ -6,7 +6,7 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import select, text, update
+from sqlalchemy import insert, select, text, update
 
 from cognee.infrastructure.databases.cache.sql.SqlCacheAdapter import SqlCacheAdapter
 from cognee.infrastructure.databases.cache.sql.tables import (
@@ -815,6 +815,66 @@ async def test_session_context_isolated_per_session(adapter):
     assert await adapter.get_session_context_entries("u1", "s1") == []
     assert len(await adapter.get_session_context_entries("u1", "s2")) == 1
     assert len(await adapter.get_session_context_entries("u2", "s1")) == 1
+
+
+async def _stack_legacy_duplicates(inst, entry_id, payloads):
+    """Recreate the pre-#4226 state: no unique index, duplicate rows for one key."""
+    async with inst.engine.begin() as connection:
+        await connection.execute(text("DROP INDEX uq_cache_session_context_entry"))
+        for payload in payloads:
+            await connection.execute(
+                insert(cache_session_context).values(
+                    user_id="u1", session_id="s1", entry_id=entry_id, payload=payload
+                )
+            )
+
+
+@pytest.mark.asyncio
+async def test_create_session_context_entry_retried_write_is_idempotent(adapter):
+    """Re-creating the same entry id upserts in place instead of stacking a duplicate (#4226)."""
+    await adapter.create_session_context_entry("u1", "s1", _ctx("c1", content="first"))
+    await adapter.create_session_context_entry("u1", "s1", _ctx("c1", content="retried"))
+    entries = await adapter.get_session_context_entries("u1", "s1")
+    assert len(entries) == 1
+    assert entries[0]["content"] == "retried"
+
+
+@pytest.mark.asyncio
+async def test_update_session_context_entry_heals_duplicate_rows(adapter):
+    """Duplicates from a pre-index database update the newest row and prune the rest,
+    instead of failing every write until manual cleanup (#4226)."""
+    await adapter.create_session_context_entry("u1", "s1", _ctx("c1", content="v1"))
+    await _stack_legacy_duplicates(
+        adapter, "c1", [_ctx("c1", content="v2"), _ctx("c1", content="v3")]
+    )
+
+    updated = await adapter.update_session_context_entry("u1", "s1", "c1", {"rating": "helpful"})
+
+    assert updated is True
+    (entry,) = await adapter.get_session_context_entries("u1", "s1")
+    assert entry["content"] == "v3"  # merged into the newest duplicate
+    assert entry["rating"] == "helpful"
+
+
+@pytest.mark.asyncio
+async def test_initialization_dedupes_legacy_table_and_restores_unique_index(tmp_path):
+    """A database predating the unique index is collapsed to newest-per-key on next
+    startup and upserts work again (#4226)."""
+    legacy = _make_adapter(tmp_path)
+    await legacy.create_session_context_entry("u1", "s1", _ctx("c1", content="old"))
+    await legacy.create_session_context_entry("u1", "s1", _ctx("other"))
+    await _stack_legacy_duplicates(legacy, "c1", [_ctx("c1", content="newest")])
+    await legacy.close()
+
+    inst = _make_adapter(tmp_path)
+    entries = await inst.get_session_context_entries("u1", "s1")
+    assert [(e["id"], e.get("content")) for e in entries] == [("other", "x"), ("c1", "newest")]
+
+    await inst.create_session_context_entry("u1", "s1", _ctx("c1", content="upserted"))
+    entries = await inst.get_session_context_entries("u1", "s1")
+    assert len(entries) == 2
+    assert {e["content"] for e in entries} == {"x", "upserted"}
+    await inst.close()
 
 
 @pytest.mark.asyncio
