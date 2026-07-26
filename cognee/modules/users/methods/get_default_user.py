@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 from sqlalchemy.orm import selectinload
-from sqlalchemy.exc import NoResultFound
+from sqlalchemy.exc import NoResultFound, OperationalError
 from sqlalchemy.future import select
 from cognee.modules.users.models import User
 from cognee.base_config import get_base_config
@@ -31,7 +31,16 @@ async def get_default_user() -> User:
 
             return user
     except Exception as error:
-        if "principals" in str(error.args):
+        error_text = str(error.args)
+        if "principals" in error_text:
+            raise DatabaseNotCreatedError() from error
+        # Fresh install: the SQLite file/directory or the schema does not exist
+        # yet. Without this classification the CLI's auto-migration recovery
+        # (cognee/cli/user_resolution.py) never fires and the user sees a raw
+        # "(sqlite3.OperationalError) unable to open database file".
+        if isinstance(error, OperationalError) and (
+            "unable to open database file" in error_text or "no such table" in error_text
+        ):
             raise DatabaseNotCreatedError() from error
         if isinstance(error, NoResultFound):
             raise UserNotFoundError(f"Failed to retrieve default user: {default_email}") from error
