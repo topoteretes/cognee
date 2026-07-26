@@ -50,6 +50,8 @@ class VectorConfig(BaseSettings):
         self.vector_dataset_database_handler = vector_dataset_database_handler
         if provider == "pgvector" and vector_dataset_database_handler in ("lancedb", "pgvector"):
             self.vector_dataset_database_handler = "pgvector"
+        elif provider == "turso" and vector_dataset_database_handler in ("lancedb", "turso"):
+            self.vector_dataset_database_handler = "turso"
         return self
 
     @pydantic.model_validator(mode="after")

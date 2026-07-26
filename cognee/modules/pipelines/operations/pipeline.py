@@ -94,9 +94,12 @@ async def run_pipeline(
     llm_config: Optional[LLMConfig] = None,
     embedding_config: Optional[EmbeddingConfig] = None,
     data_cache: bool = False,
+    skip_connection_test: bool = False,
 ):
     validate_pipeline_tasks(tasks)
-    await setup_and_check_environment(vector_db_config, graph_db_config)
+    await setup_and_check_environment(
+        vector_db_config, graph_db_config, skip_connection_test=skip_connection_test
+    )
 
     user, authorized_datasets = await resolve_authorized_user_datasets(datasets, user)
 

@@ -507,9 +507,10 @@ async def test_resolve_cli_user_strict_unknown_uuid_raises(monkeypatch):
     """A valid-but-unknown --user-id must be a hard error in strict mode rather
     than silently falling back to the default user."""
     from cognee.cli import user_resolution
+    from cognee.infrastructure.databases.exceptions import EntityNotFoundError
 
     async def fake_get_user(uid):
-        raise Exception("user not found")
+        raise EntityNotFoundError("User not found")
 
     async def fake_get_default_user():
         raise AssertionError("strict mode must not fall back to the default user")
@@ -528,11 +529,12 @@ async def test_resolve_cli_user_non_strict_falls_back(monkeypatch):
     """Default (non-strict) behaviour still warns and falls back, preserving the
     existing contract for other commands (e.g. datasets)."""
     from cognee.cli import user_resolution
+    from cognee.infrastructure.databases.exceptions import EntityNotFoundError
 
     sentinel = _make_user()
 
     async def fake_get_user(uid):
-        raise Exception("user not found")
+        raise EntityNotFoundError("User not found")
 
     async def fake_get_default_user():
         return sentinel

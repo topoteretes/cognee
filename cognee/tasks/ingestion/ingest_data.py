@@ -184,7 +184,7 @@ async def ingest_data(
                 data_point.owner_id = user.id
                 data_point.content_hash = new_content_hash
                 data_point.raw_content_hash = storage_file_metadata["content_hash"]
-                data_point.file_size = original_file_metadata["file_size"]
+                data_point.data_size = original_file_metadata["file_size"]
                 data_point.external_metadata = ext_metadata
                 data_point.node_set = json.dumps(node_set) if node_set else None
                 data_point.tenant_id = user.tenant_id if user.tenant_id else None

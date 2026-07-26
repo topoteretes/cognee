@@ -26,6 +26,7 @@ import {
 import { listOntologies, uploadOntology, deleteOntology, type OntologyMeta } from "@/modules/ontologies/ontologyApi";
 import { generateCustomPrompt } from "@/modules/llm/managementLlmApi";
 import cognifyDataset from "@/modules/datasets/cognifyDataset";
+import { captureException } from "@/utils/monitoring";
 
 // ── Shared button style (black) ───────────────────────────────────────────
 
@@ -153,8 +154,9 @@ export default function SchemaPage() {
       setSelectedModelId(findModelForDataset(cfg.models, datasetId)?.id ?? null);
       setSelectedPromptName(findPromptForDataset(cfg.promptAssignments ?? {}, datasetId));
       setSelectedOntologyKey(findOntologyForDataset(cfg.ontologyAssignments ?? {}, datasetId));
-    }).catch(() => {});
-    listOntologies(cogniInstance).then(setOntologies).catch(() => {});
+    }).catch((err) => captureException(err, { context: "schema-page.load-graph-config" }));
+    listOntologies(cogniInstance).then(setOntologies).catch((err) =>
+      captureException(err, { context: "schema-page.list-ontologies" }));
   }, [datasetId, cogniInstance, isInitializing]);
 
   // ── Close dropdowns on outside click ─────────────────────────────────
@@ -231,21 +233,36 @@ export default function SchemaPage() {
     setModelDropdownOpen(false);
     const name = id ? (graphModels.find((m) => m.id === id)?.name ?? "Unknown") : "Automatic";
     notifications.show({ title: "Graph model updated", message: `"${datasetName}" will use "${name}" on next run.`, color: "green", autoClose: 4000 });
-    if (cogniInstance && datasetId) assignGraphModelToDataset(cogniInstance, datasetId, id).catch(() => {});
+    if (cogniInstance && datasetId) {
+      assignGraphModelToDataset(cogniInstance, datasetId, id).catch((err) => {
+        captureException(err, { context: "schema-page.assign-graph-model", datasetId, id });
+        notifications.show({ title: "Graph model choice not saved", message: "Please try selecting it again.", color: "orange" });
+      });
+    }
   }
 
   function handleSelectPrompt(name: string | null) {
     setSelectedPromptName(name);
     setPromptDropdownOpen(false);
     notifications.show({ title: "Prompt updated", message: `"${datasetName}" will use "${name ?? "Automatic"}" on next run.`, color: "green", autoClose: 4000 });
-    if (cogniInstance && datasetId) assignPromptToDataset(cogniInstance, datasetId, name).catch(() => {});
+    if (cogniInstance && datasetId) {
+      assignPromptToDataset(cogniInstance, datasetId, name).catch((err) => {
+        captureException(err, { context: "schema-page.assign-prompt", datasetId, name });
+        notifications.show({ title: "Prompt choice not saved", message: "Please try selecting it again.", color: "orange" });
+      });
+    }
   }
 
   function handleSelectOntology(key: string | null) {
     setSelectedOntologyKey(key);
     setOntologyDropdownOpen(false);
     notifications.show({ title: "Ontology updated", message: `"${datasetName}" will use "${key ?? "Automatic"}" on next run.`, color: "green", autoClose: 4000 });
-    if (cogniInstance && datasetId) assignOntologyToDataset(cogniInstance, datasetId, key).catch(() => {});
+    if (cogniInstance && datasetId) {
+      assignOntologyToDataset(cogniInstance, datasetId, key).catch((err) => {
+        captureException(err, { context: "schema-page.assign-ontology", datasetId, key });
+        notifications.show({ title: "Ontology choice not saved", message: "Please try selecting it again.", color: "orange" });
+      });
+    }
   }
 
   async function handleInferPrompt() {
@@ -615,7 +632,16 @@ export default function SchemaPage() {
                 setOntologies(await listOntologies(cogniInstance));
                 setSelectedOntologyKey(key);
                 setShowUploadOntologyModal(false);
-                if (datasetId) assignOntologyToDataset(cogniInstance, datasetId, key).catch(() => {});
+                if (datasetId) {
+                  assignOntologyToDataset(cogniInstance, datasetId, key).catch((err) => {
+                    captureException(err, { context: "schema-page.assign-ontology-after-upload", datasetId, key });
+                    notifications.show({
+                      title: "Ontology uploaded, but not assigned",
+                      message: `"${key}" was uploaded but couldn't be assigned to this dataset automatically. Assign it manually from the dropdown.`,
+                      color: "orange",
+                    });
+                  });
+                }
                 notifications.show({ title: "Ontology uploaded", message: `"${key}" is ready.`, color: "green", autoClose: 4000 });
               } catch (err) {
                 notifications.show({ title: "Upload failed", message: err instanceof Error ? err.message : String(err), color: "red" });

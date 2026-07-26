@@ -1,11 +1,12 @@
 "use client";
 
 import { usePathname } from "next/navigation";
+import Link from "next/link";
 import { useNavbar } from "../NavbarContext";
 import NavbarIconLink from "./NavbarIconLink";
-import { ReactNode } from "react";
+import { ReactNode, useState } from "react";
 import { useTenant } from "@/modules/tenant/TenantContext";
-import { useFilter } from "../FilterContext";
+import FeedbackModal from "@/ui/layout/FeedbackModal";
 
 // -- Icon components for nav items --
 
@@ -145,7 +146,7 @@ export default function CustomAppShellNavbar() {
   const pathname = usePathname();
   const { isOpen, close } = useNavbar();
   const { tenantReady } = useTenant();
-  const { datasets } = useFilter();
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
 
   return (
     <>
@@ -225,7 +226,55 @@ export default function CustomAppShellNavbar() {
           ))}
         </nav>
 
+        {/* Feedback + Billing pinned to the bottom-left of the sidebar */}
+        <div style={{ padding: 12, borderTop: "1px solid rgba(255,255,255,0.08)", display: "flex", flexDirection: "column", gap: 8 }}>
+          <button
+            onClick={() => setFeedbackOpen(true)}
+            className="cursor-pointer"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 7,
+              width: "100%",
+              padding: "7px 12px",
+              background: "transparent",
+              border: "none",
+              borderRadius: 8,
+              fontFamily: "inherit",
+              fontSize: 12.5,
+              fontWeight: 500,
+              color: "rgba(237,236,234,0.35)",
+              transition: "color 120ms ease, background 120ms ease",
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = "#EDECEA"; e.currentTarget.style.background = "rgba(255,255,255,0.06)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = "rgba(237,236,234,0.35)"; e.currentTarget.style.background = "transparent"; }}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.7 }}>
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+            </svg>
+            Give feedback
+          </button>
+          <Link
+            href="/billing"
+            className="flex items-center justify-center rounded-[8px] w-full"
+            style={{
+              padding: "10px 12px",
+              background: "#BC9BFF",
+              color: "#1e1e1c",
+              fontSize: 14,
+              fontWeight: 500,
+              textDecoration: "none",
+            }}
+            onMouseEnter={e => ((e.currentTarget as HTMLElement).style.background = "#A988F0")}
+            onMouseLeave={e => ((e.currentTarget as HTMLElement).style.background = "#BC9BFF")}
+          >
+            Billing / Pricing
+          </Link>
+        </div>
       </aside>
+
+      {feedbackOpen && <FeedbackModal onClose={() => setFeedbackOpen(false)} />}
     </>
   );
 }

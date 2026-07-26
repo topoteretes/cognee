@@ -1,7 +1,7 @@
 import asyncio
 import time
 from uuid import UUID
-from typing import Union, BinaryIO, List, Optional, Any, Literal
+from typing import Union, BinaryIO, List, Optional, Any, Literal, TYPE_CHECKING
 
 try:
     from typing import Unpack
@@ -9,6 +9,9 @@ except ImportError:
     from typing_extensions import Unpack
 
 from typing_extensions import TypedDict
+
+if TYPE_CHECKING:
+    from cognee.modules.cognify.estimator import DryRunEstimate
 
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion.data_item import DataItem
@@ -51,8 +54,9 @@ class RememberKwargs(TypedDict, total=False):
     user: object
     vector_db_config: dict
     graph_db_config: dict
-    content_type: Literal["skills"]
+    content_type: Literal["skills", "code"]
     skill_improvement: dict[str, Any]
+    index_vectors: bool
     skills_text: str
     skill_name: str
     primary_key: str
@@ -642,8 +646,9 @@ async def remember(
     run_in_background: bool = False,
     self_improvement: bool = True,
     session_ids: Optional[List[str]] = None,
+    dry_run: bool = False,
     **kwargs: Unpack[RememberKwargs],
-) -> "RememberResult":
+) -> Union["RememberResult", "DryRunEstimate"]:
     """Store data in memory.
 
     Two modes depending on whether ``session_id`` is provided:
@@ -673,17 +678,26 @@ async def remember(
             Only used when ``self_improvement=True``. When provided,
             ``improve()`` will also copy recent graph relationships
             into these sessions for fast retrieval.
+        dry_run: If *True*, return a stage-level estimate of LLM token usage
+            and rough cost without ingesting data or making LLM calls. Only
+            supported for permanent add+cognify inputs in local mode. The
+            estimate excludes the LLM calls ``improve()`` makes when
+            ``self_improvement=True``.
         content_type: Set to ``"skills"`` to explicitly ingest SKILL.md
-            files as dataset-scoped Skill nodes. ``remember()`` does not
-            auto-detect skill paths.
+            files as dataset-scoped Skill nodes, or ``"code"`` to index a
+            code repository (local path or remote git URL, or a list of
+            them) as an architectural code graph via the enola-backed
+            pipeline. ``remember()`` does not auto-detect skill paths or
+            repositories.
         skill_improvement: Internal skill-improvement control dict used with
             ``SkillRunEntry`` or ``content_type="skills"``. ``apply=True``
             requires an existing ``proposal_id``.
         **kwargs: Additional options -- see ``RememberKwargs``.
 
     Returns:
-        RememberResult: A promise-like object. Print it for a summary,
-        await it to block until background processing finishes, or
+        RememberResult or DryRunEstimate: A promise-like object for normal
+        runs, or a token/cost estimate when ``dry_run=True``. Print it for a
+        summary, await it to block until background processing finishes, or
         inspect ``.status``, ``.dataset_name``, ``.elapsed_seconds``, etc.
 
     Example::
@@ -709,6 +723,9 @@ async def remember(
     # migration loader routes them through add/cognify or direct graph storage
     # depending on the source's fidelity mode.
     if isinstance(data, MemorySource):
+        if dry_run:
+            raise ValueError("dry_run is not supported for MemorySource imports.")
+
         from cognee.api.v1.serve.state import get_remote_client
         from cognee.modules.migration.import_source import import_memory_source
 
@@ -755,12 +772,41 @@ async def remember(
     # Typed MemoryEntry dispatch: trace steps, rich QA, feedback, and
     # explicit skill-run scores. These short-circuit the add+cognify path.
     if isinstance(data, MEMORY_ENTRY_TYPES):
+        if dry_run:
+            raise ValueError("dry_run is supported for add+cognify remember inputs only.")
         return await _remember_entry(
             data,
             dataset_name=dataset_name,
             session_id=session_id,
             user=kwargs.get("user"),
             skill_improvement=kwargs.get("skill_improvement"),
+        )
+
+    if dry_run:
+        if session_id is not None:
+            raise ValueError("dry_run is supported for permanent add+cognify remember inputs only.")
+        if kwargs.get("content_type"):
+            raise ValueError("dry_run is supported for standard add+cognify remember inputs only.")
+
+        from cognee.api.v1.serve.state import get_remote_client
+
+        if get_remote_client() is not None:
+            raise ValueError(
+                "dry_run is not supported while connected to a remote Cognee instance. "
+                "Call cognee.disconnect() to estimate locally."
+            )
+
+        from cognee.infrastructure.llm import get_max_chunk_tokens
+        from cognee.modules.chunking.TextChunker import TextChunker
+        from cognee.modules.cognify.estimator import estimate_remember_dry_run
+        from cognee.shared.data_models import KnowledgeGraph
+
+        return await estimate_remember_dry_run(
+            data,
+            chunker=chunker or TextChunker,
+            chunk_size=chunk_size or await get_max_chunk_tokens(),
+            graph_model=kwargs.get("graph_model") or KnowledgeGraph,
+            custom_prompt=custom_prompt,
         )
 
     data_size = _estimate_data_size(data)
@@ -873,6 +919,8 @@ async def _remember_inner(
     # normal remember), so they must be consumed here regardless of content_type.
     skills_text = kwargs.pop("skills_text", None)
     skill_name = kwargs.pop("skill_name", None)
+    # code-only kwarg, consumed here for the same reason as the skills ones.
+    index_vectors = kwargs.pop("index_vectors", None)
 
     def _requested_node_set(default: str) -> str:
         requested_node_set = kwargs.get("node_set") or [default]
@@ -882,12 +930,73 @@ async def _remember_inner(
             return requested_node_set[0]
         return default
 
-    if content_type not in (None, "skills"):
-        raise ValueError("Unsupported remember content_type. Supported values: 'skills'.")
+    if content_type not in (None, "skills", "code"):
+        raise ValueError("Unsupported remember content_type. Supported values: 'skills', 'code'.")
     if skill_improvement is not None and content_type != "skills":
         raise ValueError(
             "skill_improvement is supported only for SkillRunEntry or content_type='skills'."
         )
+    if index_vectors is not None and content_type != "code":
+        raise ValueError("index_vectors is supported only for content_type='code'.")
+    if content_type == "code" and session_id is not None:
+        raise ValueError(
+            "session_id is not applicable to content_type='code'; code graphs are "
+            "stored in the permanent graph, not a session cache."
+        )
+
+    if content_type == "code":
+        from pathlib import Path as _Path
+
+        from cognee import __version__ as cognee_version
+        from cognee.modules.run_custom_pipeline import run_custom_pipeline
+        from cognee.shared.utils import send_telemetry
+        from cognee.tasks.code_graph import get_code_graph_tasks
+        from cognee.tasks.code_graph.resolve_repo import resolve_repo_source
+
+        repo_specs = data if isinstance(data, list) else [data]
+        if not repo_specs or not all(isinstance(spec, (str, _Path)) for spec in repo_specs):
+            raise ValueError(
+                "content_type='code' expects a repository path or git URL "
+                "(or a list of them) as data."
+            )
+
+        send_telemetry(
+            "cognee.remember.code_graph",
+            kwargs.get("user", "sdk"),
+            additional_properties={
+                "dataset_name": dataset_name,
+                "repository_count": len(repo_specs),
+                "index_vectors": bool(index_vectors),
+                "cognee_version": cognee_version,
+            },
+        )
+
+        result = RememberResult(
+            status="completed",
+            dataset_name=dataset_name,
+            dataset_id=str(kwargs.get("dataset_id")) if kwargs.get("dataset_id") else None,
+            session_ids=None,
+        )
+        result.items = []
+        for spec in repo_specs:
+            repo_path = await resolve_repo_source(spec)
+            await run_custom_pipeline(
+                tasks=get_code_graph_tasks(str(repo_path), index_vectors=bool(index_vectors)),
+                data=str(repo_path),
+                dataset=kwargs.get("dataset_id") or dataset_name,
+                user=kwargs.get("user"),
+                pipeline_name="code_graph_pipeline",
+                # The default (graph-only) pipeline performs no LLM or embedding
+                # calls, so it must not demand an API key on first run. With
+                # index_vectors=True embeddings are used, so the checks stay on.
+                skip_connection_test=not bool(index_vectors),
+            )
+            result.items.append(
+                {"kind": "code_repository", "source": str(spec), "path": str(repo_path)}
+            )
+        result.items_processed = len(result.items)
+        result.elapsed_seconds = time.monotonic() - result._started_at
+        return result
 
     if content_type == "skills":
         import shutil
@@ -1058,6 +1167,12 @@ async def _remember_inner(
         # Bridge session data to permanent graph in the background
         if self_improvement:
             from cognee.api.v1.improve import improve
+
+            # Create/authorize the target dataset before launching the
+            # background improve. Otherwise it bridges into a dataset that was
+            # never created, and every bridge stage fails on write/read
+            # authorization. Mirrors the permanent path below.
+            user, _ = await resolve_authorized_user_datasets(dataset_name, user)
 
             async def _session_improve():
                 try:
