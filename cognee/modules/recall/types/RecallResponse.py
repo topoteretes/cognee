@@ -14,11 +14,6 @@ class ResponseAgentTraceEntry(SessionAgentTraceEntry):
     source: Literal["trace"]
 
 
-class ResponseGraphContextEntry(BaseModel):
-    source: Literal["graph_context"]
-    content: str
-
-
 class ResponseSessionContextEntry(BaseModel):
     source: Literal["session_context"]
     content: str
@@ -30,10 +25,6 @@ class ResponseGraphEntry(SearchResultItem):
 
 
 RecallResponse = Annotated[
-    ResponseQAEntry
-    | ResponseAgentTraceEntry
-    | ResponseGraphContextEntry
-    | ResponseSessionContextEntry
-    | ResponseGraphEntry,
+    ResponseQAEntry | ResponseAgentTraceEntry | ResponseSessionContextEntry | ResponseGraphEntry,
     Field(discriminator="source"),
 ]

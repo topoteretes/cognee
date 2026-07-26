@@ -11,7 +11,7 @@ from uuid import UUID
 
 from cognee.context_global_variables import session_user, set_database_global_context_variables
 from cognee.infrastructure.databases.graph import get_graph_engine
-from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.databases.vector.embeddings.get_embedding_engine import (
     get_embedding_engine,
 )
@@ -124,7 +124,7 @@ async def build_truth_subspace(
         return empty_result
 
     async with set_database_global_context_variables(dataset_obj.id, dataset_obj.owner_id):
-        vector_engine = get_vector_engine()
+        vector_engine = await get_vector_engine_async()
         graph_engine = await get_graph_engine()
 
         # Step 1: accepted learning statements from session_learnings.

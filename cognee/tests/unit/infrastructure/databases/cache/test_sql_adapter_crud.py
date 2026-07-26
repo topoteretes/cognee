@@ -578,7 +578,7 @@ async def test_log_usage_and_get_usage_logs(adapter):
 @pytest.mark.asyncio
 async def test_kv_round_trip_and_overwrite(adapter):
     """set_value/get_value/delete_value round-trip; set is an upsert."""
-    key = "graph_knowledge:u1:s1"
+    key = "session_note:u1:s1"
     assert await adapter.get_value(key) is None
 
     await adapter.set_value(key, "snapshot-1")
@@ -597,7 +597,7 @@ async def test_kv_round_trip_and_overwrite(adapter):
 @pytest.mark.asyncio
 async def test_kv_ttl_expiry(adapter):
     """A keyed value with ttl becomes invisible once expires_at passes."""
-    key = "graph_sync_checkpoint:u1:d1:s1"
+    key = "checkpoint:test"
     await adapter.set_value(key, "checkpoint", ttl=3600)
     assert await adapter.get_value(key) == "checkpoint"
 
@@ -611,7 +611,7 @@ async def test_kv_ttl_expiry(adapter):
 @pytest.mark.asyncio
 async def test_kv_without_ttl_is_immortal(adapter):
     """ttl=None stores the value without expiry (expires_at stays NULL)."""
-    key = "graph_knowledge:u1:s1"
+    key = "session_note:u1:s1"
     await adapter.set_value(key, "forever")
 
     assert await _fetch_expirations(adapter, cache_kv, key=key) == [None]
@@ -631,7 +631,7 @@ async def test_prune_clears_only_the_four_cache_tables(adapter):
         "u1", "s1", trace_id="t1", origin_function="plan_trip", status="success"
     )
     await adapter.log_usage("u1", {"endpoint": "/add"})
-    await adapter.set_value("graph_knowledge:u1:s1", "snapshot")
+    await adapter.set_value("session_note:u1:s1", "note")
 
     async with adapter.engine.begin() as connection:
         await connection.execute(text("CREATE TABLE co_tenant (id INTEGER PRIMARY KEY, v TEXT)"))
@@ -642,7 +642,7 @@ async def test_prune_clears_only_the_four_cache_tables(adapter):
     assert await adapter.get_all_qa_entries("u1", "s1") == []
     assert await adapter.get_agent_trace_session("u1", "s1") == []
     assert await adapter.get_usage_logs("u1") == []
-    assert await adapter.get_value("graph_knowledge:u1:s1") is None
+    assert await adapter.get_value("session_note:u1:s1") is None
 
     async with adapter.engine.connect() as connection:
         survivors = (await connection.execute(text("SELECT v FROM co_tenant"))).scalars().all()
@@ -839,3 +839,46 @@ async def test_session_context_reads_exclude_expired(adapter):
     await adapter.create_session_context_entry("u1", "s1", _ctx("c1"))
     await _backdate_expirations(adapter, cache_session_context, _past(), entry_id="c1")
     assert await adapter.get_session_context_entries("u1", "s1") == []
+
+
+@pytest.mark.asyncio
+async def test_uuid_ids_write_and_read_as_string_keys(adapter):
+    """uuid.UUID ids must key the same rows as their string form.
+
+    Callers sometimes hold ``user.id`` as a ``uuid.UUID``; on Postgres the
+    asyncpg bind cast then parses as ``text = uuid`` (42883) and on sqlite the
+    driver rejects the bind. The StringKey column type stringifies every bind.
+    """
+    user_uuid, session_uuid = uuid4(), uuid4()
+    await adapter.create_qa_entry(user_uuid, session_uuid, "Q", "C", "A", qa_id="id1")
+
+    via_uuid = await adapter.get_all_qa_entries(user_uuid, session_uuid)
+    via_str = await adapter.get_all_qa_entries(str(user_uuid), str(session_uuid))
+    assert [entry.qa_id for entry in via_uuid] == ["id1"]
+    assert [entry.qa_id for entry in via_str] == ["id1"]
+
+    latest = await adapter.get_latest_qa_entries(user_uuid, session_uuid, last_n=5)
+    assert [entry.qa_id for entry in latest] == ["id1"]
+
+
+@pytest.mark.asyncio
+async def test_uuid_ids_across_trace_context_and_usage(adapter):
+    """UUID user ids work for traces, session context, and usage logs alike."""
+    user_uuid, session_uuid = uuid4(), uuid4()
+
+    await adapter.append_agent_trace_step(
+        user_uuid, session_uuid, trace_id="t1", origin_function="f", status="ok"
+    )
+    traces = await adapter.get_agent_trace_session(str(user_uuid), str(session_uuid))
+    assert [trace.trace_id for trace in traces] == ["t1"]
+
+    await adapter.create_session_context_entry(user_uuid, session_uuid, _ctx("c1"))
+    entries = await adapter.get_session_context_entries(str(user_uuid), str(session_uuid))
+    assert [entry["id"] for entry in entries] == ["c1"]
+    assert await adapter.update_session_context_entry(user_uuid, session_uuid, "c1", {"note": "n"})
+
+    await adapter.log_usage(user_uuid, {"call": "search"})
+    assert len(await adapter.get_usage_logs(str(user_uuid))) == 1
+
+    assert await adapter.delete_session(user_uuid, session_uuid) is True
+    assert await adapter.get_all_qa_entries(str(user_uuid), str(session_uuid)) == []

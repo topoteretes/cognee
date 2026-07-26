@@ -49,6 +49,10 @@ def _process_ontology_nodes(
             else Entity.id_for(ontology_node.name)
         )
         ont_node_name = generate_node_name(ontology_node.name)
+        # Preserve the source ontology IRI on the stored node (Phase 0). The
+        # AttachedOntologyNode carries the rdflib URIRef; stringify it so the
+        # identifier survives persistence into the property graph.
+        ont_node_uri = str(ontology_node.uri) if ontology_node.uri is not None else None
 
         if ontology_node.category == "classes":
             ont_node_key = _create_node_key(ont_node_id, "type")
@@ -58,6 +62,7 @@ def _process_ontology_nodes(
                     name=ont_node_name,
                     description=ont_node_name,
                     ontology_valid=True,
+                    ontology_uri=ont_node_uri,
                     importance_weight=data_chunk.importance_weight,
                 )
 
@@ -69,6 +74,7 @@ def _process_ontology_nodes(
                     name=ont_node_name,
                     description=ont_node_name,
                     ontology_valid=True,
+                    ontology_uri=ont_node_uri,
                     belongs_to_set=data_chunk.belongs_to_set,
                     importance_weight=data_chunk.importance_weight,
                 )
@@ -134,12 +140,14 @@ def _create_type_node(
     )
 
     ontology_validated = bool(closest_class)
+    ontology_uri = None
 
     if ontology_validated:
         old_key = type_node_key
         node_id = EntityType.id_for(closest_class.name)
         type_node_key = _create_node_key(node_id, "type")
         new_node_name = generate_node_name(closest_class.name)
+        ontology_uri = str(closest_class.uri) if closest_class.uri is not None else None
 
         name_mapping[node_name] = closest_class.name
         key_mapping[old_key] = type_node_key
@@ -151,6 +159,7 @@ def _create_type_node(
         type=node_name,
         description=node_name,
         ontology_valid=ontology_validated,
+        ontology_uri=ontology_uri,
         importance_weight=data_chunk.importance_weight,
     )
 
@@ -195,12 +204,14 @@ def _create_entity_node(
     )
 
     ontology_validated = bool(start_ent_ont)
+    ontology_uri = None
 
     if ontology_validated:
         old_key = entity_node_key
         generated_node_id = Entity.id_for(start_ent_ont.name)
         entity_node_key = _create_node_key(generated_node_id, "entity")
         new_node_name = generate_node_name(start_ent_ont.name)
+        ontology_uri = str(start_ent_ont.uri) if start_ent_ont.uri is not None else None
 
         name_mapping[generated_node_name] = start_ent_ont.name
         key_mapping[old_key] = entity_node_key
@@ -212,6 +223,7 @@ def _create_entity_node(
         is_a=type_node,
         description=node_description,
         ontology_valid=ontology_validated,
+        ontology_uri=ontology_uri,
         belongs_to_set=data_chunk.belongs_to_set,
         # TODO add importance_weight calculation if an entity with that id already exits
         importance_weight=data_chunk.importance_weight,

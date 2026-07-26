@@ -74,6 +74,7 @@ async def persist_agent_trace_feedbacks_in_knowledge_graph_pipeline(
             cognify_agent_trace_feedback,
             dataset_id=dataset_to_write[0].id,
             node_set_name=node_set_name,
+            user=user,
         ),
     ]
 
@@ -81,6 +82,7 @@ async def persist_agent_trace_feedbacks_in_knowledge_graph_pipeline(
         extraction_tasks=extraction_tasks,
         enrichment_tasks=enrichment_tasks,
         dataset=dataset_to_write[0].id,
+        user=user,
         data=[{}],
         run_in_background=run_in_background,
     )

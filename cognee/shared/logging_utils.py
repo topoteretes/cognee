@@ -409,7 +409,7 @@ def setup_logging(log_level=None, name=None) -> bool:
             else:
                 exc_type, exc_value, tb = sys.exc_info()
 
-            if exc_type and hasattr(exc_type, __name__):
+            if exc_type and hasattr(exc_type, "__name__"):
                 event_dict["exception_type"] = exc_type.__name__
             event_dict["exception_message"] = str(exc_value)
             event_dict["traceback"] = True

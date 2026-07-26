@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from cognee.cli.api_client import CogneeApiClient
+from cognee.cli.api_client import CogneeApiClient, is_connection_error
 
 
 class TestCogneeApiClientInit:
@@ -50,6 +50,82 @@ class TestCogneeApiClientSharedConnection:
             assert c1 is c2
             # httpx.Client should only have been constructed once
             assert mock_httpx.return_value.Client.call_count == 1
+
+    def test_client_follows_redirects(self):
+        """The client must follow the collection-slash canonicalisation 307 so
+        it works against both cloud (slash) and local (no-slash) deployments."""
+        with patch("cognee.cli.api_client._import_httpx") as mock_httpx:
+            api = CogneeApiClient("http://localhost:8000", headers={"X-Api-Key": "k"})
+            api._get_client()
+
+            kwargs = mock_httpx.return_value.Client.call_args.kwargs
+            assert kwargs["follow_redirects"] is True
+            assert kwargs["headers"] == {"X-Api-Key": "k"}
+
+
+class TestDatasetsEndpoints:
+    """Dataset collection calls must use the canonical trailing-slash form."""
+
+    def _client_with_mock(self, json_body):
+        with patch("cognee.cli.api_client._import_httpx"):
+            client = CogneeApiClient("https://tenant.aws.cognee.ai")
+            resp = MagicMock(status_code=200)
+            resp.json.return_value = json_body
+            http = MagicMock()
+            http.get.return_value = resp
+            http.post.return_value = resp
+            http.delete.return_value = resp
+            client._client = http
+            return client, http
+
+    def test_datasets_list_uses_trailing_slash(self):
+        client, http = self._client_with_mock([{"id": "1", "name": "alpha"}])
+        result = client.datasets_list()
+        assert http.get.call_args[0][0] == "https://tenant.aws.cognee.ai/api/v1/datasets/"
+        assert result == [{"id": "1", "name": "alpha"}]
+
+    def test_datasets_create_uses_trailing_slash(self):
+        client, http = self._client_with_mock({"id": "1", "name": "alpha"})
+        client.datasets_create("alpha")
+        assert http.post.call_args[0][0] == "https://tenant.aws.cognee.ai/api/v1/datasets/"
+
+    def test_datasets_delete_all_uses_trailing_slash(self):
+        client, http = self._client_with_mock(None)
+        client.datasets_delete_all()
+        assert http.delete.call_args[0][0] == "https://tenant.aws.cognee.ai/api/v1/datasets/"
+
+
+class TestHealthProbe:
+    """health() must reuse the pooled (authed) client and never turn a
+    reachable-but-degraded server (503) into a raised error."""
+
+    def test_health_returns_body_on_503_without_raising(self):
+        with patch("cognee.cli.api_client._import_httpx"):
+            client = CogneeApiClient("https://tenant.aws.cognee.ai", headers={"X-Api-Key": "k"})
+            resp = MagicMock(status_code=503)
+            resp.json.return_value = {"status": "not ready", "health": "unhealthy"}
+            http = MagicMock()
+            http.get.return_value = resp
+            client._client = http
+
+            result = client.health()
+
+            # Reused the shared client (which carries auth headers), hit /health.
+            assert http.get.call_args[0][0] == "https://tenant.aws.cognee.ai/health"
+            assert result["status"] == "not ready"
+
+
+class TestIsConnectionError:
+    def test_transport_errors_are_connection_errors(self):
+        import httpx
+
+        assert is_connection_error(httpx.ConnectError("refused")) is True
+        assert is_connection_error(httpx.ConnectTimeout("timed out")) is True
+        assert is_connection_error(httpx.ReadTimeout("slow")) is True
+
+    def test_http_and_other_errors_are_not_connection_errors(self):
+        assert is_connection_error(RuntimeError("API error 500")) is False
+        assert is_connection_error(ValueError("bad")) is False
 
     def test_close_resets_client(self):
         with patch("cognee.cli.api_client._import_httpx") as mock_httpx:

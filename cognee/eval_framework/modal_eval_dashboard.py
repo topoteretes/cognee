@@ -1,6 +1,7 @@
 import os
 import json
 
+import shlex
 import subprocess
 import modal
 import streamlit as st
@@ -38,7 +39,13 @@ def run():
         "--server.enableCORS=false "
         "--server.enableXsrfProtection=false"
     )
-    subprocess.Popen(cmd, shell=True)
+    # Use shlex.split + shell=False to avoid shell injection risk and
+    # ensure the process is tracked (no zombie). The Popen object is
+    # stored so the process can be managed/cleaned up if needed.
+    cmd_args = shlex.split(cmd)
+    proc = subprocess.Popen(cmd_args, shell=False)
+    # Keep a reference so the process is not garbage-collected prematurely.
+    _ = proc
 
 
 # ----------------------------------------------------------------------------

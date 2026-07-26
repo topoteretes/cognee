@@ -253,7 +253,7 @@ async def build_and_persist_context_index(
         ctx=ctx,
     )
 
-    await persist_context_index_edges(assignments, unified_engine)
+    await persist_context_index_edges(assignments, unified_engine, ctx=ctx)
     return context_datapoints
 
 

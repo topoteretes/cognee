@@ -7,7 +7,7 @@ import os
 import pathlib
 import cognee
 from cognee.infrastructure.databases.graph import get_graph_engine
-from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.modules.search.types import SearchType
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
@@ -135,7 +135,7 @@ async def main():
         graph_engine = await get_graph_engine()
         nodes_phase2, edges_phase2 = await graph_engine.get_graph_data()
 
-        vector_engine = get_vector_engine()
+        vector_engine = await get_vector_engine_async()
         triplets_phase2 = await vector_engine.search(
             query_text="technology", limit=None, collection_name="Triplet_text"
         )

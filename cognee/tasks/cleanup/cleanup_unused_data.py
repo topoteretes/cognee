@@ -12,7 +12,7 @@ from typing import Optional, Dict, Any
 from uuid import UUID
 import os
 from cognee.infrastructure.databases.graph import get_graph_engine
-from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.models import Data, DatasetData
 from cognee.shared.logging_utils import get_logger
