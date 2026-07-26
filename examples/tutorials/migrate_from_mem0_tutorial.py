@@ -172,9 +172,7 @@ async def main():
     source = Mem0Source(SAMPLE_EXPORT, mode="preserve")
     record_count = 0
     async for record in source.records():
-        assert isinstance(record, COGXMemory), (
-            f"Expected COGXMemory, got {type(record).__name__}"
-        )
+        assert isinstance(record, COGXMemory), f"Expected COGXMemory, got {type(record).__name__}"
         record_count += 1
         print(
             f"  [{record.external_id}] {record.content[:80]}..."
