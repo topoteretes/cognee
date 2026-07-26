@@ -57,7 +57,17 @@ dependencies = [
     "structlog>=25.2.0,<26",
     "pympler>=1.1,<2.0.0",
     "pylance>=0.22.0,<=0.36.0",
-    "ladybug>=0.16.0,<=0.18.2",
+    # ladybug 0.18.x publishes only macosx_15_0 wheels and its sdist needs C++20
+    # std::atomic_ref, which Apple Clang's libc++ on macOS <= 14 lacks — so the
+    # source-build fallback hard-fails there. Darwin 24 == macOS 15: older Macs
+    # stay on 0.17.x (storage code 41; the ladybug_migrate worker upgrades the
+    # on-disk format when they later move to 0.18). The '24.' (trailing dot) is
+    # deliberate: it is not a valid PEP 440 version, which forces PEP 508's
+    # string-comparison fallback — packaging evaluates BOTH sides of and/or, and
+    # version-comparing platform_release crashes pip on Linux kernels like
+    # "6.8.0-45-generic" (packaging.version.InvalidVersion).
+    "ladybug>=0.16.0,<=0.18.2 ; sys_platform != 'darwin' or platform_release >= '24.'",
+    "ladybug>=0.16.0,<0.18 ; sys_platform == 'darwin' and platform_release < '24.'",
     "python-magic-bin<0.5 ; platform_system == 'Windows'", # Only needed for Windows
     "networkx>=3.4.2,<4",
     "uvicorn>=0.34.0,<1.0.0",
