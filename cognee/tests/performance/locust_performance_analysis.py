@@ -325,7 +325,7 @@ if __name__ == "__main__":
                 with urllib.request.urlopen(url, timeout=2) as resp:
                     if resp.status == 200:
                         return
-            except (urllib.error.URLError, ConnectionError):
+            except (urllib.error.URLError, ConnectionError, TimeoutError):
                 pass
             time.sleep(0.5)
         raise SystemExit(f"Cognee server at {url} did not become ready in {timeout}s")

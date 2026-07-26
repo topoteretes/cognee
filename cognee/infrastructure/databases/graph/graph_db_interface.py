@@ -3,6 +3,12 @@ from abc import abstractmethod, ABC
 from typing import Optional, Dict, Any, List, Tuple, Type, Union
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.engine import DataPoint
+from cognee.infrastructure.databases.exceptions import UnsupportedProvenanceCapability
+from cognee.infrastructure.databases.provenance import (
+    EdgeDeleteData,
+    EdgeIdentity,
+    NodeDeleteData,
+)
 
 logger = get_logger()
 
@@ -75,7 +81,12 @@ class GraphDBInterface(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    async def add_nodes(self, nodes: Union[List[Node], List[DataPoint]]) -> None:
+    async def add_nodes(
+        self,
+        nodes: Union[List[Node], List[DataPoint]],
+        source_ref_key: Optional[str] = None,
+        pipeline_run_id: Optional[str] = None,
+    ) -> None:
         """
         Add multiple nodes to the graph in a single operation.
 
@@ -83,6 +94,11 @@ class GraphDBInterface(ABC):
         -----------
 
             - nodes (Union[List[Node], List[DataPoint]]): A list of Node objects or DataPoint objects to be added to the graph.
+            - source_ref_key (Optional[str]): Graph provenance source ref to stamp
+              atomically as part of this write. Backends that support graph-provenance
+              provenance fold it into the same statement; others may ignore it. (default None)
+            - pipeline_run_id (Optional[str]): Run id recorded with the provenance stamp so
+              the write is rollbackable by run. Ignored when source_ref_key is None. (default None)
         """
         raise NotImplementedError
 
@@ -130,6 +146,278 @@ class GraphDBInterface(ABC):
         list-property-storing adapters are free to implement it later.
         """
         return None
+
+    async def attach_node_source_refs(
+        self,
+        node_ids: list[str],
+        source_ref_keys: list[str],
+        pipeline_run_id: str | None = None,
+    ) -> None:
+        """
+        Attach source refs to existing graph nodes.
+
+        Implementations append the supplied source_ref_keys, derive and append
+        source_dataset_ids from those refs, and when pipeline_run_id is
+        provided, append source_run_ids and source_run_refs as rollback indexes.
+
+        Parameters:
+        -----------
+
+            - node_ids (list[str]): Unique identifiers of the nodes to update.
+            - source_ref_keys (list[str]): Source refs to append to each node.
+            - pipeline_run_id (str | None): Pipeline run that attached the refs.
+
+        Default implementation raises UnsupportedProvenanceCapability.
+        """
+        raise UnsupportedProvenanceCapability()
+
+    async def attach_edge_source_refs(
+        self,
+        edges: list[EdgeIdentity],
+        source_ref_keys: list[str],
+        pipeline_run_id: str | None = None,
+    ) -> None:
+        """
+        Attach source refs to existing graph edges.
+
+        Implementations append the supplied source_ref_keys, derive and append
+        source_dataset_ids from those refs, and when pipeline_run_id is
+        provided, append source_run_ids and source_run_refs as rollback indexes.
+
+        Parameters:
+        -----------
+
+            - edges (list[EdgeIdentity]): Edge identities to update.
+            - source_ref_keys (list[str]): Source refs to append to each edge.
+            - pipeline_run_id (str | None): Pipeline run that attached the refs.
+
+        Default implementation raises UnsupportedProvenanceCapability.
+        """
+        raise UnsupportedProvenanceCapability()
+
+    async def remove_node_source_refs(
+        self,
+        node_ids: list[str],
+        source_ref_keys: list[str],
+    ) -> None:
+        """
+        Remove source refs from graph nodes.
+
+        Implementations also keep source_dataset_ids, source_run_ids, and
+        source_run_refs consistent with the remaining source_ref_keys.
+
+        Parameters:
+        -----------
+
+            - node_ids (list[str]): Unique identifiers of the nodes to update.
+            - source_ref_keys (list[str]): Source refs to remove from each node.
+
+        Default implementation raises UnsupportedProvenanceCapability.
+        """
+        raise UnsupportedProvenanceCapability()
+
+    async def remove_edge_source_refs(
+        self,
+        edges: list[EdgeIdentity],
+        source_ref_keys: list[str],
+    ) -> None:
+        """
+        Remove source refs from graph edges.
+
+        Implementations also keep source_dataset_ids, source_run_ids, and
+        source_run_refs consistent with the remaining source_ref_keys.
+
+        Parameters:
+        -----------
+
+            - edges (list[EdgeIdentity]): Edge identities to update.
+            - source_ref_keys (list[str]): Source refs to remove from each edge.
+
+        Default implementation raises UnsupportedProvenanceCapability.
+        """
+        raise UnsupportedProvenanceCapability()
+
+    async def delete_edge_triples(
+        self,
+        edges: list[EdgeIdentity],
+    ) -> None:
+        """
+        Delete graph edges by source id, target id, and relationship name.
+
+        Parameters:
+        -----------
+
+            - edges (list[EdgeIdentity]): Edge identities to delete.
+
+        Default implementation raises UnsupportedProvenanceCapability.
+        """
+        raise UnsupportedProvenanceCapability()
+
+    async def get_node_delete_data(
+        self,
+        node_ids: list[str],
+    ) -> dict[str, NodeDeleteData]:
+        """
+        Return node properties needed by graph-provenance delete and vector cleanup.
+
+        Returned data includes node identity, indexed fields, node properties,
+        and all four provenance fields.
+
+        Parameters:
+        -----------
+
+            - node_ids (list[str]): Unique identifiers of the nodes to inspect.
+
+        Returns:
+        --------
+
+            - dict[str, NodeDeleteData]: Delete data keyed by node id.
+        """
+        raise UnsupportedProvenanceCapability()
+
+    async def get_edge_delete_data(
+        self,
+        edges: list[EdgeIdentity],
+    ) -> dict[EdgeIdentity, EdgeDeleteData]:
+        """
+        Return edge properties needed by graph-provenance delete and rollback.
+
+        Returned data includes edge identity, edge text, edge properties, and
+        all four provenance fields.
+
+        Parameters:
+        -----------
+
+            - edges (list[EdgeIdentity]): Edge identities to inspect.
+
+        Returns:
+        --------
+
+            - dict[EdgeIdentity, EdgeDeleteData]: Delete data keyed by edge identity.
+        """
+        raise UnsupportedProvenanceCapability()
+
+    async def find_nodes_by_source_ref(
+        self,
+        source_ref_key: str,
+    ) -> list[str]:
+        """
+        Find graph node ids that currently contain a source ref.
+
+        Parameters:
+        -----------
+
+            - source_ref_key (str): Source ref key to match.
+        """
+        raise UnsupportedProvenanceCapability()
+
+    async def find_edges_by_source_ref(
+        self,
+        source_ref_key: str,
+    ) -> list[EdgeIdentity]:
+        """
+        Find graph edges that currently contain a source ref.
+
+        Parameters:
+        -----------
+
+            - source_ref_key (str): Source ref key to match.
+        """
+        raise UnsupportedProvenanceCapability()
+
+    async def find_node_source_refs_by_dataset(
+        self,
+        dataset_id: str,
+    ) -> dict[str, list[str]]:
+        """
+        Find node source refs owned by a dataset.
+
+        Parameters:
+        -----------
+
+            - dataset_id (str): Dataset id to match.
+
+        Returns:
+        --------
+
+            - dict[str, list[str]]: Matching source refs keyed by node id.
+        """
+        raise UnsupportedProvenanceCapability()
+
+    async def find_edge_source_refs_by_dataset(
+        self,
+        dataset_id: str,
+    ) -> dict[EdgeIdentity, list[str]]:
+        """
+        Find edge source refs owned by a dataset.
+
+        Parameters:
+        -----------
+
+            - dataset_id (str): Dataset id to match.
+
+        Returns:
+        --------
+
+            - dict[EdgeIdentity, list[str]]: Matching source refs keyed by edge identity.
+        """
+        raise UnsupportedProvenanceCapability()
+
+    async def find_node_source_refs_by_pipeline_run(
+        self,
+        pipeline_run_id: str,
+    ) -> dict[str, list[str]]:
+        """
+        Find node source refs attached by a pipeline run.
+
+        Parameters:
+        -----------
+
+            - pipeline_run_id (str): Pipeline run id to match.
+
+        Returns:
+        --------
+
+            - dict[str, list[str]]: Matching source refs keyed by node id.
+        """
+        raise UnsupportedProvenanceCapability()
+
+    async def find_edge_source_refs_by_pipeline_run(
+        self,
+        pipeline_run_id: str,
+    ) -> dict[EdgeIdentity, list[str]]:
+        """
+        Find edge source refs attached by a pipeline run.
+
+        Parameters:
+        -----------
+
+            - pipeline_run_id (str): Pipeline run id to match.
+
+        Returns:
+        --------
+
+            - dict[EdgeIdentity, list[str]]: Matching source refs keyed by edge identity.
+        """
+        raise UnsupportedProvenanceCapability()
+
+    async def set_graph_metadata(
+        self,
+        metadata: dict[str, str],
+    ) -> None:
+        """
+        Store graph-level metadata used to identify provenance schema support.
+
+        Parameters:
+        -----------
+
+            - metadata (dict[str, str]): Metadata keys and values to persist.
+        """
+        raise UnsupportedProvenanceCapability()
+
+    async def get_graph_metadata(self) -> dict[str, str]:
+        """Return graph-level metadata used to identify provenance schema support."""
+        raise UnsupportedProvenanceCapability()
 
     @abstractmethod
     async def get_node(self, node_id: str) -> Optional[NodeData]:
@@ -180,7 +468,10 @@ class GraphDBInterface(ABC):
 
     @abstractmethod
     async def add_edges(
-        self, edges: Union[List[EdgeData], List[Tuple[str, str, str, Optional[Dict[str, Any]]]]]
+        self,
+        edges: Union[List[EdgeData], List[Tuple[str, str, str, Optional[Dict[str, Any]]]]],
+        source_ref_key: Optional[str] = None,
+        pipeline_run_id: Optional[str] = None,
     ) -> None:
         """
         Add multiple edges to the graph in a single operation.
@@ -189,6 +480,11 @@ class GraphDBInterface(ABC):
         -----------
 
             - edges (Union[List[EdgeData], List[Tuple[str, str, str, Optional[Dict[str, Any]]]]]): A list of EdgeData objects or tuples representing edges to be added.
+            - source_ref_key (Optional[str]): Graph provenance source ref to stamp
+              atomically as part of this write. Backends that support graph-provenance
+              provenance fold it into the same statement; others may ignore it. (default None)
+            - pipeline_run_id (Optional[str]): Run id recorded with the provenance stamp so
+              the write is rollbackable by run. Ignored when source_ref_key is None. (default None)
         """
         raise NotImplementedError
 

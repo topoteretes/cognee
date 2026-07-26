@@ -1,7 +1,9 @@
 import { MantineThemeOverride } from "@mantine/core";
 
 const typography: MantineThemeOverride = {
-  fontFamily: '"Inter", system-ui, sans-serif',
+  fontFamily: '"TWKLausanne", sans-serif',
+  fontFamilyMonospace:
+    'ui-monospace, Menlo, Monaco, "Cascadia Mono", "Segoe UI Mono", "Roboto Mono", monospace',
   fontSizes: {
     xl: "1.5rem",
     lg: "1.25rem",
@@ -10,15 +12,15 @@ const typography: MantineThemeOverride = {
     xs: "0.75rem",
   },
   lineHeights: {
-    xl: "155%",
-    lg: "155%",
-    md: "155%",
-    sm: "143%",
-    xs: "133%",
+    xl: "1.25",
+    lg: "1.25",
+    md: "1.25",
+    sm: "1.25",
+    xs: "1.25",
   },
   autoContrast: true,
   headings: {
-    fontWeight: "600",
+    fontWeight: "700",
     sizes: {
       h1: { fontSize: "1.75rem", lineHeight: "2.25rem" },
       h2: { fontSize: "1.5rem", lineHeight: "2rem" },

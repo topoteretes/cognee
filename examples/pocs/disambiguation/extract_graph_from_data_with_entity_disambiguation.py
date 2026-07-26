@@ -24,7 +24,7 @@ from cognee.tasks.graph.exceptions import (
     InvalidOntologyAdapterError,
 )
 
-from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.infrastructure.databases.vector import get_vector_engine_async
 
 
 def _stamp_provenance_deep(data, pipeline_name, task_name, visited=None):
@@ -120,7 +120,7 @@ async def integrate_chunk_graphs(
 
 
 async def build_prompt(chunk, vector_search_limit, custom_prompt) -> Optional[str]:
-    vector_engine = get_vector_engine()
+    vector_engine = await get_vector_engine_async()
     exists = await vector_engine.has_collection(collection_name="Entity_name")
 
     if not (exists and custom_prompt):

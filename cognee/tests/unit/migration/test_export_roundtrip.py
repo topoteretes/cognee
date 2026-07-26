@@ -213,6 +213,39 @@ class TestManifest:
         _write_cogx(nodes, edges, destination, "main_dataset")
         assert read_manifest(destination).embedding_model is None
 
+    def test_migration_revision_roundtrips_to_source(self, tmp_path):
+        """The source store's stamped revision travels via the manifest and
+        surfaces on COGXArchiveSource, so the import can re-stamp the target
+        back to the revision the exported data actually has."""
+        nodes, edges = sample_graph()
+        destination = tmp_path / "archive_cogx"
+        _write_cogx(
+            nodes, edges, destination, "main_dataset", migration_revision="some_migration_slug"
+        )
+        assert read_manifest(destination).migration_revision == "some_migration_slug"
+        assert COGXArchiveSource(destination).migration_revision == "some_migration_slug"
+
+    def test_default_export_writes_no_social_layer(self, tmp_path):
+        """Without include_permissions, the archive must be knowledge-only:
+        no permissions.json (and a stale one from a previous export session
+        is removed by the writer's clean-slate init)."""
+        nodes, edges = sample_graph()
+        destination = tmp_path / "archive_cogx"
+        destination.mkdir()
+        (destination / "permissions.json").write_text("{}")
+        _write_cogx(nodes, edges, destination, "main_dataset")
+        assert not (destination / "permissions.json").exists()
+        assert COGXArchiveSource(destination).social_layer is None
+
+    def test_migration_revision_defaults_to_none(self, tmp_path):
+        """Archives without a revision (external systems, older exporters)
+        must leave the source attribute None so the import keeps its stamp."""
+        nodes, edges = sample_graph()
+        destination = tmp_path / "archive_cogx"
+        _write_cogx(nodes, edges, destination, "main_dataset")
+        assert read_manifest(destination).migration_revision is None
+        assert COGXArchiveSource(destination).migration_revision is None
+
     def _tamper_version(self, destination, version):
         manifest_path = destination / "manifest.json"
         manifest = json.loads(manifest_path.read_text())

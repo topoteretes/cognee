@@ -5,6 +5,15 @@ export const tokens = {
   purplePressed:    "#4A0BAF",
   purpleLight:      "#6C5CE7",   // selected icon tint
   green:            "#0DFF00",
+  // Canonical CTA accent for dark surfaces (hero, onboarding, embedded auth).
+  // Pair `lavender` background with `lavenderText` foreground.
+  lavender:         "#BC9BFF",
+  lavenderText:     "#1e1e1c",
+  lavenderHover:    "#A87CFF",
+  lavenderTint10:   "rgba(188,155,255,0.10)",
+  lavenderTint20:   "rgba(188,155,255,0.20)",
+  lavenderTint35:   "rgba(188,155,255,0.35)",
+  lavenderTint60:   "rgba(188,155,255,0.60)",
 
   // ── Status ──
   statusProcessing: "#FFD500",

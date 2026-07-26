@@ -18,6 +18,7 @@ async def export(
     destination: Optional[Union[str, Path]] = None,
     user=None,
     link_relations: bool = False,
+    include_permissions: bool = False,
 ) -> GraphSnapshot: ...
 
 
@@ -28,6 +29,7 @@ async def export(
     destination: Optional[Union[str, Path]] = None,
     user=None,
     link_relations: bool = False,
+    include_permissions: bool = False,
 ) -> ExportResult: ...
 
 
@@ -39,6 +41,7 @@ async def export(
     destination: Optional[Union[str, Path]] = None,
     user=None,
     link_relations: bool = False,
+    include_permissions: bool = False,
 ) -> ExportResult: ...
 
 
@@ -48,6 +51,7 @@ async def export(
     destination: Optional[Union[str, Path]] = None,
     user=None,
     link_relations: bool = False,
+    include_permissions: bool = False,
 ) -> Union[ExportResult, GraphSnapshot]:
     """Export a dataset's knowledge graph.
 
@@ -97,4 +101,5 @@ async def export(
             destination=destination,
             user=user,
             link_relations=link_relations,
+            include_permissions=include_permissions,
         )

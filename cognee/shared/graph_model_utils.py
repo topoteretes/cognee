@@ -84,7 +84,7 @@ def datapoint_model_to_basemodel(
         if strip_metadata:
             field_names = [name for name in field_names if name != "metadata"]
 
-        converted_fields = {}
+        converted_fields: dict[str, Any] = {}
         for field_name in field_names:
             field_info = model_fields[field_name]
             default_value = (

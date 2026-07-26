@@ -8,7 +8,7 @@ import cognee
 from cognee.api.v1.datasets import datasets
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.llm import LLMGateway
 from cognee.modules.chunking.models import DocumentChunk
@@ -160,7 +160,7 @@ async def main(mock_create_structured_output: AsyncMock):
     user = await get_default_user()
     await set_database_global_context_variables("main_dataset", user.id)
 
-    vector_engine = get_vector_engine()
+    vector_engine = await get_vector_engine_async()
 
     assert not await vector_engine.has_collection("EdgeType_relationship_name")
     assert not await vector_engine.has_collection("Entity_name")
