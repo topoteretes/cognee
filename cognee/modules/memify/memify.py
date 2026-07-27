@@ -49,7 +49,10 @@ async def memify(
         enrichment_tasks: List of Cognee Tasks to handle enrichment of provided graph/data from extraction tasks.
         data: The data to ingest. Can be anything when custom extraction and enrichment tasks are used.
               Data provided here will be forwarded to the first extraction task in the pipeline as input.
-              If no data is provided the whole graph (or subgraph if node_name/node_type is specified) will be forwarded
+              If no data is provided the whole graph (or subgraph if node_name/node_type is specified) will be forwarded.
+              The graph projection is skipped entirely when there are no extraction tasks to consume it
+              and the caller did not supply its own enrichment tasks, since the default enrichment task
+              discards non-DataPoint input. Pass data explicitly to run an enrichment-only pipeline.
         dataset: Dataset name or dataset uuid to process.
         user: User context for authentication and data access. Uses default if None.
         node_type: Filter graph to specific entity types (for advanced filtering). Used when no data is provided.
@@ -86,6 +89,11 @@ async def memify(
         ```
     """
 
+    # Track whether the caller supplied enrichment tasks before defaults are
+    # filled in: a caller-provided enrichment-only pipeline may legitimately
+    # consume the memory fragment itself, so it must keep receiving one.
+    caller_supplied_enrichment_tasks = bool(enrichment_tasks)
+
     # Use default triplet embedding tasks if no tasks were provided
     if not extraction_tasks:
         extraction_tasks = get_default_memify_extraction_tasks()
@@ -97,13 +105,32 @@ async def memify(
     user, authorized_dataset_list = await resolve_authorized_user_datasets(dataset, user)
     authorized_dataset = authorized_dataset_list[0]
 
-    if not data:
+    # The memory fragment exists to feed the first extraction task. Projecting it
+    # reads the entire graph into memory, so skip it when nothing can consume it:
+    # with no extraction tasks the fragment goes straight to the default
+    # enrichment task (index_data_points), which explicitly skips non-DataPoint
+    # objects like CogneeGraph and therefore discards it.
+    #
+    # This is the common case, not an edge case: get_default_memify_extraction_tasks()
+    # returns [] unless the triplet_embedding config flag is set, and that flag is
+    # off by default. Every default-configuration memify call was paying a
+    # full-graph read to build an object that was then thrown away -- which also
+    # taxes every remember(), since remember() runs improve() -> memify() by
+    # default (self_improvement=True).
+    should_build_memory_fragment = bool(extraction_tasks) or caller_supplied_enrichment_tasks
+
+    if not data and should_build_memory_fragment:
         async with set_database_global_context_variables(
             authorized_dataset.id, authorized_dataset.owner_id
         ):
             memory_fragment = await get_memory_fragment(node_type=node_type, node_name=node_name)
             # Subgraphs should be a single element in the list to represent one data item
             data = [memory_fragment]
+    elif not data:
+        logger.debug(
+            "memify: no extraction tasks resolved, skipping the memory-fragment "
+            "projection because the default enrichment task cannot consume it"
+        )
 
     memify_tasks = [
         *extraction_tasks,  # Unpack tasks provided to memify pipeline
