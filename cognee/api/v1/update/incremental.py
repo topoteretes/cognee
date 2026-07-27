@@ -22,7 +22,7 @@ to run the full update instead.
 
 import json
 from typing import List, Optional
-from uuid import NAMESPACE_OID, UUID, uuid4, uuid5
+from uuid import UUID, uuid4
 
 from sqlalchemy import select
 
@@ -31,7 +31,9 @@ from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.llm.utils import get_max_chunk_tokens
+from cognee.modules.chunking.chunk_id import chunk_content_hash, content_chunk_id
 from cognee.modules.chunking.incremental_chunking import (
+    IncrementalPlan,
     IncrementalPlanError,
     compute_incremental_plan,
 )
@@ -65,12 +67,12 @@ async def _read_processed_text(raw_data_location: str) -> str:
         return file.read()
 
 
-async def _get_stored_chunks(document_id: UUID, old_text: str) -> List[tuple]:
-    """Return the document's stored chunk (id, text) pairs in document order.
+async def _get_stored_chunks(document_id: UUID, old_text: str) -> List[dict]:
+    """Return the document's stored chunk nodes (full props) in document order.
 
     Chunks are discovered via their ``is_part_of`` edges and ordered by where
     their text occurs in the stored processed text, so the ordering holds even
-    after earlier incremental updates rewrote chunk_index values.
+    after earlier incremental updates moved chunk positions.
     """
     graph_engine = await get_graph_engine()
     connections = await graph_engine.get_connections(str(document_id))
@@ -86,22 +88,22 @@ async def _get_stored_chunks(document_id: UUID, old_text: str) -> List[tuple]:
             chunk_ids.append(source_id)
 
     chunk_nodes = await graph_engine.get_nodes(chunk_ids) if chunk_ids else []
-    chunks = {str(node["id"]): node["text"] for node in chunk_nodes if node.get("text") is not None}
+    chunks = [node for node in chunk_nodes if node.get("text") is not None]
 
     if not chunks:
         raise IncrementalUpdateNotPossible(
             f"document {document_id} has no stored chunks in the graph (not cognified yet?)"
         )
 
-    def position(item):
-        found = old_text.find(item[1])
+    def position(node):
+        found = old_text.find(node["text"])
         if found < 0:
             raise IncrementalUpdateNotPossible(
                 "stored chunk text not found in stored document text"
             )
         return found
 
-    return sorted(chunks.items(), key=position)
+    return sorted(chunks, key=position)
 
 
 def _build_document(data: Data) -> TextDocument:
@@ -118,17 +120,41 @@ def _build_document(data: Data) -> TextDocument:
 
 
 def _build_new_chunks(
-    document: TextDocument, texts: List[str], first_index: int, word_size
+    document: TextDocument, plan: IncrementalPlan, stored_chunks: List[dict], word_size
 ) -> List[DocumentChunk]:
-    """DocumentChunk objects for the replacement region (content-addressed ids)."""
+    """DocumentChunk objects for the replacement region.
+
+    Ids follow the content-hash scheme used by TextChunker: occurrence counting
+    runs over the final document order (kept prefix first), so two identical
+    texts stay distinct. Surviving chunks created under an older id scheme are
+    guarded against by bumping the occurrence on a direct id collision.
+    """
+    surviving_ids = {
+        str(node["id"])
+        for position, node in enumerate(stored_chunks)
+        if position not in set(plan.affected_indices)
+    }
+    occurrences: dict = {}
+    for position in range(plan.unchanged_prefix_count):
+        text_hash = chunk_content_hash(stored_chunks[position]["text"])
+        occurrences[text_hash] = occurrences.get(text_hash, 0) + 1
+
     chunks = []
-    for offset, text in enumerate(texts):
+    for offset, text in enumerate(plan.new_chunk_texts):
+        content_hash = chunk_content_hash(text)
+        occurrence = occurrences.get(content_hash, 0)
+        chunk_id = content_chunk_id(document.id, content_hash, occurrence)
+        while str(chunk_id) in surviving_ids:
+            occurrence += 1
+            chunk_id = content_chunk_id(document.id, content_hash, occurrence)
+        occurrences[content_hash] = occurrence + 1
         chunks.append(
             DocumentChunk(
-                id=uuid5(NAMESPACE_OID, f"{document.id}-incremental-{text}"),
+                id=chunk_id,
                 text=text,
                 chunk_size=sum(word_size(w) for w in text.split()),
-                chunk_index=first_index + offset,
+                content_hash=content_hash,
+                chunk_index=plan.unchanged_prefix_count + offset,
                 cut_type="incremental_update",
                 is_part_of=document,
                 contains=[],
@@ -137,6 +163,48 @@ def _build_new_chunks(
             )
         )
     return chunks
+
+
+def _build_shifted_chunks(
+    document: TextDocument,
+    stored_chunks: List[dict],
+    plan: IncrementalPlan,
+    new_chunk_count: int,
+) -> List[DocumentChunk]:
+    """Surviving chunks whose chunk_index no longer matches their final position.
+
+    Rebuilt with their EXISTING id and corrected index; re-storing them through
+    add_data_points upserts the graph node and refreshes the vector payload, so
+    citations and layout stay consistent after the region length changed.
+    """
+    total = len(stored_chunks)
+    shifted = []
+    for position, node in enumerate(stored_chunks):
+        if position in set(plan.affected_indices):
+            continue
+        if position < plan.unchanged_prefix_count:
+            expected = position
+        else:
+            offset_in_suffix = position - (total - plan.unchanged_suffix_count)
+            expected = plan.unchanged_prefix_count + new_chunk_count + offset_in_suffix
+        if int(node.get("chunk_index", -1)) == expected:
+            continue
+        text = node["text"]
+        shifted.append(
+            DocumentChunk(
+                id=UUID(str(node["id"])),
+                text=text,
+                chunk_size=int(node.get("chunk_size", 0)),
+                content_hash=node.get("content_hash") or chunk_content_hash(text),
+                chunk_index=expected,
+                cut_type=str(node.get("cut_type", "incremental_update")),
+                is_part_of=document,
+                contains=[],
+                document_id=str(document.id),
+                document_name=document.name,
+            )
+        )
+    return shifted
 
 
 async def _mark_document_processed(data_id: UUID, dataset_id: UUID) -> None:
@@ -202,7 +270,7 @@ async def incremental_update(
     try:
         plan = compute_incremental_plan(
             old_text,
-            [text for _, text in stored_chunks],
+            [node["text"] for node in stored_chunks],
             new_text,
             max_chunk_size,
             word_size=get_word_size,
@@ -215,14 +283,12 @@ async def incremental_update(
         return {"status": "unchanged", "deleted_chunks": 0, "added_chunks": 0}
 
     # -- Delete affected chunks + summaries + chunk-orphaned entities -------- #
-    affected_chunk_ids = [stored_chunks[i][0] for i in plan.affected_indices]
+    affected_chunk_ids = [str(stored_chunks[i]["id"]) for i in plan.affected_indices]
     await delete_chunks_incremental(affected_chunk_ids)
 
     # -- Re-ingest only the replacement chunks ------------------------------- #
     document = _build_document(new_data)
-    new_chunks = _build_new_chunks(
-        document, plan.new_chunk_texts, plan.unchanged_prefix_count, get_word_size
-    )
+    new_chunks = _build_new_chunks(document, plan, stored_chunks, get_word_size)
 
     context = PipelineContext(
         user=user,
@@ -235,18 +301,25 @@ async def incremental_update(
     summaries = await summarize_text(new_chunks)
     await add_data_points(summaries, ctx=context)
 
+    # -- Renumber surviving chunks whose position shifted --------------------- #
+    shifted_chunks = _build_shifted_chunks(document, stored_chunks, plan, len(new_chunks))
+    if shifted_chunks:
+        await add_data_points(shifted_chunks, ctx=context)
+
     await _mark_document_processed(data_id, dataset_id)
 
     logger.info(
-        "incremental update: kept %d+%d chunks, deleted %d, added %d",
+        "incremental update: kept %d+%d chunks, deleted %d, added %d, reindexed %d",
         plan.unchanged_prefix_count,
         plan.unchanged_suffix_count,
         len(affected_chunk_ids),
         len(new_chunks),
+        len(shifted_chunks),
     )
     return {
         "status": "incremental",
         "deleted_chunks": len(affected_chunk_ids),
         "added_chunks": len(new_chunks),
         "kept_chunks": plan.unchanged_prefix_count + plan.unchanged_suffix_count,
+        "reindexed_chunks": len(shifted_chunks),
     }

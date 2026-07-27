@@ -33,6 +33,9 @@ class DocumentChunk(DataPoint):
     chunk_size: int
     chunk_index: int
     cut_type: str
+    # Hex digest of `text` (see chunk_id.chunk_content_hash); the chunk id is
+    # derived from it, so identity survives edits that shift chunk positions.
+    content_hash: Optional[str] = None
     is_part_of: Document
     contains: List[Union[Entity, Event, tuple[Edge, Entity]]] = None
     importance_weight: Optional[float] = 0.5
