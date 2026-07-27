@@ -23,7 +23,7 @@ import cognee
 from cognee.api.v1.datasets import datasets
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.databases.graph import get_graph_engine
-from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.llm import LLMGateway
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
@@ -261,7 +261,7 @@ async def test_shared_entity_preserved_across_documents(mock_create_structured_o
     logger.info("✅ Germany→Netherlands edge deleted")
 
     # Verify vector indices match graph state
-    vector_engine = get_vector_engine()
+    vector_engine = await get_vector_engine_async()
 
     # Check if Germany is still in vector index
     if await vector_engine.has_collection("Entity_name"):

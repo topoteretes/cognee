@@ -331,29 +331,13 @@ async def test_delete_session(session_manager):
 
 
 @pytest.mark.asyncio
-async def test_graph_context_round_trip_via_kv_interface(session_manager, sql_adapter):
-    """set/get_graph_context round-trips through the adapter's KV methods (cache_kv table)."""
-    await session_manager.set_graph_context(
-        user_id="u1", session_id="s1", context="graph snapshot text"
-    )
+async def test_delete_session_removes_legacy_graph_snapshot_key(session_manager, sql_adapter):
+    """delete_session clears graph snapshots left by the removed graph-to-session sync."""
+    await sql_adapter.set_value("graph_knowledge:u1:s1", "legacy snapshot")
+    assert await sql_adapter.get_value("graph_knowledge:u1:s1") == "legacy snapshot"
 
-    # Stored under the verbatim legacy key string, readable via the interface method.
-    assert await sql_adapter.get_value("graph_knowledge:u1:s1") == "graph snapshot text"
-    assert (
-        await session_manager.get_graph_context(user_id="u1", session_id="s1")
-        == "graph snapshot text"
-    )
-
-    # delete_session also removes the graph knowledge snapshot key.
     await session_manager.delete_session(user_id="u1", session_id="s1")
     assert await sql_adapter.get_value("graph_knowledge:u1:s1") is None
-    assert await session_manager.get_graph_context(user_id="u1", session_id="s1") == ""
-
-
-@pytest.mark.asyncio
-async def test_get_graph_context_returns_empty_when_unset(session_manager):
-    """get_graph_context returns empty string when no snapshot was stored."""
-    assert await session_manager.get_graph_context(user_id="u1", session_id="missing") == ""
 
 
 @pytest.mark.asyncio

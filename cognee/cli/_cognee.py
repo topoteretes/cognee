@@ -102,12 +102,14 @@ def _discover_commands() -> List[Type[SupportsCliCommand]]:
         ("cognee.cli.commands.improve_command", "ImproveCommand"),
         ("cognee.cli.commands.forget_command", "ForgetCommand"),
         ("cognee.cli.commands.serve_command", "ServeCommand"),
+        ("cognee.cli.commands.eval_command", "EvalCommand"),
         ("cognee.cli.commands.migrate_command", "UpgradeCommand"),
         ("cognee.cli.commands.migrate_command", "DowngradeCommand"),
         ("cognee.cli.commands.migrate_command", "HistoryCommand"),
         ("cognee.cli.commands.migrate_command", "CurrentCommand"),
         ("cognee.cli.commands.migrate_command", "StampCommand"),
         ("cognee.cli.commands.push_command", "PushCommand"),
+        ("cognee.cli.commands.report_command", "ReportCommand"),
     ]
 
     for module_path, class_name in command_modules:
@@ -379,8 +381,7 @@ def main() -> int:
                 raiseable_exception = ex.raiseable_exception
 
             # Print exception
-            if raiseable_exception:
-                fmt.error(str(ex))
+            fmt.error(str(ex))
 
             fmt.note(f"Please refer to our docs at '{docs_url}' for further assistance.")
 

@@ -1,5 +1,6 @@
 """Unit tests for the Pydantic-native export (GraphSnapshot). Pure: no DB, no LLM."""
 
+import asyncio
 from uuid import uuid4
 
 from cognee.infrastructure.engine import DataPoint
@@ -67,6 +68,58 @@ class TestRehydrateNode:
         node = rehydrate_node(_entity_props(metadata='{"index_fields": ["name"]}'))
         assert isinstance(node, Entity)
         assert node.metadata["index_fields"] == ["name"]
+
+    def test_dynamic_model_bakes_index_fields_into_class_default(self):
+        node = rehydrate_node(
+            {
+                "id": str(uuid4()),
+                "type": "AlienChunk",
+                "text": "Zorg lives on Mars.",
+                "metadata": {"index_fields": ["text"]},
+            }
+        )
+        # The CLASS default must carry index_fields, not just the instance:
+        # get_graph_from_model rebuilds nodes via copy_model from class field
+        # defaults, so instance-only metadata never reaches the vector index.
+        assert type(node).model_fields["metadata"].default["index_fields"] == ["text"]
+
+    def test_index_fields_and_text_survive_graph_extraction(self):
+        """Regression: imported DocumentChunk raw nodes fail real-class
+        validation (flat properties lack the required relation fields) and
+        fall back to a dynamic model. Downstream model machinery only sees
+        DECLARED fields, so the dynamic class must declare the record's
+        properties AND carry index_fields as its class metadata default —
+        otherwise get_graph_from_model drops the chunk's text (extra="allow"
+        values are not iterated) and/or its embeddable-field markers
+        (copy_model re-applies class defaults), the restored archive has no
+        DocumentChunk_text collection, and hybrid retrieval fails with
+        NoDataError."""
+        from cognee.modules.graph.utils import get_graph_from_model
+
+        node = rehydrate_node(
+            {
+                "id": str(uuid4()),
+                "type": "DocumentChunk",
+                "text": "Alice lives in Berlin.",
+                "chunk_index": 0,
+                "metadata": {"index_fields": ["text"]},
+            }
+        )
+        assert node.metadata["index_fields"] == ["text"]
+        assert node.text == "Alice lives in Berlin."
+
+        nodes, _ = asyncio.run(
+            get_graph_from_model(node, added_nodes={}, added_edges={}, visited_properties={})
+        )
+        (extracted,) = nodes
+        assert extracted.metadata["index_fields"] == ["text"], (
+            "index_fields lost during graph extraction — imported chunk text "
+            "will not be vector-indexed"
+        )
+        assert getattr(extracted, "text", None) == "Alice lives in Berlin.", (
+            "chunk text lost during graph extraction — undeclared extra fields "
+            "are dropped, so the imported chunk stores and indexes as empty"
+        )
 
 
 class TestGraphSnapshot:

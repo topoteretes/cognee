@@ -87,3 +87,34 @@ class GraphOntology(BaseModel):
 
     nodes: list[OntologyNode]
     edges: list[OntologyEdge]
+
+
+class Contradiction(BaseModel):
+    """
+    One contradiction between two of the numbered facts sent to the LLM (issue #3699).
+
+    The model only reports which facts conflict; the caller already holds the rendered
+    fact lines and reconstructs their text locally, so it is guaranteed to match the graph.
+
+    Instance variables:
+
+    - first_fact_id: Identifier of the first conflicting fact, as given in the prompt.
+    - second_fact_id: Identifier of the second conflicting fact, as given in the prompt.
+    - reason: Short explanation of why the two facts are incompatible.
+    - confidence: The model's confidence that this is a genuine contradiction, in [0.0, 1.0].
+    """
+
+    first_fact_id: str = Field(description="Id of the first conflicting fact, e.g. 'F0'.")
+    second_fact_id: str = Field(description="Id of the second conflicting fact, e.g. 'F3'.")
+    reason: str = Field(description="Why the two facts are incompatible.")
+    confidence: float = Field(
+        ge=0.0, le=1.0, description="Confidence that this is a genuine contradiction."
+    )
+
+
+class ContradictionList(BaseModel):
+    """
+    Structured contradiction-detection response: the detected contradictions (possibly empty).
+    """
+
+    contradictions: List[Contradiction] = Field(default_factory=list)

@@ -14,7 +14,6 @@ from cognee.modules.observability import (
     COGNEE_DATASET_NAME,
     COGNEE_SESSION_ID,
     COGNEE_IMPROVE_STAGES,
-    COGNEE_GRAPH_EDGES_SYNCED,
 )
 
 logger = get_logger("improve")
@@ -40,6 +39,7 @@ async def improve(
     node_name: Optional[List[str]] = None,
     session_ids: Optional[List[str]] = None,
     build_global_context_index: bool = False,
+    build_truth_subspace: bool = False,
     **kwargs: Unpack[ImproveKwargs],
 ):
     """Enrich an existing knowledge graph with additional context and rules.
@@ -70,10 +70,6 @@ async def improve(
        builds retrieval-ready bucket and root summaries over the graph's
        text summaries.
 
-    5. **Sync graph to session cache** -- incrementally copies new graph
-       relationships back into the session cache as human-readable
-       summaries for fast retrieval during session completions.
-
     Without ``session_ids``, only stage 3 runs by default.
 
     Args:
@@ -86,6 +82,10 @@ async def improve(
             context index after default enrichment. Skipped in background
             mode because ordered background pipeline chaining is not
             supported yet.
+        build_truth_subspace: Opt-in flag (default ``False``) for building the
+            truth subspace from distilled session learnings after distillation
+            and before enrichment. Only runs when ``session_ids`` is provided.
+            Off by default = no behaviour change.
         **kwargs: Additional options -- see ``ImproveKwargs``.
 
     Returns:
@@ -113,6 +113,7 @@ async def improve(
             "session_ids": ",".join(session_ids) if session_ids else "",
             "run_in_background": run_in_background,
             "build_global_context_index": build_global_context_index,
+            "build_truth_subspace": build_truth_subspace,
             "cognee_version": cognee_version,
         },
     )
@@ -199,6 +200,26 @@ async def improve(
                 if distilled:
                     stages_run.append("distill_sessions")
 
+                # Stage 2d: build the truth subspace from distilled session
+                # learnings (opt-in, default OFF). Runs after distillation so
+                # freshly accepted lessons are available as anchors, and before
+                # enrichment. Non-fatal — never blocks the rest of improve().
+                if build_truth_subspace:
+                    try:
+                        from cognee.modules.truth_subspace.build import (
+                            build_truth_subspace as _build_truth_subspace,
+                        )
+
+                        result_ts = await _build_truth_subspace(
+                            dataset=dataset,
+                            session_ids=session_ids,
+                            user=user,
+                        )
+                        logger.info("improve: truth subspace built -> %s", result_ts)
+                        stages_run.append("build_truth_subspace")
+                    except Exception as e:
+                        logger.warning("improve: truth subspace build failed (non-fatal): %s", e)
+
             # Stage 3: default enrichment (triplet embeddings)
             from cognee.modules.memify import memify
 
@@ -229,16 +250,6 @@ async def improve(
                     )
                     if global_context_index_updated:
                         stages_run.append("global_context_index")
-
-            # Stage 5: sync enriched graph back to session cache (incremental)
-            # Skip when running in background — stage 3 hasn't completed yet
-            if session_ids and not run_in_background:
-                await _sync_graph_to_sessions(
-                    dataset=dataset,
-                    session_ids=session_ids,
-                    user=user,
-                )
-                stages_run.append("sync_graph_to_sessions")
 
             span.set_attribute(COGNEE_IMPROVE_STAGES, ",".join(stages_run))
 
@@ -323,16 +334,13 @@ async def _bridge_sessions(
         persist_sessions_in_knowledge_graph_pipeline,
     )
 
-    try:
-        await persist_sessions_in_knowledge_graph_pipeline(
-            user=user,
-            session_ids=session_ids,
-            dataset=dataset_name,
-            run_in_background=run_in_background,
-        )
-        logger.info("improve: session Q&A persisted from %d session(s)", len(session_ids))
-    except Exception as e:
-        logger.warning("improve: session persistence failed (non-fatal): %s", e)
+    await persist_sessions_in_knowledge_graph_pipeline(
+        user=user,
+        session_ids=session_ids,
+        dataset=dataset_name,
+        run_in_background=run_in_background,
+    )
+    logger.info("improve: session Q&A persisted from %d session(s)", len(session_ids))
 
 
 async def _extract_agent_context(
@@ -457,57 +465,3 @@ async def _persist_session_traces(
         )
     except Exception as e:
         logger.warning("improve: trace persistence failed (non-fatal): %s", e)
-
-
-async def _sync_graph_to_sessions(
-    dataset: Union[str, UUID],
-    session_ids: List[str],
-    user,
-):
-    """Incrementally sync recent graph knowledge into each session cache.
-
-    Reads new edges from the relational DB (since last checkpoint) and
-    stores them as structured JSON-lines in the session's graph knowledge
-    context. Each session is synced independently — one failure does not
-    prevent others from completing.
-    """
-    from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
-        resolve_authorized_user_datasets,
-    )
-    from cognee.tasks.memify.sync_graph_to_session import sync_graph_to_session
-
-    dataset_name = await _resolve_dataset_name(dataset, user)
-
-    try:
-        _, authorized_datasets = await resolve_authorized_user_datasets(dataset, user)
-    except Exception as e:
-        logger.warning("improve: graph-to-session sync setup failed (non-fatal): %s", e)
-        return
-
-    if not authorized_datasets:
-        logger.warning("improve: no authorized datasets for graph sync")
-        return
-    dataset_obj = authorized_datasets[0]
-    user_id = str(user.id) if hasattr(user, "id") else None
-    if not user_id:
-        return
-
-    for session_id in session_ids:
-        try:
-            result = await sync_graph_to_session(
-                user_id=user_id,
-                session_id=session_id,
-                dataset_id=dataset_obj.id,
-                dataset_name=dataset_name,
-            )
-            logger.info(
-                "improve: synced %d edges to session '%s'",
-                result.get("synced", 0),
-                session_id,
-            )
-        except Exception as e:
-            logger.warning(
-                "improve: graph-to-session sync failed for session '%s' (non-fatal): %s",
-                session_id,
-                e,
-            )

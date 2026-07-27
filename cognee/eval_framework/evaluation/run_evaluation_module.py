@@ -3,7 +3,6 @@ import json
 from typing import List
 from cognee.eval_framework.evaluation.evaluation_executor import EvaluationExecutor
 from cognee.eval_framework.analysis.metrics_calculator import calculate_metrics_statistics
-from cognee.eval_framework.analysis.dashboard_generator import create_dashboard
 from cognee.infrastructure.files.storage import get_file_storage
 from cognee.infrastructure.databases.relational.get_relational_engine import (
     get_relational_engine,
