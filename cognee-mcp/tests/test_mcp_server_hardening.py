@@ -125,7 +125,6 @@ WORKSPACE_UI_ENTRY_TOOLS = {
     "open_cognee_workspace",
 }
 WORKSPACE_INTERNAL_TOOLS = {
-    "cognify_file",
     "list_datasets_json",
     "list_dataset_data_json",
     "create_dataset_json",

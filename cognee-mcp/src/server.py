@@ -3,6 +3,7 @@ import os
 import sys
 import argparse
 import asyncio
+import base64
 import subprocess
 from collections import deque
 from datetime import datetime, timezone
@@ -80,6 +81,7 @@ cognee_client: Optional[CogneeClient] = None
 # unbounded memory). Each entry is (iso_timestamp, error_message).
 _TASK_ERROR_HISTORY = 50
 _task_errors: dict[str, Deque[Tuple[str, str]]] = {}
+_MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 
 # Strong references to in-flight background tasks. asyncio's event loop only keeps
 # weak references to tasks, so a fire-and-forget task can be GC'd mid-execution if
@@ -1076,7 +1078,9 @@ async def prune():
 @mcp.tool()
 @log_usage(function_name="MCP remember", log_type="mcp_tool")
 async def remember(
-    data: str,
+    data: str = None,
+    filename: str = None,
+    content_base64: str = None,
     dataset_name: str = None,
     session_id: str = None,
     custom_prompt: str = None,
@@ -1092,10 +1096,20 @@ async def remember(
     cache only. Fast, no entity extraction. Omit session_id when the
     content should be stored as permanent graph memory.
 
+    Pass either `data` (text) or `filename` + `content_base64` (a file
+    upload, up to 10 MB), not both. File uploads are permanent-memory
+    only and don't support session_id.
+
     Parameters
     ----------
-    data : str
-        The data to store (text content).
+    data : str, optional
+        The text content to store. Mutually exclusive with
+        filename/content_base64.
+    filename : str, optional
+        Original filename for a file upload. Used to derive the stored
+        document's name. Requires content_base64.
+    content_base64 : str, optional
+        Base64-encoded file content to ingest. Requires filename.
     dataset_name : str, optional
         Target dataset name. Defaults to the current MCP client's
         agent-scoped dataset (e.g. "cursor_vscode_memory"), or
@@ -1105,11 +1119,48 @@ async def remember(
     custom_prompt : str, optional
         Custom prompt for entity extraction (permanent mode only).
     """
+    if content_base64 and data:
+        return [
+            types.TextContent(
+                type="text",
+                text="Error: pass either `data` or `filename` + `content_base64`, not both.",
+            )
+        ]
+    if not content_base64 and not data:
+        return [
+            types.TextContent(
+                type="text",
+                text="Error: provide `data` or `filename` + `content_base64`.",
+            )
+        ]
+    if content_base64 and session_id:
+        return [
+            types.TextContent(
+                type="text",
+                text="Error: file uploads (content_base64) don't support session_id.",
+            )
+        ]
+
+    if content_base64:
+        try:
+            decoded = base64.b64decode(content_base64, validate=True)
+        except Exception as e:
+            return [types.TextContent(type="text", text=f"Error: invalid base64 content ({e}).")]
+        if len(decoded) > _MAX_UPLOAD_BYTES:
+            return [
+                types.TextContent(
+                    type="text",
+                    text=f"Error: file exceeds 10 MB limit ({len(decoded):,} bytes).",
+                )
+            ]
+
     dataset_name = dataset_name or _agent_scoped_default_dataset()
     with redirect_stdout(sys.stderr):
         try:
             result = await cognee_client.remember(
                 data=data,
+                filename=filename,
+                content_base64=content_base64,
                 dataset_name=dataset_name,
                 session_id=session_id,
                 custom_prompt=custom_prompt,
@@ -1117,6 +1168,11 @@ async def remember(
             status = result.get("status", "completed")
             if session_id:
                 text = f"Stored in session cache (session_id={session_id}, status={status})."
+            elif content_base64:
+                text = (
+                    f"Ingested '{filename}' ({len(decoded):,} bytes) into dataset "
+                    f"'{dataset_name}' (status={status})."
+                )
             else:
                 text = f"Stored permanently in knowledge graph (dataset={dataset_name}, status={status})."
             return [types.TextContent(type="text", text=text)]
@@ -1523,87 +1579,6 @@ async def open_cognee_workspace() -> types.CallToolResult:
     return types.CallToolResult(
         content=[types.TextContent(type="text", text="Cognee workspace opened.")],
     )
-
-
-_MAX_UPLOAD_BYTES = 10 * 1024 * 1024
-
-
-@mcp.tool(
-    name="cognify_file",
-    description=(
-        "Ingest an uploaded file into Cognee memory. Accepts the file as base64. "
-        "Runs add synchronously, then launches cognify in the background."
-    ),
-)
-@log_usage(function_name="MCP cognify_file", log_type="mcp_tool")
-async def cognify_file(
-    filename: str,
-    content_base64: str,
-    dataset_name: str = None,
-) -> list:
-    import base64
-    import tempfile
-
-    dataset_name = dataset_name or _agent_scoped_default_dataset()
-
-    try:
-        data = base64.b64decode(content_base64, validate=True)
-    except Exception as e:
-        return [types.TextContent(type="text", text=f"Error: invalid base64 content ({e}).")]
-
-    if len(data) > _MAX_UPLOAD_BYTES:
-        return [
-            types.TextContent(
-                type="text",
-                text=f"Error: file exceeds 10 MB limit ({len(data):,} bytes).",
-            )
-        ]
-
-    # Sanitize to a basename with a fallback extension; preserves the original
-    # name so cognee's Data.name comes out as e.g. "alice_notes" rather than
-    # a tempfile slug like "tmp231sj_ac".
-    safe_name = Path(filename).name or "upload"
-    if not Path(safe_name).suffix:
-        safe_name += ".txt"
-
-    with redirect_stdout(sys.stderr):
-        tmp_dir = tempfile.mkdtemp(prefix="cognee_upload_")
-        tmp_path = os.path.join(tmp_dir, safe_name)
-        try:
-            with open(tmp_path, "wb") as f:
-                f.write(data)
-            await cognee_client.add(tmp_path, dataset_name=dataset_name)
-        finally:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
-            try:
-                os.rmdir(tmp_dir)
-            except OSError:
-                pass
-
-    async def _cognify_bg():
-        with redirect_stdout(sys.stderr):
-            try:
-                await cognee_client.cognify(datasets=[dataset_name])
-                logger.info(f"cognify_file: background cognify finished for '{dataset_name}'.")
-            except Exception as e:
-                ts = datetime.now(timezone.utc).isoformat()
-                _task_errors.setdefault(dataset_name, []).append((ts, str(e)))
-                logger.error(f"cognify_file: background cognify failed for '{dataset_name}': {e}")
-
-    asyncio.create_task(_cognify_bg())
-
-    return [
-        types.TextContent(
-            type="text",
-            text=(
-                f"Ingested '{filename}' ({len(data):,} bytes) into dataset '{dataset_name}'. "
-                f"Cognify is running in the background; refresh the workspace once it finishes."
-            ),
-        )
-    ]
 
 
 def _format_named_items(items, singular: str, plural: str, limit: int = 50) -> str:
