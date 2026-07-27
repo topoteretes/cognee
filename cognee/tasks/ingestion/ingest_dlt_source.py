@@ -206,16 +206,42 @@ async def _extract_dlt_schema(
     )
     schema = await engine.extract_schema()
 
-    # Filter out dlt internal tables (those starting with _dlt_ or containing
-    # staging) and tables not loaded by the current source. Postgres keys are
-    # schema-qualified ("dataset.table"), so compare the last path component.
-    filtered_schema = {
-        k: v
-        for k, v in schema.items()
-        if "_dlt_" not in k and "staging" not in k and k.split(".")[-1] in allowed_tables
-    }
+    # Drop DLT's internal tables and tables not loaded by the current source.
+    # Postgres keys are schema-qualified ("dataset.table"), so the loaded-table
+    # check compares the last path component.
+    filtered_schema = {}
+    internal_tables = []
+    for qualified_name, table_info in schema.items():
+        if _is_dlt_internal_table(qualified_name):
+            internal_tables.append(qualified_name)
+            continue
+        if qualified_name.split(".")[-1] not in allowed_tables:
+            continue
+        filtered_schema[qualified_name] = table_info
+
+    if internal_tables:
+        logger.debug(
+            "Excluded %d DLT-internal table(s) from schema: %s",
+            len(internal_tables),
+            sorted(internal_tables),
+        )
 
     return schema, filtered_schema
+
+
+def _is_dlt_internal_table(qualified_name: str) -> bool:
+    """Identify DLT's own artifacts in the staging database.
+
+    DLT's bookkeeping tables are prefixed ``_dlt_`` (_dlt_loads, _dlt_version,
+    _dlt_pipeline_state); on schema-qualified destinations its staging copies
+    live in a schema named ``{dataset}_staging``. Exact prefix/suffix matching
+    only — substring checks would silently drop user tables whose names merely
+    contain "staging" or "_dlt_" (e.g. "staging_orders", "my_dlt_exports").
+    """
+    *schema_parts, table = qualified_name.split(".")
+    if table.startswith("_dlt_"):
+        return True
+    return bool(schema_parts) and schema_parts[-1].endswith("_staging")
 
 
 def _quote_identifier(name: str) -> str:
