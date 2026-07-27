@@ -7,6 +7,10 @@ from cognee.modules.users.methods import get_default_user
 from cognee.api.v1.add import add
 from cognee.api.v1.cognify import cognify
 from cognee.api.v1.datasets import datasets
+from cognee.api.v1.update.incremental import IncrementalUpdateNotPossible, incremental_update
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger("update")
 
 
 async def update(
@@ -20,7 +24,8 @@ async def update(
     preferred_loaders: dict[str, dict[str, Any]] = None,
     incremental_loading: bool = True,
     data_cache: bool = True,
-) -> Union[Dict[str, PipelineRunInfo], List[PipelineRunInfo]]:
+    chunk_level_diff: bool = True,
+) -> Union[Dict[str, PipelineRunInfo], List[PipelineRunInfo], dict]:
     """
     Update existing data in Cognee.
 
@@ -77,6 +82,24 @@ async def update(
     """
     if not user:
         user = await get_default_user()
+
+    if chunk_level_diff:
+        # Chunk-level incremental path: diff the new text against the stored
+        # processed text, replace only the affected chunks. Falls through to
+        # the full delete+re-add flow when its preconditions aren't met
+        # (first ingestion, non-text content, stored chunks unavailable).
+        # Permission errors propagate — they must never trigger the fallback.
+        try:
+            return await incremental_update(
+                data_id=data_id,
+                data=data,
+                dataset_id=dataset_id,
+                user=user,
+                node_set=node_set,
+                preferred_loaders=preferred_loaders,
+            )
+        except IncrementalUpdateNotPossible as reason:
+            logger.info("chunk-level update not possible (%s); running full update", reason)
 
     await datasets.delete_data(
         dataset_id=dataset_id,

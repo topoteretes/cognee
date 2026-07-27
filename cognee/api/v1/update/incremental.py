@@ -1,0 +1,252 @@
+"""Chunk-level incremental update: diff, delete affected chunks, re-ingest.
+
+Flow (only runs from the update endpoint):
+
+1. Enforce dataset-level "write" permission and data membership/ownership
+   (same checks as the raw-document read endpoint).
+2. Read the OLD processed text from ``Data.raw_data_location`` and the stored
+   chunk nodes from the graph, ordered by their position in that text.
+3. Run ``add()`` so the new file goes through the normal add pipeline (loaders
+   store the new processed text and update the ``Data`` row).
+4. Diff old vs new text; expand the edit to affected chunk boundaries; split
+   the replacement region into balanced chunks under ``max_chunk_size``.
+5. Delete the affected chunks (+ summaries + chunk-orphaned entities) from the
+   graph and vector stores.
+6. Re-ingest ONLY the new chunks through the standard graph-extraction and
+   storage tasks, attributed to the same ``data_id`` via ``PipelineContext``.
+
+Raises IncrementalUpdateNotPossible when preconditions fail (first ingestion,
+non-text data, stored chunks not tiling the stored text) — the caller decides
+to run the full update instead.
+"""
+
+import json
+from typing import List, Optional
+from uuid import NAMESPACE_OID, UUID, uuid4, uuid5
+
+from sqlalchemy import select
+
+from cognee.api.v1.add import add
+from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.infrastructure.files.utils.open_data_file import open_data_file
+from cognee.infrastructure.llm.utils import get_max_chunk_tokens
+from cognee.modules.chunking.incremental_chunking import (
+    IncrementalPlanError,
+    compute_incremental_plan,
+)
+from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
+from cognee.modules.data.methods import get_authorized_dataset, get_data
+from cognee.modules.data.methods.get_dataset_data import get_dataset_data
+from cognee.modules.data.models import Data
+from cognee.modules.data.processing.document_types.TextDocument import TextDocument
+from cognee.modules.graph.methods.delete_chunks_incremental import delete_chunks_incremental
+from cognee.modules.pipelines.models.PipelineContext import PipelineContext
+from cognee.modules.pipelines.operations.run_tasks_data_item import DataItemStatus
+from cognee.modules.users.models import User
+from cognee.shared.data_models import KnowledgeGraph
+from cognee.shared.logging_utils import get_logger
+from cognee.tasks.graph.extract_graph_from_data import extract_graph_from_data
+from cognee.tasks.storage.add_data_points import add_data_points
+from cognee.tasks.summarization.summarize_text import summarize_text
+
+logger = get_logger("incremental_update")
+
+PIPELINE_NAME = "cognify_pipeline"  # attribute to the cognify pipeline's status key
+
+
+class IncrementalUpdateNotPossible(Exception):
+    """Preconditions for a chunk-level update are not met; run a full update."""
+
+
+async def _read_processed_text(raw_data_location: str) -> str:
+    """Read the stored processed text file (pattern from TextDocument.read)."""
+    async with open_data_file(raw_data_location, mode="r", encoding="utf-8") as file:
+        return file.read()
+
+
+async def _get_stored_chunks(document_id: UUID, old_text: str) -> List[tuple]:
+    """Return the document's stored chunk (id, text) pairs in document order.
+
+    Chunks are discovered via their ``is_part_of`` edges and ordered by where
+    their text occurs in the stored processed text, so the ordering holds even
+    after earlier incremental updates rewrote chunk_index values.
+    """
+    graph_engine = await get_graph_engine()
+    connections = await graph_engine.get_connections(str(document_id))
+    # get_connections puts the queried node in the "source" slot regardless of
+    # direction and omits large properties — take the true endpoints from the
+    # edge and fetch full chunk nodes (including text) separately.
+    chunk_ids = []
+    for _source, edge, _target in connections:
+        if "is_part_of" not in str(edge.get("relationship_name", "")):
+            continue
+        source_id = str(edge.get("source_node_id"))
+        if str(edge.get("target_node_id")) == str(document_id) and source_id != str(document_id):
+            chunk_ids.append(source_id)
+
+    chunk_nodes = await graph_engine.get_nodes(chunk_ids) if chunk_ids else []
+    chunks = {str(node["id"]): node["text"] for node in chunk_nodes if node.get("text") is not None}
+
+    if not chunks:
+        raise IncrementalUpdateNotPossible(
+            f"document {document_id} has no stored chunks in the graph (not cognified yet?)"
+        )
+
+    def position(item):
+        found = old_text.find(item[1])
+        if found < 0:
+            raise IncrementalUpdateNotPossible(
+                "stored chunk text not found in stored document text"
+            )
+        return found
+
+    return sorted(chunks.items(), key=position)
+
+
+def _build_document(data: Data) -> TextDocument:
+    """Mirror classify_documents' Document construction for this data row."""
+    return TextDocument(
+        id=data.id,
+        title=f"{data.name}.{data.extension}",
+        raw_data_location=data.raw_data_location,
+        name=data.name,
+        mime_type=data.mime_type,
+        external_metadata=json.dumps(data.external_metadata, indent=4),
+        importance_weight=data.importance_weight if data.importance_weight is not None else 0.5,
+    )
+
+
+def _build_new_chunks(
+    document: TextDocument, texts: List[str], first_index: int, word_size
+) -> List[DocumentChunk]:
+    """DocumentChunk objects for the replacement region (content-addressed ids)."""
+    chunks = []
+    for offset, text in enumerate(texts):
+        chunks.append(
+            DocumentChunk(
+                id=uuid5(NAMESPACE_OID, f"{document.id}-incremental-{text}"),
+                text=text,
+                chunk_size=sum(word_size(w) for w in text.split()),
+                chunk_index=first_index + offset,
+                cut_type="incremental_update",
+                is_part_of=document,
+                contains=[],
+                document_id=str(document.id),
+                document_name=document.name,
+            )
+        )
+    return chunks
+
+
+async def _mark_document_processed(data_id: UUID, dataset_id: UUID) -> None:
+    """Stamp cognify completion so a later cognify() doesn't redo the document."""
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        data_point = (
+            await session.execute(select(Data).filter(Data.id == data_id))
+        ).scalar_one_or_none()
+        status_for_pipeline = data_point.pipeline_status.setdefault(PIPELINE_NAME, {})
+        status_for_pipeline[str(dataset_id)] = DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED
+        await session.merge(data_point)
+        await session.commit()
+
+
+async def incremental_update(
+    data_id: UUID,
+    data,
+    dataset_id: UUID,
+    user: User,
+    node_set: Optional[List[str]] = None,
+    preferred_loaders=None,
+) -> dict:
+    """Perform a chunk-level incremental update of one document."""
+    # -- Permissions: dataset write + membership + ownership ---------------- #
+    dataset = await get_authorized_dataset(user, dataset_id, "write")
+    dataset_data = await get_dataset_data(dataset.id)
+    if not any(item.id == data_id for item in dataset_data):
+        raise IncrementalUpdateNotPossible(f"data {data_id} is not part of dataset {dataset_id}")
+    old_data = await get_data(user.id, data_id)  # raises on foreign data
+    if old_data is None or not old_data.raw_data_location:
+        raise IncrementalUpdateNotPossible("no stored processed text for this data item")
+
+    # -- Old state (must be captured BEFORE add() replaces the stored file) - #
+    old_text = await _read_processed_text(old_data.raw_data_location)
+    stored_chunks = await _get_stored_chunks(data_id, old_text)
+
+    # -- New state through the standard add pipeline ------------------------ #
+    # Wrapping in DataItem(data_id=...) routes ingest_data into its UPDATE
+    # branch for this exact row (text input would otherwise mint a new
+    # content-addressed id and leave the old row untouched).
+    from cognee.tasks.ingestion.data_item import DataItem
+
+    # Both caching layers must be off: the add-pipeline's incremental skip and
+    # the data cache would otherwise drop the item (its id already reads as
+    # processed) before ingest_data can rewrite the stored text.
+    await add(
+        data=DataItem(data=data, data_id=data_id),
+        dataset_id=dataset_id,
+        user=user,
+        node_set=node_set,
+        preferred_loaders=preferred_loaders,
+        incremental_loading=False,
+        data_cache=False,
+    )
+    new_data = await get_data(user.id, data_id)
+    new_text = await _read_processed_text(new_data.raw_data_location)
+
+    # -- Plan ---------------------------------------------------------------- #
+    max_chunk_size = await get_max_chunk_tokens()
+    from cognee.tasks.chunks.chunk_by_sentence import get_word_size
+
+    try:
+        plan = compute_incremental_plan(
+            old_text,
+            [text for _, text in stored_chunks],
+            new_text,
+            max_chunk_size,
+            word_size=get_word_size,
+        )
+    except IncrementalPlanError as error:
+        raise IncrementalUpdateNotPossible(str(error)) from error
+
+    if not plan.affected_indices and not plan.new_chunk_texts:
+        logger.info("incremental update: content unchanged, nothing to do")
+        return {"status": "unchanged", "deleted_chunks": 0, "added_chunks": 0}
+
+    # -- Delete affected chunks + summaries + chunk-orphaned entities -------- #
+    affected_chunk_ids = [stored_chunks[i][0] for i in plan.affected_indices]
+    await delete_chunks_incremental(affected_chunk_ids)
+
+    # -- Re-ingest only the replacement chunks ------------------------------- #
+    document = _build_document(new_data)
+    new_chunks = _build_new_chunks(
+        document, plan.new_chunk_texts, plan.unchanged_prefix_count, get_word_size
+    )
+
+    context = PipelineContext(
+        user=user,
+        data_item=new_data,
+        dataset=dataset,
+        pipeline_run_id=uuid4(),
+        pipeline_name=PIPELINE_NAME,
+    )
+    await extract_graph_from_data(new_chunks, KnowledgeGraph, ctx=context)
+    summaries = await summarize_text(new_chunks)
+    await add_data_points(summaries, ctx=context)
+
+    await _mark_document_processed(data_id, dataset_id)
+
+    logger.info(
+        "incremental update: kept %d+%d chunks, deleted %d, added %d",
+        plan.unchanged_prefix_count,
+        plan.unchanged_suffix_count,
+        len(affected_chunk_ids),
+        len(new_chunks),
+    )
+    return {
+        "status": "incremental",
+        "deleted_chunks": len(affected_chunk_ids),
+        "added_chunks": len(new_chunks),
+        "kept_chunks": plan.unchanged_prefix_count + plan.unchanged_suffix_count,
+    }
