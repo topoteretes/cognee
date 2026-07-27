@@ -35,15 +35,6 @@ logger = get_logger("resolve_dlt_sources")
 # free text, not categorical data, and would produce useless one-off nodes.
 MAX_COLUMN_VALUE_LENGTH = 256
 
-ALL_COLUMNS = "*"
-AUTO_COLUMNS = "auto"
-
-# Auto mode emits a column only when its values actually repeat across rows —
-# a column where (nearly) every row holds a distinct value (ids, timestamps,
-# free text) would produce one-off nodes and embeddings instead of join hubs.
-MAX_AUTO_DISTINCT_RATIO = 0.5
-MAX_AUTO_DISTINCT_VALUES = 1000
-
 
 async def resolve_dlt_sources(
     data: Any,
@@ -211,8 +202,6 @@ async def _build_source_manifest_item(
             )
         fk_lookup[fk_key] = node_id
 
-    resolved_value_columns = _resolve_column_value_selection(unique_rows, column_value_columns)
-
     tables: dict[str, dict] = {}
     manifest_rows: list[dict] = []
     # (source_table, fk_column, ref_table, fk_value) for FKs whose target row
@@ -235,7 +224,7 @@ async def _build_source_manifest_item(
             "text": _build_schema_context_text(row),
             "fk_references": _resolve_fk_references(row, fk_lookup, missing_fk_targets),
         }
-        column_values = _selected_column_values(row, resolved_value_columns.get(row.table_name))
+        column_values = _selected_column_values(row, column_value_columns)
         if column_values:
             manifest_row["column_values"] = column_values
         manifest_rows.append(manifest_row)
@@ -321,76 +310,19 @@ def _dedupe_rows(rows: List[DltRowData], source_name: str) -> dict[tuple, DltRow
     return unique_rows
 
 
-def _cell_text(value) -> Optional[str]:
-    """Normalize a cell for ColumnValue use; None when it must not become a node."""
-    if value is None:
-        return None
-    text = str(value).strip()
-    if not text or len(text) > MAX_COLUMN_VALUE_LENGTH:
-        return None
-    return text
+def _selected_column_values(dlt_row: DltRowData, selection: Optional[dict]) -> dict:
+    """Pick row cells that should become shared ColumnValue graph nodes.
 
-
-def _resolve_column_value_selection(unique_rows: dict, selection: Optional[dict]) -> dict:
-    """Resolve the per-table column selection for ColumnValue emission.
-
-    ``selection`` maps table name to a column spec; "*" is a table wildcard.
-    A spec of ["*"] selects every column, ["auto"] keeps only columns whose
-    cleaned values repeat across the table's rows (distinct/rows and absolute
-    distinct-count gates), anything else is an explicit column list.
-
-    Returns {table_name: set of column names}; a set containing ALL_COLUMNS
-    means every column of that table.
+    ``selection`` maps table name to a column list; "*" is a wildcard for
+    either side. Primary-key and foreign-key columns are excluded (they are
+    row identity and edges already), as are null, empty, and overlong values.
     """
     if not selection:
         return {}
-
-    rows_by_table: dict[str, list] = {}
-    for row in unique_rows.values():
-        rows_by_table.setdefault(row.table_name, []).append(row)
-
-    resolved: dict[str, set] = {}
-    for table_name, table_rows in rows_by_table.items():
-        spec = selection.get(table_name) or selection.get(ALL_COLUMNS)
-        if not spec:
-            continue
-        if ALL_COLUMNS in spec:
-            resolved[table_name] = {ALL_COLUMNS}
-            continue
-        if AUTO_COLUMNS not in spec:
-            resolved[table_name] = set(spec)
-            continue
-
-        values_by_column: dict[str, list[str]] = {}
-        for row in table_rows:
-            for column, value in row.row_data.items():
-                text = _cell_text(value)
-                if text is not None:
-                    values_by_column.setdefault(column, []).append(text)
-
-        qualifying = set()
-        for column, values in values_by_column.items():
-            distinct = len(set(values))
-            if distinct <= MAX_AUTO_DISTINCT_VALUES and distinct / len(values) <= (
-                MAX_AUTO_DISTINCT_RATIO
-            ):
-                qualifying.add(column)
-        if qualifying:
-            resolved[table_name] = qualifying
-    return resolved
-
-
-def _selected_column_values(dlt_row: DltRowData, columns: Optional[set]) -> dict:
-    """Pick row cells that should become shared ColumnValue graph nodes.
-
-    ``columns`` is the resolved selection for this row's table (see
-    ``_resolve_column_value_selection``). Primary-key and foreign-key columns
-    are excluded (they are row identity and edges already), as are null,
-    empty, and overlong values.
-    """
+    columns = selection.get(dlt_row.table_name) or selection.get("*")
     if not columns:
         return {}
-    take_all = ALL_COLUMNS in columns
+    take_all = "*" in columns
 
     fk_columns = {fk.get("column", "") for fk in dlt_row.foreign_keys}
     picked = {}
@@ -399,8 +331,10 @@ def _selected_column_values(dlt_row: DltRowData, columns: Optional[set]) -> dict
             continue
         if not take_all and column not in columns:
             continue
-        text = _cell_text(value)
-        if text is None:
+        if value is None:
+            continue
+        text = str(value).strip()
+        if not text or len(text) > MAX_COLUMN_VALUE_LENGTH:
             continue
         picked[column] = text
     return picked
