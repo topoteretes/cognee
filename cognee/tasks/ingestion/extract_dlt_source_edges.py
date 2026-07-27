@@ -25,6 +25,7 @@ async def extract_dlt_source_edges(
     data_points: List[DataPoint],
     ctx: Optional["PipelineContext"] = None,
     emitted_schema_docs: Optional[set] = None,
+    emitted_value_node_ids: Optional[set] = None,
 ) -> List[DataPoint]:
     """Create graph edges and schema nodes from a DLT source manifest.
 
@@ -38,7 +39,9 @@ async def extract_dlt_source_edges(
     so batching does not duplicate work. ``emitted_schema_docs`` is shared
     across batches of one pipeline run via the Task kwarg: a doc's schema
     nodes are emitted (and vector-embedded) only for the first batch, avoiding
-    re-embedding identical schema nodes per batch.
+    re-embedding identical schema nodes per batch. ``emitted_value_node_ids``
+    plays the same role for ColumnValue nodes, whose values recur across
+    batches: each unique value is persisted and embedded once per run.
     """
     # Group row chunks in this batch by their source document.
     source_docs = {}  # doc_id -> document
@@ -88,7 +91,12 @@ async def extract_dlt_source_edges(
                 }
             )
 
-    await emit_dlt_schema_graph(tables, row_records, ctx)
+    await emit_dlt_schema_graph(
+        tables,
+        row_records,
+        ctx,
+        emitted_value_node_ids=emitted_value_node_ids,
+    )
 
     if emitted_schema_docs is not None:
         emitted_schema_docs.update(newly_emitted_doc_ids)

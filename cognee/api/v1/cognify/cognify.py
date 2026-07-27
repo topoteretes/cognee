@@ -532,9 +532,14 @@ async def get_dlt_tasks(chunk_size: int = None, chunks_per_batch: int = None) ->
             task_config={"batch_size": chunks_per_batch},
         ),
         # LOAD: schema nodes and deterministic FK edges from the manifest.
-        # emitted_schema_docs is shared across batches of this pipeline run so
-        # schema nodes are only emitted (and embedded) for the first batch.
-        Task(extract_dlt_source_edges, emitted_schema_docs=set()),
+        # emitted_schema_docs and emitted_value_node_ids are shared across
+        # batches of this pipeline run so schema nodes and column value nodes
+        # are only emitted (and embedded) once per run, not once per batch.
+        Task(
+            extract_dlt_source_edges,
+            emitted_schema_docs=set(),
+            emitted_value_node_ids=set(),
+        ),
     ]
 
 

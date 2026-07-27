@@ -31,6 +31,7 @@ async def emit_dlt_schema_graph(
     tables: dict,
     row_records: list[dict],
     ctx: Optional["PipelineContext"] = None,
+    emitted_value_node_ids: Optional[set] = None,
 ) -> None:
     """Build and persist the DLT schema graph for the given tables and rows.
 
@@ -42,6 +43,11 @@ async def emit_dlt_schema_graph(
             value) with a column-named edge from the row, so rows sharing a
             value connect through the same node.
         ctx: optional pipeline context for provenance/ledger registration.
+        emitted_value_node_ids: set shared across batches of one pipeline run
+            (mirrors ``emitted_schema_docs``). Value nodes already in the set
+            are not re-persisted or re-embedded — only their row edges are
+            emitted — so each unique value costs one embedding per run instead
+            of one per batch.
 
     Creates SchemaTable nodes (deterministic uuid5 ids, so re-emitting is an
     idempotent upsert), SchemaRelationship nodes with has_foreign_key /
@@ -206,11 +212,15 @@ async def emit_dlt_schema_graph(
 
         # Optional cell-level nodes: one shared ColumnValue node per unique
         # (table, column, value), edge named after the column. Deterministic
-        # ids make rows sharing a value connect through the same node and
-        # make re-emission across batches an idempotent upsert.
+        # ids make rows sharing a value connect through the same node. A node
+        # already persisted by an earlier batch of this run (tracked in
+        # emitted_value_node_ids) is skipped — its edge below is still emitted.
         for column, value in record.get("column_values", {}).items():
             value_node_id = uuid5(NAMESPACE_OID, name=f"dlt:colval:{table_name}:{column}:{value}")
-            if value_node_id not in column_value_nodes:
+            already_persisted = (
+                emitted_value_node_ids is not None and value_node_id in emitted_value_node_ids
+            )
+            if not already_persisted and value_node_id not in column_value_nodes:
                 column_value_nodes[value_node_id] = ColumnValue(
                     id=value_node_id,
                     name=f"{table_name}:{column}:{value}",
@@ -253,6 +263,11 @@ async def emit_dlt_schema_graph(
             relationship_count,
             len(column_value_nodes),
         )
+
+    # Mark value nodes as persisted only after the graph/vector writes above
+    # succeeded, so a failed batch cannot cause later batches to skip them.
+    if emitted_value_node_ids is not None:
+        emitted_value_node_ids.update(column_value_nodes.keys())
 
     all_edges = schema_edges + fk_row_edges
     if all_edges:

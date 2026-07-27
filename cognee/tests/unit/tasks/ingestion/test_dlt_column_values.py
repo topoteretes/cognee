@@ -148,6 +148,83 @@ async def test_emit_creates_shared_column_value_nodes_and_edges(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_shared_set_prevents_reembedding_across_batches(monkeypatch):
+    """A value seen by an earlier batch is not re-persisted or re-embedded,
+    but every later row still gets its edge to the shared node."""
+    graph = SimpleNamespace(add_nodes=AsyncMock(), add_edges=AsyncMock())
+    index_mock = AsyncMock()
+    monkeypatch.setattr(graph_engine_module, "get_graph_engine", AsyncMock(return_value=graph))
+    monkeypatch.setattr(schema_graph_module, "index_data_points", index_mock)
+    monkeypatch.setattr(
+        schema_graph_module,
+        "graph_provenance_write_kwargs",
+        AsyncMock(return_value={"source_ref_key": None}),
+    )
+
+    emitted_value_node_ids = set()
+    row_a, row_b = str(uuid4()), str(uuid4())
+    for source_id in (row_a, row_b):  # two batches, same shared value
+        await emit_dlt_schema_graph(
+            {},
+            [
+                {
+                    "source_id": source_id,
+                    "table_name": "orders",
+                    "fk_references": [],
+                    "column_values": {"status": "active"},
+                }
+            ],
+            ctx=None,
+            emitted_value_node_ids=emitted_value_node_ids,
+        )
+
+    # The value node is persisted and embedded exactly once (first batch).
+    indexed = [n for call in index_mock.call_args_list for n in call.args[0]]
+    assert len([n for n in indexed if isinstance(n, ColumnValue)]) == 1
+    added = [n for call in graph.add_nodes.call_args_list for n in call.args[0]]
+    assert len([n for n in added if isinstance(n, ColumnValue)]) == 1
+    assert len(emitted_value_node_ids) == 1
+
+    # Both batches still emitted their row edge to the same shared node.
+    edges = [e for call in graph.add_edges.call_args_list for e in call.args[0]]
+    status_edges = [e for e in edges if e[2] == "status"]
+    assert {e[0] for e in status_edges} == {row_a, row_b}
+    assert len({e[1] for e in status_edges}) == 1
+
+
+@pytest.mark.asyncio
+async def test_emit_without_shared_set_keeps_per_call_behavior(monkeypatch):
+    """Without the shared set (direct task invocation), each call persists."""
+    graph = SimpleNamespace(add_nodes=AsyncMock(), add_edges=AsyncMock())
+    index_mock = AsyncMock()
+    monkeypatch.setattr(graph_engine_module, "get_graph_engine", AsyncMock(return_value=graph))
+    monkeypatch.setattr(schema_graph_module, "index_data_points", index_mock)
+    monkeypatch.setattr(
+        schema_graph_module,
+        "graph_provenance_write_kwargs",
+        AsyncMock(return_value={"source_ref_key": None}),
+    )
+
+    for _ in range(2):
+        await emit_dlt_schema_graph(
+            {},
+            [
+                {
+                    "source_id": str(uuid4()),
+                    "table_name": "orders",
+                    "fk_references": [],
+                    "column_values": {"status": "active"},
+                }
+            ],
+            ctx=None,
+        )
+
+    indexed = [n for call in index_mock.call_args_list for n in call.args[0]]
+    # Idempotent upsert by deterministic id — persisted per call when untracked.
+    assert len([n for n in indexed if isinstance(n, ColumnValue)]) == 2
+
+
+@pytest.mark.asyncio
 async def test_emit_without_column_values_adds_no_value_nodes(monkeypatch):
     graph = SimpleNamespace(add_nodes=AsyncMock(), add_edges=AsyncMock())
     monkeypatch.setattr(graph_engine_module, "get_graph_engine", AsyncMock(return_value=graph))
