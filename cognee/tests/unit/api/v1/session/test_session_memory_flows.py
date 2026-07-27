@@ -1083,10 +1083,7 @@ class TestAgenticSessionMismatchSurfaces:
         manager.is_available = True
         manager.add_qa = AsyncMock(side_effect=SessionDatasetMismatchError("s1", uuid4(), uuid4()))
 
-        with patch(
-            "cognee.infrastructure.session.get_session_manager.get_session_manager",
-            return_value=manager,
-        ):
+        with patch.object(_mod_sm, "get_session_manager", return_value=manager):
             with pytest.raises(SessionDatasetMismatchError):
                 await retriever._store_session_qa("q", "ctx", "a", triplets=[])
 
@@ -1097,8 +1094,5 @@ class TestAgenticSessionMismatchSurfaces:
         manager.is_available = True
         manager.add_qa = AsyncMock(side_effect=RuntimeError("cache down"))
 
-        with patch(
-            "cognee.infrastructure.session.get_session_manager.get_session_manager",
-            return_value=manager,
-        ):
+        with patch.object(_mod_sm, "get_session_manager", return_value=manager):
             await retriever._store_session_qa("q", "ctx", "a", triplets=[])

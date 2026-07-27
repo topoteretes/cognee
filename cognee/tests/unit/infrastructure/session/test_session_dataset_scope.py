@@ -495,16 +495,19 @@ class TestBindingEnforcementWiring:
 
     @pytest.mark.asyncio
     async def test_delete_sessions_for_dataset_removes_sessions(self):
+        import importlib
+
         from cognee.modules.session_lifecycle.metrics import delete_sessions_for_dataset
 
         user_id, dataset_id, _, session_id = await _create_attributed_session()
 
         manager = MagicMock()
         manager.delete_session = AsyncMock(return_value=True)
-        with patch(
-            "cognee.infrastructure.session.get_session_manager.get_session_manager",
-            return_value=manager,
-        ):
+        # patch.object on the importlib-resolved module: the package __init__
+        # re-exports a function named like the submodule, so a string target
+        # resolves to the function (import-order dependent) and fails in CI.
+        gsm_module = importlib.import_module("cognee.infrastructure.session.get_session_manager")
+        with patch.object(gsm_module, "get_session_manager", return_value=manager):
             await delete_sessions_for_dataset(dataset_id)
 
         # Cache-side deletion was requested for the session's owner...
