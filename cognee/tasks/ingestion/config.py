@@ -12,14 +12,18 @@ class IngestionConfig(BaseSettings):
     # Cell-level graph nodes for DLT rows: maps table name to the columns
     # whose values become shared ColumnValue nodes. "*" is a wildcard on
     # either side. Column specs:
-    #   ["auto"] (default, {"*": ["auto"]}) — only columns whose values repeat
-    #       across rows qualify; ids, timestamps, and free text are skipped so
-    #       high-cardinality sources (e.g. Slack messages) stay clean.
+    #   ["auto"] — only columns whose values repeat across rows qualify; ids,
+    #       timestamps, and free text are skipped, so {"*": ["auto"]} is the
+    #       recommended way to enable this for a whole source.
     #   ["*"] — every column, no cardinality gate.
     #   ["col", ...] — exactly these columns.
-    #   {} — disable value-node emission entirely.
+    # Default {} (off): value nodes serve deterministic traversal (CYPHER,
+    # degree-based aggregates, visualization joins) and cost one embedding per
+    # unique value, while completion-search answer quality does not improve
+    # when they are present — so they are opt-in for callers who query the
+    # structure deliberately.
     # Env: DLT_COLUMN_VALUE_COLUMNS as JSON, or add(..., column_value_columns=...).
-    dlt_column_value_columns: dict[str, list[str]] = {"*": ["auto"]}
+    dlt_column_value_columns: dict[str, list[str]] = {}
 
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
