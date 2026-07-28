@@ -123,6 +123,13 @@ Caveats:
 import logging
 from uuid import NAMESPACE_OID, UUID, uuid5
 
+from cognee.infrastructure.databases.exceptions import UnsupportedProvenanceCapability
+from cognee.infrastructure.databases.provenance import (
+    EdgeIdentity,
+    get_pipeline_run_id_from_source_run_ref,
+    get_source_ref_key_from_source_run_ref,
+)
+from cognee.infrastructure.databases.provenance.markers import stores_provenance_in_graph
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.migrations.migration import MigrationContext
 from cognee.modules.migrations.versions._vector_rekey import (
@@ -665,13 +672,78 @@ async def _migrate_ledger(id_map: dict, dataset_id) -> None:
         await session.commit()
 
 
+def _edge_identity(source_id: str, target_id: str, relationship_name: str) -> EdgeIdentity:
+    return EdgeIdentity(str(source_id), str(target_id), str(relationship_name))
+
+
+async def _snapshot_graph_provenance(graph_engine, node_ids: list[str], edges: list) -> tuple:
+    # Only graphs that carry provenance in-graph have anything to preserve. An
+    # old/ledger graph being migrated has no provenance columns, so reading them
+    # would raise a backend "no such property" error — skip it entirely.
+    if not await stores_provenance_in_graph(graph_engine):
+        return {}, {}
+
+    try:
+        node_snapshots = await graph_engine.get_node_delete_data(node_ids)
+        edge_snapshots = await graph_engine.get_edge_delete_data(
+            [
+                _edge_identity(source_id, target_id, relationship_name)
+                for source_id, target_id, relationship_name, _properties in edges
+                if not (relationship_name == "SELF" and source_id == target_id)
+            ]
+        )
+    except UnsupportedProvenanceCapability:
+        return {}, {}
+
+    return node_snapshots, edge_snapshots
+
+
+async def _attach_preserved_provenance(
+    attach, source_ref_keys: list[str], source_run_refs: list[str]
+) -> None:
+    run_refs_by_key: dict[str, str] = {}
+    for run_ref in source_run_refs:
+        source_ref_key = get_source_ref_key_from_source_run_ref(run_ref)
+        run_refs_by_key[source_ref_key] = str(get_pipeline_run_id_from_source_run_ref(run_ref))
+
+    for source_ref_key in source_ref_keys:
+        await attach([source_ref_key], run_refs_by_key.get(source_ref_key))
+
+
+async def _restore_node_provenance(graph_engine, node_id: str, snapshot) -> None:
+    if snapshot is None or not snapshot.source_ref_keys:
+        return
+    await _attach_preserved_provenance(
+        lambda refs, run_id: graph_engine.attach_node_source_refs([node_id], refs, run_id),
+        snapshot.source_ref_keys,
+        snapshot.source_run_refs,
+    )
+
+
+async def _restore_edge_provenance(graph_engine, edge: EdgeIdentity, snapshot) -> None:
+    if snapshot is None or not snapshot.source_ref_keys:
+        return
+    await _attach_preserved_provenance(
+        lambda refs, run_id: graph_engine.attach_edge_source_refs([edge], refs, run_id),
+        snapshot.source_ref_keys,
+        snapshot.source_run_refs,
+    )
+
+
 async def _migrate_graph(graph_engine, id_map: dict, properties_by_id: dict, edges: list) -> int:
     """Remap old-scheme node ids (and their edges) in the graph database."""
+    node_snapshots, edge_snapshots = await _snapshot_graph_provenance(
+        graph_engine, list(id_map.keys()), edges
+    )
+    inverse_id_map = {new_id: old_id for old_id, new_id in id_map.items()}
+
     # 1) Create the remapped nodes (new IDs, all original properties preserved).
     new_nodes = [
         _make_node({**properties_by_id[old_id], "id": new_id}) for old_id, new_id in id_map.items()
     ]
     await graph_engine.add_nodes(new_nodes)
+    for old_id, new_id in id_map.items():
+        await _restore_node_provenance(graph_engine, new_id, node_snapshots.get(old_id))
 
     # 2) Re-create every edge touching a remapped node onto the new endpoints.
     #    Edges between two unchanged nodes are kept aside as survivors, and the
@@ -706,6 +778,14 @@ async def _migrate_graph(graph_engine, id_map: dict, properties_by_id: dict, edg
             survivor_edges.append((source_id, target_id, relationship_name, edge_properties or {}))
     if remapped_edges:
         await graph_engine.add_edges(remapped_edges)
+        for source_id, target_id, relationship_name, _properties in remapped_edges:
+            old_edge = _edge_identity(
+                inverse_id_map.get(source_id, source_id),
+                inverse_id_map.get(target_id, target_id),
+                relationship_name,
+            )
+            new_edge = _edge_identity(source_id, target_id, relationship_name)
+            await _restore_edge_provenance(graph_engine, new_edge, edge_snapshots.get(old_edge))
 
     # 3) Delete the old nodes. A detach-delete also drops their stale edges,
     #    which we already re-created against the new node IDs above.
@@ -725,6 +805,9 @@ async def _migrate_graph(graph_engine, id_map: dict, properties_by_id: dict, edg
     ]
     if at_risk:
         await graph_engine.add_edges(at_risk)
+        for source_id, target_id, relationship_name, _properties in at_risk:
+            edge = _edge_identity(source_id, target_id, relationship_name)
+            await _restore_edge_provenance(graph_engine, edge, edge_snapshots.get(edge))
 
     return len(remapped_edges)
 

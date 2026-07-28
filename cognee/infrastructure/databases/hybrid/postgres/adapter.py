@@ -89,8 +89,13 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
     ) -> None:
         return await self._graph.add_node(node, properties)
 
-    async def add_nodes(self, nodes: Union[List[Tuple[str, Dict]], List[DataPoint]]) -> None:
-        return await self._graph.add_nodes(nodes)
+    async def add_nodes(
+        self,
+        nodes: Union[List[Tuple[str, Dict]], List[DataPoint]],
+        source_ref_key: Optional[str] = None,
+        pipeline_run_id: Optional[str] = None,
+    ) -> None:
+        return await self._graph.add_nodes(nodes, source_ref_key, pipeline_run_id)
 
     async def delete_node(self, node_id: str) -> None:
         return await self._graph.delete_node(node_id)
@@ -114,9 +119,12 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
         return await self._graph.add_edge(source_id, target_id, relationship_name, properties)
 
     async def add_edges(
-        self, edges: Union[List[Tuple[str, str, str, Optional[Dict[str, Any]]]], List]
+        self,
+        edges: Union[List[Tuple[str, str, str, Optional[Dict[str, Any]]]], List],
+        source_ref_key: Optional[str] = None,
+        pipeline_run_id: Optional[str] = None,
     ) -> None:
-        return await self._graph.add_edges(edges)
+        return await self._graph.add_edges(edges, source_ref_key, pipeline_run_id)
 
     async def has_edge(self, source_id: str, target_id: str, relationship_name: str) -> bool:
         return await self._graph.has_edge(source_id, target_id, relationship_name)

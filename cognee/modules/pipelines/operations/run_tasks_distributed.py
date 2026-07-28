@@ -56,6 +56,7 @@ if modal:
         ctx,
         user: User,
         incremental_loading: bool,
+        data_cache: bool,
     ):
         """
         Wrapper that runs the run_tasks_data_item function.
@@ -79,6 +80,7 @@ if modal:
             ),
             user=user,
             incremental_loading=incremental_loading,
+            data_cache=data_cache,
         )
 
         return result
@@ -95,6 +97,7 @@ async def run_tasks_distributed(
     rollback_handler: Optional[Callable[..., Awaitable[None]]] = None,
     llm_config: Optional[LLMConfig] = None,
     embedding_config: Optional[EmbeddingConfig] = None,
+    data_cache: bool = False,
 ):
     if not user:
         user = await get_default_user()
@@ -139,6 +142,7 @@ async def run_tasks_distributed(
                 [None] * number_of_data_items,
                 [user] * number_of_data_items,
                 [incremental_loading] * number_of_data_items,
+                [data_cache] * number_of_data_items,
             ]
 
             results = []

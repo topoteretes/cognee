@@ -6,7 +6,8 @@
     "dev": "next dev --turbopack",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "eslint .",
+    "check:tracking-plan": "node scripts/check-tracking-plan.js"
   },
   "dependencies": {
     "@mantine/core": "^8.3.13",
@@ -15,12 +16,14 @@
     "@mantine/hooks": "^8.3.13",
     "@mantine/modals": "^8.3.13",
     "@mantine/notifications": "^8.3.14",
+    "@tanstack/react-query": "^5.101.2",
     "classnames": "^2.5.1",
     "culori": "^4.0.2",
     "d3-force-3d": "^3.0.6",
     "embla-carousel-autoplay": "^8.6.0",
     "embla-carousel-fade": "^8.6.0",
     "embla-carousel-react": "^8.6.0",
+    "jose": "^6.0.11",
     "mantine-form-valibot-resolver": "^3.0.1",
     "next": "^16.0.8",
     "react": "^19.1.2",

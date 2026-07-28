@@ -5,7 +5,7 @@ cache (so the session-context CRUD round-trips) while the LLM calls are mocked. 
 the four branches:
 
   1. first-turn       -> no served context, empty block, served_ids recorded as None
-  2. ordinary question-> active block built + prepended above graph snapshot, served_ids on new QA
+  2. ordinary question-> active block built + prepended above history, served_ids on new QA
   3. feedback-only    -> response_to_user returned, QA recorded, counters bumped, candidate applied
   4. feedback+request -> answer request, new QA with served_ids, candidate applied
 
@@ -139,22 +139,14 @@ async def test_first_turn_no_block_empty_served_ids(session_manager):
 
 @pytest.mark.asyncio
 async def test_non_feedback_block_prepended_and_served_ids_recorded(session_manager):
-    """Ordinary question: active block built, precedes graph snapshot, served_ids on new QA."""
+    """Ordinary question: active block built and served_ids recorded on new QA."""
     await _seed_context_entry(session_manager, "c-rule", "rules", "Always answer in metric units.")
 
     analysis = FeedbackDetectionResult(query_to_answer="Give me the distance.")
     user, mock_user, mock_cfg, mock_analyze, mock_gen = _patches(
         ("Answer two", "", None), analysis_return=analysis
     )
-    with (
-        mock_user as mu,
-        mock_cfg as mc,
-        mock_analyze,
-        mock_gen as mg,
-        patch.object(
-            session_manager, "get_graph_context", new=AsyncMock(return_value="GRAPH FACTS HERE")
-        ),
-    ):
+    with mock_user as mu, mock_cfg as mc, mock_analyze, mock_gen as mg:
         mu.get.return_value = user
         mc.return_value = _config()
 
@@ -168,12 +160,8 @@ async def test_non_feedback_block_prepended_and_served_ids_recorded(session_mana
 
     assert result == "Answer two"
     history = mg.call_args.kwargs["conversation_history"]
-    # The session-context block must precede the graph snapshot.
     assert "## Active session guidance" in history
-    assert "Background knowledge from the knowledge graph" in history
-    assert history.index("## Active session guidance") < history.index(
-        "Background knowledge from the knowledge graph"
-    )
+    assert "Background knowledge from the knowledge graph" not in history
     assert "Always answer in metric units." in history
 
     entries = await session_manager.get_session(user_id="owner-1", session_id="s1")

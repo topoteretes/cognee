@@ -20,7 +20,7 @@ class ModelName(Enum):
 
 
 class LLMConfig(BaseModel):
-    api_key: str
+    api_key: Optional[str]
     model: str
     provider: str
     endpoint: Optional[str]

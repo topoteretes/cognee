@@ -45,6 +45,7 @@ async def add(
     run_in_background: bool = False,
     llm_config: Optional[LLMConfig] = None,
     embedding_config: Optional[EmbeddingConfig] = None,
+    data_cache: bool = True,
     **kwargs,
 ):
     """
@@ -268,7 +269,14 @@ async def add(
         data_per_batch=data_per_batch,
         llm_config=llm_config,
         embedding_config=embedding_config,
+        data_cache=data_cache,
     )
+
+    # Foreground runs: the fresh rows are committed by pipeline_executor_func
+    # above, so it's now safe to clean up orphans. (Background runs already ran
+    # this up front and set orphan_cleanup to None.)
+    if orphan_cleanup is not None:
+        await orphan_cleanup()
 
     # run_pipeline_blocking returns {dataset_id: PipelineRunInfo} but callers
     # expect a single PipelineRunInfo (add always processes one dataset).

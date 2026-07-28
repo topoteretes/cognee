@@ -835,3 +835,51 @@ class TestReleaseSlotFor:
         await queue.release_slot_for("ds-ok")
         assert call_count == 2
         assert queue._semaphore._value == 5
+
+
+class TestActiveDatasetIds:
+    """Tests for the read-only active_dataset_ids snapshot used by engine-cache pinning."""
+
+    @pytest.mark.asyncio
+    async def test_tracks_slots_and_excludes_sentinels(self):
+        from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
+
+        queue = DatasetQueue(enabled=True, max_concurrent=4)
+        assert queue.active_dataset_ids() == set()
+
+        await queue.ensure_slot("dataset-1")
+        await queue.ensure_slot("dataset-2")
+        await queue.ensure_slot(None)  # "ds:<none>" must not be reported
+        async with queue.acquire():  # re-entrant pass-through: no "acquire:" slot is added
+            assert queue.active_dataset_ids() == {"dataset-1", "dataset-2"}
+
+        await queue.release_slot_for("dataset-1")
+        assert queue.active_dataset_ids() == {"dataset-2"}
+
+    @pytest.mark.asyncio
+    async def test_acquire_only_slots_are_not_dataset_ids(self):
+        from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
+
+        queue = DatasetQueue(enabled=True, max_concurrent=4)
+        async with queue.acquire():  # scoped slot without a dataset id
+            assert queue.active_dataset_ids() == set()
+
+    def test_disabled_queue_reports_no_active_datasets(self):
+        from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
+
+        queue = DatasetQueue(enabled=False, max_concurrent=4)
+        assert queue.active_dataset_ids() == set()
+
+    @pytest.mark.asyncio
+    async def test_depth_does_not_duplicate_and_survives_until_last_release(self):
+        from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
+
+        queue = DatasetQueue(enabled=True, max_concurrent=4)
+        await queue.ensure_slot("dataset-1")
+        await queue.ensure_slot("dataset-1")  # re-entrant: depth bump, same slot
+        assert queue.active_dataset_ids() == {"dataset-1"}
+
+        await queue.release_slot_for("dataset-1")
+        assert queue.active_dataset_ids() == {"dataset-1"}  # depth 1 remains
+        await queue.release_slot_for("dataset-1")
+        assert queue.active_dataset_ids() == set()

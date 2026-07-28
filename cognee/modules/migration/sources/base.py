@@ -11,7 +11,7 @@ encapsulated in the source object.
 """
 
 from abc import ABC, abstractmethod
-from typing import AsyncIterator
+from typing import AsyncIterator, Optional
 
 from cognee.modules.migration.cogx import COGXRecord
 
@@ -41,6 +41,25 @@ class MemorySource(ABC):
     # facts) to keep memory bounded. Set False on one-shot sources (e.g. live
     # API cursors) to force the buffered import path instead.
     replayable: bool = True
+
+    # Cognee-origin archives only (COGXArchiveSource sets it from
+    # permissions.json, written by export(include_permissions=True)): the
+    # dataset's social layer — owner and ACL grants with user credentials.
+    # The import recreates the accounts and grants, and runs AS the owner so
+    # the per-dataset databases land under the right identity. None (all
+    # other sources / archives without the file) keeps today's behavior:
+    # the importing user owns everything.
+    social_layer: Optional[dict] = None
+
+    # Cognee-origin archives only (COGXArchiveSource sets it from the
+    # manifest): the SOURCE store's stamped data-migration revision at export
+    # time. Raw nodes keep their source-store ids, so the import re-stamps
+    # the target back to this revision when it is behind the target's stamp —
+    # the next migration gate then replays revision -> head over the imported
+    # rows. External systems (Mem0, Zep, Letta, ...) leave it None: their
+    # records are written entirely by current-code pipelines, so the target's
+    # own stamp is already correct.
+    migration_revision: Optional[str] = None
 
     def __init__(self, mode: str = "re-derive"):
         if mode not in IMPORT_MODES:

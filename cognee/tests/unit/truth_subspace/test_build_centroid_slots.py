@@ -50,7 +50,10 @@ async def _run_build(monkeypatch, session_ids=None):
             "cognee.modules.truth_subspace.build.get_authorized_existing_datasets",
             new=AsyncMock(return_value=[dataset]),
         ),
-        patch("cognee.modules.truth_subspace.build.get_vector_engine", return_value=vector_engine),
+        patch(
+            "cognee.modules.truth_subspace.build.get_vector_engine_async",
+            new=AsyncMock(return_value=vector_engine),
+        ),
         patch(
             "cognee.modules.truth_subspace.build.get_graph_engine",
             new=AsyncMock(return_value=graph_engine),

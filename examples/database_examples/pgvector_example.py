@@ -1,6 +1,13 @@
-import asyncio
+# ruff: noqa: E402
 import os
 import pathlib
+import asyncio
+
+from dotenv import load_dotenv
+
+load_dotenv(override=True)
+
+DB_HOST = os.environ.get("DB_HOST", "127.0.0.1")
 
 import cognee
 from cognee import SearchType
@@ -20,6 +27,7 @@ async def main():
     cognee.config.set_vector_db_config(
         {
             "vector_db_provider": "pgvector",  # Specify PGVector as provider
+            "vector_dataset_database_handler": "pgvector",
             "vector_db_name": "cognee_db",
             "vector_db_host": os.environ.get("DB_HOST", "127.0.0.1"),
             "vector_db_port": "5432",
@@ -34,7 +42,7 @@ async def main():
         {
             "db_path": "",
             "db_name": "cognee_db",
-            "db_host": os.environ.get("DB_HOST", "127.0.0.1"),
+            "db_host": DB_HOST,
             "db_port": "5432",
             "db_username": "cognee",
             "db_password": "cognee",

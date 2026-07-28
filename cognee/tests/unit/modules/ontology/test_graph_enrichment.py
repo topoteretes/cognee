@@ -1,7 +1,11 @@
 from unittest.mock import MagicMock
 
+from cognee.modules.engine.models import Entity, EntityType
 from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
-from cognee.modules.ontology.graph_enrichment import canonicalize_graphs
+from cognee.modules.ontology.graph_enrichment import (
+    canonicalize_graphs,
+    extend_graph_with_ontology,
+)
 from cognee.modules.ontology.models import AttachedOntologyNode
 from cognee.shared.data_models import Edge as KGEdge
 from cognee.shared.data_models import KnowledgeGraph, Node
@@ -21,13 +25,16 @@ class _CanonicalizeStubResolver(BaseOntologyResolver):
 
     def get_subgraph(self, node_name: str, node_type: str = "individuals", directed: bool = True):
         if node_type == "classes" and node_name == "gadget":
-            root = AttachedOntologyNode("gadget", "classes")
+            root = AttachedOntologyNode("https://example.test/ontology#gadget", "classes")
             return [root], [], root
         if node_type == "individuals" and node_name == "widget":
-            root = AttachedOntologyNode("widget_canonical", "individuals")
-            return [root], [], root
+            root = AttachedOntologyNode(
+                "https://example.test/ontology#widget_canonical", "individuals"
+            )
+            related = AttachedOntologyNode("https://example.test/ontology#related", "individuals")
+            return [root, related], [], root
         if node_type == "individuals" and node_name == "alpha":
-            root = AttachedOntologyNode("alpha", "individuals")
+            root = AttachedOntologyNode("https://example.test/ontology#alpha", "individuals")
             return [root], [], root
         return [], [], None
 
@@ -96,6 +103,38 @@ def test_canonicalize_graphs_resolves_each_unique_name_once():
     assert len(matches) == 2
     assert matches[0].category == "classes"
     assert matches[1].category == "individuals"
+    assert matches[1].canonical_uri == "https://example.test/ontology#widget_canonical"
+
+
+def test_extend_graph_preserves_canonical_and_injected_ontology_uris():
+    chunk = _make_chunk()
+    graph = KnowledgeGraph(
+        nodes=[Node(id="n1", name="Widget", type="Gadget", description="desc")],
+        edges=[],
+    )
+    _, matches = canonicalize_graphs([graph], [chunk], _CanonicalizeStubResolver())
+
+    type_node = EntityType(
+        id=EntityType.id_for("gadget"),
+        name="gadget",
+        description="gadget",
+    )
+    entity_node = Entity(
+        id=Entity.id_for("widget_canonical"),
+        name="widget_canonical",
+        description="desc",
+    )
+    added_nodes_map = {
+        f"{type_node.id}_type": type_node,
+        f"{entity_node.id}_entity": entity_node,
+    }
+
+    injected_nodes, _ = extend_graph_with_ontology(matches, added_nodes_map, {})
+
+    assert type_node.ontology_uri == "https://example.test/ontology#gadget"
+    assert entity_node.ontology_uri == "https://example.test/ontology#widget_canonical"
+    related = injected_nodes[f"{Entity.id_for('related')}_entity"]
+    assert related.ontology_uri == "https://example.test/ontology#related"
 
 
 def test_canonicalize_graphs_rewrites_edge_endpoints_by_name_and_id():

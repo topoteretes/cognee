@@ -1,39 +1,26 @@
 "use client";
 
-import { Select, Stack, Text, Title } from "@mantine/core";
-import { useTenant } from "@/modules/tenant/TenantProvider";
-import { tokens } from "@/ui/theme/tokens";
+import { Stack, Text } from "@mantine/core";
 
 export default function OrganizationWidget() {
-  const { tenant, availableTenants, switchTenant } = useTenant();
-
-  const data = availableTenants.map((t) => ({
-    value: t.id,
-    label: t.name,
-  }));
-
   return (
     <Stack
-      className="rounded-[0.5rem] px-[2rem] pt-[1.5rem] pb-[1.75rem] !gap-[0] min-w-[25rem] max-w-[29.5rem]"
-      bg="white"
+      className="rounded-[0.5rem] px-[2rem] pt-[1.5rem] pb-[1.75rem] !gap-[0] flex-1"
+      style={{
+        background: "rgba(255,255,255,0.06)",
+        backdropFilter: "blur(12px)",
+        border: "1px solid rgba(255,255,255,0.1)",
+        borderRadius: 12,
+      }}
     >
-      <Stack className="!gap-[0] mb-[1.375rem]">
-        <Title size="h2" mb="0.125rem">
+      <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: "1.375rem" }}>
+        <h2 style={{ fontSize: 20, fontWeight: 300, color: "#EDECEA", margin: 0, fontFamily: '"TWKLausanne", sans-serif' }}>
           Organization
-        </Title>
-        <Text c={tokens.textMuted} size="lg">
-          Switch between organizations you belong to
+        </h2>
+        <Text size="sm" style={{ color: "rgba(237,236,234,0.55)" }}>
+          Team and organization management is not available in the open-source UI.
         </Text>
-      </Stack>
-      <Select
-        label="Active organization"
-        placeholder="Select organization"
-        data={data}
-        value={tenant?.tenant_id ?? null}
-        onChange={(val) => val && switchTenant(val)}
-        radius="0.5rem"
-        classNames={{ input: "!h-[2.75rem] !border-cognee-border" }}
-      />
+      </div>
     </Stack>
   );
 }

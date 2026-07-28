@@ -23,6 +23,7 @@ def _create_edge_key(source_id: str, target_id: str, relationship_name: str) -> 
 class OntologyMatch:
     category: str
     canonical_name: str
+    canonical_uri: Optional[str]
     subgraph_nodes: list
     subgraph_edges: list
     triggering_chunk: DocumentChunk
@@ -32,14 +33,16 @@ def _resolve_ontology_match(
     ontology_resolver: BaseOntologyResolver,
     node_name: str,
     node_type: str,
-) -> tuple[Optional[str], list, list]:
-    """Return (canonical_raw_name, ontology_nodes, ontology_edges)."""
+) -> tuple[Optional[str], Optional[str], list, list]:
+    """Return canonical identity and the matched ontology subgraph."""
     ontology_nodes, ontology_edges, match = ontology_resolver.get_subgraph(
         node_name=node_name, node_type=node_type
     )
     if not match:
-        return None, [], []
-    return match.name, ontology_nodes, ontology_edges
+        return None, None, [], []
+
+    canonical_uri = str(match.uri) if match.uri is not None else None
+    return match.name, canonical_uri, ontology_nodes, ontology_edges
 
 
 def canonicalize_graphs(
@@ -51,8 +54,8 @@ def canonicalize_graphs(
     if ontology_resolver is None:
         return chunk_graphs, []
 
-    resolved_types: dict[str, tuple[Optional[str], list, list]] = {}
-    resolved_entities: dict[str, tuple[Optional[str], list, list]] = {}
+    resolved_types: dict[str, tuple[Optional[str], Optional[str], list, list]] = {}
+    resolved_entities: dict[str, tuple[Optional[str], Optional[str], list, list]] = {}
     matches: list[OntologyMatch] = []
 
     for chunk, graph in zip(data_chunks, chunk_graphs):
@@ -64,12 +67,15 @@ def canonicalize_graphs(
                 resolved_types[norm_type] = _resolve_ontology_match(
                     ontology_resolver, norm_type, "classes"
                 )
-                canonical_name, ontology_nodes, ontology_edges = resolved_types[norm_type]
+                canonical_name, canonical_uri, ontology_nodes, ontology_edges = resolved_types[
+                    norm_type
+                ]
                 if canonical_name is not None:
                     matches.append(
                         OntologyMatch(
                             category="classes",
                             canonical_name=canonical_name,
+                            canonical_uri=canonical_uri,
                             subgraph_nodes=ontology_nodes,
                             subgraph_edges=ontology_edges,
                             triggering_chunk=chunk,
@@ -81,12 +87,15 @@ def canonicalize_graphs(
                 resolved_entities[norm_name] = _resolve_ontology_match(
                     ontology_resolver, norm_name, "individuals"
                 )
-                canonical_name, ontology_nodes, ontology_edges = resolved_entities[norm_name]
+                canonical_name, canonical_uri, ontology_nodes, ontology_edges = resolved_entities[
+                    norm_name
+                ]
                 if canonical_name is not None:
                     matches.append(
                         OntologyMatch(
                             category="individuals",
                             canonical_name=canonical_name,
+                            canonical_uri=canonical_uri,
                             subgraph_nodes=ontology_nodes,
                             subgraph_edges=ontology_edges,
                             triggering_chunk=chunk,
@@ -162,6 +171,7 @@ def _mark_matched_nodes_valid(matches: list[OntologyMatch], added_nodes_map: dic
         node = added_nodes_map.get(node_key)
         if node is not None:
             node.ontology_valid = True
+            node.ontology_uri = match.canonical_uri
 
 
 def _process_ontology_nodes(
@@ -178,6 +188,7 @@ def _process_ontology_nodes(
             else Entity.id_for(ontology_node.name)
         )
         ont_node_name = generate_node_name(ontology_node.name)
+        ont_node_uri = str(ontology_node.uri) if ontology_node.uri is not None else None
 
         if ontology_node.category == "classes":
             ont_node_key = _create_node_key(ont_node_id, "type")
@@ -187,6 +198,7 @@ def _process_ontology_nodes(
                     name=ont_node_name,
                     description=ont_node_name,
                     ontology_valid=True,
+                    ontology_uri=ont_node_uri,
                     importance_weight=data_chunk.importance_weight,
                 )
 
@@ -198,6 +210,7 @@ def _process_ontology_nodes(
                     name=ont_node_name,
                     description=ont_node_name,
                     ontology_valid=True,
+                    ontology_uri=ont_node_uri,
                     belongs_to_set=data_chunk.belongs_to_set,
                     importance_weight=data_chunk.importance_weight,
                 )
