@@ -173,6 +173,16 @@ Key files:
 - `cognee/tasks/graph/extract_graph_from_data.py`
 - `cognee/tasks/storage/add_data_points.py`
 
+#### UPDATE: Chunk-Level Incremental Updates
+`update(data_id, data, dataset_id)` diffs the new content against the stored processed text (`Data.raw_data_location`) and replaces only the chunks the edit touched: the edit span is expanded to chunk boundaries, the replacement region is re-split into balanced chunks under the token budget, replaced chunks (plus their summaries, chunk-orphaned entities, and triplet embeddings) are deleted, and only the new chunks run through LLM extraction. Unaffected chunks keep their node ids, entities, summaries, and embeddings; surviving chunks are renumbered so `chunk_index` stays contiguous. Chunk identity is content-derived (`uuid5(doc : sha256(text) : occurrence)`, see `cognee/modules/chunking/chunk_id.py`), so unchanged content keeps its identity across edits and the incremental path preserves `data_id` (the full path mints a new one).
+
+Runs under the per-dataset lock with the dataset-scoped database context (multi-tenant-safe). Falls back to the full delete + re-add + cognify flow when preconditions fail (first ingestion, non-text content, unverified graph adapter — currently gated to kuzu/ladybug); disable with `update(..., chunk_level_diff=False)` or the same query param on `PATCH /update`.
+
+Key files:
+- `cognee/api/v1/update/update.py` / `cognee/api/v1/update/incremental.py`
+- `cognee/modules/chunking/incremental_chunking.py` (diff + balanced re-split, no-loss invariant)
+- `cognee/modules/graph/methods/delete_chunks_incremental.py` (chunk-scoped orphan deletion)
+
 #### SEARCH: Retrieval
 `search(query_text, query_type)` → route to retriever type → filter by permissions → return results
 

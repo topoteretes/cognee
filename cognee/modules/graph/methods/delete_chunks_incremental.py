@@ -67,6 +67,7 @@ async def delete_chunks_incremental(chunk_ids: List[str]) -> List[str]:
     # 2. Chunk-local orphan check: an entity dies only when every chunk that
     #    contains it is in the deleted set.
     orphan_entities = []
+    candidate_type_ids = set()
     for entity_id in candidates:
         entity_connections = await graph_engine.get_connections(entity_id)
         containing_chunks = {
@@ -79,6 +80,11 @@ async def delete_chunks_incremental(chunk_ids: List[str]) -> List[str]:
             orphan_entities.append(entity_id)
             for _source, edge, _target in entity_connections:
                 doomed_triplet_ids.add(_triplet_id(edge))
+                if (
+                    _relationship_name(edge) == "is_a"
+                    and str(edge.get("source_node_id")) == entity_id
+                ):
+                    candidate_type_ids.add(str(edge.get("target_node_id")))
 
     # 3. Summaries are keyed deterministically off the chunk id (summarize_text.py).
     summary_ids = [str(uuid5(UUID(chunk), "TextSummary")) for chunk in deleting]
@@ -95,6 +101,22 @@ async def delete_chunks_incremental(chunk_ids: List[str]) -> List[str]:
     # this, facts from deleted chunks stay reachable through triplet search.
     if doomed_triplet_ids and await vector_engine.has_collection("Triplet_text"):
         await vector_engine.delete_data_points("Triplet_text", sorted(doomed_triplet_ids))
+
+    # EntityType nodes referenced only by deleted entities are orphans too.
+    orphan_type_ids = []
+    for type_id in candidate_type_ids:
+        remaining = [
+            edge
+            for _source, edge, _target in await graph_engine.get_connections(type_id)
+            if _relationship_name(edge) == "is_a" and str(edge.get("target_node_id")) == type_id
+        ]
+        if not remaining:
+            orphan_type_ids.append(type_id)
+    if orphan_type_ids:
+        await graph_engine.delete_nodes(orphan_type_ids)
+        if await vector_engine.has_collection("EntityType_name"):
+            await vector_engine.delete_data_points("EntityType_name", orphan_type_ids)
+        doomed.extend(orphan_type_ids)
 
     logger.info(
         "incremental delete: %d chunks, %d summaries, %d orphaned entities",

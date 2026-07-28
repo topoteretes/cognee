@@ -1,7 +1,10 @@
 from uuid import UUID
 from typing import Union, BinaryIO, List, Optional, Any, Dict
 
+from pydantic import BaseModel
+
 from cognee.modules.pipelines.models import PipelineRunInfo
+from cognee.shared.data_models import KnowledgeGraph
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_default_user
 from cognee.api.v1.add import add
@@ -25,6 +28,8 @@ async def update(
     incremental_loading: bool = True,
     data_cache: bool = True,
     chunk_level_diff: bool = True,
+    graph_model: type[BaseModel] = KnowledgeGraph,
+    custom_prompt: Optional[str] = None,
 ) -> Union[Dict[str, PipelineRunInfo], List[PipelineRunInfo], dict]:
     """
     Update existing data in Cognee.
@@ -106,6 +111,8 @@ async def update(
                 user=user,
                 node_set=node_set,
                 preferred_loaders=preferred_loaders,
+                graph_model=graph_model,
+                custom_prompt=custom_prompt,
             )
         except IncrementalUpdateNotPossible as reason:
             logger.info("chunk-level update not possible (%s); running full update", reason)
@@ -135,6 +142,8 @@ async def update(
         graph_db_config=graph_db_config,
         incremental_loading=incremental_loading,
         data_cache=data_cache,
+        graph_model=graph_model,
+        custom_prompt=custom_prompt,
     )
 
     return cognify_run

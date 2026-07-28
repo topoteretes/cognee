@@ -24,7 +24,8 @@ import json
 from typing import List, Optional
 from uuid import UUID, uuid4
 
-from sqlalchemy import select
+from pydantic import BaseModel
+from sqlalchemy import and_, delete, select
 
 from cognee.api.v1.add import add
 from cognee.context_global_variables import set_database_global_context_variables
@@ -32,7 +33,24 @@ from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.graph.config import get_graph_config
 from cognee.infrastructure.locks import dataset_lock
 from cognee.modules.cognify.config import get_cognify_config
+from cognee.modules.graph.models import Node
+from cognee.modules.ontology.get_default_ontology_resolver import (
+    get_default_ontology_resolver,
+    get_ontology_resolver_from_env,
+)
+from cognee.modules.ontology.ontology_config import Config
+from cognee.modules.ontology.ontology_env_config import get_ontology_env_config
+from cognee.modules.pipelines.operations.log_pipeline_run_complete import (
+    log_pipeline_run_complete,
+)
+from cognee.modules.pipelines.operations.log_pipeline_run_error import log_pipeline_run_error
+from cognee.modules.pipelines.operations.log_pipeline_run_start import log_pipeline_run_start
+from cognee.modules.pipelines.utils import generate_pipeline_id
+from cognee.shared.utils import send_telemetry
+from cognee.tasks.documents.classify_documents import update_node_set
 from cognee.tasks.documents.extract_chunks_from_documents import update_document_token_count
+from cognee.tasks.graph.detect_contradictions import detect_contradictions
+from cognee.tasks.graph.extract_graph_and_summarize import extract_graph_and_summarize
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.llm.utils import get_max_chunk_tokens
@@ -53,13 +71,14 @@ from cognee.modules.pipelines.operations.run_tasks_data_item import DataItemStat
 from cognee.modules.users.models import User
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.shared.logging_utils import get_logger
-from cognee.tasks.graph.extract_graph_from_data import extract_graph_from_data
 from cognee.tasks.storage.add_data_points import add_data_points
-from cognee.tasks.summarization.summarize_text import summarize_text
 
 logger = get_logger("incremental_update")
 
 PIPELINE_NAME = "cognify_pipeline"  # attribute to the cognify pipeline's status key
+# Distinct run-record name: dashboards see incremental runs without touching
+# the skip logic that keys on cognify_pipeline's per-item status.
+RUN_PIPELINE_NAME = "incremental_update_pipeline"
 
 # Graph adapters whose get_connections/get_nodes shapes the incremental path
 # has been verified against. Anything else falls back to the full update.
@@ -117,7 +136,7 @@ async def _get_stored_chunks(document_id: UUID, old_text: str) -> List[dict]:
 
 def _build_document(data: Data) -> TextDocument:
     """Mirror classify_documents' Document construction for this data row."""
-    return TextDocument(
+    document = TextDocument(
         id=data.id,
         title=f"{data.name}.{data.extension}",
         raw_data_location=data.raw_data_location,
@@ -126,6 +145,39 @@ def _build_document(data: Data) -> TextDocument:
         external_metadata=json.dumps(data.external_metadata, indent=4),
         importance_weight=data.importance_weight if data.importance_weight is not None else 0.5,
     )
+    update_node_set(document)  # NodeSet tagging parity with classify_documents
+    return document
+
+
+def _resolve_extraction_config() -> Config:
+    """Ontology configuration exactly as cognify's get_default_tasks resolves it."""
+    ontology_config = get_ontology_env_config()
+    if (
+        ontology_config.ontology_file_path
+        and ontology_config.ontology_resolver
+        and ontology_config.matching_strategy
+    ):
+        return {
+            "ontology_config": {
+                "ontology_resolver": get_ontology_resolver_from_env(**ontology_config.to_dict())
+            }
+        }
+    return {"ontology_config": {"ontology_resolver": get_default_ontology_resolver()}}
+
+
+async def _prune_ledger_rows(data_id: UUID, dataset_id: UUID, doomed_ids: List[str]) -> None:
+    """Drop rollback-ledger rows for nodes the incremental delete removed."""
+    if not doomed_ids:
+        return
+    slugs = [UUID(doomed) for doomed in doomed_ids]
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        await session.execute(
+            delete(Node).where(
+                and_(Node.data_id == data_id, Node.dataset_id == dataset_id, Node.slug.in_(slugs))
+            )
+        )
+        await session.commit()
 
 
 def _build_new_chunks(
@@ -236,6 +288,8 @@ async def incremental_update(
     user: User,
     node_set: Optional[List[str]] = None,
     preferred_loaders=None,
+    graph_model: type[BaseModel] = KnowledgeGraph,
+    custom_prompt: Optional[str] = None,
 ) -> dict:
     """Perform a chunk-level incremental update of one document."""
     graph_provider = str(get_graph_config().graph_database_provider).lower()
@@ -261,7 +315,15 @@ async def incremental_update(
     async with dataset_lock(dataset.id):
         async with set_database_global_context_variables(dataset.id, user.id):
             return await _run_incremental_update(
-                data_id, data, dataset, user, old_data, node_set, preferred_loaders
+                data_id,
+                data,
+                dataset,
+                user,
+                old_data,
+                node_set,
+                preferred_loaders,
+                graph_model,
+                custom_prompt,
             )
 
 
@@ -273,9 +335,74 @@ async def _run_incremental_update(
     old_data: Data,
     node_set: Optional[List[str]],
     preferred_loaders,
+    graph_model: type[BaseModel],
+    custom_prompt: Optional[str],
+) -> dict:
+    """Run-record-logged wrapper around the incremental update body."""
+    pipeline_id = generate_pipeline_id(user.id, dataset.id, RUN_PIPELINE_NAME)
+    pipeline_run = await log_pipeline_run_start(
+        pipeline_id, RUN_PIPELINE_NAME, dataset.id, [data_id]
+    )
+    send_telemetry(
+        "Incremental Update Run Started",
+        user.id,
+        additional_properties={"dataset_id": str(dataset.id), "data_id": str(data_id)},
+    )
+    try:
+        result = await _apply_incremental_update(
+            data_id,
+            data,
+            dataset,
+            user,
+            old_data,
+            node_set,
+            preferred_loaders,
+            graph_model,
+            custom_prompt,
+        )
+    except Exception as error:
+        # Includes IncrementalUpdateNotPossible: the record shows why this run
+        # ended and the full update that follows logs its own runs.
+        await log_pipeline_run_error(
+            pipeline_run.pipeline_run_id,
+            pipeline_id,
+            RUN_PIPELINE_NAME,
+            dataset.id,
+            [data_id],
+            error,
+        )
+        raise
+    await log_pipeline_run_complete(
+        pipeline_run.pipeline_run_id, pipeline_id, RUN_PIPELINE_NAME, dataset.id, result
+    )
+    send_telemetry(
+        "Incremental Update Run Completed",
+        user.id,
+        additional_properties={"dataset_id": str(dataset.id), "data_id": str(data_id), **result},
+    )
+    return result
+
+
+async def _apply_incremental_update(
+    data_id: UUID,
+    data,
+    dataset,
+    user: User,
+    old_data: Data,
+    node_set: Optional[List[str]],
+    preferred_loaders,
+    graph_model: type[BaseModel],
+    custom_prompt: Optional[str],
 ) -> dict:
     """The locked, dataset-context-scoped body of the incremental update."""
     dataset_id = dataset.id
+
+    # Re-fetch the row INSIDE the lock: a concurrent update that just finished
+    # has moved raw_data_location to a new processed file, and diffing against
+    # the pre-lock snapshot would use a stale baseline.
+    old_data = await get_data(user.id, data_id)
+    if old_data is None or not old_data.raw_data_location:
+        raise IncrementalUpdateNotPossible("data row disappeared before the update ran")
 
     # -- Old state (must be captured BEFORE add() replaces the stored file) - #
     old_text = await _read_processed_text(old_data.raw_data_location)
@@ -354,18 +481,30 @@ async def _run_incremental_update(
     # -- Ingest new content FIRST (crash safety: a failure between phases ----- #
     #    leaves recoverable duplicates, never holes; the retry falls back to a
     #    full update because the stored chunks no longer tile the stored text).
-    embed_triplets = get_cognify_config().triplet_embedding
+    cognify_config = get_cognify_config()
     if fresh_chunks:
-        await extract_graph_from_data(fresh_chunks, KnowledgeGraph, ctx=context)
-        summaries = await summarize_text(fresh_chunks)
-        await add_data_points(summaries, ctx=context, embed_triplets=embed_triplets)
+        # Same extraction + summarization the cognify pipeline runs, with the
+        # same ontology resolution, model, and prompt plumbing.
+        summaries = await extract_graph_and_summarize(
+            fresh_chunks,
+            graph_model=graph_model,
+            config=_resolve_extraction_config(),
+            custom_prompt=custom_prompt,
+            ctx=context,
+        )
+        await add_data_points(
+            summaries, ctx=context, embed_triplets=cognify_config.triplet_embedding
+        )
+        if cognify_config.contradiction_detection:
+            await detect_contradictions(summaries)
     if reused_chunks:
         await add_data_points(reused_chunks, ctx=context)
 
     # -- Delete replaced chunks + summaries + chunk-orphaned entities --------- #
     ids_to_delete = sorted(affected_ids - new_ids)
     if ids_to_delete:
-        await delete_chunks_incremental(ids_to_delete)
+        doomed = await delete_chunks_incremental(ids_to_delete)
+        await _prune_ledger_rows(data_id, dataset_id, doomed)
 
     # -- Renumber surviving chunks whose position shifted --------------------- #
     shifted_chunks = _build_shifted_chunks(document, stored_chunks, plan, len(new_chunks))
