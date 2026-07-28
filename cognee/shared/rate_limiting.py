@@ -17,91 +17,110 @@ llm_rate_limiter = AsyncLimiter(
 # EmbeddingConfig is reached through, import this module).
 _embedding_rate_limiter = None
 
-# Set once AUTO_RATE_LIMIT reacts to a provider rate limit: from then on every
+# Early overload detection: a dispatch that SUCCEEDS but takes this long is
+# proof the server's queue is approaching the client timeout cliff (default
+# 600s) — react before anything actually fails. Healthy setups complete
+# calls in seconds to a couple of minutes and never approach this.
+SLOW_COMPLETION_SECONDS = 300.0
+
+# Set once AUTO_RATE_LIMIT reacts to overload evidence: from then on every
 # dispatch is paced by the RPM limiter above, exactly as if
 # LLM_RATE_LIMIT_ENABLED had been set.
 _auto_rate_limit_activated = False
 
-# Local inference servers never report rate limits — their overload signal is
-# a slow client timeout, far too late to react to. With AUTO_RATE_LIMIT they
-# are therefore paced from the very first dispatch instead of reactively.
-_LOCAL_LLM_PROVIDERS = frozenset({"ollama", "llama_cpp"})
-_LOCAL_MODEL_PREFIXES = ("lm_studio/", "hosted_vllm/", "vllm/")
-_local_pacing_active: bool | None = None  # resolved lazily on first dispatch
 
-
-def _local_pacing() -> bool:
-    """Pace local LLM servers up front (once, with a warning explaining why)."""
-    global _local_pacing_active
-    if _local_pacing_active is None:
-        provider = (llm_config.llm_provider or "").lower()
-        model = (llm_config.llm_model or "").lower()
-        is_local = provider in _LOCAL_LLM_PROVIDERS or model.startswith(_LOCAL_MODEL_PREFIXES)
-        _local_pacing_active = llm_config.auto_rate_limit and is_local
-        if _local_pacing_active:
-            logger.warning(
-                "Local LLM provider detected (%s / %s) — enabling the RPM limiter "
-                "(%d requests per %ds) up front, because local servers cannot absorb "
-                "unbounded request floods and never report rate limits themselves. "
-                "Tune LLM_RATE_LIMIT_REQUESTS / LLM_RATE_LIMIT_INTERVAL to match your "
-                "machine's real throughput, or set AUTO_RATE_LIMIT=false to disable "
-                "this behavior.",
-                llm_config.llm_provider,
-                llm_config.llm_model,
-                llm_config.llm_rate_limit_requests,
-                llm_config.llm_rate_limit_interval,
-            )
-    return _local_pacing_active
-
-
-def _activate_rate_limiter_on_rate_limit(error: BaseException) -> None:
-    """Warn and switch on the RPM limiter if the error (or its cause) is a rate limit.
-
-    Wrappers hide the signal — instructor re-raises provider errors inside
-    InstructorRetryException — so the cause chain is checked, not just the
-    top-level type. openai.RateLimitError covers every client stack: litellm's
-    exceptions subclass it, and SDK-direct adapters raise it natively.
-    """
+def _fall_back_to_rate_limiter(reason: str) -> None:
+    """Warn once and pace all further dispatches with the RPM limiter."""
     global _auto_rate_limit_activated
+    if _auto_rate_limit_activated:
+        return
+    _auto_rate_limit_activated = True
+    logger.warning(
+        "LLM requests are not being processed fast enough (%s) — enabling "
+        "the RPM limiter (%d requests per %ds) for the rest of this process. "
+        "Tune LLM_RATE_LIMIT_REQUESTS / LLM_RATE_LIMIT_INTERVAL to match what "
+        "your provider or machine can handle, or set AUTO_RATE_LIMIT=false to "
+        "opt out.",
+        reason,
+        llm_config.llm_rate_limit_requests,
+        llm_config.llm_rate_limit_interval,
+    )
+
+
+def _overload_evidence(error: BaseException) -> str | None:
+    """Name the overload cause in ``error``'s chain, or None.
+
+    Overload evidence is a rate-limit error (cloud providers), a timeout (how
+    overwhelmed local servers usually surface — they never send rate limits),
+    or an HTTP 503/529 overload status (Ollama past its queue cap, Anthropic
+    overloaded). Wrappers hide the signal — instructor re-raises provider
+    errors inside InstructorRetryException — so the cause chain is checked,
+    not just the top-level type. The openai base classes cover every client
+    stack: litellm's exceptions subclass them, and SDK-direct adapters raise
+    them natively.
+    """
+    import asyncio
+
     import openai
 
+    overload_types = (
+        openai.RateLimitError,
+        openai.APITimeoutError,
+        asyncio.TimeoutError,
+        TimeoutError,
+    )
+    # Server-overload statuses that arrive as plain HTTP errors: 503 (service
+    # unavailable — e.g. Ollama's queue-full reply) and 529 (Anthropic overloaded).
+    overload_statuses = frozenset({503, 529})
     seen: set = set()
     node: BaseException | None = error
     while node is not None and id(node) not in seen and len(seen) < 20:
-        if isinstance(node, openai.RateLimitError):
-            if not _auto_rate_limit_activated:
-                _auto_rate_limit_activated = True
-                logger.warning(
-                    "LLM provider reported a rate limit — enabling the RPM limiter "
-                    "(%d requests per %ds) for the rest of this process. Tune with "
-                    "LLM_RATE_LIMIT_REQUESTS / LLM_RATE_LIMIT_INTERVAL, or set "
-                    "AUTO_RATE_LIMIT=false to opt out.",
-                    llm_config.llm_rate_limit_requests,
-                    llm_config.llm_rate_limit_interval,
-                )
-            return
+        if isinstance(node, overload_types):
+            return type(node).__name__
+        if (
+            isinstance(node, openai.APIStatusError)
+            and getattr(node, "status_code", None) in overload_statuses
+        ):
+            return f"HTTP {node.status_code}"
         seen.add(id(node))
         node = node.__cause__ or node.__context__
+    return None
 
 
 @asynccontextmanager
 async def _governed_llm_dispatch():
     """Gate one LLM dispatch attempt.
 
-    Cloud is unbounded by default; the RPM limiter paces when
-    LLM_RATE_LIMIT_ENABLED is set, when AUTO_RATE_LIMIT (default on) reacted
-    to a provider rate limit, or from the start for local inference servers.
-    Adapters enter this context manager INSIDE their tenacity retry, so
-    retried attempts are paced as well.
+    Everything runs unbounded (the fast path). When there is evidence the
+    provider cannot keep up — a completion slow enough to prove the queue is
+    nearing the client timeout (detected BEFORE anything fails), a rate-limit
+    error, an HTTP 503/529, or a timeout — one warning is logged and the RPM
+    limiter paces all further dispatches with the configured budget.
+    LLM_RATE_LIMIT_ENABLED paces from the start, unchanged. Adapters enter
+    this context manager INSIDE their tenacity retry, so retried attempts are
+    paced as well.
     """
-    pace = llm_config.llm_rate_limit_enabled or _auto_rate_limit_activated or _local_pacing()
+    import time
+
+    pace = llm_config.llm_rate_limit_enabled or _auto_rate_limit_activated
     async with llm_rate_limiter if pace else nullcontext():
+        started = time.monotonic()
         try:
             yield
         except Exception as error:
-            if llm_config.auto_rate_limit:
-                _activate_rate_limiter_on_rate_limit(error)
+            if llm_config.auto_rate_limit and not _auto_rate_limit_activated:
+                evidence = _overload_evidence(error)
+                if evidence is not None:
+                    _fall_back_to_rate_limiter(evidence)
             raise
+        else:
+            elapsed = time.monotonic() - started
+            if (
+                llm_config.auto_rate_limit
+                and not _auto_rate_limit_activated
+                and elapsed >= SLOW_COMPLETION_SECONDS
+            ):
+                _fall_back_to_rate_limiter(f"completion took {elapsed:.0f}s")
 
 
 def llm_rate_limiter_context_manager():
