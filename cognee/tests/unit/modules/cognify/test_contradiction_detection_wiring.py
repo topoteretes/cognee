@@ -9,6 +9,7 @@ pipeline. No real API keys are required (get_cognify_config is patched; config +
 chunk_size are passed so no ontology/LLM setup runs).
 """
 
+import importlib
 import os
 import sys
 from unittest.mock import AsyncMock, patch
@@ -25,6 +26,10 @@ from cognee.tasks.graph.models import Contradiction, ContradictionList
 # cognify FUNCTION; grab the actual module objects for patching.
 cognify_module = sys.modules["cognee.api.v1.cognify.cognify"]
 remember_module = sys.modules["cognee.api.v1.remember.remember"]
+# Resolved via importlib: `cognee.api.v1` re-exports the serve *function*, which
+# shadows the serve *package* on mock.patch's string-target resolution
+# (order-dependent — see test_public_memory_api.py for the same workaround).
+serve_state_module = importlib.import_module("cognee.api.v1.serve.state")
 
 # The canonical pre-detection task order.
 _BASE_SEQUENCE = [
@@ -129,7 +134,7 @@ class TestRememberInheritsTheFlag:
             patch.object(cognify_module, "get_cognify_config", return_value=config),
             patch.object(cognify_module, "get_pipeline_executor", _fake_executor),
             patch("cognee.modules.migrations.startup.run_migrations_and_block", new=AsyncMock()),
-            patch("cognee.api.v1.serve.state.get_remote_client", return_value=None),
+            patch.object(serve_state_module, "get_remote_client", return_value=None),
             patch("cognee.modules.engine.operations.setup.setup", new=AsyncMock()),
             patch("cognee.api.v1.add.add", new=AsyncMock()),
             patch(
