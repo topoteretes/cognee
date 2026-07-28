@@ -43,17 +43,22 @@ PACKAGE_ROOT = Path(cognee.__file__).parent
 # instantiate every subclass regardless of its signature. A raw KeyError here is
 # turned into an actionable failure (see ``_build_kwargs``).
 SAMPLE_ARGUMENTS = {
+    "attempted_dataset_id": "sample-attempted-dataset",
     "attribute": "sample_attribute",
+    "bound_dataset_id": "sample-bound-dataset",
+    "dataset_ids": ["sample-dataset-1", "sample-dataset-2"],
     "detail": "sample detail",
     "dimension": 1,
     "field": "sample_field",
     "got": "sample",
     "max_index": 2,
     "message": "contract message",
+    "model": "sample-model",
     "name": "ContractError",
     "observer": "sample-observer",
     "provider": "sample-provider",
     "search_type": "sample-search",
+    "session_id": "sample-session",
     "status_code": 400,
     "value": 1,
 }
