@@ -149,6 +149,13 @@ def get_remember_router() -> APIRouter:
                 "for large files."
             ),
         ),
+        self_improvement: bool = Form(
+            default=True,
+            description=(
+                "If true, runs improve() after remembering to enrich graph memory. "
+                "Set to false to skip the self-improvement pass."
+            ),
+        ),
         custom_prompt: Optional[str] = Form(
             default="",
             description=(
@@ -244,6 +251,7 @@ def get_remember_router() -> APIRouter:
           data is ingested directly via add + cognify.
         - **node_set** (Optional[List[str]]): Node identifiers for graph organisation.
         - **run_in_background** (Optional[bool]): Run the cognify step asynchronously (default: False).
+        - **self_improvement** (bool): Run improve/memify after remembering (default: True).
         - **custom_prompt** (Optional[str]): Custom prompt for entity extraction.
         - **chunk_size** (Optional[int]): Maximum tokens per chunk (default: 4096).
         - **chunks_per_batch** (Optional[int]): Chunks per cognify batch.
@@ -355,6 +363,7 @@ def get_remember_router() -> APIRouter:
                 dataset_id=datasetId if datasetId else None,
                 node_set=[tag for tag in (node_set or []) if tag] or None,
                 run_in_background=run_in_background or False,
+                self_improvement=self_improvement,
                 custom_prompt=custom_prompt or None,
                 chunk_size=chunk_size,
                 chunks_per_batch=chunks_per_batch,

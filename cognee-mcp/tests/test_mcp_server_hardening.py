@@ -144,6 +144,21 @@ async def test_mcp_exposes_only_memory_tools():
 
 
 @pytest.mark.asyncio
+async def test_mcp_remember_exposes_self_improvement():
+    import src.server as server
+
+    tools = await server.mcp.list_tools()
+    remember_tool = next(tool for tool in tools if tool.name == "remember")
+
+    self_improvement = remember_tool.inputSchema["properties"]["self_improvement"]
+    assert self_improvement == {
+        "default": True,
+        "title": "Self Improvement",
+        "type": "boolean",
+    }
+
+
+@pytest.mark.asyncio
 async def test_cognee_client_api_add_uses_content_addressed_filename():
     requests: list[httpx.Request] = []
 
@@ -194,6 +209,47 @@ async def test_cognee_client_api_remember_sends_session_id():
     assert payload["session_id"] == "session-1"
     assert payload["entry"]["type"] == "qa"
     assert payload["entry"]["answer"] == content
+
+
+@pytest.mark.asyncio
+async def test_cognee_client_direct_remember_forwards_self_improvement():
+    class FakeCognee:
+        def __init__(self):
+            self.remember_kwargs = None
+
+        async def remember(self, **kwargs):
+            self.remember_kwargs = kwargs
+            return None
+
+    client = CogneeClient()
+    client.cognee = FakeCognee()
+
+    await client.remember("hello", dataset_name="ds", self_improvement=False)
+
+    assert client.cognee.remember_kwargs["self_improvement"] is False
+
+
+@pytest.mark.asyncio
+async def test_cognee_client_api_remember_forwards_self_improvement():
+    requests: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"status": "ok"})
+
+    client = CogneeClient(api_url="http://cognee.local")
+    await client.client.aclose()
+    client.client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+    try:
+        await client.remember("hello", dataset_name="ds", self_improvement=False)
+    finally:
+        await client.close()
+
+    body = requests[0].content.decode()
+    assert requests[0].url.path == "/api/v1/remember"
+    assert 'name="self_improvement"' in body
+    assert "\r\nfalse\r\n" in body
 
 
 @pytest.mark.asyncio
@@ -259,6 +315,31 @@ async def test_mcp_recall_forwards_system_prompt(monkeypatch):
         "system_prompt": "Answer with provenance.",
         "top_k": 5,
     }
+
+
+@pytest.mark.asyncio
+async def test_mcp_remember_forwards_self_improvement(monkeypatch):
+    import src.server as server
+
+    class FakeClient:
+        def __init__(self):
+            self.remember_kwargs = None
+
+        async def remember(self, **kwargs):
+            self.remember_kwargs = kwargs
+            return {"status": "completed"}
+
+    fake_client = FakeClient()
+    monkeypatch.setattr(server, "cognee_client", fake_client)
+
+    result = await server.remember(
+        data="hello",
+        dataset_name="ds",
+        self_improvement=False,
+    )
+
+    assert "Stored permanently" in result[0].text
+    assert fake_client.remember_kwargs["self_improvement"] is False
 
 
 @pytest.mark.asyncio

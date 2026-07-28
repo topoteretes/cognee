@@ -494,7 +494,7 @@ The MCP server exposes its functionality through tools. Call them from any MCP c
 
 The MCP server exposes three tools:
 
-- **remember**: Store data in memory. With `session_id`: fast session cache. Without `session_id`: permanent graph memory
+- **remember**: Store data in memory. With `session_id`: fast session cache. Without `session_id`: permanent graph memory. Set `self_improvement=false` to skip the follow-up improve/memify pass
 - **recall**: Search memory with auto-routing. Searches session cache first when `session_id` is provided, then falls through to the permanent graph
 - **forget**: Delete memory by dataset name, or delete all owned memory with `everything=True`
 
@@ -546,6 +546,13 @@ rm -rf "$DATA_ROOT/.cognee_system" "$DATA_ROOT/.data_storage"
 ```bash
 # Store permanent memory
 remember(data="Cognee MCP now exposes a focused memory API.", dataset_name="main_dataset")
+
+# Store permanent memory without the follow-up improve/memify pass
+remember(
+    data="A latency-sensitive memory.",
+    dataset_name="main_dataset",
+    self_improvement=False,
+)
 
 # Store session memory
 remember(data="Temporary working note", session_id="agent-session-1")

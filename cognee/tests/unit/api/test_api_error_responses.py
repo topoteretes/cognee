@@ -165,6 +165,28 @@ class TestRememberEndpoint:
         remember.assert_awaited_once()
         assert remember.await_args.kwargs["chunk_size"] == 42
 
+    def test_remember_passes_self_improvement(self, client, monkeypatch):
+        remember_pkg = importlib.import_module("cognee.api.v1.remember")
+
+        class RememberResultStub:
+            status = "completed"
+
+            def to_dict(self):
+                return {"status": "completed", "dataset_name": "test_dataset"}
+
+        remember = AsyncMock(return_value=RememberResultStub())
+        monkeypatch.setattr(remember_pkg, "remember", remember)
+
+        resp = client.post(
+            "/remember",
+            data={"datasetName": "test_dataset", "self_improvement": "false"},
+            files={"data": ("test.txt", b"Cognee is an AI memory platform.", "text/plain")},
+        )
+
+        assert resp.status_code == 200
+        remember.assert_awaited_once()
+        assert remember.await_args.kwargs["self_improvement"] is False
+
 
 # ---------------------------------------------------------------------------
 # Cognify endpoint

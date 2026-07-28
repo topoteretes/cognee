@@ -522,11 +522,15 @@ class CogneeClient:
         dataset_name: str = "main_dataset",
         session_id: Optional[str] = None,
         custom_prompt: Optional[str] = None,
+        self_improvement: bool = True,
     ) -> Dict[str, Any]:
         """Store data in memory via remember().
 
         With session_id: stores in session cache only (fast).
         Without session_id: full add + cognify pipeline (permanent).
+
+        Set self_improvement to False to skip the improve/memify step that
+        follows the core remember operation.
         """
         if self.use_api:
             if session_id:
@@ -562,7 +566,10 @@ class CogneeClient:
 
             endpoint = f"{self.api_url}/api/v1/remember"
             files = self._text_upload(data)
-            form_data = {"datasetName": dataset_name}
+            form_data = {
+                "datasetName": dataset_name,
+                "self_improvement": "true" if self_improvement else "false",
+            }
             if custom_prompt:
                 form_data["custom_prompt"] = custom_prompt
             response = await self.client.post(
@@ -578,6 +585,7 @@ class CogneeClient:
                 kwargs = {
                     "data": data,
                     "dataset_name": dataset_name,
+                    "self_improvement": self_improvement,
                 }
                 if session_id:
                     kwargs["session_id"] = session_id

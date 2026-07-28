@@ -1080,6 +1080,7 @@ async def remember(
     dataset_name: str = None,
     session_id: str = None,
     custom_prompt: str = None,
+    self_improvement: bool = True,
 ) -> list:
     """Store data in memory.
 
@@ -1104,6 +1105,9 @@ async def remember(
         Session ID. When set, stores in session cache only.
     custom_prompt : str, optional
         Custom prompt for entity extraction (permanent mode only).
+    self_improvement : bool, optional
+        Whether to run improve/memify after remembering. Defaults to True.
+        Set to False to avoid the graph-wide self-improvement pass.
     """
     dataset_name = dataset_name or _agent_scoped_default_dataset()
     with redirect_stdout(sys.stderr):
@@ -1113,6 +1117,7 @@ async def remember(
                 dataset_name=dataset_name,
                 session_id=session_id,
                 custom_prompt=custom_prompt,
+                self_improvement=self_improvement,
             )
             status = result.get("status", "completed")
             if session_id:
