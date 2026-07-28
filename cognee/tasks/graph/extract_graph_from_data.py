@@ -19,6 +19,7 @@ from cognee.modules.graph.utils import (
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.infrastructure.llm.extraction import extract_content_graph
 from cognee.infrastructure.llm.pipeline_stage import pipeline_stage
+from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.engine import DataPoint
 from cognee.tasks.graph.exceptions import (
     InvalidGraphModelError,
@@ -26,6 +27,8 @@ from cognee.tasks.graph.exceptions import (
     InvalidChunkGraphInputError,
     InvalidOntologyAdapterError,
 )
+
+logger = get_logger("extract_graph_from_data")
 
 
 def _stamp_provenance_deep(data, pipeline_name, task_name, visited=None):
@@ -171,13 +174,22 @@ async def extract_graph_from_data(
         chunk_graphs = await extracted if inspect.isawaitable(extracted) else extracted
     else:
         with pipeline_stage("extraction"):
+            total = len(non_dlt_chunks)
+            log_every = max(1, total // 10)
+            completed = 0
+
+            async def _extract_with_progress(chunk):
+                nonlocal completed
+                graph = await extract_content_graph(
+                    chunk.text, graph_model, custom_prompt=custom_prompt, **kwargs
+                )
+                completed += 1
+                if completed % log_every == 0 or completed == total:
+                    logger.info("Graph extraction progress: %d/%d chunks", completed, total)
+                return graph
+
             chunk_graphs = await asyncio.gather(
-                *[
-                    extract_content_graph(
-                        chunk.text, graph_model, custom_prompt=custom_prompt, **kwargs
-                    )
-                    for chunk in non_dlt_chunks
-                ]
+                *[_extract_with_progress(chunk) for chunk in non_dlt_chunks]
             )
     cache_entity_embeddings = kwargs.get("cache_entity_embeddings")
     if callable(cache_entity_embeddings):

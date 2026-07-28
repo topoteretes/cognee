@@ -104,6 +104,9 @@ class LLMConfig(BaseSettings):
     llm_rate_limit_requests: int = 60
     llm_rate_limit_interval: int = 60  # in seconds (default is 60 requests per minute)
     llm_rate_limit_tokens: int = 0  # max tokens per interval (0 = disabled)
+    # When the provider reports a rate limit, warn and switch on the RPM limiter
+    # (with the llm_rate_limit_requests/interval budget) for the rest of the process.
+    auto_rate_limit: bool = True
 
     llama_cpp_model_path: str | None = None
     llama_cpp_n_ctx: int = 2048
