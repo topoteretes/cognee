@@ -73,7 +73,7 @@ class OllamaAPIAdapter(LLMInterface):
         llm_args: dict[str, Any] | None = None,
     ) -> None:
         self.name = name
-        self.model = model.removeprefix("ollama/")
+        self.model = model.removeprefix("ollama/") if model.startswith("ollama/") else model
         self.api_key = api_key
         self.endpoint = endpoint
         self.max_completion_tokens = max_completion_tokens
