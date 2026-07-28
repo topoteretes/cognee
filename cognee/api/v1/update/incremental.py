@@ -27,7 +27,9 @@ from uuid import UUID, uuid4
 from sqlalchemy import select
 
 from cognee.api.v1.add import add
+from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.locks import dataset_lock
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.llm.utils import get_max_chunk_tokens
@@ -237,6 +239,30 @@ async def incremental_update(
     old_data = await get_data(user.id, data_id)  # raises on foreign data
     if old_data is None or not old_data.raw_data_location:
         raise IncrementalUpdateNotPossible("no stored processed text for this data item")
+
+    # Same per-dataset lock as pipeline runs and delete_data: serialize against
+    # concurrent cognify/delete/update on this dataset (re-entrant, so the
+    # inner add() pipeline can take it again). Inside, establish the dataset's
+    # database context — with backend access control on, graph/vector engines
+    # resolve per user+dataset, and a fresh API request arrives without it.
+    async with dataset_lock(dataset.id):
+        async with set_database_global_context_variables(dataset.id, user.id):
+            return await _run_incremental_update(
+                data_id, data, dataset, user, old_data, node_set, preferred_loaders
+            )
+
+
+async def _run_incremental_update(
+    data_id: UUID,
+    data,
+    dataset,
+    user: User,
+    old_data: Data,
+    node_set: Optional[List[str]],
+    preferred_loaders,
+) -> dict:
+    """The locked, dataset-context-scoped body of the incremental update."""
+    dataset_id = dataset.id
 
     # -- Old state (must be captured BEFORE add() replaces the stored file) - #
     old_text = await _read_processed_text(old_data.raw_data_location)
