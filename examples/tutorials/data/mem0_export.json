@@ -1,0 +1,36 @@
+{
+  "results": [
+    {
+      "id": "m01",
+      "memory": "Alice prefers dark mode and uses VS Code as her editor.",
+      "user_id": "alice",
+      "categories": ["preferences", "tools"],
+      "created_at": "2025-01-10T14:30:00Z",
+      "metadata": {"source": "onboarding_chat"}
+    },
+    {
+      "id": "m02",
+      "memory": "The project uses PostgreSQL for the main database and Redis for caching.",
+      "user_id": "alice",
+      "categories": ["infrastructure"],
+      "created_at": "2025-01-12T09:00:00Z",
+      "metadata": {"source": "team_wiki"}
+    },
+    {
+      "id": "m03",
+      "memory": "Alice's manager is Bob, who leads the platform engineering team.",
+      "user_id": "alice",
+      "categories": ["people"],
+      "created_at": "2025-02-01T11:00:00Z",
+      "metadata": {}
+    },
+    {
+      "id": "m04",
+      "memory": "The Q2 OKRs include reducing p95 latency by 30% and launching the new API gateway.",
+      "user_id": "alice",
+      "categories": ["goals"],
+      "created_at": "2025-03-15T16:00:00Z",
+      "metadata": {"source": "okr_review"}
+    }
+  ]
+}
