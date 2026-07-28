@@ -8,8 +8,9 @@ Flow (only runs from the update endpoint):
    chunk nodes from the graph, ordered by their position in that text.
 3. Run ``add()`` so the new file goes through the normal add pipeline (loaders
    store the new processed text and update the ``Data`` row).
-4. Diff old vs new text; expand the edit to affected chunk boundaries; split
-   the replacement region into balanced chunks under ``max_chunk_size``.
+4. Diff old vs new text; expand the edit to affected chunk boundaries; re-chunk
+   the replacement region with the standard TextChunker (same sentence/paragraph
+   boundary semantics and token budget as pipeline chunks).
 5. Delete the affected chunks (+ summaries + chunk-orphaned entities) from the
    graph and vector stores.
 6. Re-ingest ONLY the new chunks through the standard graph-extraction and
@@ -59,7 +60,9 @@ from cognee.modules.chunking.incremental_chunking import (
     IncrementalPlan,
     IncrementalPlanError,
     compute_incremental_plan,
+    validate_no_loss,
 )
+from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.modules.data.methods import get_authorized_dataset, get_data
 from cognee.modules.data.methods.get_dataset_data import get_dataset_data
@@ -184,15 +187,39 @@ async def _prune_ledger_rows(data_id: UUID, dataset_id: UUID, doomed_ids: List[s
         await session.commit()
 
 
-def _build_new_chunks(
-    document: TextDocument, plan: IncrementalPlan, stored_chunks: List[dict], word_size
+async def _chunk_region(
+    document: TextDocument, region_text: str, max_chunk_size: int
 ) -> List[DocumentChunk]:
-    """DocumentChunk objects for the replacement region.
+    """Run the standard TextChunker over the replacement region.
 
-    Ids follow the content-hash scheme used by TextChunker: occurrence counting
-    runs over the final document order (kept prefix first), so two identical
-    texts stay distinct. Surviving chunks created under an older id scheme are
-    guarded against by bumping the occurrence on a direct id collision.
+    Replacement chunks get the same sentence/paragraph boundary semantics as
+    pipeline chunks; only the region's last chunk may come out under-filled,
+    like the tail of any normally-cognified document. The chunker's ids and
+    indexes are region-local and discarded — _build_new_chunks reassigns both.
+    """
+    if not region_text:
+        return []
+
+    async def get_text():
+        yield region_text
+
+    chunker = TextChunker(document, get_text, max_chunk_size)
+    return [chunk async for chunk in chunker.read()]
+
+
+def _build_new_chunks(
+    document: TextDocument,
+    plan: IncrementalPlan,
+    stored_chunks: List[dict],
+    region_chunks: List[DocumentChunk],
+) -> List[DocumentChunk]:
+    """Finalize the region's chunks with document-scoped identity and position.
+
+    Ids follow the content-hash scheme: occurrence counting runs over the final
+    document order (kept prefix first), so two identical texts stay distinct —
+    the chunker's own region-local ids would collide with an identical prefix
+    chunk. Surviving chunks created under an older id scheme are guarded
+    against by bumping the occurrence on a direct id collision.
     """
     surviving_ids = {
         str(node["id"])
@@ -205,7 +232,8 @@ def _build_new_chunks(
         occurrences[text_hash] = occurrences.get(text_hash, 0) + 1
 
     chunks = []
-    for offset, text in enumerate(plan.new_chunk_texts):
+    for offset, region_chunk in enumerate(region_chunks):
+        text = region_chunk.text
         content_hash = chunk_content_hash(text)
         occurrence = occurrences.get(content_hash, 0)
         chunk_id = content_chunk_id(document.id, content_hash, occurrence)
@@ -217,10 +245,10 @@ def _build_new_chunks(
             DocumentChunk(
                 id=chunk_id,
                 text=text,
-                chunk_size=sum(word_size(w) for w in text.split()),
+                chunk_size=region_chunk.chunk_size,
                 content_hash=content_hash,
                 chunk_index=plan.unchanged_prefix_count + offset,
-                cut_type="incremental_update",
+                cut_type=region_chunk.cut_type,
                 is_part_of=document,
                 contains=[],
                 document_id=str(document.id),
@@ -434,17 +462,9 @@ async def _apply_incremental_update(
     new_text = await _read_processed_text(new_data.raw_data_location)
 
     # -- Plan ---------------------------------------------------------------- #
-    max_chunk_size = await get_max_chunk_tokens()
-    from cognee.tasks.chunks.chunk_by_sentence import get_word_size
-
+    stored_texts = [node["text"] for node in stored_chunks]
     try:
-        plan = compute_incremental_plan(
-            old_text,
-            [node["text"] for node in stored_chunks],
-            new_text,
-            max_chunk_size,
-            word_size=get_word_size,
-        )
+        plan = compute_incremental_plan(old_text, stored_texts, new_text)
     except IncrementalPlanError as error:
         raise IncrementalUpdateNotPossible(str(error)) from error
 
@@ -457,7 +477,7 @@ async def _apply_incremental_update(
         pipeline_name=PIPELINE_NAME,
     )
 
-    if not plan.affected_indices and not plan.new_chunk_texts:
+    if not plan.affected_indices:
         # Self-heal: a crash between an earlier delete and its renumbering can
         # leave stale indexes behind an unchanged text — repair them here.
         repaired = _build_shifted_chunks(document, stored_chunks, plan, 0)
@@ -472,7 +492,14 @@ async def _apply_incremental_update(
             "reindexed_chunks": len(repaired),
         }
 
-    new_chunks = _build_new_chunks(document, plan, stored_chunks, get_word_size)
+    # -- Chunk the region with the standard TextChunker, then verify no-loss -- #
+    max_chunk_size = await get_max_chunk_tokens()
+    region_chunks = await _chunk_region(document, plan.replacement_region, max_chunk_size)
+    new_chunks = _build_new_chunks(document, plan, stored_chunks, region_chunks)
+    try:
+        validate_no_loss(stored_texts, plan, [chunk.text for chunk in new_chunks], new_text)
+    except IncrementalPlanError as error:
+        raise IncrementalUpdateNotPossible(str(error)) from error
 
     # A replacement chunk that is byte-identical to one being replaced hashes
     # to the SAME node id. Keep its subgraph: refresh its properties, skip
