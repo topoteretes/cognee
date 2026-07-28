@@ -13,7 +13,7 @@ from cognee.modules.chunking.incremental_chunking import (
 
 def _units(n_words: int, prefix: str = "w"):
     """Word units with their separators; every 7th separator is a newline
-    (the diff is line-anchored, so the synthetic text must have lines)."""
+    (the diff anchors on lines/paragraphs, so the synthetic text needs them)."""
     return [f"{prefix}{i:04d}" + ("\n" if i % 7 == 6 else " ") for i in range(n_words)]
 
 
