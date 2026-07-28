@@ -258,6 +258,37 @@ def _build_new_chunks(
     return chunks
 
 
+def _rehydrate_chunk(document: TextDocument, node: dict, chunk_index: int) -> DocumentChunk:
+    """Rebuild a stored chunk at a new position, preserving every model field.
+
+    Adapters replace the node's whole property set on MERGE (ladybug rewrites
+    the properties blob wholesale), so any field missing here is not merely
+    reset — it is erased. Everything DocumentChunk models must be carried over
+    from the stored node; only the position (chunk_index) is meant to change.
+    """
+    text = node["text"]
+    truth_alignment = node.get("truth_alignment")
+    return DocumentChunk(
+        id=UUID(str(node["id"])),
+        text=text,
+        chunk_size=int(node.get("chunk_size", 0)),
+        content_hash=node.get("content_hash") or chunk_content_hash(text),
+        chunk_index=chunk_index,
+        cut_type=str(node.get("cut_type", "paragraph_end")),
+        is_part_of=document,
+        contains=[],
+        importance_weight=node.get("importance_weight", document.importance_weight),
+        document_id=str(document.id),
+        document_name=document.name,
+        truth_alignment=truth_alignment if isinstance(truth_alignment, list) else None,
+        truth_epoch=node.get("truth_epoch"),
+        ontology_valid=bool(node.get("ontology_valid", False)),
+        ontology_uri=node.get("ontology_uri"),
+        version=int(node.get("version", 1)),
+        topological_rank=node.get("topological_rank", 0),
+    )
+
+
 def _build_shifted_chunks(
     document: TextDocument,
     stored_chunks: List[dict],
@@ -266,9 +297,10 @@ def _build_shifted_chunks(
 ) -> List[DocumentChunk]:
     """Surviving chunks whose chunk_index no longer matches their final position.
 
-    Rebuilt with their EXISTING id and corrected index; re-storing them through
-    add_data_points upserts the graph node and refreshes the vector payload, so
-    citations and layout stay consistent after the region length changed.
+    Rehydrated from their stored node with their EXISTING id and corrected
+    index; re-storing them through add_data_points upserts the graph node and
+    refreshes the vector payload, so citations and layout stay consistent
+    after the region length changed.
     """
     total = len(stored_chunks)
     shifted = []
@@ -282,21 +314,7 @@ def _build_shifted_chunks(
             expected = plan.unchanged_prefix_count + new_chunk_count + offset_in_suffix
         if int(node.get("chunk_index", -1)) == expected:
             continue
-        text = node["text"]
-        shifted.append(
-            DocumentChunk(
-                id=UUID(str(node["id"])),
-                text=text,
-                chunk_size=int(node.get("chunk_size", 0)),
-                content_hash=node.get("content_hash") or chunk_content_hash(text),
-                chunk_index=expected,
-                cut_type=str(node.get("cut_type", "incremental_update")),
-                is_part_of=document,
-                contains=[],
-                document_id=str(document.id),
-                document_name=document.name,
-            )
-        )
+        shifted.append(_rehydrate_chunk(document, node, expected))
     return shifted
 
 
@@ -329,6 +347,15 @@ async def incremental_update(
         raise IncrementalUpdateNotPossible(
             f"graph provider '{graph_provider}' is not verified for chunk-level updates"
         )
+
+    # The HTTP router (and permissive SDK callers) send a list of files; a
+    # chunk-level update targets exactly one document by definition.
+    if isinstance(data, (list, tuple)):
+        if len(data) != 1:
+            raise IncrementalUpdateNotPossible(
+                f"chunk-level update targets exactly one document, got {len(data)} items"
+            )
+        data = data[0]
 
     # -- Permissions: dataset write + membership + ownership ---------------- #
     dataset = await get_authorized_dataset(user, dataset_id, "write")
@@ -502,11 +529,17 @@ async def _apply_incremental_update(
         raise IncrementalUpdateNotPossible(str(error)) from error
 
     # A replacement chunk that is byte-identical to one being replaced hashes
-    # to the SAME node id. Keep its subgraph: refresh its properties, skip
-    # re-extraction, and exclude it from deletion.
+    # to the SAME node id. Keep its subgraph: rehydrate the stored node at its
+    # new position (preserving all properties), skip re-extraction, and
+    # exclude it from deletion.
     affected_ids = {str(stored_chunks[i]["id"]) for i in plan.affected_indices}
     new_ids = {str(chunk.id) for chunk in new_chunks}
-    reused_chunks = [chunk for chunk in new_chunks if str(chunk.id) in affected_ids]
+    stored_by_id = {str(node["id"]): node for node in stored_chunks}
+    reused_chunks = [
+        _rehydrate_chunk(document, stored_by_id[str(chunk.id)], chunk.chunk_index)
+        for chunk in new_chunks
+        if str(chunk.id) in affected_ids
+    ]
     fresh_chunks = [chunk for chunk in new_chunks if str(chunk.id) not in affected_ids]
 
     # -- Ingest new content FIRST (crash safety: a failure between phases ----- #

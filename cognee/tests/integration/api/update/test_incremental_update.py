@@ -271,6 +271,28 @@ async def test_incremental_update_full_flow(incremental_env):
     healed_nodes = await _doc_chunk_nodes(data_id, healed_text)
     assert "".join(n["text"] for n in healed_nodes) == healed_text, "fallback healed the graph"
 
+    # --- The router shape: a single UploadFile in a list ---------------------- #
+    # FastAPI backs UploadFile with a SpooledTemporaryFile — classify() keys on
+    # that exact type, so the fixture must too.
+    import tempfile
+
+    from starlette.datastructures import UploadFile
+
+    def _upload(content: bytes, filename: str) -> UploadFile:
+        spooled = tempfile.SpooledTemporaryFile()
+        spooled.write(content)
+        spooled.seek(0)
+        return UploadFile(file=spooled, filename=filename)
+
+    text_v6 = healed_text.replace("Paragraph 3", "Paragraph 3 ENTV6", 1)
+    upload = _upload(text_v6.encode("utf-8"), "update.txt")
+    result6 = await update_like_an_api_request(data_id, [upload], dataset.id, user=user)
+    assert isinstance(result6, dict) and result6.get("status") == "incremental", (
+        f"single-UploadFile update must run chunk-level: {result6}"
+    )
+    healed_text = await _stored_text(user, data_id)
+    assert healed_text == text_v6, "UploadFile content must land as the stored text"
+
     # --- Permissions: non-permitted user is rejected, nothing changes -------- #
     from uuid import uuid4
 
@@ -283,3 +305,13 @@ async def test_incremental_update_full_flow(incremental_env):
         "Permission" in type(denied.value).__name__ or "Unauthorized" in type(denied.value).__name__
     )
     assert await _stored_text(user, data_id) == healed_text
+
+    # --- Multi-item payload: chunk-level refuses, full update takes over ------ #
+    uploads = [
+        _upload(b"first file", "a.txt"),
+        _upload(b"second file", "b.txt"),
+    ]
+    multi = await update_like_an_api_request(data_id, uploads, dataset.id, user=user)
+    assert not (isinstance(multi, dict) and multi.get("status") == "incremental"), (
+        "multi-item update must fall back to the full flow"
+    )
