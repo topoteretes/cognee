@@ -129,6 +129,10 @@ def compute_incremental_plan(
     old_text: str, old_chunks: List[str], new_text: str
 ) -> IncrementalPlan:
     """Diff old vs new text and plan the minimal set of chunk replacements."""
+    if not old_chunks:
+        if old_text or new_text:
+            raise IncrementalPlanError("cannot plan an update for a document with no chunks")
+        return IncrementalPlan([], 0)
     offsets = chunk_offsets(old_text, old_chunks)
     spans = _diff_spans(old_text, new_text)
     if not spans:

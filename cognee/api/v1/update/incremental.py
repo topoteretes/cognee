@@ -107,9 +107,14 @@ async def _read_processed_text(raw_data_location: str) -> str:
 async def _get_stored_chunks(document_id: UUID, old_text: str) -> List[dict]:
     """Return the document's stored chunk nodes (full props) in document order.
 
-    Chunks are discovered via their ``is_part_of`` edges and ordered by where
-    their text occurs in the stored processed text, so the ordering holds even
-    after earlier incremental updates moved chunk positions.
+    Chunks are discovered via their ``is_part_of`` edges and ordered by their
+    stored ``chunk_index`` — authoritative, because ingestion assigns it
+    sequentially and every incremental update renumbers survivors (with a
+    self-heal pass for interrupted runs). Ordering by text position instead
+    breaks on documents with repeated content: a later chunk's text can be
+    found at an earlier occurrence, scrambling the order and forcing a
+    needless full-update fallback. The tiling check in the planner remains
+    the correctness gate for any document whose indexes are stale.
     """
     graph_engine = await get_graph_engine()
     connections = await graph_engine.get_connections(str(document_id))
@@ -132,15 +137,7 @@ async def _get_stored_chunks(document_id: UUID, old_text: str) -> List[dict]:
             f"document {document_id} has no stored chunks in the graph (not cognified yet?)"
         )
 
-    def position(node):
-        found = old_text.find(node["text"])
-        if found < 0:
-            raise IncrementalUpdateNotPossible(
-                "stored chunk text not found in stored document text"
-            )
-        return found
-
-    return sorted(chunks, key=position)
+    return sorted(chunks, key=lambda node: int(node.get("chunk_index", -1)))
 
 
 def _build_document(data: Data) -> TextDocument:

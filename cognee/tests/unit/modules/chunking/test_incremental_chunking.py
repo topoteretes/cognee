@@ -114,3 +114,78 @@ def test_edit_at_document_edges():
     plan = compute_incremental_plan(text, chunks, text + "TAIL\n")
     assert plan.regions[-1].affected_indices[-1] == len(chunks) - 1
     validate_no_loss(chunks, plan, _region_texts(plan), text + "TAIL\n")
+
+
+def test_empty_old_chunks_raises_cleanly():
+    """Regression: used to crash with IndexError (anchor -1 into empty offsets)."""
+    with pytest.raises(IncrementalPlanError):
+        compute_incremental_plan("", [], "new content\n")
+
+
+def test_delete_all_content():
+    chunks = ["para one\n", "para two\n", "para three\n"]
+    plan = compute_incremental_plan("".join(chunks), chunks, "")
+    assert plan.affected_indices == [0, 1, 2]
+    assert plan.regions[0].replacement_text == ""
+    validate_no_loss(chunks, plan, [[""]], "")
+
+
+def test_duplicate_paragraph_editing_one_copy():
+    """Identical chunks at two positions: editing either copy stays valid."""
+    dup = "the walrus spoke of many things\n"
+    chunks = ["alpha start\n", dup, "middle words here\n", dup, "omega end\n"]
+    old = "".join(chunks)
+
+    edited_second = old.replace(dup + "omega", dup.replace("many", "CHANGED") + "omega")
+    plan = compute_incremental_plan(old, chunks, edited_second)
+    validate_no_loss(chunks, plan, [[r.replacement_text] for r in plan.regions], edited_second)
+    # Alignment may blame either copy — both reassemble identically; what must
+    # hold is that exactly one region exists and the untouched chunks survive.
+    assert len(plan.regions) == 1
+
+    deleted_first = "alpha start\n" + "middle words here\n" + dup + "omega end\n"
+    plan = compute_incremental_plan(old, chunks, deleted_first)
+    validate_no_loss(chunks, plan, [[r.replacement_text] for r in plan.regions], deleted_first)
+
+    third_copy = "alpha start\n" + dup + "middle words here\n" + dup + dup + "omega end\n"
+    plan = compute_incremental_plan(old, chunks, third_copy)
+    validate_no_loss(chunks, plan, [[r.replacement_text] for r in plan.regions], third_copy)
+
+
+def test_duplicate_heavy_structural_fuzz():
+    """Small-alphabet documents maximize diff ambiguity; plans must stay
+    structurally valid (sorted, disjoint, contiguous, in range) and lossless."""
+    random.seed(99)
+    alphabet = [f"repeated paragraph {i} with the same words again\n" for i in range(4)]
+    for trial in range(150):
+        chunks = [random.choice(alphabet) for _ in range(random.randint(6, 20))]
+        old = "".join(chunks)
+        new_paras = list(chunks)
+        for _ in range(random.randint(1, 3)):
+            if not new_paras:
+                break
+            i = random.randrange(len(new_paras))
+            op = random.choice(["dup", "del", "move", "sub", "ins"])
+            if op == "dup":
+                new_paras.insert(i, new_paras[i])
+            elif op == "del":
+                new_paras.pop(i)
+            elif op == "move" and len(new_paras) > 2:
+                new_paras.insert(random.randrange(len(new_paras)), new_paras.pop(i))
+            elif op == "sub":
+                new_paras[i] = new_paras[i].replace("words", f"w{trial}", 1)
+            else:
+                new_paras.insert(i, f"entirely new paragraph {trial}\n")
+        new = "".join(new_paras)
+        try:
+            plan = compute_incremental_plan(old, chunks, new)
+        except IncrementalPlanError:
+            continue  # clean refusal -> full-update fallback is acceptable
+        prev_end = -1
+        for region in plan.regions:
+            idx = region.affected_indices
+            assert idx == list(range(idx[0], idx[-1] + 1))
+            assert idx[0] > prev_end
+            assert 0 <= idx[0] and idx[-1] < len(chunks)
+            prev_end = idx[-1]
+        validate_no_loss(chunks, plan, [[r.replacement_text] for r in plan.regions], new)
