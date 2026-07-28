@@ -348,42 +348,11 @@ jobs:
                 text:
                   type: "mrkdwn"
                   text: |
-                    *🦀 Rust SDK (file_based) — 50 Small Documents — Mock LLM* (`${{ needs.perf-rust.result }}`)  •  runs `${{ fromJSON(needs.perf-rust.outputs.metrics || '{}').success }}`
-                    add      p50 `${{ fromJSON(needs.perf-rust.outputs.metrics || '{}').add.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-rust.outputs.metrics || '{}').add.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-rust.outputs.metrics || '{}').add.p99 }}s`
-                    cognify  p50 `${{ fromJSON(needs.perf-rust.outputs.metrics || '{}').cognify.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-rust.outputs.metrics || '{}').cognify.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-rust.outputs.metrics || '{}').cognify.p99 }}s`
-                    search     p50 `${{ fromJSON(needs.perf-rust.outputs.metrics || '{}').search.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-rust.outputs.metrics || '{}').search.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-rust.outputs.metrics || '{}').search.p99 }}s`
-                    total      p50 `${{ fromJSON(needs.perf-rust.outputs.metrics || '{}').total.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-rust.outputs.metrics || '{}').total.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-rust.outputs.metrics || '{}').total.p99 }}s`
-                    <${{ steps.presign.outputs.url_rust }}|HTML report>
-              - type: "section"
-                text:
-                  type: "mrkdwn"
-                  text: |
-                    *🦀 Rust SDK (file_based) — War and Peace — Mock LLM* (`${{ needs.perf-rust-wap.result }}`)  •  runs `${{ fromJSON(needs.perf-rust-wap.outputs.metrics || '{}').success }}`
-                    add      p50 `${{ fromJSON(needs.perf-rust-wap.outputs.metrics || '{}').add.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-rust-wap.outputs.metrics || '{}').add.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-rust-wap.outputs.metrics || '{}').add.p99 }}s`
-                    cognify  p50 `${{ fromJSON(needs.perf-rust-wap.outputs.metrics || '{}').cognify.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-rust-wap.outputs.metrics || '{}').cognify.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-rust-wap.outputs.metrics || '{}').cognify.p99 }}s`
-                    search     p50 `${{ fromJSON(needs.perf-rust-wap.outputs.metrics || '{}').search.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-rust-wap.outputs.metrics || '{}').search.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-rust-wap.outputs.metrics || '{}').search.p99 }}s`
-                    total      p50 `${{ fromJSON(needs.perf-rust-wap.outputs.metrics || '{}').total.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-rust-wap.outputs.metrics || '{}').total.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-rust-wap.outputs.metrics || '{}').total.p99 }}s`
-                    <${{ steps.presign.outputs.url_rust_wap }}|HTML report>
-              - type: "section"
-                text:
-                  type: "mrkdwn"
-                  text: |
-                    *🦀 Rust SDK (file_based) — 50 Small Documents — Real LLM* (`${{ needs.perf-rust-llm.result }}`)  •  runs `${{ fromJSON(needs.perf-rust-llm.outputs.metrics || '{}').success }}`
-                    add      p50 `${{ fromJSON(needs.perf-rust-llm.outputs.metrics || '{}').add.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-rust-llm.outputs.metrics || '{}').add.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-rust-llm.outputs.metrics || '{}').add.p99 }}s`
-                    cognify  p50 `${{ fromJSON(needs.perf-rust-llm.outputs.metrics || '{}').cognify.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-rust-llm.outputs.metrics || '{}').cognify.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-rust-llm.outputs.metrics || '{}').cognify.p99 }}s`
-                    search     p50 `${{ fromJSON(needs.perf-rust-llm.outputs.metrics || '{}').search.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-rust-llm.outputs.metrics || '{}').search.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-rust-llm.outputs.metrics || '{}').search.p99 }}s`
-                    total      p50 `${{ fromJSON(needs.perf-rust-llm.outputs.metrics || '{}').total.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-rust-llm.outputs.metrics || '{}').total.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-rust-llm.outputs.metrics || '{}').total.p99 }}s`
-                    <${{ steps.presign.outputs.url_rust_llm }}|HTML report>
-              - type: "section"
-                text:
-                  type: "mrkdwn"
-                  text: |
-                    *🦀 Rust SDK (file_based) — War and Peace — Real LLM* (`${{ needs.perf-rust-wap-llm.result }}`)  •  runs `${{ fromJSON(needs.perf-rust-wap-llm.outputs.metrics || '{}').success }}`
-                    add      p50 `${{ fromJSON(needs.perf-rust-wap-llm.outputs.metrics || '{}').add.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-rust-wap-llm.outputs.metrics || '{}').add.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-rust-wap-llm.outputs.metrics || '{}').add.p99 }}s`
-                    cognify  p50 `${{ fromJSON(needs.perf-rust-wap-llm.outputs.metrics || '{}').cognify.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-rust-wap-llm.outputs.metrics || '{}').cognify.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-rust-wap-llm.outputs.metrics || '{}').cognify.p99 }}s`
-                    search     p50 `${{ fromJSON(needs.perf-rust-wap-llm.outputs.metrics || '{}').search.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-rust-wap-llm.outputs.metrics || '{}').search.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-rust-wap-llm.outputs.metrics || '{}').search.p99 }}s`
-                    total      p50 `${{ fromJSON(needs.perf-rust-wap-llm.outputs.metrics || '{}').total.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-rust-wap-llm.outputs.metrics || '{}').total.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-rust-wap-llm.outputs.metrics || '{}').total.p99 }}s`
-                    <${{ steps.presign.outputs.url_rust_wap_llm }}|HTML report>
+                    *🦀 Rust SDK (file_based)* — total-latency percentiles; per-stage detail is in each HTML report
+                    50 small documents — mock LLM  (`${{ needs.perf-rust.result }}`)  •  total p50 `${{ fromJSON(needs.perf-rust.outputs.metrics || '{}').total.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-rust.outputs.metrics || '{}').total.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-rust.outputs.metrics || '{}').total.p99 }}s`  •  <${{ steps.presign.outputs.url_rust }}|HTML report>
+                    War and Peace — mock LLM  (`${{ needs.perf-rust-wap.result }}`)  •  total p50 `${{ fromJSON(needs.perf-rust-wap.outputs.metrics || '{}').total.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-rust-wap.outputs.metrics || '{}').total.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-rust-wap.outputs.metrics || '{}').total.p99 }}s`  •  <${{ steps.presign.outputs.url_rust_wap }}|HTML report>
+                    50 small documents — real LLM  (`${{ needs.perf-rust-llm.result }}`)  •  total p50 `${{ fromJSON(needs.perf-rust-llm.outputs.metrics || '{}').total.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-rust-llm.outputs.metrics || '{}').total.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-rust-llm.outputs.metrics || '{}').total.p99 }}s`  •  <${{ steps.presign.outputs.url_rust_llm }}|HTML report>
+                    War and Peace — real LLM  (`${{ needs.perf-rust-wap-llm.result }}`)  •  total p50 `${{ fromJSON(needs.perf-rust-wap-llm.outputs.metrics || '{}').total.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-rust-wap-llm.outputs.metrics || '{}').total.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-rust-wap-llm.outputs.metrics || '{}').total.p99 }}s`  •  <${{ steps.presign.outputs.url_rust_wap_llm }}|HTML report>
               - type: "section"
                 text:
                   type: "mrkdwn"
