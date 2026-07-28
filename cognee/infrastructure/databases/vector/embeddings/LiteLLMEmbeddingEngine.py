@@ -155,6 +155,24 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                         "api_base": self.endpoint,
                         "api_version": self.api_version,
                     }
+                    # Older LiteLLM releases serialize an omitted encoding format as null,
+                    # which OpenRouter rejects (it only accepts "float"/"base64"). Cognee
+                    # always consumes float vectors, so make the valid format explicit for
+                    # every OpenRouter route: the "openrouter/" model prefix, an explicit
+                    # provider, or a custom endpoint aimed at openrouter.ai. The last case
+                    # (an unprefixed model + endpoint) is driven through litellm's OpenAI
+                    # handler -- the branch that historically injected the null -- so it is
+                    # the one that still needs the guard on current litellm. We keep this
+                    # scoped to OpenRouter because providers such as gemini/bedrock/vertex_ai
+                    # reject encoding_format and cognee does not enable litellm.drop_params.
+                    routed_to_openrouter = (
+                        (self.provider or "").lower() == "openrouter"
+                        or (self.model or "").lower().startswith("openrouter/")
+                        or "openrouter.ai" in (self.endpoint or "").lower()
+                    )
+                    if routed_to_openrouter:
+                        embedding_kwargs["encoding_format"] = "float"
+
                     # Pass through target embedding dimensions when supported
                     if self.dimensions is not None:
                         embedding_kwargs["dimensions"] = self.dimensions

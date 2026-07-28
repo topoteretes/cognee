@@ -2,7 +2,7 @@ import json
 import copy
 from uuid import UUID
 from decimal import Decimal
-from datetime import datetime
+from datetime import date, datetime
 from pydantic_core import PydanticUndefined
 from pydantic import create_model, ConfigDict, BaseModel, Field
 
@@ -13,6 +13,8 @@ class JSONEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, datetime):
             return obj.isoformat()  # Convert datetime to ISO 8601 string
+        elif isinstance(obj, date):
+            return obj.isoformat()
         elif isinstance(obj, UUID):
             # if the obj is uuid, we simply return the value of uuid
             return str(obj)

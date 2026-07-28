@@ -4,33 +4,12 @@ import { useCallback } from "react";
 import Link from "next/link";
 import useBoolean from "@/utils/useBoolean";
 import useOutsideClick from "@/utils/useOutsideClick";
-import { useTenant } from "@/modules/tenant/TenantContext";
 
 function PersonIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="rgba(237,236,234,0.6)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
       <circle cx="12" cy="7" r="4" />
-    </svg>
-  );
-}
-
-function MembersIcon() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="rgba(237,236,234,0.6)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-      <circle cx="9" cy="7" r="4" />
-      <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-    </svg>
-  );
-}
-
-function BillingIcon() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="rgba(237,236,234,0.6)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="2" y="5" width="20" height="14" rx="2" />
-      <line x1="2" y1="10" x2="22" y2="10" />
     </svg>
   );
 }
@@ -56,8 +35,6 @@ export default function ProfileMenu({ userName, userEmail, profileHref = "/setti
   const { value: isOpen, toggle, setFalse: close } = useBoolean(false);
   const closeCallback = useCallback(() => close(), [close]);
   const containerRef = useOutsideClick<HTMLDivElement>(closeCallback, isOpen);
-  // Billing is owner-only: only the tenant owner can buy/manage credits.
-  const { isOwner } = useTenant();
 
   const initial = userName ? userName.charAt(0).toUpperCase() : "U";
 
@@ -119,34 +96,6 @@ export default function ProfileMenu({ userName, userEmail, profileHref = "/setti
             <PersonIcon />
             Profile
           </Link>
-
-          {/* Members link */}
-          <Link
-            href="/members"
-            onClick={close}
-            className="flex items-center gap-[10px] rounded-[6px] px-3 py-[10px]"
-            style={{ fontSize: 13, color: "rgba(237,236,234,0.8)", textDecoration: "none" }}
-            onMouseEnter={e => ((e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.07)")}
-            onMouseLeave={e => ((e.currentTarget as HTMLElement).style.background = "transparent")}
-          >
-            <MembersIcon />
-            Members
-          </Link>
-
-          {/* Billing link — owner-only */}
-          {isOwner && (
-            <Link
-              href="/billing"
-              onClick={close}
-              className="flex items-center gap-[10px] rounded-[6px] px-3 py-[10px]"
-              style={{ fontSize: 13, color: "rgba(237,236,234,0.8)", textDecoration: "none" }}
-              onMouseEnter={e => ((e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.07)")}
-              onMouseLeave={e => ((e.currentTarget as HTMLElement).style.background = "transparent")}
-            >
-              <BillingIcon />
-              Billing
-            </Link>
-          )}
 
           <div style={{ height: 1, background: "rgba(255,255,255,0.08)", margin: "2px -6px" }} />
 
