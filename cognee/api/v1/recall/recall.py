@@ -394,7 +394,9 @@ async def recall(
             ``retriever_specific_config={"response_model": ...}`` — pass it in
             one place only. Supported by the completion-style search types
             (GRAPH_COMPLETION and variants, RAG/TRIPLET/HYBRID/TEMPORAL/
-            AGENTIC completion); not supported with a remote Cognee server.
+            AGENTIC completion). With a remote Cognee server the model's JSON
+            Schema is sent (``model_json_schema()``); the server validates
+            structure only — Python-side validators do not travel.
 
     Returns:
         Search results. When searching session-only, returns a list of
@@ -479,13 +481,11 @@ async def recall(
 
         client = get_remote_client()
         if client is not None:
-            # A model class cannot cross the HTTP boundary, and the remote call
-            # below does not forward retriever_specific_config — fail fast
-            # instead of silently returning unstructured results.
-            if response_model is not None:
-                raise CogneeValidationError(
-                    message="response_model is not supported with a remote Cognee server."
-                )
+            # A model class cannot cross the HTTP boundary — send its JSON
+            # Schema instead; the server rebuilds a validation model from it
+            # and results come back with the validated dict in `structured`.
+            # Read from the merged config so the dict form travels too.
+            remote_response_model = (retriever_specific_config or {}).get("response_model")
             results = await client.recall(
                 query_text,
                 query_type,
@@ -500,6 +500,11 @@ async def recall(
                 context_profile=context_profile,
                 verbose=verbose,
                 include_references=include_references,
+                response_schema=(
+                    remote_response_model.model_json_schema()
+                    if remote_response_model is not None
+                    else None
+                ),
             )
             span.set_attribute(COGNEE_RECALL_SOURCE, "cloud")
             span.set_attribute(COGNEE_RESULT_COUNT, len(results) if results else 0)

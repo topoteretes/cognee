@@ -929,21 +929,46 @@ class TestRecallResponseModelParam:
         assert forwarded == {"response_model": model}
 
     @pytest.mark.asyncio
-    async def test_response_model_rejected_in_remote_mode(self):
+    async def test_response_model_forwarded_as_schema_in_remote_mode(self):
+        """Remote mode sends model_json_schema(), not the class."""
         recall_mod = _get_recall_module()
         model = self._fake_model()
         serve_state = importlib.import_module("cognee.api.v1.serve.state")
+
+        remote_client = MagicMock()
+        remote_client.recall = AsyncMock(return_value=[])
 
         user = MagicMock()
         user.id = uuid4()
         with (
             patch.object(recall_mod, "get_default_user", AsyncMock(return_value=user)),
             patch.object(recall_mod, "set_session_user_context_variable", AsyncMock()),
-            patch.object(serve_state, "get_remote_client", MagicMock(return_value=MagicMock())),
+            patch.object(serve_state, "get_remote_client", MagicMock(return_value=remote_client)),
         ):
-            with pytest.raises(CogneeValidationError):
-                await recall_mod.recall(
-                    "test",
-                    query_type=SearchType.GRAPH_COMPLETION,
-                    response_model=model,
-                )
+            await recall_mod.recall(
+                "test",
+                query_type=SearchType.GRAPH_COMPLETION,
+                response_model=model,
+            )
+
+        sent = remote_client.recall.await_args.kwargs["response_schema"]
+        assert sent == model.model_json_schema()
+
+    @pytest.mark.asyncio
+    async def test_no_response_model_sends_no_schema_in_remote_mode(self):
+        recall_mod = _get_recall_module()
+        serve_state = importlib.import_module("cognee.api.v1.serve.state")
+
+        remote_client = MagicMock()
+        remote_client.recall = AsyncMock(return_value=[])
+
+        user = MagicMock()
+        user.id = uuid4()
+        with (
+            patch.object(recall_mod, "get_default_user", AsyncMock(return_value=user)),
+            patch.object(recall_mod, "set_session_user_context_variable", AsyncMock()),
+            patch.object(serve_state, "get_remote_client", MagicMock(return_value=remote_client)),
+        ):
+            await recall_mod.recall("test", query_type=SearchType.GRAPH_COMPLETION)
+
+        assert remote_client.recall.await_args.kwargs["response_schema"] is None
