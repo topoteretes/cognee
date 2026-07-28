@@ -84,6 +84,7 @@ STALL = {stall!r}
 METHOD = {method!r}
 KILL_MODE = {kill_mode!r}
 KILL_AFTER = {kill_after!r}
+MARKER_PATH = {marker_path!r}
 
 
 def _worker(req_q, resp_q):
@@ -93,6 +94,12 @@ def _worker(req_q, resp_q):
     time.sleep(STALL)
     # The REAL loop -- not a stand-in. Empty dispatch + no init is enough: the
     # arming block under test runs before either is touched.
+    # MARKER: proves the child actually REACHED the guard.
+    # Without this the only assertion is "the process is gone", which is also
+    # true when the child dies during the spawn bootstrap (unpickling, imports)
+    # because the SIGKILL landed inside it -- so the test would PASS with the
+    # fix deleted. "The process is gone" is not "the guard fired".
+    open(MARKER_PATH, "w").close()
     run_worker_loop({{}}, req_q, resp_q)
 
 
@@ -219,6 +226,7 @@ def _write_parent_script(tmp_path, *, method: str, kill_mode: str, stall: float)
             method=method,
             kill_mode=kill_mode,
             kill_after=_KILL_AFTER_SECONDS,
+            marker_path=str(path) + '.reached',
         )
     )
     return str(path)
@@ -233,7 +241,24 @@ def _launch_parent(script: str) -> subprocess.Popen:
     )
 
 
-def _reap(pid: int) -> None:
+def _reap(pid: int, starttime: str | None = None) -> None:
+    """Kill a test-spawned process, verifying identity first.
+
+    CORRECTED 2026-07-28: this previously did a bare ``os.kill(pid, SIGKILL)``
+    with no starttime check -- violating the discipline THIS FILE states at the
+    top ("never by PID number alone"). By the time cleanup runs the pid has very
+    likely already exited, and Linux recycles pids, so a bare kill can SIGKILL an
+    unrelated process on the test host. Same class as the machine-wide PID-reuse
+    rule that the descendant-walk reaper had to be fixed for.
+
+    ``starttime`` is optional only so older call sites keep working; pass it.
+    """
+    if starttime is not None:
+        ident = _proc_identity(pid)
+        if ident is None:
+            return  # already gone -- nothing to kill
+        if ident[1] != starttime:
+            return  # PID RECYCLED: this is a different process. Do not kill it.
     try:
         os.kill(pid, signal.SIGKILL)
     except (ProcessLookupError, PermissionError, OSError):
@@ -268,6 +293,18 @@ class TestArmWindowRace:
             deadline = time.monotonic() + _STALL_SECONDS + 25.0
             while time.monotonic() < deadline:
                 if _is_gone(worker_pid, starttime):
+                    # The worker is gone -- but WHY? "gone" is also true if the SIGKILL
+                    # landed inside the spawn bootstrap (unpickle/imports), which would
+                    # make this test PASS with the fix deleted. The marker is written
+                    # immediately before run_worker_loop, so its presence proves the
+                    # child actually REACHED the guard and then exited, rather than
+                    # dying on the way there. "The process is gone" is not "the guard
+                    # fired" -- the same "a substring is not the property" trap.
+                    assert os.path.exists(script + ".reached"), (
+                        "worker died WITHOUT reaching run_worker_loop -- the SIGKILL "
+                        "landed during bootstrap, so this run proves nothing about the "
+                        "guard. Raise the stall or _KILL_AFTER_SECONDS."
+                    )
                     return
                 time.sleep(0.1)
             pytest.fail(
@@ -434,13 +471,20 @@ class TestParentAlreadyExitedUnitSemantics:
         # be None ("cannot tell"), never False ("dead").
         assert harness._parent_sentinel_alive() is None
 
-    def test_getppid_fallback_is_not_used_under_forkserver(self, monkeypatch):
-        """The naive fix, contained.
+    def test_there_is_no_getppid_fallback_at_all(self, monkeypatch):
+        """No usable sentinel must mean "unknown", never "dead".
 
-        Even in the fallback branch (no usable sentinel), the `getppid()`
-        comparison must be refused under `forkserver`, where it is
-        structurally meaningless. A bogus baseline pid that "differs" from
-        `getppid()` must still yield False.
+        REPLACES test_getppid_fallback_is_not_used_under_forkserver, which
+        asserted the fallback was *gated* correctly. The fallback has since been
+        REMOVED outright: its gate read `get_start_method()`, i.e. the
+        process-wide DEFAULT context rather than the context that created this
+        child, so a process defaulting to spawn while launching via forkserver
+        would pass the gate and then evaluate a comparison that differs BY
+        DESIGN -- killing every healthy worker at startup.
+
+        A gate on the wrong fact is not a gate. This asserts the property that
+        replaced it: with no answer from the sentinel, the result is False
+        (do not kill) regardless of pids or start method.
         """
         import multiprocessing
 
@@ -448,14 +492,50 @@ class TestParentAlreadyExitedUnitSemantics:
 
         monkeypatch.setattr(harness, "_parent_sentinel_alive", lambda: None)
         bogus_baseline = 999999
-        assert os.getppid() != bogus_baseline
+        assert os.getppid() != bogus_baseline, "baseline must differ for this to mean anything"
 
-        monkeypatch.setattr(multiprocessing, "get_start_method", lambda allow_none=False: "forkserver")
-        assert harness.parent_already_exited(bogus_baseline) is False, (
-            "getppid() comparison must be refused under forkserver -- it differs from the "
-            "real parent pid by design there, so trusting it kills healthy workers"
+        # Under EVERY start method -- including the ones the old fallback
+        # treated as safe -- an unanswerable sentinel must never yield "dead".
+        for method in ("spawn", "fork", "forkserver"):
+            monkeypatch.setattr(
+                multiprocessing, "get_start_method", lambda allow_none=False, _m=method: _m
+            )
+            assert harness.parent_already_exited(bogus_baseline) is False, (
+                f"under {method}: no sentinel answer must mean unknown, not dead. "
+                "Returning True here kills healthy workers."
+            )
+
+    def test_invalid_sentinel_fd_is_unknown_not_dead(self):
+        """A closed/invalid sentinel fd must degrade to None, never False.
+
+        `is_alive()` does NOT raise on a bad fd: selectors accept any
+        non-negative int, poll() reports POLLNVAL, and the selector treats that
+        as ready -- so `is_alive()` returns False, i.e. "confirmed dead", for a
+        perfectly healthy parent. The docstring used to claim every error path
+        returned None; it did not, and that claim guarded an os._exit(0).
+        """
+        import multiprocessing
+
+        from cognee_db_workers import harness
+
+        r, w = os.pipe()
+        os.close(r)
+        os.close(w)
+
+        class _BadFdParent:
+            _sentinel = r
+
+            def is_alive(self):
+                return False  # what POLLNVAL actually produces
+
+        original = multiprocessing.parent_process
+        multiprocessing.parent_process = lambda: _BadFdParent()
+        try:
+            got = harness._parent_sentinel_alive()
+        finally:
+            multiprocessing.parent_process = original
+
+        assert got is None, (
+            f"invalid fd yielded {got!r}; False would be read as 'parent dead' "
+            "and kill a worker whose parent is fine"
         )
-
-        # ...but it IS the intended last resort under spawn.
-        monkeypatch.setattr(multiprocessing, "get_start_method", lambda allow_none=False: "spawn")
-        assert harness.parent_already_exited(bogus_baseline) is True
