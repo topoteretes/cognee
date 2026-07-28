@@ -22,15 +22,23 @@ logger = get_logger("delete_chunks_incremental")
 _VECTOR_COLLECTIONS = ["DocumentChunk_text", "TextSummary_text", "Entity_name"]
 
 
-def _triplet_id(edge: dict) -> str:
+def edge_endpoints(source: dict, edge: dict, target: dict) -> tuple:
+    """Adapter-tolerant (source_id, target_id) for a get_connections triple.
+
+    The ladybug/kuzu adapter always puts the QUERIED node in the tuple's source
+    slot but carries the true endpoints on the edge dict; Neo4j and the
+    Postgres graph adapter carry true orientation in the tuple positions and
+    omit endpoint ids from the edge. Prefer the edge, fall back to the slots.
+    """
+    source_id = edge.get("source_node_id") or source.get("id")
+    target_id = edge.get("target_node_id") or target.get("id")
+    return str(source_id), str(target_id)
+
+
+def _triplet_id(source: dict, edge: dict, target: dict) -> str:
     """Triplet-embedding id for an edge (mirrors delete_from_graph_and_vector)."""
-    return str(
-        generate_node_id(
-            str(edge.get("source_node_id"))
-            + _relationship_name(edge)
-            + str(edge.get("target_node_id"))
-        )
-    )
+    source_id, target_id = edge_endpoints(source, edge, target)
+    return str(generate_node_id(source_id + _relationship_name(edge) + target_id))
 
 
 def _relationship_name(edge: dict) -> str:
@@ -57,12 +65,13 @@ async def delete_chunks_incremental(chunk_ids: List[str]) -> List[str]:
     candidates = set()
     doomed_triplet_ids = set()
     for chunk_id in deleting:
-        for _source, edge, _target in await graph_engine.get_connections(chunk_id):
-            doomed_triplet_ids.add(_triplet_id(edge))
+        for source, edge, target in await graph_engine.get_connections(chunk_id):
+            source_id, target_id = edge_endpoints(source, edge, target)
+            doomed_triplet_ids.add(_triplet_id(source, edge, target))
             if _relationship_name(edge) != "contains":
                 continue
-            if str(edge.get("source_node_id")) == chunk_id:
-                candidates.add(str(edge.get("target_node_id")))
+            if source_id == chunk_id:
+                candidates.add(target_id)
 
     # 2. Chunk-local orphan check: an entity dies only when every chunk that
     #    contains it is in the deleted set.
@@ -70,21 +79,18 @@ async def delete_chunks_incremental(chunk_ids: List[str]) -> List[str]:
     candidate_type_ids = set()
     for entity_id in candidates:
         entity_connections = await graph_engine.get_connections(entity_id)
-        containing_chunks = {
-            str(edge.get("source_node_id"))
-            for _source, edge, _target in entity_connections
-            if _relationship_name(edge) == "contains"
-            and str(edge.get("target_node_id")) == entity_id
-        }
+        containing_chunks = set()
+        for source, edge, target in entity_connections:
+            source_id, target_id = edge_endpoints(source, edge, target)
+            if _relationship_name(edge) == "contains" and target_id == entity_id:
+                containing_chunks.add(source_id)
         if containing_chunks <= deleting:
             orphan_entities.append(entity_id)
-            for _source, edge, _target in entity_connections:
-                doomed_triplet_ids.add(_triplet_id(edge))
-                if (
-                    _relationship_name(edge) == "is_a"
-                    and str(edge.get("source_node_id")) == entity_id
-                ):
-                    candidate_type_ids.add(str(edge.get("target_node_id")))
+            for source, edge, target in entity_connections:
+                source_id, target_id = edge_endpoints(source, edge, target)
+                doomed_triplet_ids.add(_triplet_id(source, edge, target))
+                if _relationship_name(edge) == "is_a" and source_id == entity_id:
+                    candidate_type_ids.add(target_id)
 
     # 3. Summaries are keyed deterministically off the chunk id (summarize_text.py).
     summary_ids = [str(uuid5(UUID(chunk), "TextSummary")) for chunk in deleting]
@@ -107,8 +113,9 @@ async def delete_chunks_incremental(chunk_ids: List[str]) -> List[str]:
     for type_id in candidate_type_ids:
         remaining = [
             edge
-            for _source, edge, _target in await graph_engine.get_connections(type_id)
-            if _relationship_name(edge) == "is_a" and str(edge.get("target_node_id")) == type_id
+            for source, edge, target in await graph_engine.get_connections(type_id)
+            if _relationship_name(edge) == "is_a"
+            and edge_endpoints(source, edge, target)[1] == type_id
         ]
         if not remaining:
             orphan_type_ids.append(type_id)

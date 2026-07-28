@@ -31,17 +31,34 @@ def incremental_env():
 
     import cognee  # noqa: F401  (cognee's import runs load_dotenv(override=True))
 
+    # Parametrized via env so the same suite verifies other graph adapters:
+    #   INCR_TEST_GRAPH_PROVIDER=neo4j INCR_TEST_GRAPH_URL=bolt://... \
+    #   INCR_TEST_GRAPH_USER=... INCR_TEST_GRAPH_PASSWORD=... pytest ...
+    graph_provider = os.environ.get("INCR_TEST_GRAPH_PROVIDER", "kuzu")
+    graph_env = {"GRAPH_DATABASE_PROVIDER": graph_provider}
+    for source_key, target_key in [
+        ("INCR_TEST_GRAPH_URL", "GRAPH_DATABASE_URL"),
+        ("INCR_TEST_GRAPH_USER", "GRAPH_DATABASE_USERNAME"),
+        ("INCR_TEST_GRAPH_PASSWORD", "GRAPH_DATABASE_PASSWORD"),
+        ("INCR_TEST_GRAPH_NAME", "GRAPH_DATABASE_NAME"),
+    ]:
+        if os.environ.get(source_key):
+            graph_env[target_key] = os.environ[source_key]
+
     os.environ.update(
         DB_PROVIDER="sqlite",
         VECTOR_DB_PROVIDER="lancedb",
-        GRAPH_DATABASE_PROVIDER="kuzu",
         CACHE_BACKEND="sqlite",
+        **graph_env,
         MOCK_EMBEDDING="true",
         TRIPLET_EMBEDDING="true",
         TELEMETRY_DISABLED="1",
         DATA_ROOT_DIRECTORY=str(root / "data"),
         SYSTEM_ROOT_DIRECTORY=str(root / "system"),
-        ENABLE_BACKEND_ACCESS_CONTROL="true",
+        # Multi-tenant isolated DBs need a backend that supports them
+        # (ladybug/lancedb/sqlite/postgres). Neo4j Community cannot CREATE
+        # DATABASE, so its run uses INCR_TEST_ACL=false (single-user mode).
+        ENABLE_BACKEND_ACCESS_CONTROL=os.environ.get("INCR_TEST_ACL", "true"),
     )
 
     import importlib
@@ -112,14 +129,15 @@ def _paragraph(i: int) -> str:
 async def _doc_chunk_nodes(document_id, text):
     """Full chunk nodes of a document, ordered by their position in text."""
     from cognee.infrastructure.databases.graph import get_graph_engine
+    from cognee.modules.graph.methods.delete_chunks_incremental import edge_endpoints
 
     graph = await get_graph_engine()
     chunk_ids = []
-    for _source, edge, _target in await graph.get_connections(str(document_id)):
+    for source, edge, target in await graph.get_connections(str(document_id)):
         if "is_part_of" not in str(edge.get("relationship_name", "")):
             continue
-        source_id = str(edge.get("source_node_id"))
-        if str(edge.get("target_node_id")) == str(document_id) and source_id != str(document_id):
+        source_id, target_id = edge_endpoints(source, edge, target)
+        if target_id == str(document_id) and source_id != str(document_id):
             chunk_ids.append(source_id)
     nodes = await graph.get_nodes(chunk_ids) if chunk_ids else []
     return sorted(

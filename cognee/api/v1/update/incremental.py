@@ -65,7 +65,10 @@ from cognee.modules.data.methods import get_authorized_dataset, get_data
 from cognee.modules.data.methods.get_dataset_data import get_dataset_data
 from cognee.modules.data.models import Data
 from cognee.modules.data.processing.document_types.TextDocument import TextDocument
-from cognee.modules.graph.methods.delete_chunks_incremental import delete_chunks_incremental
+from cognee.modules.graph.methods.delete_chunks_incremental import (
+    delete_chunks_incremental,
+    edge_endpoints,
+)
 from cognee.modules.pipelines.models.PipelineContext import PipelineContext
 from cognee.modules.pipelines.operations.run_tasks_data_item import DataItemStatus
 from cognee.modules.users.models import User
@@ -81,8 +84,9 @@ PIPELINE_NAME = "cognify_pipeline"  # attribute to the cognify pipeline's status
 RUN_PIPELINE_NAME = "incremental_update_pipeline"
 
 # Graph adapters whose get_connections/get_nodes shapes the incremental path
-# has been verified against. Anything else falls back to the full update.
-SUPPORTED_GRAPH_PROVIDERS = {"kuzu", "ladybug"}
+# has been verified against (see edge_endpoints for the shape differences).
+# Anything else falls back to the full update.
+SUPPORTED_GRAPH_PROVIDERS = {"kuzu", "ladybug", "neo4j", "postgres"}
 
 
 class IncrementalUpdateNotPossible(Exception):
@@ -104,15 +108,15 @@ async def _get_stored_chunks(document_id: UUID, old_text: str) -> List[dict]:
     """
     graph_engine = await get_graph_engine()
     connections = await graph_engine.get_connections(str(document_id))
-    # get_connections puts the queried node in the "source" slot regardless of
-    # direction and omits large properties — take the true endpoints from the
-    # edge and fetch full chunk nodes (including text) separately.
+    # Adapters disagree on connection shapes (see edge_endpoints); resolve the
+    # true endpoints, then fetch full chunk nodes (including text) separately —
+    # connection triples may omit large properties.
     chunk_ids = []
-    for _source, edge, _target in connections:
+    for source, edge, target in connections:
         if "is_part_of" not in str(edge.get("relationship_name", "")):
             continue
-        source_id = str(edge.get("source_node_id"))
-        if str(edge.get("target_node_id")) == str(document_id) and source_id != str(document_id):
+        source_id, target_id = edge_endpoints(source, edge, target)
+        if target_id == str(document_id) and source_id != str(document_id):
             chunk_ids.append(source_id)
 
     chunk_nodes = await graph_engine.get_nodes(chunk_ids) if chunk_ids else []
