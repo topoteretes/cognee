@@ -226,6 +226,27 @@ async def test_incremental_update_full_flow(incremental_env):
     assert "entshared" in entities, "shared entity must survive"
     assert "entnew001" in entities, "replacement-region entities must be ingested"
 
+    # --- Multi-region: three disjoint edits handled as three small regions --- #
+    total_before = len(new_nodes)
+    text_multi = (
+        "MULTI HEAD LINE\n"
+        + text_v2[: len(text_v2) // 2]
+        + "MID INSERT LINE\n"
+        + text_v2[len(text_v2) // 2 :]
+        + "MULTI TAIL LINE\n"
+    )
+    result_multi = await update_like_an_api_request(data_id, text_multi, dataset.id, user=user)
+    assert result_multi["status"] == "incremental"
+    assert result_multi["regions"] == 3, f"expected three regions: {result_multi}"
+    assert result_multi["kept_chunks"] >= total_before - 6, (
+        f"disjoint edits must keep the untouched middle: {result_multi}"
+    )
+    assert await _stored_text(user, data_id) == text_multi
+    multi_nodes = await _doc_chunk_nodes(data_id, text_multi)
+    assert "".join(n["text"] for n in multi_nodes) == text_multi
+    assert sorted(int(n["chunk_index"]) for n in multi_nodes) == list(range(len(multi_nodes)))
+    text_v2 = text_multi  # concurrency section below edits on top of this state
+
     # --- Concurrent updates on the same document serialize on the lock ------- #
     text_v3 = text_v2.replace("CHANGED", "CHANGED-A ENTV3A", 1)
     text_v4 = text_v2.replace("CHANGED", "CHANGED-B ENTV3B", 1)

@@ -8,10 +8,11 @@ Flow (only runs from the update endpoint):
    chunk nodes from the graph, ordered by their position in that text.
 3. Run ``add()`` so the new file goes through the normal add pipeline (loaders
    store the new processed text and update the ``Data`` row).
-4. Diff old vs new text; expand the edit to affected chunk boundaries; re-chunk
-   the replacement region with the standard TextChunker (same sentence/paragraph
-   boundary semantics and token budget as pipeline chunks).
-5. Delete the affected chunks (+ summaries + chunk-orphaned entities) from the
+4. Diff old vs new text into DISJOINT changed regions (line-anchored hunks,
+   trimmed to char precision, expanded to old chunk boundaries); chunks between
+   regions are kept untouched. Each region is re-chunked with the standard
+   TextChunker (same boundary semantics and token budget as pipeline chunks).
+5. Delete the replaced chunks (+ summaries + chunk-orphaned entities) from the
    graph and vector stores.
 6. Re-ingest ONLY the new chunks through the standard graph-extraction and
    storage tasks, attributed to the same ``data_id`` via ``PipelineContext``.
@@ -207,55 +208,68 @@ async def _chunk_region(
     return [chunk async for chunk in chunker.read()]
 
 
-def _build_new_chunks(
+def _assemble_final_chunks(
     document: TextDocument,
-    plan: IncrementalPlan,
     stored_chunks: List[dict],
-    region_chunks: List[DocumentChunk],
-) -> List[DocumentChunk]:
-    """Finalize the region's chunks with document-scoped identity and position.
+    plan: IncrementalPlan,
+    region_chunk_lists: List[List[DocumentChunk]],
+) -> tuple:
+    """Walk the final document order once: kept chunks and region chunks interleaved.
 
-    Ids follow the content-hash scheme: occurrence counting runs over the final
-    document order (kept prefix first), so two identical texts stay distinct —
-    the chunker's own region-local ids would collide with an identical prefix
-    chunk. Surviving chunks created under an older id scheme are guarded
-    against by bumping the occurrence on a direct id collision.
+    Returns (new_chunks, kept_final_index) where new_chunks carry document-
+    scoped content-hash ids (occurrence counting over the FINAL order, so two
+    identical texts stay distinct; surviving legacy ids are dodged by bumping
+    the occurrence) and kept_final_index maps each kept chunk's old position
+    to its final chunk_index.
     """
+    affected = set(plan.affected_indices)
     surviving_ids = {
-        str(node["id"])
-        for position, node in enumerate(stored_chunks)
-        if position not in set(plan.affected_indices)
+        str(node["id"]) for position, node in enumerate(stored_chunks) if position not in affected
     }
-    occurrences: dict = {}
-    for position in range(plan.unchanged_prefix_count):
-        text_hash = chunk_content_hash(stored_chunks[position]["text"])
-        occurrences[text_hash] = occurrences.get(text_hash, 0) + 1
+    region_by_start = {
+        region.affected_indices[0]: index for index, region in enumerate(plan.regions)
+    }
 
-    chunks = []
-    for offset, region_chunk in enumerate(region_chunks):
-        text = region_chunk.text
-        content_hash = chunk_content_hash(text)
-        occurrence = occurrences.get(content_hash, 0)
-        chunk_id = content_chunk_id(document.id, content_hash, occurrence)
-        while str(chunk_id) in surviving_ids:
-            occurrence += 1
-            chunk_id = content_chunk_id(document.id, content_hash, occurrence)
-        occurrences[content_hash] = occurrence + 1
-        chunks.append(
-            DocumentChunk(
-                id=chunk_id,
-                text=text,
-                chunk_size=region_chunk.chunk_size,
-                content_hash=content_hash,
-                chunk_index=plan.unchanged_prefix_count + offset,
-                cut_type=region_chunk.cut_type,
-                is_part_of=document,
-                contains=[],
-                document_id=str(document.id),
-                document_name=document.name,
-            )
-        )
-    return chunks
+    occurrences: dict = {}
+    new_chunks: List[DocumentChunk] = []
+    kept_final_index: dict = {}
+    final_index = 0
+    position = 0
+    while position < len(stored_chunks):
+        if position in region_by_start:
+            region_index = region_by_start[position]
+            for region_chunk in region_chunk_lists[region_index]:
+                text = region_chunk.text
+                content_hash = chunk_content_hash(text)
+                occurrence = occurrences.get(content_hash, 0)
+                chunk_id = content_chunk_id(document.id, content_hash, occurrence)
+                while str(chunk_id) in surviving_ids:
+                    occurrence += 1
+                    chunk_id = content_chunk_id(document.id, content_hash, occurrence)
+                occurrences[content_hash] = occurrence + 1
+                new_chunks.append(
+                    DocumentChunk(
+                        id=chunk_id,
+                        text=text,
+                        chunk_size=region_chunk.chunk_size,
+                        content_hash=content_hash,
+                        chunk_index=final_index,
+                        cut_type=region_chunk.cut_type,
+                        is_part_of=document,
+                        contains=[],
+                        document_id=str(document.id),
+                        document_name=document.name,
+                    )
+                )
+                final_index += 1
+            position = plan.regions[region_index].affected_indices[-1] + 1
+        else:
+            text_hash = chunk_content_hash(stored_chunks[position]["text"])
+            occurrences[text_hash] = occurrences.get(text_hash, 0) + 1
+            kept_final_index[position] = final_index
+            final_index += 1
+            position += 1
+    return new_chunks, kept_final_index
 
 
 def _rehydrate_chunk(document: TextDocument, node: dict, chunk_index: int) -> DocumentChunk:
@@ -292,26 +306,21 @@ def _rehydrate_chunk(document: TextDocument, node: dict, chunk_index: int) -> Do
 def _build_shifted_chunks(
     document: TextDocument,
     stored_chunks: List[dict],
-    plan: IncrementalPlan,
-    new_chunk_count: int,
+    affected: set,
+    kept_final_index: dict,
 ) -> List[DocumentChunk]:
-    """Surviving chunks whose chunk_index no longer matches their final position.
+    """Kept chunks whose chunk_index no longer matches their final position.
 
     Rehydrated from their stored node with their EXISTING id and corrected
     index; re-storing them through add_data_points upserts the graph node and
     refreshes the vector payload, so citations and layout stay consistent
-    after the region length changed.
+    after region lengths changed.
     """
-    total = len(stored_chunks)
     shifted = []
     for position, node in enumerate(stored_chunks):
-        if position in set(plan.affected_indices):
+        if position in affected:
             continue
-        if position < plan.unchanged_prefix_count:
-            expected = position
-        else:
-            offset_in_suffix = position - (total - plan.unchanged_suffix_count)
-            expected = plan.unchanged_prefix_count + new_chunk_count + offset_in_suffix
+        expected = kept_final_index[position]
         if int(node.get("chunk_index", -1)) == expected:
             continue
         shifted.append(_rehydrate_chunk(document, node, expected))
@@ -504,10 +513,12 @@ async def _apply_incremental_update(
         pipeline_name=PIPELINE_NAME,
     )
 
-    if not plan.affected_indices:
+    if not plan.regions:
         # Self-heal: a crash between an earlier delete and its renumbering can
         # leave stale indexes behind an unchanged text — repair them here.
-        repaired = _build_shifted_chunks(document, stored_chunks, plan, 0)
+        repaired = _build_shifted_chunks(
+            document, stored_chunks, set(), {i: i for i in range(len(stored_chunks))}
+        )
         if repaired:
             await add_data_points(repaired, ctx=context)
         await _mark_document_processed(data_id, dataset_id)
@@ -519,12 +530,22 @@ async def _apply_incremental_update(
             "reindexed_chunks": len(repaired),
         }
 
-    # -- Chunk the region with the standard TextChunker, then verify no-loss -- #
+    # -- Chunk each region with the standard TextChunker, then verify no-loss - #
     max_chunk_size = await get_max_chunk_tokens()
-    region_chunks = await _chunk_region(document, plan.replacement_region, max_chunk_size)
-    new_chunks = _build_new_chunks(document, plan, stored_chunks, region_chunks)
+    region_chunk_lists = [
+        await _chunk_region(document, region.replacement_text, max_chunk_size)
+        for region in plan.regions
+    ]
+    new_chunks, kept_final_index = _assemble_final_chunks(
+        document, stored_chunks, plan, region_chunk_lists
+    )
     try:
-        validate_no_loss(stored_texts, plan, [chunk.text for chunk in new_chunks], new_text)
+        validate_no_loss(
+            stored_texts,
+            plan,
+            [[chunk.text for chunk in chunks] for chunks in region_chunk_lists],
+            new_text,
+        )
     except IncrementalPlanError as error:
         raise IncrementalUpdateNotPossible(str(error)) from error
 
@@ -570,8 +591,10 @@ async def _apply_incremental_update(
         doomed = await delete_chunks_incremental(ids_to_delete)
         await _prune_ledger_rows(data_id, dataset_id, doomed)
 
-    # -- Renumber surviving chunks whose position shifted --------------------- #
-    shifted_chunks = _build_shifted_chunks(document, stored_chunks, plan, len(new_chunks))
+    # -- Renumber kept chunks whose position shifted --------------------------- #
+    shifted_chunks = _build_shifted_chunks(
+        document, stored_chunks, set(plan.affected_indices), kept_final_index
+    )
     if shifted_chunks:
         await add_data_points(shifted_chunks, ctx=context)
 
@@ -586,10 +609,12 @@ async def _apply_incremental_update(
 
     await _mark_document_processed(data_id, dataset_id)
 
+    kept_count = len(stored_chunks) - len(plan.affected_indices)
     logger.info(
-        "incremental update: kept %d+%d chunks, deleted %d, added %d (%d reused), reindexed %d",
-        plan.unchanged_prefix_count,
-        plan.unchanged_suffix_count,
+        "incremental update: %d regions, kept %d chunks, deleted %d, added %d "
+        "(%d reused), reindexed %d",
+        len(plan.regions),
+        kept_count,
         len(ids_to_delete),
         len(new_chunks),
         len(reused_chunks),
@@ -597,9 +622,10 @@ async def _apply_incremental_update(
     )
     return {
         "status": "incremental",
+        "regions": len(plan.regions),
         "deleted_chunks": len(ids_to_delete),
         "added_chunks": len(new_chunks),
         "reused_chunks": len(reused_chunks),
-        "kept_chunks": plan.unchanged_prefix_count + plan.unchanged_suffix_count,
+        "kept_chunks": kept_count,
         "reindexed_chunks": len(shifted_chunks),
     }

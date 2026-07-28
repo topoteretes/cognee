@@ -9,7 +9,6 @@ truth fields to model defaults).
 from uuid import uuid4
 
 from cognee.api.v1.update.incremental import _build_shifted_chunks, _rehydrate_chunk
-from cognee.modules.chunking.incremental_chunking import IncrementalPlan
 from cognee.modules.data.processing.document_types.TextDocument import TextDocument
 
 
@@ -87,9 +86,11 @@ def test_shifted_chunks_rehydrate_and_renumber_only_moved_survivors():
         _stored_node("c ", 2),  # suffix: index 2 -> 4
         _stored_node("d ", 3),  # suffix: index 3 -> 5
     ]
-    plan = IncrementalPlan(affected_indices=[1], unchanged_prefix_count=1, unchanged_suffix_count=2)
-
-    shifted = _build_shifted_chunks(document, stored, plan, new_chunk_count=3)
+    # Chunk 1 was replaced by 3 new chunks: kept chunk 0 stays at 0, kept
+    # chunks 2 and 3 land at final positions 4 and 5.
+    shifted = _build_shifted_chunks(
+        document, stored, affected={1}, kept_final_index={0: 0, 2: 4, 3: 5}
+    )
 
     assert [str(chunk.id) for chunk in shifted] == [stored[2]["id"], stored[3]["id"]]
     assert [chunk.chunk_index for chunk in shifted] == [4, 5]
