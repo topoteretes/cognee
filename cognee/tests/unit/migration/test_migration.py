@@ -280,6 +280,28 @@ class TestLettaSource:
         transcript = loader.render_episode(episode)
         assert transcript.index("my order is late") < transcript.index("refunded you")
 
+    def test_empty_alias_does_not_shadow_the_populated_one(self):
+        # Letta renamed these collections across versions and an agent file can
+        # carry both spellings, the retired one left empty. The empty spelling
+        # must not stand in for the populated one.
+        agent_file = {
+            "agents": [
+                {
+                    "name": "assistant",
+                    "core_memory": [],
+                    "blocks": [{"label": "persona", "value": "I am helpful"}],
+                    "messages": [],
+                    "in_context_messages": [{"role": "user", "content": "hello"}],
+                    "archival_memory": [],
+                    "passages": [{"text": "archived note"}],
+                }
+            ]
+        }
+        kinds = [record.kind for record in collect(LettaSource(agent_file))]
+        assert kinds.count("memory_block") == 1
+        assert kinds.count("episode") == 1
+        assert kinds.count("document") == 1
+
 
 class TestZepSource:
     def test_graphiti_export(self):
@@ -327,6 +349,20 @@ class TestZepSource:
         assert fact.valid_at is not None
         assert fact.invalid_at is None
         assert fact.provenance == ["ep1"]
+
+    def test_empty_alias_does_not_shadow_the_populated_one(self):
+        # A Cypher dump names every collection it queried, so the ones that
+        # came back empty sit alongside the ones that did not.
+        export = {
+            "episodes": [],
+            "episodic_nodes": [{"uuid": "ep1", "content": "Alice moved to Berlin"}],
+            "entities": [],
+            "nodes": [{"uuid": "n1", "name": "Alice"}, {"uuid": "n2", "name": "Berlin"}],
+            "facts": [],
+            "edges": [{"uuid": "f1", "source_node_uuid": "n1", "target_node_uuid": "n2"}],
+        }
+        records = collect(GraphitiSource(export))
+        assert [record.kind for record in records] == ["episode", "entity", "entity", "fact"]
 
     def test_default_mode_is_hybrid(self):
         assert GraphitiSource({"nodes": []}).mode == "hybrid"
