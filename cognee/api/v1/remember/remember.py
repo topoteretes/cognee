@@ -13,6 +13,7 @@ from typing_extensions import TypedDict
 if TYPE_CHECKING:
     from cognee.modules.cognify.estimator import DryRunEstimate
 
+from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion.data_item import DataItem
 from cognee.memory import (
@@ -38,8 +39,6 @@ from cognee.modules.observability import (
 )
 
 logger = get_logger("remember")
-
-DEFAULT_DATASET_NAME = "main_dataset"
 
 
 class RememberKwargs(TypedDict, total=False):

@@ -7,6 +7,7 @@ from typing import Any, Callable, Optional
 
 from cognee.exceptions import CogneeValidationError
 from cognee.modules.users.models import User
+from cognee.shared.logging_utils import get_logger
 
 from cognee.modules.agent_memory.runtime import (
     AgentMemoryContext,
@@ -24,6 +25,8 @@ from cognee.modules.agents.registry import (
     derive_memory_mode,
     register_agent_connection,
 )
+
+logger = get_logger("agent_memory.decorator")
 
 
 def agent_memory(
@@ -96,11 +99,26 @@ def agent_memory(
             scope = None
             if config.with_memory or config.with_session_memory or config.save_session_traces:
                 resolved_user = await resolve_agent_user(config)
-                if config.with_memory or (
-                    config.dataset_name
-                    and (config.with_session_memory or config.save_session_traces)
-                ):
+                if config.with_memory:
+                    # Graph memory cannot search without a dataset — a failure
+                    # to resolve one is fatal.
                     scope = await resolve_agent_dataset_scope(config, resolved_user)
+                elif config.with_session_memory or config.save_session_traces:
+                    # Session memory wants a dataset so the session is bound to
+                    # one (an unbound session is writable from every dataset),
+                    # but must not *require* one: a trace-only agent has to keep
+                    # working on an install that has no main_dataset yet. Fail
+                    # open — SessionManager then falls back to the plain default
+                    # session, and there is nothing to bridge when no dataset
+                    # exists anyway.
+                    try:
+                        scope = await resolve_agent_dataset_scope(config, resolved_user)
+                    except Exception as error:
+                        logger.debug(
+                            "agent_memory: no dataset scope for session memory (%s); "
+                            "sessions will use the unscoped default session.",
+                            error,
+                        )
             context = AgentMemoryContext(
                 origin_function=fn.__qualname__,
                 config=config,

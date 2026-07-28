@@ -150,6 +150,61 @@ async def search(
     return _backwards_compatible_search_results(search_results, verbose)
 
 
+async def _scope_datasets_to_session(
+    session_id: Optional[str],
+    search_datasets: list[Dataset],
+    user: User,
+) -> list[Dataset]:
+    """Reconcile the datasets being searched with the session's bound dataset.
+
+    A search records its turn into the session, so it is a session *write* and
+    must obey one-dataset-per-session. Deciding that here — before the per-dataset
+    fan-out — rather than inside each retriever means:
+
+    * a bound session narrows the search to its own dataset, so the common
+      ``recall(query, session_id=...)`` shape keeps working instead of 409-ing
+      once N datasets are readable;
+    * an unbound session over several datasets fails immediately, instead of
+      letting whichever dataset finishes first silently claim the session;
+    * the rule holds identically whether or not backend access control is on,
+      and no retrieval or LLM work is spent before the conflict surfaces.
+
+    Fail-open on lookup problems: the binding table is optional infrastructure,
+    and ``SessionManager`` still claims atomically as a backstop.
+    """
+    if not session_id or len(search_datasets) == 0:
+        return search_datasets
+
+    from cognee.modules.session_lifecycle.exceptions import (
+        SessionDatasetAmbiguousError,
+        SessionDatasetMismatchError,
+    )
+    from cognee.modules.session_lifecycle.metrics import get_session_dataset_id
+
+    bound_dataset_id = await get_session_dataset_id(session_id=session_id, user_id=user.id)
+
+    if bound_dataset_id is not None:
+        scoped = [dataset for dataset in search_datasets if dataset.id == bound_dataset_id]
+        if not scoped:
+            raise SessionDatasetMismatchError(
+                session_id,
+                bound_dataset_id,
+                ", ".join(str(dataset.id) for dataset in search_datasets),
+            )
+        if len(scoped) != len(search_datasets):
+            logger.debug(
+                "Search narrowed to dataset %s: session '%s' is bound to it.",
+                bound_dataset_id,
+                session_id,
+            )
+        return scoped
+
+    if len(search_datasets) > 1:
+        raise SessionDatasetAmbiguousError(session_id, [dataset.id for dataset in search_datasets])
+
+    return search_datasets
+
+
 async def authorized_search(
     query_type: SearchType,
     query_text: str,
@@ -181,6 +236,8 @@ async def authorized_search(
     search_datasets = await get_authorized_existing_datasets(
         datasets=dataset_ids, permission_type="read", user=user
     )
+
+    search_datasets = await _scope_datasets_to_session(session_id, search_datasets, user)
 
     # Searches all provided datasets and handles setting up of appropriate database context based on permissions
     search_results = await search_in_datasets_context(

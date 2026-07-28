@@ -238,11 +238,19 @@ async def test_agent_memory_noop_mode_does_not_resolve_user_or_scope(monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_agent_memory_with_session_memory_resolves_user_but_not_dataset_scope(monkeypatch):
+async def test_agent_memory_with_session_memory_also_resolves_dataset_scope(monkeypatch):
+    """Session memory needs a dataset too, even with with_memory=False.
+
+    Without a scope the session manager has no dataset, so the session binds to
+    nothing and stays writable from every dataset. resolve_agent_dataset_scope
+    defaults an omitted dataset_name to main_dataset.
+    """
     resolved_user = _make_user()
+    resolved_scope = _make_scope()
     resolve_user, resolve_scope, retrieve_memory, _persist_trace_mock = _patch_decorator_runtime(
         monkeypatch,
         user=resolved_user,
+        scope=resolved_scope,
         memory_context="Recent Session Memory:\nprevious plan",
     )
 
@@ -251,12 +259,12 @@ async def test_agent_memory_with_session_memory_resolves_user_but_not_dataset_sc
         context = get_current_agent_memory_context()
         assert context is not None
         assert context.user == resolved_user
-        assert context.scope is None
+        assert context.scope is resolved_scope
         return context.memory_context
 
     assert await sample_agent() == "Recent Session Memory:\nprevious plan"
     resolve_user.assert_awaited_once()
-    resolve_scope.assert_not_awaited()
+    resolve_scope.assert_awaited_once()
     retrieve_memory.assert_awaited_once()
 
 
@@ -695,7 +703,9 @@ async def test_persist_trace_uses_session_manager_with_structured_payload(monkey
     session_manager = SimpleNamespace(
         add_agent_trace_step=AsyncMock(),
         default_session_id="default_session",
-        _resolve_session_id=lambda session_id: session_id or "default_session",
+        _resolve_session_id=AsyncMock(
+            side_effect=lambda session_id, user_id=None: session_id or "default_session"
+        ),
     )
     _patch_session_manager(monkeypatch, session_manager)
 
@@ -734,7 +744,9 @@ async def test_persist_trace_passes_none_session_id_for_default_resolution(monke
     session_manager = SimpleNamespace(
         add_agent_trace_step=AsyncMock(),
         default_session_id="default_session",
-        _resolve_session_id=lambda session_id: session_id or "default_session",
+        _resolve_session_id=AsyncMock(
+            side_effect=lambda session_id, user_id=None: session_id or "default_session"
+        ),
     )
     _patch_session_manager(monkeypatch, session_manager)
 
@@ -757,7 +769,9 @@ async def test_persist_trace_can_disable_trace_summary_generation(monkeypatch):
     session_manager = SimpleNamespace(
         add_agent_trace_step=AsyncMock(),
         default_session_id="default_session",
-        _resolve_session_id=lambda session_id: session_id or "default_session",
+        _resolve_session_id=AsyncMock(
+            side_effect=lambda session_id, user_id=None: session_id or "default_session"
+        ),
     )
     _patch_session_manager(monkeypatch, session_manager)
 
@@ -785,7 +799,9 @@ async def test_persist_trace_skips_all_work_when_session_trace_persistence_disab
         add_agent_trace_step=AsyncMock(),
         get_agent_trace_count=AsyncMock(),
         default_session_id="default_session",
-        _resolve_session_id=lambda session_id: session_id or "default_session",
+        _resolve_session_id=AsyncMock(
+            side_effect=lambda session_id, user_id=None: session_id or "default_session"
+        ),
     )
     _patch_session_manager(monkeypatch, session_manager)
     persist_memify_mock = AsyncMock()
@@ -810,7 +826,9 @@ async def test_persist_trace_only_persists_session_trace_when_periodic_memify_di
         add_agent_trace_step=AsyncMock(),
         get_agent_trace_count=AsyncMock(),
         default_session_id="default_session",
-        _resolve_session_id=lambda session_id: session_id or "default_session",
+        _resolve_session_id=AsyncMock(
+            side_effect=lambda session_id, user_id=None: session_id or "default_session"
+        ),
     )
     _patch_session_manager(monkeypatch, session_manager)
     persist_memify_mock = AsyncMock()
@@ -842,7 +860,9 @@ async def test_persist_trace_does_not_trigger_memify_before_trace_count_threshol
         add_agent_trace_step=AsyncMock(),
         get_agent_trace_count=AsyncMock(return_value=4),
         default_session_id="default_session",
-        _resolve_session_id=lambda session_id: session_id or "default_session",
+        _resolve_session_id=AsyncMock(
+            side_effect=lambda session_id, user_id=None: session_id or "default_session"
+        ),
     )
     _patch_session_manager(monkeypatch, session_manager)
     persist_memify_mock = AsyncMock()
@@ -895,7 +915,9 @@ async def test_persist_trace_triggers_memify_when_trace_count_is_divisible(
         add_agent_trace_step=AsyncMock(side_effect=add_agent_trace_step),
         get_agent_trace_count=AsyncMock(side_effect=get_agent_trace_count),
         default_session_id="default_session",
-        _resolve_session_id=lambda session_id: session_id or "default_session",
+        _resolve_session_id=AsyncMock(
+            side_effect=lambda session_id, user_id=None: session_id or "default_session"
+        ),
     )
     _patch_session_manager(monkeypatch, session_manager)
     persist_memify_mock = AsyncMock(side_effect=persist_memify)
@@ -940,7 +962,9 @@ async def test_persist_trace_passes_custom_node_set_name_to_periodic_memify(monk
         add_agent_trace_step=AsyncMock(),
         get_agent_trace_count=AsyncMock(return_value=2),
         default_session_id="default_session",
-        _resolve_session_id=lambda session_id: session_id or "default_session",
+        _resolve_session_id=AsyncMock(
+            side_effect=lambda session_id, user_id=None: session_id or "default_session"
+        ),
     )
     _patch_session_manager(monkeypatch, session_manager)
     persist_memify_mock = AsyncMock()
@@ -979,7 +1003,9 @@ async def test_persist_trace_skips_memify_when_trace_count_is_zero(monkeypatch):
         add_agent_trace_step=AsyncMock(),
         get_agent_trace_count=AsyncMock(return_value=0),
         default_session_id="default_session",
-        _resolve_session_id=lambda session_id: session_id or "default_session",
+        _resolve_session_id=AsyncMock(
+            side_effect=lambda session_id, user_id=None: session_id or "default_session"
+        ),
     )
     _patch_session_manager(monkeypatch, session_manager)
     persist_memify_mock = AsyncMock()
@@ -1014,7 +1040,9 @@ async def test_persist_trace_uses_default_session_and_main_dataset_for_periodic_
         add_agent_trace_step=AsyncMock(),
         get_agent_trace_count=AsyncMock(return_value=3),
         default_session_id="default_session",
-        _resolve_session_id=lambda session_id: session_id or "default_session",
+        _resolve_session_id=AsyncMock(
+            side_effect=lambda session_id, user_id=None: session_id or "default_session"
+        ),
     )
     _patch_session_manager(monkeypatch, session_manager)
     persist_memify_mock = AsyncMock()
@@ -1056,7 +1084,9 @@ async def test_persist_trace_swallows_periodic_memify_errors(monkeypatch):
         add_agent_trace_step=AsyncMock(),
         get_agent_trace_count=AsyncMock(return_value=2),
         default_session_id="default_session",
-        _resolve_session_id=lambda session_id: session_id or "default_session",
+        _resolve_session_id=AsyncMock(
+            side_effect=lambda session_id, user_id=None: session_id or "default_session"
+        ),
     )
     _patch_session_manager(monkeypatch, session_manager)
     persist_memify_mock = AsyncMock(side_effect=RuntimeError("memify failed"))
@@ -1087,7 +1117,9 @@ async def test_agent_memory_persists_error_trace_and_reraises(monkeypatch):
     session_manager = SimpleNamespace(
         add_agent_trace_step=AsyncMock(),
         default_session_id="default_session",
-        _resolve_session_id=lambda session_id: session_id or "default_session",
+        _resolve_session_id=AsyncMock(
+            side_effect=lambda session_id, user_id=None: session_id or "default_session"
+        ),
     )
 
     monkeypatch.setattr(
@@ -1185,7 +1217,9 @@ async def test_session_memory_decorator_flow_injects_into_llmgateway(monkeypatch
         get_agent_trace_feedback=AsyncMock(return_value=["first step", "second step"]),
         add_agent_trace_step=AsyncMock(),
         default_session_id="default_session",
-        _resolve_session_id=lambda session_id: session_id or "default_session",
+        _resolve_session_id=AsyncMock(
+            side_effect=lambda session_id, user_id=None: session_id or "default_session"
+        ),
     )
     _patch_session_manager(monkeypatch, session_manager)
     monkeypatch.setattr(

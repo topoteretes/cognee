@@ -10,6 +10,7 @@ current_dataset_id context variable). The binding:
 Explicit session IDs are stored unchanged — existing sessions keep working.
 """
 
+import asyncio
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -20,8 +21,10 @@ from sqlalchemy import select
 from cognee.context_global_variables import current_dataset_id
 from cognee.infrastructure.session.session_manager import SessionManager
 from cognee.modules.session_lifecycle.metrics import (
+    claim_session_dataset,
     delete_session_lifecycle,
     get_session_dataset,
+    get_session_dataset_id,
     record_session_activity,
 )
 from cognee.modules.session_lifecycle.models import SessionModelUsage, SessionRecord
@@ -31,20 +34,26 @@ from cognee.infrastructure.databases.relational import get_relational_engine
 class TestDatasetBinding:
     """Default-session derivation from the manager's dataset binding."""
 
-    def test_explicit_dataset_derives_default_session_id(self):
+    @pytest.mark.asyncio
+    async def test_explicit_dataset_derives_default_session_id(self):
         dataset_id = uuid4()
         manager = SessionManager(cache_engine=None, dataset_id=dataset_id)
-        assert manager._resolve_session_id(None) == f"default_session_{dataset_id}"
+        assert await manager._resolve_session_id(None) == f"default_session_{dataset_id}"
 
-    def test_no_dataset_uses_plain_default(self):
+    @pytest.mark.asyncio
+    async def test_no_dataset_and_no_default_uses_plain_default(self):
+        """Without a resolvable main_dataset there is nothing to scope to."""
         manager = SessionManager(cache_engine=None)
-        assert manager._resolve_session_id(None) == "default_session"
+        with patch.object(SessionManager, "_effective_dataset_id", AsyncMock(return_value=None)):
+            assert await manager._resolve_session_id(None) == "default_session"
 
-    def test_explicit_session_id_unchanged(self):
+    @pytest.mark.asyncio
+    async def test_explicit_session_id_unchanged(self):
         manager = SessionManager(cache_engine=None, dataset_id=uuid4())
-        assert manager._resolve_session_id("my_session") == "my_session"
+        assert await manager._resolve_session_id("my_session") == "my_session"
 
-    def test_inherits_current_dataset_id_context(self):
+    @pytest.mark.asyncio
+    async def test_inherits_current_dataset_id_context(self):
         dataset_id = uuid4()
         token = current_dataset_id.set(str(dataset_id))
         try:
@@ -52,7 +61,7 @@ class TestDatasetBinding:
         finally:
             current_dataset_id.reset(token)
         assert manager.dataset_id == str(dataset_id)
-        assert manager._resolve_session_id(None) == f"default_session_{dataset_id}"
+        assert await manager._resolve_session_id(None) == f"default_session_{dataset_id}"
 
     def test_explicit_dataset_overrides_context(self):
         explicit_id = uuid4()
@@ -62,6 +71,57 @@ class TestDatasetBinding:
         finally:
             current_dataset_id.reset(token)
         assert manager.dataset_id == str(explicit_id)
+
+    def test_non_uuid_dataset_context_is_ignored(self):
+        """A name-valued context cannot scope a session; it must not be used as-is."""
+        token = current_dataset_id.set("main_dataset")
+        try:
+            manager = SessionManager(cache_engine=None)
+        finally:
+            current_dataset_id.reset(token)
+        assert manager.dataset_id is None
+
+
+class TestDefaultDatasetFallback:
+    """An omitted dataset falls back to main_dataset, like everywhere else in Cognee."""
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_main_dataset(self):
+        user_id, dataset_id = uuid4(), uuid4()
+        dataset = MagicMock()
+        dataset.id = dataset_id
+        manager = SessionManager(cache_engine=None)
+
+        with patch(
+            "cognee.modules.data.methods.get_datasets_by_name",
+            AsyncMock(return_value=[dataset]),
+        ) as by_name:
+            resolved = await manager._resolve_session_id(None, str(user_id))
+            # Second call must not re-query — the lookup is memoised per instance.
+            await manager._resolve_session_id(None, str(user_id))
+
+        assert resolved == f"default_session_{dataset_id}"
+        by_name.assert_awaited_once_with(["main_dataset"], user_id)
+
+    @pytest.mark.asyncio
+    async def test_missing_main_dataset_does_not_create_one(self):
+        """Reads must stay side-effect free before any dataset exists."""
+        manager = SessionManager(cache_engine=None)
+        with patch(
+            "cognee.modules.data.methods.get_datasets_by_name",
+            AsyncMock(return_value=[]),
+        ):
+            assert await manager._resolve_session_id(None, str(uuid4())) == "default_session"
+
+    @pytest.mark.asyncio
+    async def test_explicit_dataset_skips_the_fallback(self):
+        manager = SessionManager(cache_engine=None, dataset_id=uuid4())
+        with patch(
+            "cognee.modules.data.methods.get_datasets_by_name",
+            AsyncMock(return_value=[]),
+        ) as by_name:
+            await manager._resolve_session_id(None, str(uuid4()))
+        by_name.assert_not_awaited()
 
 
 class TestActivityAttribution:
@@ -548,3 +608,152 @@ class TestBindingEnforcementWiring:
                 )
 
         generate_answer.assert_not_awaited()
+
+
+class TestAtomicClaim:
+    """The bind is atomic: concurrent *first* writes cannot all win.
+
+    This is the property a bare check-then-write cannot provide. On the search
+    path the gap between "check" and "bind" spans a whole LLM completion, so N
+    datasets fanned out over one session id would all observe "unbound" and all
+    write. These tests hit the real relational engine, since the guarantee is a
+    property of the upsert, not of the Python around it.
+    """
+
+    @pytest.mark.asyncio
+    async def test_concurrent_claims_elect_exactly_one_dataset(self):
+        from cognee.modules.session_lifecycle.exceptions import SessionDatasetMismatchError
+
+        user_id = uuid4()
+        session_id = f"scope-test-{uuid4()}"
+        dataset_ids = [uuid4() for _ in range(6)]
+
+        engine = get_relational_engine()
+        async with engine.engine.begin() as conn:
+            await conn.run_sync(SessionRecord.metadata.create_all)
+
+        results = await asyncio.gather(
+            *(
+                claim_session_dataset(session_id=session_id, user_id=user_id, dataset_id=dataset_id)
+                for dataset_id in dataset_ids
+            ),
+            return_exceptions=True,
+        )
+
+        winners = [r for r in results if not isinstance(r, Exception)]
+        losers = [r for r in results if isinstance(r, SessionDatasetMismatchError)]
+        assert len(winners) == 1, f"expected exactly one winner, got {results!r}"
+        assert len(losers) == len(dataset_ids) - 1, f"unexpected results: {results!r}"
+
+        bound = await get_session_dataset_id(session_id=session_id, user_id=user_id)
+        assert bound in dataset_ids
+        # Every loser must have been told the same surviving binding.
+        assert {loser.bound_dataset_id for loser in losers} == {bound}
+
+    @pytest.mark.asyncio
+    async def test_concurrent_add_qa_writes_one_turn(self):
+        """One session id fanned out over N datasets stores a single turn."""
+        from cognee.modules.session_lifecycle.exceptions import SessionDatasetMismatchError
+
+        user_id = uuid4()
+        session_id = f"scope-test-{uuid4()}"
+
+        engine = get_relational_engine()
+        async with engine.engine.begin() as conn:
+            await conn.run_sync(SessionRecord.metadata.create_all)
+
+        cache = AsyncMock()
+        managers = [SessionManager(cache_engine=cache, dataset_id=uuid4()) for _ in range(5)]
+
+        with patch(
+            "cognee.infrastructure.session.session_manager.index_session_qa",
+            new_callable=AsyncMock,
+        ) as index_mock:
+            results = await asyncio.gather(
+                *(
+                    manager.add_qa(
+                        user_id=str(user_id),
+                        session_id=session_id,
+                        question="q",
+                        context="",
+                        answer="a",
+                    )
+                    for manager in managers
+                ),
+                return_exceptions=True,
+            )
+
+        assert sum(not isinstance(r, Exception) for r in results) == 1
+        assert all(
+            isinstance(r, SessionDatasetMismatchError) for r in results if isinstance(r, Exception)
+        ), f"unexpected failures: {results!r}"
+        # The rejected writes must not have touched the cache or the vector store.
+        assert cache.create_qa_entry.await_count == 1
+        assert index_mock.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_terminal_session_can_still_be_bound(self):
+        """A completed session that never got a dataset must not stay open to all."""
+        from cognee.modules.session_lifecycle.exceptions import SessionDatasetMismatchError
+        from cognee.modules.session_lifecycle.metrics import SessionStatus, mark_ended
+
+        user_id = uuid4()
+        session_id = f"scope-test-{uuid4()}"
+        dataset_id = uuid4()
+
+        engine = get_relational_engine()
+        async with engine.engine.begin() as conn:
+            await conn.run_sync(SessionRecord.metadata.create_all)
+
+        await record_session_activity(str(user_id), session_id)
+        await mark_ended(session_id=session_id, user_id=user_id, status=SessionStatus.COMPLETED)
+        async with engine.get_async_session() as session:
+            before = (
+                await session.execute(
+                    select(SessionRecord).where(SessionRecord.session_id == session_id)
+                )
+            ).scalar_one()
+            frozen_activity = before.last_activity_at
+
+        await claim_session_dataset(session_id=session_id, user_id=user_id, dataset_id=dataset_id)
+        assert await get_session_dataset_id(session_id=session_id, user_id=user_id) == dataset_id
+
+        with pytest.raises(SessionDatasetMismatchError):
+            await claim_session_dataset(session_id=session_id, user_id=user_id, dataset_id=uuid4())
+
+        # Binding a terminal session must not resurrect its activity clock.
+        async with engine.get_async_session() as session:
+            after = (
+                await session.execute(
+                    select(SessionRecord).where(SessionRecord.session_id == session_id)
+                )
+            ).scalar_one()
+        assert after.last_activity_at == frozen_activity
+        assert after.status == SessionStatus.COMPLETED.value
+
+    @pytest.mark.asyncio
+    async def test_dangling_binding_is_still_enforced(self):
+        """Enforcement reads the raw column, so a deleted dataset still binds.
+
+        get_session_dataset() returns None here (its JOIN finds no Dataset row);
+        if enforcement used that, the session would silently rebind elsewhere.
+        """
+        user_id = uuid4()
+        session_id = f"scope-test-{uuid4()}"
+        dangling_dataset_id = uuid4()
+
+        engine = get_relational_engine()
+        async with engine.engine.begin() as conn:
+            await conn.run_sync(SessionRecord.metadata.create_all)
+        await record_session_activity(str(user_id), session_id, dataset_id=str(dangling_dataset_id))
+
+        assert await get_session_dataset(session_id=session_id, user_id=user_id) is None
+        assert (
+            await get_session_dataset_id(session_id=session_id, user_id=user_id)
+            == dangling_dataset_id
+        )
+
+        from cognee.modules.session_lifecycle.exceptions import SessionDatasetMismatchError
+
+        with pytest.raises(SessionDatasetMismatchError):
+            await claim_session_dataset(session_id=session_id, user_id=user_id, dataset_id=uuid4())

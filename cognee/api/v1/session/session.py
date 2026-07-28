@@ -38,10 +38,17 @@ async def _resolve_user(user: Optional[User]) -> User:
 
 
 async def get_session(
-    session_id: str = "default_session",
+    session_id: Optional[str] = None,
     last_n: Optional[int] = None,
     user: Optional[User] = None,
 ) -> List[SessionQAEntry]:
+    """Return a session's Q&A entries.
+
+    ``session_id=None`` resolves to the same per-dataset default session that an
+    omitted session_id resolves to on the write side, so a default-session write
+    is readable back through this function. Passing the literal
+    ``"default_session"`` reads the legacy pre-dataset-scoping session instead.
+    """
     resolved_user = await _resolve_user(user)
     user_id = str(resolved_user.id)
 

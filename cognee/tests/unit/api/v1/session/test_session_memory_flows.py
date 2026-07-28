@@ -1096,3 +1096,144 @@ class TestAgenticSessionMismatchSurfaces:
 
         with patch.object(_mod_sm, "get_session_manager", return_value=manager):
             await retriever._store_session_qa("q", "ctx", "a", triplets=[])
+
+
+# ---------------------------------------------------------------------------
+# Search pre-flight: the session/dataset conflict is settled before the
+# per-dataset fan-out, not inside each retriever
+# ---------------------------------------------------------------------------
+
+
+class TestSearchSessionPreflight:
+    @staticmethod
+    def _dataset(dataset_id=None):
+        dataset = MagicMock()
+        dataset.id = dataset_id or uuid4()
+        dataset.owner_id = uuid4()
+        return dataset
+
+    @staticmethod
+    def _user():
+        user = MagicMock()
+        user.id = uuid4()
+        return user
+
+    @staticmethod
+    def _patch_binding(bound):
+        return patch(
+            "cognee.modules.session_lifecycle.metrics.get_session_dataset_id",
+            AsyncMock(return_value=bound),
+        )
+
+    @pytest.mark.asyncio
+    async def test_bound_session_narrows_to_its_dataset(self):
+        """recall(query, session_id=...) with every dataset readable must keep working."""
+        from cognee.modules.search.methods.search import _scope_datasets_to_session
+
+        bound = self._dataset()
+        others = [self._dataset(), self._dataset()]
+
+        with self._patch_binding(bound.id):
+            scoped = await _scope_datasets_to_session("s1", [*others, bound], self._user())
+
+        assert scoped == [bound]
+
+    @pytest.mark.asyncio
+    async def test_bound_session_rejects_when_its_dataset_is_out_of_scope(self):
+        from cognee.modules.search.methods.search import _scope_datasets_to_session
+        from cognee.modules.session_lifecycle.exceptions import SessionDatasetMismatchError
+
+        with self._patch_binding(uuid4()):
+            with pytest.raises(SessionDatasetMismatchError):
+                await _scope_datasets_to_session("s1", [self._dataset()], self._user())
+
+    @pytest.mark.asyncio
+    async def test_unbound_session_over_many_datasets_raises(self):
+        """Otherwise whichever dataset finished first would silently claim the session."""
+        from cognee.modules.search.methods.search import _scope_datasets_to_session
+        from cognee.modules.session_lifecycle.exceptions import SessionDatasetAmbiguousError
+
+        datasets = [self._dataset(), self._dataset()]
+        with self._patch_binding(None):
+            with pytest.raises(SessionDatasetAmbiguousError) as excinfo:
+                await _scope_datasets_to_session("s1", datasets, self._user())
+
+        assert excinfo.value.dataset_ids == [dataset.id for dataset in datasets]
+
+    @pytest.mark.asyncio
+    async def test_unbound_session_over_one_dataset_passes(self):
+        from cognee.modules.search.methods.search import _scope_datasets_to_session
+
+        datasets = [self._dataset()]
+        with self._patch_binding(None):
+            assert await _scope_datasets_to_session("s1", datasets, self._user()) == datasets
+
+    @pytest.mark.asyncio
+    async def test_no_session_id_leaves_every_dataset_in_scope(self):
+        """Without a session id each dataset uses its own default session."""
+        from cognee.modules.search.methods.search import _scope_datasets_to_session
+
+        datasets = [self._dataset(), self._dataset()]
+        with self._patch_binding(None) as binding:
+            assert await _scope_datasets_to_session(None, datasets, self._user()) == datasets
+        binding.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_preflight_is_wired_into_authorized_search(self):
+        """The narrowing must happen through authorized_search, not just in the helper.
+
+        Every other test in the suite mocks authorized_search, so without this the
+        call site itself would be uncovered.
+        """
+        # importlib, not `from ... import search`: the package __init__ re-exports a
+        # function named like the submodule, so the plain import yields the function.
+        search_methods = importlib.import_module("cognee.modules.search.methods.search")
+
+        bound = self._dataset()
+        user = self._user()
+        fan_out = AsyncMock(return_value=[])
+
+        with (
+            patch.object(
+                search_methods,
+                "get_authorized_existing_datasets",
+                AsyncMock(return_value=[self._dataset(), bound, self._dataset()]),
+            ),
+            patch.object(search_methods, "search_in_datasets_context", fan_out),
+            self._patch_binding(bound.id),
+        ):
+            await search_methods.authorized_search(
+                query_type=SearchType.GRAPH_COMPLETION,
+                query_text="q",
+                user=user,
+                session_id="s1",
+            )
+
+        assert fan_out.await_args.kwargs["search_datasets"] == [bound]
+
+    @pytest.mark.asyncio
+    async def test_authorized_search_raises_before_fanning_out(self):
+        # importlib, not `from ... import search`: the package __init__ re-exports a
+        # function named like the submodule, so the plain import yields the function.
+        search_methods = importlib.import_module("cognee.modules.search.methods.search")
+        from cognee.modules.session_lifecycle.exceptions import SessionDatasetAmbiguousError
+
+        fan_out = AsyncMock(return_value=[])
+        with (
+            patch.object(
+                search_methods,
+                "get_authorized_existing_datasets",
+                AsyncMock(return_value=[self._dataset(), self._dataset()]),
+            ),
+            patch.object(search_methods, "search_in_datasets_context", fan_out),
+            self._patch_binding(None),
+        ):
+            with pytest.raises(SessionDatasetAmbiguousError):
+                await search_methods.authorized_search(
+                    query_type=SearchType.GRAPH_COMPLETION,
+                    query_text="q",
+                    user=self._user(),
+                    session_id="s1",
+                )
+
+        fan_out.assert_not_awaited()

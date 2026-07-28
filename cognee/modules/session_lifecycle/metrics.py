@@ -64,13 +64,24 @@ async def ensure_and_touch_session(
     session_id: str,
     user_id: UUIDType,
     dataset_id: Optional[UUIDType] = None,
-) -> None:
+    return_binding: bool = False,
+) -> Optional[UUIDType]:
     """Upsert the session row in one round trip.
 
     Creates the row if absent (status=running). If present AND still
-    running, bumps ``last_activity_at``. Terminal sessions are left
-    untouched so a late straggler can't accidentally resurrect them.
-    Also fills in ``dataset_id`` when currently null.
+    running, bumps ``last_activity_at``. Terminal sessions keep their
+    timestamps so a late straggler can't accidentally resurrect them.
+
+    ``dataset_id`` is filled only when currently null — the column is
+    write-once. The bind is deliberately *not* gated on running status:
+    a terminal session that never got a dataset must still be bindable,
+    otherwise it stays writable from every dataset forever.
+
+    ``return_binding`` adds a read-back of the surviving ``dataset_id``, which
+    is what makes :func:`claim_session_dataset` atomic: because the column is
+    write-once, reading it after our own write cannot observe a later change.
+    It costs an extra statement, so the plain heartbeat path leaves it off and
+    keeps returning None.
     """
     now = datetime.now(timezone.utc)
     engine = get_relational_engine()
@@ -95,20 +106,38 @@ async def ensure_and_touch_session(
         if dialect in ("sqlite", "postgresql"):
             insert = sqlite_insert if dialect == "sqlite" else pg_insert
             stmt = insert(SessionRecord).values(**values)
-            set_ = {"last_activity_at": now}
-            # Back-fill a previously-unset dataset_id.
-            set_["dataset_id"] = case(
-                (SessionRecord.dataset_id.is_(None), dataset_id),
-                else_=SessionRecord.dataset_id,
-            )
+            set_ = {
+                # Back-fill a previously-unset dataset_id (write-once).
+                "dataset_id": case(
+                    (SessionRecord.dataset_id.is_(None), dataset_id),
+                    else_=SessionRecord.dataset_id,
+                ),
+                # Freeze activity on terminal sessions instead of skipping the
+                # whole DO UPDATE, so the bind above always gets a chance to run.
+                "last_activity_at": case(
+                    (SessionRecord.status == SessionStatus.RUNNING.value, now),
+                    else_=SessionRecord.last_activity_at,
+                ),
+            }
             stmt = stmt.on_conflict_do_update(
                 index_elements=["session_id", "user_id"],
                 set_=set_,
-                where=SessionRecord.status == SessionStatus.RUNNING.value,
             )
             await session.execute(stmt)
+            effective = None
+            if return_binding:
+                effective = (
+                    await session.execute(
+                        select(SessionRecord.dataset_id).where(
+                            and_(
+                                SessionRecord.session_id == session_id,
+                                SessionRecord.user_id == user_id,
+                            )
+                        )
+                    )
+                ).scalar_one_or_none()
             await session.commit()
-            return
+            return effective
 
         # Portable fallback: SELECT-then-INSERT/UPDATE. Two round trips.
         existing = (
@@ -123,11 +152,15 @@ async def ensure_and_touch_session(
         ).scalar_one_or_none()
         if existing is None:
             session.add(SessionRecord(**values))
-        elif existing.status == SessionStatus.RUNNING.value:
-            existing.last_activity_at = now
+            effective = dataset_id
+        else:
+            if existing.status == SessionStatus.RUNNING.value:
+                existing.last_activity_at = now
             if existing.dataset_id is None and dataset_id is not None:
                 existing.dataset_id = dataset_id
+            effective = existing.dataset_id
         await session.commit()
+        return effective
 
 
 async def accumulate_usage(
@@ -310,6 +343,44 @@ async def delete_session_lifecycle(
         return False
 
 
+async def get_session_dataset_id(
+    *,
+    session_id: str,
+    user_id: str | UUIDType,
+) -> Optional[UUIDType]:
+    """Return a session's bound ``dataset_id`` straight from the lifecycle row.
+
+    This is the authority for enforcement: it reads the raw column, so it
+    reports a binding even when the referenced Dataset row has since been
+    deleted. :func:`get_session_dataset` is the resolution counterpart and
+    can legitimately return None where this returns a value — never use
+    that one to decide whether a session is bound.
+
+    Best-effort: None when unbound, when the id is malformed, or on failure.
+    """
+    try:
+        user_uuid = UUIDType(str(user_id))
+    except (ValueError, TypeError):
+        return None
+
+    try:
+        engine = get_relational_engine()
+        async with engine.get_async_session() as session:
+            return (
+                await session.execute(
+                    select(SessionRecord.dataset_id).where(
+                        and_(
+                            SessionRecord.session_id == session_id,
+                            SessionRecord.user_id == user_uuid,
+                        )
+                    )
+                )
+            ).scalar_one_or_none()
+    except Exception as exc:
+        logger.debug("Failed to read binding for session %s: %s", session_id, exc)
+        return None
+
+
 async def get_session_dataset(
     *,
     session_id: str,
@@ -318,8 +389,10 @@ async def get_session_dataset(
     """Return (dataset_id, dataset_owner_id) for a session's attributed dataset.
 
     The dataset owner identifies the database context that session vectors were
-    written under. Best-effort: returns None when the session has no dataset
-    attribution, the dataset row is gone, or the lookup fails.
+    written under, so this resolves through the Dataset row. Best-effort:
+    returns None when the session has no dataset attribution, the dataset row
+    is gone, or the lookup fails. For "is this session bound?" use
+    :func:`get_session_dataset_id` instead.
     """
     try:
         user_uuid = UUIDType(str(user_id))
@@ -354,27 +427,40 @@ async def get_session_dataset(
 _binding_lookup_failed = False
 
 
-async def check_session_dataset_binding(
+def _warn_binding_lookup_failed(session_id: str, exc: Exception) -> None:
+    """Log a binding-enforcement failure once at WARNING, then at debug."""
+    global _binding_lookup_failed
+    if not _binding_lookup_failed:
+        _binding_lookup_failed = True
+        logger.warning(
+            "Session binding lookup failed (%s); one-dataset-per-session enforcement "
+            "is skipped while lookups fail. Subsequent failures log at debug.",
+            exc,
+        )
+    else:
+        logger.debug(
+            "Session binding lookup failed for %s (%s); skipping enforcement", session_id, exc
+        )
+
+
+async def claim_session_dataset(
     *,
     session_id: str,
     user_id: str | UUIDType,
     dataset_id: str | UUIDType | None,
 ) -> None:
-    """Raise ``SessionDatasetMismatchError`` when a write targets the wrong dataset.
+    """Atomically bind a session to a dataset, or raise if it belongs to another.
 
-    Sessions live in exactly one dataset: the first write binds the session
-    (``ensure_and_touch_session`` fills ``dataset_id`` once) and every later
-    write must target the same dataset. No-ops when the proposed dataset is
-    unknown, the session has no binding yet, or the binding lookup fails —
-    the session_records table is best-effort infrastructure, so only a
-    genuine mismatch raises.
+    Replaces check-then-write. ``ensure_and_touch_session`` binds and reports
+    the surviving binding in one statement, so N concurrent *first* writes to
+    one session cannot all pass: exactly one wins and the rest see a foreign
+    binding. This matters because the gap between "check" and "bind" on the
+    search path spans an entire LLM completion.
 
-    Note: check-then-write is not atomic — two concurrent *first* writes to
-    one session can both pass before either binds. Real callers derive one
-    session per conversation with a fixed dataset, so this is accepted; an
-    atomic claim in ``ensure_and_touch_session`` is the fix if that changes.
+    No-ops when the proposed dataset is unknown. Fails open on infrastructure
+    errors — the session_records table is optional for SessionManager
+    correctness — so only a genuine mismatch raises.
     """
-    global _binding_lookup_failed
     from cognee.modules.session_lifecycle.exceptions import SessionDatasetMismatchError
 
     if dataset_id is None or not session_id:
@@ -386,32 +472,47 @@ async def check_session_dataset_binding(
         return
 
     try:
-        engine = get_relational_engine()
-        async with engine.get_async_session() as session:
-            bound = (
-                await session.execute(
-                    select(SessionRecord.dataset_id).where(
-                        and_(
-                            SessionRecord.session_id == session_id,
-                            SessionRecord.user_id == user_uuid,
-                        )
-                    )
-                )
-            ).scalar_one_or_none()
+        effective = await ensure_and_touch_session(
+            session_id=session_id,
+            user_id=user_uuid,
+            dataset_id=dataset_uuid,
+            return_binding=True,
+        )
     except Exception as exc:
-        if not _binding_lookup_failed:
-            _binding_lookup_failed = True
-            logger.warning(
-                "Session binding lookup failed (%s); one-dataset-per-session enforcement "
-                "is skipped while lookups fail. Subsequent failures log at debug.",
-                exc,
-            )
-        else:
-            logger.debug(
-                "Session binding lookup failed for %s (%s); skipping enforcement", session_id, exc
-            )
+        _warn_binding_lookup_failed(session_id, exc)
         return
 
+    if effective is not None and effective != dataset_uuid:
+        raise SessionDatasetMismatchError(session_id, effective, dataset_uuid)
+
+
+async def check_session_dataset_binding(
+    *,
+    session_id: str,
+    user_id: str | UUIDType,
+    dataset_id: str | UUIDType | None,
+) -> None:
+    """Raise ``SessionDatasetMismatchError`` when an operation targets the wrong dataset.
+
+    Read-only validation for callers that want to reject *before* doing work
+    without binding anything yet (``improve``'s pre-flight, the search
+    pre-flight). Writers must use :func:`claim_session_dataset` instead — a
+    bare check cannot establish the binding it depends on.
+
+    No-ops when the proposed dataset is unknown, the session has no binding
+    yet, or the lookup fails — the session_records table is best-effort
+    infrastructure, so only a genuine mismatch raises.
+    """
+    from cognee.modules.session_lifecycle.exceptions import SessionDatasetMismatchError
+
+    if dataset_id is None or not session_id:
+        return
+    try:
+        dataset_uuid = UUIDType(str(dataset_id))
+    except (ValueError, TypeError):
+        return
+
+    bound = await get_session_dataset_id(session_id=session_id, user_id=user_id)
     if bound is not None and bound != dataset_uuid:
         raise SessionDatasetMismatchError(session_id, bound, dataset_uuid)
 

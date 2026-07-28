@@ -29,7 +29,7 @@ from cognee.modules.observability import (
 )
 from cognee.modules.retrieval.utils.completion import generate_completion
 from cognee.modules.session_lifecycle.metrics import (
-    check_session_dataset_binding,
+    claim_session_dataset,
     delete_session_lifecycle,
     get_session_dataset,
     record_session_activity,
@@ -38,6 +38,11 @@ from cognee.shared.logging_utils import get_logger
 from cognee.shared.utils import send_telemetry
 
 logger = get_logger("SessionManager")
+
+# A SessionManager is built per operation, so a name-valued dataset context would
+# warn on every construction. Warn once per process, then drop to debug — same
+# posture as the session_records write/lookup failure flags.
+_non_uuid_dataset_context_warned = False
 
 
 class SessionManager:
@@ -91,26 +96,96 @@ class SessionManager:
             session_history_last_n: Number of prior Q&A entries to include in conversation
                                    history for completion. Defaults to 10.
             dataset_id: Dataset this manager writes sessions for. Falls back to the
-                       current_dataset_id context variable. Used to derive a per-dataset
-                       default session ID and to attribute lifecycle rows to the dataset;
-                       explicit session IDs are stored unchanged.
+                       current_dataset_id context variable, then to the caller's
+                       ``main_dataset``. Used to derive a per-dataset default session
+                       ID and to attribute lifecycle rows to the dataset; explicit
+                       session IDs are stored unchanged.
         """
         self._cache = cache_engine
         self.default_session_id = default_session_id
         self.session_history_last_n = session_history_last_n
         resolved_dataset_id = dataset_id if dataset_id is not None else current_dataset_id.get()
-        self.dataset_id = str(resolved_dataset_id) if resolved_dataset_id is not None else None
+        self.dataset_id = self._normalize_dataset_id(resolved_dataset_id)
+        # Lazily-resolved fallback dataset (see _effective_dataset_id). Cached
+        # per instance, including the miss, so an unbound manager does not hit
+        # the relational DB on every call.
+        self._fallback_dataset_id: str | None = None
+        self._fallback_resolved = False
 
-    def _resolve_session_id(self, session_id: str | None) -> str:
+    @staticmethod
+    def _normalize_dataset_id(value: Any) -> str | None:
+        """Return ``value`` as a UUID string, or None when it isn't one.
+
+        The dataset context variable is documented as a dataset id but is set
+        from ``Union[str, UUID]``, so it can legitimately carry a *name*. A name
+        cannot scope a session (lifecycle attribution and binding enforcement
+        are both UUID-typed), so treat it as absent and let the fallback resolve
+        a real id — but say so, since silently degrading to an unscoped session
+        is exactly what dataset-bound sessions are meant to prevent.
+        """
+        global _non_uuid_dataset_context_warned
+        if value is None:
+            return None
+        try:
+            return str(uuid.UUID(str(value)))
+        except (ValueError, TypeError, AttributeError):
+            message = (
+                "Dataset context %r is not a UUID; ignoring it for session scoping and "
+                "falling back to the default dataset."
+            )
+            if not _non_uuid_dataset_context_warned:
+                _non_uuid_dataset_context_warned = True
+                logger.warning(message, value)
+            else:
+                logger.debug(message, value)
+            return None
+
+    async def _effective_dataset_id(self, user_id: str | None = None) -> str | None:
+        """Return the dataset this manager scopes sessions to.
+
+        Explicit argument / context variable first, then the caller's
+        ``main_dataset`` — mirroring Cognee's "no dataset stated means
+        main_dataset" convention, so an omitted dataset still yields a
+        dataset-scoped session instead of an unenforceable global one.
+
+        The fallback resolves an *existing* dataset only; it never creates one,
+        so reads stay side-effect free. Before any dataset exists there is
+        nothing to bridge, and the plain default session is used.
+        """
+        if self.dataset_id is not None:
+            return self.dataset_id
+        if self._fallback_resolved:
+            return self._fallback_dataset_id
+
+        self._fallback_resolved = True
+        if user_id is None:
+            user_id = getattr(session_user.get(), "id", None)
+        if user_id is None:
+            return None
+        try:
+            from cognee.modules.data.constants import DEFAULT_DATASET_NAME
+            from cognee.modules.data.methods import get_datasets_by_name
+
+            datasets = await get_datasets_by_name([DEFAULT_DATASET_NAME], uuid.UUID(str(user_id)))
+            if datasets:
+                self._fallback_dataset_id = str(datasets[0].id)
+        except Exception as exc:
+            logger.debug("Default dataset lookup for session scoping failed: %s", exc)
+        return self._fallback_dataset_id
+
+    async def _resolve_session_id(self, session_id: str | None, user_id: str | None = None) -> str:
         """Return session_id if provided, otherwise the default session ID.
 
         The default is scoped per dataset so that omitting session_id in two
-        different datasets can never mix their turns in one session.
+        different datasets can never mix their turns in one session. Both the
+        read and write sides go through here, so an omitted session_id resolves
+        to the same id in either direction.
         """
         if session_id is not None:
             return session_id
-        if self.dataset_id is not None:
-            return f"{self.default_session_id}_{self.dataset_id}"
+        dataset_id = await self._effective_dataset_id(user_id)
+        if dataset_id is not None:
+            return f"{self.default_session_id}_{dataset_id}"
         return self.default_session_id
 
     @property
@@ -136,17 +211,16 @@ class SessionManager:
         used_graph_element_ids: Optional dict with keys "node_ids" and "edge_ids" (lists of str).
         used_session_context_ids: Optional list of session-context entry ids served to this answer.
         """
-        session_id = self._resolve_session_id(session_id)
+        session_id = await self._resolve_session_id(session_id, user_id)
         self._validate_session_params(user_id=user_id, session_id=session_id)
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, skipping add_qa")
             return None
-        # Sessions live in exactly one dataset — refuse to write a turn under a
-        # different dataset context than the session's binding, before any cache
-        # or vector write happens.
-        await check_session_dataset_binding(
-            session_id=session_id, user_id=user_id, dataset_id=self.dataset_id
-        )
+        # Sessions live in exactly one dataset. Claim the binding atomically —
+        # a bare check could not stop two concurrent *first* writes from both
+        # passing — before any cache or vector write happens.
+        dataset_id = await self._effective_dataset_id(user_id)
+        await claim_session_dataset(session_id=session_id, user_id=user_id, dataset_id=dataset_id)
 
         data_size = len(answer.encode("utf-8", errors="replace")) if answer else 0
         data_size += len(question.encode("utf-8", errors="replace")) if question else 0
@@ -187,7 +261,7 @@ class SessionManager:
                 question=question,
                 answer=answer,
             )
-            await record_session_activity(user_id, session_id, dataset_id=self.dataset_id)
+            await record_session_activity(user_id, session_id, dataset_id=dataset_id)
             return qa_id
 
     async def add_agent_trace_step(
@@ -209,15 +283,14 @@ class SessionManager:
 
         Returns trace_id, or None if cache unavailable.
         """
-        session_id = self._resolve_session_id(session_id)
+        session_id = await self._resolve_session_id(session_id, user_id)
         self._validate_session_params(user_id=user_id, session_id=session_id)
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, skipping add_agent_trace_step")
             return None
-        # Same one-dataset-per-session guard as add_qa.
-        await check_session_dataset_binding(
-            session_id=session_id, user_id=user_id, dataset_id=self.dataset_id
-        )
+        # Same atomic one-dataset-per-session claim as add_qa.
+        dataset_id = await self._effective_dataset_id(user_id)
+        await claim_session_dataset(session_id=session_id, user_id=user_id, dataset_id=dataset_id)
 
         trace_id = str(uuid.uuid4())
         if generate_feedback_with_llm:
@@ -247,7 +320,7 @@ class SessionManager:
             session_feedback=session_feedback,
         )
         await record_session_activity(
-            user_id, session_id, dataset_id=self.dataset_id, errored=status == "error"
+            user_id, session_id, dataset_id=dataset_id, errored=status == "error"
         )
         await self._maybe_extract_agent_context(
             user_id=user_id,
@@ -357,7 +430,9 @@ class SessionManager:
     ) -> Any:
         """Run one session turn under a session-usage scope, then return the answer."""
         user_id = getattr(session_user.get(), "id", None)
-        resolved_session_id = self._resolve_session_id(session_id)
+        resolved_session_id = await self._resolve_session_id(
+            session_id, str(user_id) if user_id is not None else None
+        )
         async with self._session_usage_scope(user_id, resolved_session_id):
             return await self._run_session_turn(
                 user_id=user_id,
@@ -408,10 +483,15 @@ class SessionManager:
                 response_model=response_model,
             )
 
-        # A mismatched session would raise in add_qa anyway — but only after the
-        # answer was generated. Fail here, before any LLM spend.
-        await check_session_dataset_binding(
-            session_id=session_id, user_id=user_id, dataset_id=self.dataset_id
+        # add_qa claims the binding at the end of the turn — but that is after the
+        # answer was generated. Claim here instead, before any LLM spend; add_qa's
+        # own claim then resolves to the same (already written) binding.
+        await claim_session_dataset(
+            session_id=session_id,
+            user_id=user_id,
+            dataset_id=await self._effective_dataset_id(
+                str(user_id) if user_id is not None else None
+            ),
         )
 
         if turn_preparation is None:
@@ -505,7 +585,7 @@ class SessionManager:
             List of QA entry dicts, or formatted string if formatted=True.
             Empty list or empty string if cache unavailable or session not found.
         """
-        session_id = self._resolve_session_id(session_id)
+        session_id = await self._resolve_session_id(session_id, user_id)
         self._validate_session_params(user_id=user_id, session_id=session_id, last_n=last_n)
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, returning empty session")
@@ -543,7 +623,7 @@ class SessionManager:
         session_id: str | None = None,
     ) -> list[SessionQAEntry]:
         """Get specific session QA entries by qa_id, returned in chronological order."""
-        session_id = self._resolve_session_id(session_id)
+        session_id = await self._resolve_session_id(session_id, user_id)
         self._validate_session_params(user_id=user_id, session_id=session_id)
         for qa_id in qa_ids:
             self._validate_session_params(qa_id=qa_id)
@@ -562,7 +642,7 @@ class SessionManager:
         """
         Get the agent trace session for the given user/session pair.
         """
-        session_id = self._resolve_session_id(session_id)
+        session_id = await self._resolve_session_id(session_id, user_id)
         self._validate_session_params(user_id=user_id, session_id=session_id, last_n=last_n)
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, returning empty agent trace session")
@@ -581,7 +661,7 @@ class SessionManager:
         """
         Get only per-step feedback strings for the trace session.
         """
-        session_id = self._resolve_session_id(session_id)
+        session_id = await self._resolve_session_id(session_id, user_id)
         self._validate_session_params(user_id=user_id, session_id=session_id, last_n=last_n)
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, returning empty agent trace feedback")
@@ -601,7 +681,7 @@ class SessionManager:
         """
         Get the number of trace steps stored for the given user/session pair.
         """
-        session_id = self._resolve_session_id(session_id)
+        session_id = await self._resolve_session_id(session_id, user_id)
         self._validate_session_params(user_id=user_id, session_id=session_id)
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, returning empty agent trace count")
@@ -635,7 +715,7 @@ class SessionManager:
         """
         from cognee.infrastructure.locks import session_lock
 
-        session_id = self._resolve_session_id(session_id)
+        session_id = await self._resolve_session_id(session_id, user_id)
         self._validate_session_params(user_id=user_id, session_id=session_id, qa_id=qa_id)
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, skipping update_qa")
@@ -665,16 +745,28 @@ class SessionManager:
                     session_id=session_id,
                     qa_ids=[qa_id],
                 )
-                await delete_session_qa_vector(qa_id=qa_id)
-                if entries:
-                    entry = entries[0]
-                    await index_session_qa(
-                        user_id=user_id,
-                        session_id=session_id,
-                        qa_id=qa_id,
-                        question=entry.question,
-                        answer=entry.answer,
-                    )
+                entry = entries[0] if entries else None
+
+                # The old vector lives in the store the QA was written under, and
+                # the replacement has to land there too — otherwise an edit leaves
+                # an orphan in the dataset store and a duplicate in the ambient one.
+                async def _reindex() -> None:
+                    await delete_session_qa_vector(qa_id=qa_id)
+                    if entry is not None:
+                        await index_session_qa(
+                            user_id=user_id,
+                            session_id=session_id,
+                            qa_id=qa_id,
+                            question=entry.question,
+                            answer=entry.answer,
+                        )
+
+                session_dataset = await get_session_dataset(session_id=session_id, user_id=user_id)
+                await self._run_in_session_dataset_store(
+                    session_id=session_id,
+                    session_dataset=session_dataset,
+                    operation=_reindex,
+                )
             return True
 
     async def add_feedback(
@@ -718,7 +810,7 @@ class SessionManager:
 
         Returns True if updated, False if not found or cache unavailable.
         """
-        session_id = self._resolve_session_id(session_id)
+        session_id = await self._resolve_session_id(session_id, user_id)
         self._validate_session_params(user_id=user_id, session_id=session_id, qa_id=qa_id)
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, skipping delete_feedback")
@@ -729,6 +821,42 @@ class SessionManager:
             session_id=session_id,
             qa_id=qa_id,
         )
+
+    async def _run_in_session_dataset_store(
+        self,
+        *,
+        session_id: str,
+        session_dataset: tuple | None,
+        operation,
+    ) -> None:
+        """Run ``operation`` exactly once, in the store holding this session's vectors.
+
+        The dataset's store when the session is attributed, the ambient store
+        otherwise. Unlike :meth:`_delete_vectors_in_session_stores` this must not
+        run twice — it is used for writes (re-indexing), where a second pass in
+        another store would duplicate the vector rather than no-op.
+
+        Falls back to the ambient store if the dataset context cannot be entered,
+        so a broken per-dataset database degrades instead of losing the write.
+        """
+        if session_dataset is not None:
+            try:
+                from cognee.context_global_variables import (
+                    set_database_global_context_variables,
+                )
+
+                dataset_id, dataset_owner_id = session_dataset
+                async with set_database_global_context_variables(dataset_id, dataset_owner_id):
+                    await operation()
+                return
+            except Exception as error:
+                logger.warning(
+                    "Dataset-scoped session vector write failed for %s, retrying in the "
+                    "ambient store: %s",
+                    session_id,
+                    error,
+                )
+        await operation()
 
     async def _delete_vectors_in_session_stores(
         self,
@@ -775,7 +903,7 @@ class SessionManager:
         """
         from cognee.infrastructure.locks import session_lock
 
-        session_id = self._resolve_session_id(session_id)
+        session_id = await self._resolve_session_id(session_id, user_id)
         self._validate_session_params(user_id=user_id, session_id=session_id, qa_id=qa_id)
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, skipping delete_qa")
@@ -812,7 +940,7 @@ class SessionManager:
         Fail-open on infrastructure errors: returns False when the cache is
         unavailable or the cache operation fails.
         """
-        session_id = self._resolve_session_id(session_id)
+        session_id = await self._resolve_session_id(session_id, user_id)
         self._validate_session_params(user_id=user_id, session_id=session_id)
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, skipping create_session_context_entry")
@@ -837,7 +965,7 @@ class SessionManager:
         Fail-open on infrastructure errors: returns [] when the cache is
         unavailable or the cache operation fails.
         """
-        session_id = self._resolve_session_id(session_id)
+        session_id = await self._resolve_session_id(session_id, user_id)
         self._validate_session_params(user_id=user_id, session_id=session_id)
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, returning empty session context")
@@ -863,7 +991,7 @@ class SessionManager:
         Fail-open on infrastructure errors: returns False when the cache is
         unavailable or the cache operation fails.
         """
-        session_id = self._resolve_session_id(session_id)
+        session_id = await self._resolve_session_id(session_id, user_id)
         self._validate_session_params(user_id=user_id, session_id=session_id)
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, skipping update_session_context_entry")
@@ -889,7 +1017,7 @@ class SessionManager:
         Fail-open on infrastructure errors: returns False when the cache is
         unavailable or the cache operation fails.
         """
-        session_id = self._resolve_session_id(session_id)
+        session_id = await self._resolve_session_id(session_id, user_id)
         self._validate_session_params(user_id=user_id, session_id=session_id)
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, skipping delete_session_context")
@@ -906,7 +1034,7 @@ class SessionManager:
 
         Returns True if deleted, False if session did not exist or cache unavailable.
         """
-        session_id = self._resolve_session_id(session_id)
+        session_id = await self._resolve_session_id(session_id, user_id)
         self._validate_session_params(user_id=user_id, session_id=session_id)
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, skipping delete_session")
