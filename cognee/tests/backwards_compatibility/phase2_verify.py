@@ -397,7 +397,13 @@ async def _verify_session_takeover(stage: str) -> None:
     print("  [session] unchanged legacy session: 0 new documents, watermark healed to 2 — OK")
 
     # B: grow the legacy session with the current branch -> only the new entry.
-    await cognee.remember(SESSION_FACT_3, session_id=COMPAT_SESSION_ID, self_improvement=False)
+    # DATASET is named explicitly so the session stays bound to it even when the
+    # legacy seeding version predates session->dataset attribution (an unbound
+    # session would otherwise bind to main_dataset here and the improve below
+    # would 409 on the cross-dataset bridge).
+    await cognee.remember(
+        SESSION_FACT_3, DATASET, session_id=COMPAT_SESSION_ID, self_improvement=False
+    )
     await cognee.improve(DATASET, session_ids=[COMPAT_SESSION_ID])
     after_grown = await _session_data_items(user)
     new_items = [item for item in after_grown if item.id not in {x.id for x in after_unchanged}]

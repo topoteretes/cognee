@@ -52,8 +52,16 @@ async def seed_session() -> None:
     target dataset does not exist yet (pre-existing behavior in every version).
     """
     print("Seeding session memory (remember x2 + improve bridge)...")
-    await cognee.remember(SESSION_FACT_1, session_id=COMPAT_SESSION_ID, self_improvement=False)
-    await cognee.remember(SESSION_FACT_2, session_id=COMPAT_SESSION_ID, self_improvement=False)
+    # Name the dataset explicitly: sessions live in exactly one dataset, and the
+    # improve bridge below must target the session's own dataset. Omitting it
+    # would bind the session to main_dataset and the current branch would
+    # (correctly) refuse the cross-dataset bridge with a 409.
+    await cognee.remember(
+        SESSION_FACT_1, "lorem_ipsum", session_id=COMPAT_SESSION_ID, self_improvement=False
+    )
+    await cognee.remember(
+        SESSION_FACT_2, "lorem_ipsum", session_id=COMPAT_SESSION_ID, self_improvement=False
+    )
     await cognee.improve("lorem_ipsum", session_ids=[COMPAT_SESSION_ID])
     print(f"Seeded session '{COMPAT_SESSION_ID}' with 2 entries and bridged it into the graph.")
 
