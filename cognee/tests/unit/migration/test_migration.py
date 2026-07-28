@@ -62,6 +62,30 @@ class TestParseTimestamp:
         # Out-of-range epochs return None instead of raising.
         assert parse_timestamp(float("inf")) is None
 
+    def test_values_without_an_offset_are_read_as_utc(self):
+        # Exports that drop the offset must not be read in the importing
+        # machine's local timezone.
+        assert parse_timestamp("2024-03-01T12:00:00") == datetime(
+            2024, 3, 1, 12, 0, tzinfo=timezone.utc
+        )
+        assert parse_timestamp("2024-03-01") == datetime(2024, 3, 1, tzinfo=timezone.utc)
+        assert parse_timestamp(datetime(2024, 3, 1, 12, 0)) == datetime(
+            2024, 3, 1, 12, 0, tzinfo=timezone.utc
+        )
+
+    def test_explicit_offsets_are_preserved(self):
+        assert parse_timestamp("2024-03-01T17:30:00+05:30") == datetime(
+            2024, 3, 1, 12, 0, tzinfo=timezone.utc
+        )
+
+    def test_mixed_input_formats_stay_orderable(self):
+        # One record can carry an ISO created_at and an epoch updated_at;
+        # ordering them raises TypeError if either comes back naive.
+        created_at = parse_timestamp("2024-03-01T12:00:00")
+        updated_at = parse_timestamp(1709294400 + 3600)
+        assert created_at < updated_at
+        assert created_at == parse_timestamp(1709294400)
+
 
 class TestCOGXArchive:
     def _sample_records(self):
@@ -226,6 +250,35 @@ class TestLettaSource:
         block = next(r for r in records if r.kind == "memory_block")
         assert block.label == "persona"
         assert block.limit == 2000
+
+    def test_turns_with_mixed_timestamp_formats_order_by_instant(self):
+        # Letta serializes message created_at with or without an offset
+        # depending on version; both denote UTC instants.
+        agent_file = {
+            "agents": [
+                {
+                    "name": "support",
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": "my order is late",
+                            "created_at": "2024-03-01T06:00:00Z",
+                        },
+                        {
+                            "role": "assistant",
+                            "content": "refunded you",
+                            "created_at": "2024-03-01T10:00:00",
+                        },
+                    ],
+                }
+            ]
+        }
+        episode = next(r for r in collect(LettaSource(agent_file)) if r.kind == "episode")
+        earlier, later = episode.turns
+        assert earlier.occurred_at < later.occurred_at
+
+        transcript = loader.render_episode(episode)
+        assert transcript.index("my order is late") < transcript.index("refunded you")
 
 
 class TestZepSource:
