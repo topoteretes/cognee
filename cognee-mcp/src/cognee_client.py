@@ -172,6 +172,15 @@ class CogneeClient:
         mime_type, _ = mimetypes.guess_type(safe_name)
         return {"data": (safe_name, raw_bytes, mime_type or "application/octet-stream")}
 
+    @staticmethod
+    def _path_upload(path: str) -> Dict[str, tuple[str, bytes, str]]:
+        """Create a real file upload (preserving basename) for an existing filesystem path."""
+        safe_name = Path(path).name or "upload"
+        with open(path, "rb") as f:
+            raw_bytes = f.read()
+        mime_type, _ = mimetypes.guess_type(safe_name)
+        return {"data": (safe_name, raw_bytes, mime_type or "application/octet-stream")}
+
     async def add(
         self, data: Any, dataset_name: str = "main_dataset", node_set: Optional[List[str]] = None
     ) -> Dict[str, Any]:
@@ -195,7 +204,10 @@ class CogneeClient:
         if self.use_api:
             endpoint = f"{self.api_url}/api/v1/add"
 
-            files = self._text_upload(data)
+            if isinstance(data, (str, Path)) and os.path.isfile(data):
+                files = self._path_upload(data)
+            else:
+                files = self._text_upload(data)
             form_data = {
                 "datasetName": dataset_name,
             }
@@ -601,6 +613,8 @@ class CogneeClient:
             endpoint = f"{self.api_url}/api/v1/remember"
             if content_base64:
                 files = self._file_upload(filename, content_base64)
+            elif isinstance(data, (str, Path)) and os.path.isfile(data):
+                files = self._path_upload(data)
             else:
                 files = self._text_upload(data)
             form_data = {"datasetName": dataset_name}

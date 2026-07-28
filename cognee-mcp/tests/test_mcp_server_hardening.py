@@ -1,7 +1,10 @@
 import asyncio
+import base64
 import hashlib
 import importlib
 import json
+import mimetypes
+import re
 import sys
 from pathlib import Path
 
@@ -166,6 +169,188 @@ async def test_cognee_client_api_add_uses_content_addressed_filename():
     body = requests[0].content.decode()
     assert f'filename="text_{digest}.txt"' in body
     assert "data.txt" not in body
+
+
+async def _mock_api_client(requests: list[httpx.Request], **kwargs) -> CogneeClient:
+    """API-mode client whose requests are recorded instead of sent over the wire."""
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"status": "ok"})
+
+    client = CogneeClient(api_url="http://cognee.local", **kwargs)
+    await client.client.aclose()
+    client.client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    return client
+
+
+def _multipart_filenames(request: httpx.Request) -> list[str]:
+    """Filenames declared in a multipart body, in order."""
+    body = request.content.decode("latin-1")
+    return re.findall(r'filename="([^"]*)"', body)
+
+
+# Regression guards for issue #4230: in API mode `add()` used to stringify every
+# argument through `_text_upload`, so a real filesystem path was uploaded as the
+# *path text* under a content-addressed `text_<md5>.txt` name. Documents ingested
+# through the MCP file-upload path therefore showed up in the UI as opaque slugs
+# instead of their original filename. Paths must upload file bytes under the
+# original basename, while plain text must keep the content-addressed name that
+# fixed the silent `data.txt` collision (#2747).
+
+
+@pytest.mark.asyncio
+async def test_cognee_client_api_add_uploads_file_path_under_original_basename(tmp_path):
+    upload = tmp_path / "meeting-notes.md"
+    upload.write_text("# Meeting notes\nagenda item", encoding="utf-8")
+    requests: list[httpx.Request] = []
+    client = await _mock_api_client(requests)
+
+    try:
+        await client.add(str(upload), dataset_name="ds")
+    finally:
+        await client.close()
+
+    body = requests[0].content.decode()
+    expected_mime = mimetypes.guess_type("meeting-notes.md")[0] or "application/octet-stream"
+
+    assert _multipart_filenames(requests[0]) == ["meeting-notes.md"]
+    # The bug: a content-addressed name derived from the path string.
+    assert 'filename="text_' not in body
+    # The file's bytes must be uploaded, not the path that pointed at them.
+    assert "# Meeting notes\nagenda item" in body
+    assert str(upload) not in body
+    assert f"Content-Type: {expected_mime}" in body
+    assert 'name="datasetName"' in body and "ds" in body
+
+
+@pytest.mark.asyncio
+async def test_cognee_client_api_add_accepts_path_objects(tmp_path):
+    upload = tmp_path / "client-profile.md"
+    upload.write_text("profile", encoding="utf-8")
+    requests: list[httpx.Request] = []
+    client = await _mock_api_client(requests)
+
+    try:
+        await client.add(upload, dataset_name="ds")
+    finally:
+        await client.close()
+
+    assert _multipart_filenames(requests[0]) == ["client-profile.md"]
+    assert "profile" in requests[0].content.decode()
+
+
+@pytest.mark.asyncio
+async def test_cognee_client_api_add_uploads_binary_file_bytes(tmp_path):
+    upload = tmp_path / "report.pdf"
+    raw_bytes = b"%PDF-1.4\n\x00\x80\xff binary payload"
+    upload.write_bytes(raw_bytes)
+    requests: list[httpx.Request] = []
+    client = await _mock_api_client(requests)
+
+    try:
+        await client.add(str(upload), dataset_name="ds")
+    finally:
+        await client.close()
+
+    expected_mime = mimetypes.guess_type("report.pdf")[0] or "application/octet-stream"
+
+    assert _multipart_filenames(requests[0]) == ["report.pdf"]
+    # Bytes are passed through untouched: a str()/utf-8 round trip would mangle them.
+    assert raw_bytes in requests[0].content
+    assert f"Content-Type: {expected_mime}".encode() in requests[0].content
+
+
+@pytest.mark.asyncio
+async def test_cognee_client_api_add_keeps_content_addressed_name_for_non_file_text():
+    """Text that merely looks like a path stays a content-addressed text upload."""
+    requests: list[httpx.Request] = []
+    client = await _mock_api_client(requests)
+
+    content = "/definitely/not/on/disk/notes.md"
+    digest = hashlib.md5(content.encode("utf-8")).hexdigest()
+
+    try:
+        await client.add(content, dataset_name="ds")
+    finally:
+        await client.close()
+
+    body = requests[0].content.decode()
+    assert _multipart_filenames(requests[0]) == [f"text_{digest}.txt"]
+    assert 'filename="notes.md"' not in body
+    assert content in body
+
+
+@pytest.mark.asyncio
+async def test_cognee_client_api_add_keeps_text_upload_for_directories_and_long_text(tmp_path):
+    """Non-file arguments must not trip the path branch (or raise from os.path.isfile)."""
+    requests: list[httpx.Request] = []
+    client = await _mock_api_client(requests)
+
+    long_text = "remember this\n" * 5000
+
+    try:
+        await client.add(str(tmp_path), dataset_name="ds")
+        await client.add(long_text, dataset_name="ds")
+    finally:
+        await client.close()
+
+    dir_digest = hashlib.md5(str(tmp_path).encode("utf-8")).hexdigest()
+    text_digest = hashlib.md5(long_text.encode("utf-8")).hexdigest()
+
+    assert _multipart_filenames(requests[0]) == [f"text_{dir_digest}.txt"]
+    assert _multipart_filenames(requests[1]) == [f"text_{text_digest}.txt"]
+
+
+@pytest.mark.asyncio
+async def test_cognee_client_api_remember_uploads_file_path_under_original_basename(tmp_path):
+    """remember() shares add()'s path handling (issue #4230, "same pattern")."""
+    upload = tmp_path / "alice_notes.md"
+    upload.write_text("alice prefers async updates", encoding="utf-8")
+    requests: list[httpx.Request] = []
+    client = await _mock_api_client(requests)
+
+    try:
+        await client.remember(str(upload), dataset_name="ds")
+    finally:
+        await client.close()
+
+    body = requests[0].content.decode()
+    assert requests[0].url.path == "/api/v1/remember"
+    assert _multipart_filenames(requests[0]) == ["alice_notes.md"]
+    assert "alice prefers async updates" in body
+    assert str(upload) not in body
+
+
+@pytest.mark.asyncio
+async def test_cognee_client_api_remember_base64_upload_preserves_and_sanitizes_filename():
+    """The MCP file-upload path keeps the caller's name but never a directory."""
+    requests: list[httpx.Request] = []
+    client = await _mock_api_client(requests)
+
+    payload = base64.b64encode(b"# Client profile").decode("ascii")
+
+    try:
+        await client.remember(
+            data=None,
+            dataset_name="ds",
+            filename="client-profile.md",
+            content_base64=payload,
+        )
+        await client.remember(
+            data=None,
+            dataset_name="ds",
+            filename="../../etc/passwd",
+            content_base64=payload,
+        )
+        await client.remember(data=None, dataset_name="ds", filename="", content_base64=payload)
+    finally:
+        await client.close()
+
+    assert _multipart_filenames(requests[0]) == ["client-profile.md"]
+    assert "# Client profile" in requests[0].content.decode()
+    assert _multipart_filenames(requests[1]) == ["passwd.txt"]
+    assert _multipart_filenames(requests[2]) == ["upload.txt"]
 
 
 @pytest.mark.asyncio
