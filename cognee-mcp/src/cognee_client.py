@@ -181,6 +181,24 @@ class CogneeClient:
         mime_type, _ = mimetypes.guess_type(safe_name)
         return {"data": (safe_name, raw_bytes, mime_type or "application/octet-stream")}
 
+    @staticmethod
+    def _build_upload(
+        data: Any = None,
+        filename: Optional[str] = None,
+        content_base64: Optional[str] = None,
+    ) -> Dict[str, tuple[str, Any, str]]:
+        """Pick the multipart upload for an API-mode ingestion payload.
+
+        Base64 uploads and real filesystem paths keep their original
+        basename (#4230); anything else is uploaded as content-addressed
+        text so repeated writes don't collide (#2747).
+        """
+        if content_base64:
+            return CogneeClient._file_upload(filename, content_base64)
+        if isinstance(data, (str, Path)) and os.path.isfile(data):
+            return CogneeClient._path_upload(data)
+        return CogneeClient._text_upload(data)
+
     async def add(
         self, data: Any, dataset_name: str = "main_dataset", node_set: Optional[List[str]] = None
     ) -> Dict[str, Any]:
@@ -204,10 +222,7 @@ class CogneeClient:
         if self.use_api:
             endpoint = f"{self.api_url}/api/v1/add"
 
-            if isinstance(data, (str, Path)) and os.path.isfile(data):
-                files = self._path_upload(data)
-            else:
-                files = self._text_upload(data)
+            files = self._build_upload(data)
             form_data = {
                 "datasetName": dataset_name,
             }
@@ -611,12 +626,7 @@ class CogneeClient:
                 return response.json()
 
             endpoint = f"{self.api_url}/api/v1/remember"
-            if content_base64:
-                files = self._file_upload(filename, content_base64)
-            elif isinstance(data, (str, Path)) and os.path.isfile(data):
-                files = self._path_upload(data)
-            else:
-                files = self._text_upload(data)
+            files = self._build_upload(data, filename, content_base64)
             form_data = {"datasetName": dataset_name}
             if custom_prompt:
                 form_data["custom_prompt"] = custom_prompt
