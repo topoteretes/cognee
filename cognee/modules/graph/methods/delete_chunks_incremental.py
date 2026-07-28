@@ -13,12 +13,24 @@ from uuid import UUID, uuid5
 
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine_async
+from cognee.modules.engine.utils.generate_node_id import generate_node_id
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("delete_chunks_incremental")
 
 # Collections the deleted node kinds are embedded in.
 _VECTOR_COLLECTIONS = ["DocumentChunk_text", "TextSummary_text", "Entity_name"]
+
+
+def _triplet_id(edge: dict) -> str:
+    """Triplet-embedding id for an edge (mirrors delete_from_graph_and_vector)."""
+    return str(
+        generate_node_id(
+            str(edge.get("source_node_id"))
+            + _relationship_name(edge)
+            + str(edge.get("target_node_id"))
+        )
+    )
 
 
 def _relationship_name(edge: dict) -> str:
@@ -40,10 +52,13 @@ async def delete_chunks_incremental(chunk_ids: List[str]) -> List[str]:
     # NOTE: get_connections returns the queried node in the "source" slot no
     # matter the direction — the true endpoints live on the edge dict.
 
-    # 1. Collect entity candidates: everything a deleted chunk `contains`.
+    # 1. Collect entity candidates (everything a deleted chunk `contains`) and
+    #    the triplet-embedding ids of every edge that dies with a deleted node.
     candidates = set()
+    doomed_triplet_ids = set()
     for chunk_id in deleting:
         for _source, edge, _target in await graph_engine.get_connections(chunk_id):
+            doomed_triplet_ids.add(_triplet_id(edge))
             if _relationship_name(edge) != "contains":
                 continue
             if str(edge.get("source_node_id")) == chunk_id:
@@ -53,14 +68,17 @@ async def delete_chunks_incremental(chunk_ids: List[str]) -> List[str]:
     #    contains it is in the deleted set.
     orphan_entities = []
     for entity_id in candidates:
+        entity_connections = await graph_engine.get_connections(entity_id)
         containing_chunks = {
             str(edge.get("source_node_id"))
-            for _source, edge, _target in await graph_engine.get_connections(entity_id)
+            for _source, edge, _target in entity_connections
             if _relationship_name(edge) == "contains"
             and str(edge.get("target_node_id")) == entity_id
         }
         if containing_chunks <= deleting:
             orphan_entities.append(entity_id)
+            for _source, edge, _target in entity_connections:
+                doomed_triplet_ids.add(_triplet_id(edge))
 
     # 3. Summaries are keyed deterministically off the chunk id (summarize_text.py).
     summary_ids = [str(uuid5(UUID(chunk), "TextSummary")) for chunk in deleting]
@@ -72,6 +90,11 @@ async def delete_chunks_incremental(chunk_ids: List[str]) -> List[str]:
     for collection in _VECTOR_COLLECTIONS:
         if await vector_engine.has_collection(collection):
             await vector_engine.delete_data_points(collection, doomed)
+
+    # Triplet embeddings of edges that died with the deleted nodes — without
+    # this, facts from deleted chunks stay reachable through triplet search.
+    if doomed_triplet_ids and await vector_engine.has_collection("Triplet_text"):
+        await vector_engine.delete_data_points("Triplet_text", sorted(doomed_triplet_ids))
 
     logger.info(
         "incremental delete: %d chunks, %d summaries, %d orphaned entities",

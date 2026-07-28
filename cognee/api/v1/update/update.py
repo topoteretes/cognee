@@ -72,9 +72,18 @@ async def update(
         vector_db_config: Optional configuration for vector database (for custom setups).
         graph_db_config: Optional configuration for graph database (for custom setups).
         dataset_id: Optional specific dataset UUID to use instead of dataset_name.
+        chunk_level_diff: When True (default), diff the new content against the stored
+                 processed text and replace only the chunks the edit touched — unaffected
+                 chunks keep their nodes, entities, and summaries. Falls back to the full
+                 delete + re-add + cognify flow when chunk-level preconditions are not met
+                 (first ingestion, non-text content, unverified graph adapter). Permission
+                 errors always propagate and never trigger the fallback.
 
     Returns:
-        PipelineRunInfo: Information about the ingestion pipeline execution including:
+        With chunk_level_diff, a summary dict:
+            {"status": "incremental" | "unchanged", "deleted_chunks": n, "added_chunks": n,
+             "reused_chunks": n, "kept_chunks": n, "reindexed_chunks": n}
+        Otherwise PipelineRunInfo: Information about the ingestion pipeline execution including:
             - Pipeline run ID for tracking
             - Dataset ID where data was stored
             - Processing status and any errors

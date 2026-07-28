@@ -29,7 +29,10 @@ from sqlalchemy import select
 from cognee.api.v1.add import add
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.databases.graph.config import get_graph_config
 from cognee.infrastructure.locks import dataset_lock
+from cognee.modules.cognify.config import get_cognify_config
+from cognee.tasks.documents.extract_chunks_from_documents import update_document_token_count
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.llm.utils import get_max_chunk_tokens
@@ -57,6 +60,10 @@ from cognee.tasks.summarization.summarize_text import summarize_text
 logger = get_logger("incremental_update")
 
 PIPELINE_NAME = "cognify_pipeline"  # attribute to the cognify pipeline's status key
+
+# Graph adapters whose get_connections/get_nodes shapes the incremental path
+# has been verified against. Anything else falls back to the full update.
+SUPPORTED_GRAPH_PROVIDERS = {"kuzu", "ladybug"}
 
 
 class IncrementalUpdateNotPossible(Exception):
@@ -231,6 +238,12 @@ async def incremental_update(
     preferred_loaders=None,
 ) -> dict:
     """Perform a chunk-level incremental update of one document."""
+    graph_provider = str(get_graph_config().graph_database_provider).lower()
+    if graph_provider not in SUPPORTED_GRAPH_PROVIDERS:
+        raise IncrementalUpdateNotPossible(
+            f"graph provider '{graph_provider}' is not verified for chunk-level updates"
+        )
+
     # -- Permissions: dataset write + membership + ownership ---------------- #
     dataset = await get_authorized_dataset(user, dataset_id, "write")
     dataset_data = await get_dataset_data(dataset.id)
@@ -304,18 +317,7 @@ async def _run_incremental_update(
     except IncrementalPlanError as error:
         raise IncrementalUpdateNotPossible(str(error)) from error
 
-    if not plan.affected_indices and not plan.new_chunk_texts:
-        logger.info("incremental update: content unchanged, nothing to do")
-        return {"status": "unchanged", "deleted_chunks": 0, "added_chunks": 0}
-
-    # -- Delete affected chunks + summaries + chunk-orphaned entities -------- #
-    affected_chunk_ids = [str(stored_chunks[i]["id"]) for i in plan.affected_indices]
-    await delete_chunks_incremental(affected_chunk_ids)
-
-    # -- Re-ingest only the replacement chunks ------------------------------- #
     document = _build_document(new_data)
-    new_chunks = _build_new_chunks(document, plan, stored_chunks, get_word_size)
-
     context = PipelineContext(
         user=user,
         data_item=new_data,
@@ -323,29 +325,78 @@ async def _run_incremental_update(
         pipeline_run_id=uuid4(),
         pipeline_name=PIPELINE_NAME,
     )
-    await extract_graph_from_data(new_chunks, KnowledgeGraph, ctx=context)
-    summaries = await summarize_text(new_chunks)
-    await add_data_points(summaries, ctx=context)
+
+    if not plan.affected_indices and not plan.new_chunk_texts:
+        # Self-heal: a crash between an earlier delete and its renumbering can
+        # leave stale indexes behind an unchanged text — repair them here.
+        repaired = _build_shifted_chunks(document, stored_chunks, plan, 0)
+        if repaired:
+            await add_data_points(repaired, ctx=context)
+        await _mark_document_processed(data_id, dataset_id)
+        logger.info("incremental update: content unchanged, repaired %d indexes", len(repaired))
+        return {
+            "status": "unchanged",
+            "deleted_chunks": 0,
+            "added_chunks": 0,
+            "reindexed_chunks": len(repaired),
+        }
+
+    new_chunks = _build_new_chunks(document, plan, stored_chunks, get_word_size)
+
+    # A replacement chunk that is byte-identical to one being replaced hashes
+    # to the SAME node id. Keep its subgraph: refresh its properties, skip
+    # re-extraction, and exclude it from deletion.
+    affected_ids = {str(stored_chunks[i]["id"]) for i in plan.affected_indices}
+    new_ids = {str(chunk.id) for chunk in new_chunks}
+    reused_chunks = [chunk for chunk in new_chunks if str(chunk.id) in affected_ids]
+    fresh_chunks = [chunk for chunk in new_chunks if str(chunk.id) not in affected_ids]
+
+    # -- Ingest new content FIRST (crash safety: a failure between phases ----- #
+    #    leaves recoverable duplicates, never holes; the retry falls back to a
+    #    full update because the stored chunks no longer tile the stored text).
+    embed_triplets = get_cognify_config().triplet_embedding
+    if fresh_chunks:
+        await extract_graph_from_data(fresh_chunks, KnowledgeGraph, ctx=context)
+        summaries = await summarize_text(fresh_chunks)
+        await add_data_points(summaries, ctx=context, embed_triplets=embed_triplets)
+    if reused_chunks:
+        await add_data_points(reused_chunks, ctx=context)
+
+    # -- Delete replaced chunks + summaries + chunk-orphaned entities --------- #
+    ids_to_delete = sorted(affected_ids - new_ids)
+    if ids_to_delete:
+        await delete_chunks_incremental(ids_to_delete)
 
     # -- Renumber surviving chunks whose position shifted --------------------- #
     shifted_chunks = _build_shifted_chunks(document, stored_chunks, plan, len(new_chunks))
     if shifted_chunks:
         await add_data_points(shifted_chunks, ctx=context)
 
+    # -- Keep Data.token_count in sync with the final chunk set --------------- #
+    surviving_tokens = sum(
+        int(node.get("chunk_size", 0))
+        for position, node in enumerate(stored_chunks)
+        if position not in set(plan.affected_indices)
+    )
+    new_tokens = sum(chunk.chunk_size for chunk in new_chunks)
+    await update_document_token_count(data_id, surviving_tokens + new_tokens)
+
     await _mark_document_processed(data_id, dataset_id)
 
     logger.info(
-        "incremental update: kept %d+%d chunks, deleted %d, added %d, reindexed %d",
+        "incremental update: kept %d+%d chunks, deleted %d, added %d (%d reused), reindexed %d",
         plan.unchanged_prefix_count,
         plan.unchanged_suffix_count,
-        len(affected_chunk_ids),
+        len(ids_to_delete),
         len(new_chunks),
+        len(reused_chunks),
         len(shifted_chunks),
     )
     return {
         "status": "incremental",
-        "deleted_chunks": len(affected_chunk_ids),
+        "deleted_chunks": len(ids_to_delete),
         "added_chunks": len(new_chunks),
+        "reused_chunks": len(reused_chunks),
         "kept_chunks": plan.unchanged_prefix_count + plan.unchanged_suffix_count,
         "reindexed_chunks": len(shifted_chunks),
     }
