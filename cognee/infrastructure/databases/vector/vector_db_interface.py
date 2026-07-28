@@ -1,4 +1,4 @@
-from typing import List, Protocol, Optional, Any
+from typing import Any, Dict, List, Optional, Protocol
 from abc import abstractmethod
 from cognee.infrastructure.engine import DataPoint
 from .models.PayloadSchema import PayloadSchema
@@ -155,6 +155,31 @@ class VectorDBInterface(Protocol):
               like the RAG_COMPLETION search type, but not needed when search also contains graph data.
         """
         raise NotImplementedError
+
+    # Whether this adapter implements update_payload. Callers must check this
+    # BEFORE relying on payload-only updates and take a re-embedding write
+    # path when it is False.
+    supports_payload_update: bool = False
+
+    async def update_payload(
+        self, collection_name: str, payload_updates: Dict[str, Dict[str, Any]]
+    ) -> None:
+        """
+        Update payload fields on existing rows WITHOUT re-embedding.
+
+        Used for metadata-only changes (e.g. a chunk's ``chunk_index`` after an
+        incremental document update repositioned it): the stored vector is
+        preserved exactly, so no embedding call happens. Fields must already
+        exist in the collection's payload schema. Missing ids are skipped.
+
+        Parameters:
+        -----------
+
+            - collection_name (str): The collection holding the rows.
+            - payload_updates (Dict[str, Dict[str, Any]]): Mapping of data
+              point id (string form) to the payload fields to overwrite.
+        """
+        raise NotImplementedError("This vector adapter does not support payload-only updates.")
 
     @abstractmethod
     async def delete_data_points(self, collection_name: str, data_point_ids: List[UUID]):

@@ -245,6 +245,22 @@ async def test_incremental_update_full_flow(incremental_env):
     multi_nodes = await _doc_chunk_nodes(data_id, text_multi)
     assert "".join(n["text"] for n in multi_nodes) == text_multi
     assert sorted(int(n["chunk_index"]) for n in multi_nodes) == list(range(len(multi_nodes)))
+
+    # Renumbering must reach the VECTOR payloads too (citations read
+    # chunk_index from there) — via update_payload, without re-embedding.
+    from cognee.infrastructure.databases.vector import get_vector_engine_async
+
+    vector_engine = await get_vector_engine_async()
+    assert vector_engine.supports_payload_update, "in-tree adapters must support update_payload"
+    vector_rows = await vector_engine.retrieve(
+        "DocumentChunk_text", [str(n["id"]) for n in multi_nodes]
+    )
+    vector_index_by_id = {str(row.id): row.payload.get("chunk_index") for row in vector_rows}
+    assert len(vector_rows) == len(multi_nodes)
+    for node in multi_nodes:
+        assert vector_index_by_id[str(node["id"])] == int(node["chunk_index"]), (
+            "vector payload chunk_index must match the graph after renumbering"
+        )
     text_v2 = text_multi  # concurrency section below edits on top of this state
 
     # --- Concurrent updates on the same document serialize on the lock ------- #

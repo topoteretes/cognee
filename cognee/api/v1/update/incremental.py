@@ -33,6 +33,7 @@ from cognee.api.v1.add import add
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.graph.config import get_graph_config
+from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.locks import dataset_lock
 from cognee.modules.cognify.config import get_cognify_config
 from cognee.modules.graph.models import Node
@@ -327,6 +328,29 @@ def _build_shifted_chunks(
     return shifted
 
 
+async def _restore_repositioned_chunks(chunks: List[DocumentChunk], context) -> None:
+    """Write back chunks whose ONLY change is their position (kept or reused).
+
+    Graph node properties refresh through the normal MERGE path; the vector
+    row takes a payload-only update where the adapter supports it — the text
+    is unchanged, so re-embedding it would be pure waste (an early edit in a
+    large document repositions O(document) chunks). Adapters without
+    update_payload take the full re-embedding write: same stored state,
+    higher cost.
+    """
+    vector_engine = await get_vector_engine_async()
+    if not getattr(vector_engine, "supports_payload_update", False):
+        await add_data_points(chunks, ctx=context)
+        return
+    await add_data_points(chunks, ctx=context, graph_only=True)
+    # Only chunk_index changed; content_hash is deliberately not written here —
+    # legacy collections may predate the field in their payload schema.
+    await vector_engine.update_payload(
+        "DocumentChunk_text",
+        {str(chunk.id): {"chunk_index": chunk.chunk_index} for chunk in chunks},
+    )
+
+
 async def _mark_document_processed(data_id: UUID, dataset_id: UUID) -> None:
     """Stamp cognify completion so a later cognify() doesn't redo the document."""
     db_engine = get_relational_engine()
@@ -520,7 +544,7 @@ async def _apply_incremental_update(
             document, stored_chunks, set(), {i: i for i in range(len(stored_chunks))}
         )
         if repaired:
-            await add_data_points(repaired, ctx=context)
+            await _restore_repositioned_chunks(repaired, context)
         await _mark_document_processed(data_id, dataset_id)
         logger.info("incremental update: content unchanged, repaired %d indexes", len(repaired))
         return {
@@ -583,7 +607,7 @@ async def _apply_incremental_update(
         if cognify_config.contradiction_detection:
             await detect_contradictions(summaries)
     if reused_chunks:
-        await add_data_points(reused_chunks, ctx=context)
+        await _restore_repositioned_chunks(reused_chunks, context)
 
     # -- Delete replaced chunks + summaries + chunk-orphaned entities --------- #
     ids_to_delete = sorted(affected_ids - new_ids)
@@ -596,7 +620,7 @@ async def _apply_incremental_update(
         document, stored_chunks, set(plan.affected_indices), kept_final_index
     )
     if shifted_chunks:
-        await add_data_points(shifted_chunks, ctx=context)
+        await _restore_repositioned_chunks(shifted_chunks, context)
 
     # -- Keep Data.token_count in sync with the final chunk set --------------- #
     surviving_tokens = sum(
