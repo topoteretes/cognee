@@ -257,10 +257,192 @@ def set_pdeathsig() -> bool:
         # Passing ``None`` to ``CDLL`` opens the main program's symbol table
         # which on Linux includes the dynamic linker's libc symbols — used as
         # a last-ditch fallback if ``find_library`` returns nothing (rare).
+        # ``use_errno=True`` on BOTH paths: without it on the fallback,
+        # ``ctypes.get_errno()`` reads an errno slot this CDLL never writes,
+        # so a genuine failure would report a stale/zero errno.
         libc_name = ctypes.util.find_library("c")
-        libc = ctypes.CDLL(libc_name, use_errno=True) if libc_name else ctypes.CDLL(None)
-        rc = libc.prctl(PR_SET_PDEATHSIG, signal.SIGTERM, 0, 0, 0)
-        return rc == 0
+        libc = (
+            ctypes.CDLL(libc_name, use_errno=True)
+            if libc_name
+            else ctypes.CDLL(None, use_errno=True)
+        )
+        # Explicit prototype. Left unconfigured, ctypes defaults ``restype`` to
+        # a 32-bit ``int`` and marshals every argument as ``c_int``; the real
+        # signature is
+        #     int prctl(int, unsigned long, unsigned long, unsigned long, unsigned long)
+        # so the trailing args are pointer-sized on LP64. Empirically harmless
+        # here (all the values passed are 0 or small), but the same ambiguity
+        # the Windows branch below already removes — remove it here too.
+        libc.prctl.restype = ctypes.c_int
+        libc.prctl.argtypes = (
+            ctypes.c_int,
+            ctypes.c_ulong,
+            ctypes.c_ulong,
+            ctypes.c_ulong,
+            ctypes.c_ulong,
+        )
+        ctypes.set_errno(0)
+        rc = libc.prctl(PR_SET_PDEATHSIG, int(signal.SIGTERM), 0, 0, 0)
+        if rc == 0:
+            return True
+        # A seccomp/AppArmor profile that blocks PR_SET_PDEATHSIG (or any other
+        # prctl failure) was previously COMPLETELY silent: the caller just saw
+        # ``False`` and quietly degraded to the polling watchdog with no way to
+        # tell an operator why kernel-level parent-death protection is off.
+        # Best-effort one-line diagnostic; never let logging break the worker.
+        err = ctypes.get_errno()
+        try:
+            print(
+                "[cognee_db_workers] prctl(PR_SET_PDEATHSIG) failed: "
+                f"rc={rc} errno={err} ({os.strerror(err) if err else 'unknown'}); "
+                "falling back to the portable parent-liveness watchdog",
+                file=sys.__stderr__ or sys.stderr,
+                flush=True,
+            )
+        except Exception:
+            pass
+        return False
+    except Exception:
+        return False
+
+
+def get_original_parent_pid() -> Optional[int]:
+    """The PID of the process that actually launched this worker, or ``None``.
+
+    Read from ``multiprocessing.parent_process()``, NOT from ``os.getppid()``.
+    The two are not interchangeable, and the difference is the whole point:
+
+    * ``os.getppid()`` is rewritten by the kernel to the reaper's PID the
+      moment the real parent dies — i.e. it is destroyed by exactly the event
+      we want to detect, so it cannot serve as its own baseline.
+    * Under the ``forkserver`` start method the two differ **by design even
+      while the parent is perfectly healthy** — ``getppid()`` reports the
+      fork-server process, not the launching process. Measured on this
+      project's own target (WSL Ubuntu / CPython 3.14.4), parent alive
+      throughout::
+
+          spawn        parent_process().pid=199682  getppid()=199682
+          fork         parent_process().pid=199682  getppid()=199682
+          forkserver   parent_process().pid=199682  getppid()=199706   <-- differ
+
+      CPython 3.14 makes ``forkserver`` the default start method on Linux, so
+      this is the common case, not an exotic one.
+
+    ``None`` when this process is not a ``multiprocessing`` child at all (e.g.
+    ``run_worker_loop`` invoked directly in a test or an embedding host), which
+    callers must treat as "no baseline available", never as "parent is gone".
+    """
+    try:
+        import multiprocessing
+
+        parent = multiprocessing.parent_process()
+        if parent is None:
+            return None
+        pid = parent.pid
+    except Exception:
+        return None
+    return pid if isinstance(pid, int) and pid > 0 else None
+
+
+def _parent_sentinel_alive() -> Optional[bool]:
+    """Tri-state liveness of the real parent, via the multiprocessing sentinel.
+
+    ``True`` = parent confirmed alive, ``False`` = parent confirmed exited,
+    ``None`` = could not tell. **Every** error path returns ``None``; an error
+    must never be reported as "dead", because the only caller acts on "dead"
+    by killing the worker.
+
+    ``multiprocessing.parent_process().is_alive()`` polls the parent-sentinel
+    pipe file descriptor (POSIX) / process HANDLE (Windows) that the
+    multiprocessing bootstrap hands every child. The launching process holds
+    the far end open for the child's entire life, so the **kernel** releases it
+    on ANY parent exit — clean shutdown, ``SIGKILL``, OOM killer, ``kill -9``.
+    That makes this signal:
+
+    * start-method agnostic (works identically under spawn / fork /
+      forkserver — for forkserver the sentinel is a dup of the data pipe whose
+      write end is kept open by the *launching* process, not by the fork
+      server, so it still tracks the real parent);
+    * immune to PID reuse (it is an open-fd relationship, not a PID number);
+    * not dependent on ``os.getppid()``, which the parent's death corrupts.
+
+    Verified on WSL Ubuntu / CPython 3.14.4: after the launching process
+    ``SIGKILL``s itself, this flips to ``False`` in all three start methods.
+    """
+    try:
+        import multiprocessing
+
+        parent = multiprocessing.parent_process()
+        if parent is None:
+            return None
+        # No sentinel to consult (shouldn't happen for a real mp child, but a
+        # missing one must degrade to "unknown", not to "dead").
+        if getattr(parent, "_sentinel", None) is None:
+            return None
+        return bool(parent.is_alive())
+    except Exception:
+        return None
+
+
+def parent_already_exited(original_ppid: Optional[int]) -> bool:
+    """Did the parent die BEFORE ``set_pdeathsig`` could arm? (POSIX only.)
+
+    ``PR_SET_PDEATHSIG`` is not retroactive: it only fires for a parent death
+    that happens *after* the ``prctl`` call. Workers here are ``spawn``-started,
+    so there is a real window — re-exec python, import chain, unpickle — between
+    ``Process.start()`` in the parent and ``set_pdeathsig()`` inside the child.
+    A parent that dies in that window (OOM kill being the realistic trigger)
+    delivers no signal, ever. Worse, ``set_pdeathsig()`` still returns ``True``
+    (the syscall itself succeeded), which *suppresses* the polling-watchdog
+    fallback at its call site. Net result: an orphaned worker holding an
+    exclusive Kuzu/LanceDB lock forever, exactly the failure the Windows branch
+    of this module was written to fix — just via a different door.
+
+    Returns ``True`` ONLY on a confirmed-dead parent. Every ambiguous or
+    error case returns ``False``, because the caller's response to ``True``
+    is ``os._exit(0)`` and a false positive there is an outage: it would kill
+    every worker at startup.
+
+    Ordering, and why:
+
+    1. ``sys.platform == "win32"`` → ``False``. This fix is deliberately
+       POSIX-scoped: the race it closes is specific to ``PR_SET_PDEATHSIG``
+       not being retroactive. Windows parent-death handling is unchanged.
+    2. The sentinel (see ``_parent_sentinel_alive``) — kernel-guaranteed,
+       start-method agnostic, PID-reuse immune. This is the primary signal.
+    3. ``os.getppid() != original_ppid`` only as a last-resort fallback when
+       step 2 could not produce an answer at all, **and** only under a start
+       method where that comparison is meaningful. Under ``forkserver`` the two
+       differ permanently with a healthy parent (see
+       ``get_original_parent_pid``), so applying the comparison there would
+       report "parent dead" for every healthy worker — an
+       exit-every-worker-at-startup regression, and precisely why the naive
+       "just compare getppid()" fix is wrong. ``forkserver`` is CPython 3.14's
+       default on Linux, so this guard is load-bearing, not theoretical.
+    """
+    if sys.platform == "win32":
+        return False
+
+    alive = _parent_sentinel_alive()
+    if alive is True:
+        return False
+    if alive is False:
+        return True
+
+    # alive is None: no usable sentinel. Fall back only where it is safe to.
+    if original_ppid is None:
+        return False
+    try:
+        import multiprocessing
+
+        start_method = multiprocessing.get_start_method(allow_none=True)
+    except Exception:
+        return False
+    if start_method not in ("spawn", "fork"):
+        # forkserver, or unknown. Not a usable comparison — fail safe.
+        return False
+    try:
+        return os.getppid() != original_ppid
     except Exception:
         return False
 
@@ -419,6 +601,12 @@ def run_worker_loop(
     sentinels (READY, SHUTDOWN ack) use ``request_id=0``.
     """
     _enable_faulthandler()
+    # Captured BEFORE arming anything: identifies the process that actually
+    # launched this worker, from the multiprocessing sentinel rather than
+    # os.getppid() (which the parent's death rewrites, and which diverges from
+    # the real parent under forkserver even while it is healthy). See
+    # get_original_parent_pid.
+    original_ppid = get_original_parent_pid()
     # pdeathsig is the authoritative parent-death signal on Linux. Only fall
     # back to the portable polling watchdog when the kernel hook is
     # unavailable (macOS, Windows) or failed to arm — that watchdog has no
@@ -427,6 +615,25 @@ def run_worker_loop(
     # us covered.
     if not set_pdeathsig():
         start_parent_liveness_watchdog()
+    # Closes the arm-time race that NEITHER branch above can:
+    # every one of them only reacts to a parent death occurring after it is
+    # installed, but the parent can already be gone by the time this line is
+    # reached (spawn re-exec + import + unpickle is a real window, and an OOM
+    # kill of the parent lands there readily). Deliberately placed AFTER the
+    # whole block so one call site covers both paths:
+    #   * pdeathsig armed  -> the reported bug: prctl is not retroactive, and
+    #     its success return value actively suppresses the fallbacks below it.
+    #   * pdeathsig failed -> start_parent_liveness_watchdog only ever compares
+    #     getppid() to a baseline it read AFTER the reparenting, so it can
+    #     never fire for a death that already happened.
+    #   * macOS            -> same watchdog, same blind spot.
+    # Together with the arming above this is exhaustive: a death before this
+    # line is caught here, a death after it is caught by whatever armed above.
+    if parent_already_exited(original_ppid):
+        # Parent confirmed gone. Exit fast without atexit handlers (they may
+        # touch resources owned by the dead parent) rather than sit forever
+        # holding an exclusive Kuzu/LanceDB file lock.
+        os._exit(0)
 
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
