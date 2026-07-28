@@ -206,7 +206,7 @@ async def test_brute_force_triplet_search_does_not_mutate_caller_collections():
     snapshot = list(caller_collections)
 
     with patch(
-        "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine",
+        "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine_async",
         return_value=mock_vector_engine,
     ):
         await brute_force_triplet_search(query="test", collections=caller_collections)
@@ -232,7 +232,7 @@ async def test_brute_force_triplet_search_caller_collections_with_edge_not_dupli
     snapshot = list(caller_collections)
 
     with patch(
-        "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine",
+        "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine_async",
         return_value=mock_vector_engine,
     ):
         await brute_force_triplet_search(query="test", collections=caller_collections)
@@ -265,7 +265,7 @@ async def test_triplet_context_provider_does_not_mutate_configured_collections()
 
     with (
         patch(
-            "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine",
+            "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine_async",
             return_value=mock_vector_engine,
         ),
         patch(
