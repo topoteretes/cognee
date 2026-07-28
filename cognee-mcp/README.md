@@ -494,7 +494,7 @@ The MCP server exposes its functionality through tools. Call them from any MCP c
 
 The MCP server exposes three tools:
 
-- **remember**: Store data in memory. With `session_id`: fast session cache. Without `session_id`: permanent graph memory
+- **remember**: Store data in memory. Pass `data` for text, or `filename` + `content_base64` to ingest an uploaded file (up to 10 MB). With `session_id`: fast session cache (text only). Without `session_id`: permanent graph memory
 - **recall**: Search memory with auto-routing. Searches session cache first when `session_id` is provided, then falls through to the permanent graph
 - **forget**: Delete memory by dataset name, or delete all owned memory with `everything=True`
 
@@ -503,7 +503,6 @@ The MCP server exposes three tools:
 - **visualize_graph_ui**: Open the workspace and render the current knowledge graph
 - **upload_file_ui**: Open the workspace for file upload
 - **open_cognee_workspace**: Generic "open the cognee UI" entry point
-- **cognify_file**: Ingest an uploaded file (used by the workspace; accepts base64 content)
 - **list_datasets_json / list_dataset_data_json / create_dataset_json / get_client_info_json**: Structured-JSON helpers powering the workspace dropdown
 
 The workspace lets you create/switch/delete datasets, upload files, add text, search, and view the graph from one inline panel.
@@ -514,7 +513,7 @@ The bundle that powers the workspace lives at `cognee-mcp/src/app_bundles/visual
 
 By default, each MCP client gets its own auto-named dataset (e.g. Cursor → `cursor_vscode_memory`, Claude Code → `claude_code_memory`) so different agents don't share memory unintentionally. The dataset is created on demand the first time a client calls a workspace tool.
 
-LLM-direct calls to `cognify`, `remember`, `improve`, `cognify_status`, and `cognify_file` route to the agent-scoped dataset when `dataset_name` is omitted. Pass `dataset_name` explicitly to override (e.g. `dataset_name="main_dataset"` still works).
+LLM-direct calls to `cognify`, `remember`, `improve`, and `cognify_status` route to the agent-scoped dataset when `dataset_name` is omitted. Pass `dataset_name` explicitly to override (e.g. `dataset_name="main_dataset"` still works).
 
 To disable agent scoping and have all clients share `main_dataset` as the default, set in `.env`:
 

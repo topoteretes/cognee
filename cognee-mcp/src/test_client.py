@@ -17,7 +17,6 @@ EXPECTED_TOOLS = {
     "visualize_graph_ui",
     "upload_file_ui",
     "open_cognee_workspace",
-    "cognify_file",
     "list_datasets_json",
     "list_dataset_data_json",
     "get_client_info_json",
