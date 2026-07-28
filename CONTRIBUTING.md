@@ -23,6 +23,7 @@ You can contribute to **cognee** in many ways:
 - 🔍 Reviewing pull requests
 - 🛠️ Contributing code or tests
 - 🌐 Helping other users
+- 📇 Adding an entry to the [Integrations Hub or Use-Case Gallery](docs/contributing/add-catalog-entry.md)
 
 ## 📫 Get in Touch
 

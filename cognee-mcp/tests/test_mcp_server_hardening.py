@@ -608,6 +608,12 @@ async def test_list_datasets_json_text_channel_over_mcp_protocol(monkeypatch):
     assert "beta (id-beta)" in text
 
 
+def _recall_payload(requests: "list[httpx.Request]") -> dict:
+    """Payload of the recall POST; a bare recall sends a GET /datasets preflight first."""
+    recall_request = next(r for r in requests if r.url.path == "/api/v1/recall")
+    return json.loads(recall_request.content.decode())
+
+
 @pytest.mark.asyncio
 async def test_recall_uses_env_default_system_prompt_when_caller_omits_it(monkeypatch):
     """The env default is injected when the caller passes no system_prompt."""
@@ -629,7 +635,7 @@ async def test_recall_uses_env_default_system_prompt_when_caller_omits_it(monkey
     finally:
         await client.close()
 
-    payload = json.loads(requests[0].content.decode())
+    payload = _recall_payload(requests)
     assert payload["system_prompt"] == "Answer with provenance."
 
 
@@ -654,7 +660,7 @@ async def test_recall_caller_system_prompt_wins_over_env_default(monkeypatch):
     finally:
         await client.close()
 
-    payload = json.loads(requests[0].content.decode())
+    payload = _recall_payload(requests)
     assert payload["system_prompt"] == "Caller wins."
 
 
@@ -681,7 +687,7 @@ async def test_recall_reads_env_default_system_prompt_from_file(monkeypatch, tmp
     finally:
         await client.close()
 
-    payload = json.loads(requests[0].content.decode())
+    payload = _recall_payload(requests)
     assert payload["system_prompt"] == "Prompt from file."
 
 
@@ -706,5 +712,5 @@ async def test_recall_without_env_default_omits_system_prompt(monkeypatch):
     finally:
         await client.close()
 
-    payload = json.loads(requests[0].content.decode())
+    payload = _recall_payload(requests)
     assert "system_prompt" not in payload

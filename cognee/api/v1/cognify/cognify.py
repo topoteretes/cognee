@@ -27,6 +27,7 @@ from cognee.tasks.documents import (
     extract_chunks_from_documents,
 )
 from cognee.tasks.graph.extract_graph_and_summarize import extract_graph_and_summarize
+from cognee.tasks.graph import detect_contradictions
 from cognee.tasks.graph.resolve_temporal_contradictions import resolve_temporal_contradictions
 from cognee.tasks.storage import add_data_points
 from cognee.tasks.ingestion.extract_dlt_fk_edges import extract_dlt_fk_edges
@@ -351,6 +352,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
 
     cognify_config = get_cognify_config()
     embed_triplets = cognify_config.triplet_embedding
+    check_contradictions = cognify_config.contradiction_detection
 
     if chunks_per_batch is None:
         chunks_per_batch = (
@@ -383,6 +385,15 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
             task_config={"batch_size": chunks_per_batch},
         ),
         Task(extract_dlt_fk_edges),
+        # COGNIFY (opt-in): flag facts in this ingestion that contradict facts
+        # already in the graph. Runs last so both new and existing facts are
+        # persisted and comparable. Default OFF — when the flag is off this spread
+        # is empty and the task list is identical to the pre-detection pipeline.
+        *(
+            [Task(detect_contradictions, task_config={"batch_size": chunks_per_batch})]
+            if check_contradictions
+            else []
+        ),
     ]
 
     # OPTIONAL: for the relationships declared single-valued, tag the assertions a
