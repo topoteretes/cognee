@@ -156,6 +156,7 @@ class TestRememberInheritsTheFlag:
                 new=AsyncMock(
                     side_effect=lambda datasets, user: [{"datasets": datasets, "leg_kinds": None}]
                 ),
+            ),
             patch.object(_mod_migrations_startup, "run_migrations_and_block", new=AsyncMock()),
             patch.object(_mod_serve_state, "get_remote_client", return_value=None),
             patch.object(_mod_engine_setup, "setup", new=AsyncMock()),
