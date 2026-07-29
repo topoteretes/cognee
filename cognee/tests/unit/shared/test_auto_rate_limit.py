@@ -42,7 +42,7 @@ def _config(**overrides):
 @pytest.fixture(autouse=True)
 def fresh_state(monkeypatch):
     """Reset activation; default config: rate limiting off, auto fallback on."""
-    monkeypatch.setattr(rate_limiting, "_auto_rate_limit_activated", False)
+    monkeypatch.setattr(rate_limiting, "_auto_paced_until", 0.0)
     monkeypatch.setattr(rate_limiting, "llm_config", _config())
     spy = PacerSpy()
     monkeypatch.setattr(rate_limiting, "llm_rate_limiter", spy)
@@ -68,7 +68,7 @@ async def test_full_speed_by_default(fresh_state):
     async with llm_rate_limiter_context_manager():
         pass
     assert fresh_state.entered == 0
-    assert rate_limiting._auto_rate_limit_activated is False
+    assert rate_limiting._auto_paced_until == 0.0
 
 
 @pytest.mark.parametrize(
@@ -99,7 +99,9 @@ async def test_overload_enables_rate_limiter_with_warning(
         async with llm_rate_limiter_context_manager():
             raise wrapper
 
-    assert rate_limiting._auto_rate_limit_activated is True
+    import time
+
+    assert time.monotonic() < rate_limiting._auto_paced_until
     assert len(warnings) == 1
     assert "not being processed fast enough" in warnings[0]
     assert expected_name in warnings[0]
@@ -121,9 +123,11 @@ async def test_slow_completion_enables_rate_limiter_before_any_failure(fresh_sta
         "logger",
         SimpleNamespace(warning=lambda message, *args: warnings.append(message % args)),
     )
+    import time
+
     async with llm_rate_limiter_context_manager():
         await asyncio.sleep(0.06)  # a successful but dangerously slow call
-    assert rate_limiting._auto_rate_limit_activated is True
+    assert time.monotonic() < rate_limiting._auto_paced_until
     assert len(warnings) == 1 and "completion took" in warnings[0]
 
 
@@ -134,7 +138,7 @@ async def test_auto_rate_limit_disabled_never_activates(fresh_state, monkeypatch
         with pytest.raises(type(error)):
             async with llm_rate_limiter_context_manager():
                 raise error
-    assert rate_limiting._auto_rate_limit_activated is False
+    assert rate_limiting._auto_paced_until == 0.0
     assert fresh_state.entered == 0
 
 
@@ -146,7 +150,7 @@ async def test_ordinary_errors_do_not_activate(fresh_state):
     with pytest.raises(openai.APIStatusError):
         async with llm_rate_limiter_context_manager():
             raise _status_error(500)  # a plain server error is not overload evidence
-    assert rate_limiting._auto_rate_limit_activated is False
+    assert rate_limiting._auto_paced_until == 0.0
 
 
 @pytest.mark.asyncio
@@ -155,3 +159,54 @@ async def test_explicit_rate_limit_setting_paces_from_the_start(fresh_state, mon
     async with llm_rate_limiter_context_manager():
         pass
     assert fresh_state.entered == 1
+
+
+@pytest.mark.asyncio
+async def test_pacing_lapses_after_quiet_cooldown_and_rewarns(fresh_state, monkeypatch):
+    warnings = []
+    monkeypatch.setattr(
+        rate_limiting,
+        "logger",
+        SimpleNamespace(warning=lambda message, *args: warnings.append(message % args)),
+    )
+    monkeypatch.setattr(rate_limiting, "AUTO_RATE_LIMIT_COOLDOWN_SECONDS", 0.1)
+
+    for _ in range(2):  # two separate episodes with a quiet gap between them
+        with pytest.raises(openai.RateLimitError):
+            async with llm_rate_limiter_context_manager():
+                raise _rate_limit_error()
+        async with llm_rate_limiter_context_manager():
+            pass  # inside the episode: paced
+        await asyncio.sleep(0.15)  # cooldown lapses with no evidence
+        async with llm_rate_limiter_context_manager():
+            pass  # back to the configured (unpaced) state
+
+    assert fresh_state.entered == 2  # exactly one paced dispatch per episode
+    assert len(warnings) == 2  # each fresh episode warns again
+
+
+@pytest.mark.asyncio
+async def test_evidence_extends_the_cooldown_without_rewarning(fresh_state, monkeypatch):
+    import time
+
+    warnings = []
+    monkeypatch.setattr(
+        rate_limiting,
+        "logger",
+        SimpleNamespace(warning=lambda message, *args: warnings.append(message % args)),
+    )
+    monkeypatch.setattr(rate_limiting, "AUTO_RATE_LIMIT_COOLDOWN_SECONDS", 0.2)
+
+    with pytest.raises(openai.RateLimitError):
+        async with llm_rate_limiter_context_manager():
+            raise _rate_limit_error()
+    first_deadline = rate_limiting._auto_paced_until
+
+    await asyncio.sleep(0.05)
+    with pytest.raises(openai.RateLimitError):
+        async with llm_rate_limiter_context_manager():
+            raise _rate_limit_error()
+
+    assert rate_limiting._auto_paced_until > first_deadline  # extended
+    assert time.monotonic() < rate_limiting._auto_paced_until
+    assert len(warnings) == 1  # same episode: no second warning
