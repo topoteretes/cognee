@@ -98,7 +98,13 @@ async def run_tasks_distributed(
     llm_config: Optional[LLMConfig] = None,
     embedding_config: Optional[EmbeddingConfig] = None,
     data_cache: bool = False,
+    legs: Optional[List[tuple]] = None,
 ):
+    if legs is not None:
+        raise NotImplementedError(
+            "Multi-leg pipeline runs are not supported by the distributed runner yet; "
+            "run mixed-kind datasets with COGNEE_DISTRIBUTED disabled."
+        )
     if not user:
         user = await get_default_user()
 
