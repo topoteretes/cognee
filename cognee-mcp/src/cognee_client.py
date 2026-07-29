@@ -190,8 +190,8 @@ class CogneeClient:
         """Pick the multipart upload for an API-mode ingestion payload.
 
         Base64 uploads and real filesystem paths keep their original
-        basename (#4230); anything else is uploaded as content-addressed
-        text so repeated writes don't collide (#2747).
+        basename; anything else is uploaded as content-addressed
+        text so repeated writes don't collide.
         """
         if content_base64:
             return CogneeClient._file_upload(filename, content_base64)

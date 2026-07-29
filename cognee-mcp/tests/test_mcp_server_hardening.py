@@ -190,15 +190,6 @@ def _multipart_filenames(request: httpx.Request) -> list[str]:
     return re.findall(r'filename="([^"]*)"', body)
 
 
-# Regression guards for issue #4230: in API mode `add()` used to stringify every
-# argument through `_text_upload`, so a real filesystem path was uploaded as the
-# *path text* under a content-addressed `text_<md5>.txt` name. Documents ingested
-# through the MCP file-upload path therefore showed up in the UI as opaque slugs
-# instead of their original filename. Paths must upload file bytes under the
-# original basename, while plain text must keep the content-addressed name that
-# fixed the silent `data.txt` collision (#2747).
-
-
 @pytest.mark.asyncio
 async def test_cognee_client_api_add_uploads_file_path_under_original_basename(tmp_path):
     upload = tmp_path / "meeting-notes.md"
@@ -215,7 +206,7 @@ async def test_cognee_client_api_add_uploads_file_path_under_original_basename(t
     expected_mime = mimetypes.guess_type("meeting-notes.md")[0] or "application/octet-stream"
 
     assert _multipart_filenames(requests[0]) == ["meeting-notes.md"]
-    # The bug: a content-addressed name derived from the path string.
+    # Bug from issue 4230: a content-addressed name derived from the path string.
     assert 'filename="text_' not in body
     # The file's bytes must be uploaded, not the path that pointed at them.
     assert "# Meeting notes\nagenda item" in body
