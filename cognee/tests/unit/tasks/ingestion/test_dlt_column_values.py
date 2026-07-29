@@ -9,7 +9,7 @@ per-table column lists with "*" wildcards on either side; emission
 import importlib
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -144,7 +144,8 @@ async def test_emit_creates_shared_column_value_nodes_and_edges(monkeypatch):
     assert len(status_edges) == 2
     shared_node_id = {edge[1] for edge in status_edges}
     assert len(shared_node_id) == 1, "both rows must point at the same value node"
-    assert {edge[0] for edge in status_edges} == {row_a, row_b}
+    # Edge tuple slots carry UUIDs (the upsert_edges ledger contract).
+    assert {edge[0] for edge in status_edges} == {UUID(row_a), UUID(row_b)}
 
 
 @pytest.mark.asyncio
@@ -188,7 +189,7 @@ async def test_shared_set_prevents_reembedding_across_batches(monkeypatch):
     # Both batches still emitted their row edge to the same shared node.
     edges = [e for call in graph.add_edges.call_args_list for e in call.args[0]]
     status_edges = [e for e in edges if e[2] == "status"]
-    assert {e[0] for e in status_edges} == {row_a, row_b}
+    assert {e[0] for e in status_edges} == {UUID(row_a), UUID(row_b)}
     assert len({e[1] for e in status_edges}) == 1
 
 

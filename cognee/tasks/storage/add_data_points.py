@@ -41,6 +41,7 @@ async def add_data_points(
     custom_edges: Optional[List] = None,
     embed_triplets: bool = False,
     ctx: Optional["PipelineContext"] = None,
+    graph_only: bool = False,
 ) -> List[DataPoint]:
     """
     Add a batch of data points to the graph database by extracting nodes and edges,
@@ -51,6 +52,8 @@ async def add_data_points(
         custom_edges: Custom edges between datapoints.
         embed_triplets: If True, creates and indexes triplet embeddings.
         ctx: Pipeline runtime context (user, dataset, data_item).
+        graph_only: Persist graph nodes and edges without initializing or writing
+            a vector engine. Intended for deterministic extraction pipelines.
     """
     user = ctx.user if ctx else None
     data_item = ctx.data_item if ctx else None
@@ -61,6 +64,10 @@ async def add_data_points(
         raise InvalidDataPointsInAddDataPointsError("data_points must be a list.")
     if not all(isinstance(dp, DataPoint) for dp in data_points):
         raise InvalidDataPointsInAddDataPointsError("data_points: each item must be a DataPoint.")
+    if graph_only and embed_triplets:
+        raise InvalidDataPointsInAddDataPointsError(
+            "embed_triplets cannot be enabled when graph_only is True."
+        )
 
     nodes = []
     edges = []
@@ -94,10 +101,17 @@ async def add_data_points(
         else None
     )
 
-    unified = await get_unified_engine()
-    graph_engine = unified.graph
-    vector_engine = unified.vector
-    use_hybrid = unified.has_capability(EngineCapability.HYBRID_WRITE)
+    if graph_only:
+        from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
+
+        graph_engine = await get_graph_engine()
+        vector_engine = None
+        use_hybrid = False
+    else:
+        unified = await get_unified_engine()
+        graph_engine = unified.graph
+        vector_engine = unified.vector
+        use_hybrid = unified.has_capability(EngineCapability.HYBRID_WRITE)
 
     # Provenance needs a concrete (dataset, data) pair. data_item_id resolves
     # the id whether data_item is a relational Data (.id) or an ingestion
@@ -173,6 +187,10 @@ async def add_data_points(
 
     if use_hybrid:
         await graph_engine.add_nodes_with_vectors(nodes)
+    elif graph_only:
+        await graph_engine.add_nodes(
+            nodes, source_ref_key=fold_source_ref_key, pipeline_run_id=fold_run_arg
+        )
     else:
         await asyncio.gather(
             graph_engine.add_nodes(
@@ -186,6 +204,10 @@ async def add_data_points(
 
     if use_hybrid:
         await graph_engine.add_edges_with_vectors(edges)
+    elif graph_only:
+        await graph_engine.add_edges(
+            edges, source_ref_key=fold_source_ref_key, pipeline_run_id=fold_run_arg
+        )
     else:
         await asyncio.gather(
             graph_engine.add_edges(
@@ -200,6 +222,12 @@ async def add_data_points(
         # rollback-ledger upsert, so no second ensure_default_edge_properties here.
         if use_hybrid:
             await graph_engine.add_edges_with_vectors(custom_edges)
+        elif graph_only:
+            await graph_engine.add_edges(
+                custom_edges,
+                source_ref_key=fold_source_ref_key,
+                pipeline_run_id=fold_run_arg,
+            )
         else:
             await asyncio.gather(
                 graph_engine.add_edges(

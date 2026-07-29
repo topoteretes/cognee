@@ -274,8 +274,9 @@ async def add(
         data_cache=data_cache,
     )
 
-    # Blocking runs commit before this point, so the deferred DLT orphan
-    # cleanup can now run safely (background runs already ran it up front).
+    # Foreground runs: the fresh rows are committed by pipeline_executor_func
+    # above, so it's now safe to clean up orphans. (Background runs already ran
+    # this up front and set orphan_cleanup to None.)
     if orphan_cleanup is not None:
         await orphan_cleanup()
 

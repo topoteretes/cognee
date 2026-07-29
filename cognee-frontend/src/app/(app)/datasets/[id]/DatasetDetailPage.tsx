@@ -9,8 +9,10 @@ import getDatasetData from "@/modules/datasets/getDatasetData";
 import deleteDatasetData from "@/modules/datasets/deleteDatasetData";
 import deleteDataset from "@/modules/datasets/deleteDataset";
 import rememberData from "@/modules/ingestion/rememberData";
+import { MAX_FILES_PER_UPLOAD } from "@/modules/ingestion/uploadLimits";
 import cognifyDataset from "@/modules/datasets/cognifyDataset";
-import pollDatasetStatus, { type DatasetProcessingStatus } from "@/modules/datasets/pollDatasetStatus";
+import pollDatasetStatus from "@/modules/datasets/pollDatasetStatus";
+import { useDatasetStatuses } from "@/modules/datasets/useDatasetStatuses";
 import { notifications } from "@mantine/notifications";
 import { Tooltip } from "@mantine/core";
 import { TrackPageView, trackEvent } from "@/modules/analytics";
@@ -182,7 +184,6 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
   const modelDropdownRef = useRef<HTMLDivElement>(null);
   const [graphOutdated, setGraphOutdated] = useState(false);
   const [datasetStatus, setDatasetStatus] = useState<"ready" | "pending" | "processing" | "failed" | "outdated" | "empty">("empty");
-  const statusPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [showCreateModelModal, setShowCreateModelModal] = useState(false);
   const [inferring, setInferring] = useState(false);
 
@@ -214,8 +215,9 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
       const assignedOntology = findOntologyForDataset(cfg.ontologyAssignments ?? {}, datasetId);
       setSelectedOntologyKey(assignedOntology);
       if (cfg.outdatedDatasets?.includes(datasetId)) setGraphOutdated(true);
-    }).catch(() => {});
-    listOntologies(cogniInstance).then(setOntologies).catch(() => {});
+    }).catch((err) => captureException(err, { context: "dataset-detail.load-graph-config" }));
+    listOntologies(cogniInstance).then(setOntologies).catch((err) =>
+      captureException(err, { context: "dataset-detail.list-ontologies" }));
   }, [datasetId, cogniInstance, isInitializing]);
 
   // Close dropdown on outside click
@@ -465,40 +467,28 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
     loadFiles();
   }, [cogniInstance, isInitializing]);
 
-  // Fetch dataset status once on load; only poll while processing
+  const { statuses, refetch: refetchStatuses } = useDatasetStatuses(!isInitializing);
+
   useEffect(() => {
-    if (!cogniInstance || isInitializing) return;
-    async function fetchStatus() {
-      try {
-        const resp = await cogniInstance!.fetch(`/v1/datasets/status?dataset=${datasetId}`);
-        if (!resp.ok) return;
-        const data: Record<string, DatasetProcessingStatus> = await resp.json();
-        const raw = data[datasetId] ?? Object.values(data)[0];
-        if (!raw) {
-          if (files.length === 0) setDatasetStatus("empty");
-          else if (graphOutdated) setDatasetStatus("outdated");
-          else setDatasetStatus("ready");
-          return;
-        }
-        if (raw === "DATASET_PROCESSING_COMPLETED") {
-          setDatasetStatus(graphOutdated ? "outdated" : "ready");
-          setProcessing(false);
-        } else if (raw === "DATASET_PROCESSING_ERRORED") {
-          setDatasetStatus("failed");
-          setProcessing(false);
-        } else if (raw === "DATASET_PROCESSING_STARTED" || raw === "DATASET_PROCESSING_INITIATED") {
-          setDatasetStatus("processing");
-          setProcessing(true);
-        }
-      } catch {}
+    const raw = statuses[datasetId];
+    if (!raw) {
+      if (files.length === 0) setDatasetStatus("empty");
+      else if (graphOutdated) setDatasetStatus("outdated");
+      else setDatasetStatus("ready");
+      setProcessing(false);
+      return;
     }
-    fetchStatus();
-    // Only poll while actively processing
-    if (processing) {
-      statusPollRef.current = setInterval(fetchStatus, 5000);
-      return () => { if (statusPollRef.current) clearInterval(statusPollRef.current); };
+    if (raw === "DATASET_PROCESSING_COMPLETED") {
+      setDatasetStatus(graphOutdated ? "outdated" : "ready");
+      setProcessing(false);
+    } else if (raw === "DATASET_PROCESSING_ERRORED") {
+      setDatasetStatus("failed");
+      setProcessing(false);
+    } else if (raw === "DATASET_PROCESSING_STARTED" || raw === "DATASET_PROCESSING_INITIATED") {
+      setDatasetStatus("processing");
+      setProcessing(true);
     }
-  }, [cogniInstance, isInitializing, datasetId, graphOutdated, files.length, processing]);
+  }, [statuses, datasetId, graphOutdated, files.length]);
 
   async function loadFiles() {
     if (!cogniInstance) return;
@@ -521,6 +511,16 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
   async function handleUpload(newFiles: FileList | File[]) {
     if (!cogniInstance) return;
     const filesArray = Array.from(newFiles);
+
+    if (filesArray.length > MAX_FILES_PER_UPLOAD) {
+      notifications.show({
+        title: "Too many files",
+        message: `You selected ${filesArray.length} files. Please upload ${MAX_FILES_PER_UPLOAD} or fewer at a time.`,
+        color: "red",
+      });
+      return;
+    }
+
     const totalBytes = filesArray.reduce((sum, f) => sum + f.size, 0);
     const fileTypes = filesArray.map((f) => f.type || "unknown");
     const uploadStartedAt = Date.now();
@@ -538,28 +538,10 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
     });
 
     try {
-      // Kick off ingestion in the background so the upload POST returns immediately,
-      // then poll the dataset status until the pipeline finishes. This avoids holding
-      // one HTTP request open for the full (multi-minute) build, which the client
-      // would abort at the rememberData timeout — and which is also exposed to
-      // gateway/LB idle timeouts — while the backend kept processing.
+      // Kick off ingestion in the background so the upload POST returns immediately.
+      // The add itself is done once this call returns — anything that fails after
+      // this point (status polling) must not be reported as an upload failure.
       await rememberData({ id: datasetId }, filesArray, cogniInstance, { ...getCognifyOptions(), runInBackground: true });
-      await pollDatasetStatus(datasetId, cogniInstance, { intervalMs: 5000 });
-      await loadFiles();
-      setUploading(false);
-      setLastSynced(new Date().toISOString());
-
-      trackEvent({
-        pageName: "Dataset Detail",
-        eventName: "dataset_files_uploaded",
-        additionalProperties: {
-          dataset_id: datasetId,
-          file_count: String(filesArray.length),
-          total_bytes: String(totalBytes),
-          duration_ms: String(Date.now() - uploadStartedAt),
-        },
-      });
-      recordUploadSuccess(Date.now() - uploadStartedAt, totalBytes, filesArray.length);
     } catch (err) {
       setUploading(false);
 
@@ -597,6 +579,52 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
           color: "red",
         });
       }
+      return;
+    }
+
+    try {
+      // Files were already added successfully by this point — this only tracks
+      // knowledge-graph build progress, so its failure is reported separately.
+      await pollDatasetStatus(datasetId, cogniInstance, { intervalMs: 5000 });
+      await loadFiles();
+      setUploading(false);
+      setLastSynced(new Date().toISOString());
+
+      trackEvent({
+        pageName: "Dataset Detail",
+        eventName: "dataset_files_uploaded",
+        additionalProperties: {
+          dataset_id: datasetId,
+          file_count: String(filesArray.length),
+          total_bytes: String(totalBytes),
+          duration_ms: String(Date.now() - uploadStartedAt),
+        },
+      });
+      recordUploadSuccess(Date.now() - uploadStartedAt, totalBytes, filesArray.length);
+    } catch (err) {
+      setUploading(false);
+      await loadFiles();
+
+      const durationMs = Date.now() - uploadStartedAt;
+      const errorMessage = err instanceof Error ? err.message : String(err);
+
+      captureException(err, { datasetId, fileCount: filesArray.length, totalBytes, durationMs, stage: "processing" });
+      trackEvent({
+        pageName: "Dataset Detail",
+        eventName: "dataset_processing_failed",
+        additionalProperties: {
+          dataset_id: datasetId,
+          file_count: String(filesArray.length),
+          total_bytes: String(totalBytes),
+          duration_ms: String(durationMs),
+          error_message: errorMessage,
+        },
+      });
+      notifications.show({
+        title: "Knowledge graph build failed",
+        message: `Files were added, but building the knowledge graph failed: ${errorMessage}`,
+        color: "red",
+      });
     }
   }
 
@@ -617,9 +645,11 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
     setSyncing(true);
     try {
       await cognifyDataset({ id: datasetId, name: datasetName, data: [], status: "processing" }, cogniInstance, getCognifyOptions());
+      refetchStatuses();
       const finalStatus = await pollDatasetStatus(datasetId, cogniInstance, { intervalMs: 5000 });
       trackEvent({ pageName: "Dataset Detail", eventName: "dataset_synced", additionalProperties: { dataset_id: datasetId, status: finalStatus } });
       setLastSynced(new Date().toISOString());
+      refetchStatuses();
     } catch (err) {
       console.error("Sync failed:", err);
     } finally {
@@ -1142,7 +1172,14 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
                 setSelectedOntologyKey(key);
                 setShowUploadOntologyModal(false);
                 if (cogniInstance) {
-                  assignOntologyToDataset(cogniInstance, datasetId, key).catch(() => {});
+                  assignOntologyToDataset(cogniInstance, datasetId, key).catch((err) => {
+                    captureException(err, { context: "dataset-detail.assign-ontology-after-upload", datasetId, key });
+                    notifications.show({
+                      title: "Ontology uploaded, but not assigned",
+                      message: `"${key}" was uploaded but couldn't be assigned to this dataset automatically. Assign it manually from the dropdown.`,
+                      color: "orange",
+                    });
+                  });
                 }
                 notifications.show({ title: "Ontology uploaded", message: `"${key}" is ready to use.`, color: "green", autoClose: 4000 });
               } catch (err) {
@@ -1197,8 +1234,12 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
                 const cognifyPayload = getCognifyOptions();
                 const result = await cognifyDataset({ id: datasetId, name: datasetName, data: [], status: "processing" }, cogniInstance, cognifyPayload);
                 trackEvent({ pageName: "Dataset Detail", eventName: "dataset_recognified", additionalProperties: { dataset_id: datasetId } });
-                clearDatasetOutdated(cogniInstance, datasetId).catch(() => {});
-                // Status polling will pick up the real state
+                clearDatasetOutdated(cogniInstance, datasetId).catch((err) =>
+                  captureException(err, { context: "dataset-detail.clear-outdated-flag", datasetId }));
+                // Force an immediate status re-fetch so the shared poller picks up
+                // the new in-progress state right away instead of waiting for the
+                // next tick (it may have gone idle if the previous snapshot was terminal).
+                refetchStatuses();
               } catch (err) {
                 console.error("Re-cognify failed:", err);
                 notifications.show({ title: "Rebuild failed", message: err instanceof Error ? err.message : String(err), color: "red" });

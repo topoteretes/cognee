@@ -106,6 +106,20 @@ def _count_document_chunks(nodes) -> int:
     return document_chunk_count
 
 
+def _document_chunk_texts(nodes) -> list[str]:
+    texts = []
+    for _node_id, props in nodes:
+        node_type = props.get("type")
+        is_chunk = (
+            node_type.get("DocumentChunk")
+            if isinstance(node_type, dict)
+            else node_type == "DocumentChunk"
+        )
+        if is_chunk:
+            texts.append(str(props.get("text", "")))
+    return texts
+
+
 @pytest_asyncio.fixture(scope="module")
 async def session_persistence_env(event_loop):
     """Clean cognee env with one dataset (add + cognify); shared by all tests in this module."""
@@ -532,3 +546,117 @@ async def test_persist_agent_trace_feedbacks_skips_empty_feedbacks(
 
     assert nodes == []
     assert edges == []
+
+
+@pytest.mark.asyncio
+async def test_persist_sessions_watermark_ingests_everything_exactly_once(
+    session_persistence_env,
+):
+    """The persist watermark's end-to-end contract over three pipeline runs:
+
+    1. First run persists all existing entries.
+    2. Re-running on an unchanged session ingests nothing new.
+    3. After the session grows, the next run persists ONLY the new entries —
+       every entry ends up in the graph exactly once (complete, no gaps,
+       no re-ingestion of already-persisted content).
+    """
+    dataset_name = session_persistence_env
+    session_id = "watermark_loop_session"
+
+    user = await get_default_user()
+    user_id = str(user.id)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with patch(
+            "cognee.infrastructure.databases.cache.fscache.FsCacheAdapter.get_storage_config",
+            return_value={"data_root_directory": tmpdir},
+        ):
+            from cognee.infrastructure.databases.cache.fscache.FsCacheAdapter import (
+                FSCacheAdapter,
+            )
+
+            adapter = FSCacheAdapter()
+            session_manager = SessionManager(cache_engine=adapter)
+
+            await session_manager.add_qa(
+                user_id=user_id,
+                question="What is the watermark first question?",
+                context="",
+                answer="WATERMARK-FIRST-ANSWER about knowledge graphs.",
+                session_id=session_id,
+            )
+            await session_manager.add_qa(
+                user_id=user_id,
+                question="What is the watermark second question?",
+                context="",
+                answer="WATERMARK-SECOND-ANSWER about vector search.",
+                session_id=session_id,
+            )
+
+            extract_module = sys.modules["cognee.tasks.memify.extract_user_sessions"]
+            cognify_module = sys.modules["cognee.tasks.memify.cognify_session"]
+            with (
+                patch.object(extract_module, "get_session_manager", return_value=session_manager),
+                patch.object(cognify_module, "get_session_manager", return_value=session_manager),
+            ):
+                # Run 1: persists both existing entries.
+                await persist_sessions_in_knowledge_graph_pipeline(
+                    user=user,
+                    session_ids=[session_id],
+                    dataset=dataset_name,
+                    run_in_background=False,
+                )
+
+                graph_engine = await get_graph_engine()
+                nodes, _ = await graph_engine.get_graph_data()
+                chunks_after_first = _count_document_chunks(nodes)
+
+                # Run 2: unchanged session — nothing new may be ingested.
+                await persist_sessions_in_knowledge_graph_pipeline(
+                    user=user,
+                    session_ids=[session_id],
+                    dataset=dataset_name,
+                    run_in_background=False,
+                )
+
+                nodes, _ = await graph_engine.get_graph_data()
+                assert _count_document_chunks(nodes) == chunks_after_first, (
+                    "Re-running persistence on an unchanged session must not ingest anything"
+                )
+
+                # Run 3: session grew by one entry — only that entry is persisted.
+                await session_manager.add_qa(
+                    user_id=user_id,
+                    question="What is the watermark third question?",
+                    context="",
+                    answer="WATERMARK-THIRD-ANSWER about session memory.",
+                    session_id=session_id,
+                )
+                await persist_sessions_in_knowledge_graph_pipeline(
+                    user=user,
+                    session_ids=[session_id],
+                    dataset=dataset_name,
+                    run_in_background=False,
+                )
+
+                nodes, _ = await graph_engine.get_graph_data()
+                chunk_texts = _document_chunk_texts(nodes)
+
+                # Completeness: every entry is in the graph.
+                for marker in (
+                    "WATERMARK-FIRST-ANSWER",
+                    "WATERMARK-SECOND-ANSWER",
+                    "WATERMARK-THIRD-ANSWER",
+                ):
+                    occurrences = sum(text.count(marker) for text in chunk_texts)
+                    assert occurrences == 1, (
+                        f"{marker} appears {occurrences} times in DocumentChunks — "
+                        "each entry must be ingested exactly once"
+                    )
+
+                # No re-ingestion: the third run's window must not contain the
+                # first run's entries (no whole-session snapshot documents).
+                third_chunks = [t for t in chunk_texts if "WATERMARK-THIRD-ANSWER" in t]
+                assert third_chunks and all(
+                    "WATERMARK-FIRST-ANSWER" not in text for text in third_chunks
+                ), "Third run re-ingested already-persisted entries"

@@ -1,6 +1,6 @@
 import asyncio
 from pydantic import BaseModel
-from typing import Union, Optional
+from typing import Collection, Union, Optional
 from uuid import UUID
 
 from cognee.modules.cognify.config import get_cognify_config
@@ -27,6 +27,8 @@ from cognee.tasks.documents import (
     extract_chunks_from_documents,
 )
 from cognee.tasks.graph.extract_graph_and_summarize import extract_graph_and_summarize
+from cognee.tasks.graph import detect_contradictions
+from cognee.tasks.graph.resolve_temporal_contradictions import resolve_temporal_contradictions
 from cognee.tasks.storage import add_data_points
 from cognee.tasks.ingestion.extract_dlt_fk_edges import extract_dlt_fk_edges
 from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
@@ -54,10 +56,12 @@ async def cognify(
     incremental_loading: bool = True,
     custom_prompt: Optional[str] = None,
     temporal_cognify: bool = False,
+    functional_relationships: Optional[Collection[str]] = None,
     data_per_batch: int = 20,
     llm_config: Optional[LLMConfig] = None,
     embedding_config: Optional[EmbeddingConfig] = None,
     data_cache: bool = True,
+    dry_run: bool = False,
     **kwargs,
 ):
     """
@@ -123,9 +127,18 @@ async def cognify(
                       If provided, this prompt will be used instead of the default prompts for
                       knowledge graph extraction. The prompt should guide the LLM on how to
                       extract entities and relationships from the text content.
+        functional_relationships: Relationship names that hold a single target per source
+                      (e.g. {"ceo_of"}). Once the graph is written, conflicting assertions
+                      of those relationships are resolved by recency: the most recent one
+                      stays current and the older ones are tagged as superseded — nothing
+                      is deleted. Off by default, because most cognee relationships are
+                      legitimately many-valued and collapsing them would corrupt the graph.
+        dry_run: If True, return a stage-level estimate of LLM token usage and rough cost
+                 without making LLM calls or writing graph results. The estimate covers all
+                 data in the selected dataset(s); an incremental run may process fewer items.
 
     Returns:
-        Union[dict, list[PipelineRunInfo]]:
+        Union[dict, list[PipelineRunInfo], DryRunEstimate]:
             - **Blocking mode**: Dictionary mapping dataset_id -> PipelineRunInfo with:
                 * Processing status (completed/failed/in_progress)
                 * Extracted entity and relationship counts
@@ -204,6 +217,11 @@ async def cognify(
 
     client = get_remote_client()
     if client is not None:
+        if dry_run:
+            raise ValueError(
+                "dry_run is not supported while connected to a remote Cognee instance. "
+                "Call cognee.disconnect() to estimate against local data."
+            )
         return await client.cognify(
             datasets,
             chunk_size=chunk_size,
@@ -240,6 +258,20 @@ async def cognify(
                     "ontology_config": {"ontology_resolver": get_default_ontology_resolver()}
                 }
 
+        if dry_run:
+            if temporal_cognify:
+                raise ValueError("dry_run is supported for the default cognify pipeline only.")
+            from cognee.modules.cognify.estimator import estimate_cognify_dry_run
+
+            return await estimate_cognify_dry_run(
+                datasets,
+                user=user,
+                graph_model=graph_model,
+                chunker=chunker,
+                chunk_size=chunk_size or await get_max_chunk_tokens(),
+                custom_prompt=custom_prompt,
+            )
+
         if temporal_cognify:
             tasks = await get_temporal_tasks(
                 user=user,
@@ -256,6 +288,7 @@ async def cognify(
                 config=config,
                 custom_prompt=custom_prompt,
                 chunks_per_batch=chunks_per_batch,
+                functional_relationships=functional_relationships,
                 **kwargs,
             )
 
@@ -299,6 +332,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
     config: Config = None,
     custom_prompt: Optional[str] = None,
     chunks_per_batch: int = None,
+    functional_relationships: Optional[Collection[str]] = None,
     **kwargs,
 ) -> list[Task]:
     if config is None:
@@ -320,6 +354,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
 
     cognify_config = get_cognify_config()
     embed_triplets = cognify_config.triplet_embedding
+    check_contradictions = cognify_config.contradiction_detection
 
     if chunks_per_batch is None:
         chunks_per_batch = (
@@ -352,7 +387,28 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
             task_config={"batch_size": chunks_per_batch},
         ),
         Task(extract_dlt_fk_edges),
+        # COGNIFY (opt-in): flag facts in this ingestion that contradict facts
+        # already in the graph. Runs last so both new and existing facts are
+        # persisted and comparable. Default OFF — when the flag is off this spread
+        # is empty and the task list is identical to the pre-detection pipeline.
+        *(
+            [Task(detect_contradictions, task_config={"batch_size": chunks_per_batch})]
+            if check_contradictions
+            else []
+        ),
     ]
+
+    # OPTIONAL: for the relationships declared single-valued, tag the assertions a
+    # more recent one replaced. Runs last so the new facts are already stored and
+    # comparable with the ones they supersede; disabled by default.
+    if functional_relationships:
+        default_tasks.append(
+            Task(
+                resolve_temporal_contradictions,
+                functional_relationships=functional_relationships,
+                task_config={"batch_size": chunks_per_batch},
+            )
+        )
 
     return default_tasks
 

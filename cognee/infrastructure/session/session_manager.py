@@ -734,13 +734,12 @@ class SessionManager:
         """
         Append one session-context entry (a plain dict carrying a "kind" field).
 
-        Fail-open: returns False when cache unavailable or on any error, never raises.
+        Raises SessionParameterValidationError for invalid user_id/session_id.
+        Fail-open on infrastructure errors: returns False when the cache is
+        unavailable or the cache operation fails.
         """
         session_id = self._resolve_session_id(session_id)
-        try:
-            self._validate_session_params(user_id=user_id, session_id=session_id)
-        except Exception:
-            return False
+        self._validate_session_params(user_id=user_id, session_id=session_id)
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, skipping create_session_context_entry")
             return False
@@ -760,13 +759,12 @@ class SessionManager:
         """
         Return all stored session-context entries (both "context" and "feedback" kinds).
 
-        Fail-open: returns [] when cache unavailable or on any error, never raises.
+        Raises SessionParameterValidationError for invalid user_id/session_id.
+        Fail-open on infrastructure errors: returns [] when the cache is
+        unavailable or the cache operation fails.
         """
         session_id = self._resolve_session_id(session_id)
-        try:
-            self._validate_session_params(user_id=user_id, session_id=session_id)
-        except Exception:
-            return []
+        self._validate_session_params(user_id=user_id, session_id=session_id)
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, returning empty session context")
             return []
@@ -787,13 +785,12 @@ class SessionManager:
         """
         Shallow-merge updates into the session-context entry matching entry["id"].
 
-        Fail-open: returns False when cache unavailable or on any error, never raises.
+        Raises SessionParameterValidationError for invalid user_id/session_id.
+        Fail-open on infrastructure errors: returns False when the cache is
+        unavailable or the cache operation fails.
         """
         session_id = self._resolve_session_id(session_id)
-        try:
-            self._validate_session_params(user_id=user_id, session_id=session_id)
-        except Exception:
-            return False
+        self._validate_session_params(user_id=user_id, session_id=session_id)
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, skipping update_session_context_entry")
             return False
@@ -814,13 +811,12 @@ class SessionManager:
         """
         Delete the entire session-context list for the given session.
 
-        Fail-open: returns False when cache unavailable or on any error, never raises.
+        Raises SessionParameterValidationError for invalid user_id/session_id.
+        Fail-open on infrastructure errors: returns False when the cache is
+        unavailable or the cache operation fails.
         """
         session_id = self._resolve_session_id(session_id)
-        try:
-            self._validate_session_params(user_id=user_id, session_id=session_id)
-        except Exception:
-            return False
+        self._validate_session_params(user_id=user_id, session_id=session_id)
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, skipping delete_session_context")
             return False
