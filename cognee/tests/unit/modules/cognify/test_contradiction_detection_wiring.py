@@ -26,6 +26,11 @@ from cognee.tasks.graph.models import Contradiction, ContradictionList
 cognify_module = sys.modules["cognee.api.v1.cognify.cognify"]
 remember_module = sys.modules["cognee.api.v1.remember.remember"]
 
+# Patching by the dotted string "cognee.api.v1.serve.state…" fails on
+# Python 3.10: `cognee.api.v1.serve` is shadowed by the re-exported serve()
+# function, and pre-3.11 mock walks attributes instead of importing modules.
+from cognee.api.v1.serve import state as serve_state_module
+
 # The canonical pre-detection task order.
 _BASE_SEQUENCE = [
     "classify_documents",
@@ -139,7 +144,7 @@ class TestRememberInheritsTheFlag:
                 ),
             ),
             patch("cognee.modules.migrations.startup.run_migrations_and_block", new=AsyncMock()),
-            patch("cognee.api.v1.serve.state.get_remote_client", return_value=None),
+            patch.object(serve_state_module, "get_remote_client", return_value=None),
             patch("cognee.modules.engine.operations.setup.setup", new=AsyncMock()),
             patch("cognee.api.v1.add.add", new=AsyncMock()),
             patch(
