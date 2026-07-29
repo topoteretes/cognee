@@ -103,6 +103,40 @@ def client(app):
     return TestClient(app)
 
 
+@pytest.fixture(autouse=True)
+def _restore_api_package_functions():
+    """Undo the bare ``pkg.fn = AsyncMock(...)`` assignments the tests below make.
+
+    Without this, the last-installed mock leaks into every later test module
+    that resolves these package attributes lazily — e.g. remember()-based tests
+    failed on dev CI with whichever side_effect ran last here
+    (LLMPaymentRequiredError from the 402 test).
+    """
+    import cognee.api.v1.add as add_pkg
+    import cognee.api.v1.cognify as cognify_pkg
+    import cognee.api.v1.memify as memify_pkg
+    import cognee.api.v1.search as search_pkg
+    import cognee.api.v1.update as update_pkg
+
+    targets = [
+        (add_pkg, "add"),
+        (cognify_pkg, "cognify"),
+        (memify_pkg, "memify"),
+        (search_pkg, "search"),
+        (update_pkg, "update"),
+    ]
+    missing = object()
+    originals = [(pkg, name, getattr(pkg, name, missing)) for pkg, name in targets]
+    yield
+    for pkg, name, original in originals:
+        if original is missing:
+            # The attribute only exists because a test assigned it — remove it.
+            if hasattr(pkg, name):
+                delattr(pkg, name)
+        else:
+            setattr(pkg, name, original)
+
+
 # ---------------------------------------------------------------------------
 # Add endpoint
 # ---------------------------------------------------------------------------

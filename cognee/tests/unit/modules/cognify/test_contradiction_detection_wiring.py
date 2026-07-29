@@ -9,6 +9,7 @@ pipeline. No real API keys are required (get_cognify_config is patched; config +
 chunk_size are passed so no ontology/LLM setup runs).
 """
 
+import importlib
 import os
 import sys
 from unittest.mock import AsyncMock, patch
@@ -30,6 +31,19 @@ from cognee.api.v1.serve import state as serve_state_module
 # cognify FUNCTION; grab the actual module objects for patching.
 cognify_module = sys.modules["cognee.api.v1.cognify.cognify"]
 remember_module = sys.modules["cognee.api.v1.remember.remember"]
+
+# String targets like patch("cognee.api.v1.serve.state.get_remote_client") break
+# on Python 3.10: its mock resolves dotted paths by getattr per component, and
+# package __init__ re-exports shadow submodules with same-named FUNCTIONS
+# (v1.serve is the serve() function), so resolution dies with
+# "'function' object has no attribute 'state'". Python 3.11+ resolves via
+# pkgutil.resolve_name (module-first) and doesn't hit this. Import the module
+# objects and use patch.object instead.
+_mod_serve_state = importlib.import_module("cognee.api.v1.serve.state")
+_mod_migrations_startup = importlib.import_module("cognee.modules.migrations.startup")
+_mod_engine_setup = importlib.import_module("cognee.modules.engine.operations.setup")
+_pkg_add = importlib.import_module("cognee.api.v1.add")
+_mod_users_methods = importlib.import_module("cognee.modules.users.methods")
 
 # The canonical pre-detection task order.
 _BASE_SEQUENCE = [
@@ -142,13 +156,13 @@ class TestRememberInheritsTheFlag:
                 new=AsyncMock(
                     side_effect=lambda datasets, user: [{"datasets": datasets, "leg_kinds": None}]
                 ),
-            ),
-            patch("cognee.modules.migrations.startup.run_migrations_and_block", new=AsyncMock()),
-            patch.object(serve_state_module, "get_remote_client", return_value=None),
-            patch("cognee.modules.engine.operations.setup.setup", new=AsyncMock()),
-            patch("cognee.api.v1.add.add", new=AsyncMock()),
-            patch(
-                "cognee.modules.users.methods.get_default_user",
+            patch.object(_mod_migrations_startup, "run_migrations_and_block", new=AsyncMock()),
+            patch.object(_mod_serve_state, "get_remote_client", return_value=None),
+            patch.object(_mod_engine_setup, "setup", new=AsyncMock()),
+            patch.object(_pkg_add, "add", new=AsyncMock()),
+            patch.object(
+                _mod_users_methods,
+                "get_default_user",
                 new=AsyncMock(return_value=object()),
             ),
             patch.object(

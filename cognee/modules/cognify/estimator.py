@@ -369,7 +369,13 @@ def _path_candidate(value: str) -> Optional[Path]:
             # Mirror the ACCEPT_LOCAL_FILE_PATH gate: an existing *absolute* file
             # path is rejected, while an existing *relative* path falls through to
             # raw text (save_data_item_to_storage has no reject branch for it).
-            if value.startswith("/"):
+            # Absolute-path detection matches save_data_item_to_storage exactly,
+            # including Windows drive-letter paths (C:\...), which "/"-prefix
+            # checking alone misses.
+            is_absolute_path = (
+                value.startswith("/") or (os.name == "nt" and len(value) > 1 and value[1] == ":")
+            ) and Path(os.path.normpath(value)).is_absolute()
+            if is_absolute_path:
                 raise ValueError(f"Local files are not accepted, got {value!r}.")
             return None
         return path
