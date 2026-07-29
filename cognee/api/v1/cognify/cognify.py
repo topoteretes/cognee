@@ -482,7 +482,25 @@ async def _plan_cognify_runs(datasets, user) -> list[tuple[str, list, Optional[l
     When no dataset contains a manifest, the plan is a single standard run
     that passes the original ``datasets`` argument through unchanged (items
     are loaded by the pipeline itself).
+
+    Routing is best-effort: if the manifest probe fails for any reason, the
+    plan falls back to the single standard run — the pipeline itself redoes
+    dataset resolution with authoritative error handling, so a probe failure
+    must never gate a plain cognify.
     """
+    try:
+        return await _probe_cognify_runs(datasets, user)
+    except Exception as error:
+        logger.warning(
+            "DLT cognify routing probe failed (%s); falling back to the standard pipeline.",
+            error,
+        )
+        return [("cognify_pipeline", datasets, None)]
+
+
+async def _probe_cognify_runs(datasets, user) -> list[tuple[str, list, Optional[list]]]:
+    """The fallible half of ``_plan_cognify_runs``: resolve datasets and split
+    manifest items from regular ones."""
     from sqlalchemy import select
 
     from cognee.infrastructure.databases.relational import get_relational_engine
