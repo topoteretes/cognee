@@ -68,7 +68,17 @@ async def run_tasks(
     llm_config: Optional[LLMConfig] = None,
     embedding_config: Optional[EmbeddingConfig] = None,
     data_cache: bool = False,
+    legs: Optional[List[tuple]] = None,
 ):
+    """Run a pipeline over a dataset as ONE logical run.
+
+    ``legs`` routes item subsets through different task lists under a single
+    pipeline run: a list of ``(tasks, items)`` pairs sharing this run's
+    lifecycle — one run record, one database context, one rollback, one
+    terminal status. Used by cognify when a dataset mixes data kinds (e.g.
+    DLT manifests + regular documents). When ``legs`` is given, ``tasks`` and
+    ``data`` are ignored.
+    """
     if not user:
         user = await get_default_user()
 
@@ -97,22 +107,35 @@ async def run_tasks(
         embedding_config=embedding_config,
     ):
         try:
-            if not isinstance(data, list):
-                data = [data]
+            # Build (item, item_tasks) work pairs: uniform task list for a
+            # plain run, per-leg task lists for a multi-leg run.
+            if legs is not None:
+                work_items = []
+                for leg_tasks, leg_items in legs:
+                    leg_items = list(leg_items or [])
+                    if data_cache or incremental_loading:
+                        leg_items = await resolve_data_directories(leg_items)
+                    work_items.extend((item, leg_tasks) for item in leg_items)
+                data = [item for item, _ in work_items]
+            else:
+                if not isinstance(data, list):
+                    data = [data]
 
-            if data_cache or incremental_loading:
-                data = await resolve_data_directories(data)
+                if data_cache or incremental_loading:
+                    data = await resolve_data_directories(data)
+
+                work_items = [(item, tasks) for item in data]
 
             # Semaphore-based concurrency: all items are scheduled at once,
             # but at most data_per_batch run concurrently at any time.
             semaphore = asyncio.Semaphore(data_per_batch)
 
-            async def _run_item(data_item):
+            async def _run_item(data_item, item_tasks):
                 async with semaphore:
                     return await run_tasks_data_item(
                         data_item,
                         dataset,
-                        tasks,
+                        item_tasks,
                         pipeline_name,
                         pipeline_id,
                         pipeline_run_id,
@@ -130,7 +153,10 @@ async def run_tasks(
                     )
 
             gathered = await asyncio.gather(
-                *[asyncio.create_task(_run_item(item)) for item in data],
+                *[
+                    asyncio.create_task(_run_item(item, item_tasks))
+                    for item, item_tasks in work_items
+                ],
             )
 
             # Separate successes from unhandled exceptions

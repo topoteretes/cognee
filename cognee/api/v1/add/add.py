@@ -252,6 +252,8 @@ async def add(
     await reset_dataset_pipeline_run_status(
         authorized_dataset.id,
         user,
+        # dlt_cognify_pipeline is legacy: cognify now runs DLT data as legs of
+        # cognify_pipeline; kept here so pre-existing rows still get reset.
         pipeline_names=["add_pipeline", "cognify_pipeline", "dlt_cognify_pipeline"],
     )
 

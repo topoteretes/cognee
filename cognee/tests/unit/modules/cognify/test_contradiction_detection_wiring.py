@@ -135,7 +135,7 @@ class TestRememberInheritsTheFlag:
                 cognify_module,
                 "_plan_cognify_runs",
                 new=AsyncMock(
-                    side_effect=lambda datasets, user: [("cognify_pipeline", datasets, None)]
+                    side_effect=lambda datasets, user: [{"datasets": datasets, "leg_kinds": None}]
                 ),
             ),
             patch("cognee.modules.migrations.startup.run_migrations_and_block", new=AsyncMock()),

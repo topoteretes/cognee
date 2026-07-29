@@ -428,60 +428,82 @@ async def _execute_cognify_runs(
     embedding_config,
     data_cache,
 ):
-    """Execute the planned pipeline runs and merge their results.
+    """Execute the planned invocations under ONE logical run per dataset.
 
-    Each run is (pipeline_name, datasets, items): items is an explicit data
-    subset for mixed datasets, or None to let the pipeline load the dataset
-    itself. The DLT task list is built lazily, only when a run needs it.
+    Every dataset gets exactly one ``cognify_pipeline`` run regardless of how
+    many task lists (legs) its data requires, so the status endpoint, result
+    shape, rollback, and background handles all see a single logical run. A
+    dataset whose data needs several task lists executes them as legs of one
+    run (``run_pipeline(legs=...)``); the DLT task list is built lazily, only
+    when some invocation needs it.
     """
-    tasks_for = {"cognify_pipeline": cognify_tasks}
-    partial_results = []
-    for pipeline_name, run_datasets, items in runs:
-        if pipeline_name not in tasks_for:
-            tasks_for[pipeline_name] = await get_dlt_tasks(
+    tasks_by_kind = {"standard": cognify_tasks}
+
+    async def _tasks_for(kind):
+        if kind not in tasks_by_kind:
+            if kind != "dlt":
+                raise ValueError(f"Unknown cognify leg kind: {kind!r}")
+            tasks_by_kind["dlt"] = await get_dlt_tasks(
                 chunk_size=chunk_size, chunks_per_batch=chunks_per_batch
             )
-        data_kwargs = {"data": items} if items is not None else {}
-        partial_results.append(
-            await executor(
-                pipeline=run_pipeline,
-                tasks=tasks_for[pipeline_name],
-                datasets=run_datasets,
-                pipeline_name=pipeline_name,
-                user=user,
-                vector_db_config=vector_db_config,
-                graph_db_config=graph_db_config,
-                incremental_loading=incremental_loading,
-                use_pipeline_cache=False,
-                data_per_batch=data_per_batch,
-                rollback_handler=cognify_rollback_handler,
-                llm_config=llm_config,
-                embedding_config=embedding_config,
-                data_cache=data_cache,
-                **data_kwargs,
-            )
+        return tasks_by_kind[kind]
+
+    results: dict = {}
+    for invocation in runs:
+        call_kwargs = dict(
+            pipeline=run_pipeline,
+            datasets=invocation["datasets"],
+            pipeline_name="cognify_pipeline",
+            user=user,
+            vector_db_config=vector_db_config,
+            graph_db_config=graph_db_config,
+            incremental_loading=incremental_loading,
+            use_pipeline_cache=False,
+            data_per_batch=data_per_batch,
+            rollback_handler=cognify_rollback_handler,
+            llm_config=llm_config,
+            embedding_config=embedding_config,
+            data_cache=data_cache,
         )
-    return _merge_pipeline_results(partial_results)
+
+        leg_kinds = invocation.get("leg_kinds")
+        if leg_kinds is None:
+            call_kwargs["tasks"] = cognify_tasks
+        elif len(leg_kinds) == 1:
+            # A single data kind needs no leg machinery — a plain run with an
+            # explicit item subset is already one logical run.
+            kind, items = leg_kinds[0]
+            call_kwargs["tasks"] = await _tasks_for(kind)
+            call_kwargs["data"] = items
+        else:
+            call_kwargs["legs"] = [(await _tasks_for(kind), items) for kind, items in leg_kinds]
+
+        partial = await executor(**call_kwargs)
+        if isinstance(partial, dict):
+            # Invocations cover disjoint datasets, so this is a plain union.
+            results.update(partial)
+        else:
+            results = partial
+    return results
 
 
-async def _plan_cognify_runs(datasets, user) -> list[tuple[str, list, Optional[list]]]:
-    """Plan pipeline runs for cognify routing.
+async def _plan_cognify_runs(datasets, user) -> list[dict]:
+    """Plan pipeline invocations for cognify routing.
 
     DLT-source manifests (external_metadata.source == "dlt_source") run the
-    DLT pipeline; all other items run the standard cognify pipeline. The split
-    is per data item, so mixed datasets get both pipelines, each with its own
-    item subset.
+    deterministic DLT task list; all other items run the standard one. The
+    split is per data item, and a dataset always maps to exactly ONE
+    ``cognify_pipeline`` run — a dataset mixing both kinds executes them as
+    legs of a single run.
 
-    Returns [(pipeline_name, dataset_ids, data_or_None)]:
-    - ("dlt_cognify_pipeline", [ds_id], manifest_items) per manifest dataset
-    - ("cognify_pipeline", [ds_id], regular_items) for manifest datasets that
-      also contain non-manifest items
-    - one ("cognify_pipeline", [ids...], None) entry for all datasets without
-      manifests, items loaded by the pipeline itself (unchanged behavior)
-
-    When no dataset contains a manifest, the plan is a single standard run
-    that passes the original ``datasets`` argument through unchanged (items
-    are loaded by the pipeline itself).
+    Returns a list of invocation dicts:
+    - {"datasets": [ds_id], "leg_kinds": [("dlt", manifest_items)]} for a
+      manifest-only dataset
+    - {"datasets": [ds_id], "leg_kinds": [("dlt", ...), ("standard", ...)]}
+      for a mixed dataset
+    - {"datasets": <original argument>, "leg_kinds": None} covering all
+      datasets without manifests — items loaded by the pipeline itself
+      (unchanged legacy behavior)
 
     Routing never guesses: the standard plan is only chosen when the probe
     *proves* there is nothing to route (no datasets, or no manifests in
@@ -501,7 +523,7 @@ async def _plan_cognify_runs(datasets, user) -> list[tuple[str, list, Optional[l
         ) from error
 
 
-async def _probe_cognify_runs(datasets, user) -> list[tuple[str, list, Optional[list]]]:
+async def _probe_cognify_runs(datasets, user) -> list[dict]:
     """The fallible half of ``_plan_cognify_runs``: resolve datasets and split
     manifest items from regular ones."""
     from sqlalchemy import select
@@ -520,7 +542,7 @@ async def _probe_cognify_runs(datasets, user) -> list[tuple[str, list, Optional[
         datasets=dataset_list, permission_type="write", user=user
     )
     if not authorized_datasets:
-        return [("cognify_pipeline", datasets, None)]
+        return [{"datasets": datasets, "leg_kinds": None}]
 
     # One filtered query to find which requested datasets contain a manifest,
     # instead of loading every dataset's data items.
@@ -543,9 +565,9 @@ async def _probe_cognify_runs(datasets, user) -> list[tuple[str, list, Optional[
         )
 
     if not manifest_dataset_ids:
-        return [("cognify_pipeline", datasets, None)]
+        return [{"datasets": datasets, "leg_kinds": None}]
 
-    runs: list[tuple[str, list, Optional[list]]] = []
+    invocations: list[dict] = []
     regular_ids = []
     for dataset in authorized_datasets:
         if dataset.id not in manifest_dataset_ids:
@@ -556,27 +578,15 @@ async def _probe_cognify_runs(datasets, user) -> list[tuple[str, list, Optional[
         for item in await get_dataset_data(dataset.id):
             (manifest_items if is_dlt_source_manifest(item) else regular_items).append(item)
 
-        runs.append(("dlt_cognify_pipeline", [dataset.id], manifest_items))
+        leg_kinds = [("dlt", manifest_items)]
         if regular_items:
-            runs.append(("cognify_pipeline", [dataset.id], regular_items))
+            leg_kinds.append(("standard", regular_items))
+        invocations.append({"datasets": [dataset.id], "leg_kinds": leg_kinds})
 
     if regular_ids:
-        runs.append(("cognify_pipeline", regular_ids, None))
+        invocations.append({"datasets": regular_ids, "leg_kinds": None})
 
-    return runs
-
-
-def _merge_pipeline_results(partial_results: list) -> dict:
-    """Merge results from multiple pipeline executor calls.
-
-    Both executor modes return dicts keyed by dataset_id. For a dataset with
-    two runs (DLT + regular) the later (regular) run info wins, as it runs
-    after the DLT pipeline.
-    """
-    merged = {}
-    for partial in partial_results:
-        merged.update(partial)
-    return merged
+    return invocations
 
 
 async def get_dlt_tasks(chunk_size: int = None, chunks_per_batch: int = None) -> list[Task]:
