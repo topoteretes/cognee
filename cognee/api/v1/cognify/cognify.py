@@ -1,6 +1,6 @@
 import asyncio
 from pydantic import BaseModel
-from typing import Union, Optional
+from typing import Collection, Union, Optional
 from uuid import UUID
 
 from cognee.modules.cognify.config import get_cognify_config
@@ -24,6 +24,7 @@ from cognee.tasks.documents import (
 )
 from cognee.tasks.graph.extract_graph_and_summarize import extract_graph_and_summarize
 from cognee.tasks.graph import detect_contradictions
+from cognee.tasks.graph.resolve_temporal_contradictions import resolve_temporal_contradictions
 from cognee.tasks.storage import add_data_points
 from cognee.tasks.ingestion.extract_dlt_fk_edges import extract_dlt_fk_edges
 from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
@@ -51,6 +52,7 @@ async def cognify(
     incremental_loading: bool = True,
     custom_prompt: Optional[str] = None,
     temporal_cognify: bool = False,
+    functional_relationships: Optional[Collection[str]] = None,
     data_per_batch: int = 20,
     llm_config: Optional[LLMConfig] = None,
     embedding_config: Optional[EmbeddingConfig] = None,
@@ -121,6 +123,12 @@ async def cognify(
                       If provided, this prompt will be used instead of the default prompts for
                       knowledge graph extraction. The prompt should guide the LLM on how to
                       extract entities and relationships from the text content.
+        functional_relationships: Relationship names that hold a single target per source
+                      (e.g. {"ceo_of"}). Once the graph is written, conflicting assertions
+                      of those relationships are resolved by recency: the most recent one
+                      stays current and the older ones are tagged as superseded — nothing
+                      is deleted. Off by default, because most cognee relationships are
+                      legitimately many-valued and collapsing them would corrupt the graph.
         dry_run: If True, return a stage-level estimate of LLM token usage and rough cost
                  without making LLM calls or writing graph results. The estimate covers all
                  data in the selected dataset(s); an incremental run may process fewer items.
@@ -260,6 +268,7 @@ async def cognify(
                 config=config,
                 custom_prompt=custom_prompt,
                 chunks_per_batch=chunks_per_batch,
+                functional_relationships=functional_relationships,
                 **kwargs,
             )
 
@@ -301,6 +310,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
     config: Config = None,
     custom_prompt: Optional[str] = None,
     chunks_per_batch: int = None,
+    functional_relationships: Optional[Collection[str]] = None,
     **kwargs,
 ) -> list[Task]:
     cognify_config = get_cognify_config()
@@ -348,6 +358,18 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
             else []
         ),
     ]
+
+    # OPTIONAL: for the relationships declared single-valued, tag the assertions a
+    # more recent one replaced. Runs last so the new facts are already stored and
+    # comparable with the ones they supersede; disabled by default.
+    if functional_relationships:
+        default_tasks.append(
+            Task(
+                resolve_temporal_contradictions,
+                functional_relationships=functional_relationships,
+                task_config={"batch_size": chunks_per_batch},
+            )
+        )
 
     return default_tasks
 
