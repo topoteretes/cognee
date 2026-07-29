@@ -31,6 +31,19 @@ remember_module = sys.modules["cognee.api.v1.remember.remember"]
 # (order-dependent — see test_public_memory_api.py for the same workaround).
 serve_state_module = importlib.import_module("cognee.api.v1.serve.state")
 
+# String targets like patch("cognee.api.v1.serve.state.get_remote_client") break
+# on Python 3.10: its mock resolves dotted paths by getattr per component, and
+# package __init__ re-exports shadow submodules with same-named FUNCTIONS
+# (v1.serve is the serve() function), so resolution dies with
+# "'function' object has no attribute 'state'". Python 3.11+ resolves via
+# pkgutil.resolve_name (module-first) and doesn't hit this. Import the module
+# objects and use patch.object instead.
+_mod_serve_state = importlib.import_module("cognee.api.v1.serve.state")
+_mod_migrations_startup = importlib.import_module("cognee.modules.migrations.startup")
+_mod_engine_setup = importlib.import_module("cognee.modules.engine.operations.setup")
+_pkg_add = importlib.import_module("cognee.api.v1.add")
+_mod_users_methods = importlib.import_module("cognee.modules.users.methods")
+
 # The canonical pre-detection task order.
 _BASE_SEQUENCE = [
     "classify_documents",
@@ -133,12 +146,13 @@ class TestRememberInheritsTheFlag:
             patch.dict(os.environ, {"TELEMETRY_DISABLED": "1"}),
             patch.object(cognify_module, "get_cognify_config", return_value=config),
             patch.object(cognify_module, "get_pipeline_executor", _fake_executor),
-            patch("cognee.modules.migrations.startup.run_migrations_and_block", new=AsyncMock()),
-            patch.object(serve_state_module, "get_remote_client", return_value=None),
-            patch("cognee.modules.engine.operations.setup.setup", new=AsyncMock()),
-            patch("cognee.api.v1.add.add", new=AsyncMock()),
-            patch(
-                "cognee.modules.users.methods.get_default_user",
+            patch.object(_mod_migrations_startup, "run_migrations_and_block", new=AsyncMock()),
+            patch.object(_mod_serve_state, "get_remote_client", return_value=None),
+            patch.object(_mod_engine_setup, "setup", new=AsyncMock()),
+            patch.object(_pkg_add, "add", new=AsyncMock()),
+            patch.object(
+                _mod_users_methods,
+                "get_default_user",
                 new=AsyncMock(return_value=object()),
             ),
             patch.object(
