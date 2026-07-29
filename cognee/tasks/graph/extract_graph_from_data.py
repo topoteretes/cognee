@@ -20,29 +20,12 @@ from cognee.shared.data_models import KnowledgeGraph
 from cognee.infrastructure.llm.extraction import extract_content_graph
 from cognee.infrastructure.llm.pipeline_stage import pipeline_stage
 from cognee.infrastructure.engine import DataPoint
-from cognee.shared.logging_utils import get_logger
 from cognee.tasks.graph.exceptions import (
     InvalidGraphModelError,
     InvalidDataChunksError,
     InvalidChunkGraphInputError,
     InvalidOntologyAdapterError,
 )
-
-
-logger = get_logger(__name__)
-
-
-def _should_log_skip_for_provided_config(
-    config: Optional[Config],
-    resolver: Optional[BaseOntologyResolver],
-) -> bool:
-    """Return True when caller provided malformed config that resolves to skip."""
-    if config is None or resolver is not None:
-        return False
-    ontology_config = config.get("ontology_config")
-    if ontology_config is None:
-        return True
-    return "ontology_resolver" not in ontology_config
 
 
 def _stamp_provenance_deep(data, pipeline_name, task_name, visited=None):
@@ -212,10 +195,6 @@ async def extract_graph_from_data(
             await callback_result
 
     ontology_resolver = get_configured_ontology_resolver(config)
-    if _should_log_skip_for_provided_config(config, ontology_resolver):
-        logger.info(
-            "No ontology resolver configured in provided config — skipping ontology enrichment."
-        )
 
     task_name = "extract_graph_from_data"
 

@@ -2,12 +2,8 @@ import asyncio
 from typing import Type, List, Optional, Dict
 from pydantic import BaseModel
 
-from cognee.modules.ontology.ontology_env_config import get_ontology_env_config
 from cognee.modules.ontology.ontology_config import Config
-from cognee.modules.ontology.get_default_ontology_resolver import (
-    get_default_ontology_resolver,
-    get_ontology_resolver_from_env,
-)
+from cognee.modules.ontology.get_default_ontology_resolver import get_configured_ontology_resolver
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.infrastructure.llm.extraction import extract_content_graph
 from cognee.tasks.graph.exceptions import (
@@ -69,25 +65,7 @@ async def extract_graph_from_data_with_entity_disambiguation_task(
         ]
     )
 
-    # Extract resolver from config if provided, otherwise get default
-    if config is None:
-        ontology_config = get_ontology_env_config()
-        if (
-            ontology_config.ontology_file_path
-            and ontology_config.ontology_resolver
-            and ontology_config.matching_strategy
-        ):
-            config: Config = {
-                "ontology_config": {
-                    "ontology_resolver": get_ontology_resolver_from_env(**ontology_config.to_dict())
-                }
-            }
-        else:
-            config: Config = {
-                "ontology_config": {"ontology_resolver": get_default_ontology_resolver()}
-            }
-
-    ontology_resolver = config["ontology_config"]["ontology_resolver"]
+    ontology_resolver = get_configured_ontology_resolver(config)
 
     pipeline_name = context.get("pipeline_name") if isinstance(context, dict) else None
     task_name = "extract_graph_from_data"

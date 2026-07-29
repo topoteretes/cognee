@@ -247,21 +247,24 @@ def _add_ontology_edges(
     ontology_edges: list[tuple[str, str, str]],
     edges_by_identity: dict[EdgeIdentity, Edge],
 ) -> None:
-    ontology_node_categories_by_name = {node.name: node.category for node in ontology_nodes}
+    ontology_nodes_by_normalized_name = {
+        generate_edge_name(node.name): node for node in ontology_nodes
+    }
     for source_name, ontology_relationship_name, target_name in ontology_edges:
-        source_data_point_class = _get_data_point_class_for_ontology_category(
-            ontology_node_categories_by_name.get(source_name, "")
-        )
-        target_data_point_class = _get_data_point_class_for_ontology_category(
-            ontology_node_categories_by_name.get(target_name, "")
-        )
+        source_node = ontology_nodes_by_normalized_name.get(generate_edge_name(source_name))
+        target_node = ontology_nodes_by_normalized_name.get(generate_edge_name(target_name))
+        if source_node is None or target_node is None:
+            continue
+
+        source_data_point_class = _get_data_point_class_for_ontology_category(source_node.category)
+        target_data_point_class = _get_data_point_class_for_ontology_category(target_node.category)
         if source_data_point_class is None or target_data_point_class is None:
             continue
 
         relationship_name = generate_edge_name(ontology_relationship_name)
         edge_identity = EdgeIdentity(
-            source_id=str(source_data_point_class.id_for(source_name)),
-            target_id=str(target_data_point_class.id_for(target_name)),
+            source_id=str(source_data_point_class.id_for(source_node.name)),
+            target_id=str(target_data_point_class.id_for(target_node.name)),
             relationship_name=relationship_name,
         )
         edges_by_identity.setdefault(

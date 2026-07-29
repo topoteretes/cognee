@@ -76,29 +76,6 @@ class _EdgeCollisionResolver(BaseOntologyResolver):
         return [], [], None
 
 
-class _PositiveOntologyEdgeResolver(BaseOntologyResolver):
-    """Minimal resolver that emits one ontology is_a relation."""
-
-    def build_lookup(self) -> None:
-        return None
-
-    def refresh_lookup(self) -> None:
-        return None
-
-    def find_closest_match(self, name: str, category: str):
-        return None
-
-    def get_subgraph(self, node_name: str, node_type: str = "individuals", directed: bool = True):
-        if node_type == "classes" and node_name == "car":
-            root = AttachedOntologyNode("car", "classes")
-            return [root], [], root
-        if node_type == "individuals" and node_name == "audi":
-            root = AttachedOntologyNode("audi", "individuals")
-            parent = AttachedOntologyNode("car", "classes")
-            return [root, parent], [("audi", "is_a", "car")], root
-        return [], [], None
-
-
 def _belongs_to_set_tuple(belongs_to_set) -> tuple[str, ...]:
     if not belongs_to_set:
         return ()
@@ -549,9 +526,33 @@ EXPECTED_OUTPUT_WITH_ONTOLOGY = {
     "relations": (
         (
             "013e367e-5401-5a01-8505-f13ad52b3933",
+            "is_a",
+            "e4bbd678-157f-5349-ad0d-b822c3021210",
+            None,
+        ),
+        (
+            "013e367e-5401-5a01-8505-f13ad52b3933",
             "raced_against",
             "5b4598fe-f589-57a1-88a8-d72c48f4915b",
             "Porsche raced Audi.",
+        ),
+        (
+            "5b4598fe-f589-57a1-88a8-d72c48f4915b",
+            "is_a",
+            "e4bbd678-157f-5349-ad0d-b822c3021210",
+            None,
+        ),
+        (
+            "afc75e41-4df3-5db9-907e-dcf55750efec",
+            "is_a",
+            "99a82eec-bb35-5bb5-9ed2-e73fc7a756de",
+            None,
+        ),
+        (
+            "e4bbd678-157f-5349-ad0d-b822c3021210",
+            "is_a",
+            "0f5ec78d-c353-540c-b8bd-bce84eac0af4",
+            None,
         ),
     ),
 }
@@ -586,13 +587,17 @@ def test_matching_ontology_output():
 
 
 def test_positive_ontology_edge_pin():
-    """Prove ontology edge injection attaches at least one ontology-derived relation."""
+    """Prove production resolver edges attach despite URI casing differences."""
     chunk = _make_chunk()
     graph = _make_graph(
         [Node(id="e1", name="Audi", type="Car", description="audi entity")],
         [],
     )
-    _, data_points = _construct_test_output([chunk], [graph], _PositiveOntologyEdgeResolver())
+    _, data_points = _construct_test_output(
+        [chunk],
+        [graph],
+        _build_matching_ontology_resolver(),
+    )
     assert ("audi", "is_a", "car") in _relation_triples(data_points)
 
 
@@ -703,6 +708,13 @@ def test_existing_edges_are_not_attached_to_data_points():
         existing_edge_identities,
     )
     filtered = serialize_output([chunk_main, chunk_extra], filtered_data_points)
-    filtered_rels = {rel for rel in filtered["relations"]}
-    assert not any(rel[1] == "raced_against" for rel in filtered_rels)
-    assert not any(rel[1] == "is_a" for rel in filtered_rels)
+    attached_edge_identities = {
+        EdgeIdentity(
+            source_id=source_id,
+            target_id=target_id,
+            relationship_name=relationship_name,
+        )
+        for source_id, relationship_name, target_id, _edge_text in filtered["relations"]
+    }
+    assert extracted_edge_identity not in attached_edge_identities
+    assert ontology_edge_identity not in attached_edge_identities
