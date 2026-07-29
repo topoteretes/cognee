@@ -149,12 +149,21 @@ async def _get_dataset(user):
 
 
 async def _dlt_pks(dataset):
+    """Primary keys of all live DLT rows: manifest records (source ==
+    "dlt_source") carry their rows in the manifest JSON; legacy per-row
+    records (source == "dlt") are read directly."""
+    from cognee.tasks.ingestion.dlt_utils import load_dlt_manifest
+
     rows = await get_dataset_data(dataset.id)
-    return sorted(
-        d.external_metadata.get("primary_key_value")
-        for d in rows
-        if isinstance(d.external_metadata, dict) and d.external_metadata.get("source") == "dlt"
-    )
+    pks = []
+    for d in rows:
+        ext = d.external_metadata if isinstance(d.external_metadata, dict) else {}
+        if ext.get("source") == "dlt_source":
+            manifest = await load_dlt_manifest(d.raw_data_location)
+            pks.extend(row["primary_key_value"] for row in manifest.get("rows", []))
+        elif ext.get("source") == "dlt":
+            pks.append(ext.get("primary_key_value"))
+    return sorted(pks)
 
 
 async def _store_counts(dataset):
@@ -176,8 +185,6 @@ async def _store_counts(dataset):
 
 @pytest.mark.asyncio
 async def test_dlt_orphan_cleanup_purges_graph_and_vector_under_access_control(clean_env):
-    from cognee.tasks.ingestion.resolve_dlt_sources import resolve_dlt_sources
-
     user = await get_default_user()
     kwargs = dict(primary_key="id", write_disposition="merge", max_rows_per_table=0)
 
@@ -208,24 +215,21 @@ async def test_dlt_orphan_cleanup_purges_graph_and_vector_under_access_control(c
         nodes_before, vec_before = await _store_counts(dataset)
         assert nodes_before > 0 and vec_before == 2  # graph populated, 2 chunks
 
-        # Delete 'b' upstream: resolve_dlt_sources runs the merge (hard-deletes b
-        # from the dlt destination) and returns the deferred orphan cleanup.
-        _, orphan_cleanup = await resolve_dlt_sources(
-            _dlt_source([{"id": "b", "_deleted": True}]),
-            dataset_name=DATASET,
-            user=user,
-            **kwargs,
+        # Delete 'b' upstream and re-sync through the real add pipeline. Under
+        # the manifest model the whole source is one content-addressed Data
+        # record: the re-sync commits a fresh manifest (rows: only 'a') and the
+        # foreground add then runs the deferred orphan cleanup, which purges
+        # the previous manifest (rows: a, b) and all its derived artifacts.
+        # Cleanup runs *after* the pipeline's dataset context has exited — the
+        # exact condition the dataset-context wrapper in _delete_dlt_orphans
+        # exists for; without it the graph + vector purge would resolve the
+        # default engines and miss the per-dataset stores.
+        await cognee.add(
+            _dlt_source([{"id": "b", "_deleted": True}]), dataset_name=DATASET, **kwargs
         )
-        assert orphan_cleanup is not None
-
-        # Reproduce the background-ingest condition: orphan_cleanup runs in a
-        # *fresh* async context, before any pipeline has established the
-        # per-dataset DB context. Without the dataset-context wrapper in
-        # _delete_dlt_orphans, the graph + vector purge resolves the *default*
-        # engines and silently misses the per-dataset stores.
-        graph_db_config.set(None)
-        vector_db_config.set(None)
-        await orphan_cleanup()
+        # Re-cognify the fresh manifest so the surviving row's chunk is rebuilt
+        # (deterministic DLT pipeline — no LLM involved).
+        await cognee.cognify(datasets=[DATASET])
 
     # 'b' must be gone from ALL three stores — including the per-dataset graph +
     # vector, which is exactly what the ledger-only / no-context path missed.
