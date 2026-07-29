@@ -3,6 +3,7 @@ from dataclasses import asdict
 import pytest
 from pydantic import BaseModel
 
+from cognee.infrastructure.llm import utils as llm_utils
 from cognee.infrastructure.llm.config import LLMConfig
 from cognee.infrastructure.llm.exceptions import LLMAPIKeyNotSetError
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.generic_llm_api import (
@@ -52,6 +53,30 @@ def _llm_config(**overrides):
 
 def test_llm_client_cache_is_bounded_lru():
     assert _get_llm_client_cached.cache_parameters()["maxsize"] == _LLM_CLIENT_CACHE_MAXSIZE
+
+
+def test_get_max_chunk_tokens_prefers_model_context_window(monkeypatch):
+    class FakeEmbeddingEngine:
+        max_completion_tokens = 4096
+
+    class FakeVectorEngine:
+        embedding_engine = FakeEmbeddingEngine()
+
+    class FakeLLMClient:
+        max_completion_tokens = 1024
+
+    class FakeLLMConfig:
+        llm_model = "test-model"
+
+    monkeypatch.setattr(
+        "cognee.infrastructure.databases.vector.get_vector_engine",
+        lambda: FakeVectorEngine(),
+    )
+    monkeypatch.setattr(llm_utils, "get_llm_client", lambda raise_api_key_error=False: FakeLLMClient())
+    monkeypatch.setattr(llm_utils, "get_llm_context_config", lambda: FakeLLMConfig())
+    monkeypatch.setattr(llm_utils, "get_model_max_context_tokens", lambda model_name: 32768)
+
+    assert llm_utils.get_max_chunk_tokens() == 4096
 
 
 def test_llm_client_cache_key_covers_adapter_configuration_fields():
