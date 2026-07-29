@@ -483,19 +483,22 @@ async def _plan_cognify_runs(datasets, user) -> list[tuple[str, list, Optional[l
     that passes the original ``datasets`` argument through unchanged (items
     are loaded by the pipeline itself).
 
-    Routing is best-effort: if the manifest probe fails for any reason, the
-    plan falls back to the single standard run — the pipeline itself redoes
-    dataset resolution with authoritative error handling, so a probe failure
-    must never gate a plain cognify.
+    Routing never guesses: the standard plan is only chosen when the probe
+    *proves* there is nothing to route (no datasets, or no manifests in
+    them). A probe failure raises — silently falling back could send
+    manifest data through the LLM pipeline, producing a wrong graph at LLM
+    cost with no error anywhere.
     """
+    from cognee.exceptions import CogneeSystemError
+
     try:
         return await _probe_cognify_runs(datasets, user)
     except Exception as error:
-        logger.warning(
-            "DLT cognify routing probe failed (%s); falling back to the standard pipeline.",
-            error,
-        )
-        return [("cognify_pipeline", datasets, None)]
+        raise CogneeSystemError(
+            f"DLT cognify routing probe failed for datasets {datasets!r}; "
+            "cannot determine which pipeline the data requires. "
+            f"Underlying error: {error!r}"
+        ) from error
 
 
 async def _probe_cognify_runs(datasets, user) -> list[tuple[str, list, Optional[list]]]:
