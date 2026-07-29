@@ -544,6 +544,14 @@ await cognee.cognify(datasets=["my_project"])
 ### DataPoints
 Atomic knowledge units that form the foundation of graph structures. All graph nodes extend the `DataPoint` base class with versioning and metadata support.
 
+### Contradiction Detection
+Opt-in LLM check that runs as the last `cognify()` task (default **off**). After the graph is stored, it gathers the facts one hop from the entities this ingestion touched — new and pre-existing alike — asks an LLM which pairs cannot both be true, and records each confident conflict as a `contradicts` edge carrying both fact texts, the reason, and the confidence. It only adds edges (never rewrites or deletes) and swallows its own errors, so it can never break ingestion.
+
+- **Enable**: set `CONTRADICTION_DETECTION=true`. When off, the cognify pipeline is unchanged.
+- **Tuning** (env): `CONTRADICTION_CONFIDENCE_THRESHOLD` (default 0.5, minimum confidence to flag), `CONTRADICTION_MAX_FACTS` (default 500, cap on facts per LLM call).
+- **Applies to `remember()` too** — and to session memory bridged back by `improve()` — since those build their graphs through `cognify()`. The exception is `remember(content_type="code")`, which runs the separate code-graph pipeline.
+- **Scope / limitations**: only the 1-hop neighbourhood of the touched entities is compared; structural edges (`contains`, `is_part_of`, `made_from`, `exists_in`, `contradicts`) and edges with an unnamed endpoint are skipped; the temporal cognify path is not covered.
+
 ### Permissions System
 Multi-tenant architecture with users, roles, and Access Control Lists (ACLs):
 - Read, write, delete, and share permissions per dataset
