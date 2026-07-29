@@ -114,9 +114,12 @@ Index(
     sqlite_where=cache_trace_entries.c.expires_at.isnot(None),
 )
 
-# Session-context entries: append-only, kind-discriminated ("context"/"feedback").
-# entry_id is promoted from the payload's "id" to a column for direct UPDATE,
-# mirroring how cache_qa_entries promotes qa_id.
+# Session-context entries: one row per (user_id, session_id, entry_id), kind-
+# discriminated ("context"/"feedback"). entry_id is promoted from the payload's
+# "id" to a column for direct UPDATE, mirroring how cache_qa_entries promotes qa_id.
+# Uniqueness on (user_id, session_id, entry_id) is enforced by a create-on-init
+# unique index in SqlCacheAdapter (not a table constraint here) so it also backfills
+# onto pre-existing tables after collapsing legacy duplicate rows — see issue #4226.
 cache_session_context = Table(
     "cache_session_context",
     cache_metadata,

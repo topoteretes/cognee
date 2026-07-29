@@ -882,3 +882,75 @@ async def test_uuid_ids_across_trace_context_and_usage(adapter):
 
     assert await adapter.delete_session(user_uuid, session_uuid) is True
     assert await adapter.get_all_qa_entries(str(user_uuid), str(session_uuid)) == []
+
+
+@pytest.mark.asyncio
+async def test_create_session_context_entry_same_id_upserts_not_duplicates(adapter):
+    """Re-writing the same entry_id updates the row in place (issue #4226 regression).
+
+    A retried write that reuses an entry_id must not pile up duplicate rows — the
+    original cause of the permanent 503s. The newest payload wins.
+    """
+    await adapter.create_session_context_entry("u1", "s1", _ctx("c1", content="first"))
+    await adapter.create_session_context_entry("u1", "s1", _ctx("c1", content="second"))
+    await adapter.create_session_context_entry("u1", "s1", _ctx("c1", content="third"))
+
+    entries = await adapter.get_session_context_entries("u1", "s1")
+    matching = [e for e in entries if e["id"] == "c1"]
+    assert len(matching) == 1
+    assert matching[0]["content"] == "third"
+
+    # Update still resolves to a single row instead of raising MultipleResultsFound.
+    assert (
+        await adapter.update_session_context_entry("u1", "s1", "c1", {"content": "final"}) is True
+    )
+    (entry,) = await adapter.get_session_context_entries("u1", "s1")
+    assert entry["content"] == "final"
+
+
+@pytest.mark.asyncio
+async def test_session_context_idless_entries_still_append(adapter):
+    """Id-less payloads get synthetic ids, so they append rather than collapse."""
+    await adapter.create_session_context_entry("u1", "s1", {"kind": "context", "content": "a"})
+    await adapter.create_session_context_entry("u1", "s1", {"kind": "context", "content": "b"})
+    entries = await adapter.get_session_context_entries("u1", "s1")
+    assert [e["content"] for e in entries] == ["a", "b"]
+
+
+@pytest.mark.asyncio
+async def test_session_context_legacy_duplicates_are_migrated_and_updatable(tmp_path):
+    """Pre-existing duplicate rows collapse to the newest on migration; update no longer 503s.
+
+    Reproduces the corrupt on-disk state from issue #4226 by dropping the unique index
+    and injecting a duplicate row directly, then re-runs the create-on-init migration.
+    """
+    inst = _make_adapter(tmp_path)
+    try:
+        await inst.create_session_context_entry("u1", "s1", _ctx("c1", content="v1"))
+
+        # Simulate a legacy table: remove the guard, then inject a duplicate row.
+        async with inst.engine.begin() as connection:
+            await connection.execute(text("DROP INDEX uq_cache_session_context_entry"))
+            await connection.execute(
+                cache_session_context.insert().values(
+                    user_id="u1",
+                    session_id="s1",
+                    entry_id="c1",
+                    payload={"id": "c1", "kind": "context", "section": "goals", "content": "v2"},
+                )
+            )
+
+        # Before the fix this session is poisoned: update would raise on two rows.
+        await inst._migrate_session_context_uniqueness()
+
+        matching = [
+            e for e in await inst.get_session_context_entries("u1", "s1") if e["id"] == "c1"
+        ]
+        assert len(matching) == 1
+        assert matching[0]["content"] == "v2"  # newest (highest seq) survives
+
+        assert await inst.update_session_context_entry("u1", "s1", "c1", {"content": "v3"}) is True
+        (entry,) = await inst.get_session_context_entries("u1", "s1")
+        assert entry["content"] == "v3"
+    finally:
+        await inst.close()

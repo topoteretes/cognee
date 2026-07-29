@@ -42,6 +42,28 @@ _DEADLOCK_ATTEMPTS = 3
 # Advisory-lock id guarding the throttled global TTL sweep on Postgres.
 _PURGE_LOCK_ID = int.from_bytes(sha256(b"cognee_cache_ttl_sweep").digest()[:8], "big", signed=True)
 
+# Unique key that keeps one session-context row per (user, session, entry). Its
+# absence let a timed-out-then-retried write insert duplicate rows, after which
+# scalar_one_or_none() raised and the session 503'd forever (issue #4226). It is
+# enforced as a create-on-init unique index rather than a table-level constraint
+# so pre-existing deployments (whose table predates the fix) get it too. This is
+# orthogonal to _lock_session_writes, which only serializes concurrent writers and
+# does not make a client retry across separate transactions idempotent.
+_SESSION_CONTEXT_UNIQUE_INDEX = "uq_cache_session_context_entry"
+
+_CREATE_SESSION_CONTEXT_UNIQUE_INDEX_SQL = (
+    f"CREATE UNIQUE INDEX IF NOT EXISTS {_SESSION_CONTEXT_UNIQUE_INDEX} "
+    "ON cache_session_context (user_id, session_id, entry_id)"
+)
+
+# Collapse pre-existing duplicate rows to the newest (highest seq) per key so the
+# unique index can be built on a legacy table that already accumulated dupes.
+_DEDUPE_SESSION_CONTEXT_SQL = (
+    "DELETE FROM cache_session_context WHERE seq NOT IN "
+    "(SELECT MAX(seq) FROM cache_session_context "
+    "GROUP BY user_id, session_id, entry_id)"
+)
+
 
 def _is_deadlock_error(error: Exception) -> bool:
     """Best-effort detection of a Postgres deadlock without importing asyncpg."""
@@ -176,11 +198,34 @@ class SqlCacheAdapter(CacheDBInterface):
             try:
                 async with self.engine.begin() as connection:
                     await connection.run_sync(cache_metadata.create_all, checkfirst=True)
+                await self._migrate_session_context_uniqueness()
             except Exception as error:
                 error_msg = f"Failed to connect to SQL cache database: {error}"
                 logger.error(error_msg)
                 raise CacheConnectionError(error_msg) from error
             self._initialized = True
+
+    async def _migrate_session_context_uniqueness(self) -> None:
+        """Ensure the (user_id, session_id, entry_id) unique index on cache_session_context.
+
+        Fresh databases get it directly. Legacy tables that already accumulated
+        duplicate rows (issue #4226) fail the create; those dupes are collapsed to
+        the newest row per key and the index is created on the retry. Each statement
+        runs in its own transaction so the failed create (which aborts the surrounding
+        transaction on Postgres) doesn't poison the dedupe that follows. On the common
+        path — index already present or table clean — this is a single no-op statement.
+        """
+        try:
+            async with self.engine.begin() as connection:
+                await connection.execute(text(_CREATE_SESSION_CONTEXT_UNIQUE_INDEX_SQL))
+            return
+        except DBAPIError:
+            # Pre-existing duplicate keys block the unique index; collapse and retry.
+            pass
+        async with self.engine.begin() as connection:
+            await connection.execute(text(_DEDUPE_SESSION_CONTEXT_SQL))
+        async with self.engine.begin() as connection:
+            await connection.execute(text(_CREATE_SESSION_CONTEXT_UNIQUE_INDEX_SQL))
 
     @staticmethod
     def _now() -> datetime:
@@ -835,31 +880,51 @@ class SqlCacheAdapter(CacheDBInterface):
     async def create_session_context_entry(
         self, user_id: str, session_id: str, entry_dump: dict
     ) -> None:
-        """Append one session-context entry (kind-discriminated dict) to the session.
+        """Upsert one session-context entry (kind-discriminated dict) into the session.
 
-        The caller validates the payload; we only promote its ``id`` to the
-        ``entry_id`` column so updates can target a single row directly.
+        The caller validates the payload; we promote its ``id`` to the ``entry_id``
+        column so a single row is addressable per entry. Re-writing the same
+        ``entry_id`` updates that row in place instead of appending a duplicate,
+        which makes a timed-out-then-retried write idempotent — the missing piece
+        that let retries pile up duplicate rows and permanently 503 the session
+        (issue #4226).
         """
         await self._ensure_initialized()
         # Redis/FS append regardless of "id" (an id-less entry is simply never
-        # targetable by update). Mirror that: fall back to a synthetic entry_id
-        # only to satisfy the NOT NULL column; the stored payload is untouched.
+        # targetable by update). Mirror the "not updatable" part: fall back to a
+        # synthetic entry_id only to satisfy the NOT NULL column. A synthetic id is
+        # unique per call, so id-less entries still append rather than collapse.
         entry_id = entry_dump.get("id") or str(uuid.uuid4())
         try:
+            if self._is_postgres:
+                from sqlalchemy.dialects.postgresql import insert as upsert_insert
+            else:
+                from sqlalchemy.dialects.sqlite import insert as upsert_insert
+
+            statement = upsert_insert(cache_session_context).values(
+                user_id=user_id,
+                session_id=session_id,
+                entry_id=entry_id,
+                payload=entry_dump,
+                expires_at=self._session_expiry(),
+            )
+            statement = statement.on_conflict_do_update(
+                index_elements=[
+                    cache_session_context.c.user_id,
+                    cache_session_context.c.session_id,
+                    cache_session_context.c.entry_id,
+                ],
+                set_={
+                    "payload": statement.excluded.payload,
+                    "expires_at": statement.excluded.expires_at,
+                },
+            )
             async with self.sessionmaker() as session, session.begin():
                 await self._lock_session_writes(session, cache_session_context, user_id, session_id)
                 await self._purge_session_expired(
                     session, cache_session_context, user_id, session_id
                 )
-                await session.execute(
-                    insert(cache_session_context).values(
-                        user_id=user_id,
-                        session_id=session_id,
-                        entry_id=entry_id,
-                        payload=entry_dump,
-                        expires_at=self._session_expiry(),
-                    )
-                )
+                await session.execute(statement)
                 await self._refresh_session_ttl(session, cache_session_context, user_id, session_id)
         except Exception as error:
             error_msg = f"Unexpected error while adding session context to SQL cache: {error}"
@@ -901,6 +966,10 @@ class SqlCacheAdapter(CacheDBInterface):
                     await self._lock_session_writes(
                         session, cache_session_context, user_id, session_id
                     )
+                    # Prefer the newest row and cap at one: the unique index now keeps
+                    # this to a single row, but any duplicate that predates the migration
+                    # must resolve to the newest instead of raising MultipleResultsFound
+                    # (the original 503 trigger, issue #4226).
                     result = await session.execute(
                         select(cache_session_context.c.payload)
                         .where(
@@ -908,9 +977,11 @@ class SqlCacheAdapter(CacheDBInterface):
                             cache_session_context.c.entry_id == entry_id,
                             self._not_expired(cache_session_context),
                         )
+                        .order_by(cache_session_context.c.seq.desc())
+                        .limit(1)
                         .with_for_update()
                     )
-                    payload = result.scalar_one_or_none()
+                    payload = result.scalars().first()
                     if payload is None:
                         return False
                     merged = {**dict(payload), **merge}
