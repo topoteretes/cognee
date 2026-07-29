@@ -36,6 +36,10 @@ class DocumentChunk(DataPoint):
     # Hex digest of `text` (see chunk_id.chunk_content_hash); the chunk id is
     # derived from it, so identity survives edits that shift chunk positions.
     content_hash: Optional[str] = None
+    # Token budget this chunk was cut against. Incremental updates re-chunk a
+    # region with the budget recorded on the chunks it replaces, so a document
+    # stays self-consistent even when the global configuration changes.
+    max_chunk_tokens: Optional[int] = None
     is_part_of: Document
     contains: List[Union[Entity, Event, tuple[Edge, Entity]]] = None
     importance_weight: Optional[float] = 0.5

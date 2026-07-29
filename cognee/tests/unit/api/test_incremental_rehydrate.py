@@ -32,6 +32,7 @@ def _stored_node(text: str, chunk_index: int, **extra) -> dict:
         "chunk_index": chunk_index,
         "cut_type": "paragraph_end",
         "content_hash": None,
+        "max_chunk_tokens": 60,
         "importance_weight": 0.91,
         "truth_alignment": [0.1, 0.2],
         "truth_epoch": 7,
@@ -63,6 +64,7 @@ def test_rehydrate_preserves_every_model_field():
     assert chunk.topological_rank == 5
     assert chunk.cut_type == "paragraph_end"
     assert chunk.content_hash  # backfilled from text when the node lacks it
+    assert chunk.max_chunk_tokens == 60
 
 
 def test_rehydrate_tolerates_missing_and_malformed_fields():
@@ -76,6 +78,7 @@ def test_rehydrate_tolerates_missing_and_malformed_fields():
     assert chunk.truth_alignment is None
     assert chunk.importance_weight == document.importance_weight
     assert chunk.version == 1
+    assert chunk.max_chunk_tokens is None  # legacy nodes have no recorded budget
 
 
 def test_shifted_chunks_rehydrate_and_renumber_only_moved_survivors():

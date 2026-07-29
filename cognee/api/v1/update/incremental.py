@@ -251,6 +251,7 @@ def _assemble_final_chunks(
                         text=text,
                         chunk_size=region_chunk.chunk_size,
                         content_hash=content_hash,
+                        max_chunk_tokens=region_chunk.max_chunk_tokens,
                         chunk_index=final_index,
                         cut_type=region_chunk.cut_type,
                         is_part_of=document,
@@ -270,6 +271,21 @@ def _assemble_final_chunks(
     return new_chunks, kept_final_index
 
 
+def _region_chunk_budget(stored_chunks: List[dict], region, fallback: int) -> int:
+    """Token budget for re-chunking one region.
+
+    The budget recorded on the chunks the region replaces wins, so an edit
+    keeps the granularity of the text around it even when the global
+    configuration changed after ingestion. Legacy chunks predate the recorded
+    budget and fall back to the current configuration.
+    """
+    for position in region.affected_indices:
+        recorded = stored_chunks[position].get("max_chunk_tokens")
+        if recorded:
+            return int(recorded)
+    return fallback
+
+
 def _rehydrate_chunk(document: TextDocument, node: dict, chunk_index: int) -> DocumentChunk:
     """Rebuild a stored chunk at a new position, preserving every model field.
 
@@ -285,6 +301,7 @@ def _rehydrate_chunk(document: TextDocument, node: dict, chunk_index: int) -> Do
         text=text,
         chunk_size=int(node.get("chunk_size", 0)),
         content_hash=node.get("content_hash") or chunk_content_hash(text),
+        max_chunk_tokens=node.get("max_chunk_tokens"),
         chunk_index=chunk_index,
         cut_type=str(node.get("cut_type", "paragraph_end")),
         is_part_of=document,
@@ -552,9 +569,13 @@ async def _apply_incremental_update(
         }
 
     # -- Chunk each region with the standard TextChunker, then verify no-loss - #
-    max_chunk_size = await get_max_chunk_tokens()
+    fallback_budget = await get_max_chunk_tokens()
     region_chunk_lists = [
-        await _chunk_region(document, region.replacement_text, max_chunk_size)
+        await _chunk_region(
+            document,
+            region.replacement_text,
+            _region_chunk_budget(stored_chunks, region, fallback_budget),
+        )
         for region in plan.regions
     ]
     new_chunks, kept_final_index = _assemble_final_chunks(
