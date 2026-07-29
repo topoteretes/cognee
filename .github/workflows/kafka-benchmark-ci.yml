@@ -1,0 +1,77 @@
+name: Kafka Benchmark CI
+
+on:
+  push:
+    paths:
+      - 'benchmarks/kafka/**'
+      - 'cognee/integrations/kafka/**'
+      - '.github/workflows/kafka-benchmark-ci.yml'
+  pull_request:
+    paths:
+      - 'benchmarks/kafka/**'
+      - 'cognee/integrations/kafka/**'
+      - '.github/workflows/kafka-benchmark-ci.yml'
+
+permissions:
+  contents: read
+
+env:
+  COGNEE_SKIP_CONNECTION_TEST: 'true'
+  RUNTIME__LOG_LEVEL: ERROR
+  ENV: 'dev'
+  LLM_PROVIDER: openai
+  LLM_MODEL: gpt-4o-mini
+  LLM_ENDPOINT: https://api.openai.com/v1
+  LLM_API_KEY: stub-key-not-used-mocked
+  EMBEDDING_PROVIDER: openai
+  EMBEDDING_MODEL: text-embedding-3-small
+  EMBEDDING_DIMENSIONS: 300
+  EMBEDDING_API_KEY: stub-key-not-used-mocked
+
+jobs:
+  kafka-benchmark-e2e:
+    name: Kafka Benchmark E2E
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+
+      - name: Start Kafka
+        run: |
+          docker compose -f benchmarks/kafka/docker-compose.yml up -d
+          echo "Waiting for Kafka to be healthy..."
+          for i in {1..15}; do
+            STATUS=$(docker inspect --format='{{.State.Health.Status}}' $(docker compose -f benchmarks/kafka/docker-compose.yml ps -q kafka) 2>/dev/null || echo "starting")
+            if [ "$STATUS" == "healthy" ]; then
+              echo "Kafka is healthy!"
+              break
+            fi
+            echo "Status: $STATUS. Waiting 2s..."
+            sleep 2
+          done
+
+      - name: Run Kafka Benchmark (Mocked LLM Mode)
+        run: |
+          uv run python benchmarks/kafka/harness.py \
+            --messages 10 \
+            --batch-size 5 \
+            --concurrency 2 \
+            --bootstrap-servers localhost:9092 \
+            --mock-llm \
+            --output benchmarks/results/
+            
+      - name: Assert JSON Output Exists
+        run: |
+          count=$(ls -1 benchmarks/results/kafka_benchmark_*.json 2>/dev/null | wc -l)
+          if [ "$count" -eq 0 ]; then
+            echo "Failed: No benchmark JSON result found in benchmarks/results/!"
+            exit 1
+          fi
+          echo "Success: Found $count JSON results."
