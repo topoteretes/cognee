@@ -134,9 +134,37 @@ async def _serve_cloud(
     mgmt_url = mgmt_url.rstrip("/")
 
     # Step 1: Check for saved credentials
+
     creds = load_credentials()
 
     if creds and creds.service_url and creds.api_key:
+        # Fast path: try the cached (service_url, api_key) first, regardless of
+        # access_token state. The access_token is only needed for Auth0/management
+        # calls (tenant discovery, key rotation, refresh), not for actually talking
+        # to the cognee service. If the service is reachable with the saved key we
+        # can connect immediately, even when Auth0/management is slow or down.
+        # See: #3249.
+        try:
+            client = CloudClient(creds.service_url, creds.api_key)
+            # Fast path uses a short, dedicated timeout so a degraded
+            # Auth0/management backend doesn't stall SDK startup. The
+            # underlying _health_check returns False on any exception
+            # (timeout, connection refused, non-2xx), so we simply fall
+            # through to the existing token-check / refresh path below.
+            if await client._health_check(timeout=client.HEALTH_CHECK_TIMEOUT):
+                logger.info("Using saved credentials for %s (health check)", creds.email)
+                set_remote_client(client)
+                print(f"  Connected to Cognee Cloud at {creds.service_url}")
+                return client
+            else:
+                logger.info("Saved service URL unreachable, falling through to token check")
+                await client.close()
+        except Exception as e:
+            logger.debug("Health check on saved creds failed: %s", e)
+
+        # Token check: only needed if we are about to call Auth0/management. This
+        # path is unchanged from before — kept as the original behavior so any
+        # security expectations around token rotation still apply.
         if not is_token_expired(creds):
             logger.info("Using saved credentials for %s", creds.email)
             client = CloudClient(creds.service_url, creds.api_key)
