@@ -50,6 +50,7 @@ SAMPLE_ARGUMENTS = {
     "got": "sample",
     "max_index": 2,
     "message": "contract message",
+    "model": "sample-provider/sample-model",
     "name": "ContractError",
     "observer": "sample-observer",
     "provider": "sample-provider",
