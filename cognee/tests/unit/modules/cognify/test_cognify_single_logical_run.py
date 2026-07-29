@@ -14,14 +14,16 @@ from uuid import uuid4
 
 import pytest
 
-cognify_module = sys.modules.get("cognee.api.v1.cognify.cognify") or __import__(
-    "cognee.api.v1.cognify.cognify", fromlist=["cognify"]
-)
+import cognee.api.v1.cognify.cognify  # noqa: F401 — ensure the module (not the re-exported function) is importable via sys.modules
 import cognee.modules.pipelines.operations.run_tasks as run_tasks_module
 from cognee.modules.pipelines.models.PipelineRunInfo import (
     PipelineRunCompleted,
     PipelineRunStarted,
 )
+
+# `from cognee.api.v1.cognify import cognify` would resolve to the re-exported
+# cognify FUNCTION; grab the actual module object for patching.
+cognify_module = sys.modules["cognee.api.v1.cognify.cognify"]
 
 
 class _ExecutorRecorder:

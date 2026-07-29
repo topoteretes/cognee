@@ -21,15 +21,15 @@ from cognee.api.v1.remember.remember import remember
 from cognee.modules.cognify.config import CognifyConfig
 from cognee.tasks.graph.models import Contradiction, ContradictionList
 
-# `from cognee.api.v1.cognify import cognify` would resolve to the re-exported
-# cognify FUNCTION; grab the actual module objects for patching.
-cognify_module = sys.modules["cognee.api.v1.cognify.cognify"]
-remember_module = sys.modules["cognee.api.v1.remember.remember"]
-
 # Patching by the dotted string "cognee.api.v1.serve.state…" fails on
 # Python 3.10: `cognee.api.v1.serve` is shadowed by the re-exported serve()
 # function, and pre-3.11 mock walks attributes instead of importing modules.
 from cognee.api.v1.serve import state as serve_state_module
+
+# `from cognee.api.v1.cognify import cognify` would resolve to the re-exported
+# cognify FUNCTION; grab the actual module objects for patching.
+cognify_module = sys.modules["cognee.api.v1.cognify.cognify"]
+remember_module = sys.modules["cognee.api.v1.remember.remember"]
 
 # The canonical pre-detection task order.
 _BASE_SEQUENCE = [
