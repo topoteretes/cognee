@@ -1,16 +1,18 @@
 from uuid import UUID
 from typing import Optional, Union, Literal
 from pydantic import ConfigDict, Field
-from fastapi import Depends, APIRouter
+from fastapi import Depends, APIRouter, status
 from fastapi.responses import JSONResponse
 
-from cognee.api.DTO import InDTO
+from cognee.api.DTO import InDTO, ErrorResponse
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.shared.utils import send_telemetry
 from cognee.shared.usage_logger import log_usage
 from cognee import __version__ as cognee_version
 from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
 
 
 class ForgetPayloadDTO(InDTO):
@@ -53,7 +55,13 @@ class ForgetPayloadDTO(InDTO):
 def get_forget_router() -> APIRouter:
     router = APIRouter()
 
-    @router.post("")
+    @router.post(
+        "",
+        responses={
+            422: {"model": ErrorResponse},
+            500: {"model": ErrorResponse},
+        },
+    )
     @log_usage(function_name="POST /v1/forget", log_type="api_endpoint")
     async def forget_endpoint(
         payload: ForgetPayloadDTO, user: User = Depends(get_authenticated_user)
@@ -110,17 +118,20 @@ def get_forget_router() -> APIRouter:
             return result
         except ValueError:
             return JSONResponse(
-                status_code=422,
-                content={
-                    "error": "Invalid request parameters. Specify dataset or dataset_id, data_id+dataset, or everything=True."
-                },
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                content=ErrorResponse(
+                    error="Invalid request parameters.",
+                    detail="Specify dataset or dataset_id, data_id+dataset, or everything=True.",
+                ).model_dump(),
             )
         except Exception as error:
-            logger = get_logger()
             logger.error("Forget endpoint error: %s", error, exc_info=True)
             return JSONResponse(
-                status_code=500,
-                content={"error": "An error occurred during deletion."},
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                content=ErrorResponse(
+                    error="An error occurred during deletion.",
+                    detail=str(error),
+                ).model_dump(),
             )
 
     return router
