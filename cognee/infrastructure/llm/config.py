@@ -32,6 +32,12 @@ KNOWN_LLM_PROVIDERS = frozenset(
     }
 )
 
+# Default RPM budget for local inference servers (Ollama, LM Studio, vLLM,
+# llama.cpp) when LLM_RATE_LIMIT_REQUESTS is not explicitly configured — they
+# process requests (near-)serially, unlike cloud providers which keep the
+# regular default of 60.
+LOCAL_DEFAULT_RATE_LIMIT_REQUESTS = 20
+
 
 class LLMConfig(BaseSettings):
     """
@@ -101,6 +107,8 @@ class LLMConfig(BaseSettings):
     temporal_graph_prompt_path: str = "generate_event_graph_prompt.txt"
     event_entity_prompt_path: str = "generate_event_entity_prompt.txt"
     llm_rate_limit_enabled: bool = False
+    # Default 60 requests per interval; local inference servers get
+    # LOCAL_DEFAULT_RATE_LIMIT_REQUESTS instead (see default_local_rate_limit_budget).
     llm_rate_limit_requests: int = 60
     llm_rate_limit_interval: int = 60  # in seconds (default is 60 requests per minute)
     llm_rate_limit_tokens: int = 0  # max tokens per interval (0 = disabled)
@@ -169,6 +177,30 @@ class LLMConfig(BaseSettings):
                 from cognee.infrastructure.llm.exceptions import ProviderNotDeducibleError
 
                 raise ProviderNotDeducibleError(model)
+
+        return self
+
+    @model_validator(mode="after")
+    def default_local_rate_limit_budget(self) -> "LLMConfig":
+        """
+        Give local inference servers a smaller default RPM budget.
+
+        Local servers (Ollama, LM Studio, vLLM, llama.cpp) process requests
+        (near-)serially, so when the rate limiter engages, the regular cloud
+        default of 60 requests per interval would still flood them. An
+        explicitly configured ``LLM_RATE_LIMIT_REQUESTS`` always wins. Runs
+        after ``infer_provider_from_model`` so the provider is already
+        resolved.
+        """
+        if "llm_rate_limit_requests" in self.model_fields_set:
+            return self
+
+        provider = (self.llm_provider or "").lower()
+        model = (self.llm_model or "").lower()
+        local_providers = {"ollama", "llama_cpp"}
+        local_model_prefixes = ("lm_studio/", "hosted_vllm/", "vllm/")
+        if provider in local_providers or model.startswith(local_model_prefixes):
+            self.llm_rate_limit_requests = LOCAL_DEFAULT_RATE_LIMIT_REQUESTS
 
         return self
 

@@ -9,6 +9,8 @@ logger = get_logger("llm_dispatch")
 
 llm_config = get_llm_config()
 
+# The budget is provider-aware: LLMConfig gives local inference servers a
+# smaller default LLM_RATE_LIMIT_REQUESTS (see default_local_rate_limit_budget).
 llm_rate_limiter = AsyncLimiter(
     llm_config.llm_rate_limit_requests, llm_config.llm_rate_limit_interval
 )
@@ -16,6 +18,7 @@ llm_rate_limiter = AsyncLimiter(
 # lazily to avoid a circular import at module load time (embedding engines, which
 # EmbeddingConfig is reached through, import this module).
 _embedding_rate_limiter = None
+
 
 # Early overload detection: a dispatch that SUCCEEDS but takes this long is
 # proof the server's queue is approaching the client timeout cliff (default

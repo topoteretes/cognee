@@ -31,6 +31,9 @@ def _config(**overrides):
         auto_rate_limit=True,
         llm_rate_limit_requests=60,
         llm_rate_limit_interval=60,
+        llm_provider="openai",
+        llm_model="openai/gpt-5-mini",
+        model_fields_set=set(),
     )
     defaults.update(overrides)
     return SimpleNamespace(**defaults)
