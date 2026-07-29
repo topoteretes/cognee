@@ -1,23 +1,11 @@
-from typing import Optional
+from uuid import UUID
 
+from cognee.infrastructure.databases.provenance import EdgeIdentity
 from cognee.infrastructure.engine.models.Edge import Edge
 from cognee.modules.chunking.models import DocumentChunk
 from cognee.modules.engine.models import Entity, EntityType
-from cognee.modules.engine.utils import (
-    generate_edge_name,
-    generate_node_name,
-)
-from cognee.shared.data_models import KnowledgeGraph
-
-
-def _create_node_key(node_id: str, category: str) -> str:
-    """Create a standardized node key."""
-    return f"{node_id}_{category}"
-
-
-def _create_edge_key(source_id: str, target_id: str, relationship_name: str) -> str:
-    """Create a standardized edge key."""
-    return f"{source_id}_{target_id}_{relationship_name}"
+from cognee.modules.engine.utils import generate_edge_name, generate_node_name
+from cognee.shared.data_models import KnowledgeGraph, Node
 
 
 def _strip_nonblank_text(value: str | None) -> str | None:
@@ -28,209 +16,214 @@ def _strip_nonblank_text(value: str | None) -> str | None:
     return stripped_value or None
 
 
-def _create_type_node(
-    node_type: str,
-    added_nodes_map: dict,
+def _get_or_create_entity_type(
+    extracted_type: str,
     data_chunk: DocumentChunk,
+    data_points_by_id: dict[str, Entity | EntityType],
 ) -> EntityType:
-    """Create or retrieve a type node."""
-    node_id = EntityType.id_for(node_type)
-    node_name = generate_node_name(node_type)
-    type_node_key = _create_node_key(node_id, "type")
+    entity_type_id = EntityType.id_for(extracted_type)
+    entity_type_key = str(entity_type_id)
+    existing_data_point = data_points_by_id.get(entity_type_key)
+    if isinstance(existing_data_point, EntityType):
+        return existing_data_point
 
-    if type_node_key in added_nodes_map:
-        return added_nodes_map[type_node_key]
-
-    type_node = EntityType(
-        id=node_id,
-        name=node_name,
-        description=node_name,
+    normalized_type_name = generate_node_name(extracted_type)
+    entity_type = EntityType(
+        id=entity_type_id,
+        name=normalized_type_name,
+        description=normalized_type_name,
         importance_weight=data_chunk.importance_weight,
     )
-    added_nodes_map[type_node_key] = type_node
-    return type_node
+    data_points_by_id[entity_type_key] = entity_type
+    return entity_type
 
 
-def _create_entity_node(
-    node_id: str,
-    node_name: str,
-    node_description: str,
-    type_node: EntityType,
-    added_nodes_map: dict,
+def _get_or_create_entity(
+    extracted_node: Node,
+    entity_id: UUID,
+    entity_type: EntityType,
     data_chunk: DocumentChunk,
+    data_points_by_id: dict[str, Entity | EntityType],
 ) -> Entity:
-    """Create or retrieve an entity node."""
-    generated_node_id = Entity.id_for(node_id)
-    generated_node_name = generate_node_name(node_name)
-    entity_node_key = _create_node_key(generated_node_id, "entity")
+    entity_key = str(entity_id)
+    existing_data_point = data_points_by_id.get(entity_key)
+    if isinstance(existing_data_point, Entity):
+        return existing_data_point
 
-    if entity_node_key in added_nodes_map:
-        return added_nodes_map[entity_node_key]
-
-    entity_node = Entity(
-        id=generated_node_id,
-        name=generated_node_name,
-        is_a=type_node,
-        description=node_description,
+    entity = Entity(
+        id=entity_id,
+        name=generate_node_name(extracted_node.name),
+        is_a=entity_type,
+        description=extracted_node.description,
         belongs_to_set=data_chunk.belongs_to_set,
         importance_weight=data_chunk.importance_weight,
     )
-    added_nodes_map[entity_node_key] = entity_node
-    return entity_node
+    data_points_by_id[entity_key] = entity
+    return entity
 
 
-def _process_graph_nodes(
+def _calculate_entity_ids_by_extracted_node_id(
+    extracted_graph: KnowledgeGraph,
     data_chunk: DocumentChunk,
-    graph: KnowledgeGraph,
-    added_nodes_map: dict,
+) -> dict[str, UUID]:
+    """Calculate the final entity ID for every graph-local node ID.
+
+    Multiple nodes with the same name remain distinct by receiving deterministic graph-scoped
+    IDs instead of sharing one name-based ID.
+    """
+    extracted_node_ids: set[str] = set()
+    nodes_by_name_based_id: dict[UUID, list[Node]] = {}
+    for node in extracted_graph.nodes:
+        if node.id in extracted_node_ids:
+            raise ValueError(f"Duplicate node id in extracted graph: {node.id}")
+        extracted_node_ids.add(node.id)
+
+        name_based_entity_id = Entity.id_for(node.name)
+        nodes_by_name_based_id.setdefault(name_based_entity_id, []).append(node)
+
+    entity_ids_by_extracted_node_id: dict[str, UUID] = {}
+    for name_based_entity_id, same_name_nodes in nodes_by_name_based_id.items():
+        if len(same_name_nodes) == 1:
+            entity_ids_by_extracted_node_id[same_name_nodes[0].id] = name_based_entity_id
+            continue
+
+        ordered_nodes = sorted(
+            same_name_nodes,
+            key=lambda node: (
+                generate_node_name(node.type),
+                generate_node_name(node.description),
+                generate_node_name(node.id),
+            ),
+        )
+        for ordinal, node in enumerate(ordered_nodes, start=1):
+            entity_ids_by_extracted_node_id[node.id] = Entity.id_for(
+                node.name,
+                data_chunk.id,
+                ordinal,
+            )
+
+    return entity_ids_by_extracted_node_id
+
+
+def _link_chunk_to_entity(
+    data_chunk: DocumentChunk,
+    extracted_node: Node,
+    entity: Entity,
 ) -> None:
-    """Process nodes in a knowledge graph."""
-    for node in graph.nodes:
-        type_node = _create_type_node(node.type, added_nodes_map, data_chunk)
-        entity_node = _create_entity_node(
-            node.id,
-            node.name,
-            node.description,
-            type_node,
-            added_nodes_map,
+    if data_chunk.contains is None:
+        data_chunk.contains = []
+
+    entity_description = _strip_nonblank_text(extracted_node.description)
+    edge_text = (
+        f"Document chunk mentions {entity.name}: {entity_description}"
+        if entity_description
+        else None
+    )
+    data_chunk.contains.append(
+        (
+            Edge(relationship_type="contains", edge_text=edge_text),
+            entity,
+        )
+    )
+
+
+def _convert_extracted_nodes_to_data_points(
+    data_chunk: DocumentChunk,
+    extracted_graph: KnowledgeGraph,
+    data_points_by_id: dict[str, Entity | EntityType],
+) -> dict[str, Entity]:
+    """Construct final DataPoints and index entities by their graph-local LLM IDs."""
+    entity_ids_by_extracted_node_id = _calculate_entity_ids_by_extracted_node_id(
+        extracted_graph,
+        data_chunk,
+    )
+    entities_by_extracted_node_id: dict[str, Entity] = {}
+
+    for extracted_node in extracted_graph.nodes:
+        entity_type = _get_or_create_entity_type(
+            extracted_node.type,
             data_chunk,
+            data_points_by_id,
         )
 
-        if data_chunk.contains is None:
-            data_chunk.contains = []
-
-        entity_description = _strip_nonblank_text(node.description)
-        edge_text = (
-            f"Document chunk mentions {entity_node.name}: {entity_description}"
-            if entity_description
-            else None
+        entity = _get_or_create_entity(
+            extracted_node,
+            entity_ids_by_extracted_node_id[extracted_node.id],
+            entity_type,
+            data_chunk,
+            data_points_by_id,
         )
+        entities_by_extracted_node_id[extracted_node.id] = entity
+        _link_chunk_to_entity(data_chunk, extracted_node, entity)
 
-        data_chunk.contains.append(
-            (
-                Edge(
-                    relationship_type="contains",
-                    edge_text=edge_text,
-                ),
-                entity_node,
-            )
-        )
+    return entities_by_extracted_node_id
 
 
-def _process_graph_edges(
-    graph: KnowledgeGraph, existing_edges_map: dict, relationships: list
+def _add_extracted_edges(
+    extracted_graph: KnowledgeGraph,
+    entities_by_extracted_node_id: dict[str, Entity],
+    edges_by_identity: dict[EdgeIdentity, Edge],
 ) -> None:
-    """Process edges in a knowledge graph."""
-    for edge in graph.edges:
-        source_node_id = Entity.id_for(edge.source_node_id)
-        target_node_id = Entity.id_for(edge.target_node_id)
-        relationship_name = generate_edge_name(edge.relationship_name)
-        edge_key = _create_edge_key(source_node_id, target_node_id, relationship_name)
-        edge_text = _strip_nonblank_text(edge.description)
-
-        if edge_key not in existing_edges_map:
-            relationships.append(
-                (
-                    source_node_id,
-                    target_node_id,
-                    relationship_name,
-                    {
-                        "relationship_name": relationship_name,
-                        "source_node_id": source_node_id,
-                        "target_node_id": target_node_id,
-                        "ontology_valid": False,
-                        "edge_text": edge_text,
-                    },
-                )
-            )
-            existing_edges_map[edge_key] = True
-
-
-def _resolve_node(node_id: str, nodes_by_key: dict):
-    entity_key = f"{node_id}_entity"
-    type_key = f"{node_id}_type"
-    return nodes_by_key.get(entity_key) or nodes_by_key.get(type_key)
-
-
-def build_nodes_by_key(entity_nodes: list) -> dict:
-    """Build the expand dedup lookup from returned entity/type nodes."""
-    nodes_by_key = {}
-    for node in entity_nodes:
-        category = "type" if isinstance(node, EntityType) else "entity"
-        nodes_by_key[_create_node_key(str(node.id), category)] = node
-    return nodes_by_key
-
-
-def populate_node_relations(nodes_by_key: dict, relationships: list) -> None:
-    """Attach edges to nodes via .relations for downstream traversal and persistence."""
-    for src_id, tgt_id, rel_name, properties in relationships:
-        src_node = _resolve_node(src_id, nodes_by_key)
-        tgt_node = _resolve_node(tgt_id, nodes_by_key)
-
-        if src_node is None or tgt_node is None:
+    for extracted_edge in extracted_graph.edges:
+        source_entity = entities_by_extracted_node_id.get(extracted_edge.source_node_id)
+        target_entity = entities_by_extracted_node_id.get(extracted_edge.target_node_id)
+        if source_entity is None or target_entity is None:
             continue
 
-        src_node.relations.append(
-            (
-                Edge(
-                    relationship_type=rel_name,
-                    edge_text=(properties or {}).get("edge_text"),
-                ),
-                tgt_node,
-            )
+        relationship_name = generate_edge_name(extracted_edge.relationship_name)
+        edge_identity = EdgeIdentity(
+            source_id=str(source_entity.id),
+            target_id=str(target_entity.id),
+            relationship_name=relationship_name,
+        )
+        edges_by_identity.setdefault(
+            edge_identity,
+            Edge(
+                relationship_type=relationship_name,
+                edge_text=_strip_nonblank_text(extracted_edge.description),
+            ),
         )
 
 
-def expand_with_nodes_and_edges(
+def construct_data_points_and_edges(
     data_chunks: list[DocumentChunk],
-    chunk_graphs: list[KnowledgeGraph],
-    existing_edges_map: Optional[dict[str, bool]] = None,
-):
-    """Convert chunk graphs to entity nodes and extracted edges."""
-    if existing_edges_map is None:
-        existing_edges_map = {}
+    extracted_graphs: list[KnowledgeGraph],
+) -> tuple[dict[str, Entity | EntityType], dict[EdgeIdentity, Edge]]:
+    """Convert extracted knowledge graphs into DataPoints and edges."""
+    data_points_by_id: dict[str, Entity | EntityType] = {}
+    edges_by_identity: dict[EdgeIdentity, Edge] = {}
 
-    added_nodes_map = {}
-    relationships = []
-
-    for data_chunk, graph in zip(data_chunks, chunk_graphs):
-        if not graph:
+    for data_chunk, extracted_graph in zip(data_chunks, extracted_graphs):
+        if not extracted_graph:
             continue
 
-        _process_graph_nodes(data_chunk, graph, added_nodes_map)
-        _process_graph_edges(graph, existing_edges_map, relationships)
+        entities_by_extracted_node_id = _convert_extracted_nodes_to_data_points(
+            data_chunk,
+            extracted_graph,
+            data_points_by_id,
+        )
+        _add_extracted_edges(
+            extracted_graph,
+            entities_by_extracted_node_id,
+            edges_by_identity,
+        )
 
-    populate_node_relations(added_nodes_map, relationships)
-
-    return data_chunks, list(added_nodes_map.values())
+    return data_points_by_id, edges_by_identity
 
 
-def expand_with_nodes_and_edges_and_ontology(
-    data_chunks: list[DocumentChunk],
-    chunk_graphs: list[KnowledgeGraph],
-    ontology_resolver,
-    existing_edges_map: Optional[dict[str, bool]] = None,
-):
-    """Canonicalize, convert, then extend with ontology subgraphs."""
-    from cognee.modules.ontology.graph_enrichment import (
-        canonicalize_graphs,
-        extend_graph_with_ontology,
-    )
+def attach_new_edges_to_data_points(
+    data_points_by_id: dict[str, Entity | EntityType],
+    edges_by_identity: dict[EdgeIdentity, Edge],
+    existing_edge_identities: set[EdgeIdentity],
+) -> None:
+    """Attach edges that are not already stored in the graph database."""
+    for edge_identity, edge in edges_by_identity.items():
+        if edge_identity in existing_edge_identities:
+            continue
 
-    if existing_edges_map is None:
-        existing_edges_map = {}
+        source_data_point = data_points_by_id.get(edge_identity.source_id)
+        target_data_point = data_points_by_id.get(edge_identity.target_id)
+        if source_data_point is None or target_data_point is None:
+            continue
 
-    chunk_graphs, matches = canonicalize_graphs(chunk_graphs, data_chunks, ontology_resolver)
-    data_chunks, entity_nodes = expand_with_nodes_and_edges(
-        data_chunks, chunk_graphs, existing_edges_map
-    )
-
-    nodes_by_key = build_nodes_by_key(entity_nodes)
-    added_ontology_nodes_map, ontology_relationships = extend_graph_with_ontology(
-        matches, nodes_by_key, existing_edges_map
-    )
-    nodes_by_key.update(added_ontology_nodes_map)
-    populate_node_relations(nodes_by_key, ontology_relationships)
-
-    entity_nodes.extend(added_ontology_nodes_map.values())
-    return data_chunks, entity_nodes
+        source_data_point.relations.append((edge, target_data_point))

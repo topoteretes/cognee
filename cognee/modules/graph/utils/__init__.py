@@ -1,8 +1,11 @@
-from .expand_with_nodes_and_edges import expand_with_nodes_and_edges
+from .expand_with_nodes_and_edges import (
+    attach_new_edges_to_data_points,
+    construct_data_points_and_edges,
+)
 from .get_graph_from_model import get_graph_from_model
 from .prepare_edges_for_storage import ensure_default_edge_properties
 from .get_model_instance_from_graph import get_model_instance_from_graph
-from .retrieve_existing_edges import retrieve_existing_edges
+from .retrieve_existing_edges import find_existing_edge_identities
 from .convert_node_to_data_point import convert_node_to_data_point
 from .deduplicate_nodes_and_edges import deduplicate_nodes_and_edges
 from .resolve_edges_to_text import resolve_edges_to_text

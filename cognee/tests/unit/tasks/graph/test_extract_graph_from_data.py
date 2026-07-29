@@ -38,29 +38,26 @@ def _two_node_graph():
 
 
 @pytest.mark.asyncio
-@patch.object(egd_module, "retrieve_existing_edges", new_callable=AsyncMock)
-async def test_integration_does_not_write_to_db(mock_retrieve):
-    mock_retrieve.return_value = {}
+@patch.object(egd_module, "find_existing_edge_identities", new_callable=AsyncMock)
+async def test_integration_does_not_write_to_db(mock_find_existing):
+    mock_find_existing.return_value = set()
     chunk = _make_chunk()
     graph = _two_node_graph()
-    context = {}
 
     # If add_data_points were called it would fail (not mocked), proving it is not called.
-    result = await integrate_chunk_graphs(
-        [chunk], [graph], KnowledgeGraph, _mock_resolver(), context
-    )
+    result = await integrate_chunk_graphs([chunk], [graph], KnowledgeGraph, _mock_resolver())
 
     assert result == [chunk]
 
 
 @pytest.mark.asyncio
-@patch.object(egd_module, "retrieve_existing_edges", new_callable=AsyncMock)
-async def test_chunk_contains_entities_after_integration(mock_retrieve):
-    mock_retrieve.return_value = {}
+@patch.object(egd_module, "find_existing_edge_identities", new_callable=AsyncMock)
+async def test_chunk_contains_entities_after_integration(mock_find_existing):
+    mock_find_existing.return_value = set()
     chunk = _make_chunk()
     graph = _two_node_graph()
 
-    await integrate_chunk_graphs([chunk], [graph], KnowledgeGraph, _mock_resolver(), {})
+    await integrate_chunk_graphs([chunk], [graph], KnowledgeGraph, _mock_resolver())
 
     assert chunk.contains is not None and len(chunk.contains) > 0
     _, entity = chunk.contains[0]
@@ -68,13 +65,13 @@ async def test_chunk_contains_entities_after_integration(mock_retrieve):
 
 
 @pytest.mark.asyncio
-@patch.object(egd_module, "retrieve_existing_edges", new_callable=AsyncMock)
-async def test_entity_relations_populated_after_integration(mock_retrieve):
-    mock_retrieve.return_value = {}
+@patch.object(egd_module, "find_existing_edge_identities", new_callable=AsyncMock)
+async def test_entity_relations_populated_after_integration(mock_find_existing):
+    mock_find_existing.return_value = set()
     chunk = _make_chunk()
     graph = _two_node_graph()
 
-    await integrate_chunk_graphs([chunk], [graph], KnowledgeGraph, _mock_resolver(), {})
+    await integrate_chunk_graphs([chunk], [graph], KnowledgeGraph, _mock_resolver())
 
     entities = [e for _, e in chunk.contains]
     alice = next((e for e in entities if e.name == "alice"), None)
@@ -85,9 +82,9 @@ async def test_entity_relations_populated_after_integration(mock_retrieve):
 
 
 @pytest.mark.asyncio
-@patch.object(egd_module, "retrieve_existing_edges", new_callable=AsyncMock)
-async def test_cache_entity_embeddings_hook_called(mock_retrieve):
-    mock_retrieve.return_value = {}
+@patch.object(egd_module, "find_existing_edge_identities", new_callable=AsyncMock)
+async def test_cache_entity_embeddings_hook_called(mock_find_existing):
+    mock_find_existing.return_value = set()
     chunk = _make_chunk()
     graph = KnowledgeGraph(
         nodes=[Node(id="n1", name="Alice", type="Person", description="desc")],
@@ -100,7 +97,6 @@ async def test_cache_entity_embeddings_hook_called(mock_retrieve):
         [graph],
         KnowledgeGraph,
         _mock_resolver(),
-        {},
         cache_entity_embeddings=hook,
     )
 
@@ -114,9 +110,9 @@ class _KGSubclass(KnowledgeGraph):
 
 
 @pytest.mark.asyncio
-@patch.object(egd_module, "retrieve_existing_edges", new_callable=AsyncMock)
-async def test_integrate_chunk_graphs_accepts_knowledge_graph_subclass(mock_retrieve):
-    mock_retrieve.return_value = {}
+@patch.object(egd_module, "find_existing_edge_identities", new_callable=AsyncMock)
+async def test_integrate_chunk_graphs_accepts_knowledge_graph_subclass(mock_find_existing):
+    mock_find_existing.return_value = set()
     chunk = _make_chunk()
     graph = _KGSubclass(
         nodes=[
@@ -126,7 +122,7 @@ async def test_integrate_chunk_graphs_accepts_knowledge_graph_subclass(mock_retr
         edges=[KGEdge(source_node_id="n1", target_node_id="n2", relationship_name="knows")],
     )
 
-    await integrate_chunk_graphs([chunk], [graph], _KGSubclass, _mock_resolver(), {})
+    await integrate_chunk_graphs([chunk], [graph], _KGSubclass, _mock_resolver())
 
     # Subclass should take the integration path, not the contains-passthrough path.
     assert chunk.contains is not None and len(chunk.contains) > 0
@@ -135,8 +131,11 @@ async def test_integrate_chunk_graphs_accepts_knowledge_graph_subclass(mock_retr
 
 
 @pytest.mark.asyncio
-@patch.object(egd_module, "integrate_chunk_graphs", new_callable=AsyncMock)
-async def test_extract_graph_from_data_filters_edges_for_subclass(mock_integrate):
+@patch.object(egd_module, "find_existing_edge_identities", new_callable=AsyncMock)
+async def test_extract_graph_keeps_dangling_edges_but_skips_them_during_integration(
+    mock_find_existing,
+):
+    mock_find_existing.return_value = set()
     chunk = _make_chunk()
     graph = _KGSubclass(
         nodes=[Node(id="n1", name="Alice", type="Person", description="desc")],
@@ -145,7 +144,6 @@ async def test_extract_graph_from_data_filters_edges_for_subclass(mock_integrate
             KGEdge(source_node_id="n1", target_node_id="missing", relationship_name="dangling"),
         ],
     )
-    mock_integrate.side_effect = lambda *a, **kw: a[0]
 
     async def fake_calc(chunks, graph_model, custom_prompt, **kwargs):
         return [graph]
@@ -159,9 +157,11 @@ async def test_extract_graph_from_data_filters_edges_for_subclass(mock_integrate
         calculate_chunk_graphs=fake_calc,
     )
 
-    # Edge with missing target should be filtered out for the subclass.
-    assert len(graph.edges) == 1
-    assert graph.edges[0].target_node_id == "n1"
+    alice = next(entity for _, entity in chunk.contains if entity.name == "alice")
+    assert len(graph.edges) == 2
+    assert [(edge.relationship_type, target.name) for edge, target in alice.relations] == [
+        ("self", "alice")
+    ]
 
 
 @pytest.mark.asyncio
@@ -174,24 +174,63 @@ async def test_non_knowledge_graph_model_unchanged():
     chunk = _make_chunk()
     custom_graph = CustomModel()
 
-    result = await integrate_chunk_graphs(
-        [chunk], [custom_graph], CustomModel, _mock_resolver(), {}
-    )
+    result = await integrate_chunk_graphs([chunk], [custom_graph], CustomModel, _mock_resolver())
 
     assert chunk.contains == custom_graph
     assert result == [chunk]
 
 
 @pytest.mark.asyncio
-@patch.object(egd_module, "retrieve_existing_edges", new_callable=AsyncMock)
-async def test_integrate_chunk_graphs_accepts_none_resolver(mock_retrieve):
-    mock_retrieve.return_value = {}
+@patch.object(egd_module, "find_existing_edge_identities", new_callable=AsyncMock)
+async def test_integrate_chunk_graphs_accepts_none_resolver(mock_find_existing):
+    mock_find_existing.return_value = set()
     chunk = _make_chunk()
     graph = _two_node_graph()
 
-    await integrate_chunk_graphs([chunk], [graph], KnowledgeGraph, None, {})
+    await integrate_chunk_graphs([chunk], [graph], KnowledgeGraph, None)
 
     assert chunk.contains is not None and len(chunk.contains) > 0
+
+
+@pytest.mark.asyncio
+@patch.object(egd_module, "find_existing_edge_identities", new_callable=AsyncMock)
+@patch.object(egd_module, "construct_data_points_and_edges_with_ontology")
+@patch.object(egd_module, "construct_data_points_and_edges")
+async def test_integrate_chunk_graphs_selects_the_non_ontology_constructor(
+    mock_construct,
+    mock_construct_with_ontology,
+    mock_find_existing,
+):
+    mock_construct.return_value = ({}, {})
+    mock_find_existing.return_value = set()
+    chunk = _make_chunk()
+    graph = _two_node_graph()
+
+    await integrate_chunk_graphs([chunk], [graph], KnowledgeGraph, None)
+
+    mock_construct.assert_called_once_with([chunk], [graph])
+    mock_construct_with_ontology.assert_not_called()
+
+
+@pytest.mark.asyncio
+@patch.object(egd_module, "find_existing_edge_identities", new_callable=AsyncMock)
+@patch.object(egd_module, "construct_data_points_and_edges_with_ontology")
+@patch.object(egd_module, "construct_data_points_and_edges")
+async def test_integrate_chunk_graphs_selects_the_ontology_constructor(
+    mock_construct,
+    mock_construct_with_ontology,
+    mock_find_existing,
+):
+    mock_construct_with_ontology.return_value = ({}, {})
+    mock_find_existing.return_value = set()
+    chunk = _make_chunk()
+    graph = _two_node_graph()
+    resolver = _mock_resolver()
+
+    await integrate_chunk_graphs([chunk], [graph], KnowledgeGraph, resolver)
+
+    mock_construct.assert_not_called()
+    mock_construct_with_ontology.assert_called_once_with([chunk], [graph], resolver)
 
 
 @pytest.mark.asyncio
@@ -200,7 +239,7 @@ async def test_integrate_chunk_graphs_rejects_invalid_resolver():
     graph = _two_node_graph()
 
     with pytest.raises(InvalidOntologyAdapterError):
-        await integrate_chunk_graphs([chunk], [graph], KnowledgeGraph, object(), {})
+        await integrate_chunk_graphs([chunk], [graph], KnowledgeGraph, object())
 
 
 @pytest.mark.asyncio
@@ -268,8 +307,8 @@ async def test_extract_graph_from_data_quiet_for_normalized_skip_config(
 
 
 @pytest.mark.asyncio
-@patch.object(egd_module, "retrieve_existing_edges", new_callable=AsyncMock)
-async def test_stub_resolver_reaches_expand_via_task(mock_retrieve):
+@patch.object(egd_module, "find_existing_edge_identities", new_callable=AsyncMock)
+async def test_stub_resolver_reaches_graph_construction_via_task(mock_find_existing):
     from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
     from cognee.modules.ontology.models import AttachedOntologyNode
 
@@ -300,7 +339,7 @@ async def test_stub_resolver_reaches_expand_via_task(mock_retrieve):
                 )
             return [], [], None
 
-    mock_retrieve.return_value = {}
+    mock_find_existing.return_value = set()
     chunk = _make_chunk()
     graph = KnowledgeGraph(
         nodes=[Node(id="n1", name="Alice", type="Person", description="desc")],

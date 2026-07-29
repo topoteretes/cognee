@@ -2,127 +2,21 @@ import asyncio
 from typing import Type, List, Optional, Dict
 from pydantic import BaseModel
 
-from cognee.infrastructure.engine.models.DataPoint import DataPoint
 from cognee.modules.ontology.ontology_env_config import get_ontology_env_config
 from cognee.modules.ontology.ontology_config import Config
 from cognee.modules.ontology.get_default_ontology_resolver import (
     get_default_ontology_resolver,
     get_ontology_resolver_from_env,
 )
-from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
-from cognee.modules.graph.utils.expand_with_nodes_and_edges import (
-    expand_with_nodes_and_edges,
-    expand_with_nodes_and_edges_and_ontology,
-)
-from cognee.modules.graph.utils import retrieve_existing_edges
-from cognee.shared.data_models import KnowledgeGraph
 from cognee.infrastructure.llm.extraction import extract_content_graph
 from cognee.tasks.graph.exceptions import (
     InvalidGraphModelError,
     InvalidDataChunksError,
-    InvalidChunkGraphInputError,
-    InvalidOntologyAdapterError,
 )
+from cognee.tasks.graph.extract_graph_from_data import integrate_chunk_graphs
 
 from cognee.infrastructure.databases.vector import get_vector_engine_async
-
-
-def _stamp_provenance_deep(data, pipeline_name, task_name, visited=None):
-    """Recursively stamp all reachable DataPoints with provenance info."""
-    if visited is None:
-        visited = set()
-
-    if isinstance(data, DataPoint):
-        obj_id = id(data)
-        if obj_id in visited:
-            return
-        visited.add(obj_id)
-
-        if data.source_pipeline is None:
-            data.source_pipeline = pipeline_name
-        if data.source_task is None:
-            data.source_task = task_name
-
-        for field_name in data.model_fields:
-            field_value = getattr(data, field_name, None)
-            if field_value is not None:
-                _stamp_provenance_deep(field_value, pipeline_name, task_name, visited)
-
-    elif isinstance(data, (list, tuple)):
-        for item in data:
-            _stamp_provenance_deep(item, pipeline_name, task_name, visited)
-
-
-async def integrate_chunk_graphs(
-    data_chunks: list[DocumentChunk],
-    chunk_graphs: list,
-    graph_model: Type[BaseModel],
-    ontology_resolver: BaseOntologyResolver,
-    context: Dict,
-    pipeline_name: str = None,
-    task_name: str = None,
-) -> List[DocumentChunk]:
-    """Integrate chunk graphs with ontology validation and store in databases.
-
-    This function processes document chunks and their associated knowledge graphs,
-    validates entities against an ontology resolver, and stores the integrated
-    data points and edges in the configured databases.
-
-    Args:
-        data_chunks: List of document chunks containing source data
-        chunk_graphs: List of knowledge graphs corresponding to each chunk
-        graph_model: Pydantic model class for graph data validation
-        ontology_resolver: Resolver for validating entities against ontology
-
-    Returns:
-        List of updated DocumentChunk objects with integrated data
-
-    Raises:
-        InvalidChunkGraphInputError: If input validation fails
-        InvalidGraphModelError: If graph model validation fails
-        InvalidOntologyAdapterError: If ontology resolver validation fails
-    """
-
-    if not isinstance(data_chunks, list) or not isinstance(chunk_graphs, list):
-        raise InvalidChunkGraphInputError("data_chunks and chunk_graphs must be lists.")
-    if len(data_chunks) != len(chunk_graphs):
-        raise InvalidChunkGraphInputError(
-            f"length mismatch: {len(data_chunks)} chunks vs {len(chunk_graphs)} graphs."
-        )
-    if not isinstance(graph_model, type) or not issubclass(graph_model, BaseModel):
-        raise InvalidGraphModelError(graph_model)
-    if ontology_resolver is None or not hasattr(ontology_resolver, "get_subgraph"):
-        raise InvalidOntologyAdapterError(
-            type(ontology_resolver).__name__ if ontology_resolver else "None"
-        )
-
-    if not issubclass(graph_model, KnowledgeGraph):
-        for chunk_index, chunk_graph in enumerate(chunk_graphs):
-            data_chunks[chunk_index].contains = chunk_graph
-
-        return data_chunks
-
-    existing_edges_map = await retrieve_existing_edges(
-        data_chunks,
-        chunk_graphs,
-    )
-
-    if ontology_resolver is None:
-        data_chunks, entity_nodes = expand_with_nodes_and_edges(
-            data_chunks, chunk_graphs, existing_edges_map
-        )
-    else:
-        data_chunks, entity_nodes = expand_with_nodes_and_edges_and_ontology(
-            data_chunks, chunk_graphs, ontology_resolver, existing_edges_map
-        )
-
-    if entity_nodes:
-        if pipeline_name or task_name:
-            for node in entity_nodes:
-                _stamp_provenance_deep(node, pipeline_name, task_name)
-
-    return data_chunks
 
 
 async def build_prompt(chunk, vector_search_limit, custom_prompt) -> Optional[str]:
@@ -175,16 +69,6 @@ async def extract_graph_from_data_with_entity_disambiguation_task(
         ]
     )
 
-    # Note: Filter edges with missing source or target nodes
-    if issubclass(graph_model, KnowledgeGraph):
-        for graph in chunk_graphs:
-            valid_node_ids = {node.id for node in graph.nodes}
-            graph.edges = [
-                edge
-                for edge in graph.edges
-                if edge.source_node_id in valid_node_ids and edge.target_node_id in valid_node_ids
-            ]
-
     # Extract resolver from config if provided, otherwise get default
     if config is None:
         ontology_config = get_ontology_env_config()
@@ -213,7 +97,6 @@ async def extract_graph_from_data_with_entity_disambiguation_task(
         chunk_graphs,
         graph_model,
         ontology_resolver,
-        context,
         pipeline_name=pipeline_name,
         task_name=task_name,
     )
