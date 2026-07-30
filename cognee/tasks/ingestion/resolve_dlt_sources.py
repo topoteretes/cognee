@@ -151,6 +151,15 @@ async def resolve_dlt_sources(
             column_value_columns=column_value_columns,
         )
         if item is not None:
+            if item.data_id in manifest_data_ids:
+                # Stable ids are seeded from (dataset, source name): two
+                # resources sharing a name would silently overwrite each
+                # other's manifest. Fail loudly instead of last-write-wins.
+                raise ValueError(
+                    f"Two DLT sources in one add() resolve to the same identity "
+                    f"(dataset {dataset_name!r}, source {source_name!r}). "
+                    "Give each source a unique name."
+                )
             expanded_items.append(item)
             manifest_data_ids.add(item.data_id)
 
@@ -314,16 +323,17 @@ async def _build_source_manifest_item(
     }
     manifest_text = json.dumps(manifest, sort_keys=True, separators=(",", ":"), default=str)
 
-    # The data_id must be content-addressed (like all cognee data ids): the add
-    # pipeline's incremental check skips known ids before any content-hash
-    # comparison, so a stable id would make source changes invisible. A changed
-    # source gets a new id and a full reprocess, while the previous manifest
-    # becomes an orphan and _delete_dlt_orphans removes it together with its
-    # derived graph/vector nodes.
+    # The data_id is STABLE — seeded from (dataset, source name) with no
+    # content hash — so a changed source updates its Data row in place instead
+    # of orphaning it (which left the source absent from the graph between add
+    # and cognify). Change detection travels separately: DataItem.content_hash
+    # pierces the add pipeline's incremental skip when it differs from the
+    # stored Data.content_hash, and the DLT cognify route purges the source's
+    # stale derived artifacts before re-emitting. Renaming a source (or
+    # dataset) changes this identity and is remove + add — a one-time full
+    # rebuild, by design.
     manifest_hash = hashlib.md5(manifest_text.encode()).hexdigest()
-    data_id = await get_unique_data_id(
-        f"dlt_source:{dataset_name}:{source_name}:{manifest_hash}", user
-    )
+    data_id = await get_unique_data_id(f"dlt_source:{dataset_name}:{source_name}", user)
 
     return DataItem(
         data=manifest_text,
@@ -336,6 +346,7 @@ async def _build_source_manifest_item(
             "row_count": len(manifest_rows),
         },
         data_id=data_id,
+        content_hash=manifest_hash,
     )
 
 

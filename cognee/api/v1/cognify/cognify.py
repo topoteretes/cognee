@@ -474,6 +474,9 @@ async def get_dlt_tasks(chunk_size: int = None, chunks_per_batch: int = None) ->
     parameter that only applies to LLM-extracted temporal facts).
     """
     from cognee.tasks.ingestion.extract_dlt_source_edges import extract_dlt_source_edges
+    from cognee.tasks.ingestion.purge_stale_dlt_source_artifacts import (
+        purge_stale_dlt_source_artifacts,
+    )
 
     cognify_config = get_cognify_config()
     if chunks_per_batch is None:
@@ -484,6 +487,9 @@ async def get_dlt_tasks(chunk_size: int = None, chunks_per_batch: int = None) ->
     return [
         # EXTRACT: classify manifest Data items into DltSourceDocument objects
         Task(classify_documents),
+        # PURGE: manifests have stable ids — drop the source's previously
+        # derived artifacts so re-emission replaces instead of accreting.
+        Task(purge_stale_dlt_source_artifacts),
         # EXTRACT: one DocumentChunk per manifest row (no text chunking)
         Task(
             extract_chunks_from_documents,
