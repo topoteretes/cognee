@@ -302,6 +302,41 @@ class TestLettaSource:
         assert kinds.count("episode") == 1
         assert kinds.count("document") == 1
 
+    def test_null_content_falls_back_to_text(self):
+        # A serializer that emits unset optional fields writes an absent
+        # content as null rather than omitting the key, so the text fallback
+        # has to fire on a present-but-null content as well as a missing one.
+        agent_file = {
+            "agents": [
+                {
+                    "name": "support",
+                    "messages": [
+                        {"role": "user", "content": None, "text": "where is my order"},
+                        {"role": "assistant", "content": None, "text": "it ships today"},
+                    ],
+                }
+            ]
+        }
+        episode = next(r for r in collect(LettaSource(agent_file)) if r.kind == "episode")
+        assert [turn.content for turn in episode.turns] == [
+            "where is my order",
+            "it ships today",
+        ]
+
+    def test_null_content_does_not_drop_the_whole_episode(self):
+        # Every message in a file is serialized the same way, so dropping them
+        # one by one leaves no turns -- and an agent with no turns yields no
+        # episode at all, losing the conversation without raising.
+        agent_file = {
+            "agents": [
+                {
+                    "name": "support",
+                    "messages": [{"role": "user", "content": None, "text": "hello"}],
+                }
+            ]
+        }
+        assert [record.kind for record in collect(LettaSource(agent_file))] == ["episode"]
+
 
 class TestZepSource:
     def test_graphiti_export(self):

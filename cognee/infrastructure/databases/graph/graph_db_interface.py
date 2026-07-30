@@ -45,6 +45,12 @@ class GraphDBInterface(ABC):
     - get_connections
     """
 
+    # Whether this backend executes raw Cypher through ``query()``. Declared on
+    # the adapter class so callers (CYPHER / NATURAL_LANGUAGE retrievers) can
+    # check the capability on the engine instance they already hold, without
+    # importing optional backend packages that slim images do not ship.
+    supports_cypher_queries: bool = True
+
     @abstractmethod
     async def is_empty(self) -> bool:
         """Return True when the graph contains no nodes."""
