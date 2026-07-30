@@ -24,13 +24,16 @@ from src.tool_registry import DEFAULT_TAG, MEMORY_TAG  # noqa: E402
 SYNTHETIC_TOOLS = {"search_tools", "call_tool"}
 MEMORY_TOOLS = {"remember", "recall", "forget"}
 WORKSPACE_UI_ENTRY_TOOLS = {"visualize_graph_ui", "upload_file_ui", "open_cognee_workspace"}
-WORKSPACE_INTERNAL_TOOLS = {
-    "cognify_file",
-    "list_datasets_json",
-    "list_dataset_data_json",
-    "create_dataset_json",
-    "get_client_info_json",
-}
+
+# Deliberately not enumerated: the unpinned tools are derived from the registry so
+# this file keeps working as the catalog changes (cognify_file in particular is
+# being merged into remember). Only the pinned sets are spelled out, because those
+# are the contract worth reviewing by eye.
+
+
+def hidden_tools() -> set[str]:
+    """Registered but not advertised in default mode."""
+    return set(server.registry.tags) - set(server.registry.names_with_tag(DEFAULT_TAG))
 
 
 @pytest.fixture(autouse=True)
@@ -56,12 +59,17 @@ async def search(client, query: str) -> list[str]:
 # --- tier declarations ---------------------------------------------------------
 
 
-def test_every_tool_declares_a_tier():
-    """A tool registered without going through @registry.tool would be missed by
-    names_with_tag(), so assert the registry covers the whole catalog."""
-    assert set(server.registry.tags) == (
-        MEMORY_TOOLS | WORKSPACE_UI_ENTRY_TOOLS | WORKSPACE_INTERNAL_TOOLS
-    )
+async def test_every_tool_declares_a_tier():
+    """A tool registered with a bare @mcp.tool would be invisible to
+    names_with_tag(), so it would never be pinned and never be counted as hidden.
+
+    Compared against the live catalog rather than a hardcoded list, so adding or
+    removing a tool needs no edit here.
+    """
+    server.apply_tool_mode("all")
+    advertised_names = {tool.name for tool in await server.mcp.list_tools()}
+
+    assert set(server.registry.tags) == advertised_names
     assert all(tags for tags in server.registry.tags.values())
 
 
@@ -119,7 +127,7 @@ async def test_result_window_is_not_the_binding_constraint():
     """TOOL_SEARCH_MAX_RESULTS is sized for a catalog we expect to grow, so today
     it exceeds the number of hidden tools: no hidden tool can be pushed out of the
     window by the limit alone."""
-    hidden = set(server.registry.tags) - set(server.registry.names_with_tag(DEFAULT_TAG))
+    hidden = hidden_tools()
     assert len(hidden) <= server.TOOL_SEARCH_MAX_RESULTS
 
 
@@ -131,7 +139,6 @@ async def test_result_window_is_not_the_binding_constraint():
         ("show me all the datasets", "list_datasets_json"),
         ("show the data inside a dataset", "list_dataset_data_json"),
         ("make a new dataset", "create_dataset_json"),
-        ("upload and ingest this file", "cognify_file"),
         ("which client am I connected as", "get_client_info_json"),
     ],
 )
@@ -160,7 +167,7 @@ async def test_search_matches_on_vocabulary_not_on_the_result_limit():
     enough to pin: if a future fastmcp adds stemming, we want to notice.
     """
     server.apply_tool_mode("default")
-    hidden = set(server.registry.tags) - set(server.registry.names_with_tag(DEFAULT_TAG))
+    hidden = hidden_tools()
 
     async with Client(server.mcp) as client:
         singular = set(await search(client, "dataset"))
@@ -179,7 +186,7 @@ async def test_hidden_tools_are_discoverable_by_search():
 
     async with Client(server.mcp) as client:
         assert "list_datasets_json" in await search(client, "list all of my datasets")
-        assert "cognify_file" in await search(client, "ingest an uploaded file")
+        assert "create_dataset_json" in await search(client, "create a new dataset")
 
 
 async def test_search_never_returns_pinned_tools():

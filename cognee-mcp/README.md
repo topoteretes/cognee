@@ -530,7 +530,7 @@ Search works well on natural-language queries. Every phrasing below returns its 
 | "what datasets do I have?" | `list_datasets_json` |
 | "show the data inside a dataset" | `list_dataset_data_json` |
 | "make a new dataset" | `create_dataset_json` |
-| "upload and ingest this file" | `cognify_file` |
+| "which client am I connected as" | `get_client_info_json` |
 
 The one thing to know when **adding** a tool: matching is purely lexical. FastMCP's BM25 tokenizer does no stemming and drops tools that score zero, so a query shares no credit with a word it doesn't literally contain — the bare query `dataset` matches `create_dataset_json` but *not* `list_datasets_json`, whose token is `datasets`. Multi-word queries paper over this (they usually contain some matching token), which is why the table above passes, but terse queries won't.
 

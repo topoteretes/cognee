@@ -37,6 +37,8 @@ EXPECTED_TOOLS = PINNED_TOOLS | SEARCH_TRANSFORM_TOOLS
 
 # Registered but deliberately not advertised; reachable by name and via search.
 # The workspace UI calls these directly, so hiding them must not unreach them.
+# Not exhaustive on purpose — asserted as a subset, so the catalog can change
+# (e.g. cognify_file folding into remember) without touching this list.
 HIDDEN_TOOLS = {
     "list_datasets_json",
     "list_dataset_data_json",
