@@ -136,22 +136,27 @@ export function FilterProvider({ children }: { children: ReactNode }) {
     }));
   }, [availableTenants]);
 
-  // Snapshot of the persisted workspace selection, read synchronously during
-  // the FIRST render via a lazy initializer — not in an effect. An effect
-  // only runs after that first render commits, so it still paints the
-  // hardcoded personal default for one frame before correcting itself; this
-  // was visible as a brief flash even after switching to a non-personal
-  // workspace. Guarded for SSR, where localStorage doesn't exist — this
-  // component only ever runs client-side, so the guard is just to keep the
-  // initializer from throwing during the server render pass.
-  const [persistedSelection] = useState<Workspace | null>(() => {
-    if (typeof window === "undefined") return null;
+  // Snapshot of the persisted workspace selection. Starts null so the first
+  // client render matches the server-rendered HTML exactly (the server has no
+  // localStorage) — reading it eagerly in a lazy useState initializer caused
+  // a hydration mismatch, since that initializer runs during the hydration
+  // pass itself, not after it. Read it in an effect instead; this still
+  // means the hardcoded personal default paints for one frame before
+  // correcting itself, but that's the tradeoff for a correct hydration.
+  const [persistedSelection, setPersistedSelection] = useState<Workspace | null>(null);
+  useEffect(() => {
     const id = localStorage.getItem("cognee_selected_tenant");
     const name = localStorage.getItem("cognee_selected_tenant_name");
-    return id && name
-      ? { id, name, initial: name.charAt(0).toUpperCase(), color: colorForTenant(id), type: "organization" as const }
-      : null;
-  });
+    if (id && name) {
+      setPersistedSelection({
+        id,
+        name,
+        initial: name.charAt(0).toUpperCase(),
+        color: colorForTenant(id),
+        type: "organization" as const,
+      });
+    }
+  }, []);
 
   // The workspace shown in the topbar — derived, not its own state. It used
   // to be mirrored into a separate useState synced by an effect, which added

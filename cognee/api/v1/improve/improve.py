@@ -334,16 +334,13 @@ async def _bridge_sessions(
         persist_sessions_in_knowledge_graph_pipeline,
     )
 
-    try:
-        await persist_sessions_in_knowledge_graph_pipeline(
-            user=user,
-            session_ids=session_ids,
-            dataset=dataset_name,
-            run_in_background=run_in_background,
-        )
-        logger.info("improve: session Q&A persisted from %d session(s)", len(session_ids))
-    except Exception as e:
-        logger.warning("improve: session persistence failed (non-fatal): %s", e)
+    await persist_sessions_in_knowledge_graph_pipeline(
+        user=user,
+        session_ids=session_ids,
+        dataset=dataset_name,
+        run_in_background=run_in_background,
+    )
+    logger.info("improve: session Q&A persisted from %d session(s)", len(session_ids))
 
 
 async def _extract_agent_context(

@@ -118,6 +118,20 @@ export function createHttpClient() {
   const resRegistry = makeRegistry<ResponseInterceptor>();
   const errRegistry = makeRegistry<ErrorInterceptor>();
 
+  // Every client instance (singleton, pod, management, ...) gets a unique
+  // correlation ID on every outgoing request, so backends and log aggregators
+  // can join on it — registered here rather than via an opt-in setup call
+  // because pod.ts/management.ts each build their own createHttpClient()
+  // instance, so a registration on the shared singleton alone never reached them.
+  reqRegistry.use((ctx) => ({
+    ...ctx,
+    headers: {
+      "X-Request-Id": crypto.randomUUID(),
+      // Allow callers to override with their own trace ID (e.g. OpenTelemetry).
+      ...ctx.headers,
+    },
+  }));
+
   let activeLogger: HttpLogger | null = null;
 
   function emitLog(event: HttpLogEvent): void {
