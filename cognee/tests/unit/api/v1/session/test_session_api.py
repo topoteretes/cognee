@@ -290,11 +290,16 @@ class TestGetSession:
         assert kw["formatted"] is False
 
     @pytest.mark.asyncio
-    async def test_default_session_id(self, session_user_ctx, sm):
+    async def test_omitted_session_id_defers_to_the_manager(self, session_user_ctx, sm):
+        """None is forwarded so SessionManager derives the per-dataset default.
+
+        Passing the literal "default_session" here would read the legacy global
+        session instead of the one a default write actually lands in.
+        """
         from cognee.api.v1.session.session import get_session
 
         await get_session()
-        assert sm.get_session.call_args.kwargs["session_id"] == "default_session"
+        assert sm.get_session.call_args.kwargs["session_id"] is None
 
 
 # add_feedback
