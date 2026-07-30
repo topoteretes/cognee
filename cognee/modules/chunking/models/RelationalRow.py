@@ -3,10 +3,10 @@ from typing import ClassVar
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 
 
-class DltRow(DocumentChunk):
+class RelationalRow(DocumentChunk):
     """One relational row from a DLT source manifest — its own graph type.
 
-    Graph nodes carry type "DltRow", so type-NAME filtering (census,
+    Graph nodes carry type "RelationalRow", so type-NAME filtering (census,
     visualization, row-aware search) separates relational rows from prose
     chunks. ``index_type_name`` keeps its vectors in the DocumentChunk_text
     collection, so every existing retriever finds rows without DLT-specific

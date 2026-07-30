@@ -120,15 +120,15 @@ async def test_ctx_none_direct_call_uses_fresh_state(monkeypatch, emit_mock):
 
 
 @pytest.mark.asyncio
-async def test_dlt_rows_have_their_own_type_but_index_as_document_chunks(monkeypatch):
-    """DltRow is a distinct graph type (type-level search filtering) that
+async def test_relational_rows_have_their_own_type_but_index_as_document_chunks(monkeypatch):
+    """RelationalRow is a distinct graph type (type-level search filtering) that
     still indexes into DocumentChunk_text (retrieval keeps finding rows)."""
-    from cognee.modules.chunking.models.DltRow import DltRow
+    from cognee.modules.chunking.models.RelationalRow import RelationalRow
     from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
     from cognee.modules.data.processing.document_types import DltSourceDocument
     from cognee.tasks.storage.index_data_points import index_data_points as run_indexing
 
-    chunk = DltRow(
+    chunk = RelationalRow(
         id=uuid4(),
         text="row text",
         chunk_size=2,
@@ -140,7 +140,7 @@ async def test_dlt_rows_have_their_own_type_but_index_as_document_chunks(monkeyp
         contains=[],
     )
     assert isinstance(chunk, DocumentChunk)
-    assert type(chunk).__name__ == "DltRow"  # graph type is the row type
+    assert type(chunk).__name__ == "RelationalRow"  # graph type is the row type
 
     created = []
 
@@ -159,4 +159,4 @@ async def test_dlt_rows_have_their_own_type_but_index_as_document_chunks(monkeyp
             return None
 
     await run_indexing([chunk], vector_engine=_FakeEngine())
-    assert created == [("DocumentChunk", "text")]  # NOT DltRow_text
+    assert created == [("DocumentChunk", "text")]  # NOT RelationalRow_text
