@@ -100,6 +100,15 @@ async def test_local_ollama_example_executes_offline(monkeypatch):
     """Verify that local_ollama_example.py runs using the mock LLM/embedding harness."""
     monkeypatch.setenv("MOCK_EMBEDDING", "true")
 
+    # MOCK_EMBEDDING alone is not enough: LiteLLMEmbeddingEngine reads it once at
+    # construction, and in a full pytest session the engine (and the lru_cached
+    # LLM/embedding configs) may already be baked from earlier tests — leaving a
+    # real OpenAI-default engine that the startup connection probe would then hit
+    # over the network. Patch embed_text at the class so every engine, cached or
+    # fresh, stays offline.
+    async def _mock_embed_text(self, texts):
+        return [[0.1] * self.dimensions for _ in texts]
+
     @staticmethod
     async def _mock_acreate(text_input, system_prompt, response_model, **kwargs):
         from cognee.shared.data_models import KnowledgeGraph, SummarizedContent
@@ -122,7 +131,14 @@ async def test_local_ollama_example_executes_offline(monkeypatch):
             return "Mocked answer"
         return response_model()
 
-    with patch.object(LLMGateway, "acreate_structured_output", new=_mock_acreate):
+    from cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine import (
+        LiteLLMEmbeddingEngine,
+    )
+
+    with (
+        patch.object(LLMGateway, "acreate_structured_output", new=_mock_acreate),
+        patch.object(LiteLLMEmbeddingEngine, "embed_text", new=_mock_embed_text),
+    ):
         from examples.demos.local_ollama_example import main
 
         await main()
