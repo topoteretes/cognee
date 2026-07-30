@@ -19,6 +19,7 @@ from cognee.modules.pipelines.operations import (
     log_pipeline_run_complete,
     log_pipeline_run_error,
 )
+from cognee.modules.pipelines.layers.validate_pipeline_tasks import validate_pipeline_tasks
 from cognee.modules.pipelines.utils import generate_pipeline_id
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
@@ -98,13 +99,8 @@ async def run_tasks_distributed(
     llm_config: Optional[LLMConfig] = None,
     embedding_config: Optional[EmbeddingConfig] = None,
     data_cache: bool = False,
-    sub_pipelines: Optional[List[tuple]] = None,
+    resolve_tasks: Optional[Callable[[Any], List[Task]]] = None,
 ):
-    if sub_pipelines is not None:
-        raise NotImplementedError(
-            "Sub-pipeline runs are not supported by the distributed runner yet; "
-            "run mixed-kind datasets with COGNEE_DISTRIBUTED disabled."
-        )
     if not user:
         user = await get_default_user()
 
@@ -138,10 +134,25 @@ async def run_tasks_distributed(
 
             number_of_data_items = len(data) if isinstance(data, list) else 1
 
+            # Resolve each item's task list in the orchestrator so Modal
+            # workers receive plain lists — no callable is serialized.
+            # Validate each DISTINCT resolved list once.
+            if resolve_tasks is not None:
+                per_item_tasks = []
+                validated_list_ids = set()
+                for item in data:
+                    item_tasks = resolve_tasks(item)
+                    if id(item_tasks) not in validated_list_ids:
+                        validate_pipeline_tasks(item_tasks)
+                        validated_list_ids.add(id(item_tasks))
+                    per_item_tasks.append(item_tasks)
+            else:
+                per_item_tasks = [tasks] * number_of_data_items
+
             data_item_tasks = [
                 data,
                 [dataset] * number_of_data_items,
-                [tasks] * number_of_data_items,
+                per_item_tasks,
                 [pipeline_name] * number_of_data_items,
                 [pipeline_id] * number_of_data_items,
                 [pipeline_run_id] * number_of_data_items,

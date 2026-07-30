@@ -11,6 +11,7 @@ from types import SimpleNamespace
 import pytest
 from pydantic import BaseModel
 
+from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.cognify import estimator
 
 
@@ -146,19 +147,12 @@ def test_reasoning_model_scales_output_and_warns(offline_estimator, monkeypatch)
     assert not any("reasoning model" in w for w in baseline.warnings)
 
 
-def test_estimate_chunks_skips_dlt_chunks(offline_estimator):
-    dlt_document = estimator.DltRowDocument(
-        name="table-row",
-        raw_data_location="",
-        external_metadata="{}",
-    )
+def test_estimate_chunks_reports_skipped_dlt_chunks(offline_estimator):
     estimate = estimator.estimate_chunks(
-        [
-            SimpleNamespace(text="normal text"),
-            SimpleNamespace(text="schema row", is_part_of=dlt_document),
-        ],
+        [SimpleNamespace(text="normal text")],
         operation="cognify",
         graph_model=_TinyGraph,
+        skipped_dlt_chunks=1,
     )
 
     payload = estimate.to_dict()
@@ -166,6 +160,50 @@ def test_estimate_chunks_skips_dlt_chunks(offline_estimator):
     assert payload["skipped_items"] == 1
     assert all(stage["calls"] == 1 for stage in payload["stages"])
     assert any("DLT row" in warning for warning in payload["warnings"])
+
+
+@pytest.mark.asyncio
+async def test_dlt_items_are_routed_out_before_any_read(offline_estimator):
+    """DLT items contribute zero LLM cost and are NEVER opened.
+
+    The manifest's raw_data_location points nowhere — if the estimator tried
+    document.read() on it, this test would explode. Chunk counts come from
+    external_metadata["row_count"] via the same routing policy execution uses.
+    """
+    manifest_item = SimpleNamespace(
+        external_metadata={"source": "dlt_source", "row_count": 42},
+        extension=None,
+        raw_data_location="does-not-exist://manifest.json",
+    )
+    legacy_item = SimpleNamespace(
+        external_metadata={"source": "dlt"},
+        extension=None,
+        raw_data_location="does-not-exist://row.txt",
+    )
+
+    chunks, skipped, skipped_dlt = await estimator._chunks_from_data_items(
+        [manifest_item, legacy_item], chunker=TextChunker, chunk_size=512
+    )
+
+    assert chunks == []
+    assert skipped == 0
+    assert skipped_dlt == 43  # 42 manifest rows + 1 legacy row chunk
+
+
+@pytest.mark.asyncio
+async def test_manifest_without_row_count_warns_and_counts_zero(offline_estimator):
+    manifest_item = SimpleNamespace(
+        id="manifest-1",
+        external_metadata={"source": "dlt_source"},
+        extension=None,
+        raw_data_location="does-not-exist://manifest.json",
+    )
+
+    chunks, skipped, skipped_dlt = await estimator._chunks_from_data_items(
+        [manifest_item], chunker=TextChunker, chunk_size=512
+    )
+
+    assert chunks == [] and skipped == 0 and skipped_dlt == 0
 
 
 # --------------------------------------------------------------------------- #

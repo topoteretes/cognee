@@ -5,6 +5,7 @@ from uuid import UUID
 
 from cognee.modules.cognify.config import get_cognify_config
 from cognee.modules.cognify.rollback import cognify_rollback_handler
+from cognee.modules.cognify.routing import CognifyRoute, cognify_route_for
 from cognee.modules.ontology.ontology_env_config import get_ontology_env_config
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.data_models import KnowledgeGraph
@@ -295,21 +296,32 @@ async def cognify(
         # By calling get pipeline executor we get a function that will have the run_pipeline run in the background or a function that we will need to wait for
         pipeline_executor_func = get_pipeline_executor(run_in_background=run_in_background)
 
-        # DLT-source manifest items run the deterministic DLT pipeline; all
-        # other data items keep the standard flow (see _plan_cognify_runs).
-        runs = await _plan_cognify_runs(datasets, user)
+        # Per-item routing: each data item resolves to the task list its kind
+        # requires — DLT-source manifests run the deterministic DLT list,
+        # everything else runs the standard (or temporal) list. The lists are
+        # built once up front and the resolver is a sync closure over them
+        # (the distributed runner materializes per-item task columns, so it
+        # needs concrete lists, not an async factory). One run_pipeline call,
+        # one cognify_pipeline run per dataset, mixed datasets included.
+        dlt_tasks = await get_dlt_tasks(chunk_size=chunk_size, chunks_per_batch=chunks_per_batch)
+        tasks_by_route = {CognifyRoute.DLT_SOURCE: dlt_tasks}
 
-        result = await _execute_cognify_runs(
-            runs,
-            executor=pipeline_executor_func,
-            cognify_tasks=tasks,
-            chunk_size=chunk_size,
-            chunks_per_batch=chunks_per_batch,
+        def resolve_cognify_tasks(data_item):
+            return tasks_by_route.get(cognify_route_for(data_item), tasks)
+
+        result = await pipeline_executor_func(
+            pipeline=run_pipeline,
+            datasets=datasets,
+            tasks=tasks,
+            resolve_tasks=resolve_cognify_tasks,
+            pipeline_name="cognify_pipeline",
             user=user,
             vector_db_config=vector_db_config,
             graph_db_config=graph_db_config,
             incremental_loading=incremental_loading,
+            use_pipeline_cache=False,
             data_per_batch=data_per_batch,
+            rollback_handler=cognify_rollback_handler,
             llm_config=llm_config,
             embedding_config=embedding_config,
             data_cache=data_cache,
@@ -411,184 +423,6 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
         )
 
     return default_tasks
-
-
-async def _execute_cognify_runs(
-    runs,
-    executor,
-    cognify_tasks,
-    chunk_size,
-    chunks_per_batch,
-    user,
-    vector_db_config,
-    graph_db_config,
-    incremental_loading,
-    data_per_batch,
-    llm_config,
-    embedding_config,
-    data_cache,
-):
-    """Execute the planned invocations under ONE logical run per dataset.
-
-    Every dataset gets exactly one ``cognify_pipeline`` run regardless of how
-    many task lists (sub_pipelines) its data requires, so the status endpoint, result
-    shape, rollback, and background handles all see a single logical run. A
-    dataset whose data needs several task lists executes them as sub_pipelines of one
-    run (``run_pipeline(sub_pipelines=...)``); the DLT task list is built lazily, only
-    when some invocation needs it.
-    """
-    tasks_by_kind = {"standard": cognify_tasks}
-
-    async def _tasks_for(kind):
-        if kind not in tasks_by_kind:
-            if kind != "dlt":
-                raise ValueError(f"Unknown cognify sub-pipeline kind: {kind!r}")
-            tasks_by_kind["dlt"] = await get_dlt_tasks(
-                chunk_size=chunk_size, chunks_per_batch=chunks_per_batch
-            )
-        return tasks_by_kind[kind]
-
-    results: dict = {}
-    for invocation in runs:
-        call_kwargs = dict(
-            pipeline=run_pipeline,
-            datasets=invocation["datasets"],
-            pipeline_name="cognify_pipeline",
-            user=user,
-            vector_db_config=vector_db_config,
-            graph_db_config=graph_db_config,
-            incremental_loading=incremental_loading,
-            use_pipeline_cache=False,
-            data_per_batch=data_per_batch,
-            rollback_handler=cognify_rollback_handler,
-            llm_config=llm_config,
-            embedding_config=embedding_config,
-            data_cache=data_cache,
-        )
-
-        sub_pipeline_kinds = invocation.get("sub_pipeline_kinds")
-        if sub_pipeline_kinds is None:
-            call_kwargs["tasks"] = cognify_tasks
-        elif len(sub_pipeline_kinds) == 1:
-            # A single data kind needs no sub-pipeline machinery — a plain run with an
-            # explicit item subset is already one logical run.
-            kind, items = sub_pipeline_kinds[0]
-            call_kwargs["tasks"] = await _tasks_for(kind)
-            call_kwargs["data"] = items
-        else:
-            call_kwargs["sub_pipelines"] = [
-                (await _tasks_for(kind), items) for kind, items in sub_pipeline_kinds
-            ]
-
-        partial = await executor(**call_kwargs)
-        if isinstance(partial, dict):
-            # Invocations cover disjoint datasets, so this is a plain union.
-            results.update(partial)
-        else:
-            results = partial
-    return results
-
-
-async def _plan_cognify_runs(datasets, user) -> list[dict]:
-    """Plan pipeline invocations for cognify routing.
-
-    DLT-source manifests (external_metadata.source == "dlt_source") run the
-    deterministic DLT task list; all other items run the standard one. The
-    split is per data item, and a dataset always maps to exactly ONE
-    ``cognify_pipeline`` run — a dataset mixing both kinds executes them as
-    sub_pipelines of a single run.
-
-    Returns a list of invocation dicts:
-    - {"datasets": [ds_id], "sub_pipeline_kinds": [("dlt", manifest_items)]} for a
-      manifest-only dataset
-    - {"datasets": [ds_id], "sub_pipeline_kinds": [("dlt", ...), ("standard", ...)]}
-      for a mixed dataset
-    - {"datasets": <original argument>, "sub_pipeline_kinds": None} covering all
-      datasets without manifests — items loaded by the pipeline itself
-      (unchanged legacy behavior)
-
-    Routing never guesses: the standard plan is only chosen when the probe
-    *proves* there is nothing to route (no datasets, or no manifests in
-    them). A probe failure raises — silently falling back could send
-    manifest data through the LLM pipeline, producing a wrong graph at LLM
-    cost with no error anywhere.
-    """
-    from cognee.exceptions import CogneeSystemError
-
-    try:
-        return await _probe_cognify_runs(datasets, user)
-    except Exception as error:
-        raise CogneeSystemError(
-            f"DLT cognify routing probe failed for datasets {datasets!r}; "
-            "cannot determine which pipeline the data requires. "
-            f"Underlying error: {error!r}"
-        ) from error
-
-
-async def _probe_cognify_runs(datasets, user) -> list[dict]:
-    """The fallible half of ``_plan_cognify_runs``: resolve datasets and split
-    manifest items from regular ones."""
-    from sqlalchemy import select
-
-    from cognee.infrastructure.databases.relational import get_relational_engine
-    from cognee.modules.data.models import Data, DatasetData
-    from cognee.modules.data.methods import get_authorized_existing_datasets, get_dataset_data
-    from cognee.modules.users.methods import get_default_user
-    from cognee.tasks.ingestion.dlt_utils import is_dlt_source_manifest
-
-    if user is None:
-        user = await get_default_user()
-
-    dataset_list = datasets if isinstance(datasets, list) or datasets is None else [datasets]
-    authorized_datasets = await get_authorized_existing_datasets(
-        datasets=dataset_list, permission_type="write", user=user
-    )
-    if not authorized_datasets:
-        return [{"datasets": datasets, "sub_pipeline_kinds": None}]
-
-    # One filtered query to find which requested datasets contain a manifest,
-    # instead of loading every dataset's data items.
-    authorized_ids = [dataset.id for dataset in authorized_datasets]
-    async with get_relational_engine().get_async_session() as session:
-        manifest_dataset_ids = set(
-            (
-                await session.execute(
-                    select(DatasetData.dataset_id)
-                    .join(Data, Data.id == DatasetData.data_id)
-                    .where(
-                        DatasetData.dataset_id.in_(authorized_ids),
-                        Data.external_metadata["source"].as_string() == "dlt_source",
-                    )
-                    .distinct()
-                )
-            )
-            .scalars()
-            .all()
-        )
-
-    if not manifest_dataset_ids:
-        return [{"datasets": datasets, "sub_pipeline_kinds": None}]
-
-    invocations: list[dict] = []
-    regular_ids = []
-    for dataset in authorized_datasets:
-        if dataset.id not in manifest_dataset_ids:
-            regular_ids.append(dataset.id)
-            continue
-
-        manifest_items, regular_items = [], []
-        for item in await get_dataset_data(dataset.id):
-            (manifest_items if is_dlt_source_manifest(item) else regular_items).append(item)
-
-        sub_pipeline_kinds = [("dlt", manifest_items)]
-        if regular_items:
-            sub_pipeline_kinds.append(("standard", regular_items))
-        invocations.append({"datasets": [dataset.id], "sub_pipeline_kinds": sub_pipeline_kinds})
-
-    if regular_ids:
-        invocations.append({"datasets": regular_ids, "sub_pipeline_kinds": None})
-
-    return invocations
 
 
 async def get_dlt_tasks(chunk_size: int = None, chunks_per_batch: int = None) -> list[Task]:

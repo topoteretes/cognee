@@ -100,6 +100,25 @@ def update_node_set(document):
     document.source_node_set = ", ".join(node_set)
 
 
+def document_class_for(data_item) -> type[Document]:
+    """The document class a data item classifies to. Pure — reads only fields
+    already on the record (external_metadata, extension); no I/O, no config.
+
+    Single source of truth for the dispatch: classify_documents builds
+    instances from it, and cognify routing (modules/cognify/routing.py)
+    derives task routes from it, so classification and routing cannot
+    disagree.
+    """
+    if is_dlt_source_manifest(data_item):
+        return DltSourceDocument
+    if is_dlt_sourced(data_item):
+        # Legacy: pre-manifest per-row DLT records; superseded by
+        # DltSourceDocument manifests.
+        return DltRowDocument
+    extension = (data_item.extension or "").lower()
+    return EXTENSION_TO_DOCUMENT_CLASS.get(extension, TextDocument)
+
+
 @task_summary("Classified {n} document(s)")
 async def classify_documents(data_documents: list[Data]) -> list[Document]:
     """
@@ -129,15 +148,7 @@ async def classify_documents(data_documents: list[Data]) -> list[Document]:
 
     documents = []
     for data_item in data_documents:
-        if is_dlt_source_manifest(data_item):
-            doc_class = DltSourceDocument
-        elif is_dlt_sourced(data_item):
-            # Legacy: pre-manifest per-row DLT records; superseded by
-            # DltSourceDocument manifests.
-            doc_class = DltRowDocument
-        else:
-            extension = (data_item.extension or "").lower()
-            doc_class = EXTENSION_TO_DOCUMENT_CLASS.get(extension, TextDocument)
+        doc_class = document_class_for(data_item)
 
         document = doc_class(
             id=data_item.id,

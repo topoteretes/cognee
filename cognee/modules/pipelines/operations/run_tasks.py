@@ -17,6 +17,7 @@ from cognee.modules.users.methods import get_default_user
 from cognee.modules.pipelines.utils import generate_pipeline_id
 from cognee.modules.pipelines.exceptions import PipelineRunFailedError
 from cognee.tasks.ingestion import resolve_data_directories
+from cognee.modules.pipelines.layers.validate_pipeline_tasks import validate_pipeline_tasks
 from cognee.modules.pipelines.models import PipelineContext
 from cognee.modules.pipelines.models.PipelineRunInfo import (
     PipelineRunCompleted,
@@ -68,16 +69,15 @@ async def run_tasks(
     llm_config: Optional[LLMConfig] = None,
     embedding_config: Optional[EmbeddingConfig] = None,
     data_cache: bool = False,
-    sub_pipelines: Optional[List[tuple]] = None,
+    resolve_tasks: Optional[Callable[[Any], List[Task]]] = None,
 ):
     """Run a pipeline over a dataset as ONE logical run.
 
-    ``sub_pipelines`` routes item subsets through different task lists under a single
-    pipeline run: a list of ``(tasks, items)`` pairs sharing this run's
-    lifecycle — one run record, one database context, one rollback, one
-    terminal status. Used by cognify when a dataset mixes data kinds (e.g.
-    DLT manifests + regular documents). When ``sub_pipelines`` is given, ``tasks`` and
-    ``data`` are ignored.
+    ``resolve_tasks`` is an optional caller-supplied policy mapping one data
+    item to the task list it should run (like ``rollback_handler``, it keeps
+    the engine domain-blind). Items resolved to different lists still share
+    this run's lifecycle — one run record, one database context, one
+    rollback, one terminal status. When unset, every item runs ``tasks``.
     """
     if not user:
         user = await get_default_user()
@@ -107,24 +107,24 @@ async def run_tasks(
         embedding_config=embedding_config,
     ):
         try:
-            # Build (item, item_tasks) work pairs: uniform task list for a
-            # plain run, per-sub-pipeline task lists for a composed run.
-            if sub_pipelines is not None:
-                work_items = []
-                for sub_pipeline_tasks, sub_pipeline_items in sub_pipelines:
-                    sub_pipeline_items = list(sub_pipeline_items or [])
-                    if data_cache or incremental_loading:
-                        sub_pipeline_items = await resolve_data_directories(sub_pipeline_items)
-                    work_items.extend((item, sub_pipeline_tasks) for item in sub_pipeline_items)
-                data = [item for item, _ in work_items]
-            else:
-                if not isinstance(data, list):
-                    data = [data]
+            if not isinstance(data, list):
+                data = [data]
 
-                if data_cache or incremental_loading:
-                    data = await resolve_data_directories(data)
+            if data_cache or incremental_loading:
+                data = await resolve_data_directories(data)
 
-                work_items = [(item, tasks) for item in data]
+            # Build (item, item_tasks) work pairs: the resolver picks each
+            # item's task list; without one, every item runs ``tasks``.
+            # Validate each DISTINCT resolved list once (the eager check in
+            # run_pipeline covers only the fallback ``tasks``).
+            work_items = []
+            validated_list_ids = set()
+            for item in data:
+                item_tasks = resolve_tasks(item) if resolve_tasks else tasks
+                if resolve_tasks is not None and id(item_tasks) not in validated_list_ids:
+                    validate_pipeline_tasks(item_tasks)
+                    validated_list_ids.add(id(item_tasks))
+                work_items.append((item, item_tasks))
 
             # Semaphore-based concurrency: all items are scheduled at once,
             # but at most data_per_batch run concurrently at any time.

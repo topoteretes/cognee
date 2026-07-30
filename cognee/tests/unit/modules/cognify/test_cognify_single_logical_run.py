@@ -1,10 +1,11 @@
-"""Every dataset gets exactly ONE cognify_pipeline run.
+"""Every dataset gets exactly ONE cognify_pipeline run, with per-item routing.
 
-_execute_cognify_runs maps planned invocations onto single run_pipeline calls:
-a plain run for uniform datasets, an explicit-items run for manifest-only
-datasets, and a multi-sub-pipeline run for mixed datasets — never two runs (or two
-pipeline names) for one dataset. run_tasks executes sub_pipelines under a single run
-lifecycle: one start record, per-sub-pipeline task lists, one terminal status.
+cognify() makes a single run_pipeline call carrying a resolve_tasks closure;
+each data item resolves to the task list its kind requires (DLT manifests →
+the deterministic DLT list, everything else → the standard list). run_tasks
+executes mixed items under a single run lifecycle: one start record,
+per-item task lists, one terminal status — never two runs (or two pipeline
+names) for one dataset.
 """
 
 import sys
@@ -16,6 +17,7 @@ import pytest
 
 import cognee.api.v1.cognify.cognify  # noqa: F401 — ensure the module (not the re-exported function) is importable via sys.modules
 import cognee.modules.pipelines.operations.run_tasks as run_tasks_module
+from cognee.modules.cognify.routing import CognifyRoute, cognify_route_for
 from cognee.modules.pipelines.models.PipelineRunInfo import (
     PipelineRunCompleted,
     PipelineRunStarted,
@@ -26,102 +28,101 @@ from cognee.modules.pipelines.models.PipelineRunInfo import (
 cognify_module = sys.modules["cognee.api.v1.cognify.cognify"]
 
 
-class _ExecutorRecorder:
-    def __init__(self):
-        self.calls = []
-
-    async def __call__(self, **kwargs):
-        self.calls.append(kwargs)
-        return {ds: f"run_info_{ds}" for ds in kwargs["datasets"] or ["all"]}
+def _manifest_item():
+    return SimpleNamespace(external_metadata={"source": "dlt_source"}, extension=None)
 
 
-async def _execute(plan, executor):
-    return await cognify_module._execute_cognify_runs(
-        plan,
-        executor=executor,
-        cognify_tasks="STANDARD_TASKS",
-        chunk_size=None,
-        chunks_per_batch=None,
-        user=None,
-        vector_db_config=None,
-        graph_db_config=None,
-        incremental_loading=True,
-        data_per_batch=20,
-        llm_config=None,
-        embedding_config=None,
-        data_cache=True,
-    )
+def _legacy_item():
+    return SimpleNamespace(external_metadata={"source": "dlt"}, extension=None)
 
 
-class TestExecuteCognifyRuns:
+def _text_item():
+    return SimpleNamespace(external_metadata=None, extension="txt")
+
+
+class TestCognifyRouting:
+    def test_manifest_routes_to_dlt_source(self):
+        assert cognify_route_for(_manifest_item()) is CognifyRoute.DLT_SOURCE
+
+    def test_legacy_row_routes_to_dlt_row_legacy(self):
+        assert cognify_route_for(_legacy_item()) is CognifyRoute.DLT_ROW_LEGACY
+
+    def test_plain_document_routes_standard(self):
+        assert cognify_route_for(_text_item()) is CognifyRoute.STANDARD
+
+
+class TestCognifyMakesOneCall:
+    """cognify() issues ONE executor call with tasks + resolve_tasks."""
+
+    async def _run_cognify(self, tasks="STANDARD_TASKS", **cognify_kwargs):
+        calls = []
+
+        async def _fake_executor(**kwargs):
+            calls.append(kwargs)
+            return {"ds": "run_info"}
+
+        with (
+            patch.object(
+                cognify_module, "get_pipeline_executor", lambda run_in_background: _fake_executor
+            ),
+            patch.object(cognify_module, "get_default_tasks", new=AsyncMock(return_value=tasks)),
+            patch.object(cognify_module, "get_dlt_tasks", new=AsyncMock(return_value="DLT_TASKS")),
+        ):
+            result = await cognify_module.cognify(
+                datasets=["ds"],
+                chunk_size=1024,
+                config={"ontology_config": {"ontology_resolver": None}},
+                **cognify_kwargs,
+            )
+        return calls, result
+
     @pytest.mark.asyncio
-    async def test_standard_plan_is_one_plain_call(self):
-        executor = _ExecutorRecorder()
-        await _execute([{"datasets": ["a", "b"], "sub_pipeline_kinds": None}], executor)
+    async def test_single_call_under_cognify_name_with_resolver(self):
+        calls, result = await self._run_cognify()
 
-        (call,) = executor.calls
+        (call,) = calls  # exactly one executor invocation, mixed or not
         assert call["pipeline_name"] == "cognify_pipeline"
         assert call["tasks"] == "STANDARD_TASKS"
-        assert "data" not in call and "sub_pipelines" not in call
+        assert call["datasets"] == ["ds"]
+        assert result == {"ds": "run_info"}
+
+        resolver = call["resolve_tasks"]
+        assert resolver(_manifest_item()) == "DLT_TASKS"
+        assert resolver(_text_item()) == "STANDARD_TASKS"
 
     @pytest.mark.asyncio
-    async def test_manifest_only_dataset_is_one_run_under_cognify_name(self):
-        executor = _ExecutorRecorder()
-        items = ["manifest_item"]
-        with patch.object(cognify_module, "get_dlt_tasks", new=AsyncMock(return_value="DLT_TASKS")):
-            await _execute(
-                [{"datasets": ["ds1"], "sub_pipeline_kinds": [("dlt", items)]}], executor
+    async def test_temporal_swaps_standard_route_only(self):
+        """temporal_cognify replaces the fallback list; manifests still route DLT."""
+        calls = []
+
+        async def _fake_executor(**kwargs):
+            calls.append(kwargs)
+            return {}
+
+        with (
+            patch.object(
+                cognify_module, "get_pipeline_executor", lambda run_in_background: _fake_executor
+            ),
+            patch.object(
+                cognify_module, "get_temporal_tasks", new=AsyncMock(return_value="TEMPORAL_TASKS")
+            ),
+            patch.object(cognify_module, "get_dlt_tasks", new=AsyncMock(return_value="DLT_TASKS")),
+        ):
+            await cognify_module.cognify(
+                datasets=["ds"],
+                temporal_cognify=True,
+                chunk_size=1024,
+                config={"ontology_config": {"ontology_resolver": None}},
             )
 
-        (call,) = executor.calls
-        assert call["pipeline_name"] == "cognify_pipeline"  # not dlt_cognify_pipeline
-        assert call["tasks"] == "DLT_TASKS"
-        assert call["data"] == items
-        assert "sub_pipelines" not in call
-
-    @pytest.mark.asyncio
-    async def test_mixed_dataset_is_one_multi_sub_pipeline_run(self):
-        executor = _ExecutorRecorder()
-        with patch.object(cognify_module, "get_dlt_tasks", new=AsyncMock(return_value="DLT_TASKS")):
-            await _execute(
-                [
-                    {
-                        "datasets": ["ds1"],
-                        "sub_pipeline_kinds": [("dlt", ["m1"]), ("standard", ["r1", "r2"])],
-                    }
-                ],
-                executor,
-            )
-
-        (call,) = executor.calls
-        assert call["pipeline_name"] == "cognify_pipeline"
-        assert call["sub_pipelines"] == [("DLT_TASKS", ["m1"]), ("STANDARD_TASKS", ["r1", "r2"])]
-        assert "tasks" not in call and "data" not in call
-
-    @pytest.mark.asyncio
-    async def test_results_union_across_disjoint_invocations(self):
-        executor = _ExecutorRecorder()
-        with patch.object(cognify_module, "get_dlt_tasks", new=AsyncMock(return_value="DLT_TASKS")):
-            result = await _execute(
-                [
-                    {"datasets": ["ds1"], "sub_pipeline_kinds": [("dlt", ["m"])]},
-                    {"datasets": ["ds2", "ds3"], "sub_pipeline_kinds": None},
-                ],
-                executor,
-            )
-
-        assert result == {
-            "ds1": "run_info_ds1",
-            "ds2": "run_info_ds2",
-            "ds3": "run_info_ds3",
-        }
+        (call,) = calls
+        assert call["tasks"] == "TEMPORAL_TASKS"
+        resolver = call["resolve_tasks"]
+        assert resolver(_text_item()) == "TEMPORAL_TASKS"
+        assert resolver(_manifest_item()) == "DLT_TASKS"
 
 
-@pytest.mark.asyncio
-async def test_run_tasks_sub_pipelines_share_one_run_lifecycle(monkeypatch):
-    dataset = SimpleNamespace(id=uuid4(), name="mixed_ds", owner_id=uuid4())
-    run_id = uuid4()
-
+def _mock_run_tasks_plumbing(monkeypatch, dataset):
     session = MagicMock()
     session.get = AsyncMock(return_value=dataset)
     session_ctx = MagicMock()
@@ -136,15 +137,25 @@ async def test_run_tasks_sub_pipelines_share_one_run_lifecycle(monkeypatch):
     db_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
     monkeypatch.setattr(run_tasks_module, "set_database_global_context_variables", db_ctx)
 
-    log_start = AsyncMock(return_value=SimpleNamespace(pipeline_run_id=run_id))
-    log_complete = AsyncMock()
-    log_error = AsyncMock()
+    log_start = AsyncMock(return_value=SimpleNamespace(pipeline_run_id=uuid4()))
     monkeypatch.setattr(run_tasks_module, "log_pipeline_run_start", log_start)
+    log_complete = AsyncMock()
     monkeypatch.setattr(run_tasks_module, "log_pipeline_run_complete", log_complete)
+    log_error = AsyncMock()
     monkeypatch.setattr(run_tasks_module, "log_pipeline_run_error", log_error)
     monkeypatch.setattr(
         run_tasks_module, "get_graph_engine", AsyncMock(return_value=SimpleNamespace())
     )
+    return log_start, log_complete, log_error
+
+
+@pytest.mark.asyncio
+async def test_run_tasks_resolver_shares_one_run_lifecycle(monkeypatch):
+    """Items resolved to different task lists share one run record and status."""
+    dataset = SimpleNamespace(id=uuid4(), name="mixed_ds", owner_id=uuid4())
+    log_start, log_complete, log_error = _mock_run_tasks_plumbing(monkeypatch, dataset)
+    run_id = log_start.return_value.pipeline_run_id
+    monkeypatch.setattr(run_tasks_module, "validate_pipeline_tasks", lambda tasks: None)
 
     processed = []
 
@@ -156,25 +167,54 @@ async def test_run_tasks_sub_pipelines_share_one_run_lifecycle(monkeypatch):
 
     events = []
     async for event in run_tasks_module.run_tasks.__wrapped__(
-        tasks=None,
+        tasks="STANDARD_TASKS",
         dataset_id=dataset.id,
-        data=None,
+        data=["m1", "m2", "r1"],
         user=SimpleNamespace(id=uuid4(), tenant_id=None),
         pipeline_name="cognify_pipeline",
-        sub_pipelines=[("DLT_TASKS", ["m1", "m2"]), ("STANDARD_TASKS", ["r1"])],
+        resolve_tasks=lambda item: "DLT_TASKS" if item.startswith("m") else "STANDARD_TASKS",
     ):
         events.append(event)
 
-    # One run record started and completed — never one per sub-pipeline.
+    # One run record started and completed — never one per task list.
     assert log_start.await_count == 1
     assert log_complete.await_count == 1
     assert log_error.await_count == 0
     assert [type(e) for e in events] == [PipelineRunStarted, PipelineRunCompleted]
     assert all(e.pipeline_run_id == run_id for e in events)
+    # log_pipeline_run_start received the real item list, not None.
+    assert log_start.await_args.args[3] == ["m1", "m2", "r1"]
 
-    # Every item ran with its own sub-pipeline's task list.
+    # Every item ran with its own resolved task list.
     assert sorted(processed) == [
         ("m1", "DLT_TASKS"),
         ("m2", "DLT_TASKS"),
         ("r1", "STANDARD_TASKS"),
     ]
+
+
+@pytest.mark.asyncio
+async def test_run_tasks_validates_each_distinct_resolved_list_once(monkeypatch):
+    dataset = SimpleNamespace(id=uuid4(), name="ds", owner_id=uuid4())
+    _mock_run_tasks_plumbing(monkeypatch, dataset)
+    monkeypatch.setattr(
+        run_tasks_module, "run_tasks_data_item", AsyncMock(return_value={"run_info": "ok"})
+    )
+
+    validated = []
+    monkeypatch.setattr(run_tasks_module, "validate_pipeline_tasks", validated.append)
+
+    list_a, list_b = ["A"], ["B"]
+    async for _ in run_tasks_module.run_tasks.__wrapped__(
+        tasks=None,
+        dataset_id=dataset.id,
+        data=["1", "2", "3"],
+        user=SimpleNamespace(id=uuid4(), tenant_id=None),
+        pipeline_name="p",
+        resolve_tasks=lambda item: list_a if item == "3" else list_b,
+    ):
+        pass
+
+    # Three items, two distinct lists → exactly two validations.
+    assert len(validated) == 2
+    assert list_a in validated and list_b in validated

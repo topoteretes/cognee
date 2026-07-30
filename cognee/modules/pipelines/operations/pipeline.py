@@ -74,18 +74,15 @@ async def run_pipeline(
     embedding_config: Optional[EmbeddingConfig] = None,
     data_cache: bool = False,
     skip_connection_test: bool = False,
-    sub_pipelines: Optional[list[tuple]] = None,
+    resolve_tasks: Optional[Callable[[Any], list[Task]]] = None,
 ):
-    """``sub_pipelines`` executes several (tasks, items) pairs as ONE logical pipeline
-    run per dataset (see ``run_tasks``); ``tasks``/``data`` are ignored when
-    it is given. Not supported together with ``use_pipeline_cache`` or the
-    distributed runner."""
-    if sub_pipelines is not None:
-        if use_pipeline_cache:
-            raise ValueError("sub_pipelines and use_pipeline_cache cannot be combined")
-        for sub_pipeline_tasks, _ in sub_pipelines:
-            validate_pipeline_tasks(sub_pipeline_tasks)
-    else:
+    """``resolve_tasks`` optionally maps each data item to the task list it
+    should run (see ``run_tasks``); items with different lists still share one
+    run per dataset. ``tasks`` remains the fallback for unresolved items and
+    is required when no resolver is given."""
+    if tasks is None and resolve_tasks is None:
+        raise ValueError("run_pipeline requires tasks, resolve_tasks, or both")
+    if tasks is not None:
         validate_pipeline_tasks(tasks)
     await setup_and_check_environment(
         vector_db_config, graph_db_config, skip_connection_test=skip_connection_test
@@ -109,7 +106,7 @@ async def run_pipeline(
             llm_config=llm_config,
             embedding_config=embedding_config,
             data_cache=data_cache,
-            sub_pipelines=sub_pipelines,
+            resolve_tasks=resolve_tasks,
         ):
             yield run_info
 
@@ -127,28 +124,24 @@ async def run_pipeline_per_dataset(
     llm_config: Optional[LLMConfig] = None,
     embedding_config: Optional[EmbeddingConfig] = None,
     data_cache=False,
-    sub_pipelines: Optional[list[tuple]] = None,
+    resolve_tasks: Optional[Callable[[Any], list[Task]]] = None,
 ):
     # The actual work of a single run, factored out so it can run either under
     # the per-dataset lock (normal case) or directly (re-entrant case below).
     async def _run_body():
-        # Sub-pipeline runs carry explicit item subsets per sub-pipeline; there is no
-        # dataset-wide data list to load and no cache qualification.
-        body_data = None
-        if sub_pipelines is None:
-            body_data = data if data else await get_dataset_data(dataset_id=dataset.id)
+        body_data = data if data else await get_dataset_data(dataset_id=dataset.id)
 
-            if use_pipeline_cache:
-                # Caching path: if this dataset's pipeline is already running or has
-                # already completed, return that status instead of re-processing.
-                # When caching is disabled the run always proceeds — concurrent runs
-                # are kept safe by the per-dataset lock, not by this check.
-                process_pipeline_status = await check_pipeline_run_qualification(
-                    dataset, body_data, pipeline_name
-                )
-                if process_pipeline_status:
-                    yield process_pipeline_status
-                    return
+        if use_pipeline_cache:
+            # Caching path: if this dataset's pipeline is already running or has
+            # already completed, return that status instead of re-processing.
+            # When caching is disabled the run always proceeds — concurrent runs
+            # are kept safe by the per-dataset lock, not by this check.
+            process_pipeline_status = await check_pipeline_run_qualification(
+                dataset, body_data, pipeline_name
+            )
+            if process_pipeline_status:
+                yield process_pipeline_status
+                return
 
         pipeline_run = run_tasks(
             tasks,
@@ -162,7 +155,7 @@ async def run_pipeline_per_dataset(
             llm_config=llm_config,
             embedding_config=embedding_config,
             data_cache=data_cache,
-            sub_pipelines=sub_pipelines,
+            resolve_tasks=resolve_tasks,
         )
 
         async for pipeline_run_info in pipeline_run:

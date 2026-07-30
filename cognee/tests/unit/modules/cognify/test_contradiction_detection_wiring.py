@@ -147,18 +147,6 @@ class TestRememberInheritsTheFlag:
             patch.dict(os.environ, {"TELEMETRY_DISABLED": "1"}),
             patch.object(cognify_module, "get_cognify_config", return_value=config),
             patch.object(cognify_module, "get_pipeline_executor", _fake_executor),
-            # The DLT routing probe needs a real relational store and fails fast
-            # without one; this test asserts task wiring, so pin the plan to the
-            # standard single run.
-            patch.object(
-                cognify_module,
-                "_plan_cognify_runs",
-                new=AsyncMock(
-                    side_effect=lambda datasets, user: [
-                        {"datasets": datasets, "sub_pipeline_kinds": None}
-                    ]
-                ),
-            ),
             patch.object(_mod_migrations_startup, "run_migrations_and_block", new=AsyncMock()),
             patch.object(_mod_serve_state, "get_remote_client", return_value=None),
             patch.object(_mod_engine_setup, "setup", new=AsyncMock()),
