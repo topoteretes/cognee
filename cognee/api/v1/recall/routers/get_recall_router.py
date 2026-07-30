@@ -13,7 +13,6 @@ from cognee.api.v1.recall.recall import RecallResponse
 from cognee.exceptions import CogneeApiError
 from cognee.modules.search.operations import get_history
 from cognee.modules.search.types import SearchResult, SearchType
-from cognee.modules.users.exceptions.exceptions import PermissionDeniedError
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
@@ -156,9 +155,8 @@ def get_recall_router() -> APIRouter:
           (default: "auto" — session first when session_id is set, else graph)
 
         ## Error Codes
-        - **403 Forbidden**: Permission denied (returns an empty list, not an error)
-        - **402/404/409/422**: Cognee errors (payment required, missing user,
-          session-dataset conflict, prerequisites not met) return their own
+        - **402/403/404/409/422**: Cognee errors (payment required, permission
+          denied, missing user, session-dataset conflict, prerequisites not met) return their own
           status code and message via the global error handler
         - **409 Conflict**: Unexpected non-Cognee error during recall
         """
@@ -192,10 +190,6 @@ def get_recall_router() -> APIRouter:
                 include_references=payload.include_references,
             )
             return jsonable_encoder(results)
-        except PermissionDeniedError:
-            # Deliberately not re-raised: an empty result instead of a 403
-            # keeps callers from probing which datasets exist.
-            return []
         except CogneeApiError:
             # Cognee errors carry their own status code and actionable message;
             # the global handler in cognee/api/client.py returns them.
