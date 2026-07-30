@@ -1,7 +1,7 @@
 """Postgres graph adapter using two tables (graph_node, graph_edge) over SQLAlchemy + asyncpg.
 
-EXPERIMENTAL: Using Postgres as a graph store is currently experimental and is not
-production-ready. Use it to experiment with keeping relational metadata, PGVector, and graph
+DEMO: Using Postgres as a graph store is currently a demo feature and is not
+production-ready. Use it to demo keeping relational metadata, PGVector, and graph
 state in a single Postgres service, but rely on a graph-native backend such as Kuzu or Neo4j
 for production workloads.
 
@@ -110,8 +110,8 @@ def _provenance_conflict_set(table, inputs: ProvenanceAttachInputs) -> Dict[str,
 class PostgresAdapter(GraphDBInterface):
     """Graph-as-tables adapter backed by Postgres, accessed via SQLAlchemy async sessions.
 
-    EXPERIMENTAL: Using Postgres as a graph store is currently experimental and is not
-    production-ready. Use it to experiment with keeping relational metadata, PGVector, and
+    DEMO: Using Postgres as a graph store is currently a demo feature and is not
+    production-ready. Use it to demo keeping relational metadata, PGVector, and
     graph state in a single Postgres service, but rely on a graph-native backend such as Kuzu
     or Neo4j for production workloads.
 
