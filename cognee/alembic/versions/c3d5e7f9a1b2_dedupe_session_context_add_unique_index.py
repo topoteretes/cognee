@@ -14,9 +14,12 @@ targets.
 
 Cache tables are create-on-init (cognee/infrastructure/databases/cache/sql/
 tables.py), not alembic-managed: fresh databases get the index from the table
-definition, so this only acts on an existing table without the index. A cache
-database split off via CACHE_DB_URL is not reachable from here and needs the
-same statements applied there manually.
+definition, and SqlCacheAdapter._heal_session_context_unique_index applies the
+same dedupe-then-index on init to any cache database alembic cannot reach (the
+default sqlite cache.db is a separate file; CACHE_DB_URL can point anywhere).
+This migration is belt-and-suspenders for cache tables living in the
+alembic-managed relational database, healing them even before the adapter's
+first write.
 """
 
 from typing import Sequence, Union
