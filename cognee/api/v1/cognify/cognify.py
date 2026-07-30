@@ -302,12 +302,19 @@ async def cognify(
         # (the distributed runner materializes per-item task columns, so it
         # needs concrete lists, not an async factory). One run_pipeline call,
         # one cognify_pipeline run per dataset, mixed datasets included.
-        dlt_tasks = await get_dlt_tasks(chunk_size=chunk_size, chunks_per_batch=chunks_per_batch)
-        tasks_by_route = {CognifyRoute.DLT_SOURCE: dlt_tasks}
-        standard_tasks = tasks
+        # Every route is wired EXPLICITLY, the standard route included — no
+        # implicit default. An unmapped route (a CognifyRoute member added
+        # without a task list here) raises KeyError instead of silently
+        # running the standard LLM list on data that was routed away from it.
+        tasks_by_route = {
+            CognifyRoute.STANDARD: tasks,
+            CognifyRoute.DLT_SOURCE: await get_dlt_tasks(
+                chunk_size=chunk_size, chunks_per_batch=chunks_per_batch
+            ),
+        }
 
         def resolve_cognify_tasks(data_item):
-            return tasks_by_route.get(cognify_route_for(data_item), standard_tasks)
+            return tasks_by_route[cognify_route_for(data_item)]
 
         result = await pipeline_executor_func(
             pipeline=run_pipeline,

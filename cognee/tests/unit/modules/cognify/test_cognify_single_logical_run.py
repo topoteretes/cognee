@@ -96,6 +96,18 @@ class TestCognifyMakesOneCall:
         assert resolver(_text_item()) == "STANDARD_TASKS"
 
     @pytest.mark.asyncio
+    async def test_unmapped_route_raises_instead_of_defaulting(self):
+        """Every route is wired explicitly — a route with no task list is a
+        programming error and raises, never silently runs the standard list."""
+        calls, _ = await self._run_cognify()
+        (call,) = calls
+        resolver = call["tasks"]
+
+        with patch.object(cognify_module, "cognify_route_for", return_value="UNMAPPED_ROUTE"):
+            with pytest.raises(KeyError):
+                resolver(_text_item())
+
+    @pytest.mark.asyncio
     async def test_temporal_swaps_standard_route_only(self):
         """temporal_cognify replaces the fallback list; manifests still route DLT."""
         calls = []
