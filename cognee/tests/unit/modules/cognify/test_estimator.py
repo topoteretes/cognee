@@ -175,19 +175,13 @@ async def test_dlt_items_are_routed_out_before_any_read(offline_estimator):
         extension=None,
         raw_data_location="does-not-exist://manifest.json",
     )
-    legacy_item = SimpleNamespace(
-        external_metadata={"source": "dlt"},
-        extension=None,
-        raw_data_location="does-not-exist://row.txt",
-    )
-
     chunks, skipped, skipped_dlt = await estimator._chunks_from_data_items(
-        [manifest_item, legacy_item], chunker=TextChunker, chunk_size=512
+        [manifest_item], chunker=TextChunker, chunk_size=512
     )
 
     assert chunks == []
     assert skipped == 0
-    assert skipped_dlt == 43  # 42 manifest rows + 1 legacy row chunk
+    assert skipped_dlt == 42  # manifest row_count, never read from disk
 
 
 @pytest.mark.asyncio

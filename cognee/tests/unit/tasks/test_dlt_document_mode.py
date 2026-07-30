@@ -4,7 +4,7 @@ A dlt source opts into the "document" ingestion path (LLM entity extraction)
 by setting ``DOCUMENT_SOURCE_ATTR`` on itself; resolve_dlt_sources then tags its
 rows ``external_metadata["source"] = <tag>`` (NOT "dlt"), so ``is_dlt_sourced``
 returns False and classify_documents routes them to TextDocument/cognify rather
-than the deterministic DltRowDocument schema path. These tests exercise that seam
+than the deterministic manifest schema path. These tests exercise that seam
 with plain objects — no connector, no database, no LLM.
 """
 

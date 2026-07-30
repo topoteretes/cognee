@@ -9,7 +9,6 @@ from cognee.modules.data.processing.document_types import (
     TextDocument,
     UnstructuredDocument,
     CsvDocument,
-    DltRowDocument,
     DltSourceDocument,
 )
 from cognee.modules.engine.models.node_set import NodeSet
@@ -112,9 +111,14 @@ def document_class_for(data_item) -> type[Document]:
     if is_dlt_source_manifest(data_item):
         return DltSourceDocument
     if is_dlt_sourced(data_item):
-        # Legacy: pre-manifest per-row DLT records; superseded by
-        # DltSourceDocument manifests.
-        return DltRowDocument
+        # Tombstone: pre-manifest per-row DLT records are unsupported. Routing
+        # them standard would silently send structured rows to the LLM, so
+        # fail loudly instead. Delete such records or re-add the source.
+        raise ValueError(
+            f"Data item {getattr(data_item, 'id', '?')} is a pre-manifest per-row DLT "
+            "record (external_metadata.source == 'dlt'), which is no longer supported. "
+            "Delete it or re-add the DLT source to ingest it as a manifest."
+        )
     extension = (data_item.extension or "").lower()
     return EXTENSION_TO_DOCUMENT_CLASS.get(extension, TextDocument)
 

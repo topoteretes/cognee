@@ -424,9 +424,9 @@ def _build_document_data_item(row: DltRowData, data_id: UUID, source_tag: str) -
     """Build a text-document DataItem from a document-source dlt row.
 
     The row is expected to carry ``title``/``content`` columns (and optionally
-    ``url``/``id``). Tagging ``external_metadata["source"] = source_tag`` (not
-    ``"dlt"``) routes the document through normal cognify entity extraction
-    rather than the deterministic dlt-row path (see ``is_dlt_sourced``).
+    ``url``/``id``). Tagging ``external_metadata["source"] = source_tag``
+    routes the document through normal cognify entity extraction rather
+    than the deterministic manifest path.
     """
     row_data = row.row_data
     title = _clean(row_data.get("title"))
@@ -457,8 +457,7 @@ def _build_schema_context_text(dlt_row: DltRowData) -> str:
 
     This text is stored as the document content and used for vector search.
     DLT rows bypass LLM extraction — their graph is built deterministically
-    from the relational schema by ``extract_dlt_source_edges`` (or
-    ``extract_dlt_fk_edges`` for legacy per-row data).
+    from the relational schema by ``extract_dlt_source_edges``.
     """
     lines = []
     lines.append(f"Table: {dlt_row.table_name}")
@@ -558,6 +557,9 @@ async def _delete_dlt_orphans(
     dataset_name: str,
     user: User,
     fresh_data_ids: Set[UUID],
+    # "dlt" stays in the sweep purely as residue cleanup: pre-manifest per-row
+    # records are unsupported (classification raises on them), and re-adding a
+    # source deletes any that linger.
     sources: tuple[str, ...] = ("dlt", "dlt_source"),
     manifest_source_names: Optional[Set[str]] = None,
 ) -> None:

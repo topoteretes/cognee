@@ -33,7 +33,8 @@ def _manifest_item():
 
 
 def _legacy_item():
-    return SimpleNamespace(external_metadata={"source": "dlt"}, extension=None)
+    # Pre-manifest per-row DLT record: unsupported, must fail loudly.
+    return SimpleNamespace(id="legacy-1", external_metadata={"source": "dlt"}, extension=None)
 
 
 def _text_item():
@@ -44,8 +45,11 @@ class TestCognifyRouting:
     def test_manifest_routes_to_dlt_source(self):
         assert cognify_route_for(_manifest_item()) is CognifyRoute.DLT_SOURCE
 
-    def test_legacy_row_routes_to_dlt_row_legacy(self):
-        assert cognify_route_for(_legacy_item()) is CognifyRoute.DLT_ROW_LEGACY
+    def test_legacy_row_record_raises_instead_of_routing(self):
+        """No legacy route exists; silently routing standard would LLM-process
+        structured rows, so classification (and thus routing) fails loudly."""
+        with pytest.raises(ValueError, match="no longer supported"):
+            cognify_route_for(_legacy_item())
 
     def test_plain_document_routes_standard(self):
         assert cognify_route_for(_text_item()) is CognifyRoute.STANDARD
@@ -67,11 +71,6 @@ class TestCognifyMakesOneCall:
             ),
             patch.object(cognify_module, "get_default_tasks", new=AsyncMock(return_value=tasks)),
             patch.object(cognify_module, "get_dlt_tasks", new=AsyncMock(return_value="DLT_TASKS")),
-            patch.object(
-                cognify_module,
-                "get_dlt_row_legacy_tasks",
-                new=AsyncMock(return_value="LEGACY_TASKS"),
-            ),
         ):
             result = await cognify_module.cognify(
                 datasets=["ds"],
@@ -93,22 +92,7 @@ class TestCognifyMakesOneCall:
 
         resolver = call["resolve_tasks"]
         assert resolver(_manifest_item()) == "DLT_TASKS"
-        assert resolver(_legacy_item()) == "LEGACY_TASKS"
         assert resolver(_text_item()) == "STANDARD_TASKS"
-
-    @pytest.mark.asyncio
-    async def test_legacy_task_list_is_llm_free(self):
-        """The legacy route's list contains only deterministic tasks."""
-        tasks = await cognify_module.get_dlt_row_legacy_tasks(chunk_size=1024)
-        names = [task.executable.__name__ for task in tasks]
-        assert names == [
-            "classify_documents",
-            "extract_chunks_from_documents",
-            "add_data_points",
-            "extract_dlt_fk_edges",
-        ]
-        assert "extract_graph_and_summarize" not in names
-        assert "detect_contradictions" not in names
 
     @pytest.mark.asyncio
     async def test_temporal_swaps_standard_route_only(self):

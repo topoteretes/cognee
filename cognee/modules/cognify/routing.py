@@ -12,7 +12,7 @@ The routing fact is written onto each Data record at add time
 from enum import Enum
 
 from cognee.tasks.documents.classify_documents import document_class_for
-from cognee.modules.data.processing.document_types import DltRowDocument, DltSourceDocument
+from cognee.modules.data.processing.document_types import DltSourceDocument
 
 
 class CognifyRoute(Enum):
@@ -20,12 +20,10 @@ class CognifyRoute(Enum):
 
     STANDARD = "standard"
     DLT_SOURCE = "dlt_source"
-    DLT_ROW_LEGACY = "dlt_row_legacy"
 
 
 _ROUTE_BY_DOCUMENT_CLASS = {
     DltSourceDocument: CognifyRoute.DLT_SOURCE,
-    DltRowDocument: CognifyRoute.DLT_ROW_LEGACY,
 }
 
 

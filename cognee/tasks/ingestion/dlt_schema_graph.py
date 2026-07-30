@@ -2,7 +2,7 @@
 
 Builds and persists SchemaTable/SchemaRelationship nodes and row-level edges
 for DLT-sourced relational data. Used by both extract_dlt_source_edges
-(manifest pipeline) and extract_dlt_fk_edges (legacy per-row pipeline).
+(the manifest pipeline).
 """
 
 import json
@@ -186,8 +186,7 @@ async def emit_dlt_schema_graph(
             )
 
         for ref in record.get("fk_references", []):
-            # Legacy metadata uses "target_data_id"; manifests use "target_node_id".
-            target_node_id = ref.get("target_node_id") or ref.get("target_data_id")
+            target_node_id = ref.get("target_node_id")
             relationship_name = ref.get("relationship_name", "references")
 
             if not target_node_id:

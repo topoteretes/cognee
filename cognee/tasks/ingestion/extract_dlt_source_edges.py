@@ -31,7 +31,7 @@ async def extract_dlt_source_edges(
     incoming data points are per-row DocumentChunks whose ids are the stable
     row node ids from the manifest. It gathers table schemas and per-row FK
     records from the manifest and delegates graph construction to
-    emit_dlt_schema_graph (shared with the legacy extract_dlt_fk_edges).
+    emit_dlt_schema_graph.
 
     Row-level edges are only emitted for rows present in the current batch,
     so batching does not duplicate work. Cross-batch dedup state lives in

@@ -495,7 +495,7 @@ async def add_code_graph_edges(
 
     Relation names are dynamic, so they cannot be expressed as DataPoint field
     references; instead they are written directly through the graph engine,
-    following the extract_dlt_fk_edges precedent. Passthrough: returns
+    as a passthrough task: returns
     data_points unchanged.
     """
     from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine

@@ -503,8 +503,6 @@ async def _chunks_from_data_items(
                 )
                 row_count = 0
             skipped_dlt_chunks += row_count
-        elif route is CognifyRoute.DLT_ROW_LEGACY:
-            skipped_dlt_chunks += 1  # DltRowDocument.read yields one chunk per record
         else:
             llm_items.append(data_item)
 

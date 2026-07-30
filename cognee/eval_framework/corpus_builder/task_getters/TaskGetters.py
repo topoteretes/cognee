@@ -14,10 +14,8 @@ from cognee.eval_framework.corpus_builder.task_getters.get_default_tasks_by_indi
 class TaskGetters(Enum):
     """Enum mapping task getter types to their respective functions.
 
-    DEFAULT mirrors cognify's standard task list, which no longer includes
-    extract_dlt_fk_edges — legacy DLT row data has its own cognify route
-    (get_dlt_row_legacy_tasks); eval corpora contain none, so this is a no-op
-    here.
+    DEFAULT mirrors cognify's standard task list (DLT data routes to its own
+    deterministic pipeline in cognify; eval corpora contain none).
     """
 
     DEFAULT = ("Default", get_default_tasks)
