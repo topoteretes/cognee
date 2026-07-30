@@ -17,8 +17,8 @@ from cognee.shared.usage_logger import log_usage
 import importlib.util
 from contextlib import redirect_stdout
 import mcp.types as types
-from mcp.server import FastMCP
-from mcp.server.transport_security import TransportSecuritySettings
+from fastmcp import FastMCP
+from fastmcp.tools.tool import ToolResult
 from cognee.modules.storage.utils import JSONEncoder
 from starlette.responses import JSONResponse
 from starlette.middleware import Middleware
@@ -105,11 +105,11 @@ def _record_task_error(dataset: str, error: str) -> None:
     bucket.append((datetime.now(timezone.utc).isoformat(), error))
 
 
-def _configure_transport_security(host: str) -> None:
-    """Configure MCP transport security based on env vars and bind host.
+def _transport_security_kwargs(host: str) -> dict:
+    """Build the Host/Origin guard kwargs for mcp.http_app() from env and bind host.
 
-    Must be called before run_sse_with_cors() or run_http_with_cors(), since
-    the SDK reads mcp.settings.transport_security lazily when creating the app.
+    FastMCP 3 takes these per-app rather than off a mutable settings object, so
+    this returns kwargs instead of configuring global state.
 
     Env vars:
         MCP_DISABLE_DNS_REBINDING_PROTECTION: Set to "true" to disable all
@@ -121,17 +121,14 @@ def _configure_transport_security(host: str) -> None:
     disable = os.getenv("MCP_DISABLE_DNS_REBINDING_PROTECTION", "false").lower() == "true"
 
     if disable:
-        mcp.settings.transport_security = TransportSecuritySettings(
-            enable_dns_rebinding_protection=False,
-        )
         logger.info("MCP transport security: DNS rebinding protection disabled")
-        return
+        return {"host_origin_protection": False}
 
     extra_hosts = [h.strip() for h in os.getenv("MCP_ALLOWED_HOSTS", "").split(",") if h.strip()]
 
-    # The SDK only auto-populates localhost defaults when transport_security is
-    # None AND host is a loopback address. When the user binds to 0.0.0.0 or a
-    # LAN IP, we must provide the full allowed list ourselves.
+    # "auto" only guards loopback binds and explicit allowlists. When the user
+    # binds to 0.0.0.0 or a LAN IP, we must provide the full allowed list
+    # ourselves and turn the guard on unconditionally.
     localhost_hosts = ["127.0.0.1:*", "localhost:*", "[::1]:*"]
     localhost_origins = ["http://127.0.0.1:*", "http://localhost:*", "http://[::1]:*"]
 
@@ -140,18 +137,19 @@ def _configure_transport_security(host: str) -> None:
     allowed_origins = localhost_origins + [f"http://{h}" for h in extra_hosts]
 
     if host not in ("127.0.0.1", "localhost", "::1") or extra_hosts:
-        mcp.settings.transport_security = TransportSecuritySettings(
-            enable_dns_rebinding_protection=True,
-            allowed_hosts=allowed_hosts,
-            allowed_origins=allowed_origins,
-        )
         logger.info(
             "MCP transport security: allowed_hosts=%s",
             allowed_hosts,
         )
-    else:
-        # Loopback-only with no extra hosts — let the SDK use its own defaults.
-        logger.info("MCP transport security: using SDK defaults (localhost only)")
+        return {
+            "host_origin_protection": True,
+            "allowed_hosts": allowed_hosts,
+            "allowed_origins": allowed_origins,
+        }
+
+    # Loopback-only with no extra hosts — let FastMCP use its own defaults.
+    logger.info("MCP transport security: using FastMCP defaults (localhost only)")
+    return {}
 
 
 def _is_running_in_docker() -> bool:
@@ -165,10 +163,14 @@ def _get_cors_origins() -> list[str]:
     return [o.strip() for o in raw.split(",") if o.strip()]
 
 
-async def run_sse_with_cors():
-    """Custom SSE transport with CORS middleware."""
-    sse_app = mcp.sse_app()
-    sse_app.add_middleware(
+async def _serve_with_cors(transport: str, host: str, port: int, log_level: str):
+    """Serve one of FastMCP's HTTP transports under uvicorn with CORS added.
+
+    FastMCP's own run_http_async() would bind the socket for us but gives no
+    seam for the CORS middleware, so we keep building the ASGI app ourselves.
+    """
+    app = mcp.http_app(transport=transport, **_transport_security_kwargs(host))
+    app.add_middleware(
         CORSMiddleware,
         allow_origins=_get_cors_origins(),
         allow_credentials=True,
@@ -177,31 +179,10 @@ async def run_sse_with_cors():
     )
 
     config = uvicorn.Config(
-        sse_app,
-        host=mcp.settings.host,
-        port=mcp.settings.port,
-        log_level=mcp.settings.log_level.lower(),
-    )
-    server = uvicorn.Server(config)
-    await server.serve()
-
-
-async def run_http_with_cors():
-    """Custom HTTP transport with CORS middleware."""
-    http_app = mcp.streamable_http_app()
-    http_app.add_middleware(
-        CORSMiddleware,
-        allow_origins=_get_cors_origins(),
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
-
-    config = uvicorn.Config(
-        http_app,
-        host=mcp.settings.host,
-        port=mcp.settings.port,
-        log_level=mcp.settings.log_level.lower(),
+        app,
+        host=host,
+        port=port,
+        log_level=log_level.lower(),
     )
     server = uvicorn.Server(config)
     await server.serve()
@@ -1497,7 +1478,7 @@ def _inject_graph_viz_overrides(html: str) -> str:
     meta={"ui": {"resourceUri": _VISUALIZE_APP_URI}},
 )
 @log_usage(function_name="MCP visualize_graph_ui", log_type="mcp_tool")
-async def visualize_graph_ui(dataset_name: str = None) -> types.CallToolResult:
+async def visualize_graph_ui(dataset_name: str = None) -> ToolResult:
     """Render the Cognee graph for a specific dataset.
 
     With ENABLE_BACKEND_ACCESS_CONTROL=true, each (user, dataset) pair has its
@@ -1516,8 +1497,8 @@ async def visualize_graph_ui(dataset_name: str = None) -> types.CallToolResult:
     # source. Reject explicit dataset selection there instead of silently
     # falling back to a different graph.
     if explicit_dataset and cognee_client.use_api:
-        return types.CallToolResult(
-            isError=True,
+        return ToolResult(
+            is_error=True,
             content=[
                 types.TextContent(
                     type="text",
@@ -1543,9 +1524,9 @@ async def visualize_graph_ui(dataset_name: str = None) -> types.CallToolResult:
 
     html = _inject_graph_viz_overrides(html)
 
-    return types.CallToolResult(
+    return ToolResult(
         content=[types.TextContent(type="text", text="Cognee knowledge graph rendered.")],
-        structuredContent={"html": html},
+        structured_content={"html": html},
     )
 
 
@@ -1558,8 +1539,8 @@ async def visualize_graph_ui(dataset_name: str = None) -> types.CallToolResult:
     meta={"ui": {"resourceUri": _VISUALIZE_APP_URI}},
 )
 @log_usage(function_name="MCP upload_file_ui", log_type="mcp_tool")
-async def upload_file_ui() -> types.CallToolResult:
-    return types.CallToolResult(
+async def upload_file_ui() -> ToolResult:
+    return ToolResult(
         content=[types.TextContent(type="text", text="Cognee workspace opened.")],
     )
 
@@ -1575,8 +1556,8 @@ async def upload_file_ui() -> types.CallToolResult:
     meta={"ui": {"resourceUri": _VISUALIZE_APP_URI}},
 )
 @log_usage(function_name="MCP open_cognee_workspace", log_type="mcp_tool")
-async def open_cognee_workspace() -> types.CallToolResult:
-    return types.CallToolResult(
+async def open_cognee_workspace() -> ToolResult:
+    return ToolResult(
         content=[types.TextContent(type="text", text="Cognee workspace opened.")],
     )
 
@@ -1611,7 +1592,7 @@ def _format_named_items(items, singular: str, plural: str, limit: int = 50) -> s
     ),
 )
 @log_usage(function_name="MCP list_datasets_json", log_type="mcp_tool")
-async def list_datasets_json() -> types.CallToolResult:
+async def list_datasets_json() -> ToolResult:
     with redirect_stdout(sys.stderr):
         raw = await cognee_client.list_datasets()
 
@@ -1622,14 +1603,14 @@ async def list_datasets_json() -> types.CallToolResult:
         else:
             datasets.append({"id": str(ds.id), "name": ds.name})
 
-    return types.CallToolResult(
+    return ToolResult(
         content=[
             types.TextContent(
                 type="text",
                 text=_format_named_items(datasets, "dataset", "datasets"),
             )
         ],
-        structuredContent={"datasets": datasets},
+        structured_content={"datasets": datasets},
     )
 
 
@@ -1641,13 +1622,13 @@ async def list_datasets_json() -> types.CallToolResult:
     ),
 )
 @log_usage(function_name="MCP list_dataset_data_json", log_type="mcp_tool")
-async def list_dataset_data_json(dataset_id: str) -> types.CallToolResult:
+async def list_dataset_data_json(dataset_id: str) -> ToolResult:
     from uuid import UUID
     from cognee.modules.data.methods import get_dataset, get_dataset_data
 
     if cognee_client.use_api:
-        return types.CallToolResult(
-            isError=True,
+        return ToolResult(
+            is_error=True,
             content=[
                 types.TextContent(
                     type="text",
@@ -1659,8 +1640,8 @@ async def list_dataset_data_json(dataset_id: str) -> types.CallToolResult:
     try:
         dataset_uuid = UUID(dataset_id)
     except ValueError as e:
-        return types.CallToolResult(
-            isError=True,
+        return ToolResult(
+            is_error=True,
             content=[types.TextContent(type="text", text=f"Error: invalid dataset_id ({e}).")],
         )
 
@@ -1668,8 +1649,8 @@ async def list_dataset_data_json(dataset_id: str) -> types.CallToolResult:
         user = await get_default_user()
         dataset = await get_dataset(user.id, dataset_uuid)
         if not dataset:
-            return types.CallToolResult(
-                isError=True,
+            return ToolResult(
+                is_error=True,
                 content=[
                     types.TextContent(type="text", text=f"Error: dataset not found: {dataset_id}.")
                 ],
@@ -1677,14 +1658,14 @@ async def list_dataset_data_json(dataset_id: str) -> types.CallToolResult:
         items = await get_dataset_data(dataset.id)
 
     data = [{"id": str(item.id), "name": item.name or "(unnamed)"} for item in items]
-    return types.CallToolResult(
+    return ToolResult(
         content=[
             types.TextContent(
                 type="text",
                 text=_format_named_items(data, "data item", "data items"),
             )
         ],
-        structuredContent={"data": data},
+        structured_content={"data": data},
     )
 
 
@@ -1747,7 +1728,7 @@ def _agent_scoped_default_dataset() -> str:
     ),
 )
 @log_usage(function_name="MCP get_client_info_json", log_type="mcp_tool")
-async def get_client_info_json() -> types.CallToolResult:
+async def get_client_info_json() -> ToolResult:
     from mcp.server.lowlevel.server import request_ctx
 
     client_name = "unknown"
@@ -1776,14 +1757,14 @@ async def get_client_info_json() -> types.CallToolResult:
     else:
         default_dataset = "main_dataset"
 
-    return types.CallToolResult(
+    return ToolResult(
         content=[
             types.TextContent(
                 type="text",
                 text=f"Agent: {client_name} → default dataset: {default_dataset}",
             )
         ],
-        structuredContent={
+        structured_content={
             "client": {"name": client_name, "version": client_version},
             "default_dataset": default_dataset,
             "agent_scoped": agent_scoped,
@@ -1799,16 +1780,16 @@ async def get_client_info_json() -> types.CallToolResult:
     ),
 )
 @log_usage(function_name="MCP create_dataset_json", log_type="mcp_tool")
-async def create_dataset_json(name: str) -> types.CallToolResult:
+async def create_dataset_json(name: str) -> ToolResult:
     name = (name or "").strip()
     if not name:
-        return types.CallToolResult(
-            isError=True,
+        return ToolResult(
+            is_error=True,
             content=[types.TextContent(type="text", text="Error: dataset name is required.")],
         )
     if cognee_client.use_api:
-        return types.CallToolResult(
-            isError=True,
+        return ToolResult(
+            is_error=True,
             content=[
                 types.TextContent(
                     type="text",
@@ -1825,9 +1806,9 @@ async def create_dataset_json(name: str) -> types.CallToolResult:
         user = await get_default_user()
         dataset = await create_authorized_dataset(name, user)
 
-    return types.CallToolResult(
+    return ToolResult(
         content=[types.TextContent(type="text", text=f"Dataset '{dataset.name}' ready.")],
-        structuredContent={"dataset": {"id": str(dataset.id), "name": dataset.name}},
+        structured_content={"dataset": {"id": str(dataset.id), "name": dataset.name}},
     )
 
 
@@ -1956,9 +1937,8 @@ async def main():
     # Initialize the global CogneeClient
     cognee_client = CogneeClient(api_url=args.api_url, api_token=args.api_token)
 
-    mcp.settings.host = args.host
-    mcp.settings.port = int(args.port)
-    _configure_transport_security(args.host)
+    host = args.host
+    port = int(args.port)
 
     # Resolve cloud connection: CLI args take precedence over env vars
     serve_url = args.serve_url or os.environ.get("COGNEE_SERVICE_URL", "")
@@ -1999,16 +1979,18 @@ async def main():
     try:
         match args.transport.lower():
             case "sse":
-                logger.info(f"Running MCP server with SSE transport on {args.host}:{args.port}")
-                await run_sse_with_cors()
+                logger.info(f"Running MCP server with SSE transport on {host}:{port}")
+                await _serve_with_cors("sse", host, port, args.log_level)
             case "http":
                 logger.info(
-                    f"Running MCP server with Streamable HTTP transport on {args.host}:{args.port}{args.path}"
+                    f"Running MCP server with Streamable HTTP transport on {host}:{port}{args.path}"
                 )
-                await run_http_with_cors()
+                await _serve_with_cors("http", host, port, args.log_level)
             case _:
                 logger.info("Running MCP server with stdio")
-                await mcp.run_stdio_async()
+                # show_banner=False: the banner is cosmetic and its version check
+                # makes a network call on every startup.
+                await mcp.run_stdio_async(show_banner=False)
     finally:
         # Drain background tasks with a bounded timeout so a hung cognify can't
         # block shutdown indefinitely. Then close the HTTP client pool.

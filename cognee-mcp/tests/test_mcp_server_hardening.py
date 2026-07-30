@@ -1077,7 +1077,7 @@ async def test_list_datasets_json_puts_names_in_text_channel(monkeypatch):
     assert "alpha (id-1)" in text
     assert "beta (id-2)" in text
     # Structured payload is preserved for the workspace UI.
-    assert result.structuredContent == {
+    assert result.structured_content == {
         "datasets": [
             {"id": "id-1", "name": "alpha"},
             {"id": "id-2", "name": "beta"},
@@ -1102,7 +1102,9 @@ async def test_list_datasets_json_text_channel_over_mcp_protocol(monkeypatch):
 
     monkeypatch.setattr(server, "cognee_client", FakeClient())
 
-    async with create_connected_server_and_client_session(server.mcp) as client:
+    # FastMCP 3 keeps the low-level Server on _mcp_server; the SDK helper needs that,
+    # not the FastMCP wrapper.
+    async with create_connected_server_and_client_session(server.mcp._mcp_server) as client:
         await client.initialize()
 
         tool_names = {tool.name for tool in (await client.list_tools()).tools}
