@@ -291,6 +291,7 @@ Use these defaults:
 - `NATURAL_LANGUAGE`: natural language to graph query
 - `TEMPORAL`: time-aware graph search
 - `CODING_RULES`: code rules and patterns
+- `CODE`: deterministic code fact lookup, graph traversal, paths, and impact analysis
 - `FEELING_LUCKY`: let Cognee choose automatically
 - `FEEDBACK`: apply feedback to improve later retrieval behavior
 

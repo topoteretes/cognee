@@ -312,8 +312,31 @@ async def search_in_datasets_context(
                     include_references=include_references,
                 )
 
+    async def _report_code_seed_miss(dataset_search, dataset: Dataset) -> SearchResultPayload:
+        """Report a per-dataset CODE seed miss instead of failing the whole request.
+
+        A name/id seed that one dataset cannot resolve says nothing about the
+        other datasets being searched, so surface it as that dataset's result.
+        """
+        from cognee.modules.retrieval.code_retriever import CodeSeedNotFoundError
+
+        try:
+            return await dataset_search
+        except CodeSeedNotFoundError as error:
+            return SearchResultPayload(
+                result_object=None,
+                context=None,
+                completion={"seed_not_found": True, "error": str(error)},
+                search_type=query_type,
+                only_context=False,
+                dataset_name=dataset.name,
+                dataset_id=dataset.id,
+                dataset_tenant_id=dataset.tenant_id,
+            )
+
     # Search every dataset async based on query and appropriate database configuration
     tasks = []
+    soften_code_seed_misses = query_type is SearchType.CODE and len(search_datasets) > 1
     if backend_access_control_enabled():
         for dataset in search_datasets:
             tasks.append(
@@ -338,6 +361,8 @@ async def search_in_datasets_context(
                     include_references=include_references,
                 )
             )
+            if soften_code_seed_misses:
+                tasks[-1] = _report_code_seed_miss(tasks[-1], dataset)
     else:
         # Run search without setting database context in case access control is disabled
         # Needed for low level pipelines that need to run search without dataset context.

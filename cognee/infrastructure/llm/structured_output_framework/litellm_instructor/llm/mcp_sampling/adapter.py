@@ -153,7 +153,7 @@ class MCPSamplingAdapter(LLMInterface):
             f"Last error: {last_error}"
         )
 
-    async def create_transcript(self, input: str) -> TranscriptionReturnType | None:
+    async def create_transcript(self, input: str, **kwargs: Any) -> TranscriptionReturnType | None:
         """Audio transcription has no MCP sampling equivalent — graceful no-audio."""
         logger.debug("create_transcript is not supported over MCP sampling; returning None")
         return None

@@ -107,10 +107,10 @@ class NaturalLanguageRetriever(BaseRetriever):
     async def get_retrieved_objects(self, query: str) -> Any:
         graph_engine = await get_graph_engine()
 
-        # Postgres backends do not support Cypher generation/execution
         # Cypher support is declared on the adapter class
-        # (GraphDBInterface.supports_cypher_queries), so the check needs no
-        # imports of optional backend packages absent from slim images.
+        # (GraphDBInterface.supports_cypher_queries), so backends like Postgres
+        # and Turso are excluded without importing optional backend packages
+        # absent from slim images.
         if not getattr(graph_engine, "supports_cypher_queries", True):
             raise SearchTypeNotSupported(
                 f"Natural language search is not supported with the "

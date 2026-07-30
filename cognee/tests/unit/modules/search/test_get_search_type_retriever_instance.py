@@ -19,6 +19,7 @@ from cognee.modules.retrieval.graph_summary_completion_retriever import (
     GraphSummaryCompletionRetriever,
 )
 from cognee.modules.retrieval.temporal_retriever import TemporalRetriever
+from cognee.modules.retrieval.code_retriever import CodeRetriever
 
 
 class _DummyCommunityRetriever:
@@ -118,6 +119,26 @@ async def test_default_mapping_passes_top_k_to_retrievers():
         SearchType.SUMMARIES, query_text="q", top_k=4
     )
     assert isinstance(retriever_instance, SummariesRetriever)
+
+
+@pytest.mark.asyncio
+async def test_code_retriever_receives_structured_operation_config():
+    import cognee.modules.search.methods.get_search_type_retriever_instance as mod
+
+    retriever_instance = await mod.get_search_type_retriever_instance(
+        SearchType.CODE,
+        query_text="Checkout",
+        retriever_specific_config={
+            "operation": "traverse",
+            "direction": "reverse",
+            "max_depth": 3,
+        },
+    )
+
+    assert isinstance(retriever_instance, CodeRetriever)
+    assert retriever_instance.operation == "traverse"
+    assert retriever_instance.config["direction"] == "reverse"
+    assert retriever_instance.config["max_depth"] == 3
 
 
 @pytest.mark.asyncio

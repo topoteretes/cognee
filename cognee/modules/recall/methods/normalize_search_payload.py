@@ -31,6 +31,7 @@ _KIND_BY_SEARCH_TYPE: dict[SearchType, SearchResultKind] = {
     SearchType.NATURAL_LANGUAGE: SearchResultKind.NATURAL_LANGUAGE,
     SearchType.TEMPORAL: SearchResultKind.TEMPORAL,
     SearchType.CODING_RULES: SearchResultKind.CODING_RULE,
+    SearchType.CODE: SearchResultKind.CODE,
     SearchType.CHUNKS: SearchResultKind.CHUNK,
     SearchType.CHUNKS_LEXICAL: SearchResultKind.CHUNK,
     SearchType.SUMMARIES: SearchResultKind.SUMMARY,

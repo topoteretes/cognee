@@ -62,6 +62,30 @@ class TestParseTimestamp:
         # Out-of-range epochs return None instead of raising.
         assert parse_timestamp(float("inf")) is None
 
+    def test_values_without_an_offset_are_read_as_utc(self):
+        # Exports that drop the offset must not be read in the importing
+        # machine's local timezone.
+        assert parse_timestamp("2024-03-01T12:00:00") == datetime(
+            2024, 3, 1, 12, 0, tzinfo=timezone.utc
+        )
+        assert parse_timestamp("2024-03-01") == datetime(2024, 3, 1, tzinfo=timezone.utc)
+        assert parse_timestamp(datetime(2024, 3, 1, 12, 0)) == datetime(
+            2024, 3, 1, 12, 0, tzinfo=timezone.utc
+        )
+
+    def test_explicit_offsets_are_preserved(self):
+        assert parse_timestamp("2024-03-01T17:30:00+05:30") == datetime(
+            2024, 3, 1, 12, 0, tzinfo=timezone.utc
+        )
+
+    def test_mixed_input_formats_stay_orderable(self):
+        # One record can carry an ISO created_at and an epoch updated_at;
+        # ordering them raises TypeError if either comes back naive.
+        created_at = parse_timestamp("2024-03-01T12:00:00")
+        updated_at = parse_timestamp(1709294400 + 3600)
+        assert created_at < updated_at
+        assert created_at == parse_timestamp(1709294400)
+
 
 class TestCOGXArchive:
     def _sample_records(self):
@@ -227,6 +251,92 @@ class TestLettaSource:
         assert block.label == "persona"
         assert block.limit == 2000
 
+    def test_turns_with_mixed_timestamp_formats_order_by_instant(self):
+        # Letta serializes message created_at with or without an offset
+        # depending on version; both denote UTC instants.
+        agent_file = {
+            "agents": [
+                {
+                    "name": "support",
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": "my order is late",
+                            "created_at": "2024-03-01T06:00:00Z",
+                        },
+                        {
+                            "role": "assistant",
+                            "content": "refunded you",
+                            "created_at": "2024-03-01T10:00:00",
+                        },
+                    ],
+                }
+            ]
+        }
+        episode = next(r for r in collect(LettaSource(agent_file)) if r.kind == "episode")
+        earlier, later = episode.turns
+        assert earlier.occurred_at < later.occurred_at
+
+        transcript = loader.render_episode(episode)
+        assert transcript.index("my order is late") < transcript.index("refunded you")
+
+    def test_empty_alias_does_not_shadow_the_populated_one(self):
+        # Letta renamed these collections across versions and an agent file can
+        # carry both spellings, the retired one left empty. The empty spelling
+        # must not stand in for the populated one.
+        agent_file = {
+            "agents": [
+                {
+                    "name": "assistant",
+                    "core_memory": [],
+                    "blocks": [{"label": "persona", "value": "I am helpful"}],
+                    "messages": [],
+                    "in_context_messages": [{"role": "user", "content": "hello"}],
+                    "archival_memory": [],
+                    "passages": [{"text": "archived note"}],
+                }
+            ]
+        }
+        kinds = [record.kind for record in collect(LettaSource(agent_file))]
+        assert kinds.count("memory_block") == 1
+        assert kinds.count("episode") == 1
+        assert kinds.count("document") == 1
+
+    def test_null_content_falls_back_to_text(self):
+        # A serializer that emits unset optional fields writes an absent
+        # content as null rather than omitting the key, so the text fallback
+        # has to fire on a present-but-null content as well as a missing one.
+        agent_file = {
+            "agents": [
+                {
+                    "name": "support",
+                    "messages": [
+                        {"role": "user", "content": None, "text": "where is my order"},
+                        {"role": "assistant", "content": None, "text": "it ships today"},
+                    ],
+                }
+            ]
+        }
+        episode = next(r for r in collect(LettaSource(agent_file)) if r.kind == "episode")
+        assert [turn.content for turn in episode.turns] == [
+            "where is my order",
+            "it ships today",
+        ]
+
+    def test_null_content_does_not_drop_the_whole_episode(self):
+        # Every message in a file is serialized the same way, so dropping them
+        # one by one leaves no turns -- and an agent with no turns yields no
+        # episode at all, losing the conversation without raising.
+        agent_file = {
+            "agents": [
+                {
+                    "name": "support",
+                    "messages": [{"role": "user", "content": None, "text": "hello"}],
+                }
+            ]
+        }
+        assert [record.kind for record in collect(LettaSource(agent_file))] == ["episode"]
+
 
 class TestZepSource:
     def test_graphiti_export(self):
@@ -274,6 +384,20 @@ class TestZepSource:
         assert fact.valid_at is not None
         assert fact.invalid_at is None
         assert fact.provenance == ["ep1"]
+
+    def test_empty_alias_does_not_shadow_the_populated_one(self):
+        # A Cypher dump names every collection it queried, so the ones that
+        # came back empty sit alongside the ones that did not.
+        export = {
+            "episodes": [],
+            "episodic_nodes": [{"uuid": "ep1", "content": "Alice moved to Berlin"}],
+            "entities": [],
+            "nodes": [{"uuid": "n1", "name": "Alice"}, {"uuid": "n2", "name": "Berlin"}],
+            "facts": [],
+            "edges": [{"uuid": "f1", "source_node_uuid": "n1", "target_node_uuid": "n2"}],
+        }
+        records = collect(GraphitiSource(export))
+        assert [record.kind for record in records] == ["episode", "entity", "entity", "fact"]
 
     def test_default_mode_is_hybrid(self):
         assert GraphitiSource({"nodes": []}).mode == "hybrid"
