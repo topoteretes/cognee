@@ -48,6 +48,9 @@ async def main():
     print("\nStep 2 — Importing mem0 memories (mode=preserve) …")
     source = Mem0Source(DATA_FILE, mode="preserve")
     result = await cognee.remember(source)
+    # when loading Mem0Source in preserve mode, cognify is skipped, so the data isn't loaded in knowledge graph - need
+    # to call cognify manually
+    await cognee.cognify()
     print("  ", result)
 
     # ------------------------------------------------------------------
