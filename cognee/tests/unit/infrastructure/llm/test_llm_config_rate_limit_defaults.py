@@ -34,3 +34,20 @@ def test_cloud_providers_keep_regular_default():
 def test_explicit_setting_wins_over_local_default():
     config = _build(llm_provider="ollama", llm_model="phi4:latest", llm_rate_limit_requests=90)
     assert config.llm_rate_limit_requests == 90
+
+
+@pytest.mark.parametrize(
+    ("provider", "model", "expected"),
+    [
+        ("ollama", "phi4:latest", True),
+        ("llama_cpp", "some-model", True),
+        ("custom", "lm_studio/qwen2.5-7b", True),
+        ("custom", "hosted_vllm/meta-llama/Llama-3-70B", True),
+        ("openai", "openai/gpt-5-mini", False),
+        (None, None, False),
+    ],
+)
+def test_is_local_llm(provider, model, expected):
+    from cognee.infrastructure.llm.config import is_local_llm
+
+    assert is_local_llm(provider, model) is expected

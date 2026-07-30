@@ -32,11 +32,24 @@ KNOWN_LLM_PROVIDERS = frozenset(
     }
 )
 
-# Default RPM budget for local inference servers (Ollama, LM Studio, vLLM,
-# llama.cpp) when LLM_RATE_LIMIT_REQUESTS is not explicitly configured — they
-# process requests (near-)serially, unlike cloud providers which keep the
-# regular default of 60.
+# Local inference servers process requests (near-)serially, unlike cloud
+# providers. One definition of the distinction, for everything that needs it:
+# by first-class provider name, or by litellm model routing prefix (LM Studio
+# and vLLM have no first-class provider in cognee).
+LOCAL_LLM_PROVIDERS = frozenset({"ollama", "llama_cpp"})
+LOCAL_LLM_MODEL_PREFIXES = ("lm_studio/", "hosted_vllm/", "vllm/")
+
+# Default RPM budget for local inference servers when LLM_RATE_LIMIT_REQUESTS
+# is not explicitly configured; cloud providers keep the regular default of 60.
 LOCAL_DEFAULT_RATE_LIMIT_REQUESTS = 20
+
+
+def is_local_llm(provider: str | None, model: str | None) -> bool:
+    """True when the provider/model points at a local inference server
+    (Ollama, llama.cpp by provider; LM Studio, vLLM by model prefix)."""
+    if (provider or "").lower() in LOCAL_LLM_PROVIDERS:
+        return True
+    return (model or "").lower().startswith(LOCAL_LLM_MODEL_PREFIXES)
 
 
 class LLMConfig(BaseSettings):
@@ -195,11 +208,7 @@ class LLMConfig(BaseSettings):
         if "llm_rate_limit_requests" in self.model_fields_set:
             return self
 
-        provider = (self.llm_provider or "").lower()
-        model = (self.llm_model or "").lower()
-        local_providers = {"ollama", "llama_cpp"}
-        local_model_prefixes = ("lm_studio/", "hosted_vllm/", "vllm/")
-        if provider in local_providers or model.startswith(local_model_prefixes):
+        if is_local_llm(self.llm_provider, self.llm_model):
             self.llm_rate_limit_requests = LOCAL_DEFAULT_RATE_LIMIT_REQUESTS
 
         return self

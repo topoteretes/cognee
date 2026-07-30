@@ -1,4 +1,4 @@
-"""Tests for AUTO_RATE_LIMIT: full speed until overload, then warn and enable the RPM limiter."""
+"""Seam tests: the dispatch context manager wires config, pacing, and the overload policy."""
 
 import asyncio
 from types import SimpleNamespace
@@ -7,6 +7,9 @@ import httpx
 import openai
 import pytest
 
+import cognee.infrastructure.llm.config as llm_config_module
+import cognee.infrastructure.llm.overload_policy as overload_policy_module
+from cognee.infrastructure.llm.overload_policy import OverloadPolicy
 from cognee.shared import rate_limiting
 from cognee.shared.rate_limiting import llm_rate_limiter_context_manager
 
@@ -31,22 +34,20 @@ def _config(**overrides):
         auto_rate_limit=True,
         llm_rate_limit_requests=60,
         llm_rate_limit_interval=60,
-        llm_provider="openai",
-        llm_model="openai/gpt-5-mini",
-        model_fields_set=set(),
     )
     defaults.update(overrides)
     return SimpleNamespace(**defaults)
 
 
 @pytest.fixture(autouse=True)
-def fresh_state(monkeypatch):
-    """Reset activation; default config: rate limiting off, auto fallback on."""
-    monkeypatch.setattr(rate_limiting, "_auto_paced_until", 0.0)
-    monkeypatch.setattr(rate_limiting, "llm_config", _config())
+def seam(monkeypatch):
+    """Fresh policy + pacer spy + config stub for every test."""
+    policy = OverloadPolicy()
+    monkeypatch.setattr(overload_policy_module, "llm_overload_policy", policy)
     spy = PacerSpy()
-    monkeypatch.setattr(rate_limiting, "llm_rate_limiter", spy)
-    return spy
+    monkeypatch.setattr(rate_limiting, "_llm_rate_limiter", spy)
+    monkeypatch.setattr(llm_config_module, "get_llm_config", lambda: _config())
+    return SimpleNamespace(policy=policy, spy=spy)
 
 
 def _rate_limit_error() -> openai.RateLimitError:
@@ -54,159 +55,41 @@ def _rate_limit_error() -> openai.RateLimitError:
     return openai.RateLimitError("rate limited", response=response, body=None)
 
 
-def _timeout_error() -> openai.APITimeoutError:
-    return openai.APITimeoutError(request=httpx.Request("POST", "http://api.test"))
-
-
-def _status_error(status: int) -> openai.APIStatusError:
-    response = httpx.Response(status, request=httpx.Request("POST", "http://api.test"))
-    return openai.APIStatusError("overloaded", response=response, body=None)
-
-
 @pytest.mark.asyncio
-async def test_full_speed_by_default(fresh_state):
+async def test_full_speed_by_default(seam):
     async with llm_rate_limiter_context_manager():
         pass
-    assert fresh_state.entered == 0
-    assert rate_limiting._auto_paced_until == 0.0
+    assert seam.spy.entered == 0
+    assert seam.policy.is_paced() is False
 
 
-@pytest.mark.parametrize(
-    ("overload_error", "expected_name"),
-    [
-        (_rate_limit_error(), "RateLimitError"),
-        (_timeout_error(), "APITimeoutError"),
-        (asyncio.TimeoutError(), "TimeoutError"),
-        (_status_error(503), "HTTP 503"),
-        (_status_error(529), "HTTP 529"),
-    ],
-)
 @pytest.mark.asyncio
-async def test_overload_enables_rate_limiter_with_warning(
-    fresh_state, monkeypatch, overload_error, expected_name
-):
-    warnings = []
-    monkeypatch.setattr(
-        rate_limiting,
-        "logger",
-        SimpleNamespace(warning=lambda message, *args: warnings.append(message % args)),
-    )
-
-    # Wrapped the way instructor surfaces provider errors: via the cause chain.
-    wrapper = RuntimeError("instructor wrapper")
-    wrapper.__cause__ = overload_error
-    with pytest.raises(RuntimeError):
-        async with llm_rate_limiter_context_manager():
-            raise wrapper
-
-    import time
-
-    assert time.monotonic() < rate_limiting._auto_paced_until
-    assert len(warnings) == 1
-    assert "not being processed fast enough" in warnings[0]
-    assert expected_name in warnings[0]
-
-    # Subsequent dispatches are paced; repeat overload does not re-warn.
+async def test_overload_error_reaches_the_policy_and_paces_next_dispatch(seam):
     with pytest.raises(openai.RateLimitError):
         async with llm_rate_limiter_context_manager():
             raise _rate_limit_error()
-    assert fresh_state.entered == 1
-    assert len(warnings) == 1
+    assert seam.policy.is_paced() is True
 
-
-@pytest.mark.asyncio
-async def test_slow_completion_enables_rate_limiter_before_any_failure(fresh_state, monkeypatch):
-    monkeypatch.setattr(rate_limiting, "SLOW_COMPLETION_SECONDS", 0.05)
-    warnings = []
-    monkeypatch.setattr(
-        rate_limiting,
-        "logger",
-        SimpleNamespace(warning=lambda message, *args: warnings.append(message % args)),
-    )
-    import time
-
-    async with llm_rate_limiter_context_manager():
-        await asyncio.sleep(0.06)  # a successful but dangerously slow call
-    assert time.monotonic() < rate_limiting._auto_paced_until
-    assert len(warnings) == 1 and "completion took" in warnings[0]
-
-
-@pytest.mark.asyncio
-async def test_auto_rate_limit_disabled_never_activates(fresh_state, monkeypatch):
-    monkeypatch.setattr(rate_limiting, "llm_config", _config(auto_rate_limit=False))
-    for error in (_rate_limit_error(), _timeout_error(), _status_error(503)):
-        with pytest.raises(type(error)):
-            async with llm_rate_limiter_context_manager():
-                raise error
-    assert rate_limiting._auto_paced_until == 0.0
-    assert fresh_state.entered == 0
-
-
-@pytest.mark.asyncio
-async def test_ordinary_errors_do_not_activate(fresh_state):
-    with pytest.raises(ValueError):
-        async with llm_rate_limiter_context_manager():
-            raise ValueError("schema mismatch")
-    with pytest.raises(openai.APIStatusError):
-        async with llm_rate_limiter_context_manager():
-            raise _status_error(500)  # a plain server error is not overload evidence
-    assert rate_limiting._auto_paced_until == 0.0
-
-
-@pytest.mark.asyncio
-async def test_explicit_rate_limit_setting_paces_from_the_start(fresh_state, monkeypatch):
-    monkeypatch.setattr(rate_limiting, "llm_config", _config(llm_rate_limit_enabled=True))
     async with llm_rate_limiter_context_manager():
         pass
-    assert fresh_state.entered == 1
+    assert seam.spy.entered == 1  # paced while the episode lasts
 
 
 @pytest.mark.asyncio
-async def test_pacing_lapses_after_quiet_cooldown_and_rewarns(fresh_state, monkeypatch):
-    warnings = []
-    monkeypatch.setattr(
-        rate_limiting,
-        "logger",
-        SimpleNamespace(warning=lambda message, *args: warnings.append(message % args)),
-    )
-    monkeypatch.setattr(rate_limiting, "AUTO_RATE_LIMIT_COOLDOWN_SECONDS", 0.1)
-
-    for _ in range(2):  # two separate episodes with a quiet gap between them
-        with pytest.raises(openai.RateLimitError):
-            async with llm_rate_limiter_context_manager():
-                raise _rate_limit_error()
+async def test_auto_rate_limit_off_bypasses_the_policy(seam, monkeypatch):
+    monkeypatch.setattr(llm_config_module, "get_llm_config", lambda: _config(auto_rate_limit=False))
+    with pytest.raises(openai.RateLimitError):
         async with llm_rate_limiter_context_manager():
-            pass  # inside the episode: paced
-        await asyncio.sleep(0.15)  # cooldown lapses with no evidence
-        async with llm_rate_limiter_context_manager():
-            pass  # back to the configured (unpaced) state
-
-    assert fresh_state.entered == 2  # exactly one paced dispatch per episode
-    assert len(warnings) == 2  # each fresh episode warns again
+            raise _rate_limit_error()
+    assert seam.policy.is_paced() is False
+    assert seam.spy.entered == 0
 
 
 @pytest.mark.asyncio
-async def test_evidence_extends_the_cooldown_without_rewarning(fresh_state, monkeypatch):
-    import time
-
-    warnings = []
+async def test_explicit_rate_limit_setting_paces_from_the_start(seam, monkeypatch):
     monkeypatch.setattr(
-        rate_limiting,
-        "logger",
-        SimpleNamespace(warning=lambda message, *args: warnings.append(message % args)),
+        llm_config_module, "get_llm_config", lambda: _config(llm_rate_limit_enabled=True)
     )
-    monkeypatch.setattr(rate_limiting, "AUTO_RATE_LIMIT_COOLDOWN_SECONDS", 0.2)
-
-    with pytest.raises(openai.RateLimitError):
-        async with llm_rate_limiter_context_manager():
-            raise _rate_limit_error()
-    first_deadline = rate_limiting._auto_paced_until
-
-    await asyncio.sleep(0.05)
-    with pytest.raises(openai.RateLimitError):
-        async with llm_rate_limiter_context_manager():
-            raise _rate_limit_error()
-
-    assert rate_limiting._auto_paced_until > first_deadline  # extended
-    assert time.monotonic() < rate_limiting._auto_paced_until
-    assert len(warnings) == 1  # same episode: no second warning
+    async with llm_rate_limiter_context_manager():
+        pass
+    assert seam.spy.entered == 1
