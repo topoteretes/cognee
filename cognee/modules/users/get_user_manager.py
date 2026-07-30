@@ -17,15 +17,16 @@ from .get_user_db import get_user_db
 from cognee.modules.users.models.UserApiKey import UserApiKey
 from cognee.modules.users.api_key.hash_api_key import prepare_api_key
 from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.shared.auth_secrets import resolve_secret
 
 logger = logging.getLogger(__name__)
 
 
 class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
-    reset_password_token_secret = os.getenv(
-        "FASTAPI_USERS_RESET_PASSWORD_TOKEN_SECRET", "super_secret"
+    reset_password_token_secret = resolve_secret(
+        "FASTAPI_USERS_RESET_PASSWORD_TOKEN_SECRET"
     )
-    verification_token_secret = os.getenv("FASTAPI_USERS_VERIFICATION_TOKEN_SECRET", "super_secret")
+    verification_token_secret = resolve_secret("FASTAPI_USERS_VERIFICATION_TOKEN_SECRET")
 
     async def on_after_login(
         self, user: User, request: Optional[Request] = None, response: Optional[Response] = None

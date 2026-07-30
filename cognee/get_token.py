@@ -1,8 +1,9 @@
 import jwt
-import os
 import datetime
 
-SECRET_KEY = os.getenv("FASTAPI_USERS_JWT_SECRET", "super_secret")
+from cognee.shared.auth_secrets import resolve_secret
+
+SECRET_KEY = resolve_secret("FASTAPI_USERS_JWT_SECRET")
 
 
 def create_jwt(user_id: str, tenant_id: str, roles: list[str]):
