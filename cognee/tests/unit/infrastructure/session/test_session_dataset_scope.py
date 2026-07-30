@@ -142,10 +142,14 @@ class TestActivityAttribution:
                 new_callable=AsyncMock,
             ) as record_mock,
         ):
-            await manager.add_qa(user_id="u1", question="q", context="", answer="a")
+            await manager.add_qa(
+                user_id="00000000-0000-0000-0000-000000000001", question="q", context="", answer="a"
+            )
 
         record_mock.assert_awaited_once_with(
-            "u1", f"default_session_{dataset_id}", dataset_id=str(dataset_id)
+            "00000000-0000-0000-0000-000000000001",
+            f"default_session_{dataset_id}",
+            dataset_id=str(dataset_id),
         )
 
 
@@ -169,9 +173,16 @@ class TestDeleteSessionLifecycle:
                 return_value=True,
             ) as lifecycle_mock,
         ):
-            assert await manager.delete_session(user_id="u1", session_id="s1") is True
+            assert (
+                await manager.delete_session(
+                    user_id="00000000-0000-0000-0000-000000000001", session_id="s1"
+                )
+                is True
+            )
 
-        lifecycle_mock.assert_awaited_once_with(session_id="s1", user_id="u1")
+        lifecycle_mock.assert_awaited_once_with(
+            session_id="s1", user_id="00000000-0000-0000-0000-000000000001"
+        )
 
     @pytest.mark.asyncio
     async def test_delete_session_true_when_only_lifecycle_row_existed(self):
@@ -191,7 +202,12 @@ class TestDeleteSessionLifecycle:
                 return_value=True,
             ),
         ):
-            assert await manager.delete_session(user_id="u1", session_id="s1") is True
+            assert (
+                await manager.delete_session(
+                    user_id="00000000-0000-0000-0000-000000000001", session_id="s1"
+                )
+                is True
+            )
 
 
 @pytest.mark.asyncio
@@ -392,7 +408,12 @@ class TestScopedVectorCleanup:
                 db_context,
             ),
         ):
-            assert await manager.delete_session(user_id="u1", session_id="s1") is True
+            assert (
+                await manager.delete_session(
+                    user_id="00000000-0000-0000-0000-000000000001", session_id="s1"
+                )
+                is True
+            )
 
         # Attribution must be read before the lifecycle row is deleted.
         assert call_order == ["resolve", "lifecycle"]
@@ -427,7 +448,12 @@ class TestScopedVectorCleanup:
                 db_context,
             ),
         ):
-            assert await manager.delete_session(user_id="u1", session_id="s1") is True
+            assert (
+                await manager.delete_session(
+                    user_id="00000000-0000-0000-0000-000000000001", session_id="s1"
+                )
+                is True
+            )
 
         db_context.assert_not_called()
         assert vectors_mock.await_count == 1
@@ -455,7 +481,12 @@ class TestScopedVectorCleanup:
                 db_context,
             ),
         ):
-            assert await manager.delete_qa(user_id="u1", session_id="s1", qa_id="q1") is True
+            assert (
+                await manager.delete_qa(
+                    user_id="00000000-0000-0000-0000-000000000001", session_id="s1", qa_id="q1"
+                )
+                is True
+            )
 
         db_context.assert_called_once_with(dataset_id, owner_id)
         assert vector_mock.await_count == 1
@@ -492,7 +523,12 @@ class TestScopedVectorCleanup:
                 db_context,
             ),
         ):
-            assert await manager.delete_session(user_id="u1", session_id="s1") is True
+            assert (
+                await manager.delete_session(
+                    user_id="00000000-0000-0000-0000-000000000001", session_id="s1"
+                )
+                is True
+            )
 
         vectors_mock.assert_not_awaited()
 

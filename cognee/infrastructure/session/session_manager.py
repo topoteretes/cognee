@@ -57,7 +57,12 @@ class SessionManager:
         Validate session parameters. Raises SessionParameterValidationError if any
         provided parameter is invalid.
 
-        - user_id, session_id, qa_id: must be non-empty strings when provided.
+        - user_id: must be a UUID (as UUID or string) when provided. Every
+          production path resolves an authenticated User, so a non-UUID here is
+          a programming error — and letting it through creates a "ghost"
+          session: cache writes succeed, but the lifecycle row, dataset
+          binding, listing, and cleanup all silently skip it.
+        - session_id, qa_id: must be non-empty strings when provided.
         - last_n: when provided, must be a positive integer.
         """
         checks = (
@@ -68,6 +73,11 @@ class SessionManager:
         for value, name in checks:
             if value is not None and (not str(value).strip()):
                 raise SessionParameterValidationError(message=f"{name} must be a non-empty string")
+        if user_id is not None and as_uuid(user_id) is None:
+            raise SessionParameterValidationError(
+                message=f"user_id must be a UUID, got {user_id!r}. Non-UUID user ids create "
+                "sessions invisible to lifecycle tracking, dataset binding, and cleanup."
+            )
         if last_n is not None and (not isinstance(last_n, int) or last_n < 1):
             raise SessionParameterValidationError(message="last_n must be a positive integer")
 
