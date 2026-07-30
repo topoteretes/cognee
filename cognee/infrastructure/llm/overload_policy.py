@@ -91,11 +91,12 @@ class OverloadPolicy:
         if new_episode:
             llm_config = get_llm_config()
             logger.warning(
-                "LLM requests are not being processed fast enough (%s) — enabling "
-                "the RPM limiter (%d requests per %ds) for the next %.0fs, extended "
-                "while issues persist. Tune LLM_RATE_LIMIT_REQUESTS / "
-                "LLM_RATE_LIMIT_INTERVAL to match what your provider or machine can "
-                "handle, or set AUTO_RATE_LIMIT=false to opt out.",
+                "Potential RPM issues detected (%s) — slowing down processing to "
+                "accommodate: enabling the RPM limiter (%d requests per %ds) for "
+                "the next %.0fs, extended while issues persist. Tune "
+                "LLM_RATE_LIMIT_REQUESTS / LLM_RATE_LIMIT_INTERVAL to match what "
+                "your provider or machine can handle, or set AUTO_RATE_LIMIT=false "
+                "to opt out.",
                 reason,
                 llm_config.llm_rate_limit_requests,
                 llm_config.llm_rate_limit_interval,

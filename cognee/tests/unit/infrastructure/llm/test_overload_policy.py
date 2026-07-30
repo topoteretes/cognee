@@ -89,7 +89,7 @@ def test_overload_error_starts_a_warned_episode(warnings):
     policy = OverloadPolicy()
     policy.on_error(_rate_limit_error())
     assert policy.is_paced() is True
-    assert len(warnings) == 1 and "not being processed fast enough" in warnings[0]
+    assert len(warnings) == 1 and "Potential RPM issues detected" in warnings[0]
 
 
 def test_evidence_extends_episode_without_rewarning(warnings):
