@@ -29,6 +29,7 @@ from cognee.modules.migration.loader import (
 from cognee.modules.migration.sources.base import MemorySource
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion.data_item import DataItem
+from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 
 if TYPE_CHECKING:
     from cognee.api.v1.remember.remember import RememberResult
@@ -265,7 +266,7 @@ def _pipeline_run_id(pipeline_result: Any) -> Optional[str]:
 
 async def import_memory_source(
     source: MemorySource,
-    dataset_name: str = "main_dataset",
+    dataset_name: str = DEFAULT_DATASET_NAME,
     user=None,
     run_in_background: bool = False,
     node_set: Optional[list] = None,
