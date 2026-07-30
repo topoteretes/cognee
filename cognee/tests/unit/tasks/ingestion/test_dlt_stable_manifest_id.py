@@ -157,3 +157,45 @@ async def test_duplicate_source_identity_is_rejected_loudly():
             await resolve_module.resolve_dlt_sources(
                 [source_a(), source_b()], "ds", user=SimpleNamespace(id=uuid4())
             )
+
+
+@pytest.mark.asyncio
+async def test_csv_path_inside_a_list_is_auto_detected():
+    """A CSV path in a MIXED add must route to the DLT manifest path.
+
+    Auto-detection used to fire only when add() received a bare string, so
+    [csv_path, note_path] silently LLM-processed the CSV as text.
+    """
+    pytest.importorskip("dlt")
+    import sys
+
+    import cognee.tasks.ingestion.resolve_dlt_sources  # noqa: F401
+
+    resolve_module = sys.modules["cognee.tasks.ingestion.resolve_dlt_sources"]
+
+    converted = []
+
+    def _fake_csv_source(path):
+        import dlt
+
+        converted.append(path)
+
+        @dlt.resource(name="rows")
+        def rows():
+            yield {"id": 1}
+
+        return rows()
+
+    with (
+        patch.object(resolve_module, "create_dlt_source_from_csv", _fake_csv_source),
+        patch.object(resolve_module, "ingest_dlt_source", new=AsyncMock(return_value=[])),
+        patch.object(
+            resolve_module, "_build_source_manifest_item", new=AsyncMock(return_value=None)
+        ),
+    ):
+        result, _cleanup = await resolve_module.resolve_dlt_sources(
+            ["/data/orders.csv", "just a plain note"], "ds", user=SimpleNamespace(id=uuid4())
+        )
+
+    assert converted == ["/data/orders.csv"]
+    assert "just a plain note" in result  # non-CSV items pass through untouched

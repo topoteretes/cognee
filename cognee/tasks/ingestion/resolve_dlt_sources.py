@@ -75,15 +75,20 @@ async def resolve_dlt_sources(
     max_rows_per_table = kwargs.get("max_rows_per_table")
     column_value_columns = kwargs.get("column_value_columns")
 
-    # --- Auto-detect structured data (CSV paths / connection strings) ------
-    if isinstance(data, str):
-        if is_csv_path(data):
-            data = create_dlt_source_from_csv(data)
-        elif is_connection_string(data):
-            data = create_dlt_source_from_connection_string(data, query=query)
-
     # Normalise to list for uniform processing
     data_list = data if isinstance(data, list) else [data]
+
+    # --- Auto-detect structured data (CSV paths / connection strings) ------
+    # Per item, so a mixed add like [csv_path, note_path] routes the CSV to
+    # the DLT manifest path instead of silently LLM-processing it as text.
+    data_list = [
+        create_dlt_source_from_csv(item)
+        if isinstance(item, str) and is_csv_path(item)
+        else create_dlt_source_from_connection_string(item, query=query)
+        if isinstance(item, str) and is_connection_string(item)
+        else item
+        for item in data_list
+    ]
 
     dlt_items = []
     non_dlt_items = []
