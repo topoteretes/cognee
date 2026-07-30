@@ -75,7 +75,7 @@ def _config(*, auto_feedback: bool = True):
 def _patches(completion_return, analysis_return=None):
     """Patch session_user, CacheConfig, turn analysis, and completion."""
     user = MagicMock()
-    user.id = "owner-1"  # non-UUID -> skips track_session_usage + session_records side effects
+    user.id = "00000000-0000-0000-0000-0000000000a1"
 
     mock_user = patch("cognee.infrastructure.session.session_manager.session_user")
     mock_cfg = patch("cognee.infrastructure.session.session_manager.CacheConfig")
@@ -94,7 +94,7 @@ def _patches(completion_return, analysis_return=None):
 
 async def _seed_context_entry(sm, entry_id, section, content):
     await sm.create_session_context_entry(
-        user_id="owner-1",
+        user_id="00000000-0000-0000-0000-0000000000a1",
         entry_dump={
             "id": entry_id,
             "kind": "context",
@@ -132,7 +132,9 @@ async def test_first_turn_no_block_empty_served_ids(session_manager):
     history = mg.call_args.kwargs["conversation_history"]
     assert "## Active session guidance" not in history
 
-    entries = await session_manager.get_session(user_id="owner-1", session_id="s1")
+    entries = await session_manager.get_session(
+        user_id="00000000-0000-0000-0000-0000000000a1", session_id="s1"
+    )
     assert len(entries) == 1
     assert entries[0].used_session_context_ids is None
 
@@ -164,7 +166,9 @@ async def test_non_feedback_block_prepended_and_served_ids_recorded(session_mana
     assert "Background knowledge from the knowledge graph" not in history
     assert "Always answer in metric units." in history
 
-    entries = await session_manager.get_session(user_id="owner-1", session_id="s1")
+    entries = await session_manager.get_session(
+        user_id="00000000-0000-0000-0000-0000000000a1", session_id="s1"
+    )
     new_qa = entries[-1]
     assert new_qa.question == "Give me the distance."
     assert new_qa.used_session_context_ids == ["c-rule"]
@@ -176,7 +180,7 @@ async def test_feedback_only_returns_thanks_records_qa_and_applies_candidate(ses
     await _seed_context_entry(session_manager, "c-served", "rules", "Be concise.")
     # A previous QA that served c-served, so it can be rated this turn.
     await session_manager.add_qa(
-        user_id="owner-1",
+        user_id="00000000-0000-0000-0000-0000000000a1",
         question="prev?",
         context="",
         answer="prev answer",
@@ -219,14 +223,16 @@ async def test_feedback_only_returns_thanks_records_qa_and_applies_candidate(ses
     assert result == "Glad it helped!"
     mock_add_feedback.assert_not_called()
 
-    entries = await session_manager.get_session(user_id="owner-1", session_id="s1")
+    entries = await session_manager.get_session(
+        user_id="00000000-0000-0000-0000-0000000000a1", session_id="s1"
+    )
     assert len(entries) == 2
     assert entries[-1].question == "that was great"
     assert entries[-1].answer == "Glad it helped!"
     assert entries[-1].used_session_context_ids is None
 
     ctx_entries = await session_manager.get_session_context_entries(
-        user_id="owner-1", session_id="s1"
+        user_id="00000000-0000-0000-0000-0000000000a1", session_id="s1"
     )
     served = next(e for e in ctx_entries if e.get("id") == "c-served")
     assert served["helpful_count"] == 1
@@ -252,7 +258,7 @@ async def test_duplicate_served_context_ratings_accumulate(session_manager):
 
     await apply_served_context_ratings(
         session_manager,
-        user_id="owner-1",
+        user_id="00000000-0000-0000-0000-0000000000a1",
         session_id="s1",
         ratings=[
             ServedContextRating(entry_id="c-served", rating="helpful"),
@@ -262,7 +268,7 @@ async def test_duplicate_served_context_ratings_accumulate(session_manager):
     )
 
     ctx_entries = await session_manager.get_session_context_entries(
-        user_id="owner-1", session_id="s1"
+        user_id="00000000-0000-0000-0000-0000000000a1", session_id="s1"
     )
     served = next(e for e in ctx_entries if e.get("id") == "c-served")
     assert served["helpful_count"] == 2
@@ -273,7 +279,7 @@ async def test_duplicate_served_context_ratings_accumulate(session_manager):
 async def test_preference_only_turn_applies_candidate_without_answering(session_manager):
     """Instruction-only turn: preference is stored, acknowledgement is recorded."""
     await session_manager.add_qa(
-        user_id="owner-1",
+        user_id="00000000-0000-0000-0000-0000000000a1",
         question="prev?",
         context="",
         answer="prev answer",
@@ -310,14 +316,16 @@ async def test_preference_only_turn_applies_candidate_without_answering(session_
     assert result == "Got it."
     mg.assert_not_called()
 
-    entries = await session_manager.get_session(user_id="owner-1", session_id="s1")
+    entries = await session_manager.get_session(
+        user_id="00000000-0000-0000-0000-0000000000a1", session_id="s1"
+    )
     assert len(entries) == 2
     assert entries[-1].question == "For now, answer with 2 informative bullet points."
     assert entries[-1].answer == "Got it."
     assert entries[-1].used_session_context_ids is None
 
     ctx_entries = await session_manager.get_session_context_entries(
-        user_id="owner-1", session_id="s1"
+        user_id="00000000-0000-0000-0000-0000000000a1", session_id="s1"
     )
     preferences = [
         e
@@ -335,7 +343,7 @@ async def test_feedback_followup_prepends_thanks_and_stores_qa(session_manager):
     """Feedback+follow-up: thanks prepended to answer, new QA stored with served_ids."""
     await _seed_context_entry(session_manager, "c-goal", "goals", "Help the user ship faster.")
     await session_manager.add_qa(
-        user_id="owner-1",
+        user_id="00000000-0000-0000-0000-0000000000a1",
         question="prev?",
         context="",
         answer="prev answer",
@@ -378,14 +386,16 @@ async def test_feedback_followup_prepends_thanks_and_stores_qa(session_manager):
 
     # A new QA was added with this turn's served_ids. The previous goal and the newly accepted
     # lesson are both available to the follow-up answer.
-    entries = await session_manager.get_session(user_id="owner-1", session_id="s1")
+    entries = await session_manager.get_session(
+        user_id="00000000-0000-0000-0000-0000000000a1", session_id="s1"
+    )
     assert len(entries) == 2
     new_qa = entries[-1]
     assert new_qa.question == "that was wrong, now what about Y?"
     assert "c-goal" in new_qa.used_session_context_ids
 
     ctx_entries = await session_manager.get_session_context_entries(
-        user_id="owner-1", session_id="s1"
+        user_id="00000000-0000-0000-0000-0000000000a1", session_id="s1"
     )
     served = next(e for e in ctx_entries if e.get("id") == "c-goal")
     assert served["harmful_count"] == 1
@@ -421,5 +431,7 @@ async def test_layer_disabled_when_auto_feedback_off(session_manager):
     assert "## Active session guidance" not in history
     ma.assert_not_called()
 
-    entries = await session_manager.get_session(user_id="owner-1", session_id="s1")
+    entries = await session_manager.get_session(
+        user_id="00000000-0000-0000-0000-0000000000a1", session_id="s1"
+    )
     assert entries[-1].used_session_context_ids is None

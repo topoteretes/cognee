@@ -38,7 +38,7 @@ async def test_create_qa_entry_writes_fs_and_mirrors_to_tapes(tapes_adapter):
     mock_post = _patched_post_returning(202)
     with patch("httpx.AsyncClient.post", mock_post):
         await tapes_adapter.create_qa_entry(
-            user_id="u1",
+            user_id="00000000-0000-0000-0000-000000000001",
             session_id="s1",
             question="What is cognee?",
             context="Background context here.",
@@ -46,7 +46,7 @@ async def test_create_qa_entry_writes_fs_and_mirrors_to_tapes(tapes_adapter):
             qa_id="qa-1",
         )
 
-    entries = await tapes_adapter.get_all_qa_entries("u1", "s1")
+    entries = await tapes_adapter.get_all_qa_entries("00000000-0000-0000-0000-000000000001", "s1")
     assert len(entries) == 1
     assert entries[0].qa_id == "qa-1"
     assert entries[0].answer == "An AI memory platform."
@@ -71,7 +71,7 @@ async def test_ingest_failure_does_not_break_fs_write(tapes_adapter):
     mock_post = AsyncMock(side_effect=RuntimeError("tapes unreachable"))
     with patch("httpx.AsyncClient.post", mock_post):
         await tapes_adapter.create_qa_entry(
-            user_id="u1",
+            user_id="00000000-0000-0000-0000-000000000001",
             session_id="s1",
             question="Q?",
             context="",
@@ -79,7 +79,7 @@ async def test_ingest_failure_does_not_break_fs_write(tapes_adapter):
             qa_id="qa-2",
         )
 
-    entries = await tapes_adapter.get_all_qa_entries("u1", "s1")
+    entries = await tapes_adapter.get_all_qa_entries("00000000-0000-0000-0000-000000000001", "s1")
     assert len(entries) == 1
     assert entries[0].qa_id == "qa-2"
 
@@ -90,7 +90,7 @@ async def test_anthropic_provider_shape(tapes_adapter):
     mock_post = _patched_post_returning(202)
     with patch("httpx.AsyncClient.post", mock_post):
         await tapes_adapter.create_qa_entry(
-            user_id="u1",
+            user_id="00000000-0000-0000-0000-000000000001",
             session_id="s1",
             question="Hi?",
             context="sys",
@@ -111,7 +111,7 @@ async def test_update_and_delete_are_not_mirrored(tapes_adapter):
     mock_post = _patched_post_returning(202)
     with patch("httpx.AsyncClient.post", mock_post):
         await tapes_adapter.create_qa_entry(
-            user_id="u1",
+            user_id="00000000-0000-0000-0000-000000000001",
             session_id="s1",
             question="Q?",
             context="",
@@ -121,14 +121,16 @@ async def test_update_and_delete_are_not_mirrored(tapes_adapter):
         assert mock_post.await_count == 1
 
         updated = await tapes_adapter.update_qa_entry(
-            user_id="u1",
+            user_id="00000000-0000-0000-0000-000000000001",
             session_id="s1",
             qa_id="qa-4",
             feedback_score=5,
         )
         assert updated is True
 
-        deleted = await tapes_adapter.delete_qa_entry("u1", "s1", "qa-4")
+        deleted = await tapes_adapter.delete_qa_entry(
+            "00000000-0000-0000-0000-000000000001", "s1", "qa-4"
+        )
         assert deleted is True
 
     # Only the initial create_qa_entry should have reached tapes.

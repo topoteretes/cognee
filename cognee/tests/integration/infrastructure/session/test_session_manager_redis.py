@@ -100,11 +100,17 @@ def session_vector_mocks():
 async def test_add_qa_and_get_session(session_manager):
     """Add QA via SessionManager and retrieve via get_session."""
     qa_id = await session_manager.add_qa(
-        user_id="u1", question="Q1?", context="ctx1", answer="A1.", session_id="s1"
+        user_id="00000000-0000-0000-0000-000000000001",
+        question="Q1?",
+        context="ctx1",
+        answer="A1.",
+        session_id="s1",
     )
     assert qa_id is not None
 
-    entries = await session_manager.get_session(user_id="u1", session_id="s1")
+    entries = await session_manager.get_session(
+        user_id="00000000-0000-0000-0000-000000000001", session_id="s1"
+    )
     assert len(entries) == 1
     assert entries[0].question == "Q1?"
     assert entries[0].answer == "A1."
@@ -115,21 +121,36 @@ async def test_add_qa_and_get_session(session_manager):
 async def test_add_qa_sets_session_ttl(session_manager, redis_adapter):
     """Session writes through SessionManager apply Redis TTL to the session key."""
     await session_manager.add_qa(
-        user_id="u1", question="Q1?", context="ctx1", answer="A1.", session_id="s1"
+        user_id="00000000-0000-0000-0000-000000000001",
+        question="Q1?",
+        context="ctx1",
+        answer="A1.",
+        session_id="s1",
     )
 
-    assert await redis_adapter.async_redis.ttl("agent_sessions:u1:s1") == 604800
+    assert (
+        await redis_adapter.async_redis.ttl(
+            "agent_sessions:00000000-0000-0000-0000-000000000001:s1"
+        )
+        == 604800
+    )
 
 
 @pytest.mark.asyncio
 async def test_get_session_does_not_refresh_session_ttl(session_manager, redis_adapter):
     """Read-only session access should not refresh TTL."""
     await session_manager.add_qa(
-        user_id="u1", question="Q1?", context="ctx1", answer="A1.", session_id="s1"
+        user_id="00000000-0000-0000-0000-000000000001",
+        question="Q1?",
+        context="ctx1",
+        answer="A1.",
+        session_id="s1",
     )
     redis_adapter.async_redis.expire_calls.clear()
 
-    entries = await session_manager.get_session(user_id="u1", session_id="s1")
+    entries = await session_manager.get_session(
+        user_id="00000000-0000-0000-0000-000000000001", session_id="s1"
+    )
 
     assert len(entries) == 1
     assert redis_adapter.async_redis.expire_calls == []
@@ -150,7 +171,7 @@ async def test_add_agent_trace_step_and_get_trace_session(session_manager):
         ),
     ):
         trace_id_1 = await session_manager.add_agent_trace_step(
-            user_id="u1",
+            user_id="00000000-0000-0000-0000-000000000001",
             session_id="s1",
             origin_function="plan_trip",
             status="success",
@@ -160,7 +181,7 @@ async def test_add_agent_trace_step_and_get_trace_session(session_manager):
             method_return_value="Plan created",
         )
         trace_id_2 = await session_manager.add_agent_trace_step(
-            user_id="u1",
+            user_id="00000000-0000-0000-0000-000000000001",
             session_id="s1",
             origin_function="book_hotel",
             status="error",
@@ -168,8 +189,12 @@ async def test_add_agent_trace_step_and_get_trace_session(session_manager):
             error_message="No availability",
         )
 
-    entries = await session_manager.get_agent_trace_session(user_id="u1", session_id="s1")
-    feedback = await session_manager.get_agent_trace_feedback(user_id="u1", session_id="s1")
+    entries = await session_manager.get_agent_trace_session(
+        user_id="00000000-0000-0000-0000-000000000001", session_id="s1"
+    )
+    feedback = await session_manager.get_agent_trace_feedback(
+        user_id="00000000-0000-0000-0000-000000000001", session_id="s1"
+    )
 
     assert [entry.trace_id for entry in entries] == [trace_id_1, trace_id_2]
     assert entries[0].origin_function == "plan_trip"
@@ -188,7 +213,7 @@ async def test_add_agent_trace_step_can_disable_llm_feedback_generation(session_
         new_callable=AsyncMock,
     ) as mock_llm:
         trace_id = await session_manager.add_agent_trace_step(
-            user_id="u1",
+            user_id="00000000-0000-0000-0000-000000000001",
             session_id="s1",
             origin_function="plan_trip",
             status="success",
@@ -198,7 +223,9 @@ async def test_add_agent_trace_step_can_disable_llm_feedback_generation(session_
 
     assert trace_id is not None
     mock_llm.assert_not_awaited()
-    entries = await session_manager.get_agent_trace_session(user_id="u1", session_id="s1")
+    entries = await session_manager.get_agent_trace_session(
+        user_id="00000000-0000-0000-0000-000000000001", session_id="s1"
+    )
     assert len(entries) == 1
     assert entries[0].session_feedback == "plan_trip succeeded."
 
@@ -207,28 +234,34 @@ async def test_add_agent_trace_step_can_disable_llm_feedback_generation(session_
 async def test_agent_trace_session_isolated_by_user_and_session(session_manager):
     """Agent trace sessions remain isolated by user_id and session_id."""
     await session_manager.add_agent_trace_step(
-        user_id="u1",
+        user_id="00000000-0000-0000-0000-000000000001",
         session_id="s1",
         origin_function="plan_trip",
         status="success",
     )
     await session_manager.add_agent_trace_step(
-        user_id="u1",
+        user_id="00000000-0000-0000-0000-000000000001",
         session_id="s2",
         origin_function="book_hotel",
         status="error",
         error_message="No availability",
     )
     await session_manager.add_agent_trace_step(
-        user_id="u2",
+        user_id="00000000-0000-0000-0000-000000000002",
         session_id="s1",
         origin_function="book_flight",
         status="success",
     )
 
-    u1s1 = await session_manager.get_agent_trace_session(user_id="u1", session_id="s1")
-    u1s2 = await session_manager.get_agent_trace_session(user_id="u1", session_id="s2")
-    u2s1 = await session_manager.get_agent_trace_session(user_id="u2", session_id="s1")
+    u1s1 = await session_manager.get_agent_trace_session(
+        user_id="00000000-0000-0000-0000-000000000001", session_id="s1"
+    )
+    u1s2 = await session_manager.get_agent_trace_session(
+        user_id="00000000-0000-0000-0000-000000000001", session_id="s2"
+    )
+    u2s1 = await session_manager.get_agent_trace_session(
+        user_id="00000000-0000-0000-0000-000000000002", session_id="s1"
+    )
 
     assert len(u1s1) == 1
     assert u1s1[0].origin_function == "plan_trip"
@@ -243,7 +276,7 @@ async def test_add_qa_with_used_graph_element_ids_round_trip(session_manager):
     """add_qa with used_graph_element_ids stores and returns it via get_session."""
     used_ids = {"node_ids": ["n1"], "edge_ids": ["e1"]}
     qa_id = await session_manager.add_qa(
-        user_id="u1",
+        user_id="00000000-0000-0000-0000-000000000001",
         question="Q?",
         context="C",
         answer="A",
@@ -251,7 +284,9 @@ async def test_add_qa_with_used_graph_element_ids_round_trip(session_manager):
         used_graph_element_ids=used_ids,
     )
     assert qa_id is not None
-    entries = await session_manager.get_session(user_id="u1", session_id="s1")
+    entries = await session_manager.get_session(
+        user_id="00000000-0000-0000-0000-000000000001", session_id="s1"
+    )
     assert len(entries) == 1
     assert entries[0].used_graph_element_ids == used_ids
 
@@ -260,9 +295,15 @@ async def test_add_qa_with_used_graph_element_ids_round_trip(session_manager):
 async def test_get_session_formatted(session_manager):
     """get_session with formatted=True returns prompt string."""
     await session_manager.add_qa(
-        user_id="u1", question="Q?", context="C", answer="A", session_id="s1"
+        user_id="00000000-0000-0000-0000-000000000001",
+        question="Q?",
+        context="C",
+        answer="A",
+        session_id="s1",
     )
-    formatted = await session_manager.get_session(user_id="u1", formatted=True, session_id="s1")
+    formatted = await session_manager.get_session(
+        user_id="00000000-0000-0000-0000-000000000001", formatted=True, session_id="s1"
+    )
     assert isinstance(formatted, str)
     assert "Previous conversation" in formatted and "Q?" in formatted
 
@@ -271,14 +312,23 @@ async def test_get_session_formatted(session_manager):
 async def test_update_qa(session_manager):
     """update_qa updates entry via RedisAdapter."""
     qa_id = await session_manager.add_qa(
-        user_id="u1", question="Q", context="C", answer="A", session_id="s1"
+        user_id="00000000-0000-0000-0000-000000000001",
+        question="Q",
+        context="C",
+        answer="A",
+        session_id="s1",
     )
     ok = await session_manager.update_qa(
-        user_id="u1", qa_id=qa_id, question="Q updated?", session_id="s1"
+        user_id="00000000-0000-0000-0000-000000000001",
+        qa_id=qa_id,
+        question="Q updated?",
+        session_id="s1",
     )
     assert ok
 
-    entries = await session_manager.get_session(user_id="u1", session_id="s1")
+    entries = await session_manager.get_session(
+        user_id="00000000-0000-0000-0000-000000000001", session_id="s1"
+    )
     assert entries[0].question == "Q updated?"
 
 
@@ -286,14 +336,23 @@ async def test_update_qa(session_manager):
 async def test_add_feedback(session_manager):
     """add_feedback sets feedback on entry."""
     qa_id = await session_manager.add_qa(
-        user_id="u1", question="Q", context="C", answer="A", session_id="s1"
+        user_id="00000000-0000-0000-0000-000000000001",
+        question="Q",
+        context="C",
+        answer="A",
+        session_id="s1",
     )
     ok = await session_manager.add_feedback(
-        user_id="u1", qa_id=qa_id, feedback_score=5, session_id="s1"
+        user_id="00000000-0000-0000-0000-000000000001",
+        qa_id=qa_id,
+        feedback_score=5,
+        session_id="s1",
     )
     assert ok
 
-    entries = await session_manager.get_session(user_id="u1", session_id="s1")
+    entries = await session_manager.get_session(
+        user_id="00000000-0000-0000-0000-000000000001", session_id="s1"
+    )
     assert entries[0].feedback_score == 5
 
 
@@ -301,7 +360,7 @@ async def test_add_feedback(session_manager):
 async def test_delete_feedback(session_manager):
     """delete_feedback clears feedback."""
     qa_id = await session_manager.add_qa(
-        user_id="u1",
+        user_id="00000000-0000-0000-0000-000000000001",
         question="Q",
         context="C",
         answer="A",
@@ -309,10 +368,14 @@ async def test_delete_feedback(session_manager):
         feedback_text="good",
         feedback_score=4,
     )
-    ok = await session_manager.delete_feedback(user_id="u1", qa_id=qa_id, session_id="s1")
+    ok = await session_manager.delete_feedback(
+        user_id="00000000-0000-0000-0000-000000000001", qa_id=qa_id, session_id="s1"
+    )
     assert ok
 
-    entries = await session_manager.get_session(user_id="u1", session_id="s1")
+    entries = await session_manager.get_session(
+        user_id="00000000-0000-0000-0000-000000000001", session_id="s1"
+    )
     assert entries[0].feedback_score is None
     assert entries[0].feedback_text is None
 
@@ -321,15 +384,27 @@ async def test_delete_feedback(session_manager):
 async def test_delete_qa(session_manager):
     """delete_qa removes single entry."""
     qa1 = await session_manager.add_qa(
-        user_id="u1", question="Q1", context="C1", answer="A1", session_id="s1"
+        user_id="00000000-0000-0000-0000-000000000001",
+        question="Q1",
+        context="C1",
+        answer="A1",
+        session_id="s1",
     )
     await session_manager.add_qa(
-        user_id="u1", question="Q2", context="C2", answer="A2", session_id="s1"
+        user_id="00000000-0000-0000-0000-000000000001",
+        question="Q2",
+        context="C2",
+        answer="A2",
+        session_id="s1",
     )
-    ok = await session_manager.delete_qa(user_id="u1", qa_id=qa1, session_id="s1")
+    ok = await session_manager.delete_qa(
+        user_id="00000000-0000-0000-0000-000000000001", qa_id=qa1, session_id="s1"
+    )
     assert ok
 
-    entries = await session_manager.get_session(user_id="u1", session_id="s1")
+    entries = await session_manager.get_session(
+        user_id="00000000-0000-0000-0000-000000000001", session_id="s1"
+    )
     assert len(entries) == 1
     assert entries[0].question == "Q2"
 
@@ -338,21 +413,31 @@ async def test_delete_qa(session_manager):
 async def test_delete_session(session_manager):
     """delete_session clears both QA and trace session entries."""
     await session_manager.add_qa(
-        user_id="u1", question="Q", context="C", answer="A", session_id="s1"
+        user_id="00000000-0000-0000-0000-000000000001",
+        question="Q",
+        context="C",
+        answer="A",
+        session_id="s1",
     )
     trace_id = await session_manager.add_agent_trace_step(
-        user_id="u1",
+        user_id="00000000-0000-0000-0000-000000000001",
         session_id="s1",
         origin_function="plan_trip",
         status="success",
     )
     assert trace_id is not None
-    ok = await session_manager.delete_session(user_id="u1", session_id="s1")
+    ok = await session_manager.delete_session(
+        user_id="00000000-0000-0000-0000-000000000001", session_id="s1"
+    )
     assert ok
 
-    entries = await session_manager.get_session(user_id="u1", session_id="s1")
+    entries = await session_manager.get_session(
+        user_id="00000000-0000-0000-0000-000000000001", session_id="s1"
+    )
     assert entries == []
-    trace_entries = await session_manager.get_agent_trace_session(user_id="u1", session_id="s1")
+    trace_entries = await session_manager.get_agent_trace_session(
+        user_id="00000000-0000-0000-0000-000000000001", session_id="s1"
+    )
     assert trace_entries == []
 
 
@@ -360,7 +445,7 @@ async def test_delete_session(session_manager):
 async def test_generate_completion_with_session_saves_qa(session_manager):
     """generate_completion_with_session runs completion and saves QA to session (LLM mocked)."""
     mock_user = MagicMock()
-    mock_user.id = "u1"
+    mock_user.id = "00000000-0000-0000-0000-000000000001"
     with (
         patch("cognee.infrastructure.session.session_manager.session_user") as mock_session_user,
         patch("cognee.infrastructure.session.session_manager.CacheConfig") as mock_config_cls,
@@ -386,7 +471,9 @@ async def test_generate_completion_with_session_saves_qa(session_manager):
         )
 
     assert result == "Integration test answer"
-    entries = await session_manager.get_session(user_id="u1", session_id="s1")
+    entries = await session_manager.get_session(
+        user_id="00000000-0000-0000-0000-000000000001", session_id="s1"
+    )
     assert len(entries) == 1
     assert entries[0].question == "What is X?"
     assert entries[0].answer == "Integration test answer"
@@ -397,7 +484,7 @@ async def test_generate_completion_with_session_saves_qa(session_manager):
 async def test_generate_completion_with_session_feedback_only_records_qa(session_manager):
     """When feedback only is detected: acknowledgement returned and recorded."""
     qa_id = await session_manager.add_qa(
-        user_id="u1",
+        user_id="00000000-0000-0000-0000-000000000001",
         question="What is X?",
         context="Context about X.",
         answer="X is something.",
@@ -406,7 +493,7 @@ async def test_generate_completion_with_session_feedback_only_records_qa(session
     assert qa_id is not None
 
     mock_user = MagicMock()
-    mock_user.id = "u1"
+    mock_user.id = "00000000-0000-0000-0000-000000000001"
     with (
         patch("cognee.infrastructure.session.session_manager.session_user") as mock_session_user,
         patch("cognee.infrastructure.session.session_manager.CacheConfig") as mock_config_cls,
@@ -436,7 +523,9 @@ async def test_generate_completion_with_session_feedback_only_records_qa(session
         )
 
     assert result == "Thanks for your feedback!"
-    entries = await session_manager.get_session(user_id="u1", session_id="s1")
+    entries = await session_manager.get_session(
+        user_id="00000000-0000-0000-0000-000000000001", session_id="s1"
+    )
     assert len(entries) == 2
     assert entries[0].qa_id == qa_id
     assert entries[0].question == "What is X?"
@@ -451,7 +540,7 @@ async def test_generate_completion_with_session_feedback_only_records_qa(session
 async def test_generate_completion_with_session_feedback_and_followup_adds_qa(session_manager):
     """When query_to_answer is present: new QA is added with answer."""
     qa_id_first = await session_manager.add_qa(
-        user_id="u1",
+        user_id="00000000-0000-0000-0000-000000000001",
         question="What is X?",
         context="Context about X.",
         answer="X is something.",
@@ -460,7 +549,7 @@ async def test_generate_completion_with_session_feedback_and_followup_adds_qa(se
     assert qa_id_first is not None
 
     mock_user = MagicMock()
-    mock_user.id = "u1"
+    mock_user.id = "00000000-0000-0000-0000-000000000001"
     with (
         patch("cognee.infrastructure.session.session_manager.session_user") as mock_session_user,
         patch("cognee.infrastructure.session.session_manager.CacheConfig") as mock_config_cls,
@@ -493,7 +582,9 @@ async def test_generate_completion_with_session_feedback_and_followup_adds_qa(se
         )
 
     assert result == "Paris is the capital of France."
-    entries = await session_manager.get_session(user_id="u1", session_id="s1")
+    entries = await session_manager.get_session(
+        user_id="00000000-0000-0000-0000-000000000001", session_id="s1"
+    )
     assert len(entries) == 2
     first_qa = next((e for e in entries if e.qa_id == qa_id_first), None)
     followup_qa = next(
