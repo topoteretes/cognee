@@ -29,7 +29,8 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.shared.logging_utils import get_logger
+from cognee.shared.logging_utils import get_logger, warn_once
+from cognee.shared.utils import as_uuid
 
 from .models import SessionModelUsage, SessionRecord
 
@@ -312,9 +313,8 @@ async def delete_session_lifecycle(
     user_id or a relational failure returns False without breaking an
     otherwise successful cache deletion.
     """
-    try:
-        user_uuid = UUIDType(str(user_id))
-    except (ValueError, TypeError):
+    user_uuid = as_uuid(user_id)
+    if user_uuid is None:
         return False
 
     try:
@@ -358,9 +358,8 @@ async def get_session_dataset_id(
 
     Best-effort: None when unbound, when the id is malformed, or on failure.
     """
-    try:
-        user_uuid = UUIDType(str(user_id))
-    except (ValueError, TypeError):
+    user_uuid = as_uuid(user_id)
+    if user_uuid is None:
         return None
 
     try:
@@ -394,9 +393,8 @@ async def get_session_dataset(
     is gone, or the lookup fails. For "is this session bound?" use
     :func:`get_session_dataset_id` instead.
     """
-    try:
-        user_uuid = UUIDType(str(user_id))
-    except (ValueError, TypeError):
+    user_uuid = as_uuid(user_id)
+    if user_uuid is None:
         return None
 
     try:
@@ -424,23 +422,16 @@ async def get_session_dataset(
         return None
 
 
-_binding_lookup_failed = False
-
-
 def _warn_binding_lookup_failed(session_id: str, exc: Exception) -> None:
     """Log a binding-enforcement failure once at WARNING, then at debug."""
-    global _binding_lookup_failed
-    if not _binding_lookup_failed:
-        _binding_lookup_failed = True
-        logger.warning(
-            "Session binding lookup failed (%s); one-dataset-per-session enforcement "
-            "is skipped while lookups fail. Subsequent failures log at debug.",
-            exc,
-        )
-    else:
-        logger.debug(
-            "Session binding lookup failed for %s (%s); skipping enforcement", session_id, exc
-        )
+    warn_once(
+        logger,
+        "session_binding_lookup",
+        "Session binding lookup failed for %s (%s); one-dataset-per-session "
+        "enforcement is skipped while lookups fail.",
+        session_id,
+        exc,
+    )
 
 
 async def claim_session_dataset(
@@ -465,10 +456,9 @@ async def claim_session_dataset(
 
     if dataset_id is None or not session_id:
         return
-    try:
-        user_uuid = UUIDType(str(user_id))
-        dataset_uuid = UUIDType(str(dataset_id))
-    except (ValueError, TypeError):
+    user_uuid = as_uuid(user_id)
+    dataset_uuid = as_uuid(dataset_id)
+    if user_uuid is None or dataset_uuid is None:
         return
 
     try:
@@ -507,9 +497,8 @@ async def check_session_dataset_binding(
 
     if dataset_id is None or not session_id:
         return
-    try:
-        dataset_uuid = UUIDType(str(dataset_id))
-    except (ValueError, TypeError):
+    dataset_uuid = as_uuid(dataset_id)
+    if dataset_uuid is None:
         return
 
     bound = await get_session_dataset_id(session_id=session_id, user_id=user_id)
@@ -750,9 +739,6 @@ async def touch_session(*, session_id, user_id, dataset_id=None):
     await ensure_and_touch_session(session_id=session_id, user_id=user_id, dataset_id=dataset_id)
 
 
-_session_record_write_failed = False
-
-
 async def record_session_activity(
     user_id: str,
     session_id: str,
@@ -767,31 +753,21 @@ async def record_session_activity(
     session_records table is optional for SessionManager correctness — but logs once at
     WARNING per process so silent breakage stays visible in ops.
     """
-    global _session_record_write_failed
-
     try:
-        try:
-            user_uuid = UUIDType(str(user_id))
-        except (ValueError, TypeError):
+        user_uuid = as_uuid(user_id)
+        if user_uuid is None:
             return
 
-        try:
-            dataset_uuid = UUIDType(str(dataset_id)) if dataset_id is not None else None
-        except (ValueError, TypeError):
-            dataset_uuid = None
-
         await ensure_and_touch_session(
-            session_id=session_id, user_id=user_uuid, dataset_id=dataset_uuid
+            session_id=session_id, user_id=user_uuid, dataset_id=as_uuid(dataset_id)
         )
         if errored:
             await accumulate_usage(session_id=session_id, user_id=user_uuid, errored=True)
     except Exception as exc:
-        if not _session_record_write_failed:
-            _session_record_write_failed = True
-            logger.warning(
-                "session_records write failed (%s); subsequent failures will log at debug. "
-                "Check alembic migrations for the session_records table.",
-                exc,
-            )
-        else:
-            logger.debug("session_records write failed (%s)", exc)
+        warn_once(
+            logger,
+            "session_records_write",
+            "session_records write failed (%s); subsequent failures log at debug. "
+            "Check alembic migrations for the session_records table.",
+            exc,
+        )

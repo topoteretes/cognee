@@ -34,15 +34,10 @@ from cognee.modules.session_lifecycle.metrics import (
     get_session_dataset,
     record_session_activity,
 )
-from cognee.shared.logging_utils import get_logger
-from cognee.shared.utils import send_telemetry
+from cognee.shared.logging_utils import get_logger, warn_once
+from cognee.shared.utils import as_uuid, send_telemetry
 
 logger = get_logger("SessionManager")
-
-# A SessionManager is built per operation, so a name-valued dataset context would
-# warn on every construction. Warn once per process, then drop to debug — same
-# posture as the session_records write/lookup failure flags.
-_non_uuid_dataset_context_warned = False
 
 
 class SessionManager:
@@ -123,22 +118,19 @@ class SessionManager:
         a real id — but say so, since silently degrading to an unscoped session
         is exactly what dataset-bound sessions are meant to prevent.
         """
-        global _non_uuid_dataset_context_warned
         if value is None:
             return None
-        try:
-            return str(uuid.UUID(str(value)))
-        except (ValueError, TypeError, AttributeError):
-            message = (
+        parsed = as_uuid(value)
+        if parsed is None:
+            warn_once(
+                logger,
+                "non_uuid_dataset_context",
                 "Dataset context %r is not a UUID; ignoring it for session scoping and "
-                "falling back to the default dataset."
+                "falling back to the default dataset.",
+                value,
             )
-            if not _non_uuid_dataset_context_warned:
-                _non_uuid_dataset_context_warned = True
-                logger.warning(message, value)
-            else:
-                logger.debug(message, value)
             return None
+        return str(parsed)
 
     async def _effective_dataset_id(self, user_id: str | None = None) -> str | None:
         """Return the dataset this manager scopes sessions to.
