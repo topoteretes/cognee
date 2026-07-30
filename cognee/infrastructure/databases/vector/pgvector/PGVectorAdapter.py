@@ -21,6 +21,7 @@ from distributed.utils import override_distributed
 from distributed.tasks.queued_add_data_points import queued_add_data_points
 from cognee.infrastructure.databases.exceptions import MissingQueryParameterError
 from cognee.context_global_variables import backend_access_control_enabled
+from cognee.modules.graph.methods.sanitize_relational_payload import sanitize_relational_payload
 
 from ...relational.ModelBase import Base
 from ...relational.sqlalchemy.SqlAlchemyAdapter import SQLAlchemyAdapter
@@ -316,7 +317,9 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 PGVectorDataPoint(
                     id=data_point.id,
                     vector=data_vectors[data_index],
-                    payload=serialize_data(data_point.model_dump()),
+                    # Strip NUL bytes: the json column accepts \u0000 on insert, but
+                    # the payload::jsonb casts in search/merge queries reject it.
+                    payload=sanitize_relational_payload(serialize_data(data_point.model_dump())),
                 )
             )
 
