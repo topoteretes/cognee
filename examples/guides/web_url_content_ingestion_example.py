@@ -1,3 +1,9 @@
+"""Ingest a web page with a custom loader and CSS extraction rules.
+
+Requires network access: this fetches a live Wikipedia endpoint rather than a local
+file, so it is also sensitive to that page's HTML structure changing.
+"""
+
 import asyncio
 from os import path
 

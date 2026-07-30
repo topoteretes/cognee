@@ -17,7 +17,7 @@ and ingest it into one dataset. Repositories indexed in separate datasets are
 searched independently and cannot have graph paths between them.
 
 Run it:
-    CODE_GRAPH_REPO_PATH=/path/to/some/repo uv run python examples/python/code_graph_example.py
+    CODE_GRAPH_REPO_PATH=/path/to/some/repo uv run python examples/guides/code_graph_example.py
 """
 
 import asyncio

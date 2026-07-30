@@ -20,11 +20,11 @@ async def main():
     # and description of these files
     mp3_file_path = os.path.join(
         pathlib.Path(__file__).parent,
-        "data/text_to_speech.mp3",
+        "multimedia_audio_image_processing_example_data/text_to_speech.mp3",
     )
     png_file_path = os.path.join(
         pathlib.Path(__file__).parent,
-        "data/example.png",
+        "multimedia_audio_image_processing_example_data/example.png",
     )
 
     # Remember the files and create knowledge graph memory

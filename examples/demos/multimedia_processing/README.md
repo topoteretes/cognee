@@ -6,9 +6,13 @@ documents.
 
 | Modality | How the text is produced | Example |
 | --- | --- | --- |
-| Audio | Audio-track transcription (`create_transcript`) | `multimedia_audio_image_processing_example.py` |
-| Image | Vision caption (`transcribe_image`) | `multimedia_audio_image_processing_example.py` |
-| Video | Audio-track transcription with inline timestamps | `video_processing_example.py` |
+| Audio | Audio-track transcription (`create_transcript`) | [`guides/multimedia_audio_image_processing_example.py`](../../guides/multimedia_audio_image_processing_example.py) |
+| Image | Vision caption (`transcribe_image`) | [`guides/multimedia_audio_image_processing_example.py`](../../guides/multimedia_audio_image_processing_example.py) |
+| Video | Audio-track transcription with inline timestamps | `video_processing_example.py` (this folder) |
+
+Audio and image ingestion moved to `examples/guides/` — it is a single-feature guide, and its
+assets live beside it in `guides/multimedia_audio_image_processing_example_data/`. This folder now
+covers video only.
 
 ## Video ingestion
 
