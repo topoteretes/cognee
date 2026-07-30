@@ -1,15 +1,19 @@
-"""Global context index: a world-summary prelude for retrieval.
+"""Global context index: a dataset-level summary prepended to retrieval context.
 
 ``improve(..., build_global_context_index=True)`` builds a compact summary of the whole
-dataset — a world summary plus the areas it covers. Retrieval can then prepend that
-summary to the context it assembles, which helps when an answer needs the shape of the
-dataset rather than the few chunks nearest the query.
+dataset — a world summary plus the areas it covers. When
+``include_global_context_index`` is on, the retriever **prepends that summary to the
+context it hands the LLM**, so answers can draw on the shape of the whole dataset
+instead of only the chunks nearest the query.
 
-This guide asks for the *context* rather than an answer (``only_context=True``) so you
-can see the prelude appear when the flag is on.
+Note where the summary lands: it is retriever *input*, not output. A normal
+``recall()`` returns an answer that was informed by the summary, not one containing
+it. This guide passes ``only_context=True`` to skip generation and print the assembled
+context instead, so you can diff the two directly — the extra block at the top of the
+second output is the prelude.
 
 For a longer run with a multi-day conversation and several queries, see
-``advanced_guides/global_context_index_smoke_demo.py``.
+``examples/advanced_guides/global_context_index_smoke_demo.py``.
 """
 
 import asyncio
@@ -29,22 +33,6 @@ CONVERSATION = [
 
 QUERY = "When is the second meeting?"
 
-RETRIEVER_CONFIG = {"include_global_context_index": True, "global_context_index_top_k": 3}
-
-
-async def context_for(include_global_context: bool) -> str:
-    config = dict(RETRIEVER_CONFIG, include_global_context_index=include_global_context)
-    results = await cognee.recall(
-        query_text=QUERY,
-        query_type=SearchType.GRAPH_COMPLETION,
-        datasets=[DATASET],
-        only_context=True,
-        retriever_specific_config=config,
-    )
-    if not results:
-        return "(empty)"
-    return results[0] if isinstance(results[0], str) else str(results[0])
-
 
 async def main() -> None:
     # Prune data and system metadata before running, only if we want "fresh" state.
@@ -56,11 +44,34 @@ async def main() -> None:
     await cognee.improve(dataset=DATASET, build_global_context_index=True)
 
     print(f"Query: {QUERY}")
-    print("\n--- context WITHOUT the global context index ---")
-    print(await context_for(include_global_context=False))
-    print("\n--- context WITH the global context index ---")
-    print("(look for the 'World summary:' / 'Relevant areas:' prelude)")
-    print(await context_for(include_global_context=True))
+
+    # only_context=True skips generation and returns the assembled context instead,
+    # so `text` holds what the retriever would have handed the LLM.
+    print("\nCONTEXT WITHOUT the global context index")
+    without_index = await cognee.recall(
+        query_text=QUERY,
+        query_type=SearchType.GRAPH_COMPLETION,
+        datasets=[DATASET],
+        only_context=True,
+        retriever_specific_config={
+            "include_global_context_index": False,
+            "global_context_index_top_k": 3,
+        },
+    )
+    print(without_index[0].text)
+
+    print("\nCONTEXT WITH the global context index")
+    with_index = await cognee.recall(
+        query_text=QUERY,
+        query_type=SearchType.GRAPH_COMPLETION,
+        datasets=[DATASET],
+        only_context=True,
+        retriever_specific_config={
+            "include_global_context_index": True,
+            "global_context_index_top_k": 3,
+        },
+    )
+    print(with_index[0].text)
 
 
 if __name__ == "__main__":
