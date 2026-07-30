@@ -18,6 +18,7 @@ from cognee.modules.agent_memory.sanitization import (
     sanitize_value,
     truncate_text,
 )
+from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 
 logger = get_logger("agent_memory")
 
@@ -280,7 +281,7 @@ async def resolve_agent_user(config: AgentMemoryConfig) -> User:
 
 async def resolve_agent_dataset_scope(config: AgentMemoryConfig, resolved_user: User) -> AgentScope:
     """Resolve the dataset scope for Cognee search using a user with read and write access."""
-    requested_dataset_name = config.dataset_name or "main_dataset"
+    requested_dataset_name = config.dataset_name or DEFAULT_DATASET_NAME
 
     readable_datasets = await get_all_user_permission_datasets(resolved_user, "read")
     writable_datasets = await get_all_user_permission_datasets(resolved_user, "write")
@@ -533,7 +534,7 @@ async def persist_trace(context: AgentMemoryContext) -> None:
         persist_kwargs = {
             "user": context.user,
             "session_ids": [resolved_session_id],
-            "dataset": context.config.dataset_name or "main_dataset",
+            "dataset": context.config.dataset_name or DEFAULT_DATASET_NAME,
             "raw_trace_content": context.config.persist_session_trace_raw_content,
             "last_n_steps": context.config.persist_session_trace_after,
             "run_in_background": False,

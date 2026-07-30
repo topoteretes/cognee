@@ -18,6 +18,7 @@ from cognee.tasks.ingestion.data_item import DataItem
 from cognee.tasks.ingestion.resolve_dlt_sources import resolve_dlt_sources
 from cognee.tasks.ingestion.utils import materialize_stream_for_background
 from cognee.shared.logging_utils import get_logger
+from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 
 logger = get_logger()
 
@@ -32,7 +33,7 @@ async def add(
         list[DataItem],
         Any,  # DltResource, SourceFactory, or other dlt types
     ],
-    dataset_name: str = "main_dataset",
+    dataset_name: str = DEFAULT_DATASET_NAME,
     user: User = None,
     node_set: Optional[List[str]] = None,
     vector_db_config: dict = None,

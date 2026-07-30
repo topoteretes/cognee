@@ -16,6 +16,7 @@ from cognee.shared.utils import send_telemetry
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.usage_logger import log_usage
 from cognee import __version__ as cognee_version
+from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 
 logger = get_logger()
 
@@ -406,7 +407,7 @@ def get_remember_router() -> APIRouter:
             Union[QAEntry, TraceEntry, FeedbackEntry, SkillRunEntry],
             Field(discriminator="type"),
         ]
-        dataset_name: str = "main_dataset"
+        dataset_name: str = DEFAULT_DATASET_NAME
         dataset_id: Optional[UUID] = Field(
             default=None,
             description=(

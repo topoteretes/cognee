@@ -18,6 +18,7 @@ from cognee.modules.observability import (
     COGNEE_SESSION_ID,
     COGNEE_IMPROVE_STAGES,
 )
+from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 
 logger = get_logger("improve")
 
@@ -50,7 +51,7 @@ async def _check_sessions_belong_to_dataset(resolved_dataset, session_ids, user)
 
 
 async def improve(
-    dataset: Union[str, UUID] = "main_dataset",
+    dataset: Union[str, UUID] = DEFAULT_DATASET_NAME,
     *,
     run_in_background: bool = False,
     node_name: Optional[List[str]] = None,

@@ -8,6 +8,7 @@ from uuid import UUID
 import aiohttp
 
 from cognee.shared.logging_utils import get_logger
+from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 
 logger = get_logger("serve.cloud_client")
 
@@ -58,7 +59,7 @@ class CloudClient:
 
     # ----- V2 Operations -----
 
-    async def remember(self, data: Any, dataset_name: str = "main_dataset", **kwargs) -> dict:
+    async def remember(self, data: Any, dataset_name: str = DEFAULT_DATASET_NAME, **kwargs) -> dict:
         """POST /api/v1/remember — ingest data and build knowledge graph."""
         session = await self._get_session()
 
@@ -144,7 +145,7 @@ class CloudClient:
     async def remember_entry(
         self,
         entry,
-        dataset_name: str = "main_dataset",
+        dataset_name: str = DEFAULT_DATASET_NAME,
         dataset_id: Optional[UUID] = None,
         session_id: Optional[str] = None,
         skill_improvement: Optional[dict] = None,
@@ -214,7 +215,7 @@ class CloudClient:
                 raise RuntimeError(f"Remote recall failed ({resp.status}): {body}")
             return await resp.json()
 
-    async def improve(self, dataset: Any = "main_dataset", **kwargs) -> dict:
+    async def improve(self, dataset: Any = DEFAULT_DATASET_NAME, **kwargs) -> dict:
         """POST /api/v1/improve — enrich the knowledge graph."""
         session = await self._get_session()
 
@@ -239,7 +240,7 @@ class CloudClient:
 
     # ----- V1 Operations (add / cognify / search) -----
 
-    async def add(self, data: Any, dataset_name: str = "main_dataset", **kwargs) -> dict:
+    async def add(self, data: Any, dataset_name: str = DEFAULT_DATASET_NAME, **kwargs) -> dict:
         """POST /api/v1/add — ingest data into a dataset."""
         session = await self._get_session()
 

@@ -6,12 +6,13 @@ from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models.User import User
 from cognee.shared.logging_utils import get_logger
+from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 
 logger = get_logger("report")
 
 
 async def report(
-    datasets: Optional[Union[str, List[str]]] = "main_dataset",
+    datasets: Optional[Union[str, List[str]]] = DEFAULT_DATASET_NAME,
     output_path: Optional[str] = "graph_report.md",
     top_n: int = 10,
     user: Optional[User] = None,
