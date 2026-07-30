@@ -45,7 +45,16 @@ def _first_list(container: Dict[str, Any], *keys: str) -> List[Dict[str, Any]]:
 
 
 def _message_text(message: Dict[str, Any]) -> str:
-    content = message.get("content", message.get("text"))
+    """Return the text of a message, from ``content`` or the ``text`` alias.
+
+    ``content`` is optional in the message schema, and a serializer that keeps
+    unset fields writes it as null instead of omitting it. ``dict.get``'s
+    default only fires on a missing key, so the fallback has to be explicit or
+    a null content silently yields no text and the message is dropped.
+    """
+    content = message.get("content")
+    if content is None:
+        content = message.get("text")
     if isinstance(content, str):
         return content
     if isinstance(content, list):
