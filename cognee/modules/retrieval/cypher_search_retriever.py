@@ -34,22 +34,14 @@ class CypherSearchRetriever(BaseRetriever):
         try:
             graph_engine = await get_graph_engine()
 
-            # Postgres backends do not support raw Cypher queries
-            # The postgres driver is optional; without it the engine cannot be Postgres.
-            try:
-                from cognee.infrastructure.databases.graph.postgres.adapter import PostgresAdapter
-                from cognee.infrastructure.databases.hybrid.postgres.adapter import (
-                    PostgresHybridAdapter,
-                )
-
-                unsupported_backends: tuple = (PostgresAdapter, PostgresHybridAdapter)
-            except ImportError:
-                unsupported_backends = ()
-
-            if isinstance(graph_engine, unsupported_backends):
+            # Cypher support is declared on the adapter class
+            # (GraphDBInterface.supports_cypher_queries), so the check needs no
+            # imports of optional backend packages absent from slim images.
+            if not getattr(graph_engine, "supports_cypher_queries", True):
                 raise SearchTypeNotSupported(
-                    "Cypher search is not supported with the Postgres graph backend. "
-                    "Use a Cypher-capable graph backend (Neo4j, Ladybug) for raw Cypher queries."
+                    f"Cypher search is not supported with the "
+                    f"{type(graph_engine).__name__} graph backend. Use a "
+                    "Cypher-capable graph backend (Neo4j, Ladybug) for raw Cypher queries."
                 )
 
             is_empty = await graph_engine.is_empty()

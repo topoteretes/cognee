@@ -60,3 +60,56 @@ async def test_natural_language_search_executes_without_postgres_driver(missing_
         result = await retriever.get_retrieved_objects("How many nodes are there?")
 
     assert result == [("node_count", 10)]
+
+
+class _NoCypherEngine:
+    """Stub for a backend that declares no Cypher capability (e.g. Postgres, Turso)."""
+
+    supports_cypher_queries = False
+
+    async def is_empty(self):
+        return False
+
+
+@pytest.mark.asyncio
+async def test_cypher_search_rejects_backend_without_cypher_support():
+    """A backend declaring supports_cypher_queries=False is rejected without imports."""
+    from cognee.modules.retrieval.exceptions import SearchTypeNotSupported
+
+    retriever = CypherSearchRetriever()
+
+    with patch(
+        "cognee.modules.retrieval.cypher_search_retriever.get_graph_engine",
+        return_value=_NoCypherEngine(),
+    ):
+        with pytest.raises(SearchTypeNotSupported, match="_NoCypherEngine"):
+            await retriever.get_retrieved_objects("MATCH (n) RETURN count(n)")
+
+
+@pytest.mark.asyncio
+async def test_natural_language_search_rejects_backend_without_cypher_support():
+    from cognee.modules.retrieval.exceptions import SearchTypeNotSupported
+
+    retriever = NaturalLanguageRetriever()
+
+    with patch(
+        "cognee.modules.retrieval.natural_language_retriever.get_graph_engine",
+        return_value=_NoCypherEngine(),
+    ):
+        with pytest.raises(SearchTypeNotSupported, match="_NoCypherEngine"):
+            await retriever.get_retrieved_objects("How many nodes are there?")
+
+
+def test_postgres_adapters_declare_no_cypher_support():
+    """The class attribute is set without instantiating (no DB connection needed)."""
+    postgres_adapter = pytest.importorskip(
+        "cognee.infrastructure.databases.graph.postgres.adapter",
+        reason="postgres extra not installed",
+    )
+    assert postgres_adapter.PostgresAdapter.supports_cypher_queries is False
+
+    hybrid_adapter = pytest.importorskip(
+        "cognee.infrastructure.databases.hybrid.postgres.adapter",
+        reason="postgres extra not installed",
+    )
+    assert hybrid_adapter.PostgresHybridAdapter.supports_cypher_queries is False

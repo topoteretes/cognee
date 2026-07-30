@@ -101,6 +101,9 @@ def _provenance_conflict_set(table, inputs: ProvenanceAttachInputs) -> Dict[str,
 class PostgresAdapter(GraphDBInterface):
     """Graph-as-tables adapter backed by Postgres, accessed via SQLAlchemy async sessions."""
 
+    # ``query()`` executes SQL against the graph tables, not Cypher.
+    supports_cypher_queries = False
+
     _ALLOWED_FILTER_ATTRS = {"id", "name", "type"}
 
     def __init__(self, connection_string: str) -> None:
