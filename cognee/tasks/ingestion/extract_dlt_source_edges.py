@@ -24,8 +24,6 @@ def _get_source_document(data_point: DataPoint):
 async def extract_dlt_source_edges(
     data_points: List[DataPoint],
     ctx: Optional["PipelineContext"] = None,
-    emitted_schema_docs: Optional[set] = None,
-    emitted_value_node_ids: Optional[set] = None,
 ) -> List[DataPoint]:
     """Create graph edges and schema nodes from a DLT source manifest.
 
@@ -36,13 +34,22 @@ async def extract_dlt_source_edges(
     emit_dlt_schema_graph (shared with the legacy extract_dlt_fk_edges).
 
     Row-level edges are only emitted for rows present in the current batch,
-    so batching does not duplicate work. ``emitted_schema_docs`` is shared
-    across batches of one pipeline run via the Task kwarg: a doc's schema
-    nodes are emitted (and vector-embedded) only for the first batch, avoiding
-    re-embedding identical schema nodes per batch. ``emitted_value_node_ids``
-    plays the same role for ColumnValue nodes, whose values recur across
-    batches: each unique value is persisted and embedded once per run.
+    so batching does not duplicate work. Cross-batch dedup state lives in
+    ``ctx.extras``: a doc's schema nodes are emitted (and vector-embedded)
+    only for the first batch that carries its rows, and each unique
+    ColumnValue node is persisted and embedded once. ``ctx`` is per data
+    item, and one manifest data item IS one source — that equality is what
+    makes ctx.extras the correct scope. If manifests ever stop being
+    one-item-per-source, this state needs a new home.
     """
+    if ctx is not None:
+        emitted_schema_docs = ctx.extras.setdefault("dlt_emitted_schema_docs", set())
+        emitted_value_node_ids = ctx.extras.setdefault("dlt_emitted_value_node_ids", set())
+    else:
+        # Direct invocation (unit tests, custom pipelines) without a pipeline
+        # context: fresh per-call sets — batching dedup only.
+        emitted_schema_docs = set()
+        emitted_value_node_ids = set()
     # Group row chunks in this batch by their source document.
     source_docs = {}  # doc_id -> document
     batch_rows_by_doc: dict[str, set] = {}  # doc_id -> {row node id (str), ...}
@@ -65,8 +72,8 @@ async def extract_dlt_source_edges(
         manifest = await load_dlt_manifest(doc.raw_data_location)
         rows_by_node_id = {row["node_id"]: row for row in manifest.get("rows", [])}
 
-        # Emit a doc's schema nodes only once per pipeline run.
-        if emitted_schema_docs is None or doc_id not in emitted_schema_docs:
+        # Emit a doc's schema nodes only once per data item's run.
+        if doc_id not in emitted_schema_docs:
             for table_name, table_meta in manifest.get("tables", {}).items():
                 if table_name in tables:
                     continue
@@ -98,7 +105,6 @@ async def extract_dlt_source_edges(
         emitted_value_node_ids=emitted_value_node_ids,
     )
 
-    if emitted_schema_docs is not None:
-        emitted_schema_docs.update(newly_emitted_doc_ids)
+    emitted_schema_docs.update(newly_emitted_doc_ids)
 
     return data_points

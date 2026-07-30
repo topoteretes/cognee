@@ -145,7 +145,9 @@ async def run_tasks(
                             dataset=dataset,
                             pipeline_run_id=pipeline_run_id,
                             pipeline_name=pipeline_name,
-                            extras=extras if isinstance(extras, dict) else {},
+                            # Copy per item: a shared dict would let one item's
+                            # ctx.extras mutations leak into every other item.
+                            extras=dict(extras) if isinstance(extras, dict) else {},
                         ),
                         user,
                         incremental_loading,

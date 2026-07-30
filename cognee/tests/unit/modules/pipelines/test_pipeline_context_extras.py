@@ -121,3 +121,74 @@ async def test_task_without_ctx_ignores_extras():
 
     flat = results[0] if isinstance(results[0], list) else results
     assert flat == [2, 4, 6]
+
+
+@pytest.mark.asyncio
+async def test_run_tasks_copies_extras_per_item(monkeypatch):
+    """Each data item gets its OWN copy of caller-supplied extras.
+
+    A shared dict would let one item's ctx.extras mutations (e.g. DLT dedup
+    sets) leak into every concurrently running item — the same bug class as
+    the shared Task-kwarg sets, one layer up.
+    """
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock
+    from uuid import uuid4
+
+    import cognee.modules.pipelines.operations.run_tasks as run_tasks_module
+
+    dataset = SimpleNamespace(id=uuid4(), name="ds", owner_id=uuid4())
+    run_id = uuid4()
+
+    session = MagicMock()
+    session.get = AsyncMock(return_value=dataset)
+    session_ctx = MagicMock()
+    session_ctx.__aenter__ = AsyncMock(return_value=session)
+    session_ctx.__aexit__ = AsyncMock(return_value=False)
+    engine = MagicMock(spec=["get_async_session"])
+    engine.get_async_session.return_value = session_ctx
+    monkeypatch.setattr(run_tasks_module, "get_relational_engine", lambda: engine)
+
+    db_ctx = MagicMock()
+    db_ctx.return_value.__aenter__ = AsyncMock(return_value=None)
+    db_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
+    monkeypatch.setattr(run_tasks_module, "set_database_global_context_variables", db_ctx)
+
+    monkeypatch.setattr(
+        run_tasks_module,
+        "log_pipeline_run_start",
+        AsyncMock(return_value=SimpleNamespace(pipeline_run_id=run_id)),
+    )
+    monkeypatch.setattr(run_tasks_module, "log_pipeline_run_complete", AsyncMock())
+    monkeypatch.setattr(run_tasks_module, "log_pipeline_run_error", AsyncMock())
+    monkeypatch.setattr(
+        run_tasks_module, "get_graph_engine", AsyncMock(return_value=SimpleNamespace())
+    )
+
+    captured_ctxs = []
+
+    async def _fake_item_run(data_item, ds, item_tasks, name, pid, rid, ctx, *args):
+        captured_ctxs.append(ctx)
+        ctx.extras["mutated_by"] = str(data_item)
+        return {"run_info": "ok"}
+
+    monkeypatch.setattr(run_tasks_module, "run_tasks_data_item", _fake_item_run)
+
+    caller_extras = {"score_multiplier": 3}
+    async for _ in run_tasks_module.run_tasks.__wrapped__(
+        tasks="TASKS",
+        dataset_id=dataset.id,
+        data=["item_a", "item_b"],
+        user=SimpleNamespace(id=uuid4(), tenant_id=None),
+        pipeline_name="custom_pipeline",
+        extras=caller_extras,
+    ):
+        pass
+
+    assert len(captured_ctxs) == 2
+    # Distinct dict objects, each seeded with the caller's values.
+    assert captured_ctxs[0].extras is not captured_ctxs[1].extras
+    assert all(ctx.extras["score_multiplier"] == 3 for ctx in captured_ctxs)
+    # Per-item mutations stayed per-item and never reached the caller's dict.
+    assert captured_ctxs[0].extras["mutated_by"] != captured_ctxs[1].extras["mutated_by"]
+    assert caller_extras == {"score_multiplier": 3}

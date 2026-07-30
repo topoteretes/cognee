@@ -596,7 +596,10 @@ async def get_dlt_tasks(chunk_size: int = None, chunks_per_batch: int = None) ->
 
     No LLM tasks: each manifest row becomes one DocumentChunk (vector-indexed
     by add_data_points) and the graph structure comes from the relational
-    schema via extract_dlt_source_edges.
+    schema via extract_dlt_source_edges. Deliberate omissions relative to
+    get_default_tasks: contradiction detection (an LLM pass; DLT rows are
+    deterministic relational data) and functional_relationships (a cognify()
+    parameter that only applies to LLM-extracted temporal facts).
     """
     from cognee.tasks.ingestion.extract_dlt_source_edges import extract_dlt_source_edges
 
@@ -618,17 +621,13 @@ async def get_dlt_tasks(chunk_size: int = None, chunks_per_batch: int = None) ->
         # LOAD: persist row chunks and embeddings to graph/vector DBs
         Task(
             add_data_points,
+            embed_triplets=cognify_config.triplet_embedding,
             task_config={"batch_size": chunks_per_batch},
         ),
         # LOAD: schema nodes and deterministic FK edges from the manifest.
-        # emitted_schema_docs and emitted_value_node_ids are shared across
-        # batches of this pipeline run so schema nodes and column value nodes
-        # are only emitted (and embedded) once per run, not once per batch.
-        Task(
-            extract_dlt_source_edges,
-            emitted_schema_docs=set(),
-            emitted_value_node_ids=set(),
-        ),
+        # Cross-batch dedup state lives in ctx.extras (per data item = per
+        # source), so these Task objects are safe to share across datasets.
+        Task(extract_dlt_source_edges),
     ]
 
 
