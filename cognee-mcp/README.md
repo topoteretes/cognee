@@ -507,6 +507,18 @@ The MCP server exposes three tools:
 
 The workspace lets you create/switch/delete datasets, upload files, add text, search, and view the graph from one inline panel.
 
+### Tool surface (`COGNEE_MCP_TOOL_MODE`)
+
+Advertising every tool up front costs agent context and hurts tool-selection accuracy, so by default the server pins a small set in `tools/list` and makes the rest discoverable through FastMCP's built-in `search_tools`. **Unadvertised tools stay callable by name**, so the workspace UI (which calls its internals directly) is unaffected.
+
+```bash
+COGNEE_MCP_TOOL_MODE=default   # pinned: remember, recall, forget + the 3 workspace UI entry tools
+COGNEE_MCP_TOOL_MODE=minimal   # pinned: remember, recall, forget
+COGNEE_MCP_TOOL_MODE=all       # no search transform; advertise all 11 tools
+```
+
+Also settable per-process with `--tool-mode`. In `default`/`minimal` an agent calls `search_tools(query=...)` to find a tool and either calls it by name or goes through the `call_tool` proxy. Tiers are declared per tool via `@registry.tool(tags={...})` in `src/server.py`, so the pinned set is derived from the decorators rather than a separate list.
+
 The bundle that powers the workspace lives at `cognee-mcp/src/app_bundles/visualize-graph.html`. It is built from `cognee-mcp/apps-src/` via `npm run build` and is gitignored. The Docker image builds it as part of the image; PyPI wheels carry it (the maintainer runs `npm run build` before `uv build`); from-source users build it manually (see [Quick Start](#-quick-start) step 7). If the bundle is missing at runtime, the workspace tools raise a `FileNotFoundError` pointing back to the build command.
 
 ### Agent Scoping (per-client default datasets)

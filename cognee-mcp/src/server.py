@@ -18,6 +18,8 @@ import importlib.util
 from contextlib import redirect_stdout
 import mcp.types as types
 from fastmcp import FastMCP
+from fastmcp.server.transforms.search import BM25SearchTransform
+from fastmcp.server.transforms.search.base import BaseSearchTransform
 from fastmcp.tools.tool import ToolResult
 from cognee.modules.storage.utils import JSONEncoder
 from starlette.responses import JSONResponse
@@ -34,6 +36,11 @@ try:
     from .strip_vectors import strip_vectors
 except ImportError:
     from strip_vectors import strip_vectors
+
+try:
+    from .tool_registry import DEFAULT_TAG, MEMORY_TAG, ToolRegistry
+except ImportError:
+    from tool_registry import DEFAULT_TAG, MEMORY_TAG, ToolRegistry
 
 try:
     from .server_utils import (
@@ -72,6 +79,10 @@ except ModuleNotFoundError:
 
 
 mcp = FastMCP("Cognee")
+
+# Tools register through this rather than @mcp.tool directly, so each one
+# declares its tier at the definition site (see apply_tool_mode()).
+registry = ToolRegistry(mcp)
 
 logger = get_logger()
 
@@ -150,6 +161,55 @@ def _transport_security_kwargs(host: str) -> dict:
     # Loopback-only with no extra hosts — let FastMCP use its own defaults.
     logger.info("MCP transport security: using FastMCP defaults (localhost only)")
     return {}
+
+
+TOOL_MODES = ("default", "minimal", "all")
+
+
+def apply_tool_mode(mode: str = None) -> str:
+    """Gate the advertised tool surface behind FastMCP's tool-search transform.
+
+    Every tool stays registered and directly callable by name; the transform
+    only changes what ``tools/list`` advertises, replacing the non-pinned tools
+    with ``search_tools``/``call_tool``. That keeps the workspace UI working
+    (it calls internals by name via app.callServerTool) while a fresh agent
+    sees a handful of tools instead of the whole catalog.
+
+    Modes (COGNEE_MCP_TOOL_MODE):
+        default: pin the DEFAULT_TAG tools (memory API + workspace UI entry).
+        minimal: pin only the memory API.
+        all:     no transform, advertise everything (pre-3.x behavior).
+
+    Returns the mode actually applied.
+    """
+    mode = (mode or os.getenv("COGNEE_MCP_TOOL_MODE") or "default").lower()
+
+    if mode not in TOOL_MODES:
+        logger.warning(
+            "Unknown COGNEE_MCP_TOOL_MODE=%r; falling back to 'default'. Valid: %s",
+            mode,
+            ", ".join(TOOL_MODES),
+        )
+        mode = "default"
+
+    # Drop any transform a previous call installed: add_transform() appends, so
+    # calling this twice would otherwise stack search transforms on top of each
+    # other and hide the first one's pinned tools.
+    mcp._transforms = [t for t in mcp._transforms if not isinstance(t, BaseSearchTransform)]
+
+    if mode == "all":
+        logger.info("MCP tool mode 'all': advertising all %d tools", len(registry.tags))
+        return mode
+
+    pinned = registry.names_with_tag(DEFAULT_TAG if mode == "default" else MEMORY_TAG)
+    mcp.add_transform(BM25SearchTransform(max_results=5, always_visible=pinned))
+    logger.info(
+        "MCP tool mode %r: advertising %s + search_tools/call_tool (%d tools searchable)",
+        mode,
+        pinned,
+        len(registry.tags) - len(pinned),
+    )
+    return mode
 
 
 def _is_running_in_docker() -> bool:
@@ -1056,8 +1116,7 @@ async def prune():
 # ---------------------------------------------------------------------------
 
 
-@mcp.tool()
-@log_usage(function_name="MCP remember", log_type="mcp_tool")
+@registry.tool(tags={DEFAULT_TAG, MEMORY_TAG})
 async def remember(
     data: str = None,
     filename: str = None,
@@ -1163,8 +1222,7 @@ async def remember(
             return [types.TextContent(type="text", text=f"Error: {error_msg}")]
 
 
-@mcp.tool()
-@log_usage(function_name="MCP recall", log_type="mcp_tool")
+@registry.tool(tags={DEFAULT_TAG, MEMORY_TAG})
 async def recall(
     query: str,
     search_type: str = None,
@@ -1225,8 +1283,7 @@ async def recall(
             return [types.TextContent(type="text", text=f"Error: {error_msg}")]
 
 
-@mcp.tool()
-@log_usage(function_name="MCP forget", log_type="mcp_tool")
+@registry.tool(tags={DEFAULT_TAG, MEMORY_TAG})
 async def forget(
     dataset: str = None,
     everything: bool = False,
@@ -1469,7 +1526,8 @@ def _inject_graph_viz_overrides(html: str) -> str:
     return html
 
 
-@mcp.tool(
+@registry.tool(
+    tags={DEFAULT_TAG, "workspace"},
     name="visualize_graph_ui",
     description=(
         "Open the Cognee workspace UI and render the current knowledge graph. "
@@ -1477,7 +1535,6 @@ def _inject_graph_viz_overrides(html: str) -> str:
     ),
     meta={"ui": {"resourceUri": _VISUALIZE_APP_URI}},
 )
-@log_usage(function_name="MCP visualize_graph_ui", log_type="mcp_tool")
 async def visualize_graph_ui(dataset_name: str = None) -> ToolResult:
     """Render the Cognee graph for a specific dataset.
 
@@ -1530,7 +1587,8 @@ async def visualize_graph_ui(dataset_name: str = None) -> ToolResult:
     )
 
 
-@mcp.tool(
+@registry.tool(
+    tags={DEFAULT_TAG, "workspace"},
     name="upload_file_ui",
     description=(
         "Open the Cognee workspace UI so the user can upload files to memory. "
@@ -1538,14 +1596,14 @@ async def visualize_graph_ui(dataset_name: str = None) -> ToolResult:
     ),
     meta={"ui": {"resourceUri": _VISUALIZE_APP_URI}},
 )
-@log_usage(function_name="MCP upload_file_ui", log_type="mcp_tool")
 async def upload_file_ui() -> ToolResult:
     return ToolResult(
         content=[types.TextContent(type="text", text="Cognee workspace opened.")],
     )
 
 
-@mcp.tool(
+@registry.tool(
+    tags={DEFAULT_TAG, "workspace"},
     name="open_cognee_workspace",
     description=(
         "Open the Cognee workspace UI. Use for generic intents like "
@@ -1555,7 +1613,6 @@ async def upload_file_ui() -> ToolResult:
     ),
     meta={"ui": {"resourceUri": _VISUALIZE_APP_URI}},
 )
-@log_usage(function_name="MCP open_cognee_workspace", log_type="mcp_tool")
 async def open_cognee_workspace() -> ToolResult:
     return ToolResult(
         content=[types.TextContent(type="text", text="Cognee workspace opened.")],
@@ -1584,14 +1641,14 @@ def _format_named_items(items, singular: str, plural: str, limit: int = 50) -> s
     return "\n".join(lines)
 
 
-@mcp.tool(
+@registry.tool(
+    tags={"workspace", "datasets"},
     name="list_datasets_json",
     description=(
         "List datasets as structured JSON for the Cognee workspace UI. "
         "Returns {datasets: [{id, name}, ...]} in structuredContent."
     ),
 )
-@log_usage(function_name="MCP list_datasets_json", log_type="mcp_tool")
 async def list_datasets_json() -> ToolResult:
     with redirect_stdout(sys.stderr):
         raw = await cognee_client.list_datasets()
@@ -1614,14 +1671,14 @@ async def list_datasets_json() -> ToolResult:
     )
 
 
-@mcp.tool(
+@registry.tool(
+    tags={"workspace", "datasets"},
     name="list_dataset_data_json",
     description=(
         "List data items in a dataset as structured JSON for the Cognee workspace UI. "
         "Returns {data: [{id, name}, ...]} in structuredContent."
     ),
 )
-@log_usage(function_name="MCP list_dataset_data_json", log_type="mcp_tool")
 async def list_dataset_data_json(dataset_id: str) -> ToolResult:
     from uuid import UUID
     from cognee.modules.data.methods import get_dataset, get_dataset_data
@@ -1717,7 +1774,8 @@ def _agent_scoped_default_dataset() -> str:
     return "main_dataset"
 
 
-@mcp.tool(
+@registry.tool(
+    tags={"workspace"},
     name="get_client_info_json",
     description=(
         "Return the current MCP client identity and its agent-scoped default dataset. "
@@ -1727,7 +1785,6 @@ def _agent_scoped_default_dataset() -> str:
         "Returns {client: {name, version}, default_dataset} in structuredContent."
     ),
 )
-@log_usage(function_name="MCP get_client_info_json", log_type="mcp_tool")
 async def get_client_info_json() -> ToolResult:
     from mcp.server.lowlevel.server import request_ctx
 
@@ -1772,14 +1829,14 @@ async def get_client_info_json() -> ToolResult:
     )
 
 
-@mcp.tool(
+@registry.tool(
+    tags={"workspace", "datasets"},
     name="create_dataset_json",
     description=(
         "Create an empty dataset with the given name (idempotent). "
         "Returns {dataset: {id, name}} in structuredContent."
     ),
 )
-@log_usage(function_name="MCP create_dataset_json", log_type="mcp_tool")
 async def create_dataset_json(name: str) -> ToolResult:
     name = (name or "").strip()
     if not name:
@@ -1901,6 +1958,16 @@ async def main():
         help="Argument stops database migration from being attempted",
     )
 
+    parser.add_argument(
+        "--tool-mode",
+        default=None,
+        choices=TOOL_MODES,
+        help="How many tools to advertise in tools/list. 'default' pins the memory API "
+        "and workspace UI entry tools and makes the rest discoverable via search_tools; "
+        "'minimal' pins only the memory API; 'all' advertises every tool. "
+        "Can also be set via COGNEE_MCP_TOOL_MODE. (default: default)",
+    )
+
     # Cognee API connection options
     parser.add_argument(
         "--api-url",
@@ -1939,6 +2006,7 @@ async def main():
 
     host = args.host
     port = int(args.port)
+    apply_tool_mode(args.tool_mode)
 
     # Resolve cloud connection: CLI args take precedence over env vars
     serve_url = args.serve_url or os.environ.get("COGNEE_SERVICE_URL", "")

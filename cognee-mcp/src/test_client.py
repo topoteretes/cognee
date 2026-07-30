@@ -10,18 +10,22 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 
-EXPECTED_TOOLS = {
-    "remember",
-    "recall",
-    "forget",
-    "visualize_graph_ui",
-    "upload_file_ui",
-    "open_cognee_workspace",
-    "list_datasets_json",
-    "list_dataset_data_json",
-    "get_client_info_json",
-    "create_dataset_json",
-}
+try:
+    from .server import registry
+    from .tool_registry import DEFAULT_TAG
+except ImportError:
+    from server import registry
+    from tool_registry import DEFAULT_TAG
+
+# Derived from the @registry.tool declarations rather than duplicated here, so
+# adding or retiering a tool can't leave this list stale. The server runs in
+# COGNEE_MCP_TOOL_MODE=default, so tools/list carries the pinned tools plus the
+# two synthetic tools FastMCP's search transform adds.
+SEARCH_TRANSFORM_TOOLS = {"search_tools", "call_tool"}
+EXPECTED_TOOLS = set(registry.names_with_tag(DEFAULT_TAG)) | SEARCH_TRANSFORM_TOOLS
+
+# Registered but not advertised in default mode; must still be callable by name.
+HIDDEN_TOOL = "list_datasets_json"
 
 
 class CogneeTestClient:
@@ -81,6 +85,39 @@ class CogneeTestClient:
             }
             print(f"FAIL tool discovery: {e}")
 
+    async def test_hidden_tool_is_still_callable(self):
+        """An unadvertised tool must remain callable by name over the real protocol."""
+        print("\nTesting hidden tool reachability...")
+
+        try:
+            async with self.mcp_server_session() as session:
+                tools_result = await session.list_tools()
+                if HIDDEN_TOOL in {tool.name for tool in tools_result.tools}:
+                    raise AssertionError(f"{HIDDEN_TOOL} should not be advertised")
+
+                direct = await session.call_tool(HIDDEN_TOOL, arguments={})
+                if direct.isError:
+                    raise AssertionError(f"Direct call failed: {self._content_text(direct)}")
+
+                found = await session.call_tool(
+                    "search_tools", arguments={"query": "list the datasets"}
+                )
+                if HIDDEN_TOOL not in self._content_text(found):
+                    raise AssertionError(f"search_tools did not surface {HIDDEN_TOOL}")
+
+            self.test_results["hidden_tool"] = {
+                "status": "PASS",
+                "message": f"{HIDDEN_TOOL} is searchable and directly callable while unlisted",
+            }
+            print("PASS hidden tool reachability")
+        except Exception as e:
+            self.test_results["hidden_tool"] = {
+                "status": "FAIL",
+                "error": str(e),
+                "message": "Hidden tool reachability failed",
+            }
+            print(f"FAIL hidden tool reachability: {e}")
+
     async def test_memory_tools(self):
         """Exercise the three public tools without deleting existing memory."""
         print("\nTesting memory tool calls...")
@@ -132,6 +169,7 @@ class CogneeTestClient:
         print("=" * 50)
 
         await self.test_tool_discovery()
+        await self.test_hidden_tool_is_still_callable()
         await self.test_memory_tools()
         self.print_test_summary()
 
