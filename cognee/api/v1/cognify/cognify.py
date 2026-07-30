@@ -356,7 +356,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
 
     if chunks_per_batch is None:
         chunks_per_batch = (
-            cognify_config.chunks_per_batch if cognify_config.chunks_per_batch is not None else 5000
+            cognify_config.chunks_per_batch if cognify_config.chunks_per_batch is not None else 2000
         )
 
     default_tasks = [
