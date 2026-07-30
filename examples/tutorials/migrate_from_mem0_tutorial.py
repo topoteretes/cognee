@@ -44,10 +44,13 @@ async def main():
 
     # ------------------------------------------------------------------
     # Step 2: Import with preserve mode (no LLM, fastest)
+    # To enable recall over the imported data, in addition to initial remember,
+    # you need to call an additional cognify() (calls LLM)
     # ------------------------------------------------------------------
     print("\nStep 2 — Importing mem0 memories (mode=preserve) …")
     source = Mem0Source(DATA_FILE, mode="preserve")
     result = await cognee.remember(source)
+    await cognee.cognify()
     print("  ", result)
 
     # ------------------------------------------------------------------
