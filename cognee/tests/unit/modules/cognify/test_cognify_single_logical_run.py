@@ -138,39 +138,12 @@ class TestCognifyMakesOneCall:
         assert resolver(_manifest_item()) == "DLT_TASKS"
 
 
-def _mock_run_tasks_plumbing(monkeypatch, dataset):
-    session = MagicMock()
-    session.get = AsyncMock(return_value=dataset)
-    session_ctx = MagicMock()
-    session_ctx.__aenter__ = AsyncMock(return_value=session)
-    session_ctx.__aexit__ = AsyncMock(return_value=False)
-    engine = MagicMock(spec=["get_async_session"])  # no push_to_s3 attribute
-    engine.get_async_session.return_value = session_ctx
-    monkeypatch.setattr(run_tasks_module, "get_relational_engine", lambda: engine)
-
-    db_ctx = MagicMock()
-    db_ctx.return_value.__aenter__ = AsyncMock(return_value=None)
-    db_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
-    monkeypatch.setattr(run_tasks_module, "set_database_global_context_variables", db_ctx)
-
-    log_start = AsyncMock(return_value=SimpleNamespace(pipeline_run_id=uuid4()))
-    monkeypatch.setattr(run_tasks_module, "log_pipeline_run_start", log_start)
-    log_complete = AsyncMock()
-    monkeypatch.setattr(run_tasks_module, "log_pipeline_run_complete", log_complete)
-    log_error = AsyncMock()
-    monkeypatch.setattr(run_tasks_module, "log_pipeline_run_error", log_error)
-    monkeypatch.setattr(
-        run_tasks_module, "get_graph_engine", AsyncMock(return_value=SimpleNamespace())
-    )
-    return log_start, log_complete, log_error
-
-
 @pytest.mark.asyncio
-async def test_run_tasks_resolver_shares_one_run_lifecycle(monkeypatch):
+async def test_run_tasks_resolver_shares_one_run_lifecycle(monkeypatch, runner_plumbing):
     """Items resolved to different task lists share one run record and status."""
     dataset = SimpleNamespace(id=uuid4(), name="mixed_ds", owner_id=uuid4())
-    log_start, log_complete, log_error = _mock_run_tasks_plumbing(monkeypatch, dataset)
-    run_id = log_start.return_value.pipeline_run_id
+    logs = runner_plumbing(run_tasks_module, dataset)
+    run_id = logs.start.return_value.pipeline_run_id
     monkeypatch.setattr(run_tasks_module, "validate_pipeline_tasks", lambda tasks: None)
 
     processed = []
@@ -192,13 +165,13 @@ async def test_run_tasks_resolver_shares_one_run_lifecycle(monkeypatch):
         events.append(event)
 
     # One run record started and completed — never one per task list.
-    assert log_start.await_count == 1
-    assert log_complete.await_count == 1
-    assert log_error.await_count == 0
+    assert logs.start.await_count == 1
+    assert logs.complete.await_count == 1
+    assert logs.error.await_count == 0
     assert [type(e) for e in events] == [PipelineRunStarted, PipelineRunCompleted]
     assert all(e.pipeline_run_id == run_id for e in events)
     # log_pipeline_run_start received the real item list, not None.
-    assert log_start.await_args.args[3] == ["m1", "m2", "r1"]
+    assert logs.start.await_args.args[3] == ["m1", "m2", "r1"]
 
     # Every item ran with its own resolved task list.
     assert sorted(processed) == [
@@ -209,9 +182,9 @@ async def test_run_tasks_resolver_shares_one_run_lifecycle(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_run_tasks_validates_each_distinct_resolved_list_once(monkeypatch):
+async def test_run_tasks_validates_each_distinct_resolved_list_once(monkeypatch, runner_plumbing):
     dataset = SimpleNamespace(id=uuid4(), name="ds", owner_id=uuid4())
-    _mock_run_tasks_plumbing(monkeypatch, dataset)
+    runner_plumbing(run_tasks_module, dataset)
     monkeypatch.setattr(
         run_tasks_module, "run_tasks_data_item", AsyncMock(return_value={"run_info": "ok"})
     )

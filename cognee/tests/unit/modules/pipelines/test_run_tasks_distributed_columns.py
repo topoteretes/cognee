@@ -34,35 +34,9 @@ class _FakeModalFn:
 
 
 @pytest.mark.asyncio
-async def test_task_column_is_resolved_per_item(monkeypatch):
+async def test_task_column_is_resolved_per_item(monkeypatch, runner_plumbing):
     dataset = SimpleNamespace(id=uuid4(), name="ds", owner_id=uuid4())
-
-    session = MagicMock()
-    session.get = AsyncMock(return_value=dataset)
-    session_ctx = MagicMock()
-    session_ctx.__aenter__ = AsyncMock(return_value=session)
-    session_ctx.__aexit__ = AsyncMock(return_value=False)
-    engine = MagicMock(spec=["get_async_session"])
-    engine.get_async_session.return_value = session_ctx
-    monkeypatch.setattr(dist_module, "get_relational_engine", lambda: engine)
-
-    db_ctx = MagicMock()
-    db_ctx.return_value.__aenter__ = AsyncMock(return_value=None)
-    db_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
-    monkeypatch.setattr(dist_module, "set_database_global_context_variables", db_ctx)
-
-    monkeypatch.setattr(
-        dist_module,
-        "log_pipeline_run_start",
-        AsyncMock(return_value=SimpleNamespace(pipeline_run_id=uuid4())),
-    )
-    monkeypatch.setattr(dist_module, "log_pipeline_run_complete", AsyncMock())
-    monkeypatch.setattr(dist_module, "log_pipeline_run_error", AsyncMock())
-
-    async def _identity(data):
-        return data
-
-    monkeypatch.setattr(dist_module, "resolve_data_directories", _identity)
+    runner_plumbing(dist_module, dataset)
 
     validated = []
     monkeypatch.setattr(dist_module, "validate_pipeline_tasks", validated.append)
