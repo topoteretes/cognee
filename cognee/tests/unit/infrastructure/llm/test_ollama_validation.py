@@ -123,6 +123,6 @@ async def test_local_ollama_example_executes_offline(monkeypatch):
         return response_model()
 
     with patch.object(LLMGateway, "acreate_structured_output", new=_mock_acreate):
-        from examples.python.local_ollama_example import main
+        from examples.demos.local_ollama_example import main
 
         await main()

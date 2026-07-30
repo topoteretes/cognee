@@ -245,6 +245,13 @@ class LLMConfig(BaseSettings):
                 f"for LLM usage (LLM_MODEL, LLM_ENDPOINT, LLM_API_KEY). Missing: {missing_llm}"
             )
 
+        # Check model support matrix if LLM_MODEL is configured
+        model_name = os.environ.get("LLM_MODEL") or self.llm_model
+        if model_name:
+            from cognee.infrastructure.llm.ollama_support import check_model_support
+
+            check_model_support(model_name)
+
         return self
 
     def to_dict(self) -> dict[str, Any]:
