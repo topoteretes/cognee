@@ -35,9 +35,11 @@ KNOWN_LLM_PROVIDERS = frozenset(
 # Local inference servers process requests (near-)serially, unlike cloud
 # providers. One definition of the distinction, for everything that needs it:
 # by first-class provider name, or by litellm model routing prefix (LM Studio
-# and vLLM have no first-class provider in cognee).
+# has no first-class provider in cognee). vLLM is deliberately NOT here: it
+# serves with continuous batching and absorbs concurrency like a cloud
+# endpoint, so it keeps the regular settings.
 LOCAL_LLM_PROVIDERS = frozenset({"ollama", "llama_cpp"})
-LOCAL_LLM_MODEL_PREFIXES = ("lm_studio/", "hosted_vllm/", "vllm/")
+LOCAL_LLM_MODEL_PREFIXES = ("lm_studio/",)
 
 # Default RPM budget for local inference servers when LLM_RATE_LIMIT_REQUESTS
 # is not explicitly configured; cloud providers keep the regular default of 60.
@@ -45,8 +47,10 @@ LOCAL_DEFAULT_RATE_LIMIT_REQUESTS = 20
 
 
 def is_local_llm(provider: str | None, model: str | None) -> bool:
-    """True when the provider/model points at a local inference server
-    (Ollama, llama.cpp by provider; LM Studio, vLLM by model prefix)."""
+    """True when the provider/model points at a serial local inference server
+    (Ollama, llama.cpp by provider; LM Studio by model prefix). vLLM counts
+    as regular: continuous batching absorbs concurrency like a cloud endpoint.
+    """
     if (provider or "").lower() in LOCAL_LLM_PROVIDERS:
         return True
     return (model or "").lower().startswith(LOCAL_LLM_MODEL_PREFIXES)
@@ -198,7 +202,7 @@ class LLMConfig(BaseSettings):
         """
         Give local inference servers a smaller default RPM budget.
 
-        Local servers (Ollama, LM Studio, vLLM, llama.cpp) process requests
+        Serial local servers (Ollama, LM Studio, llama.cpp) process requests
         (near-)serially, so when the rate limiter engages, the regular cloud
         default of 60 requests per interval would still flood them. An
         explicitly configured ``LLM_RATE_LIMIT_REQUESTS`` always wins. Runs

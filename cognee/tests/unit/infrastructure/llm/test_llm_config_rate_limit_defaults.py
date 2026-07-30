@@ -17,8 +17,6 @@ def _build(**kwargs):
         ("ollama", "phi4:latest"),
         ("llama_cpp", "some-model"),
         ("custom", "lm_studio/qwen2.5-7b"),
-        ("custom", "hosted_vllm/meta-llama/Llama-3-70B"),
-        ("custom", "vllm/some-model"),
     ],
 )
 def test_local_providers_default_to_small_budget(provider, model):
@@ -26,8 +24,16 @@ def test_local_providers_default_to_small_budget(provider, model):
     assert config.llm_rate_limit_requests == LOCAL_DEFAULT_RATE_LIMIT_REQUESTS
 
 
-def test_cloud_providers_keep_regular_default():
-    config = _build(llm_provider="openai", llm_model="openai/gpt-5-mini")
+@pytest.mark.parametrize(
+    ("provider", "model"),
+    [
+        ("openai", "openai/gpt-5-mini"),
+        ("custom", "hosted_vllm/meta-llama/Llama-3-70B"),  # vLLM batches like a cloud endpoint
+        ("custom", "vllm/some-model"),
+    ],
+)
+def test_regular_providers_keep_regular_default(provider, model):
+    config = _build(llm_provider=provider, llm_model=model)
     assert config.llm_rate_limit_requests == 60
 
 
@@ -42,7 +48,7 @@ def test_explicit_setting_wins_over_local_default():
         ("ollama", "phi4:latest", True),
         ("llama_cpp", "some-model", True),
         ("custom", "lm_studio/qwen2.5-7b", True),
-        ("custom", "hosted_vllm/meta-llama/Llama-3-70B", True),
+        ("custom", "hosted_vllm/meta-llama/Llama-3-70B", False),
         ("openai", "openai/gpt-5-mini", False),
         (None, None, False),
     ],
