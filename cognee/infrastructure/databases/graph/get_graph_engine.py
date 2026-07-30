@@ -448,6 +448,8 @@ def _create_graph_engine(
             graph_database_allow_anonymous=graph_database_allow_anonymous,
         )
 
+    # EXPERIMENTAL: Postgres as a graph store is not production-ready — use a graph-native
+    # backend (Kuzu, Neo4j) for production. See PostgresAdapter's docstring for details.
     elif graph_database_provider == "postgres":
         from cognee.context_global_variables import backend_access_control_enabled
 
