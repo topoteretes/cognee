@@ -2,9 +2,9 @@
 
 _execute_cognify_runs maps planned invocations onto single run_pipeline calls:
 a plain run for uniform datasets, an explicit-items run for manifest-only
-datasets, and a multi-leg run for mixed datasets — never two runs (or two
-pipeline names) for one dataset. run_tasks executes legs under a single run
-lifecycle: one start record, per-leg task lists, one terminal status.
+datasets, and a multi-sub-pipeline run for mixed datasets — never two runs (or two
+pipeline names) for one dataset. run_tasks executes sub_pipelines under a single run
+lifecycle: one start record, per-sub-pipeline task lists, one terminal status.
 """
 
 import sys
@@ -57,35 +57,37 @@ class TestExecuteCognifyRuns:
     @pytest.mark.asyncio
     async def test_standard_plan_is_one_plain_call(self):
         executor = _ExecutorRecorder()
-        await _execute([{"datasets": ["a", "b"], "leg_kinds": None}], executor)
+        await _execute([{"datasets": ["a", "b"], "sub_pipeline_kinds": None}], executor)
 
         (call,) = executor.calls
         assert call["pipeline_name"] == "cognify_pipeline"
         assert call["tasks"] == "STANDARD_TASKS"
-        assert "data" not in call and "legs" not in call
+        assert "data" not in call and "sub_pipelines" not in call
 
     @pytest.mark.asyncio
     async def test_manifest_only_dataset_is_one_run_under_cognify_name(self):
         executor = _ExecutorRecorder()
         items = ["manifest_item"]
         with patch.object(cognify_module, "get_dlt_tasks", new=AsyncMock(return_value="DLT_TASKS")):
-            await _execute([{"datasets": ["ds1"], "leg_kinds": [("dlt", items)]}], executor)
+            await _execute(
+                [{"datasets": ["ds1"], "sub_pipeline_kinds": [("dlt", items)]}], executor
+            )
 
         (call,) = executor.calls
         assert call["pipeline_name"] == "cognify_pipeline"  # not dlt_cognify_pipeline
         assert call["tasks"] == "DLT_TASKS"
         assert call["data"] == items
-        assert "legs" not in call
+        assert "sub_pipelines" not in call
 
     @pytest.mark.asyncio
-    async def test_mixed_dataset_is_one_multi_leg_run(self):
+    async def test_mixed_dataset_is_one_multi_sub_pipeline_run(self):
         executor = _ExecutorRecorder()
         with patch.object(cognify_module, "get_dlt_tasks", new=AsyncMock(return_value="DLT_TASKS")):
             await _execute(
                 [
                     {
                         "datasets": ["ds1"],
-                        "leg_kinds": [("dlt", ["m1"]), ("standard", ["r1", "r2"])],
+                        "sub_pipeline_kinds": [("dlt", ["m1"]), ("standard", ["r1", "r2"])],
                     }
                 ],
                 executor,
@@ -93,7 +95,7 @@ class TestExecuteCognifyRuns:
 
         (call,) = executor.calls
         assert call["pipeline_name"] == "cognify_pipeline"
-        assert call["legs"] == [("DLT_TASKS", ["m1"]), ("STANDARD_TASKS", ["r1", "r2"])]
+        assert call["sub_pipelines"] == [("DLT_TASKS", ["m1"]), ("STANDARD_TASKS", ["r1", "r2"])]
         assert "tasks" not in call and "data" not in call
 
     @pytest.mark.asyncio
@@ -102,8 +104,8 @@ class TestExecuteCognifyRuns:
         with patch.object(cognify_module, "get_dlt_tasks", new=AsyncMock(return_value="DLT_TASKS")):
             result = await _execute(
                 [
-                    {"datasets": ["ds1"], "leg_kinds": [("dlt", ["m"])]},
-                    {"datasets": ["ds2", "ds3"], "leg_kinds": None},
+                    {"datasets": ["ds1"], "sub_pipeline_kinds": [("dlt", ["m"])]},
+                    {"datasets": ["ds2", "ds3"], "sub_pipeline_kinds": None},
                 ],
                 executor,
             )
@@ -116,7 +118,7 @@ class TestExecuteCognifyRuns:
 
 
 @pytest.mark.asyncio
-async def test_run_tasks_legs_share_one_run_lifecycle(monkeypatch):
+async def test_run_tasks_sub_pipelines_share_one_run_lifecycle(monkeypatch):
     dataset = SimpleNamespace(id=uuid4(), name="mixed_ds", owner_id=uuid4())
     run_id = uuid4()
 
@@ -159,18 +161,18 @@ async def test_run_tasks_legs_share_one_run_lifecycle(monkeypatch):
         data=None,
         user=SimpleNamespace(id=uuid4(), tenant_id=None),
         pipeline_name="cognify_pipeline",
-        legs=[("DLT_TASKS", ["m1", "m2"]), ("STANDARD_TASKS", ["r1"])],
+        sub_pipelines=[("DLT_TASKS", ["m1", "m2"]), ("STANDARD_TASKS", ["r1"])],
     ):
         events.append(event)
 
-    # One run record started and completed — never one per leg.
+    # One run record started and completed — never one per sub-pipeline.
     assert log_start.await_count == 1
     assert log_complete.await_count == 1
     assert log_error.await_count == 0
     assert [type(e) for e in events] == [PipelineRunStarted, PipelineRunCompleted]
     assert all(e.pipeline_run_id == run_id for e in events)
 
-    # Every item ran with its own leg's task list.
+    # Every item ran with its own sub-pipeline's task list.
     assert sorted(processed) == [
         ("m1", "DLT_TASKS"),
         ("m2", "DLT_TASKS"),

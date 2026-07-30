@@ -33,6 +33,6 @@ async def test_probe_failure_raises_instead_of_falling_back():
 
 @pytest.mark.asyncio
 async def test_successful_probe_result_passes_through():
-    plan = [{"datasets": ["ds"], "leg_kinds": None}]
+    plan = [{"datasets": ["ds"], "sub_pipeline_kinds": None}]
     with patch.object(cognify_module, "_probe_cognify_runs", new=AsyncMock(return_value=plan)):
         assert await cognify_module._plan_cognify_runs(["ds"], user=None) == plan

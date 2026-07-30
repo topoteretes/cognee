@@ -68,15 +68,15 @@ async def run_tasks(
     llm_config: Optional[LLMConfig] = None,
     embedding_config: Optional[EmbeddingConfig] = None,
     data_cache: bool = False,
-    legs: Optional[List[tuple]] = None,
+    sub_pipelines: Optional[List[tuple]] = None,
 ):
     """Run a pipeline over a dataset as ONE logical run.
 
-    ``legs`` routes item subsets through different task lists under a single
+    ``sub_pipelines`` routes item subsets through different task lists under a single
     pipeline run: a list of ``(tasks, items)`` pairs sharing this run's
     lifecycle — one run record, one database context, one rollback, one
     terminal status. Used by cognify when a dataset mixes data kinds (e.g.
-    DLT manifests + regular documents). When ``legs`` is given, ``tasks`` and
+    DLT manifests + regular documents). When ``sub_pipelines`` is given, ``tasks`` and
     ``data`` are ignored.
     """
     if not user:
@@ -108,14 +108,14 @@ async def run_tasks(
     ):
         try:
             # Build (item, item_tasks) work pairs: uniform task list for a
-            # plain run, per-leg task lists for a multi-leg run.
-            if legs is not None:
+            # plain run, per-sub-pipeline task lists for a composed run.
+            if sub_pipelines is not None:
                 work_items = []
-                for leg_tasks, leg_items in legs:
-                    leg_items = list(leg_items or [])
+                for sub_pipeline_tasks, sub_pipeline_items in sub_pipelines:
+                    sub_pipeline_items = list(sub_pipeline_items or [])
                     if data_cache or incremental_loading:
-                        leg_items = await resolve_data_directories(leg_items)
-                    work_items.extend((item, leg_tasks) for item in leg_items)
+                        sub_pipeline_items = await resolve_data_directories(sub_pipeline_items)
+                    work_items.extend((item, sub_pipeline_tasks) for item in sub_pipeline_items)
                 data = [item for item, _ in work_items]
             else:
                 if not isinstance(data, list):

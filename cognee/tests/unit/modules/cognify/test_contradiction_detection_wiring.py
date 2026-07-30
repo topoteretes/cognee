@@ -154,7 +154,9 @@ class TestRememberInheritsTheFlag:
                 cognify_module,
                 "_plan_cognify_runs",
                 new=AsyncMock(
-                    side_effect=lambda datasets, user: [{"datasets": datasets, "leg_kinds": None}]
+                    side_effect=lambda datasets, user: [
+                        {"datasets": datasets, "sub_pipeline_kinds": None}
+                    ]
                 ),
             ),
             patch.object(_mod_migrations_startup, "run_migrations_and_block", new=AsyncMock()),

@@ -431,10 +431,10 @@ async def _execute_cognify_runs(
     """Execute the planned invocations under ONE logical run per dataset.
 
     Every dataset gets exactly one ``cognify_pipeline`` run regardless of how
-    many task lists (legs) its data requires, so the status endpoint, result
+    many task lists (sub_pipelines) its data requires, so the status endpoint, result
     shape, rollback, and background handles all see a single logical run. A
-    dataset whose data needs several task lists executes them as legs of one
-    run (``run_pipeline(legs=...)``); the DLT task list is built lazily, only
+    dataset whose data needs several task lists executes them as sub_pipelines of one
+    run (``run_pipeline(sub_pipelines=...)``); the DLT task list is built lazily, only
     when some invocation needs it.
     """
     tasks_by_kind = {"standard": cognify_tasks}
@@ -442,7 +442,7 @@ async def _execute_cognify_runs(
     async def _tasks_for(kind):
         if kind not in tasks_by_kind:
             if kind != "dlt":
-                raise ValueError(f"Unknown cognify leg kind: {kind!r}")
+                raise ValueError(f"Unknown cognify sub-pipeline kind: {kind!r}")
             tasks_by_kind["dlt"] = await get_dlt_tasks(
                 chunk_size=chunk_size, chunks_per_batch=chunks_per_batch
             )
@@ -466,17 +466,19 @@ async def _execute_cognify_runs(
             data_cache=data_cache,
         )
 
-        leg_kinds = invocation.get("leg_kinds")
-        if leg_kinds is None:
+        sub_pipeline_kinds = invocation.get("sub_pipeline_kinds")
+        if sub_pipeline_kinds is None:
             call_kwargs["tasks"] = cognify_tasks
-        elif len(leg_kinds) == 1:
-            # A single data kind needs no leg machinery — a plain run with an
+        elif len(sub_pipeline_kinds) == 1:
+            # A single data kind needs no sub-pipeline machinery — a plain run with an
             # explicit item subset is already one logical run.
-            kind, items = leg_kinds[0]
+            kind, items = sub_pipeline_kinds[0]
             call_kwargs["tasks"] = await _tasks_for(kind)
             call_kwargs["data"] = items
         else:
-            call_kwargs["legs"] = [(await _tasks_for(kind), items) for kind, items in leg_kinds]
+            call_kwargs["sub_pipelines"] = [
+                (await _tasks_for(kind), items) for kind, items in sub_pipeline_kinds
+            ]
 
         partial = await executor(**call_kwargs)
         if isinstance(partial, dict):
@@ -494,14 +496,14 @@ async def _plan_cognify_runs(datasets, user) -> list[dict]:
     deterministic DLT task list; all other items run the standard one. The
     split is per data item, and a dataset always maps to exactly ONE
     ``cognify_pipeline`` run — a dataset mixing both kinds executes them as
-    legs of a single run.
+    sub_pipelines of a single run.
 
     Returns a list of invocation dicts:
-    - {"datasets": [ds_id], "leg_kinds": [("dlt", manifest_items)]} for a
+    - {"datasets": [ds_id], "sub_pipeline_kinds": [("dlt", manifest_items)]} for a
       manifest-only dataset
-    - {"datasets": [ds_id], "leg_kinds": [("dlt", ...), ("standard", ...)]}
+    - {"datasets": [ds_id], "sub_pipeline_kinds": [("dlt", ...), ("standard", ...)]}
       for a mixed dataset
-    - {"datasets": <original argument>, "leg_kinds": None} covering all
+    - {"datasets": <original argument>, "sub_pipeline_kinds": None} covering all
       datasets without manifests — items loaded by the pipeline itself
       (unchanged legacy behavior)
 
@@ -542,7 +544,7 @@ async def _probe_cognify_runs(datasets, user) -> list[dict]:
         datasets=dataset_list, permission_type="write", user=user
     )
     if not authorized_datasets:
-        return [{"datasets": datasets, "leg_kinds": None}]
+        return [{"datasets": datasets, "sub_pipeline_kinds": None}]
 
     # One filtered query to find which requested datasets contain a manifest,
     # instead of loading every dataset's data items.
@@ -565,7 +567,7 @@ async def _probe_cognify_runs(datasets, user) -> list[dict]:
         )
 
     if not manifest_dataset_ids:
-        return [{"datasets": datasets, "leg_kinds": None}]
+        return [{"datasets": datasets, "sub_pipeline_kinds": None}]
 
     invocations: list[dict] = []
     regular_ids = []
@@ -578,13 +580,13 @@ async def _probe_cognify_runs(datasets, user) -> list[dict]:
         for item in await get_dataset_data(dataset.id):
             (manifest_items if is_dlt_source_manifest(item) else regular_items).append(item)
 
-        leg_kinds = [("dlt", manifest_items)]
+        sub_pipeline_kinds = [("dlt", manifest_items)]
         if regular_items:
-            leg_kinds.append(("standard", regular_items))
-        invocations.append({"datasets": [dataset.id], "leg_kinds": leg_kinds})
+            sub_pipeline_kinds.append(("standard", regular_items))
+        invocations.append({"datasets": [dataset.id], "sub_pipeline_kinds": sub_pipeline_kinds})
 
     if regular_ids:
-        invocations.append({"datasets": regular_ids, "leg_kinds": None})
+        invocations.append({"datasets": regular_ids, "sub_pipeline_kinds": None})
 
     return invocations
 

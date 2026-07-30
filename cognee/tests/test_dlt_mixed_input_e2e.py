@@ -4,7 +4,7 @@ Verifies the DLT single-item pipeline:
 - a DLT resource resolves to a single manifest Data record with rows
   deduplicated by (table, pk, content_hash)
 - a regular text item in the same add() keeps its own Data record
-- cognify executes both as legs of ONE cognify_pipeline run: the manifest
+- cognify executes both as sub_pipelines of ONE cognify_pipeline run: the manifest
   through the deterministic DLT task list (row chunks + schema graph, no
   LLM) and the text through the standard list (LLM entity extraction and
   summarization)
