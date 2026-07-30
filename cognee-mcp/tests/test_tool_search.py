@@ -123,6 +123,34 @@ async def test_result_window_is_not_the_binding_constraint():
     assert len(hidden) <= server.TOOL_SEARCH_MAX_RESULTS
 
 
+@pytest.mark.parametrize(
+    "query, expected",
+    [
+        ("what datasets do I have?", "list_datasets_json"),
+        ("list my datasets", "list_datasets_json"),
+        ("show me all the datasets", "list_datasets_json"),
+        ("show the data inside a dataset", "list_dataset_data_json"),
+        ("make a new dataset", "create_dataset_json"),
+        ("upload and ingest this file", "cognify_file"),
+        ("which client am I connected as", "get_client_info_json"),
+    ],
+)
+async def test_natural_language_queries_rank_their_tool_first(query, expected):
+    """The table in README.md's "Writing a tool so search can find it".
+
+    Lexical matching has real edges (see the next test), but the phrasings an
+    agent actually produces are multi-word and land at rank 1. Pinned here so a
+    description edit that breaks discoverability fails loudly, and so the README
+    claim stays honest.
+    """
+    server.apply_tool_mode("default")
+
+    async with Client(server.mcp) as client:
+        results = await search(client, query)
+
+    assert results and results[0] == expected, f"{query!r} -> {results}"
+
+
 async def test_search_matches_on_vocabulary_not_on_the_result_limit():
     """The window being wide enough does NOT mean every search returns everything.
 

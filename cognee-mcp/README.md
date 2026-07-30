@@ -521,7 +521,20 @@ Also settable per-process with `--tool-mode`. In `default`/`minimal` an agent ca
 
 `search_tools` returns up to `TOOL_SEARCH_MAX_RESULTS` (10) tools, sized for a catalog that will grow. The window only costs context on turns that actually call search; `tools/list` stays constant either way. See `tests/test_tool_search_benchmark.py` for the recall sweep behind the number.
 
-**When adding a tool, write its description in the words an agent would use — including plurals.** BM25 drops tools that score zero and its tokenizer does no stemming, so a wide window does not guarantee coverage: the query `dataset` matches `create_dataset_json` but *not* `list_datasets_json` (whose token is `datasets`). Misses come from vocabulary, not from the result limit.
+#### Writing a tool so search can find it
+
+Search works well on natural-language queries. Every phrasing below returns its target ranked first (covered by `tests/test_tool_search.py`):
+
+| query | returns |
+|---|---|
+| "what datasets do I have?" | `list_datasets_json` |
+| "show the data inside a dataset" | `list_dataset_data_json` |
+| "make a new dataset" | `create_dataset_json` |
+| "upload and ingest this file" | `cognify_file` |
+
+The one thing to know when **adding** a tool: matching is purely lexical. FastMCP's BM25 tokenizer does no stemming and drops tools that score zero, so a query shares no credit with a word it doesn't literally contain — the bare query `dataset` matches `create_dataset_json` but *not* `list_datasets_json`, whose token is `datasets`. Multi-word queries paper over this (they usually contain some matching token), which is why the table above passes, but terse queries won't.
+
+So: **write descriptions in the words an agent would use, including both singular and plural.** Recall is bounded by vocabulary, not by `TOOL_SEARCH_MAX_RESULTS`. If lexical matching ever stops being enough, `BaseSearchTransform` leaves `_search()` abstract — a semantic ranker over cognee's own embeddings can be dropped in without touching the rest of the plumbing.
 
 The bundle that powers the workspace lives at `cognee-mcp/src/app_bundles/visualize-graph.html`. It is built from `cognee-mcp/apps-src/` via `npm run build` and is gitignored. The Docker image builds it as part of the image; PyPI wheels carry it (the maintainer runs `npm run build` before `uv build`); from-source users build it manually (see [Quick Start](#-quick-start) step 7). If the bundle is missing at runtime, the workspace tools raise a `FileNotFoundError` pointing back to the build command.
 

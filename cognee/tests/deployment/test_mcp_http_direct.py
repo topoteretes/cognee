@@ -18,6 +18,7 @@ from mcp_harness import mcp_client_session, run_mcp_http_container
 
 pytestmark = pytest.mark.deployment
 
+# DANGER: IF THE MCP TOOLING CHANGES, UPDATE THIS LIST OR ELSE IT WILL FAIL!
 # What the image advertises in COGNEE_MCP_TOOL_MODE=default: the pinned tools
 # plus the two synthetic tools FastMCP's search transform adds. Spelled out
 # rather than derived from cognee-mcp's registry because this suite tests the
