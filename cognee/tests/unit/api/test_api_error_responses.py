@@ -23,9 +23,16 @@ from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError
 from cognee.api.v1.add.routers.get_add_router import get_add_router
 from cognee.api.v1.cognify.routers.get_cognify_router import get_cognify_router
 from cognee.api.v1.memify.routers.get_memify_router import get_memify_router
+from cognee.api.v1.improve.routers.get_improve_router import get_improve_router
+from cognee.api.v1.recall.routers.get_recall_router import get_recall_router
 from cognee.api.v1.remember.routers.get_remember_router import get_remember_router
 from cognee.api.v1.search.routers.get_search_router import get_search_router
 from cognee.api.v1.update.routers.get_update_router import get_update_router
+from cognee.exceptions import CogneeApiError
+from cognee.modules.session_lifecycle.exceptions import (
+    SessionDatasetAmbiguousError,
+    SessionDatasetMismatchError,
+)
 
 
 MOCK_USER = SimpleNamespace(id=uuid4(), email="test@example.com", is_active=True, tenant_id=uuid4())
@@ -61,7 +68,9 @@ def app():
     app = FastAPI()
     app.include_router(get_add_router(), prefix="/add")
     app.include_router(get_cognify_router(), prefix="/cognify")
+    app.include_router(get_improve_router(), prefix="/improve")
     app.include_router(get_memify_router(), prefix="/memify")
+    app.include_router(get_recall_router(), prefix="/recall")
     app.include_router(get_remember_router(), prefix="/remember")
     app.include_router(get_search_router(), prefix="/search")
     app.include_router(get_update_router(), prefix="/update")
@@ -70,6 +79,19 @@ def app():
         return MOCK_USER
 
     app.dependency_overrides[get_authenticated_user] = override_user
+
+    # The real app registers this in cognee/api/client.py. Session-dataset 409s
+    # rely on it: the routers re-raise them so this handler can return the
+    # exception's own actionable message at its own status code.
+    @app.exception_handler(CogneeApiError)
+    async def cognee_error_handler(_, exc: CogneeApiError):
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"detail": f"{exc.message} [{exc.name}]"},
+        )
+
     return app
 
 
@@ -294,9 +316,10 @@ class TestSearchEndpoint:
                 "query": "What is Cognee?",
             },
         )
+        # The router re-raises CogneeApiError; the global handler answers with
+        # the error's own status code and message.
         assert resp.status_code == 403
-        body = resp.json()
-        assert body["error"] == "Permission denied"
+        assert "no access to dataset" in resp.json()["detail"]
 
     def test_search_success_returns_200(self, client):
         import cognee.api.v1.search as search_pkg
@@ -345,7 +368,7 @@ class TestSearchEndpoint:
             json={"search_type": "GRAPH_COMPLETION", "query": "test"},
         )
         assert resp.status_code == 402
-        assert resp.json()["error"] == "Token budget exhausted"
+        assert "budget" in resp.json()["detail"]
 
 
 # ---------------------------------------------------------------------------
@@ -446,3 +469,81 @@ class TestUpdateEndpoint:
         )
         assert resp.status_code == 500
         assert resp.json()["error"] == "Internal server error"
+
+
+# ---------------------------------------------------------------------------
+# Session-dataset conflicts must reach HTTP callers with their message
+# ---------------------------------------------------------------------------
+
+
+class TestSessionDatasetConflictResponses:
+    """The session 409s carry actionable messages (which dataset the session is
+    bound to, what to pass instead). The routers re-raise them so the global
+    CogneeApiError handler answers — instead of replacing the message with
+    generic "run cognify" advice that cannot fix a binding conflict."""
+
+    def test_search_ambiguous_session_returns_actionable_409(self, client, monkeypatch):
+        search_pkg = importlib.import_module("cognee.api.v1.search")
+        error = SessionDatasetAmbiguousError("chat-1", [uuid4(), uuid4()])
+        monkeypatch.setattr(search_pkg, "search", AsyncMock(side_effect=error))
+
+        resp = client.post("/search", json={"query": "q", "sessionId": "chat-1"})
+
+        assert resp.status_code == 409
+        assert "chat-1" in resp.text
+        assert "not bound to a dataset" in resp.text
+
+    def test_recall_bound_session_mismatch_returns_actionable_409(self, client, monkeypatch):
+        recall_pkg = importlib.import_module("cognee.api.v1.recall")
+        bound_dataset_id = uuid4()
+        error = SessionDatasetMismatchError("chat-1", bound_dataset_id, uuid4())
+        monkeypatch.setattr(recall_pkg, "recall", AsyncMock(side_effect=error))
+
+        resp = client.post("/recall", json={"query": "q", "sessionId": "chat-1"})
+
+        assert resp.status_code == 409
+        # The caller learns WHICH dataset the session belongs to.
+        assert str(bound_dataset_id) in resp.text
+        assert "run" not in resp.text.lower() or "cognify" not in resp.text.lower()
+
+    def test_improve_session_mismatch_returns_actionable_409(self, client, monkeypatch):
+        improve_pkg = importlib.import_module("cognee.api.v1.improve")
+        bound_dataset_id = uuid4()
+        error = SessionDatasetMismatchError("chat-1", bound_dataset_id, uuid4())
+        monkeypatch.setattr(improve_pkg, "improve", AsyncMock(side_effect=error))
+
+        resp = client.post("/improve", json={"datasetName": "docs", "sessionIds": ["chat-1"]})
+
+        assert resp.status_code == 409
+        assert str(bound_dataset_id) in resp.text
+
+    def test_remember_session_mismatch_returns_actionable_409(self, client, monkeypatch):
+        remember_pkg = importlib.import_module("cognee.api.v1.remember")
+        bound_dataset_id = uuid4()
+        error = SessionDatasetMismatchError("chat-1", bound_dataset_id, uuid4())
+        monkeypatch.setattr(remember_pkg, "remember", AsyncMock(side_effect=error))
+
+        resp = client.post(
+            "/remember",
+            data={"datasetName": "docs", "sessionId": "chat-1"},
+            files={"data": ("x.txt", b"hello", "text/plain")},
+        )
+
+        assert resp.status_code == 409
+        assert str(bound_dataset_id) in resp.text
+
+
+class TestRecallPermissionDenied:
+    def test_recall_permission_denied_returns_empty_list(self, client, monkeypatch):
+        """Deliberate carve-out from the CogneeApiError re-raise: recall answers
+        permission denials with an empty result so callers cannot probe which
+        datasets exist."""
+        recall_pkg = importlib.import_module("cognee.api.v1.recall")
+        monkeypatch.setattr(
+            recall_pkg, "recall", AsyncMock(side_effect=PermissionDeniedError("no access"))
+        )
+
+        resp = client.post("/recall", json={"query": "q"})
+
+        assert resp.status_code == 200
+        assert resp.json() == []

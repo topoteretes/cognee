@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import List, Optional, Union
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from pydantic import Field
@@ -10,12 +10,10 @@ from pydantic import Field
 from cognee import __version__ as cognee_version
 from cognee.api.DTO import InDTO, OutDTO
 from cognee.api.v1.recall.recall import RecallResponse
-from cognee.exceptions import CogneeValidationError
-from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
-from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError
+from cognee.exceptions import CogneeApiError
 from cognee.modules.search.operations import get_history
 from cognee.modules.search.types import SearchResult, SearchType
-from cognee.modules.users.exceptions.exceptions import PermissionDeniedError, UserNotFoundError
+from cognee.modules.users.exceptions.exceptions import PermissionDeniedError
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
@@ -158,10 +156,11 @@ def get_recall_router() -> APIRouter:
           (default: "auto" — session first when session_id is set, else graph)
 
         ## Error Codes
-        - **409 Conflict**: Error during recall
-        - **403 Forbidden**: Permission denied (returns empty list)
-        - **422 Unprocessable Entity**: Recall prerequisites not met — ingest data
-          first (POST /v1/remember or /v1/add followed by /v1/cognify)
+        - **403 Forbidden**: Permission denied (returns an empty list, not an error)
+        - **402/404/409/422**: Cognee errors (payment required, missing user,
+          session-dataset conflict, prerequisites not met) return their own
+          status code and message via the global error handler
+        - **409 Conflict**: Unexpected non-Cognee error during recall
         """
         send_telemetry(
             "Recall API Endpoint Invoked",
@@ -193,27 +192,14 @@ def get_recall_router() -> APIRouter:
                 include_references=payload.include_references,
             )
             return jsonable_encoder(results)
-        except LLMPaymentRequiredError as error:
-            return JSONResponse(
-                status_code=status.HTTP_402_PAYMENT_REQUIRED,
-                content={
-                    "error": "Token budget exhausted",
-                    "detail": str(error),
-                },
-            )
-        except (DatabaseNotCreatedError, UserNotFoundError, CogneeValidationError) as e:
-            logger = get_logger()
-            logger.error("Recall prerequisites error: %s", e, exc_info=True)
-            status_code = getattr(e, "status_code", 422)
-            return JSONResponse(
-                status_code=status_code,
-                content={
-                    "error": "Recall prerequisites not met",
-                    "hint": "Run `await cognee.remember(...)` or `await cognee.add(...)` then `await cognee.cognify()` before recalling.",
-                },
-            )
         except PermissionDeniedError:
+            # Deliberately not re-raised: an empty result instead of a 403
+            # keeps callers from probing which datasets exist.
             return []
+        except CogneeApiError:
+            # Cognee errors carry their own status code and actionable message;
+            # the global handler in cognee/api/client.py returns them.
+            raise
         except Exception as error:
             logger = get_logger()
             logger.error("Recall endpoint error: %s", error, exc_info=True)
