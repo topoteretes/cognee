@@ -32,39 +32,59 @@ class ImproveKwargs(TypedDict, total=False):
     feedback_alpha: float
 
 
-async def _check_sessions_belong_to_dataset(dataset, session_ids, user):
+async def _resolve_write_dataset(dataset, user):
+    """Resolve the dataset improve() will write to — once, with write permission.
+
+    Every improve stage mutates the dataset (feedback weights, session
+    persistence, memify enrichment), so write is the operation's real
+    requirement. Returns the authorized ``Dataset``, or ``None`` for a *name*
+    that does not exist yet — names keep their create-on-missing intent (the
+    caller owns what gets created, so write follows by construction).
+
+    A UUID has no create-intent reading: it points at an existing dataset, so
+    an unresolvable UUID raises instead of being silently retargeted. The
+    message deliberately conflates "not found" with "not writable" — distinct
+    errors would confirm the dataset's existence to an unauthorized caller.
+    """
+    from cognee.modules.data.exceptions import DatasetNotFoundError
+    from cognee.modules.data.methods import get_authorized_existing_datasets
+
+    datasets = await get_authorized_existing_datasets([dataset], "write", user)
+    if datasets:
+        return datasets[0]
+
+    if isinstance(dataset, UUID):
+        raise DatasetNotFoundError(
+            message=f"Dataset '{dataset}' was not found or you do not have write permission on it."
+        )
+    return None
+
+
+async def _check_sessions_belong_to_dataset(resolved_dataset, dataset_ref, session_ids, user):
     """Sessions live in exactly one dataset — refuse to bridge one into another.
 
-    Resolves the dataset reference, then delegates the per-session check to
-    ``check_session_dataset_binding``. When the dataset does not exist yet
-    (downstream stages create missing datasets), any already-bound session is
-    a mismatch by definition. Resolution *errors* are skipped — downstream
-    stages raise their own, clearer errors for those.
+    Takes the dataset improve() already resolved (with write permission), so
+    the guard validates the actual write target by construction. When the
+    dataset does not exist yet (a name, created downstream), any already-bound
+    session is a mismatch by definition.
     """
-    from cognee.modules.data.methods import get_authorized_existing_datasets
     from cognee.modules.session_lifecycle.exceptions import SessionDatasetMismatchError
     from cognee.modules.session_lifecycle.metrics import (
         check_session_dataset_binding,
-        get_session_dataset,
+        get_session_dataset_id,
     )
 
-    try:
-        datasets = await get_authorized_existing_datasets([dataset], "read", user)
-    except Exception as exc:
-        logger.debug("improve: dataset resolution failed (%s); skipping session validation", exc)
-        return
-
-    if not datasets:
+    if resolved_dataset is None:
         # The dataset would be created downstream — a bound session cannot move into it.
         for session_id in session_ids:
-            binding = await get_session_dataset(session_id=session_id, user_id=user.id)
-            if binding is not None:
-                raise SessionDatasetMismatchError(session_id, binding[0], str(dataset))
+            bound = await get_session_dataset_id(session_id=session_id, user_id=user.id)
+            if bound is not None:
+                raise SessionDatasetMismatchError(session_id, bound, str(dataset_ref))
         return
 
     for session_id in session_ids:
         await check_session_dataset_binding(
-            session_id=session_id, user_id=user.id, dataset_id=datasets[0].id
+            session_id=session_id, user_id=user.id, dataset_id=resolved_dataset.id
         )
 
 
@@ -171,8 +191,19 @@ async def improve(
         if user is None:
             user = await get_default_user()
 
+        # One write-level resolution, shared by the session guard and every
+        # stage below — the guard validates the dataset that is actually
+        # written to, and an unauthorized UUID fails loudly here instead of
+        # being silently retargeted. Downstream always receives the resolved
+        # UUID, never a name: names are owner-scoped, so a name collapsed from
+        # a *shared* dataset's UUID would re-resolve to the caller's own
+        # same-named dataset inside the pipelines. Only an unresolved name
+        # (create-on-missing intent) passes through as a string.
+        resolved_dataset = await _resolve_write_dataset(dataset, user)
+        write_dataset_ref = resolved_dataset.id if resolved_dataset is not None else dataset
+
         if session_ids:
-            await _check_sessions_belong_to_dataset(dataset, session_ids, user)
+            await _check_sessions_belong_to_dataset(resolved_dataset, dataset, session_ids, user)
 
         feedback_alpha = kwargs.pop("feedback_alpha", 0.1)
 
@@ -200,7 +231,7 @@ async def improve(
             # Stage 1 & 2: bridge sessions into the permanent graph
             if session_ids:
                 await _bridge_sessions(
-                    dataset=dataset,
+                    dataset=write_dataset_ref,
                     session_ids=session_ids,
                     user=user,
                     feedback_alpha=feedback_alpha,
@@ -213,7 +244,7 @@ async def improve(
                 # plugin's trace activity never reaches permanent
                 # memory — only QA entries do.
                 await _persist_session_traces(
-                    dataset=dataset,
+                    dataset=write_dataset_ref,
                     session_ids=session_ids,
                     user=user,
                     run_in_background=run_in_background,
@@ -321,16 +352,6 @@ async def _build_global_context_index(
         return False
 
 
-async def _resolve_dataset_name(dataset: Union[str, UUID], user) -> str:
-    """Resolve a dataset reference to its name string."""
-    if isinstance(dataset, str):
-        return dataset
-    from cognee.modules.data.methods.get_authorized_dataset import get_authorized_dataset
-
-    ds = await get_authorized_dataset(user, dataset, "write")
-    return ds.name if ds else "main_dataset"
-
-
 async def _bridge_sessions(
     dataset: Union[str, UUID],
     session_ids: List[str],
@@ -354,13 +375,11 @@ async def _bridge_sessions(
     # Stage 1: apply feedback weights from session retrieval traces
     from cognee.memify_pipelines.apply_feedback_weights import apply_feedback_weights_pipeline
 
-    dataset_name = await _resolve_dataset_name(dataset, user)
-
     try:
         await apply_feedback_weights_pipeline(
             user=user,
             session_ids=session_ids,
-            dataset=dataset_name,
+            dataset=dataset,
             alpha=feedback_alpha,
             run_in_background=run_in_background,
         )
@@ -376,7 +395,7 @@ async def _bridge_sessions(
     await persist_sessions_in_knowledge_graph_pipeline(
         user=user,
         session_ids=session_ids,
-        dataset=dataset_name,
+        dataset=dataset,
         run_in_background=run_in_background,
     )
     logger.info("improve: session Q&A persisted from %d session(s)", len(session_ids))
@@ -482,8 +501,6 @@ async def _persist_session_traces(
     that extracts per-step ``session_feedback`` from the cache and
     cognifies it into the ``agent_trace_feedbacks`` node-set.
     """
-    dataset_name = await _resolve_dataset_name(dataset, user)
-
     try:
         from cognee.memify_pipelines.persist_agent_trace_feedbacks_in_knowledge_graph import (
             persist_agent_trace_feedbacks_in_knowledge_graph_pipeline,
@@ -492,7 +509,7 @@ async def _persist_session_traces(
         await persist_agent_trace_feedbacks_in_knowledge_graph_pipeline(
             user=user,
             session_ids=session_ids,
-            dataset=dataset_name,
+            dataset=dataset,
             node_set_name="agent_trace_feedbacks",
             raw_trace_content=False,
             last_n_steps=None,  # persist all stored steps on demand

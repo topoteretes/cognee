@@ -69,6 +69,8 @@ async def test_improve_global_context_index_opt_in(monkeypatch, build_global_con
     global_context_mock = AsyncMock(return_value={"status": "global-context-ok"})
     monkeypatch.setattr(memify_module, "memify", memify_mock)
     monkeypatch.setattr(pipeline_module, "global_context_index_pipeline", global_context_mock)
+    # Write-level dataset resolution hits the relational DB; None = name-to-create.
+    monkeypatch.setattr(improve_module, "_resolve_write_dataset", AsyncMock(return_value=None))
 
     user = SimpleNamespace(id="user-id")
 
@@ -108,6 +110,8 @@ async def test_improve_skips_global_context_index_in_background(monkeypatch):
     global_context_mock = AsyncMock(return_value={"status": "global-context-ok"})
     monkeypatch.setattr(memify_module, "memify", memify_mock)
     monkeypatch.setattr(pipeline_module, "global_context_index_pipeline", global_context_mock)
+    # Write-level dataset resolution hits the relational DB; None = name-to-create.
+    monkeypatch.setattr(improve_module, "_resolve_write_dataset", AsyncMock(return_value=None))
 
     result = await improve_module.improve(
         dataset="docs",
