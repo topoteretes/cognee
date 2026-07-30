@@ -1,5 +1,6 @@
 import sys
 from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import UUID
 
 import pytest
 
@@ -27,7 +28,7 @@ def _make_entry(**kwargs) -> SessionQAEntry:
 @pytest.fixture
 def mock_user():
     user = MagicMock()
-    user.id = "u1"
+    user.id = UUID("00000000-0000-0000-0000-000000000001")
     return user
 
 
