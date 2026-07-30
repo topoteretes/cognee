@@ -1,6 +1,7 @@
 from importlib import import_module
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
+from uuid import uuid4
 
 import pytest
 
@@ -69,8 +70,13 @@ async def test_improve_global_context_index_opt_in(monkeypatch, build_global_con
     global_context_mock = AsyncMock(return_value={"status": "global-context-ok"})
     monkeypatch.setattr(memify_module, "memify", memify_mock)
     monkeypatch.setattr(pipeline_module, "global_context_index_pipeline", global_context_mock)
-    # Write-level dataset resolution hits the relational DB; None = name-to-create.
-    monkeypatch.setattr(improve_module, "_resolve_write_dataset", AsyncMock(return_value=None))
+    # Write-level dataset resolution hits the relational DB — stub it out.
+    resolved = SimpleNamespace(id=uuid4(), name="docs")
+    monkeypatch.setattr(
+        improve_module,
+        "resolve_authorized_user_datasets",
+        AsyncMock(side_effect=lambda dataset, user: (user, [resolved])),
+    )
 
     user = SimpleNamespace(id="user-id")
 
@@ -110,8 +116,13 @@ async def test_improve_skips_global_context_index_in_background(monkeypatch):
     global_context_mock = AsyncMock(return_value={"status": "global-context-ok"})
     monkeypatch.setattr(memify_module, "memify", memify_mock)
     monkeypatch.setattr(pipeline_module, "global_context_index_pipeline", global_context_mock)
-    # Write-level dataset resolution hits the relational DB; None = name-to-create.
-    monkeypatch.setattr(improve_module, "_resolve_write_dataset", AsyncMock(return_value=None))
+    # Write-level dataset resolution hits the relational DB — stub it out.
+    resolved = SimpleNamespace(id=uuid4(), name="docs")
+    monkeypatch.setattr(
+        improve_module,
+        "resolve_authorized_user_datasets",
+        AsyncMock(side_effect=lambda dataset, user: (user, [resolved])),
+    )
 
     result = await improve_module.improve(
         dataset="docs",

@@ -997,30 +997,6 @@ class TestImproveSessionValidation:
         return user
 
     @pytest.mark.asyncio
-    async def test_unresolved_name_rejects_bound_sessions(self):
-        """Downstream stages create missing datasets — a bound session must not
-        slip through the not-found branch into a brand-new dataset."""
-        from cognee.api.v1.improve.improve import _check_sessions_belong_to_dataset
-        from cognee.modules.session_lifecycle.exceptions import SessionDatasetMismatchError
-
-        with patch(
-            "cognee.modules.session_lifecycle.metrics.get_session_dataset_id",
-            AsyncMock(return_value=uuid4()),
-        ):
-            with pytest.raises(SessionDatasetMismatchError):
-                await _check_sessions_belong_to_dataset(None, "new_dataset", ["s1"], self._user())
-
-    @pytest.mark.asyncio
-    async def test_unresolved_name_allows_unbound_sessions(self):
-        from cognee.api.v1.improve.improve import _check_sessions_belong_to_dataset
-
-        with patch(
-            "cognee.modules.session_lifecycle.metrics.get_session_dataset_id",
-            AsyncMock(return_value=None),
-        ):
-            await _check_sessions_belong_to_dataset(None, "new_dataset", ["s1"], self._user())
-
-    @pytest.mark.asyncio
     async def test_resolved_dataset_delegates_to_binding_check(self):
         from cognee.api.v1.improve.improve import _check_sessions_belong_to_dataset
 
@@ -1032,42 +1008,40 @@ class TestImproveSessionValidation:
             "cognee.modules.session_lifecycle.metrics.check_session_dataset_binding",
             check,
         ):
-            await _check_sessions_belong_to_dataset(dataset, "docs", ["s1", "s2"], user)
+            await _check_sessions_belong_to_dataset(dataset, ["s1", "s2"], user)
 
         assert check.await_count == 2
         check.assert_awaited_with(session_id="s2", user_id=user.id, dataset_id=dataset.id)
 
     @pytest.mark.asyncio
-    async def test_uuid_without_write_permission_raises_instead_of_retargeting(self):
+    async def test_unauthorized_uuid_raises_before_any_stage(self):
         """The M4 regression: a UUID the caller cannot write must fail loudly.
 
         Previously the write path silently fell back to "main_dataset" while
         the pre-flight validated the requested dataset — bridging session
-        content into a dataset the caller never named.
+        content into a dataset the caller never named. improve() now shares
+        remember's write-level resolver, which raises DatasetNotFoundError
+        for a missing or unauthorized UUID.
         """
-        from cognee.api.v1.improve.improve import _resolve_write_dataset
         from cognee.modules.data.exceptions import DatasetNotFoundError
 
-        with patch(
-            "cognee.modules.data.methods.get_authorized_existing_datasets",
-            AsyncMock(return_value=[]),
-        ) as resolve:
-            with pytest.raises(DatasetNotFoundError):
-                await _resolve_write_dataset(uuid4(), self._user())
+        improve_module = importlib.import_module("cognee.api.v1.improve.improve")
+        serve_state = importlib.import_module("cognee.api.v1.serve.state")
 
-        # The single resolution is write-level — the guard and the stages
-        # share it, so they can never validate different datasets.
-        assert resolve.await_args.args[1] == "write"
-
-    @pytest.mark.asyncio
-    async def test_unresolved_name_returns_none_for_create_intent(self):
-        from cognee.api.v1.improve.improve import _resolve_write_dataset
-
-        with patch(
-            "cognee.modules.data.methods.get_authorized_existing_datasets",
-            AsyncMock(return_value=[]),
+        bridge = AsyncMock()
+        with (
+            patch.object(
+                improve_module,
+                "resolve_authorized_user_datasets",
+                AsyncMock(side_effect=DatasetNotFoundError(message="not found or not writable")),
+            ),
+            patch.object(improve_module, "_bridge_sessions", bridge),
+            patch.object(serve_state, "get_remote_client", MagicMock(return_value=None)),
         ):
-            assert await _resolve_write_dataset("brand_new_dataset", self._user()) is None
+            with pytest.raises(DatasetNotFoundError):
+                await improve_module.improve(dataset=uuid4(), session_ids=["s1"], user=self._user())
+
+        bridge.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------

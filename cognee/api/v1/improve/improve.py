@@ -9,6 +9,9 @@ except ImportError:
 from typing_extensions import TypedDict
 
 from cognee.shared.logging_utils import get_logger
+from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
+    resolve_authorized_user_datasets,
+)
 from cognee.modules.observability import (
     new_span,
     COGNEE_DATASET_NAME,
@@ -32,55 +35,13 @@ class ImproveKwargs(TypedDict, total=False):
     feedback_alpha: float
 
 
-async def _resolve_write_dataset(dataset, user):
-    """Resolve the dataset improve() will write to — once, with write permission.
-
-    Every improve stage mutates the dataset (feedback weights, session
-    persistence, memify enrichment), so write is the operation's real
-    requirement. Returns the authorized ``Dataset``, or ``None`` for a *name*
-    that does not exist yet — names keep their create-on-missing intent (the
-    caller owns what gets created, so write follows by construction).
-
-    A UUID has no create-intent reading: it points at an existing dataset, so
-    an unresolvable UUID raises instead of being silently retargeted. The
-    message deliberately conflates "not found" with "not writable" — distinct
-    errors would confirm the dataset's existence to an unauthorized caller.
-    """
-    from cognee.modules.data.exceptions import DatasetNotFoundError
-    from cognee.modules.data.methods import get_authorized_existing_datasets
-
-    datasets = await get_authorized_existing_datasets([dataset], "write", user)
-    if datasets:
-        return datasets[0]
-
-    if isinstance(dataset, UUID):
-        raise DatasetNotFoundError(
-            message=f"Dataset '{dataset}' was not found or you do not have write permission on it."
-        )
-    return None
-
-
-async def _check_sessions_belong_to_dataset(resolved_dataset, dataset_ref, session_ids, user):
+async def _check_sessions_belong_to_dataset(resolved_dataset, session_ids, user):
     """Sessions live in exactly one dataset — refuse to bridge one into another.
 
     Takes the dataset improve() already resolved (with write permission), so
-    the guard validates the actual write target by construction. When the
-    dataset does not exist yet (a name, created downstream), any already-bound
-    session is a mismatch by definition.
+    the guard validates the actual write target by construction.
     """
-    from cognee.modules.session_lifecycle.exceptions import SessionDatasetMismatchError
-    from cognee.modules.session_lifecycle.metrics import (
-        check_session_dataset_binding,
-        get_session_dataset_id,
-    )
-
-    if resolved_dataset is None:
-        # The dataset would be created downstream — a bound session cannot move into it.
-        for session_id in session_ids:
-            bound = await get_session_dataset_id(session_id=session_id, user_id=user.id)
-            if bound is not None:
-                raise SessionDatasetMismatchError(session_id, bound, str(dataset_ref))
-        return
+    from cognee.modules.session_lifecycle.metrics import check_session_dataset_binding
 
     for session_id in session_ids:
         await check_session_dataset_binding(
@@ -192,18 +153,19 @@ async def improve(
             user = await get_default_user()
 
         # One write-level resolution, shared by the session guard and every
-        # stage below — the guard validates the dataset that is actually
-        # written to, and an unauthorized UUID fails loudly here instead of
-        # being silently retargeted. Downstream always receives the resolved
-        # UUID, never a name: names are owner-scoped, so a name collapsed from
-        # a *shared* dataset's UUID would re-resolve to the caller's own
-        # same-named dataset inside the pipelines. Only an unresolved name
-        # (create-on-missing intent) passes through as a string.
-        resolved_dataset = await _resolve_write_dataset(dataset, user)
-        write_dataset_ref = resolved_dataset.id if resolved_dataset is not None else dataset
+        # stage below — the same resolver remember/memify use: names resolve
+        # or are created for the caller; a missing or unauthorized UUID raises
+        # DatasetNotFoundError instead of being silently retargeted. Downstream
+        # always receives the resolved UUID, never a name: names are
+        # owner-scoped, so a name collapsed from a *shared* dataset's UUID
+        # would re-resolve to the caller's own same-named dataset inside the
+        # pipelines.
+        user, authorized_datasets = await resolve_authorized_user_datasets(dataset, user)
+        resolved_dataset = authorized_datasets[0]
+        write_dataset_ref = resolved_dataset.id
 
         if session_ids:
-            await _check_sessions_belong_to_dataset(resolved_dataset, dataset, session_ids, user)
+            await _check_sessions_belong_to_dataset(resolved_dataset, session_ids, user)
 
         feedback_alpha = kwargs.pop("feedback_alpha", 0.1)
 
