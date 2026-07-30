@@ -519,6 +519,10 @@ COGNEE_MCP_TOOL_MODE=all       # no search transform; advertise all 11 tools
 
 Also settable per-process with `--tool-mode`. In `default`/`minimal` an agent calls `search_tools(query=...)` to find a tool and either calls it by name or goes through the `call_tool` proxy. Tiers are declared per tool via `@registry.tool(tags={...})` in `src/server.py`, so the pinned set is derived from the decorators rather than a separate list.
 
+`search_tools` returns up to `TOOL_SEARCH_MAX_RESULTS` (10) tools, sized for a catalog that will grow. The window only costs context on turns that actually call search; `tools/list` stays constant either way. See `tests/test_tool_search_benchmark.py` for the recall sweep behind the number.
+
+**When adding a tool, write its description in the words an agent would use — including plurals.** BM25 drops tools that score zero and its tokenizer does no stemming, so a wide window does not guarantee coverage: the query `dataset` matches `create_dataset_json` but *not* `list_datasets_json` (whose token is `datasets`). Misses come from vocabulary, not from the result limit.
+
 The bundle that powers the workspace lives at `cognee-mcp/src/app_bundles/visualize-graph.html`. It is built from `cognee-mcp/apps-src/` via `npm run build` and is gitignored. The Docker image builds it as part of the image; PyPI wheels carry it (the maintainer runs `npm run build` before `uv build`); from-source users build it manually (see [Quick Start](#-quick-start) step 7). If the bundle is missing at runtime, the workspace tools raise a `FileNotFoundError` pointing back to the build command.
 
 ### Agent Scoping (per-client default datasets)

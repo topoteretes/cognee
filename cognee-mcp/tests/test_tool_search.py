@@ -115,6 +115,37 @@ async def test_apply_tool_mode_is_idempotent():
 # --- the lazy-loading guarantee ------------------------------------------------
 
 
+async def test_result_window_is_not_the_binding_constraint():
+    """TOOL_SEARCH_MAX_RESULTS is sized for a catalog we expect to grow, so today
+    it exceeds the number of hidden tools: no hidden tool can be pushed out of the
+    window by the limit alone."""
+    hidden = set(server.registry.tags) - set(server.registry.names_with_tag(DEFAULT_TAG))
+    assert len(hidden) <= server.TOOL_SEARCH_MAX_RESULTS
+
+
+async def test_search_matches_on_vocabulary_not_on_the_result_limit():
+    """The window being wide enough does NOT mean every search returns everything.
+
+    BM25 drops zero-scoring tools and its tokenizer does no stemming, so "dataset"
+    does not match `list_datasets_json` (token "datasets"). This is the behavior
+    that makes tool *descriptions* the lever for recall, and it is surprising
+    enough to pin: if a future fastmcp adds stemming, we want to notice.
+    """
+    server.apply_tool_mode("default")
+    hidden = set(server.registry.tags) - set(server.registry.names_with_tag(DEFAULT_TAG))
+
+    async with Client(server.mcp) as client:
+        singular = set(await search(client, "dataset"))
+        plural = set(await search(client, "datasets"))
+        combined = set(await search(client, "dataset datasets file client info create list"))
+
+    assert "create_dataset_json" in singular
+    assert "list_datasets_json" not in singular, "unexpected stemming — revisit the docs"
+    assert "list_datasets_json" in plural
+    # Covering both forms does reach everything, confirming the limit is not the cap.
+    assert combined == hidden
+
+
 async def test_hidden_tools_are_discoverable_by_search():
     server.apply_tool_mode("default")
 

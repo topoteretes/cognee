@@ -165,6 +165,26 @@ def _transport_security_kwargs(host: str) -> dict:
 
 TOOL_MODES = ("default", "minimal", "all")
 
+# How many tools search_tools returns. Chosen from the recall sweep in
+# tests/test_tool_search_benchmark.py: over a 500-tool catalog, BM25 recall@k
+# goes 60% -> 80% between k=5 and k=10 and then plateaus, because the ranker was
+# placing the right tool just outside a 5-wide window. Recall is the metric that
+# matters — the agent sees every returned schema and picks for itself, so a tool
+# missing from the window is unrecoverable while its rank inside the window
+# barely costs anything.
+#
+# With today's 11 tools this exceeds the unpinned count, so the window is never
+# the binding constraint — but that does NOT mean every search returns every
+# tool. BM25 drops zero-scoring tools, and its tokenizer does no stemming, so
+# query "dataset" matches `create_dataset_json` but not `list_datasets_json`
+# (token "datasets"). Misses come from vocabulary, not from k. When adding a
+# tool, put the words an agent would actually use — in both singular and plural
+# — in its description.
+#
+# The window costs context only on turns that call search, never on the
+# per-turn tools/list payload.
+TOOL_SEARCH_MAX_RESULTS = 10
+
 
 def apply_tool_mode(mode: str = None) -> str:
     """Gate the advertised tool surface behind FastMCP's tool-search transform.
@@ -202,7 +222,9 @@ def apply_tool_mode(mode: str = None) -> str:
         return mode
 
     pinned = registry.names_with_tag(DEFAULT_TAG if mode == "default" else MEMORY_TAG)
-    mcp.add_transform(BM25SearchTransform(max_results=5, always_visible=pinned))
+    mcp.add_transform(
+        BM25SearchTransform(max_results=TOOL_SEARCH_MAX_RESULTS, always_visible=pinned)
+    )
     logger.info(
         "MCP tool mode %r: advertising %s + search_tools/call_tool (%d tools searchable)",
         mode,

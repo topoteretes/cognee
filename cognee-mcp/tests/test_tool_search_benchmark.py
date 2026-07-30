@@ -7,7 +7,7 @@ than taste. Three things get measured over synthetic catalogs of mock tools:
   every turn. This is the entire reason for gating the surface.
 * **Latency** — index build plus per-query time, i.e. what gating costs at call
   time.
-* **Retrieval quality** — recall@5 and MRR over labeled paraphrase queries,
+* **Retrieval quality** — recall@k and MRR over labeled paraphrase queries,
   comparing FastMCP's BM25 and regex transforms against ``NaiveSubstringSearch``
   below, which is roughly the "v1 lexical scoring" a custom implementation would
   have started from.
@@ -22,18 +22,29 @@ Measured conclusion (fastmcp 3.4.5, 500 mock tools, 10 paraphrase queries):
 * Gating cuts the ``tools/list`` payload by 67% at today's 11 tools, 92% at 50,
   and 99% at 500 (1199 → 393 tokens, 47329 → 393). The gated payload is
   *constant* in catalog size, which is the actual win.
-* On retrieval quality BM25 and the hand-rolled matcher are close, and **not
-  uniformly in FastMCP's favour**: naive substring wins recall@5 (70% vs 60% at
-  500 tools) while BM25 wins ranking (MRR 0.55 vs 0.51). Both are purely
-  lexical, so neither handles a true synonym; a real quality jump needs
-  embeddings, not a better hand-rolled scorer.
+* **max_results dominates the choice of ranker.** At k=5 the hand-rolled matcher
+  looks better on recall (70% vs 60%); at k=10 BM25 pulls ahead (80% vs 70%) and
+  both plateau by k=15. BM25's higher MRR (0.55 vs 0.51) was the tell: it was
+  placing the right tool just outside a 5-wide window. Any recall comparison at
+  a single k says more about the cutoff than about the ranker.
+* Recall, not ranking, is the metric to optimise: the agent receives every
+  returned schema and selects for itself, so a tool absent from the window is
+  unrecoverable while its rank inside the window costs almost nothing. Hence
+  ``server.TOOL_SEARCH_MAX_RESULTS = 10``, sitting at the knee of the sweep.
+* Both rankers are purely lexical and plateau near 80%. The residual misses are
+  vocabulary failures no ranker fixes — "wipe out" vs "permanently remove", and
+  plural/singular mismatches, since BM25's tokenizer does **no stemming** and it
+  drops zero-scoring tools outright ("tenants" never reaches ``list_tenant``).
+  So tool descriptions are the lever for recall, not k and not the ranker; a
+  decisive jump beyond that needs embeddings.
 * BM25 costs ~3 ms/query at 500 tools versus ~0.2 ms naive. Ten times slower in
   relative terms, irrelevant next to an LLM round trip.
 
-So the case for FastMCP's transform is maintenance, not superiority: comparable
-quality and negligible latency for zero lines of our own search code. If we ever
-want a decisive quality win, the lever is semantic search over the catalog
-(cognee's own embeddings), not reimplementing lexical ranking.
+So: use FastMCP's transform. It wins on the metric that matters once k is tuned,
+and costs zero lines of our own search code. If we later want semantic matching,
+``BaseSearchTransform`` leaves ``_search()`` abstract — we can swap the ranking
+function for cognee's embeddings and keep the synthetic tools, the call_tool
+proxy, and the visibility/auth composition.
 """
 
 import json
@@ -50,9 +61,14 @@ MCP_ROOT = Path(__file__).resolve().parents[1]  # cognee-mcp/
 if str(MCP_ROOT) not in sys.path:
     sys.path.insert(0, str(MCP_ROOT))
 
+from src.server import TOOL_SEARCH_MAX_RESULTS  # noqa: E402
+
 CATALOG_SIZES = (11, 50, 200, 500)
 PINNED = ["remember", "recall", "forget"]
-TOP_K = 5
+# The value the server actually ships, so the sweep below validates production
+# config rather than an arbitrary constant.
+TOP_K = TOOL_SEARCH_MAX_RESULTS
+K_SWEEP = (3, 5, 10, 15, 25)
 
 # Rough proxy: ~4 chars/token for JSON. Absolute values are indicative; the
 # flat-vs-gated ratio is the number that matters and is unit-independent.
@@ -162,8 +178,8 @@ class NaiveSubstringSearch:
     Stands in for the "v1: lexical scoring, zero deps" implementation the
     original design proposed writing. Scores by how many query tokens appear in
     the tool's text, ties broken by catalog order — no IDF, no length
-    normalization. Notably this is *not* enough of a handicap to lose on
-    recall@5 at these catalog sizes; see the module docstring.
+    normalization. Good enough to beat BM25 on recall at k=5, and beaten by it
+    at the k=10 we actually ship; see the module docstring.
     """
 
     def __init__(self, specs: list[tuple[str, str, dict]]):
@@ -312,7 +328,7 @@ async def test_retrieval_quality_versus_hand_rolled(count, capsys):
 
     with capsys.disabled():
         print(f"\ncatalog = {count} tools, top_k = {TOP_K}, {len(queries)} paraphrase queries")
-        print(f"{'strategy':>16} | {'recall@5':>9} {'MRR':>6} | {'p50 ms':>7} {'max ms':>7}")
+        print(f"{'strategy':>16} | {f'recall@{TOP_K}':>9} {'MRR':>6} | {'p50 ms':>7} {'max ms':>7}")
         print("-" * 60)
         for label, recall, mrr, p50, worst in rows:
             print(f"{label:>16} | {recall:>8.0%} {mrr:>6.2f} | {p50:>7.2f} {worst:>7.2f}")
@@ -337,6 +353,49 @@ async def test_retrieval_quality_versus_hand_rolled(count, capsys):
     # Query cost stays interactive even at 500 tools (generous bound: CI is slow
     # and the first call also builds the index).
     assert statistics.median(bm25_timings) < 250
+
+
+async def test_recall_versus_max_results(capsys):
+    """The sweep that sets TOOL_SEARCH_MAX_RESULTS.
+
+    Recall at a single k conflates the ranker with the window: BM25 trails the
+    hand-rolled matcher at k=5 and beats it at k=10, purely because its hits sat
+    just outside the narrower window. The shipped value must be at or past the
+    knee of this curve.
+    """
+    queries = [query for query, _ in LABELED_QUERIES]
+    naive = NaiveSubstringSearch(mock_tool_specs(500))
+
+    rows = []
+    for k in K_SWEEP:
+        bm25_results, _ = await run_search(
+            build_server(500, BM25SearchTransform(max_results=k, always_visible=PINNED)),
+            "query",
+            queries,
+        )
+        bm25_recall, bm25_mrr = recall_and_mrr(bm25_results)
+        naive_recall, _ = recall_and_mrr({q: naive.search(q, k) for q in queries})
+        rows.append((k, bm25_recall, bm25_mrr, naive_recall))
+
+    by_k = {k: bm25_recall for k, bm25_recall, _, _ in rows}
+
+    with capsys.disabled():
+        print(f"\ncatalog = 500 tools — recall@k sweep (shipping k={TOOL_SEARCH_MAX_RESULTS})")
+        print(f"{'k':>4} | {'BM25 recall':>11} {'BM25 MRR':>9} | {'hand-rolled':>11}")
+        print("-" * 46)
+        for k, bm25_recall, bm25_mrr, naive_recall in rows:
+            marker = "  <- shipping" if k == TOOL_SEARCH_MAX_RESULTS else ""
+            print(f"{k:>4} | {bm25_recall:>10.0%} {bm25_mrr:>9.2f} | {naive_recall:>10.0%}{marker}")
+
+    assert TOOL_SEARCH_MAX_RESULTS in by_k, "shipping k is not covered by the sweep"
+
+    # Recall is monotonic in k (a wider window can only add hits), so the knee is
+    # where it stops improving. The shipped k must be no worse than the plateau.
+    assert by_k[TOOL_SEARCH_MAX_RESULTS] == max(by_k.values()), (
+        f"k={TOOL_SEARCH_MAX_RESULTS} leaves recall on the table: {by_k}"
+    )
+    # ...and strictly better than the narrow window that made the ranker look bad.
+    assert by_k[TOOL_SEARCH_MAX_RESULTS] > by_k[3]
 
 
 async def test_bm25_index_is_built_once_and_reused(capsys):
