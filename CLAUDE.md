@@ -129,7 +129,7 @@ All data flows through task-based pipelines (`cognee/modules/pipelines/`). Tasks
 
 #### 2. Interface-Based Database Adapters
 Multiple backends are supported through adapter interfaces:
-- **Graph**: Ladybug (default), Neo4j, Neptune, Postgres via `GraphDBInterface`
+- **Graph**: Ladybug (default), Neo4j, Neptune, Postgres (demo) via `GraphDBInterface`
 - **Vector**: LanceDB (default), ChromaDB, PGVector via `VectorDBInterface`
 - **Relational**: SQLite (default), PostgreSQL
 
@@ -265,7 +265,7 @@ VECTOR_DB_URL=postgresql://cognee:cognee@localhost:5432/cognee_db
 ```
 
 #### Graph Databases
-Supported: ladybug (default), neo4j, neptune, ladybug-remote, postgres
+Supported: ladybug (default), neo4j, neptune, ladybug-remote, postgres (demo)
 ```bash
 # Neo4j (requires neo4j extra: pip install cognee[neo4j])
 GRAPH_DATABASE_PROVIDER=neo4j
@@ -281,10 +281,19 @@ GRAPH_DATABASE_USERNAME=your_username
 GRAPH_DATABASE_PASSWORD=your_password
 
 # Postgres (requires postgres extra: pip install cognee[postgres])
+# DEMO, not production-ready — see the warning below.
 # Does not support raw Cypher queries, natural language search, or Graphiti.
 GRAPH_DATABASE_PROVIDER=postgres
 GRAPH_DATABASE_URL=postgresql+asyncpg://cognee:cognee@localhost:5432/cognee_db
 ```
+
+> **⚠️ Warning:** Using Postgres as a graph store is currently a demo feature and is not
+> production-ready. Use it to demo keeping relational metadata, PGVector, and graph
+> state in a single Postgres service, but rely on a graph-native backend such as Kuzu or Neo4j
+> for production workloads.
+>
+> Interested in further development or production use of Postgres as a graph database? Write to
+> us at social@cognee.ai to explore the options.
 
 #### Session Cache
 ```bash
