@@ -45,13 +45,13 @@ _mod_engine_setup = importlib.import_module("cognee.modules.engine.operations.se
 _pkg_add = importlib.import_module("cognee.api.v1.add")
 _mod_users_methods = importlib.import_module("cognee.modules.users.methods")
 
-# The canonical pre-detection task order.
+# The canonical pre-detection task order. extract_dlt_fk_edges left this
+# list when legacy DLT rows got their own cognify route (SDK-38).
 _BASE_SEQUENCE = [
     "classify_documents",
     "extract_chunks_from_documents",
     "extract_graph_and_summarize",
     "add_data_points",
-    "extract_dlt_fk_edges",
 ]
 
 

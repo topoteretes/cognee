@@ -31,7 +31,6 @@ from cognee.tasks.graph.extract_graph_and_summarize import extract_graph_and_sum
 from cognee.tasks.graph import detect_contradictions
 from cognee.tasks.graph.resolve_temporal_contradictions import resolve_temporal_contradictions
 from cognee.tasks.storage import add_data_points
-from cognee.tasks.ingestion.extract_dlt_fk_edges import extract_dlt_fk_edges
 from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
 from cognee.tasks.temporal_graph.extract_events_and_entities import extract_events_and_timestamps
 from cognee.tasks.temporal_graph.extract_knowledge_graph_from_events import (
@@ -403,7 +402,6 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
             embed_triplets=embed_triplets,
             task_config={"batch_size": chunks_per_batch},
         ),
-        Task(extract_dlt_fk_edges),
         # COGNIFY (opt-in): flag facts in this ingestion that contradict facts
         # already in the graph. Runs last so both new and existing facts are
         # persisted and comparable. Default OFF — when the flag is off this spread
@@ -441,6 +439,8 @@ async def get_dlt_row_legacy_tasks(
     removing the DltRowDocument guards from the shared LLM tasks safe: legacy
     rows can never reach them. Same deliberate omissions as get_dlt_tasks.
     """
+    from cognee.tasks.ingestion.extract_dlt_fk_edges import extract_dlt_fk_edges
+
     cognify_config = get_cognify_config()
     if chunks_per_batch is None:
         chunks_per_batch = (

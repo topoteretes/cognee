@@ -147,27 +147,9 @@ async def extract_graph_from_data(
     if not isinstance(graph_model, type) or not issubclass(graph_model, BaseModel):
         raise InvalidGraphModelError(graph_model)
 
-    # Skip LLM extraction for DLT row chunks — their graph is built
-    # deterministically by extract_dlt_fk_edges from schema metadata.
-    from cognee.modules.data.processing.document_types import DltRowDocument
-
-    # Partition in a single pass: a list-membership check against dlt_chunks
-    # rescans the list for every chunk (O(n^2) with Pydantic __eq__ comparisons),
-    # which becomes a bottleneck on the extraction hot path for large DLT sources.
-    dlt_chunks = []
-    non_dlt_chunks = []
-    for c in data_chunks:
-        if isinstance(getattr(c, "is_part_of", None), DltRowDocument):
-            dlt_chunks.append(c)
-        else:
-            non_dlt_chunks.append(c)
-
-    if not non_dlt_chunks:
-        return data_chunks
-
     calculate_chunk_graphs = kwargs.get("calculate_chunk_graphs")
     if callable(calculate_chunk_graphs):
-        extracted = calculate_chunk_graphs(non_dlt_chunks, graph_model, custom_prompt, **kwargs)
+        extracted = calculate_chunk_graphs(data_chunks, graph_model, custom_prompt, **kwargs)
         chunk_graphs = await extracted if inspect.isawaitable(extracted) else extracted
     else:
         with pipeline_stage("extraction"):
@@ -176,7 +158,7 @@ async def extract_graph_from_data(
                     extract_content_graph(
                         chunk.text, graph_model, custom_prompt=custom_prompt, **kwargs
                     )
-                    for chunk in non_dlt_chunks
+                    for chunk in data_chunks
                 ]
             )
     cache_entity_embeddings = kwargs.get("cache_entity_embeddings")
@@ -218,7 +200,7 @@ async def extract_graph_from_data(
     task_name = "extract_graph_from_data"
 
     integrated = await integrate_chunk_graphs(
-        non_dlt_chunks,
+        data_chunks,
         chunk_graphs,
         graph_model,
         ontology_resolver,
@@ -227,4 +209,4 @@ async def extract_graph_from_data(
         **kwargs,
     )
 
-    return integrated + dlt_chunks
+    return integrated
