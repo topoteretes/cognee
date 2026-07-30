@@ -365,3 +365,41 @@ async def test_improve_permission_matrix(permissions_example_env):
     await record_session_activity(str(other.id), session_id, dataset_id=str(dataset_2_id))
     with pytest.raises(SessionDatasetMismatchError):
         await cognee.improve(dataset=dataset_id, session_ids=[session_id], user=other)
+
+
+async def test_pipeline_permission_basics(permissions_example_env):
+    """Basic has-access / no-access pairs for forget, export, and visualize.
+
+    Each pipeline resolves its dataset through the ACL layer with the
+    permission its operation actually needs (forget: delete; export and
+    visualize: read), so an unauthorized user gets a 403 and the owner
+    succeeds. push is not covered here: it resolves its cloud client before
+    any permission check, so the ACL path is unreachable without a remote.
+    """
+    from cognee.modules.data.methods import get_datasets_by_name
+
+    owner = await create_user("pipeline_owner@example.com", "example")
+    stranger = await create_user("pipeline_stranger@example.com", "example")
+
+    await cognee.add(["pipeline permission fixture text"], dataset_name="PIPE_PERMS", user=owner)
+    dataset_id = (await get_datasets_by_name(["PIPE_PERMS"], owner.id))[0].id
+
+    # export: read permission required.
+    with pytest.raises(PermissionDeniedError):
+        await cognee.export(dataset_id, user=stranger)
+    snapshot = await cognee.export(dataset_id, user=owner)
+    assert snapshot is not None
+
+    # visualize: read permission required.
+    with pytest.raises(PermissionDeniedError):
+        await cognee.visualize_graph(dataset=dataset_id, user=stranger)
+    html = await cognee.visualize_graph(dataset=dataset_id, user=owner)
+    assert html is not None
+
+    # forget: delete permission required. Denial first, then the owner's
+    # forget actually removes the dataset.
+    with pytest.raises(PermissionDeniedError):
+        await cognee.forget(dataset=dataset_id, user=stranger)
+    result = await cognee.forget(dataset=dataset_id, user=owner)
+    assert result["status"] == "success"
+    assert await get_datasets_by_name(["PIPE_PERMS"], owner.id) == []
