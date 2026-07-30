@@ -16,7 +16,7 @@ logger = get_logger("llm_dispatch")
 # How long one piece of overload evidence keeps dispatch paced; every further
 # piece extends the window. When it lapses, behavior returns to the
 # configured state — the reaction is never stuck on forever.
-COOLDOWN_SECONDS = 300.0
+COOLDOWN_SECONDS = 900.0
 
 # Server-overload statuses that arrive as plain HTTP errors: 503 (service
 # unavailable — e.g. Ollama's queue-full reply) and 529 (Anthropic overloaded).
