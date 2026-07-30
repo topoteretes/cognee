@@ -142,6 +142,16 @@ async def test_relational_rows_have_their_own_type_but_index_as_document_chunks(
     assert isinstance(chunk, DocumentChunk)
     assert type(chunk).__name__ == "RelationalRow"  # graph type is the row type
 
+    # The pipeline rebuilds data-point classes (copy_model/create_model keeps
+    # only the class NAME and fields), so the index redirect must survive a
+    # rebuilt instance whose class carries nothing.
+    from cognee.modules.storage.utils import copy_model
+
+    rebuilt_cls = copy_model(type(chunk))
+    rebuilt = rebuilt_cls(**chunk.model_dump())
+    assert type(rebuilt).__name__ == "RelationalRow"
+    assert rebuilt.metadata.get("index_type_name") == "DocumentChunk"
+
     created = []
 
     class _FakeEngine:
