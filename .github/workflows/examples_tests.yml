@@ -35,7 +35,7 @@ jobs:
           LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           LLM_ARGS: ${{ secrets.LLM_ARGS }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        run: uv run python ./examples/demos/multimedia_processing/multimedia_audio_image_processing_example.py
+        run: uv run python ./examples/guides/multimedia_audio_image_processing_example.py
 
   test-eval-example:
     name: Run Eval Example
