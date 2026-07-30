@@ -728,7 +728,9 @@ async def test_mcp_remember_advertises_file_upload_parameters():
 
     tools = await server.mcp.list_tools()
     remember_tool = next(tool for tool in tools if tool.name == "remember")
-    properties = remember_tool.inputSchema["properties"]
+    # FastMCP 3 returns its own Tool objects, whose JSON schema is `parameters`;
+    # `inputSchema` is the name on the MCP wire type a client receives.
+    properties = remember_tool.parameters["properties"]
 
     assert {"data", "filename", "content_base64"} <= set(properties)
     assert "filename" in remember_tool.description
