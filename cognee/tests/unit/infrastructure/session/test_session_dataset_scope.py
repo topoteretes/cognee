@@ -349,7 +349,12 @@ async def test_get_session_dataset_invalid_user_returns_none():
 
 
 class TestScopedVectorCleanup:
-    """Vector cleanup runs in the session's attributed dataset store AND the ambient store."""
+    """Vector cleanup runs exactly once, in the store selected by the session's binding.
+
+    A second "ambient" pass used to follow the dataset-scoped one; it always
+    resolved the same store (the per-dataset vector config persists after
+    context exit by design), so one pass is the honest contract.
+    """
 
     @staticmethod
     def _db_context_mock():
@@ -392,8 +397,8 @@ class TestScopedVectorCleanup:
         # Attribution must be read before the lifecycle row is deleted.
         assert call_order == ["resolve", "lifecycle"]
         db_context.assert_called_once_with(dataset_id, owner_id)
-        # Once inside the dataset store, once in the ambient store.
-        assert vectors_mock.await_count == 2
+        # Exactly one pass, inside the dataset's store.
+        assert vectors_mock.await_count == 1
 
     @pytest.mark.asyncio
     async def test_delete_session_without_attribution_uses_ambient_store_only(self):
@@ -453,11 +458,15 @@ class TestScopedVectorCleanup:
             assert await manager.delete_qa(user_id="u1", session_id="s1", qa_id="q1") is True
 
         db_context.assert_called_once_with(dataset_id, owner_id)
-        assert vector_mock.await_count == 2
+        assert vector_mock.await_count == 1
 
     @pytest.mark.asyncio
-    async def test_delete_session_scoped_cleanup_failure_still_cleans_ambient(self):
-        """A broken dataset context must not block the ambient cleanup."""
+    async def test_delete_session_scoped_cleanup_failure_fails_open(self):
+        """A broken dataset store logs and skips — no retry in another store.
+
+        Deleting in a different store would be a no-op (the vectors live in the
+        broken store), and session deletion itself must still succeed.
+        """
         cache = AsyncMock()
         cache.delete_session.return_value = True
         manager = SessionManager(cache_engine=cache)
@@ -485,7 +494,7 @@ class TestScopedVectorCleanup:
         ):
             assert await manager.delete_session(user_id="u1", session_id="s1") is True
 
-        assert vectors_mock.await_count == 1
+        vectors_mock.assert_not_awaited()
 
 
 class TestOneDatasetBinding:

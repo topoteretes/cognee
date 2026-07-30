@@ -865,12 +865,19 @@ class SessionManager:
         session_dataset: tuple | None,
         delete_vectors,
     ) -> None:
-        """Run a fail-open vector deletion in every store that may hold session vectors.
+        """Delete this session's vectors from the one store that holds them.
 
-        A dataset-scoped session's vectors live in its dataset's store; a session
-        that predates dataset scoping (or gained attribution mid-life) can also
-        hold vectors in the ambient store. Deleting where nothing matches is a
-        no-op, so both passes are safe.
+        Exactly one pass, selected by the binding: the dataset's own store when
+        the session is bound, the currently configured store otherwise (legacy
+        sessions predating dataset scoping).
+
+        A second "ambient" pass used to follow the dataset-scoped one, meant to
+        clean pre-scoping leftovers in the shared store. It never could: the
+        per-dataset vector config deliberately persists after ``async with``
+        exit (see ``DatabaseContextManager`` — there is no restore token for
+        it), so the second pass always resolved the same dataset store as the
+        first. Fail-open: a broken per-dataset store logs and skips — deleting
+        in a different store would be a no-op anyway.
         """
         if session_dataset is not None:
             try:
@@ -887,6 +894,7 @@ class SessionManager:
                     session_id,
                     error,
                 )
+            return
         await delete_vectors()
 
     async def delete_qa(
