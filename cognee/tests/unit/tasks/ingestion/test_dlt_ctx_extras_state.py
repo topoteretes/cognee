@@ -117,3 +117,46 @@ async def test_ctx_none_direct_call_uses_fresh_state(monkeypatch, emit_mock):
     # No cross-call state: both calls emit the schema.
     assert "people" in emit_mock.await_args_list[0].args[0]
     assert "people" in emit_mock.await_args_list[1].args[0]
+
+
+@pytest.mark.asyncio
+async def test_dlt_rows_have_their_own_type_but_index_as_document_chunks(monkeypatch):
+    """DltRow is a distinct graph type (type-level search filtering) that
+    still indexes into DocumentChunk_text (retrieval keeps finding rows)."""
+    from cognee.modules.chunking.models.DltRow import DltRow
+    from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
+    from cognee.modules.data.processing.document_types import DltSourceDocument
+    from cognee.tasks.storage.index_data_points import index_data_points as run_indexing
+
+    chunk = DltRow(
+        id=uuid4(),
+        text="row text",
+        chunk_size=2,
+        chunk_index=0,
+        cut_type="dlt_row",
+        is_part_of=DltSourceDocument(
+            name="src", raw_data_location="unused", external_metadata="{}"
+        ),
+        contains=[],
+    )
+    assert isinstance(chunk, DocumentChunk)
+    assert type(chunk).__name__ == "DltRow"  # graph type is the row type
+
+    created = []
+
+    class _FakeEngine:
+        class embedding_engine:
+            @staticmethod
+            def get_batch_size():
+                return 10
+
+        @staticmethod
+        async def create_vector_index(type_name, field_name):
+            created.append((type_name, field_name))
+
+        @staticmethod
+        async def index_data_points(type_name, field_name, points):
+            return None
+
+    await run_indexing([chunk], vector_engine=_FakeEngine())
+    assert created == [("DocumentChunk", "text")]  # NOT DltRow_text

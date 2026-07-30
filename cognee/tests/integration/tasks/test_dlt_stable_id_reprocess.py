@@ -109,7 +109,9 @@ async def _row_texts():
     graph = await get_graph_engine()
     nodes, _ = await graph.get_graph_data()
     return " ".join(
-        str(props.get("text", "")) for _, props in nodes if props.get("type") == "DocumentChunk"
+        str(props.get("text", ""))
+        for _, props in nodes
+        if props.get("type") in ("DltRow", "DocumentChunk")
     )
 
 
