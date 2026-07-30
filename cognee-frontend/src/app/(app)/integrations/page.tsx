@@ -1,15 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { useCogniInstance } from "@/modules/tenant/TenantProvider";
-import { TrackPageView } from "@/modules/analytics";
-import getSlackConnection, { SlackConnection } from "@/modules/integrations/slack/getSlackConnection";
-import connectSlack from "@/modules/integrations/slack/connectSlack";
-import disconnectSlack from "@/modules/integrations/slack/disconnectSlack";
-import getSlackChannels, { SlackChannel } from "@/modules/integrations/slack/getSlackChannels";
-import saveSlackChannels from "@/modules/integrations/slack/saveSlackChannels";
+import { TrackPageView, trackEvent } from "@/modules/analytics";
 import {
   OPENCLAW_PROMPT,
   CLAUDE_MARKETPLACE_ADD, CLAUDE_PLUGIN_INSTALL,
@@ -18,28 +12,19 @@ import {
   UPLOAD_MEMORY_PROMPT, UPLOAD_SAMPLE_PROMPT, RECALL_SAMPLE_PROMPT,
 } from "@/data/prompts";
 
-// VS Code's MCP config uses a "servers" wrapper (not "mcpServers"). The API
-// key is requested via an inputs promptString instead of being written into
-// .vscode/mcp.json — that file is commonly committed, so a raw key would leak.
-const VSCODE_MCP_CONFIG = `{
-  "inputs": [
-    {
-      "type": "promptString",
-      "id": "cognee-api-key",
-      "description": "Cognee API key",
-      "password": true
-    }
-  ],
-  "servers": {
-    "cognee": {
-      "type": "stdio",
-      "command": "uvx",
-      "args": ["cognee-mcp"],
-      "env": {
-        "COGNEE_BASE_URL": "{{BASE_URL}}",
-        "COGNEE_API_KEY": "\${input:cognee-api-key}"
-      }
-    }
+// Claude Desktop's config file already exists (it holds "preferences" and other
+// keys), so users MERGE this "mcpServers" key into it — hence no outer file
+// braces here, unlike the whole-file configs the other MCP cards write. Pasting
+// a full { "mcpServers": … } object would nest braces inside the existing root
+// and break the JSON.
+const CLAUDE_DESKTOP_MCP_ENTRY = `"mcpServers": {
+  "cognee": {
+    "command": "uvx",
+    "args": [
+      "cognee-mcp@latest",
+      "--api-url", "{{BASE_URL}}",
+      "--api-token", "{{API_KEY}}"
+    ]
   }
 }`;
 
@@ -67,16 +52,125 @@ function InlineCodeBlock({ code, toCopy, loading }: { code: string; toCopy?: str
   );
 }
 
+// A read-only, annotated preview of claude_desktop_config.json: the user's
+// existing keys are dimmed and the inserted Cognee block is highlighted, so they
+// can eyeball their open file against it. Copy grabs just the merge-ready
+// "mcpServers" fragment (no outer braces) with a trailing comma, so it stays
+// valid JSON when inserted above the user's existing keys — matching the "}," the
+// preview shows.
+function ConfigPreview({ baseUrl, apiKey, loading }: { baseUrl: string; apiKey: string; loading: boolean }) {
+  const [copied, setCopied] = useState(false);
+  const mono = 'ui-monospace, Menlo, Monaco, "Cascadia Mono", "Segoe UI Mono", "Roboto Mono", monospace';
+  function doCopy() {
+    if (loading) return;
+    navigator.clipboard.writeText(fillTemplate(CLAUDE_DESKTOP_MCP_ENTRY, baseUrl, apiKey) + ",");
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1800);
+  }
+  const inserted = [
+    '  "mcpServers": {',
+    '    "cognee": {',
+    '      "command": "uvx",',
+    '      "args": [',
+    '        "cognee-mcp@latest",',
+    `        "--api-url", "${loading ? "…" : baseUrl}",`,
+    `        "--api-token", "${loading ? "…" : apiKey}"`,
+    "      ]",
+    "    }",
+    "  },",
+  ];
+  const dim = "rgba(237,236,234,0.4)";
+  return (
+    <div style={{ position: "relative", background: "#18181B", borderRadius: 8, marginBottom: 4 }}>
+      <button onClick={(e) => { e.stopPropagation(); doCopy(); }} aria-label={copied ? "Copied" : "Copy the highlighted block"} style={{ position: "absolute", top: 8, right: 10, background: "rgba(24,24,27,0.85)", border: "none", cursor: loading ? "wait" : "pointer", padding: 2, borderRadius: 4, zIndex: 2 }}>
+        {copied
+          ? <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M3.5 8.5L6.5 11.5L12.5 4.5" stroke="#22C55E" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+          : <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="5" y="5" width="8" height="8" rx="1.5" stroke="#6B7280" strokeWidth="1.5" /><path d="M11 3H4.5A1.5 1.5 0 003 4.5V11" stroke="#6B7280" strokeWidth="1.5" strokeLinecap="round" /></svg>}
+      </button>
+      <div style={{ overflowX: "auto", padding: "12px 0", fontFamily: mono, fontSize: 12.5, lineHeight: 1.75, whiteSpace: "pre" }}>
+        <div style={{ padding: "0 14px", color: dim }}>{"{"}</div>
+        {inserted.map((line, i) => (
+          <div key={i} style={{ padding: "0 14px", color: loading ? "rgba(237,236,234,0.5)" : "#EDECEA", background: "rgba(34,197,94,0.13)", borderLeft: "2px solid #22C55E" }}>{line}</div>
+        ))}
+        <div style={{ padding: "0 14px", color: dim }}>{'  "preferences": { … }'}</div>
+        <div style={{ padding: "0 14px", color: dim }}>{"}"}</div>
+      </div>
+    </div>
+  );
+}
+
+// Cursor's ~/.cursor/mcp.json opens with the "mcpServers" wrapper already
+// scaffolded by "Add Custom MCP", so we preview the whole file for context but
+// highlight only the "cognee" entry. The copy button grabs exactly that
+// highlighted entry (not the dimmed wrapper), so it drops straight into the
+// existing mcpServers object.
+function CursorConfigPreview({ baseUrl, apiKey, loading }: { baseUrl: string; apiKey: string; loading: boolean }) {
+  const [copied, setCopied] = useState(false);
+  const mono = 'ui-monospace, Menlo, Monaco, "Cascadia Mono", "Segoe UI Mono", "Roboto Mono", monospace';
+  const cogneeBlock = [
+    '    "cognee": {',
+    '      "command": "uvx",',
+    '      "args": ["cognee-mcp"],',
+    '      "env": {',
+    `        "COGNEE_BASE_URL": "${loading ? "…" : baseUrl}",`,
+    `        "COGNEE_API_KEY": "${loading ? "…" : apiKey}"`,
+    "      }",
+    "    }",
+  ];
+  function doCopy() {
+    if (loading) return;
+    navigator.clipboard.writeText(cogneeBlock.join("\n"));
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1800);
+  }
+  const dim = "rgba(237,236,234,0.4)";
+  return (
+    <div style={{ position: "relative", background: "#18181B", borderRadius: 8, marginBottom: 4 }}>
+      <button onClick={(e) => { e.stopPropagation(); doCopy(); }} aria-label={copied ? "Copied" : "Copy the cognee entry"} style={{ position: "absolute", top: 8, right: 10, background: "rgba(24,24,27,0.85)", border: "none", cursor: loading ? "wait" : "pointer", padding: 2, borderRadius: 4, zIndex: 2 }}>
+        {copied
+          ? <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M3.5 8.5L6.5 11.5L12.5 4.5" stroke="#22C55E" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+          : <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="5" y="5" width="8" height="8" rx="1.5" stroke="#6B7280" strokeWidth="1.5" /><path d="M11 3H4.5A1.5 1.5 0 003 4.5V11" stroke="#6B7280" strokeWidth="1.5" strokeLinecap="round" /></svg>}
+      </button>
+      <div style={{ overflowX: "auto", padding: "12px 0", fontFamily: mono, fontSize: 12.5, lineHeight: 1.75, whiteSpace: "pre" }}>
+        <div style={{ padding: "0 14px", color: dim }}>{"{"}</div>
+        <div style={{ padding: "0 14px", color: dim }}>{'  "mcpServers": {'}</div>
+        {cogneeBlock.map((line, i) => (
+          <div key={i} style={{ padding: "0 14px", color: loading ? "rgba(237,236,234,0.5)" : "#EDECEA", background: "rgba(34,197,94,0.13)", borderLeft: "2px solid #22C55E" }}>{line}</div>
+        ))}
+        <div style={{ padding: "0 14px", color: dim }}>{"  }"}</div>
+        <div style={{ padding: "0 14px", color: dim }}>{"}"}</div>
+      </div>
+    </div>
+  );
+}
+
+// A subtle callout that visually separates a "gotcha"/troubleshooting note from
+// the main step instruction.
+function InfoBox({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{ display: "flex", gap: 9, background: "rgba(188,155,255,0.08)", border: "1px solid rgba(188,155,255,0.22)", borderRadius: 8, padding: "10px 12px" }}>
+      <svg width="15" height="15" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0, marginTop: 1 }}>
+        <circle cx="8" cy="8" r="6.5" stroke="#BC9BFF" strokeWidth="1.3" />
+        <path d="M8 7.2V11" stroke="#BC9BFF" strokeWidth="1.4" strokeLinecap="round" />
+        <circle cx="8" cy="4.9" r="0.9" fill="#BC9BFF" />
+      </svg>
+      <div style={{ fontSize: 12.5, color: "rgba(237,236,234,0.6)", lineHeight: 1.6 }}>{children}</div>
+    </div>
+  );
+}
+
 // ── Agent config ──────────────────────────────────────────────────────────
 
 interface StepDef {
   title: string;
-  description: string;
+  description: React.ReactNode;
   code?: string;
   codeToCopy?: string;
   loading?: boolean;
   /** When set, renders multiple separately-copyable code blocks (commands run one at a time). */
-  codeBlocks?: { code: string; codeToCopy?: string; label?: string }[];
+  codeBlocks?: { code: string; codeToCopy?: string; label?: string; loading?: boolean }[];
+  /** Custom rendered content (e.g. an annotated config preview) shown below the description. */
+  content?: React.ReactNode;
 }
 
 interface AgentCfg {
@@ -230,8 +324,54 @@ const AGENT_CARDS: AgentCfg[] = [
     logo: imgLogo("/visuals/logos/claude.svg", "Claude Desktop"),
     icon: imgIcon("/visuals/logos/claude.svg", "Claude Desktop"),
     buildSteps: (baseUrl, apiKey, loading) => [
-      mcpConfigStep("claude_desktop_config.json", "Claude Desktop", '"$HOME/Library/Application Support/Claude"', '"$HOME/Library/Application Support/Claude/claude_desktop_config.json"', baseUrl, apiKey, loading),
-      { title: "Test the connection", description: "Restart Claude Desktop. Open a new conversation and ask: \"What do you know from cognee?\" — Cognee's memory will respond." },
+      {
+        title: "Install uv (provides uvx)",
+        description: (
+          <>
+            <strong style={{ color: "#EDECEA" }}>Open your terminal</strong> and <strong style={{ color: "#EDECEA" }}>install uv</strong> using one of the below methods:
+          </>
+        ),
+        codeBlocks: [
+          { label: "Homebrew", code: "brew install uv" },
+          { label: "Install script", code: "curl -LsSf https://astral.sh/uv/install.sh | sh" },
+        ],
+      },
+      {
+        title: "Open the MCP config file",
+        description: (
+          <>
+            In Claude Desktop, open <strong style={{ color: "#EDECEA" }}>Settings</strong> → <strong style={{ color: "#EDECEA" }}>Developer</strong> → <strong style={{ color: "#EDECEA" }}>Edit Config</strong> to create and open <strong style={{ color: "#EDECEA" }}>claude_desktop_config.json</strong>. Leave it open for the next step.
+          </>
+        ),
+      },
+      {
+        title: "Add the Cognee server to the config",
+        description: (
+          <>
+            Merge the highlighted block into your config — eyeball it against your open file.
+            {"\n"}• No <strong style={{ color: "#EDECEA" }}>{'"mcpServers"'}</strong> yet → add the whole block at the top.
+            {"\n"}• Already have one → add only the <strong style={{ color: "#EDECEA" }}>{'"cognee"'}</strong> entry inside it.
+          </>
+        ),
+        content: <ConfigPreview baseUrl={baseUrl} apiKey={apiKey} loading={loading} />,
+      },
+      {
+        title: "Restart and test",
+        description: (
+          <>
+            Fully quit Claude Desktop — <strong style={{ color: "#EDECEA" }}>⌘Q</strong>, or quit from the tray on Windows (closing the window is not enough) — then reopen it.
+            {"\n\n"}Nothing visibly changes in the UI, so confirm by using it: in a new chat, ask the prompt below. If Claude runs a <strong style={{ color: "#EDECEA" }}>cognee</strong> tool and answers from your memory, you are connected.
+          </>
+        ),
+        code: "What do you know from cognee?",
+        content: (
+          <div style={{ marginTop: 12 }}>
+            <InfoBox>
+              If Claude never calls a <strong style={{ color: "#EDECEA" }}>cognee</strong> tool, it usually cannot find <strong style={{ color: "#EDECEA" }}>uvx</strong> on its PATH — run <strong style={{ color: "#EDECEA" }}>which uvx</strong> and use that absolute path as the <strong style={{ color: "#EDECEA" }}>command</strong> value in the config.{" "}<strong style={{ color: "#EDECEA" }}>(the uvx from step 1)</strong>
+            </InfoBox>
+          </div>
+        ),
+      },
     ],
   },
   {
@@ -241,8 +381,55 @@ const AGENT_CARDS: AgentCfg[] = [
     logo: imgLogo("/visuals/logos/cursor.svg", "Cursor"),
     icon: imgIcon("/visuals/logos/cursor.svg", "Cursor"),
     buildSteps: (baseUrl, apiKey, loading) => [
-      mcpConfigStep("~/.cursor/mcp.json", "Cursor", "~/.cursor", "~/.cursor/mcp.json", baseUrl, apiKey, loading),
-      { title: "Test the connection", description: "Restart Cursor. Open a project and ask the agent: \"What do you know from cognee?\" — you should get a memory-grounded response." },
+      {
+        title: "Install uv (provides uvx)",
+        description: (
+          <>
+            <strong style={{ color: "#EDECEA" }}>Open your terminal</strong> and <strong style={{ color: "#EDECEA" }}>install uv</strong> using one of the below methods:
+          </>
+        ),
+        codeBlocks: [
+          { label: "Homebrew", code: "brew install uv" },
+          { label: "Install script", code: "curl -LsSf https://astral.sh/uv/install.sh | sh" },
+        ],
+      },
+      {
+        title: "Open Cursor's MCP config",
+        description: (
+          <>
+            Open <strong style={{ color: "#EDECEA" }}>Cursor Settings</strong> → <strong style={{ color: "#EDECEA" }}>Tools &amp; MCPs</strong> (newer builds are moving this under <strong style={{ color: "#EDECEA" }}>Customize</strong> — follow the banner if you see it). Under <strong style={{ color: "#EDECEA" }}>Home MCP Servers</strong>, click <strong style={{ color: "#EDECEA" }}>Add Custom MCP</strong> — Cursor creates and opens <strong style={{ color: "#EDECEA" }}>~/.cursor/mcp.json</strong>.
+            {"\n\n"}Prefer the terminal? Just open the file directly — the next step shows exactly what goes in it.
+          </>
+        ),
+      },
+      {
+        title: "Add the Cognee server to mcp.json",
+        description: (
+          <>
+            Paste the highlighted <strong style={{ color: "#EDECEA" }}>{'"cognee"'}</strong> entry inside the <strong style={{ color: "#EDECEA" }}>{'"mcpServers"'}</strong> block, then save. The copy button grabs just that entry — the dimmed braces show where it lands.
+            {"\n"}• Cursor scaffolded the wrapper for you → drop it in alongside any existing servers.
+            {"\n"}• Completely empty file → add the dimmed <strong style={{ color: "#EDECEA" }}>{'"mcpServers"'}</strong> braces around it too.
+          </>
+        ),
+        content: <CursorConfigPreview baseUrl={baseUrl} apiKey={apiKey} loading={loading} />,
+      },
+      {
+        title: "Enable it and test",
+        description: (
+          <>
+            Back in <strong style={{ color: "#EDECEA" }}>Tools &amp; MCPs</strong> → <strong style={{ color: "#EDECEA" }}>Home MCP Servers</strong>, <strong style={{ color: "#EDECEA" }}>cognee</strong> now appears with a status dot — make sure its toggle is on and wait for the dot to turn <strong style={{ color: "#EDECEA" }}>green</strong> (hit the refresh icon if it doesn’t). Cursor may ask you to trust the server; accept it.
+            {"\n\n"}Then open a chat, switch it to <strong style={{ color: "#EDECEA" }}>Agent</strong> mode (MCP tools only run there), and send the prompt below. If Cursor calls a <strong style={{ color: "#EDECEA" }}>cognee</strong> tool and answers from your memory, you’re connected.
+          </>
+        ),
+        code: "What do you know from cognee?",
+        content: (
+          <div style={{ marginTop: 12 }}>
+            <InfoBox>
+              Red dot or “no tools available”? Cursor usually can’t find <strong style={{ color: "#EDECEA" }}>uvx</strong> on its PATH — run <strong style={{ color: "#EDECEA" }}>which uvx</strong> and use that absolute path as the <strong style={{ color: "#EDECEA" }}>command</strong> value in mcp.json <strong style={{ color: "#EDECEA" }}>(the uvx from step 1)</strong>.
+            </InfoBox>
+          </div>
+        ),
+      },
     ],
   },
   {
@@ -259,12 +446,43 @@ const AGENT_CARDS: AgentCfg[] = [
   {
     key: "vscode",
     name: "VS Code",
-    cta: "Connect via MCP",
+    cta: "Connect via extension",
     logo: imgLogo("/visuals/logos/vscode.svg", "VS Code"),
     icon: imgIcon("/visuals/logos/vscode.svg", "VS Code"),
     buildSteps: (baseUrl, apiKey, loading) => [
-      { title: "Configure VS Code", description: "From your project root, run this command to register the Cognee MCP server for VS Code (Copilot agent mode), then reload the window. Cognee runs via uvx (requires uv) — no separate install. VS Code prompts for your API key on first use (kept out of the committable file); an existing mcp.json is backed up to .bak.", code: ".vscode/mcp.json", codeToCopy: `mkdir -p .vscode && [ -f .vscode/mcp.json ] && cp .vscode/mcp.json .vscode/mcp.json.bak; cat > .vscode/mcp.json << 'COGNEE_EOF'\n${fillTemplate(VSCODE_MCP_CONFIG, baseUrl, apiKey)}\nCOGNEE_EOF`, loading },
-      { title: "Test the connection", description: "Open Copilot Chat in agent mode and ask: \"What do you know from cognee?\" — the Cognee memory tools should respond." },
+      {
+        title: "Install the Cognee extension",
+        description: (
+          <>
+            Open the <strong style={{ color: "#EDECEA" }}>Extensions</strong> view (<strong style={{ color: "#EDECEA" }}>⇧⌘X</strong> / <strong style={{ color: "#EDECEA" }}>Ctrl+Shift+X</strong>), search for <strong style={{ color: "#EDECEA" }}>Cognee</strong>, and click <strong style={{ color: "#EDECEA" }}>Install</strong> on <strong style={{ color: "#EDECEA" }}>“Cognee — Project Memory”</strong> by Cognee.
+          </>
+        ),
+      },
+      {
+        title: "Run Cognee: Set Up",
+        description: (
+          <>
+            Open the <strong style={{ color: "#EDECEA" }}>Command Palette</strong> (<strong style={{ color: "#EDECEA" }}>⇧⌘P</strong> / <strong style={{ color: "#EDECEA" }}>Ctrl+Shift+P</strong>) and run <strong style={{ color: "#EDECEA" }}>Cognee: Set Up</strong>. Paste your <strong style={{ color: "#EDECEA" }}>endpoint</strong>, then your <strong style={{ color: "#EDECEA" }}>API key</strong> — stored in your OS keychain, not settings. A health check confirms the connection.
+          </>
+        ),
+        codeBlocks: [
+          { label: "Endpoint", code: baseUrl, loading },
+          { label: "API key", code: apiKey, loading },
+        ],
+      },
+      {
+        title: "Use the core commands",
+        description: (
+          <>
+            Everything lives in the <strong style={{ color: "#EDECEA" }}>Command Palette</strong> under <strong style={{ color: "#EDECEA" }}>Cognee</strong>. Start with these:
+            {"\n\n"}• <strong style={{ color: "#EDECEA" }}>Cognee: Remember Selection</strong> — store selected code (or the whole file) in this repo&apos;s memory.
+            {"\n"}• <strong style={{ color: "#EDECEA" }}>Cognee: Ask My Project Memory</strong> — ask a question; answers come with clickable citations.
+            {"\n"}• <strong style={{ color: "#EDECEA" }}>Cognee: Index Workspace</strong> — bulk-ingest the whole repo at once.
+            {"\n\n"}
+            <a href="https://docs.cognee.ai/cognee-cloud/agent-integrations/vscode" target="_blank" rel="noopener noreferrer" style={{ color: "#6510F4", textDecoration: "underline" }}>See all commands and settings →</a>
+          </>
+        ),
+      },
     ],
   },
   {
@@ -473,7 +691,7 @@ function AgentSection({ cards }: { cards: AgentCfg[] }) {
                   <div style={{ display: "grid", gridTemplateRows: isStepActive ? "1fr" : "0fr", opacity: isStepActive ? 1 : 0, transition: "grid-template-rows 260ms ease, opacity 200ms ease" }}>
                     <div style={{ overflow: "hidden" }}>
                       <div onClick={(e) => e.stopPropagation()} style={{ padding: "10px 20px 18px 56px" }}>
-                        {step.description && <p style={{ fontSize: 13, color: "rgba(237,236,234,0.55)", margin: "0 0 12px", lineHeight: 1.6 }}>{step.description}</p>}
+                        {step.description && <p style={{ fontSize: 13, color: "rgba(237,236,234,0.55)", margin: "0 0 12px", lineHeight: 1.6, whiteSpace: "pre-line" }}>{step.description}</p>}
                         {step.code && <InlineCodeBlock code={step.code} toCopy={step.codeToCopy} loading={step.loading} />}
                         {step.codeBlocks && (
                           <div style={{ display: "flex", flexDirection: "column", gap: step.codeBlocks.some(cb => cb.label) ? 14 : 8 }}>
@@ -481,14 +699,15 @@ function AgentSection({ cards }: { cards: AgentCfg[] }) {
                               cb.label ? (
                                 <div key={j}>
                                   <div style={{ fontSize: 13, fontWeight: 600, color: "#EDECEA", marginBottom: 6 }}>{cb.label}</div>
-                                  <InlineCodeBlock code={cb.code} toCopy={cb.codeToCopy} />
+                                  <InlineCodeBlock code={cb.code} toCopy={cb.codeToCopy} loading={cb.loading} />
                                 </div>
                               ) : (
-                                <InlineCodeBlock key={j} code={cb.code} toCopy={cb.codeToCopy} />
+                                <InlineCodeBlock key={j} code={cb.code} toCopy={cb.codeToCopy} loading={cb.loading} />
                               )
                             ))}
                           </div>
                         )}
+                        {step.content}
                         {i < activeSteps.length - 1
                           ? <p style={{ margin: "10px 0 0", fontSize: 12, color: "#C8C8C8" }}>Click step {i + 2} when ready ↓</p>
                           : <button onClick={(e) => { e.stopPropagation(); setActiveKey(null); router.push("/sessions"); }} style={{ marginTop: 12, display: "inline-flex", alignItems: "center", gap: 5, background: "none", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 8, padding: "7px 14px", fontSize: 13, fontWeight: 500, color: "rgba(237,236,234,0.7)", fontFamily: "inherit", cursor: "pointer" }}>Go to Sessions →</button>}
@@ -505,558 +724,207 @@ function AgentSection({ cards }: { cards: AgentCfg[] }) {
   );
 }
 
-// ── Slack (live connection) ───────────────────────────────────────────────
+// ── Data source integrations ──────────────────────────────────────────────
 
-const SLACK_OUTCOME_MESSAGES: Record<string, string> = {
-  connected: "Slack workspace connected.",
-  cancelled: "Slack connection cancelled.",
-  error_invalid_state: "Slack connection failed — please try again.",
-  error_already_connected: "That Slack workspace is already connected to another account.",
-  error_exchange_failed: "Slack connection failed — please try again.",
-};
+// Mirrors the native integrations offered in Claude Desktop's connector
+// directory, so the false-door list measures demand against a set users already
+// recognize from Claude. Ordered by expected demand for a team knowledge base:
+// shared comms and docs first, niche/vertical tools last.
+// `logo` is a vendored Simple Icons (CC0) glyph rendered white on the brand
+// tile; entries without one fall back to their initials.
+interface DataSource {
+  name: string;
+  description: string;
+  initials: string;
+  color: string;
+  logo?: string;
+}
 
-function SlackChannelsModal({ onClose }: { onClose: () => void }) {
-  const { cogniInstance, localInstance } = useCogniInstance();
-  const instance = cogniInstance || localInstance;
+const INTEGRATIONS: DataSource[] = [
+  { name: "Slack",        description: "Channels and threads",        initials: "Sl", color: "#4A154B", logo: "slack" },
+  { name: "Notion",       description: "Pages and databases",         initials: "No", color: "#000000", logo: "notion" },
+  { name: "Google Drive", description: "Docs, Sheets, and Slides",    initials: "GD", color: "#1A73E8", logo: "googledrive" },
+  { name: "Confluence",   description: "Spaces and wikis",            initials: "Cf", color: "#172B4D", logo: "confluence" },
+  { name: "GitHub",       description: "Issues, PRs, and docs",       initials: "GH", color: "#181717", logo: "github" },
+  { name: "Gmail",        description: "Email threads and files",     initials: "Gm", color: "#EA4335", logo: "gmail" },
+  { name: "Jira",         description: "Tickets and epics",           initials: "Jr", color: "#0052CC", logo: "jira" },
+  { name: "Linear",       description: "Issues and project context",  initials: "Li", color: "#5E6AD2", logo: "linear" },
+  { name: "Granola",      description: "Meeting notes and transcripts",initials: "Gr", color: "#C2410C", logo: "granola" },
+  { name: "Asana",        description: "Tasks and projects",          initials: "As", color: "#F06A6A", logo: "asana" },
+  { name: "monday.com",   description: "Boards, items, and updates",  initials: "Mo", color: "#FF3D57", logo: "monday" },
+  { name: "Figma",        description: "Design files and comments",   initials: "Fg", color: "#F24E1E", logo: "figma" },
+  { name: "HubSpot",      description: "Contacts, deals, and notes",  initials: "Hs", color: "#FF7A59", logo: "hubspot" },
+  { name: "Intercom",     description: "Conversations and articles",  initials: "In", color: "#1F8DED", logo: "intercom" },
+  { name: "Box",          description: "Documents and files",         initials: "Bx", color: "#0061D5", logo: "box" },
+  { name: "Canva",        description: "Designs and brand assets",    initials: "Cv", color: "#00C4CC", logo: "canva" },
+  { name: "PostHog",      description: "Product analytics",           initials: "Ph", color: "#F54E00", logo: "posthog" },
+  { name: "Stripe",       description: "Customers and invoices",      initials: "St", color: "#635BFF", logo: "stripe" },
+  { name: "Vercel",       description: "Projects and deployments",    initials: "Ve", color: "#000000", logo: "vercel" },
+  { name: "MotherDuck",   description: "Your data warehouse",         initials: "Md", color: "#F9A825", logo: "motherduck" },
+  { name: "Xero",         description: "Accounting and invoices",     initials: "Xe", color: "#13B5EA", logo: "xero" },
+  { name: "lemlist",      description: "Outreach campaigns",          initials: "Ll", color: "#4F46E5", logo: "lemlist" },
+  { name: "Workable",     description: "Candidates and pipelines",    initials: "Wk", color: "#16A34A", logo: "workable" },
+];
 
-  const [channels, setChannels] = useState<SlackChannel[] | null>(null);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  // Same portal pattern as ExtractionSettingsModal — null on first render
-  // (SSR) so the fixed overlay only mounts client-side, escaping any
-  // transformed ancestor that would break position: fixed.
-  const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
-  useEffect(() => { setPortalTarget(document.body); }, []);
+// ── Data sources: "false door" experiment ─────────────────────────────────
+// These data sources aren't built yet. Each card presents as a real, available
+// connector (no "coming soon" telegraph) so a Connect click measures genuine
+// intent; the click opens a Coming Soon modal and fires analytics so we can
+// decide what to build next. Both interactions are tracked (see tracking-plan).
 
-  useEffect(() => {
-    if (!instance) return;
-    getSlackChannels(instance)
-      .then(({ channels }) => {
-        setChannels(channels);
-        setSelected(new Set(channels.filter((c) => c.allowed).map((c) => c.id)));
-      })
-      .catch((err) => setError(err instanceof Error ? err.message : "Could not load channels."));
-  }, [instance]);
+function ComingSoonModal({
+  source,
+  onClose,
+}: {
+  source: (typeof INTEGRATIONS)[number];
+  onClose: () => void;
+}) {
+  const [notified, setNotified] = useState(false);
 
-  function toggle(id: string) {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
+  function requestNotify() {
+    trackEvent({
+      pageName: "Integrations",
+      eventName: "data_source_notify_requested",
+      additionalProperties: { data_source: source.name },
     });
+    setNotified(true);
   }
-
-  async function handleSave() {
-    if (!instance) return;
-    setSaving(true);
-    setError(null);
-    try {
-      await saveSlackChannels(instance, Array.from(selected));
-      onClose();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not save channels. Please try again.");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  if (!portalTarget) return null;
-  return createPortal(
-    <div
-      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", backdropFilter: "blur(4px)", WebkitBackdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}
-      onClick={onClose}
-    >
-      <div
-        style={{ background: "rgba(15,15,15,0.92)", backdropFilter: "blur(16px)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: 24, width: 400, maxHeight: "80vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(0,0,0,0.6)" }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div style={{ marginBottom: 16 }}>
-          <h2 style={{ fontSize: 16, fontWeight: 700, color: "#EDECEA", margin: 0 }}>Slack channels</h2>
-          <p style={{ fontSize: 13, color: "rgba(237,236,234,0.55)", margin: "4px 0 0" }}>
-            Choose which channels can use /cognee-ask. Leave everything unchecked to allow it everywhere.
-          </p>
-        </div>
-        <div style={{ height: 1, background: "rgba(255,255,255,0.08)", margin: "0 0 16px" }} />
-
-        <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 2 }}>
-          {channels === null && !error && (
-            <p style={{ fontSize: 13, color: "rgba(237,236,234,0.55)" }}>Loading channels…</p>
-          )}
-          {error && <p style={{ fontSize: 12, color: "#EF4444", margin: 0 }}>{error}</p>}
-          {channels?.length === 0 && (
-            <p style={{ fontSize: 13, color: "rgba(237,236,234,0.55)" }}>No public channels found.</p>
-          )}
-          {channels?.map((channel) => (
-            <label
-              key={channel.id}
-              style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 6px", borderRadius: 6, cursor: "pointer" }}
-            >
-              <input
-                type="checkbox"
-                checked={selected.has(channel.id)}
-                onChange={() => toggle(channel.id)}
-                style={{ width: 16, height: 16, accentColor: "#6510F4" }}
-              />
-              <span style={{ fontSize: 13, color: "#EDECEA" }}>#{channel.name}</span>
-            </label>
-          ))}
-        </div>
-
-        <div style={{ height: 1, background: "rgba(255,255,255,0.08)", margin: "16px 0" }} />
-        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-          <button
-            onClick={onClose}
-            disabled={saving}
-            style={{ height: 36, padding: "0 16px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.15)", background: "transparent", fontSize: 13, fontWeight: 500, color: "rgba(237,236,234,0.8)", cursor: "pointer", fontFamily: "inherit" }}
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={saving || channels === null}
-            style={{
-              height: 36, padding: "0 16px", borderRadius: 8, border: "none",
-              background: saving || channels === null ? "rgba(255,255,255,0.08)" : "#6510F4",
-              fontSize: 13, fontWeight: 500,
-              color: saving || channels === null ? "rgba(237,236,234,0.35)" : "#fff",
-              cursor: saving || channels === null ? "default" : "pointer", fontFamily: "inherit",
-            }}
-          >
-            {saving ? "Saving…" : "Save"}
-          </button>
-        </div>
-      </div>
-    </div>,
-    portalTarget,
-  );
-}
-
-function InlineCode({ children }: { children: React.ReactNode }) {
-  return (
-    <code
-      style={{
-        background: "rgba(255,255,255,0.08)",
-        color: "#BC9BFF",
-        padding: "1px 6px",
-        borderRadius: 4,
-        fontSize: "0.92em",
-        fontFamily: 'ui-monospace, Menlo, Monaco, "Cascadia Mono", "Segoe UI Mono", "Roboto Mono", monospace',
-      }}
-    >
-      {children}
-    </code>
-  );
-}
-
-function SlackCard() {
-  const { cogniInstance, localInstance } = useCogniInstance();
-  const instance = cogniInstance || localInstance;
-  const router = useRouter();
-  const searchParams = useSearchParams();
-
-  const [status, setStatus] = useState<SlackConnection | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
-  const [showChannels, setShowChannels] = useState(false);
-  const [showConnectModal, setShowConnectModal] = useState(false);
-
-  useEffect(() => {
-    if (!instance) return;
-    getSlackConnection(instance)
-      .then(setStatus)
-      .catch(() => setStatus({ connected: false }));
-  }, [instance]);
-
-  useEffect(() => {
-    const outcome = searchParams.get("slack");
-    if (!outcome) return;
-
-    setMessage(SLACK_OUTCOME_MESSAGES[outcome] || null);
-    // Connection status is refreshed by the [instance] effect above once
-    // instance is ready — no need to duplicate that fetch here (and doing
-    // so here would race it if instance wasn't ready on this first render).
-    // Strip the query param so a refresh doesn't re-show the message.
-    router.replace("/integrations");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams]);
-
-  async function handleConnect() {
-    if (!instance) return;
-    setLoading(true);
-    try {
-      const authorizeUrl = await connectSlack(instance);
-      window.location.href = authorizeUrl;
-    } catch (err) {
-      // Close the modal so this becomes visible — it renders on the card
-      // underneath, which the modal's own overlay would otherwise hide.
-      setShowConnectModal(false);
-      setMessage(err instanceof Error && err.message ? err.message : "Could not start the Slack connection. Please try again.");
-      setLoading(false);
-    }
-  }
-
-  async function handleDisconnect() {
-    if (!instance) return;
-    setLoading(true);
-    try {
-      const { disconnected } = await disconnectSlack(instance);
-      if (disconnected) {
-        setStatus({ connected: false });
-      } else {
-        setMessage("Could not disconnect Slack. Please try again.");
-      }
-    } catch (err) {
-      setMessage(err instanceof Error && err.message ? err.message : "Could not disconnect Slack. Please try again.");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  const connected = status?.connected ?? false;
 
   return (
-    <div
-      style={{ background: "rgba(255,255,255,0.06)", backdropFilter: "blur(12px)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: 20, display: "flex", flexDirection: "column", gap: 12 }}
-    >
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
-          <div style={{ width: 40, height: 40, borderRadius: 10, background: "#4A154B", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-            <span style={{ color: "#fff", fontSize: 14, fontWeight: 700 }}>Sl</span>
+    <div role="dialog" aria-modal="true" onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", backdropFilter: "blur(4px)", WebkitBackdropFilter: "blur(4px)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: "rgba(15,15,15,0.92)", backdropFilter: "blur(16px)", borderRadius: 14, width: 440, maxWidth: "100%", boxShadow: "0 20px 60px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.1)", overflow: "hidden" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "16px 20px", borderBottom: "1px solid rgba(255,255,255,0.1)" }}>
+          <div style={{ width: 32, height: 32, borderRadius: 8, background: source.color, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            <span style={{ color: "#fff", fontSize: 12, fontWeight: 700 }}>{source.initials}</span>
           </div>
-          <span style={{ fontSize: 16, fontWeight: 500, color: "#EDECEA", fontFamily: '"TWKLausanne", sans-serif' }}>Slack</span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: "#EDECEA", lineHeight: "20px" }}>Coming soon</div>
+            <div style={{ fontSize: 12, color: "rgba(237,236,234,0.45)", marginTop: 1 }}>{source.name}</div>
+          </div>
+          <button onClick={onClose} aria-label="Close" style={{ background: "none", border: "none", color: "rgba(237,236,234,0.65)", cursor: "pointer", padding: 4, borderRadius: 6, lineHeight: 1 }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+          </button>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-          {connected && (
-            <span style={{ background: "rgba(34,197,94,0.15)", color: "#4ADE80", fontSize: 11, fontWeight: 500, padding: "2px 8px", borderRadius: 999 }}>Connected</span>
+        <div style={{ padding: "18px 20px 20px" }}>
+          {notified ? (
+            <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+              <svg width="18" height="18" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0, marginTop: 1 }}><circle cx="8" cy="8" r="7" stroke="#22C55E" strokeWidth="1.3" /><path d="M5 8.2L7 10.2L11 5.8" stroke="#22C55E" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+              <p style={{ margin: 0, fontSize: 14, color: "rgba(237,236,234,0.75)", lineHeight: 1.6 }}>
+                Thanks — we’ll email you the moment the <strong style={{ color: "#EDECEA" }}>{source.name}</strong> integration is live.
+              </p>
+            </div>
+          ) : (
+            <>
+              <p style={{ margin: "0 0 16px", fontSize: 14, color: "rgba(237,236,234,0.6)", lineHeight: 1.6 }}>
+                We can let you know once the <strong style={{ color: "#EDECEA" }}>{source.name}</strong> integration is live to upgrade your Company Brain.
+              </p>
+              <button onClick={requestNotify} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "#6510F4", border: "none", borderRadius: 8, padding: "9px 16px", fontSize: 13.5, fontWeight: 600, color: "#fff", cursor: "pointer", fontFamily: "inherit" }}>
+                Get notified once live
+              </button>
+            </>
           )}
-          {connected && <SlackHowToTooltip />}
         </div>
       </div>
-      <p style={{ fontSize: 13, lineHeight: "20px", color: "rgba(237,236,234,0.55)", margin: 0 }}>
-        {connected ? (
-          <>
-            Connected to <strong style={{ color: "rgba(237,236,234,0.8)", fontWeight: 500 }}>{status?.accountLabel || "your workspace"}</strong>.
-            Your team&apos;s memory is one message away — see the <InlineCode>?</InlineCode> above for how it works.
-          </>
-        ) : (
-          <>
-            Bring your team&apos;s shared memory into Slack — ask questions, save what matters, and
-            pick up right where a conversation left off, without ever leaving the channel.
-          </>
-        )}
-      </p>
-      {message && <p style={{ fontSize: 12, color: "#BC9BFF", margin: 0 }}>{message}</p>}
-      {connected ? (
-        <div style={{ display: "flex", gap: 8 }}>
-          <button
-            onClick={handleDisconnect}
-            disabled={loading || !instance}
-            style={{
-              alignSelf: "flex-start", background: "rgba(255,255,255,0.06)", color: "rgba(237,236,234,0.7)",
-              border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "6px 14px", fontSize: 13,
-              fontWeight: 500, cursor: loading || !instance ? "wait" : "pointer",
-            }}
-          >
-            {loading ? "Disconnecting…" : "Disconnect"}
-          </button>
-          <button
-            onClick={() => setShowChannels(true)}
-            style={{ alignSelf: "flex-start", background: "rgba(255,255,255,0.06)", color: "rgba(237,236,234,0.7)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "6px 14px", fontSize: 13, fontWeight: 500, cursor: "pointer" }}
-          >
-            Manage channels
-          </button>
-        </div>
-      ) : (
-        <button
-          onClick={() => setShowConnectModal(true)}
-          disabled={!instance}
-          style={{
-            width: "100%", background: "#6510F4", color: "#fff", border: "none", borderRadius: 8,
-            padding: "8px 14px", fontSize: 13, fontWeight: 500, cursor: !instance ? "wait" : "pointer",
-          }}
-        >
-          Connect
-        </button>
-      )}
-      {showChannels && <SlackChannelsModal onClose={() => setShowChannels(false)} />}
-      {showConnectModal && (
-        <SlackConnectModal
-          loading={loading}
-          onConnect={handleConnect}
-          onClose={() => setShowConnectModal(false)}
-        />
-      )}
     </div>
   );
 }
 
-function SlackConnectModal({
-  loading,
-  onConnect,
-  onClose,
-}: {
-  loading: boolean;
-  onConnect: () => void;
-  onClose: () => void;
-}) {
-  const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
-  useEffect(() => { setPortalTarget(document.body); }, []);
+function DataSourcesSection() {
+  const [activeName, setActiveName] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const activeSource = INTEGRATIONS.find((it) => it.name === activeName) ?? null;
 
-  if (!portalTarget) return null;
-  return createPortal(
-    <div
-      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", backdropFilter: "blur(4px)", WebkitBackdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
-      onClick={loading ? undefined : onClose}
-    >
-      <div
-        style={{ background: "rgba(15,15,15,0.92)", backdropFilter: "blur(16px)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: 24, width: 480, maxWidth: "100%", maxHeight: "85vh", overflowY: "auto", display: "flex", flexDirection: "column", gap: 16, boxShadow: "0 20px 60px rgba(0,0,0,0.6)" }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ width: 44, height: 44, borderRadius: 10, background: "#4A154B", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-            <span style={{ color: "#fff", fontSize: 15, fontWeight: 700 }}>Sl</span>
-          </div>
-          <div>
-            <h2 style={{ fontSize: 17, fontWeight: 700, color: "#EDECEA", margin: 0 }}>Connect Slack</h2>
-            <p style={{ fontSize: 12.5, color: "rgba(237,236,234,0.5)", margin: "2px 0 0" }}>
-              Ask questions, save messages, and search memory — right from Slack.
-            </p>
-          </div>
-        </div>
+  const q = query.trim().toLowerCase();
+  const filtered = q
+    ? INTEGRATIONS.filter((it) => it.name.toLowerCase().includes(q) || it.description.toLowerCase().includes(q))
+    : INTEGRATIONS;
 
-        <div style={{ height: 1, background: "rgba(255,255,255,0.08)" }} />
-
-        <div style={{ display: "flex", flexDirection: "column", gap: 14, fontSize: 12.5, color: "rgba(237,236,234,0.7)", lineHeight: "18px" }}>
-          <div>
-            <div style={{ fontSize: 13, fontWeight: 700, color: "#EDECEA", marginBottom: 4 }}>
-              What this integration does
-            </div>
-            <div>
-              Brings your team&apos;s Cognee memory into Slack, so nobody has to leave the
-              conversation to ask a question, save context, or look something up. One workspace
-              connects once; every teammate then links their own Cognee identity, so answers and
-              saved messages are always personal — never mixed up with a colleague&apos;s.
-            </div>
-          </div>
-
-          <div>
-            <div style={{ fontSize: 13, fontWeight: 700, color: "#EDECEA", marginBottom: 6 }}>Commands</div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <div>
-                <InlineCode>/cognee-link</InlineCode>
-                <div style={{ marginTop: 2, color: "rgba(237,236,234,0.6)" }}>
-                  One-time setup for each teammate — a private link to confirm their own account.
-                </div>
-              </div>
-              <div>
-                <InlineCode>/cognee-ask &lt;question&gt;</InlineCode>
-                <div style={{ marginTop: 2, color: "rgba(237,236,234,0.6)" }}>
-                  Ask your Cognee memory a question. Reviewed privately (Share/Discard) before
-                  anything posts to the channel.
-                </div>
-              </div>
-              <div>
-                <InlineCode>Remember this</InlineCode>
-                <div style={{ marginTop: 2, color: "rgba(237,236,234,0.6)" }}>
-                  Message shortcut that saves any message to memory, tagged with who said it and where.
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div>
-            <div style={{ fontSize: 13, fontWeight: 700, color: "#EDECEA", marginBottom: 4 }}>
-              Channels &amp; permissions
-            </div>
-            <div>
-              By default every channel the bot is invited to can use these commands. Once
-              connected, restrict this to specific channels any time from{" "}
-              <strong style={{ color: "#EDECEA" }}>Manage channels</strong> on this card.
-            </div>
-          </div>
-        </div>
-
-        <div style={{ height: 1, background: "rgba(255,255,255,0.08)" }} />
-        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-          <button
-            onClick={onClose}
-            disabled={loading}
-            style={{ height: 36, padding: "0 16px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.15)", background: "transparent", fontSize: 13, fontWeight: 500, color: "rgba(237,236,234,0.8)", cursor: "pointer", fontFamily: "inherit" }}
-          >
-            Cancel
-          </button>
-          <button
-            onClick={onConnect}
-            disabled={loading}
-            style={{
-              height: 36, padding: "0 18px", borderRadius: 8, border: "none",
-              background: "#6510F4", fontSize: 13, fontWeight: 500, color: "#fff",
-              cursor: loading ? "wait" : "pointer", fontFamily: "inherit",
-            }}
-          >
-            {loading ? "Connecting…" : "Connect to Slack"}
-          </button>
-        </div>
-      </div>
-    </div>,
-    portalTarget,
-  );
-}
-
-function SlackHowToTooltip() {
-  const triggerRef = useRef<HTMLSpanElement>(null);
-  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
-  const [coords, setCoords] = useState<{ top: number; left: number; width: number } | null>(null);
-
-  useEffect(() => {
-    setPortalTarget(document.body);
-    return () => {
-      if (closeTimer.current) clearTimeout(closeTimer.current);
-    };
-  }, []);
-
-  // The tooltip is portaled to document.body — it's no longer a DOM
-  // descendant of the trigger, so moving the mouse from the "?" icon onto
-  // the tooltip itself looks like "left the trigger" and would close it
-  // before the cursor ever arrives. A short cancellable delay bridges that
-  // gap, on both the trigger and the tooltip's own mouse events below.
-  function cancelClose() {
-    if (closeTimer.current) {
-      clearTimeout(closeTimer.current);
-      closeTimer.current = null;
-    }
-  }
-
-  function open() {
-    cancelClose();
-    const rect = triggerRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const margin = 16;
-    const width = Math.min(360, window.innerWidth - margin * 2);
-    // Prefer right-aligned to the "?" icon, but clamp so it can never run
-    // past either edge of the viewport regardless of where the card
-    // holding this trigger happens to sit in the page's own grid layout.
-    const left = Math.min(Math.max(rect.right - width, margin), window.innerWidth - width - margin);
-    setCoords({ top: rect.top, left, width });
-  }
-
-  function scheduleClose() {
-    cancelClose();
-    closeTimer.current = setTimeout(() => setCoords(null), 150);
+  function openSource(source: (typeof INTEGRATIONS)[number]) {
+    trackEvent({
+      pageName: "Integrations",
+      eventName: "data_source_connect_clicked",
+      additionalProperties: { data_source: source.name },
+    });
+    setActiveName(source.name);
   }
 
   return (
-    <span
-      ref={triggerRef}
-      style={{ position: "relative", display: "inline-flex" }}
-      onMouseEnter={open}
-      onMouseLeave={scheduleClose}
-    >
-      <span
-        style={{
-          width: 16, height: 16, borderRadius: "50%", border: "1px solid rgba(237,236,234,0.35)",
-          color: "rgba(237,236,234,0.55)", fontSize: 10, fontWeight: 600, display: "flex",
-          alignItems: "center", justifyContent: "center", cursor: "default",
-        }}
-      >
-        ?
-      </span>
-      {coords && portalTarget && createPortal(
-        <div
-          onMouseEnter={cancelClose}
-          onMouseLeave={scheduleClose}
-          style={{
-            position: "fixed", top: coords.top - 8, left: coords.left, width: coords.width,
-            transform: "translateY(-100%)",
-            maxHeight: 420, overflowY: "auto", background: "#18181B", border: "1px solid rgba(255,255,255,0.1)",
-            borderRadius: 10, padding: "16px 18px", fontSize: 12.5, color: "rgba(237,236,234,0.7)", zIndex: 1000,
-            boxShadow: "0 12px 32px rgba(0,0,0,0.5)", lineHeight: "18px",
-          }}
-        >
-          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          <div>
-            <div style={{ fontSize: 13, fontWeight: 700, color: "#EDECEA", marginBottom: 4 }}>
-              What this integration does
-            </div>
-            <div>
-              Brings your team&apos;s Cognee memory into Slack, so nobody has to leave the
-              conversation to ask a question, save context, or look something up. One Slack
-              workspace connects once; every teammate then links their own Cognee identity, so
-              answers and saved messages are always personal — never mixed up with a colleague&apos;s.
-            </div>
-          </div>
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <style>{`
+        .ds-card { transition: transform 150ms ease, border-color 150ms ease, background 150ms ease; }
+        .ds-card:hover { transform: translateY(-2px); border-color: rgba(188,155,255,0.35) !important; background: rgba(255,255,255,0.09) !important; }
+        .ds-connect { opacity: 0; transform: translateX(4px); transition: opacity 150ms ease, transform 150ms ease; }
+        .ds-card:hover .ds-connect, .ds-card:focus-visible .ds-connect { opacity: 1; transform: translateX(0); }
+        @media (prefers-reduced-motion: reduce) {
+          .ds-card, .ds-connect { transition: none; }
+          .ds-card:hover { transform: none; }
+        }
+        .ds-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(224px, 1fr)); gap: 14px; }
+        .ds-search { transition: border-color 150ms ease, background 150ms ease; }
+        .ds-search::placeholder { color: rgba(237,236,234,0.4); }
+        .ds-search:focus { outline: none; border-color: rgba(188,155,255,0.5); background: rgba(255,255,255,0.09); }
+      `}</style>
 
-          <div>
-            <div style={{ fontSize: 13, fontWeight: 700, color: "#EDECEA", marginBottom: 6 }}>Commands</div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <div>
-                <InlineCode>/cognee-link</InlineCode>
-                <div style={{ marginTop: 2, color: "rgba(237,236,234,0.6)" }}>
-                  One-time setup for each teammate. Replies privately with a link — open it in a
-                  browser where you&apos;re already logged in and click Confirm. Nothing to copy or paste.
-                </div>
-              </div>
-              <div>
-                <InlineCode>/cognee-ask &lt;question&gt;</InlineCode>
-                <div style={{ marginTop: 2, color: "rgba(237,236,234,0.6)" }}>
-                  Ask your Cognee memory a question. The answer is reviewed privately first
-                  (Share/Discard) — nothing posts to the channel until you choose Share.
-                </div>
-              </div>
-              <div>
-                <InlineCode>Remember this</InlineCode>
-                <div style={{ marginTop: 2, color: "rgba(237,236,234,0.6)" }}>
-                  Message shortcut (hover a message → More actions → Connect to apps). Saves it to
-                  memory, tagged with who said it and in which channel.
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div>
-            <div style={{ fontSize: 13, fontWeight: 700, color: "#EDECEA", marginBottom: 4 }}>
-              Installing it
-            </div>
-            <div>
-              One person on the team clicks <strong style={{ color: "#EDECEA" }}>Connect</strong>{" "}
-              above and authorizes the Slack workspace — that&apos;s the whole install. Every other
-              member then runs <InlineCode>/cognee-link</InlineCode> once for their own account;
-              nothing else to configure per person.
-            </div>
-          </div>
-
-          <div>
-            <div style={{ fontSize: 13, fontWeight: 700, color: "#EDECEA", marginBottom: 4 }}>
-              When it&apos;s useful
-            </div>
-            <div>
-              Pulling up a decision buried in an old thread instead of scrolling for it. Capturing
-              a spec, quote, or answer the moment someone posts it, before it scrolls out of view.
-              Onboarding a new teammate onto shared team knowledge without a separate tool to open.
-            </div>
-          </div>
+      <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
+        <div>
+          <h2 style={{ fontSize: 18, fontWeight: 700, color: "#EDECEA", margin: "0 0 4px", letterSpacing: "-0.01em" }}>Data sources</h2>
+          <p style={{ fontSize: 14, color: "rgba(237,236,234,0.55)", margin: 0 }}>Connect the tools your team already uses as data sources for your brains.</p>
         </div>
-        </div>,
-        portalTarget,
+        <div style={{ position: "relative", width: 240, maxWidth: "100%" }}>
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" style={{ position: "absolute", left: 11, top: "50%", marginTop: -7.5, pointerEvents: "none" }}>
+            <circle cx="7" cy="7" r="4.5" stroke="rgba(237,236,234,0.45)" strokeWidth="1.4" />
+            <path d="M10.5 10.5L14 14" stroke="rgba(237,236,234,0.45)" strokeWidth="1.4" strokeLinecap="round" />
+          </svg>
+          <input
+            className="ds-search"
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search data sources"
+            aria-label="Search data sources"
+            style={{ width: "100%", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 9, padding: "8px 12px 8px 32px", fontSize: 13, color: "#EDECEA", fontFamily: "inherit" }}
+          />
+        </div>
+      </div>
+
+      {filtered.length > 0 ? (
+        <div className="ds-grid">
+          {filtered.map((it) => (
+            <button key={it.name} className="ds-card" onClick={() => openSource(it)} style={{ position: "relative", display: "flex", alignItems: "center", gap: 12, background: "rgba(255,255,255,0.06)", backdropFilter: "blur(12px)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: "13px 15px", textAlign: "left", cursor: "pointer", fontFamily: "inherit", width: "100%" }}>
+              <div style={{ width: 36, height: 36, borderRadius: 10, background: it.color, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.08)" }}>
+                {it.logo ? (
+                  <span aria-hidden style={{ width: 19, height: 19, background: "#fff", WebkitMaskImage: `url(/visuals/logos/datasources/${it.logo}.svg)`, maskImage: `url(/visuals/logos/datasources/${it.logo}.svg)`, WebkitMaskRepeat: "no-repeat", maskRepeat: "no-repeat", WebkitMaskPosition: "center", maskPosition: "center", WebkitMaskSize: "contain", maskSize: "contain" }} />
+                ) : (
+                  <span style={{ color: "#fff", fontSize: 13, fontWeight: 700, letterSpacing: "-0.02em" }}>{it.initials}</span>
+                )}
+              </div>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ fontSize: 14, fontWeight: 500, color: "#EDECEA", fontFamily: '"TWKLausanne", sans-serif', overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", lineHeight: 1.3 }}>{it.name}</div>
+                <div style={{ fontSize: 12, color: "rgba(237,236,234,0.45)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", lineHeight: 1.4 }}>{it.description}</div>
+              </div>
+              <span className="ds-connect" style={{ position: "absolute", right: 11, top: "50%", marginTop: -12, display: "inline-flex", alignItems: "center", gap: 3, background: "rgba(24,24,27,0.95)", backdropFilter: "blur(8px)", border: "1px solid rgba(188,155,255,0.4)", borderRadius: 6, padding: "3px 8px", fontSize: 11, fontWeight: 600, color: "#BC9BFF" }}>
+                Connect
+                <svg width="11" height="11" viewBox="0 0 16 16" fill="none"><path d="M6 3l5 5-5 5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
+              </span>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div style={{ textAlign: "center", padding: "28px 16px", fontSize: 13.5, color: "rgba(237,236,234,0.5)", lineHeight: 1.6 }}>
+          No data sources match “{query.trim()}”.{" "}
+          <a href={`mailto:support@cognee.ai?subject=${encodeURIComponent(`Integration request: ${query.trim()}`)}`} style={{ color: "#6510F4", textDecoration: "underline" }}>Request it</a> and we’ll consider it next.
+        </div>
       )}
-    </span>
+
+      <p style={{ fontSize: 13, color: "rgba(237,236,234,0.35)", textAlign: "center", margin: 0 }}>
+        More integrations on the way.{" "}
+        <a href="mailto:support@cognee.ai?subject=Integration%20request" style={{ color: "#6510F4", textDecoration: "underline" }}>Let us know</a> what to prioritize.
+      </p>
+
+      {activeSource && <ComingSoonModal source={activeSource} onClose={() => setActiveName(null)} />}
+    </div>
   );
 }
-
-// ── Data source integrations ──────────────────────────────────────────────
-
-const INTEGRATIONS = [
-  { name: "Notion",              description: "Sync pages and databases into your knowledge graph.", initials: "No", color: "#000000" },
-  { name: "Google Drive",        description: "Ingest Docs, Sheets, and Slides automatically.",      initials: "GD", color: "#1A73E8" },
-  { name: "GitHub",              description: "Index issues, PRs, and repository docs.",             initials: "GH", color: "#181717" },
-  { name: "Linear",              description: "Bring issues and project context into memory.",       initials: "Li", color: "#5E6AD2" },
-  { name: "Confluence",          description: "Connect spaces and wikis as a data source.",          initials: "Cf", color: "#172B4D" },
-  { name: "Jira",                description: "Sync tickets and epics into the graph.",              initials: "Jr", color: "#0052CC" },
-  { name: "Google Drive Sheets", description: "Pull structured data from spreadsheets.",            initials: "Sh", color: "#0F9D58" },
-];
 
 // ── Page ──────────────────────────────────────────────────────────────────
 
@@ -1091,40 +959,8 @@ export default function IntegrationsPage() {
         {/* ── Divider ── */}
         <div style={{ height: 1, background: "rgba(255,255,255,0.08)" }} />
 
-        {/* ── Data sources ── */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          <div>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
-              <h2 style={{ fontSize: 18, fontWeight: 700, color: "#EDECEA", margin: 0, letterSpacing: "-0.01em" }}>Data sources</h2>
-              <span style={{ background: "rgba(188,155,255,0.20)", color: "#BC9BFF", fontSize: 11, fontWeight: 700, padding: "2px 10px", borderRadius: 999 }}>Coming soon</span>
-            </div>
-            <p style={{ fontSize: 14, color: "rgba(237,236,234,0.55)", margin: 0 }}>Connect the tools your team already uses as data sources for your brains.</p>
-          </div>
-
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 16 }}>
-            <SlackCard />
-            {INTEGRATIONS.map((it) => (
-              <div key={it.name} style={{ background: "rgba(255,255,255,0.06)", backdropFilter: "blur(12px)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: 20, display: "flex", flexDirection: "column", gap: 12 }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
-                    <div style={{ width: 40, height: 40, borderRadius: 10, background: it.color, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                      <span style={{ color: "#fff", fontSize: 14, fontWeight: 700 }}>{it.initials}</span>
-                    </div>
-                    <span style={{ fontSize: 16, fontWeight: 500, color: "#EDECEA", fontFamily: '"TWKLausanne", sans-serif', overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.name}</span>
-                  </div>
-                  <span style={{ flexShrink: 0, background: "rgba(255,255,255,0.06)", color: "rgba(237,236,234,0.35)", fontSize: 11, fontWeight: 500, padding: "2px 8px", borderRadius: 999 }}>Coming soon</span>
-                </div>
-                <p style={{ fontSize: 13, color: "rgba(237,236,234,0.55)", margin: 0 }}>{it.description}</p>
-                <button disabled style={{ alignSelf: "flex-start", background: "rgba(255,255,255,0.06)", color: "rgba(237,236,234,0.35)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "6px 14px", fontSize: 13, fontWeight: 500, cursor: "not-allowed" }}>Notify me</button>
-              </div>
-            ))}
-          </div>
-
-          <p style={{ fontSize: 13, color: "rgba(237,236,234,0.35)", textAlign: "center", margin: 0 }}>
-            More integrations on the way.{" "}
-            <a href="mailto:support@cognee.ai?subject=Integration%20request" style={{ color: "#6510F4", textDecoration: "underline" }}>Let us know</a> what to prioritize.
-          </p>
-        </div>
+        {/* ── Data sources (false doors) ── */}
+        <DataSourcesSection />
 
       </div>
     </div>

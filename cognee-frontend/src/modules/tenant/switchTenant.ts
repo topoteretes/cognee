@@ -1,5 +1,6 @@
 import { clearInitCache } from "./initCache";
 import persistSelectedTenant from "./persistSelectedTenant";
+import selectTenant from "./selectTenant";
 
 // Read by useTenantInit.ts's connectToSelectedTenant on the other side of the
 // reload this triggers. Value is the tenant id, not a bare "1" flag, so a
@@ -54,17 +55,20 @@ export function clearFreshlyCreatedTenant(): void {
 // visited before — e.g. logging in fresh or opening a shared workspace for
 // the first time), which is wrong for a tenant that came into existence
 // seconds ago and whose pod/DNS may still be spinning up.
-export default function switchTenant(
+export default async function switchTenant(
   tenantId: string,
   tenantName?: string,
   navigateTo?: string,
   isFreshlyCreated?: boolean,
-): void {
+): Promise<void> {
   clearInitCache();
   persistSelectedTenant(tenantId, tenantName);
   if (isFreshlyCreated) {
     markFreshlyCreatedTenant(tenantId);
   }
+  // Awaited before navigating away — the reload below would otherwise race
+  // with (and likely cancel) this request, silently dropping the backend sync.
+  await selectTenant(tenantId);
   if (navigateTo) {
     window.location.href = navigateTo;
   } else {

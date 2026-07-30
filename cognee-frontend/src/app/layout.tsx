@@ -7,7 +7,6 @@ import "@mantine/notifications/styles.css";
 import { mantineHtmlProps, MantineProvider } from "@mantine/core";
 import theme from "@/ui/theme/theme";
 import { Notifications } from "@mantine/notifications";
-import QueryProvider from "@/modules/query/QueryProvider";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -34,12 +33,10 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased h-full`}
       >
-        <QueryProvider>
-          <MantineProvider theme={theme}>
-            <Notifications position="top-right" zIndex={10001} />
-            {children}
-          </MantineProvider>
-        </QueryProvider>
+        <MantineProvider theme={theme}>
+          <Notifications position="top-right" zIndex={10001} />
+          {children}
+        </MantineProvider>
       </body>
     </html>
   );

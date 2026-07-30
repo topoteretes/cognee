@@ -10,6 +10,7 @@ import getSearchHistory, { type SearchHistoryEntry } from "@/modules/searchHisto
 import { listSessions, getSessionDetail, SEARCH_SESSION_PREFIX, type SessionRow } from "@/modules/sessions/getSessions";
 import { TrackPageView, trackEvent } from "@/modules/analytics";
 import BrainSelector from "@/ui/elements/BrainSelector";
+import { isInsufficientCreditsError } from "@/utils/insufficientCredits";
 
 type SearchScope = "documents" | "agent";
 
@@ -424,12 +425,24 @@ export default function SearchPage() {
         })
       );
     } catch (err) {
-      setSessionConvos((prev) =>
-        prev.map((c) => {
-          if (c.id !== finalConvoId) return c;
-          return { ...c, messages: c.messages.map((m) => m.id === loadingMsg.id ? { ...m, content: err instanceof Error ? err.message : "Search failed", loading: false, error: true } : m) };
-        })
-      );
+      // On insufficient credits, the pod interceptor (services/http/pod.ts)
+      // already opened the global modal — drop the placeholder message
+      // instead of showing a redundant inline error bubble underneath it.
+      if (isInsufficientCreditsError(err)) {
+        setSessionConvos((prev) =>
+          prev.map((c) => {
+            if (c.id !== finalConvoId) return c;
+            return { ...c, messages: c.messages.filter((m) => m.id !== loadingMsg.id) };
+          })
+        );
+      } else {
+        setSessionConvos((prev) =>
+          prev.map((c) => {
+            if (c.id !== finalConvoId) return c;
+            return { ...c, messages: c.messages.map((m) => m.id === loadingMsg.id ? { ...m, content: err instanceof Error ? err.message : "Search failed", loading: false, error: true } : m) };
+          })
+        );
+      }
     } finally {
       setIsSearching(false);
       setTimeout(() => inputRef.current?.focus(), 100);

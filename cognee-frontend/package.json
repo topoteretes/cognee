@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
+    "test:e2e": "playwright test",
     "check:tracking-plan": "node scripts/check-tracking-plan.js"
   },
   "dependencies": {
@@ -23,9 +24,12 @@
     "embla-carousel-autoplay": "^8.6.0",
     "embla-carousel-fade": "^8.6.0",
     "embla-carousel-react": "^8.6.0",
+    "fflate": "^0.8.3",
     "jose": "^6.0.11",
+    "js-tiktoken": "^1.0.21",
     "mantine-form-valibot-resolver": "^3.0.1",
     "next": "^16.0.8",
+    "pdfjs-dist": "^6.1.200",
     "react": "^19.1.2",
     "react-dom": "^19.1.2",
     "react-error-boundary": "^6.0.0",
@@ -36,6 +40,7 @@
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
+    "@playwright/test": "^1.61.1",
     "@tailwindcss/postcss": "^4.1.18",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",

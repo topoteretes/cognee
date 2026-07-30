@@ -351,14 +351,14 @@ export default function ApiKeysPage() {
               {k.isNew ? (
                 /* Show full key once for newly created keys */
                 <div style={{ display: "flex", alignItems: "center", gap: 8, background: "rgba(34,197,94,0.15)", border: "1px solid rgba(34,197,94,0.4)", borderRadius: 6, padding: "6px 12px" }}>
-                  <span style={{ fontSize: 12, color: "#22C55E", fontFamily: 'ui-monospace, Menlo, Monaco, "Cascadia Mono", "Segoe UI Mono", "Roboto Mono", monospace', wordBreak: "break-all" }}>{k.key}</span>
+                  <span className="cs-mask" data-cs-mask="true" style={{ fontSize: 12, color: "#22C55E", fontFamily: 'ui-monospace, Menlo, Monaco, "Cascadia Mono", "Segoe UI Mono", "Roboto Mono", monospace', wordBreak: "break-all" }}>{k.key}</span>
                   <button onClick={() => handleCopy(k.id, k.key)} className="cursor-pointer" style={{ background: "none", border: "none", padding: 2, display: "flex", flexShrink: 0 }} title="Copy key">
                     {copiedId === k.id ? <CheckIcon /> : <CopyIcon />}
                   </button>
                 </div>
               ) : (
                 <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <span style={{ fontSize: 13, color: "rgba(237,236,234,0.7)", fontFamily: 'ui-monospace, Menlo, Monaco, "Cascadia Mono", "Segoe UI Mono", "Roboto Mono", monospace' }}>{k.label || k.key}</span>
+                  <span className="cs-mask" data-cs-mask="true" style={{ fontSize: 13, color: "rgba(237,236,234,0.7)", fontFamily: 'ui-monospace, Menlo, Monaco, "Cascadia Mono", "Segoe UI Mono", "Roboto Mono", monospace' }}>{k.label || k.key}</span>
                   <button onClick={() => handleCopy(k.id, k.key)} className="cursor-pointer" style={{ background: "none", border: "none", padding: 2, display: "flex" }} title="Copy key">
                     {copiedId === k.id ? <CheckIcon /> : <CopyIcon />}
                   </button>

@@ -15,6 +15,11 @@ export interface UserMe {
   // UserProvider detect a different account logging in on the same tab and
   // wipe the previous account's cached tenant/workspace state.
   userId: string | null;
+  // ISO timestamp, inherited from the backend's Principal row (CLO-363) —
+  // lets time-based triggers (e.g. the NPS survey's "15 days old" condition)
+  // gate off account age without a separate call. Null for the rare
+  // legacy/backfilled row whose Principal.created_at was never set.
+  accountCreatedAt: string | null;
 }
 
 // A workspace the current user belongs to. Owned by the User domain (it answers
