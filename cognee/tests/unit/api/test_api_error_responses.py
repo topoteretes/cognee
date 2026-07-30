@@ -527,10 +527,12 @@ class TestCogneeErrorPassthrough:
 
 
 class TestRecallPermissionDenied:
-    def test_recall_permission_denied_returns_empty_list(self, client, monkeypatch):
-        """Deliberate carve-out from the CogneeApiError re-raise: recall answers
-        permission denials with an empty result so callers cannot probe which
-        datasets exist."""
+    def test_recall_permission_denied_returns_403_with_message(self, client, monkeypatch):
+        """Permission denials surface like every other CogneeApiError: the
+        exception's own 403 and message via the global handler — not the old
+        misleading "prerequisites not met, run cognify" body."""
+        from cognee.modules.users.exceptions.exceptions import PermissionDeniedError
+
         recall_pkg = importlib.import_module("cognee.api.v1.recall")
         monkeypatch.setattr(
             recall_pkg, "recall", AsyncMock(side_effect=PermissionDeniedError("no access"))
@@ -538,5 +540,6 @@ class TestRecallPermissionDenied:
 
         resp = client.post("/recall", json={"query": "q"})
 
-        assert resp.status_code == 200
-        assert resp.json() == []
+        assert resp.status_code == 403
+        assert "no access" in resp.text
+        assert "cognify" not in resp.text.lower()
