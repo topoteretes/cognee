@@ -1,6 +1,6 @@
 """Minimal demo: GraphCompletion triplets -> Hybrid context + answer.
 
-    uv run python examples/demos/graph_completion_to_hybrid.py
+uv run python examples/demos/graph_completion_to_hybrid.py
 """
 
 import asyncio
@@ -79,7 +79,9 @@ def triplets_to_hybrid(edges) -> dict:
 
 async def main() -> None:
     root = pathlib.Path(__file__).resolve().parents[2]
-    cognee.config.system_root_directory(str(root / ".cognee_system/graph_completion_to_hybrid_demo"))
+    cognee.config.system_root_directory(
+        str(root / ".cognee_system/graph_completion_to_hybrid_demo")
+    )
     cognee.config.data_root_directory(str(root / ".data_storage/graph_completion_to_hybrid_demo"))
 
     await cognee.forget(everything=True)
