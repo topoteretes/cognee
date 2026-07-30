@@ -348,6 +348,18 @@ LLM_ENDPOINT="https://openrouter.ai/api/v1"
 LLM_API_KEY="your_api_key"
 ```
 
+#### Requesty (LLM router, requires custom provider)
+Requesty exposes 400+ models behind a single OpenAI-compatible endpoint, using
+`provider/model` names (same convention as OpenRouter). Get a key at
+https://app.requesty.ai/router. Use the EU endpoint
+`https://router.eu.requesty.ai/v1` for EU data residency.
+```bash
+LLM_PROVIDER="custom"
+LLM_MODEL="openai/openai/gpt-4o-mini"
+LLM_ENDPOINT="https://router.requesty.ai/v1"
+LLM_API_KEY="your_requesty_api_key"
+```
+
 #### AWS Bedrock (requires aws extra)
 ```bash
 LLM_PROVIDER="bedrock"
