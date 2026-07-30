@@ -67,6 +67,11 @@ class TestCognifyMakesOneCall:
             ),
             patch.object(cognify_module, "get_default_tasks", new=AsyncMock(return_value=tasks)),
             patch.object(cognify_module, "get_dlt_tasks", new=AsyncMock(return_value="DLT_TASKS")),
+            patch.object(
+                cognify_module,
+                "get_dlt_row_legacy_tasks",
+                new=AsyncMock(return_value="LEGACY_TASKS"),
+            ),
         ):
             result = await cognify_module.cognify(
                 datasets=["ds"],
@@ -88,7 +93,22 @@ class TestCognifyMakesOneCall:
 
         resolver = call["resolve_tasks"]
         assert resolver(_manifest_item()) == "DLT_TASKS"
+        assert resolver(_legacy_item()) == "LEGACY_TASKS"
         assert resolver(_text_item()) == "STANDARD_TASKS"
+
+    @pytest.mark.asyncio
+    async def test_legacy_task_list_is_llm_free(self):
+        """The legacy route's list contains only deterministic tasks."""
+        tasks = await cognify_module.get_dlt_row_legacy_tasks(chunk_size=1024)
+        names = [task.executable.__name__ for task in tasks]
+        assert names == [
+            "classify_documents",
+            "extract_chunks_from_documents",
+            "add_data_points",
+            "extract_dlt_fk_edges",
+        ]
+        assert "extract_graph_and_summarize" not in names
+        assert "detect_contradictions" not in names
 
     @pytest.mark.asyncio
     async def test_temporal_swaps_standard_route_only(self):

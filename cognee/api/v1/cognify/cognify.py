@@ -304,7 +304,12 @@ async def cognify(
         # needs concrete lists, not an async factory). One run_pipeline call,
         # one cognify_pipeline run per dataset, mixed datasets included.
         dlt_tasks = await get_dlt_tasks(chunk_size=chunk_size, chunks_per_batch=chunks_per_batch)
-        tasks_by_route = {CognifyRoute.DLT_SOURCE: dlt_tasks}
+        tasks_by_route = {
+            CognifyRoute.DLT_SOURCE: dlt_tasks,
+            CognifyRoute.DLT_ROW_LEGACY: await get_dlt_row_legacy_tasks(
+                chunk_size=chunk_size, chunks_per_batch=chunks_per_batch
+            ),
+        }
 
         def resolve_cognify_tasks(data_item):
             return tasks_by_route.get(cognify_route_for(data_item), tasks)
@@ -423,6 +428,39 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
         )
 
     return default_tasks
+
+
+async def get_dlt_row_legacy_tasks(
+    chunk_size: int = None, chunks_per_batch: int = None
+) -> list[Task]:
+    """Deterministic pipeline for legacy pre-manifest DLT row records.
+
+    One Data record per row (superseded by DltSourceDocument manifests, but
+    persisted datasets still hold these). No LLM tasks — the graph comes from
+    the row's FK metadata via extract_dlt_fk_edges. This route is what makes
+    removing the DltRowDocument guards from the shared LLM tasks safe: legacy
+    rows can never reach them. Same deliberate omissions as get_dlt_tasks.
+    """
+    cognify_config = get_cognify_config()
+    if chunks_per_batch is None:
+        chunks_per_batch = (
+            cognify_config.chunks_per_batch if cognify_config.chunks_per_batch is not None else 100
+        )
+
+    return [
+        Task(classify_documents),
+        Task(
+            extract_chunks_from_documents,
+            max_chunk_size=chunk_size or await get_max_chunk_tokens(),
+            chunker=TextChunker,
+        ),
+        Task(
+            add_data_points,
+            embed_triplets=cognify_config.triplet_embedding,
+            task_config={"batch_size": chunks_per_batch},
+        ),
+        Task(extract_dlt_fk_edges),
+    ]
 
 
 async def get_dlt_tasks(chunk_size: int = None, chunks_per_batch: int = None) -> list[Task]:
