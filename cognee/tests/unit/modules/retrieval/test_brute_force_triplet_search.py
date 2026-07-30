@@ -131,6 +131,7 @@ async def test_brute_force_triplet_search_default_collections():
             "TextSummary_text",
             "EntityType_name",
             "DocumentChunk_text",
+            "RelationalRow_text",
             "EdgeType_relationship_name",
         ]
 

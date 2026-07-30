@@ -120,12 +120,16 @@ async def test_ctx_none_direct_call_uses_fresh_state(monkeypatch, emit_mock):
 
 
 @pytest.mark.asyncio
-async def test_relational_rows_have_their_own_type_but_index_as_document_chunks(monkeypatch):
-    """RelationalRow is a distinct graph type (type-level search filtering) that
-    still indexes into DocumentChunk_text (retrieval keeps finding rows)."""
-    from cognee.modules.chunking.models.RelationalRow import RelationalRow
+async def test_relational_rows_index_into_their_own_collection(monkeypatch):
+    """Rows are their own type AND their own collection: chunk search
+    (DocumentChunk_text) is documents-only; row text lands in
+    RelationalRow_text for row-aware retrieval. The pipeline rebuilds
+    data-point classes (copy_model keeps only the class NAME and fields),
+    so the collection name must survive that rebuild too."""
     from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
+    from cognee.modules.chunking.models.RelationalRow import RelationalRow
     from cognee.modules.data.processing.document_types import DltSourceDocument
+    from cognee.modules.storage.utils import copy_model
     from cognee.tasks.storage.index_data_points import index_data_points as run_indexing
 
     chunk = RelationalRow(
@@ -139,18 +143,10 @@ async def test_relational_rows_have_their_own_type_but_index_as_document_chunks(
         ),
         contains=[],
     )
-    assert isinstance(chunk, DocumentChunk)
-    assert type(chunk).__name__ == "RelationalRow"  # graph type is the row type
+    assert isinstance(chunk, DocumentChunk)  # field-shape reuse only
+    assert type(chunk).__name__ == "RelationalRow"
 
-    # The pipeline rebuilds data-point classes (copy_model/create_model keeps
-    # only the class NAME and fields), so the index redirect must survive a
-    # rebuilt instance whose class carries nothing.
-    from cognee.modules.storage.utils import copy_model
-
-    rebuilt_cls = copy_model(type(chunk))
-    rebuilt = rebuilt_cls(**chunk.model_dump())
-    assert type(rebuilt).__name__ == "RelationalRow"
-    assert rebuilt.metadata.get("index_type_name") == "DocumentChunk"
+    rebuilt = copy_model(type(chunk))(**chunk.model_dump())
 
     created = []
 
@@ -169,4 +165,7 @@ async def test_relational_rows_have_their_own_type_but_index_as_document_chunks(
             return None
 
     await run_indexing([chunk], vector_engine=_FakeEngine())
-    assert created == [("DocumentChunk", "text")]  # NOT RelationalRow_text
+    await run_indexing([rebuilt], vector_engine=_FakeEngine())
+    assert created == [("RelationalRow", "text"), ("RelationalRow", "text")], (
+        "row vectors must land in RelationalRow_text, original and rebuilt alike"
+    )

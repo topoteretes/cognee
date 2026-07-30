@@ -37,14 +37,7 @@ async def index_data_points(data_points: list[DataPoint], vector_engine=None):
             continue
 
         data_point_type = type(data_point)
-        # A subtype may pin its vector collection to a base type via
-        # metadata["index_type_name"] (e.g. RelationalRow indexes as
-        # DocumentChunk so every retriever reading DocumentChunk_text keeps
-        # finding it, while the graph node keeps the subtype for type-level
-        # filtering). It rides in metadata — an instance field — because the
-        # pipeline rebuilds data-point classes via copy_model/create_model,
-        # which keeps only the class NAME and fields.
-        type_name = data_point.metadata.get("index_type_name") or data_point_type.__name__
+        type_name = data_point_type.__name__
 
         for field_name in data_point.metadata["index_fields"]:
             if getattr(data_point, field_name, None) is None:

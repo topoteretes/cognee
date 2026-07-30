@@ -102,12 +102,33 @@ async def test_dlt_mixed_input():
     entities = [p for p in node_props if p.get("type") == "Entity"]
     assert entities, "No Entity nodes — LLM extraction did not run for the regular text item"
 
-    # --- Search: both the DLT rows and the text are retrievable -------------
-    row_result = await cognee.search(
+    # --- Search: chunk search is documents-only; rows have their own
+    # collection (RelationalRow_text) read by row-aware retrieval. ----------
+    chunk_result = await cognee.search(
         "Ada Lovelace", query_type=SearchType.CHUNKS, datasets=[DATASET_NAME]
     )
-    assert "analytical engines" in str(row_result), (
-        f"DLT row not retrievable via chunk search: {str(row_result)[:500]}"
+    assert "analytical engines" not in str(chunk_result), (
+        f"DLT rows must NOT surface in chunk search (documents only): {str(chunk_result)[:500]}"
+    )
+
+    from cognee.context_global_variables import set_database_global_context_variables
+    from cognee.infrastructure.databases.vector import get_vector_engine_async
+    from cognee.modules.data.methods import get_authorized_existing_datasets
+    from cognee.modules.users.methods import get_default_user
+
+    user = await get_default_user()
+    dataset = (
+        await get_authorized_existing_datasets(
+            user=user, permission_type="read", datasets=[DATASET_NAME]
+        )
+    )[0]
+    async with set_database_global_context_variables(dataset.id, dataset.owner_id):
+        vector_engine = await get_vector_engine_async()
+        row_hits = await vector_engine.search(
+            "RelationalRow_text", query_text="Ada Lovelace", limit=3, include_payload=True
+        )
+    assert any("analytical engines" in str(hit.payload) for hit in row_hits), (
+        "DLT row text must be searchable in its own RelationalRow_text collection"
     )
 
     text_result = await cognee.search(
