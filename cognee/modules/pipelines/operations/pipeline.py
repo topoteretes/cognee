@@ -59,7 +59,7 @@ async def _drive_marking_held(dataset_id: UUID, source: AsyncIterator[Any]) -> A
 
 
 async def run_pipeline(
-    tasks: Optional[list[Task]] = None,
+    tasks: Optional[Union[list[Task], Callable[[Any], list[Task]]]] = None,
     data=None,
     datasets: Optional[Union[str, list[str], list[UUID]]] = None,
     user: Optional[User] = None,
@@ -74,15 +74,15 @@ async def run_pipeline(
     embedding_config: Optional[EmbeddingConfig] = None,
     data_cache: bool = False,
     skip_connection_test: bool = False,
-    resolve_tasks: Optional[Callable[[Any], list[Task]]] = None,
 ):
-    """``resolve_tasks`` optionally maps each data item to the task list it
-    should run (see ``run_tasks``); items with different lists still share one
-    run per dataset. ``tasks`` remains the fallback for unresolved items and
-    is required when no resolver is given."""
-    if tasks is None and resolve_tasks is None:
-        raise ValueError("run_pipeline requires tasks, resolve_tasks, or both")
-    if tasks is not None:
+    """``tasks`` is either the task list every data item runs, or a callable
+    mapping one item to its task list (a task resolver — see ``run_tasks``);
+    items resolved to different lists still share one run per dataset."""
+    if tasks is None:
+        raise ValueError(
+            "run_pipeline requires tasks: a task list or a per-item task resolver callable"
+        )
+    if not callable(tasks):
         validate_pipeline_tasks(tasks)
     await setup_and_check_environment(
         vector_db_config, graph_db_config, skip_connection_test=skip_connection_test
@@ -106,7 +106,6 @@ async def run_pipeline(
             llm_config=llm_config,
             embedding_config=embedding_config,
             data_cache=data_cache,
-            resolve_tasks=resolve_tasks,
         ):
             yield run_info
 
@@ -114,7 +113,7 @@ async def run_pipeline(
 async def run_pipeline_per_dataset(
     dataset: Dataset,
     user: User,
-    tasks: Optional[list[Task]] = None,
+    tasks: Optional[Union[list[Task], Callable[[Any], list[Task]]]] = None,
     data: Optional[list[Data]] = None,
     pipeline_name: str = "custom_pipeline",
     use_pipeline_cache=False,
@@ -124,7 +123,6 @@ async def run_pipeline_per_dataset(
     llm_config: Optional[LLMConfig] = None,
     embedding_config: Optional[EmbeddingConfig] = None,
     data_cache=False,
-    resolve_tasks: Optional[Callable[[Any], list[Task]]] = None,
 ):
     # The actual work of a single run, factored out so it can run either under
     # the per-dataset lock (normal case) or directly (re-entrant case below).
@@ -155,7 +153,6 @@ async def run_pipeline_per_dataset(
             llm_config=llm_config,
             embedding_config=embedding_config,
             data_cache=data_cache,
-            resolve_tasks=resolve_tasks,
         )
 
         async for pipeline_run_info in pipeline_run:

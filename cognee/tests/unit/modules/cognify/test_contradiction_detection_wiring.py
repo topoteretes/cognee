@@ -12,6 +12,7 @@ chunk_size are passed so no ontology/LLM setup runs).
 import importlib
 import os
 import sys
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -137,7 +138,15 @@ class TestRememberInheritsTheFlag:
 
         def _fake_executor(run_in_background=False):
             async def _run(**executor_kwargs):
-                captured["tasks"] = [task.executable.__name__ for task in executor_kwargs["tasks"]]
+                tasks_arg = executor_kwargs["tasks"]
+                # cognify passes a per-item resolver as ``tasks``; resolve a
+                # plain text item to obtain the standard list.
+                resolved = (
+                    tasks_arg(SimpleNamespace(external_metadata=None, extension="txt"))
+                    if callable(tasks_arg)
+                    else tasks_arg
+                )
+                captured["tasks"] = [task.executable.__name__ for task in resolved]
                 return {}
 
             return _run

@@ -2,7 +2,7 @@ import os
 
 import asyncio
 from functools import wraps
-from typing import Any, Awaitable, Callable, List, Optional
+from typing import Any, Awaitable, Callable, List, Optional, Union
 from uuid import UUID
 
 from cognee.infrastructure.databases.graph import get_graph_engine
@@ -57,7 +57,7 @@ def override_run_tasks(new_gen):
 
 @override_run_tasks(run_tasks_distributed)
 async def run_tasks(
-    tasks: List[Task],
+    tasks: Union[List[Task], Callable[[Any], List[Task]]],
     dataset_id: UUID,
     data: Optional[List[Any]] = None,
     user: Optional[User] = None,
@@ -69,16 +69,17 @@ async def run_tasks(
     llm_config: Optional[LLMConfig] = None,
     embedding_config: Optional[EmbeddingConfig] = None,
     data_cache: bool = False,
-    resolve_tasks: Optional[Callable[[Any], List[Task]]] = None,
 ):
     """Run a pipeline over a dataset as ONE logical run.
 
-    ``resolve_tasks`` is an optional caller-supplied policy mapping one data
-    item to the task list it should run (like ``rollback_handler``, it keeps
-    the engine domain-blind). Items resolved to different lists still share
-    this run's lifecycle — one run record, one database context, one
-    rollback, one terminal status. When unset, every item runs ``tasks``.
+    ``tasks`` is either the task list every item runs, or a callable mapping
+    one data item to its task list (a task resolver — like
+    ``rollback_handler``, a caller-supplied policy that keeps the engine
+    domain-blind). A constant list is just the degenerate resolver; items
+    resolved to different lists still share this run's lifecycle — one run
+    record, one database context, one rollback, one terminal status.
     """
+    task_resolver = tasks if callable(tasks) else None
     if not user:
         user = await get_default_user()
 
@@ -113,15 +114,15 @@ async def run_tasks(
             if data_cache or incremental_loading:
                 data = await resolve_data_directories(data)
 
-            # Build (item, item_tasks) work pairs: the resolver picks each
-            # item's task list; without one, every item runs ``tasks``.
-            # Validate each DISTINCT resolved list once (the eager check in
-            # run_pipeline covers only the fallback ``tasks``).
+            # Build (item, item_tasks) work pairs: a resolver picks each
+            # item's task list; a plain list applies uniformly. Validate each
+            # DISTINCT resolved list once (the eager check in run_pipeline
+            # covers only the plain-list case).
             work_items = []
             validated_list_ids = set()
             for item in data:
-                item_tasks = resolve_tasks(item) if resolve_tasks else tasks
-                if resolve_tasks is not None and id(item_tasks) not in validated_list_ids:
+                item_tasks = task_resolver(item) if task_resolver else tasks
+                if task_resolver is not None and id(item_tasks) not in validated_list_ids:
                     validate_pipeline_tasks(item_tasks)
                     validated_list_ids.add(id(item_tasks))
                 work_items.append((item, item_tasks))

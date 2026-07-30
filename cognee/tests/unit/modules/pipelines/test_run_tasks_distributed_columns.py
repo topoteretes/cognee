@@ -1,9 +1,9 @@
 """The distributed runner resolves per-item task lists in the orchestrator.
 
 Modal workers must receive plain task lists (no callable is serialized), so
-resolve_tasks is applied while building the dispatch columns: the task column
-is [resolve_tasks(item) for item in data] instead of the [tasks] * n
-broadcast. Mixed-kind datasets therefore RUN distributed — the old
+when ``tasks`` is a resolver callable it is applied while building the
+dispatch columns: the task column becomes one resolved list per item instead
+of the [tasks] * n broadcast. Mixed-kind datasets therefore RUN distributed — the old
 partition-era NotImplementedError is gone.
 """
 
@@ -73,12 +73,11 @@ async def test_task_column_is_resolved_per_item(monkeypatch):
     dlt_list, std_list = ["DLT"], ["STD"]
     events = []
     async for event in dist_module.run_tasks_distributed(
-        tasks=std_list,
+        tasks=lambda item: dlt_list if item.startswith("m") else std_list,
         dataset_id=dataset.id,
         data=["m1", "r1", "m2"],
         user=SimpleNamespace(id=uuid4(), tenant_id=None),
         pipeline_name="cognify_pipeline",
-        resolve_tasks=lambda item: dlt_list if item.startswith("m") else std_list,
     ):
         events.append(event)
 

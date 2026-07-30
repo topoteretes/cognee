@@ -1,6 +1,6 @@
 """Every dataset gets exactly ONE cognify_pipeline run, with per-item routing.
 
-cognify() makes a single run_pipeline call carrying a resolve_tasks closure;
+cognify() makes a single run_pipeline call whose ``tasks`` is a resolver closure;
 each data item resolves to the task list its kind requires (DLT manifests →
 the deterministic DLT list, everything else → the standard list). run_tasks
 executes mixed items under a single run lifecycle: one start record,
@@ -56,7 +56,7 @@ class TestCognifyRouting:
 
 
 class TestCognifyMakesOneCall:
-    """cognify() issues ONE executor call with tasks + resolve_tasks."""
+    """cognify() issues ONE executor call; tasks IS the per-item resolver."""
 
     async def _run_cognify(self, tasks="STANDARD_TASKS", **cognify_kwargs):
         calls = []
@@ -86,11 +86,12 @@ class TestCognifyMakesOneCall:
 
         (call,) = calls  # exactly one executor invocation, mixed or not
         assert call["pipeline_name"] == "cognify_pipeline"
-        assert call["tasks"] == "STANDARD_TASKS"
         assert call["datasets"] == ["ds"]
         assert result == {"ds": "run_info"}
 
-        resolver = call["resolve_tasks"]
+        # tasks IS the resolver: a plain list is just the degenerate case.
+        resolver = call["tasks"]
+        assert callable(resolver)
         assert resolver(_manifest_item()) == "DLT_TASKS"
         assert resolver(_text_item()) == "STANDARD_TASKS"
 
@@ -120,8 +121,7 @@ class TestCognifyMakesOneCall:
             )
 
         (call,) = calls
-        assert call["tasks"] == "TEMPORAL_TASKS"
-        resolver = call["resolve_tasks"]
+        resolver = call["tasks"]
         assert resolver(_text_item()) == "TEMPORAL_TASKS"
         assert resolver(_manifest_item()) == "DLT_TASKS"
 
@@ -171,12 +171,11 @@ async def test_run_tasks_resolver_shares_one_run_lifecycle(monkeypatch):
 
     events = []
     async for event in run_tasks_module.run_tasks.__wrapped__(
-        tasks="STANDARD_TASKS",
+        tasks=lambda item: "DLT_TASKS" if item.startswith("m") else "STANDARD_TASKS",
         dataset_id=dataset.id,
         data=["m1", "m2", "r1"],
         user=SimpleNamespace(id=uuid4(), tenant_id=None),
         pipeline_name="cognify_pipeline",
-        resolve_tasks=lambda item: "DLT_TASKS" if item.startswith("m") else "STANDARD_TASKS",
     ):
         events.append(event)
 
@@ -210,12 +209,11 @@ async def test_run_tasks_validates_each_distinct_resolved_list_once(monkeypatch)
 
     list_a, list_b = ["A"], ["B"]
     async for _ in run_tasks_module.run_tasks.__wrapped__(
-        tasks=None,
+        tasks=lambda item: list_a if item == "3" else list_b,
         dataset_id=dataset.id,
         data=["1", "2", "3"],
         user=SimpleNamespace(id=uuid4(), tenant_id=None),
         pipeline_name="p",
-        resolve_tasks=lambda item: list_a if item == "3" else list_b,
     ):
         pass
 
@@ -225,7 +223,7 @@ async def test_run_tasks_validates_each_distinct_resolved_list_once(monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_resolve_tasks_composes_with_pipeline_cache(monkeypatch):
+async def test_task_resolver_composes_with_pipeline_cache(monkeypatch):
     """The partition-era mutual exclusion is gone: a resolver and the
     pipeline cache are accepted together (qualification still runs per
     dataset inside _run_body)."""
@@ -241,8 +239,7 @@ async def test_resolve_tasks_composes_with_pipeline_cache(monkeypatch):
     events = [
         event
         async for event in pipeline_module.run_pipeline(
-            tasks=None,
-            resolve_tasks=lambda item: ["LIST"],
+            tasks=lambda item: ["LIST"],
             use_pipeline_cache=True,
             datasets=["ds"],
         )
@@ -251,9 +248,9 @@ async def test_resolve_tasks_composes_with_pipeline_cache(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_run_pipeline_requires_tasks_or_resolver():
+async def test_run_pipeline_requires_tasks():
     import cognee.modules.pipelines.operations.pipeline as pipeline_module
 
-    with pytest.raises(ValueError, match="tasks, resolve_tasks, or both"):
-        async for _ in pipeline_module.run_pipeline(tasks=None, resolve_tasks=None):
+    with pytest.raises(ValueError, match="requires tasks"):
+        async for _ in pipeline_module.run_pipeline(tasks=None):
             pass

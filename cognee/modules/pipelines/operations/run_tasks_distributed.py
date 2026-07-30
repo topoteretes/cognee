@@ -3,7 +3,7 @@ try:
 except ModuleNotFoundError:
     modal = None
 
-from typing import Any, Awaitable, Callable, List, Optional
+from typing import Any, Awaitable, Callable, List, Optional, Union
 from uuid import UUID
 
 from cognee.infrastructure.databases.relational import get_relational_engine
@@ -88,7 +88,7 @@ if modal:
 
 
 async def run_tasks_distributed(
-    tasks: List[Task],
+    tasks: Union[List[Task], Callable[[Any], List[Task]]],
     dataset_id: UUID,
     data: Optional[List[Any]] = None,
     user: Optional[User] = None,
@@ -99,8 +99,8 @@ async def run_tasks_distributed(
     llm_config: Optional[LLMConfig] = None,
     embedding_config: Optional[EmbeddingConfig] = None,
     data_cache: bool = False,
-    resolve_tasks: Optional[Callable[[Any], List[Task]]] = None,
 ):
+    task_resolver = tasks if callable(tasks) else None
     if not user:
         user = await get_default_user()
 
@@ -137,11 +137,11 @@ async def run_tasks_distributed(
             # Resolve each item's task list in the orchestrator so Modal
             # workers receive plain lists — no callable is serialized.
             # Validate each DISTINCT resolved list once.
-            if resolve_tasks is not None:
+            if task_resolver is not None:
                 per_item_tasks = []
                 validated_list_ids = set()
                 for item in data:
-                    item_tasks = resolve_tasks(item)
+                    item_tasks = task_resolver(item)
                     if id(item_tasks) not in validated_list_ids:
                         validate_pipeline_tasks(item_tasks)
                         validated_list_ids.add(id(item_tasks))

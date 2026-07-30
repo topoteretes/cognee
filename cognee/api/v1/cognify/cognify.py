@@ -304,15 +304,15 @@ async def cognify(
         # one cognify_pipeline run per dataset, mixed datasets included.
         dlt_tasks = await get_dlt_tasks(chunk_size=chunk_size, chunks_per_batch=chunks_per_batch)
         tasks_by_route = {CognifyRoute.DLT_SOURCE: dlt_tasks}
+        standard_tasks = tasks
 
         def resolve_cognify_tasks(data_item):
-            return tasks_by_route.get(cognify_route_for(data_item), tasks)
+            return tasks_by_route.get(cognify_route_for(data_item), standard_tasks)
 
         result = await pipeline_executor_func(
             pipeline=run_pipeline,
             datasets=datasets,
-            tasks=tasks,
-            resolve_tasks=resolve_cognify_tasks,
+            tasks=resolve_cognify_tasks,
             pipeline_name="cognify_pipeline",
             user=user,
             vector_db_config=vector_db_config,
