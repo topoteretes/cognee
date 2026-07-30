@@ -68,10 +68,14 @@ def multi_user_support_possible():
             f"Supported dataset to database handlers: {list(supported_dataset_database_handlers.keys())}\n"
         )
 
-    if (
-        supported_dataset_database_handlers[graph_handler]["handler_provider"]
-        != graph_db_config.graph_database_provider
-    ):
+    def compatible_providers(handler_name):
+        # handler_provider is a plain string, or a tuple when a handler works
+        # with multiple providers (e.g. ladybug/kuzu). Normalize the string so
+        # membership below never falls into substring matching.
+        providers = supported_dataset_database_handlers[handler_name]["handler_provider"]
+        return (providers,) if isinstance(providers, str) else providers
+
+    if graph_db_config.graph_database_provider not in compatible_providers(graph_handler):
         raise EnvironmentError(
             "The selected graph dataset to database handler does not work with the configured graph database provider. Cannot add support for multi-user access control mode. Please use a supported graph dataset to database handler or set the environment variables ENABLE_BACKEND_ACCESS_CONTROL to false to switch off multi-user access control mode.\n"
             f"Selected graph database provider: {graph_db_config.graph_database_provider}\n"
@@ -79,10 +83,7 @@ def multi_user_support_possible():
             f"Supported dataset to database handlers: {list(supported_dataset_database_handlers.keys())}\n"
         )
 
-    if (
-        supported_dataset_database_handlers[vector_handler]["handler_provider"]
-        != vector_db_config.vector_db_provider
-    ):
+    if vector_db_config.vector_db_provider not in compatible_providers(vector_handler):
         raise EnvironmentError(
             "The selected vector dataset to database handler does not work with the configured vector database provider. Cannot add support for multi-user access control mode. Please use a supported vector dataset to database handler or set the environment variables ENABLE_BACKEND_ACCESS_CONTROL to false to switch off multi-user access control mode.\n"
             f"Selected vector database provider: {vector_db_config.vector_db_provider}\n"
