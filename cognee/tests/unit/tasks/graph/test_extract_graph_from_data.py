@@ -193,6 +193,41 @@ async def test_integrate_chunk_graphs_accepts_none_resolver(mock_find_existing):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("use_ontology", [False, True])
+@patch.object(egd_module, "find_existing_edge_identities", new_callable=AsyncMock)
+async def test_integrate_chunk_graphs_keeps_first_node_for_duplicate_extracted_id(
+    mock_find_existing,
+    use_ontology,
+):
+    mock_find_existing.return_value = set()
+    chunk = _make_chunk()
+    graph = KnowledgeGraph(
+        nodes=[
+            Node(id="duplicate", name="Alice", type="Person", description="first"),
+            Node(id="duplicate", name="Bob", type="Person", description="second"),
+        ],
+        edges=[
+            KGEdge(
+                source_node_id="duplicate",
+                target_node_id="duplicate",
+                relationship_name="knows",
+            )
+        ],
+    )
+    resolver = _mock_resolver() if use_ontology else None
+
+    await integrate_chunk_graphs([chunk], [graph], KnowledgeGraph, resolver)
+
+    assert [(node.id, node.name) for node in graph.nodes] == [("duplicate", "Alice")]
+    assert len(chunk.contains) == 1
+    _, alice = chunk.contains[0]
+    assert alice.name == "alice"
+    assert [(edge.relationship_type, target.name) for edge, target in alice.relations] == [
+        ("knows", "alice")
+    ]
+
+
+@pytest.mark.asyncio
 @patch.object(egd_module, "find_existing_edge_identities", new_callable=AsyncMock)
 @patch.object(egd_module, "construct_data_points_and_edges_with_ontology")
 @patch.object(egd_module, "construct_data_points_and_edges")

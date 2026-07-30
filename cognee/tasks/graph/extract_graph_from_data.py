@@ -20,12 +20,36 @@ from cognee.shared.data_models import KnowledgeGraph
 from cognee.infrastructure.llm.extraction import extract_content_graph
 from cognee.infrastructure.llm.pipeline_stage import pipeline_stage
 from cognee.infrastructure.engine import DataPoint
+from cognee.shared.logging_utils import get_logger
 from cognee.tasks.graph.exceptions import (
     InvalidGraphModelError,
     InvalidDataChunksError,
     InvalidChunkGraphInputError,
     InvalidOntologyAdapterError,
 )
+
+logger = get_logger("extract_graph_from_data")
+
+
+def _remove_duplicate_extracted_nodes_by_id(
+    extracted_graphs: list[KnowledgeGraph],
+) -> None:
+    """Keep the first extracted node for each graph-local ID."""
+    for extracted_graph in extracted_graphs:
+        if not extracted_graph:
+            continue
+
+        nodes_by_id = {}
+        for node in extracted_graph.nodes:
+            if node.id in nodes_by_id:
+                # NOTE: This is a lossy strategy; duplicate IDs may deserve more careful handling.
+                logger.warning("Ignoring duplicate extracted node ID: %s", node.id)
+                continue
+
+            nodes_by_id[node.id] = node
+
+        if len(nodes_by_id) != len(extracted_graph.nodes):
+            extracted_graph.nodes = list(nodes_by_id.values())
 
 
 def _stamp_provenance_deep(data, pipeline_name, task_name, visited=None):
@@ -100,6 +124,8 @@ async def integrate_chunk_graphs(
             data_chunks[chunk_index].contains = chunk_graph
 
         return data_chunks
+
+    _remove_duplicate_extracted_nodes_by_id(chunk_graphs)
 
     if ontology_resolver is None:
         data_points_by_id, edges_by_identity = construct_data_points_and_edges(
