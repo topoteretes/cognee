@@ -5,8 +5,10 @@ uv run python examples/demos/graph_completion_to_hybrid.py
 
 import asyncio
 import pathlib
+from typing import List, cast
 
 import cognee
+from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge, Node
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.hybrid_retriever import HybridRetriever
 from cognee.modules.retrieval.utils.brute_force_triplet_search import format_triplets
@@ -24,7 +26,7 @@ DOCUMENTS = [
 ]
 
 
-def triplets_to_hybrid(edges) -> dict:
+def triplets_to_hybrid(edges: List[Edge]) -> dict:
     """Map GraphCompletion edges into Hybrid's chunks/ entities/ facts channels.
 
     Relationships already attached to an entity are not repeated as facts.
@@ -32,7 +34,7 @@ def triplets_to_hybrid(edges) -> dict:
     """
     chunks_by_id, entities_by_id, facts = {}, {}, []
 
-    def label(n):
+    def label(n: Node) -> str:
         return n.attributes.get("name") or n.attributes.get("text") or n.id
 
     for edge in edges:
@@ -87,7 +89,19 @@ async def main() -> None:
     await cognee.forget(everything=True)
     await cognee.remember(DOCUMENTS, dataset_name=DATASET, self_improvement=False)
 
-    edges = await GraphCompletionRetriever(top_k=8).get_retrieved_objects(query=QUERY)
+    retrieved = await GraphCompletionRetriever(top_k=8).get_retrieved_objects(query=QUERY)
+    # get_retrieved_objects() is typed as Union[List[Edge], List[List[Edge]]] because it
+    # also supports query_batch=. This demo only ever passes a single `query=`, so the
+    # result is always a flat List[Edge] -- narrow it explicitly here (both for the type
+    # checker and as a defensive runtime check) instead of accessing .node1/.node2
+    # directly on a value the checker can't prove isn't a nested list.
+    if retrieved and isinstance(retrieved[0], list):
+        raise TypeError(
+            "get_retrieved_objects() returned batch-mode results (List[List[Edge]]); "
+            "this demo only supports the single-query List[Edge] shape."
+        )
+    edges = cast(List[Edge], retrieved)
+
     print("TRIPLETS\n", format_triplets(edges) if edges else "[none]")
 
     evidence = triplets_to_hybrid(edges)
