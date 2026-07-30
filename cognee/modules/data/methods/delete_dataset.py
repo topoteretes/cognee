@@ -16,6 +16,16 @@ async def delete_dataset(dataset: Dataset):
     db_engine = get_relational_engine()
     dataset_id = dataset.id
 
+    # Sessions live in exactly one dataset and quote its documents — they share
+    # the dataset's blast radius, so delete them (cache content, vectors, and
+    # lifecycle rows) along with it. This must run first: cleanup locates the
+    # sessions through their binding rows, so a crash midway leaves the dataset
+    # intact and the whole delete retryable — after the dataset row is gone,
+    # surviving sessions would be unfindable forever.
+    from cognee.modules.session_lifecycle.metrics import delete_sessions_for_dataset
+
+    await delete_sessions_for_dataset(dataset_id)
+
     async with db_engine.get_async_session() as session:
         if db_engine.engine.dialect.name == "sqlite":
             # Foreign key constraints are disabled by default in SQLite (for backwards compatibility),
@@ -77,10 +87,3 @@ async def delete_dataset(dataset: Dataset):
         if dataset:
             await session.delete(dataset)
             await session.commit()
-
-    # Sessions live in exactly one dataset and quote its documents — they share
-    # the dataset's blast radius, so delete them (cache content, vectors, and
-    # lifecycle rows) along with it.
-    from cognee.modules.session_lifecycle.metrics import delete_sessions_for_dataset
-
-    await delete_sessions_for_dataset(dataset_id)
