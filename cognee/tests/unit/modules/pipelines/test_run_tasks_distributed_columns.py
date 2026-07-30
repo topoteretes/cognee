@@ -4,7 +4,7 @@ Modal workers must receive plain task lists (no callable is serialized), so
 resolve_tasks is applied while building the dispatch columns: the task column
 is [resolve_tasks(item) for item in data] instead of the [tasks] * n
 broadcast. Mixed-kind datasets therefore RUN distributed — the old
-sub_pipelines NotImplementedError is gone.
+partition-era NotImplementedError is gone.
 """
 
 from types import SimpleNamespace

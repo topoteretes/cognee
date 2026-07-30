@@ -1,7 +1,7 @@
 """Cross-batch dedup state for extract_dlt_source_edges lives in ctx.extras.
 
 The state used to be mutable ``set()`` kwargs baked into the Task object,
-which _execute_cognify_runs shared across datasets — dataset B skipped schema
+which the old cognify executor shared across datasets — dataset B skipped schema
 emission because dataset A had already "emitted" it, writing edges to nodes
 that only exist in A's graph. ctx.extras is per data item (one manifest item
 IS one source), so isolation holds by construction. These tests pin that.

@@ -238,3 +238,38 @@ async def test_run_tasks_validates_each_distinct_resolved_list_once(monkeypatch)
     # Three items, two distinct lists → exactly two validations.
     assert len(validated) == 2
     assert list_a in validated and list_b in validated
+
+
+@pytest.mark.asyncio
+async def test_resolve_tasks_composes_with_pipeline_cache(monkeypatch):
+    """The partition-era mutual exclusion is gone: a resolver and the
+    pipeline cache are accepted together (qualification still runs per
+    dataset inside _run_body)."""
+    import cognee.modules.pipelines.operations.pipeline as pipeline_module
+
+    monkeypatch.setattr(pipeline_module, "setup_and_check_environment", AsyncMock())
+    monkeypatch.setattr(
+        pipeline_module,
+        "resolve_authorized_user_datasets",
+        AsyncMock(return_value=(SimpleNamespace(id=uuid4()), [])),
+    )
+
+    events = [
+        event
+        async for event in pipeline_module.run_pipeline(
+            tasks=None,
+            resolve_tasks=lambda item: ["LIST"],
+            use_pipeline_cache=True,
+            datasets=["ds"],
+        )
+    ]
+    assert events == []  # no datasets resolved — and, critically, no ValueError
+
+
+@pytest.mark.asyncio
+async def test_run_pipeline_requires_tasks_or_resolver():
+    import cognee.modules.pipelines.operations.pipeline as pipeline_module
+
+    with pytest.raises(ValueError, match="tasks, resolve_tasks, or both"):
+        async for _ in pipeline_module.run_pipeline(tasks=None, resolve_tasks=None):
+            pass
