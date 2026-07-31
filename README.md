@@ -328,14 +328,11 @@ Agent: "Here's how senior analysts solved a similar retention query.
 
 Graph memory traditionally means operating a stack — a graph database for relationships, a vector database for embeddings, Redis for sessions, and a relational database for metadata — all deployed, secured, and paid for before an agent remembers anything. In cognee 1.0 you can run the entire memory layer on a single Postgres instance.
 
-> **⚠️ Warning:** Using Postgres as a graph store is currently a demo feature and is not
-> production-ready. Use it to demo keeping relational metadata, PGVector, and graph
-> state in a single Postgres service, but rely on a graph-native backend such as Kuzu or Neo4j
-> for production workloads.
+> **⚠️ Warning:** Using Postgres as a graph store is currently a released as a demo feature. The production ready feature is available as a licenced product. Use it to demo keeping relational metadata, PGVector, and graph
+> state in a single Postgres service.
 >
-> Interested in further development or production use of Postgres as a graph database? Write to
-> us at social@cognee.ai to explore the options.
-
+> Interested in production use of Postgres as a graph database? Book a call with our sales team at our [website](htpps://www.cognee.ai)
+> 
 | Memory layer | Traditional stack | cognee on Postgres |
 | --- | --- | --- |
 | Relationships | Neo4j or another graph database | cognee's Postgres graph backend |
