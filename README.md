@@ -333,6 +333,7 @@ Graph memory traditionally means operating a stack — a graph database for rela
 > state in a single Postgres service.
 >
 > Interested in production use of Postgres as a graph database? Book a call with our sales team at our [website](htpps://www.cognee.ai)
+> 
 | Memory layer | Traditional stack | cognee on Postgres |
 | --- | --- | --- |
 | Relationships | Neo4j or another graph database | cognee's Postgres graph backend |
