@@ -29,7 +29,9 @@ Others must be reached from the SDK, not CLI; e.g. call cognee.search with `quer
 
 ```bash
 cognee-cli datasets list                     # dataset operations
-cognee-cli config get|set|list               # configuration management
+cognee-cli config get [key] [--show-secrets] # view one/all settings (API keys masked by default)
+cognee-cli config set <key> <value>          # set + persist to ./.env in the cwd
+cognee-cli config unset <key>                # reset a key to its default (also persisted)
 cognee-cli -ui                               # launch API server + UI (see cognee-server skill)
 cognee-cli serve --url http://localhost:8000 # connect CLI/SDK to a running instance
 ```
@@ -71,4 +73,8 @@ an old schema.
   cognify/search operate across your accessible datasets unless a dataset is
   given.
 - `memify` requires one of the arguments -d/--dataset-name --dataset-id
-- `cognee-cli get` is not implemented presently; `cognee-cli set` is not working. The user must presently rely on .env and environment variables for config
+- `config set`/`config unset` write to the `.env` file in whatever directory
+  you run the command from (creating it if missing) — run later
+  `cognee-cli`/SDK commands from that same directory to see the change take
+  effect, same as editing `.env` by hand. `config reset` (reset *all* keys)
+  is still not implemented.
