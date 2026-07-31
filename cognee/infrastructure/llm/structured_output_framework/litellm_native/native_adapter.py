@@ -51,6 +51,25 @@ observe = get_observe()
 _MAX_VALIDATION_RETRIES: int = 3
 
 
+def _report_usage(response: Any) -> None:
+    """Report a litellm response's token usage to the usage tracker (best-effort).
+
+    Feeds exact counts to the gateway's usage hook so the session/activity
+    trackers record real tokens instead of the char estimate. Never raises.
+    """
+    try:
+        from cognee.modules.session_lifecycle.usage_tracking import report_llm_usage
+
+        usage = getattr(response, "usage", None)
+        if usage is not None:
+            report_llm_usage(
+                getattr(usage, "prompt_tokens", None),
+                getattr(usage, "completion_tokens", None),
+            )
+    except Exception:
+        pass
+
+
 def _supports_native_schema(model_name: str) -> bool:
     """Whether *model_name* can enforce a Pydantic schema via ``response_format``.
 
@@ -156,6 +175,7 @@ class NativeLiteLLMAdapter:
                 api_version=api_version,
                 **merged_kwargs,
             )
+        _report_usage(response)
         return response.choices[0].message.content or ""
 
     async def _acreate_schema_native(
@@ -184,6 +204,7 @@ class NativeLiteLLMAdapter:
                 api_version=api_version,
                 **merged_kwargs,
             )
+        _report_usage(response)
         raw_content = response.choices[0].message.content or "{}"
         return response_model.model_validate_json(raw_content)
 
@@ -237,6 +258,7 @@ class NativeLiteLLMAdapter:
                     **merged_kwargs,
                 )
 
+            _report_usage(response)
             raw_content = response.choices[0].message.content or "{}"
             try:
                 return response_model.model_validate_json(raw_content)

@@ -132,6 +132,45 @@ async def track_operation_usage(operation: str, **context):
                 logger.debug("activity sink failed (%s)", exc)
 
 
+# Exact per-call token usage, reported by an adapter right after a completion
+# so the gateway's usage hook can use real counts instead of the char estimate.
+# One-shot: consumed (and cleared) by the very next record_llm_call.
+_last_call_usage: ContextVar[Optional[tuple[int, int]]] = ContextVar(
+    "cognee_last_llm_usage", default=None
+)
+
+
+def report_llm_usage(prompt_tokens: Optional[int], completion_tokens: Optional[int]) -> None:
+    """Report exact token counts for the just-completed LLM call.
+
+    Adapters call this immediately after a completion (from ``response.usage``)
+    so the gateway records real tokens rather than the char estimate. Inert if
+    either count is missing (falls back to the estimate).
+    """
+    if prompt_tokens is None or completion_tokens is None:
+        return
+    # Accumulate within a public call: one acreate_structured_output may make
+    # several internal completions (e.g. the JSON-fallback validation retries),
+    # and the gateway consumes the total exactly once. Cleared by consume.
+    prev = _last_call_usage.get()
+    if prev is None:
+        _last_call_usage.set((int(prompt_tokens), int(completion_tokens)))
+    else:
+        _last_call_usage.set((prev[0] + int(prompt_tokens), prev[1] + int(completion_tokens)))
+
+
+def consume_last_usage() -> Optional[tuple[int, int]]:
+    """Return and clear the last reported ``(prompt, completion)`` token counts.
+
+    Cleared on read so a later call that reports nothing can't reuse stale
+    counts.
+    """
+    usage = _last_call_usage.get()
+    if usage is not None:
+        _last_call_usage.set(None)
+    return usage
+
+
 def _estimate_tokens(text: str) -> int:
     """Very rough char-based estimate. Good enough for dashboard aggregates."""
     if not text:

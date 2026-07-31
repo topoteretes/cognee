@@ -34,17 +34,26 @@ async def _record_session_usage_after(
     """
     result = await coro
     try:
-        from cognee.modules.session_lifecycle.usage_tracking import record_llm_call
+        from cognee.modules.session_lifecycle.usage_tracking import (
+            consume_last_usage,
+            record_llm_call,
+        )
 
         if isinstance(result, BaseModel):
             output_repr = result.model_dump_json()
         else:
             output_repr = str(result)
         model = get_llm_context_config().llm_model
+        # Prefer exact counts an adapter reported via report_llm_usage; fall
+        # back to the char estimate inside record_llm_call when unavailable.
+        usage = consume_last_usage()
+        tokens_in_override, tokens_out_override = usage if usage else (None, None)
         await record_llm_call(
             input_text=text_input,
             output_text=output_repr,
             model=model,
+            tokens_in_override=tokens_in_override,
+            tokens_out_override=tokens_out_override,
         )
     except Exception:
         pass
