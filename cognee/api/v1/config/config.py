@@ -457,7 +457,8 @@ class config:
             Valid keys include: embedding_provider, embedding_model,
             embedding_dimensions, embedding_endpoint, embedding_api_key,
             embedding_api_version, embedding_max_completion_tokens,
-            embedding_batch_size, huggingface_tokenizer.
+            embedding_batch_size, embedding_max_concurrent_data_points,
+            huggingface_tokenizer.
 
         Example
         -------

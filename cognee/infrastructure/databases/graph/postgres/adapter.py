@@ -29,6 +29,7 @@ from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
 from cognee.infrastructure.databases.relational import get_relational_config
 from cognee.modules.storage.utils import JSONEncoder
+from cognee.modules.graph.methods.sanitize_relational_payload import sanitize_relational_payload
 from cognee.infrastructure.databases.provenance import (
     EdgeDeleteData,
     EdgeIdentity,
@@ -118,6 +119,9 @@ class PostgresAdapter(GraphDBInterface):
     Interested in further development or production use of Postgres as a graph database? Write
     to us at social@cognee.ai to explore the options.
     """
+
+    # ``query()`` executes SQL against the graph tables, not Cypher.
+    supports_cypher_queries = False
 
     _ALLOWED_FILTER_ATTRS = {"id", "name", "type"}
 
@@ -271,12 +275,14 @@ class PostgresAdapter(GraphDBInterface):
                 props = vars(node)
 
             extra = {k: v for k, v in props.items() if k not in core_keys}
+            # NUL bytes break Postgres text columns and JSONB (the \u0000 escape is rejected);
+            # ids are sanitized the same way in add_edges so references stay consistent.
             rows.append(
                 {
-                    "id": str(props.get("id", "")),
-                    "name": str(props.get("name", "")),
-                    "type": str(props.get("type", "")),
-                    "properties": extra,
+                    "id": sanitize_relational_payload(str(props.get("id", ""))),
+                    "name": sanitize_relational_payload(str(props.get("name", ""))),
+                    "type": sanitize_relational_payload(str(props.get("type", ""))),
+                    "properties": sanitize_relational_payload(extra),
                     "created_at": now,
                     "updated_at": now,
                 }
@@ -423,12 +429,14 @@ class PostgresAdapter(GraphDBInterface):
         rows = []
         for edge in edges:
             raw_props = edge[3] if len(edge) > 3 and edge[3] else {}
+            # NUL bytes break Postgres text columns and JSONB; ids are sanitized
+            # the same way in add_nodes so references stay consistent.
             rows.append(
                 {
-                    "source_id": str(edge[0]),
-                    "target_id": str(edge[1]),
-                    "relationship_name": edge[2],
-                    "properties": raw_props,
+                    "source_id": sanitize_relational_payload(str(edge[0])),
+                    "target_id": sanitize_relational_payload(str(edge[1])),
+                    "relationship_name": sanitize_relational_payload(edge[2]),
+                    "properties": sanitize_relational_payload(raw_props),
                     "created_at": now,
                     "updated_at": now,
                 }
