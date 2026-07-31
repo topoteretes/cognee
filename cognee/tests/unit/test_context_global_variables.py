@@ -135,28 +135,20 @@ async def test_dataset_database_configs_persist_after_exit(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_dataset_name_is_resolved_to_its_id_before_publishing(monkeypatch):
-    """current_dataset_id always carries a dataset id: entering the context with
-    a *name* (the legacy creating entry style) publishes the same deterministic
-    id get_or_create_dataset_database uses, never the name itself."""
-    from unittest.mock import AsyncMock, patch
+async def test_dataset_name_is_rejected(monkeypatch):
+    """Only a dataset id (UUID or UUID string) may enter the database context.
+    Names must be resolved by the caller first; the context variable is left
+    untouched when entry is refused."""
+    from cognee.exceptions import CogneeValidationError
 
-    resolved_id = uuid4()
-    user_id = uuid4()
     monkeypatch.setenv("ENABLE_BACKEND_ACCESS_CONTROL", "false")
+    current_dataset_id.set(None)
 
-    with (
-        patch(
-            "cognee.modules.data.methods.get_unique_dataset_id",
-            AsyncMock(return_value=resolved_id),
-        ) as resolve,
-        patch("cognee.context_global_variables.get_user", AsyncMock(return_value=object())),
-    ):
-        async with set_database_global_context_variables("main_dataset", user_id):
-            assert current_dataset_id.get() == str(resolved_id)
+    with pytest.raises(CogneeValidationError, match="main_dataset"):
+        async with set_database_global_context_variables("main_dataset", uuid4()):
+            pass
 
-    resolve.assert_awaited_once()
-    assert resolve.await_args.args[0] == "main_dataset"
+    assert current_dataset_id.get() is None
 
 
 @pytest.mark.asyncio

@@ -147,20 +147,26 @@ class DatabaseContextManager:
     async def apply_database_context_variables(
         self, dataset: Union[str, UUID], user_id: UUID
     ) -> None:
-        # current_dataset_id always carries a dataset *id* (UUID string), never a
-        # name. Callers may still enter the context with a name (the legacy,
-        # creating entry style honoured by get_or_create_dataset_database below);
-        # resolve it to the same deterministic id that path uses before
-        # publishing, so readers (session scoping, retrievers) never see a name.
+        # current_dataset_id always carries a dataset *id*. Only a UUID (or its
+        # string form) may enter the context: dataset names must be resolved by
+        # the caller (get_unique_dataset_id, resolve_authorized_user_datasets)
+        # so a context is never entered for a dataset the caller did not
+        # explicitly identify.
         dataset_uuid: Optional[UUID] = None
         if dataset is not None:
             from cognee.shared.utils import as_uuid
 
             dataset_uuid = as_uuid(dataset)
             if dataset_uuid is None:
-                from cognee.modules.data.methods import get_unique_dataset_id
-
-                dataset_uuid = await get_unique_dataset_id(dataset, await get_user(user_id))
+                raise CogneeValidationError(
+                    message=f"dataset must be a dataset id (UUID or UUID string), got "
+                    f"{dataset!r}. Resolve dataset names to ids before entering the "
+                    "database context."
+                )
+            # Downstream (queue slot, per-dataset database row, release on exit)
+            # uses the canonical id so slot keys and rows never vary by the
+            # caller's spelling of the same dataset.
+            self._dataset = dataset_uuid
         self._dataset_token = current_dataset_id.set(
             str(dataset_uuid) if dataset_uuid is not None else None
         )
@@ -187,12 +193,12 @@ class DatabaseContextManager:
         # Imported lazily to avoid circular imports at module load.
         from cognee.infrastructure.databases.dataset_queue import dataset_queue
 
-        await dataset_queue().ensure_slot(dataset)
+        await dataset_queue().ensure_slot(dataset_uuid)
 
         user = await get_user(user_id)
 
         # To ensure permissions are enforced properly all datasets will have their own databases
-        dataset_database = await get_or_create_dataset_database(dataset, user)
+        dataset_database = await get_or_create_dataset_database(dataset_uuid, user)
         # Ensure that all connection info is resolved properly
         dataset_database = await resolve_dataset_database_connection_info(dataset_database)
 
