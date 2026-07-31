@@ -1080,6 +1080,7 @@ async def remember(
     dataset_name: str = None,
     session_id: str = None,
     custom_prompt: str = None,
+    self_improvement: bool = None,
 ) -> list:
     """Store data in memory.
 
@@ -1104,8 +1105,15 @@ async def remember(
         Session ID. When set, stores in session cache only.
     custom_prompt : str, optional
         Custom prompt for entity extraction (permanent mode only).
+    self_improvement : bool, optional
+        Whether to run the graph-wide improve() pass after storing.
+        Defaults to the COGNEE_MCP_REMEMBER_SELF_IMPROVEMENT env var
+        ('true' unless set to 'false'). Enrichment reads the whole graph,
+        so on a large one it can cost far more than the write itself.
     """
     dataset_name = dataset_name or _agent_scoped_default_dataset()
+    if self_improvement is None:
+        self_improvement = _default_remember_self_improvement()
     with redirect_stdout(sys.stderr):
         try:
             result = await cognee_client.remember(
@@ -1113,6 +1121,7 @@ async def remember(
                 dataset_name=dataset_name,
                 session_id=session_id,
                 custom_prompt=custom_prompt,
+                self_improvement=self_improvement,
             )
             status = result.get("status", "completed")
             if session_id:
@@ -1731,6 +1740,17 @@ def _is_agent_scoping_enabled() -> bool:
     matching the pre-agent-scoping behavior.
     """
     return os.getenv("COGNEE_MCP_AGENT_SCOPED", "true").strip().lower() != "false"
+
+
+def _default_remember_self_improvement() -> bool:
+    """Whether remember() self-improves when the caller does not say.
+
+    Controlled by COGNEE_MCP_REMEMBER_SELF_IMPROVEMENT (default: 'true'),
+    matching remember()'s own default. Deployments whose graph has grown
+    large enough that the enrichment pass dominates every write can set it
+    to 'false' once instead of relying on each caller to pass the argument.
+    """
+    return os.getenv("COGNEE_MCP_REMEMBER_SELF_IMPROVEMENT", "true").strip().lower() != "false"
 
 
 def _agent_scoped_default_dataset() -> str:

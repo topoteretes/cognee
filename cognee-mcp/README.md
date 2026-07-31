@@ -494,7 +494,7 @@ The MCP server exposes its functionality through tools. Call them from any MCP c
 
 The MCP server exposes three tools:
 
-- **remember**: Store data in memory. With `session_id`: fast session cache. Without `session_id`: permanent graph memory
+- **remember**: Store data in memory. With `session_id`: fast session cache. Without `session_id`: permanent graph memory. Pass `self_improvement=False` to skip the enrichment pass (see [Self-improvement on remember](#self-improvement-on-remember))
 - **recall**: Search memory with auto-routing. Searches session cache first when `session_id` is provided, then falls through to the permanent graph
 - **forget**: Delete memory by dataset name, or delete all owned memory with `everything=True`
 
@@ -523,6 +523,28 @@ COGNEE_MCP_AGENT_SCOPED=false
 ```
 
 When disabled, the workspace UI header shows `(agent scoping off)` and no per-client datasets are autocreated.
+
+### Self-improvement on remember
+
+`remember` runs cognee's `improve()` enrichment pass after storing, which works over the whole
+knowledge graph rather than only over what was just stored. Its cost therefore grows with total
+graph size, and on a large graph it can dominate every write — especially with
+`TRIPLET_EMBEDDING=true`, where enrichment re-embeds every triplet in the graph.
+
+Turn it off per call:
+
+```bash
+remember(data="A short fact", self_improvement=False)
+```
+
+…or for the whole deployment, in `.env`:
+
+```bash
+COGNEE_MCP_REMEMBER_SELF_IMPROVEMENT=false
+```
+
+An explicit `self_improvement` argument always wins over the env var. Run enrichment on your own
+schedule instead — for example a periodic `cognee.improve()` — rather than on every write.
 
 ### Per-dataset isolation (`ENABLE_BACKEND_ACCESS_CONTROL`)
 

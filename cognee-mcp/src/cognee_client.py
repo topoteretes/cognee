@@ -522,11 +522,18 @@ class CogneeClient:
         dataset_name: str = "main_dataset",
         session_id: Optional[str] = None,
         custom_prompt: Optional[str] = None,
+        self_improvement: Optional[bool] = None,
     ) -> Dict[str, Any]:
         """Store data in memory via remember().
 
         With session_id: stores in session cache only (fast).
         Without session_id: full add + cognify pipeline (permanent).
+
+        self_improvement=None leaves remember()'s own default in place; False
+        skips the graph-wide improve() pass, whose cost scales with total graph
+        size rather than with the data being stored. It does not apply to the
+        API-mode session path — that posts a typed session entry, which never
+        self-improves.
         """
         if self.use_api:
             if session_id:
@@ -565,6 +572,8 @@ class CogneeClient:
             form_data = {"datasetName": dataset_name}
             if custom_prompt:
                 form_data["custom_prompt"] = custom_prompt
+            if self_improvement is not None:
+                form_data["self_improvement"] = str(self_improvement).lower()
             response = await self.client.post(
                 endpoint,
                 files=files,
@@ -583,6 +592,8 @@ class CogneeClient:
                     kwargs["session_id"] = session_id
                 if custom_prompt:
                     kwargs["custom_prompt"] = custom_prompt
+                if self_improvement is not None:
+                    kwargs["self_improvement"] = self_improvement
                 result = await self.cognee.remember(**kwargs)
                 return {
                     "status": getattr(result, "status", "completed"),
