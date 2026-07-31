@@ -15,6 +15,30 @@ except ImportError:
 _STAGE_NAMES = {"extraction", "summarization", "query"}
 
 
+# Local inference servers process requests (near-)serially, unlike cloud
+# providers. One definition of the distinction, for everything that needs it:
+# by first-class provider name, or by litellm model routing prefix (LM Studio
+# has no first-class provider in cognee). vLLM is deliberately NOT here: it
+# serves with continuous batching and absorbs concurrency like a cloud
+# endpoint, so it keeps the regular settings.
+LOCAL_LLM_PROVIDERS = frozenset({"ollama", "llama_cpp"})
+LOCAL_LLM_MODEL_PREFIXES = ("lm_studio/",)
+
+# Default RPM budget for local inference servers when LLM_RATE_LIMIT_REQUESTS
+# is not explicitly configured; cloud providers keep the regular default of 60.
+LOCAL_DEFAULT_RATE_LIMIT_REQUESTS = 10
+
+
+def is_local_llm(provider: str | None, model: str | None) -> bool:
+    """True when the provider/model points at a serial local inference server
+    (Ollama, llama.cpp by provider; LM Studio by model prefix). vLLM counts
+    as regular: continuous batching absorbs concurrency like a cloud endpoint.
+    """
+    if (provider or "").lower() in LOCAL_LLM_PROVIDERS:
+        return True
+    return (model or "").lower().startswith(LOCAL_LLM_MODEL_PREFIXES)
+
+
 class LLMConfig(BaseSettings):
     """
     Configuration settings for the LLM (Large Language Model) provider and related options.
@@ -86,9 +110,14 @@ class LLMConfig(BaseSettings):
     temporal_graph_prompt_path: str = "generate_event_graph_prompt.txt"
     event_entity_prompt_path: str = "generate_event_entity_prompt.txt"
     llm_rate_limit_enabled: bool = False
+    # Default 60 requests per interval; local inference servers get
+    # LOCAL_DEFAULT_RATE_LIMIT_REQUESTS instead (see default_local_rate_limit_budget).
     llm_rate_limit_requests: int = 60
     llm_rate_limit_interval: int = 60  # in seconds (default is 60 requests per minute)
     llm_rate_limit_tokens: int = 0  # max tokens per interval (0 = disabled)
+    # When the provider reports a rate limit, warn and switch on the RPM limiter
+    # (with the llm_rate_limit_requests/interval budget) for the rest of the process.
+    auto_rate_limit: bool = True
     embedding_rate_limit_enabled: bool = False
     embedding_rate_limit_requests: int = 60
     embedding_rate_limit_interval: int = 60  # in seconds (default is 60 requests per minute)
@@ -145,6 +174,26 @@ class LLMConfig(BaseSettings):
             if isinstance(value, str) and len(value) >= 2:
                 if value[0] == value[-1] and value[0] in ("'", '"'):
                     setattr(self, field_name, value[1:-1])
+
+        return self
+
+    @model_validator(mode="after")
+    def default_local_rate_limit_budget(self) -> "LLMConfig":
+        """
+        Give local inference servers a smaller default RPM budget.
+
+        Serial local servers (Ollama, LM Studio, llama.cpp) process requests
+        (near-)serially, so when the rate limiter engages, the regular cloud
+        default of 60 requests per interval would still flood them. An
+        explicitly configured ``LLM_RATE_LIMIT_REQUESTS`` always wins. Runs
+        after ``strip_quotes_from_strings`` so the provider is already
+        resolved.
+        """
+        if "llm_rate_limit_requests" in self.model_fields_set:
+            return self
+
+        if is_local_llm(self.llm_provider, self.llm_model):
+            self.llm_rate_limit_requests = LOCAL_DEFAULT_RATE_LIMIT_REQUESTS
 
         return self
 
