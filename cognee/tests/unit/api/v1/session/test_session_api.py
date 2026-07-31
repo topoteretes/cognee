@@ -337,6 +337,27 @@ class TestGetSession:
         assert scoped.get_session.call_args.kwargs["session_id"] is None
         bare.get_session.assert_not_awaited()
 
+    @pytest.mark.asyncio
+    async def test_bare_call_without_main_dataset_raises(self, session_user_ctx):
+        """No main_dataset means there is no default session to read — a bare
+        call surfaces the precondition instead of silently reading an
+        unscoped global session."""
+        from cognee.api.v1.session.session import get_session
+
+        bare = SimpleNamespace(dataset_id=None, get_session=AsyncMock(return_value=[]))
+
+        with (
+            patch.object(_session_module(), "get_session_manager", return_value=bare),
+            patch(
+                "cognee.modules.data.methods.get_datasets_by_name",
+                AsyncMock(return_value=[]),
+            ),
+        ):
+            with pytest.raises(CogneeValidationError, match="no main_dataset"):
+                await get_session()
+
+        bare.get_session.assert_not_awaited()
+
 
 # add_feedback
 

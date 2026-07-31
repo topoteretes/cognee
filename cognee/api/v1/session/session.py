@@ -38,15 +38,28 @@ async def _resolve_user(user: Optional[User]) -> User:
         ) from error
 
 
-async def _default_dataset_id(user: User):
-    """The caller's existing ``main_dataset`` id, or None before one exists.
+async def _default_dataset_id(user: User) -> UUID:
+    """The caller's existing ``main_dataset`` id.
 
-    Read-only: never creates a dataset."""
+    Read-only — never creates a dataset. Raises when none exists: a bare
+    default-session read has nothing to be scoped to before any data was
+    added, and silently reading an unscoped global session instead would
+    hide the real problem."""
     from cognee.modules.data.constants import DEFAULT_DATASET_NAME
     from cognee.modules.data.methods import get_datasets_by_name
 
     datasets = await get_datasets_by_name([DEFAULT_DATASET_NAME], cast(UUID, user.id))
-    return datasets[0].id if datasets else None
+    if not datasets:
+        raise CogneeValidationError(
+            message=(
+                "Session prerequisites not met: no main_dataset exists for this user, "
+                "so there is no default session to read. Add data first "
+                "(`await cognee.add(...)` or `await cognee.remember(...)`), run inside "
+                "a dataset context, or pass an explicit session_id."
+            ),
+            name="SessionPreconditionError",
+        )
+    return cast(UUID, datasets[0].id)
 
 
 async def get_session(
@@ -58,9 +71,11 @@ async def get_session(
 
     ``session_id=None`` resolves to the same per-dataset default session the
     write side uses — from the active dataset context, or, for a bare call,
-    the caller's existing ``main_dataset`` — so a default-session write is
-    readable back through this function. Passing the literal
-    ``"default_session"`` always reads the global session.
+    the caller's existing ``main_dataset``, so a default-session write is
+    readable back through this function. A bare call with no main_dataset
+    raises: there is no default session before any data was added. Passing
+    the literal ``"default_session"`` always reads the global (legacy)
+    session.
     """
     resolved_user = await _resolve_user(user)
     user_id = str(resolved_user.id)
@@ -79,6 +94,10 @@ async def get_session(
             last_n=last_n,
             formatted=False,
         )
+    except CogneeValidationError:
+        # A missing main_dataset is a caller-actionable precondition, not an
+        # infrastructure hiccup — surface it instead of returning [].
+        raise
     except Exception as e:
         logger.warning("get_session: error from SessionManager: %s", e)
         return []
