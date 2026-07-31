@@ -29,7 +29,7 @@ from cognee.modules.observability import (
 )
 from cognee.modules.retrieval.utils.completion import generate_completion
 from cognee.modules.session_lifecycle.metrics import record_session_activity
-from cognee.shared.logging_utils import get_logger, warn_once
+from cognee.shared.logging_utils import get_logger
 from cognee.shared.utils import as_uuid, send_telemetry
 
 logger = get_logger("SessionManager")
@@ -103,26 +103,22 @@ class SessionManager:
 
     @staticmethod
     def _normalize_dataset_id(value: Any) -> str | None:
-        """Return ``value`` as a UUID string, or None when it isn't one.
+        """Return ``value`` as a canonical UUID string, or None when unset.
 
-        The dataset context variable is documented as a dataset id but is set
-        from ``Union[str, UUID]``, so it can legitimately carry a *name*. A name
-        cannot scope a session, so treat it as absent and let the fallback
-        resolve a real id — but say so, since silently degrading to an unscoped
-        session is exactly what dataset-scoped sessions are meant to prevent.
+        The dataset context variable is guaranteed to carry a dataset id — the
+        database context manager resolves names before publishing — and an
+        explicit constructor argument must be one too. A name cannot scope a
+        session, so reject it outright instead of silently degrading to an
+        unscoped session.
         """
         if value is None:
             return None
         parsed = as_uuid(value)
         if parsed is None:
-            warn_once(
-                logger,
-                "non_uuid_dataset_context",
-                "Dataset context %r is not a UUID; ignoring it for session scoping and "
-                "falling back to the default dataset.",
-                value,
+            raise SessionParameterValidationError(
+                message=f"dataset_id must be a dataset id (UUID), got {value!r}. "
+                "Resolve dataset names to ids before constructing a SessionManager."
             )
-            return None
         return str(parsed)
 
     async def _effective_dataset_id(self, user_id: str | None = None) -> str | None:

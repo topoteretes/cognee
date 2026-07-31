@@ -68,14 +68,10 @@ def multi_user_support_possible():
             f"Supported dataset to database handlers: {list(supported_dataset_database_handlers.keys())}\n"
         )
 
-    def compatible_providers(handler_name):
-        # handler_provider is a plain string, or a tuple when a handler works
-        # with multiple providers (e.g. ladybug/kuzu). Normalize the string so
-        # membership below never falls into substring matching.
-        providers = supported_dataset_database_handlers[handler_name]["handler_provider"]
-        return (providers,) if isinstance(providers, str) else providers
-
-    if graph_db_config.graph_database_provider not in compatible_providers(graph_handler):
+    if (
+        supported_dataset_database_handlers[graph_handler]["handler_provider"]
+        != graph_db_config.graph_database_provider
+    ):
         raise EnvironmentError(
             "The selected graph dataset to database handler does not work with the configured graph database provider. Cannot add support for multi-user access control mode. Please use a supported graph dataset to database handler or set the environment variables ENABLE_BACKEND_ACCESS_CONTROL to false to switch off multi-user access control mode.\n"
             f"Selected graph database provider: {graph_db_config.graph_database_provider}\n"
@@ -83,7 +79,10 @@ def multi_user_support_possible():
             f"Supported dataset to database handlers: {list(supported_dataset_database_handlers.keys())}\n"
         )
 
-    if vector_db_config.vector_db_provider not in compatible_providers(vector_handler):
+    if (
+        supported_dataset_database_handlers[vector_handler]["handler_provider"]
+        != vector_db_config.vector_db_provider
+    ):
         raise EnvironmentError(
             "The selected vector dataset to database handler does not work with the configured vector database provider. Cannot add support for multi-user access control mode. Please use a supported vector dataset to database handler or set the environment variables ENABLE_BACKEND_ACCESS_CONTROL to false to switch off multi-user access control mode.\n"
             f"Selected vector database provider: {vector_db_config.vector_db_provider}\n"
@@ -148,7 +147,23 @@ class DatabaseContextManager:
     async def apply_database_context_variables(
         self, dataset: Union[str, UUID], user_id: UUID
     ) -> None:
-        self._dataset_token = current_dataset_id.set(str(dataset) if dataset is not None else None)
+        # current_dataset_id always carries a dataset *id* (UUID string), never a
+        # name. Callers may still enter the context with a name (the legacy,
+        # creating entry style honoured by get_or_create_dataset_database below);
+        # resolve it to the same deterministic id that path uses before
+        # publishing, so readers (session scoping, retrievers) never see a name.
+        dataset_uuid: Optional[UUID] = None
+        if dataset is not None:
+            from cognee.shared.utils import as_uuid
+
+            dataset_uuid = as_uuid(dataset)
+            if dataset_uuid is None:
+                from cognee.modules.data.methods import get_unique_dataset_id
+
+                dataset_uuid = await get_unique_dataset_id(dataset, await get_user(user_id))
+        self._dataset_token = current_dataset_id.set(
+            str(dataset_uuid) if dataset_uuid is not None else None
+        )
 
         # LLM and embedding configs are an explicit, caller-provided override and
         # are intentionally applied regardless of backend access control: callers

@@ -57,14 +57,19 @@ class TestDatasetBinding:
             current_dataset_id.reset(token)
         assert manager.dataset_id == str(explicit_id)
 
-    def test_non_uuid_dataset_context_is_ignored(self):
-        """A name-valued context cannot scope a session; it must not be used as-is."""
+    def test_non_uuid_dataset_context_raises(self):
+        """A name cannot scope a session — constructing against one must break,
+        not silently degrade to an unscoped session. (The database context
+        manager resolves names before publishing, so this only fires on direct
+        contextvar writes or bad constructor arguments.)"""
+        from cognee.infrastructure.databases.exceptions import SessionParameterValidationError
+
         token = current_dataset_id.set("main_dataset")
         try:
-            manager = SessionManager(cache_engine=None)
+            with pytest.raises(SessionParameterValidationError, match="main_dataset"):
+                SessionManager(cache_engine=None)
         finally:
             current_dataset_id.reset(token)
-        assert manager.dataset_id is None
 
 
 class TestDefaultDatasetFallback:

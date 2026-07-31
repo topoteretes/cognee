@@ -247,23 +247,6 @@ def get_logger(name=None, level=None) -> logging.Logger:
         return logger
 
 
-_warned_once_keys: set = set()
-
-
-def warn_once(logger, key: str, message: str, *args) -> None:
-    """Log ``message`` at WARNING the first time ``key`` is seen this process,
-    then at DEBUG.
-
-    For failure paths that fire on every write (lifecycle heartbeats, binding
-    lookups): silent breakage stays visible in ops without spamming the log.
-    """
-    if key in _warned_once_keys:
-        logger.debug(message, *args)
-    else:
-        _warned_once_keys.add(key)
-        logger.warning(message, *args)
-
-
 def log_database_configuration(logger) -> None:
     """Log the current database configuration for all database types"""
     # NOTE: Has to be imporated at runtime to avoid circular import
