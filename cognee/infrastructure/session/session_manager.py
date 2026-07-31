@@ -1,5 +1,5 @@
 import uuid
-from typing import Any
+from typing import Any, cast
 
 from cognee.context_global_variables import current_dataset_id, session_user
 from cognee.infrastructure.databases.cache import SessionAgentTraceEntry, SessionQAEntry
@@ -144,7 +144,7 @@ class SessionManager:
 
             datasets = await get_datasets_by_name([DEFAULT_DATASET_NAME], uuid.UUID(str(user_id)))
             if datasets:
-                self._fallback_dataset_id = datasets[0].id
+                self._fallback_dataset_id = cast(uuid.UUID, datasets[0].id)
         except Exception as exc:
             logger.debug("Default dataset lookup for session scoping failed: %s", exc)
         return self._fallback_dataset_id
