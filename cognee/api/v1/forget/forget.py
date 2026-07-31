@@ -10,10 +10,12 @@ from cognee.modules.observability import (
     COGNEE_FORGET_TARGET,
     COGNEE_RESULT_COUNT,
 )
+from cognee.modules.session_lifecycle.usage_tracking import log_activity
 
 logger = get_logger("forget")
 
 
+@log_activity("forget")
 async def forget(
     *,
     data_id: Optional[UUID] = None,

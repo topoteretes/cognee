@@ -175,6 +175,45 @@ async def end_operation(token) -> None:
             logger.debug("activity sink failed (%s)", exc)
 
 
+def log_activity(operation: str):
+    """Decorator: wrap a **keyword-only** async entry point in an activity scope.
+
+    Reads ``user``/``dataset``/``dataset_id``/``session_id`` from kwargs
+    (best-effort), opens an operation scope so any LLM usage inside accrues, and
+    emits the finished event on return or error. Inert when no sink is
+    registered. For functions with positional args, use ``begin_operation`` /
+    ``end_operation`` directly instead (kwargs extraction won't see positionals).
+    """
+    import functools
+
+    def decorator(fn):
+        @functools.wraps(fn)
+        async def wrapper(*args, **kwargs):
+            user = kwargs.get("user")
+            dataset = kwargs.get("dataset")
+            session_id = kwargs.get("session_id")
+            token = begin_operation(
+                operation,
+                user_id=getattr(user, "id", None),
+                tenant_id=getattr(user, "tenant_id", None),
+                dataset_id=kwargs.get("dataset_id"),
+                dataset_name=dataset if isinstance(dataset, str) else None,
+                session_id=session_id,
+                origin="session" if session_id else "api",
+            )
+            try:
+                return await fn(*args, **kwargs)
+            except Exception as exc:
+                mark_active_operation_errored(repr(exc))
+                raise
+            finally:
+                await end_operation(token)
+
+        return wrapper
+
+    return decorator
+
+
 # Exact per-call token usage, reported by an adapter right after a completion
 # so the gateway's usage hook can use real counts instead of the char estimate.
 # One-shot: consumed (and cleared) by the very next record_llm_call.

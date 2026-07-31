@@ -171,6 +171,20 @@ async def _add_to_session(session_id: str, data, user):
         context="",
         answer=text,
     )
+
+    # Activity log: record the session write (no LLM cost). Inert without a sink.
+    from cognee.modules.session_lifecycle.usage_tracking import begin_operation, end_operation
+
+    await end_operation(
+        begin_operation(
+            "remember",
+            user_id=getattr(user, "id", None),
+            tenant_id=getattr(user, "tenant_id", None),
+            session_id=session_id,
+            origin="session",
+        )
+    )
+
     logger.info("remember: added entry to session '%s'", session_id)
 
 

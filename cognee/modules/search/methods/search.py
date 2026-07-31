@@ -77,6 +77,20 @@ async def search(
         Searching by dataset is only available in ENABLE_BACKEND_ACCESS_CONTROL mode
     """
     query = await log_query(query_text, query_type.value, user.id)
+
+    # Activity log: scope the search so its LLM usage accrues to one event
+    # (inert unless a sink is registered). Single return below closes it.
+    from cognee.modules.session_lifecycle.usage_tracking import begin_operation, end_operation
+
+    _activity_token = begin_operation(
+        "search",
+        user_id=user.id,
+        tenant_id=getattr(user, "tenant_id", None),
+        dataset_id=dataset_ids[0] if dataset_ids and len(dataset_ids) == 1 else None,
+        session_id=session_id,
+        origin="session" if session_id else "api",
+    )
+
     send_telemetry(
         "cognee.search EXECUTION STARTED",
         user.id,
@@ -146,6 +160,8 @@ async def search(
         json.dumps(completions) if completions else "[]",
         user.id,
     )
+
+    await end_operation(_activity_token)
 
     return _backwards_compatible_search_results(search_results, verbose)
 
