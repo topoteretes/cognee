@@ -154,7 +154,7 @@ class TestActivityAttribution:
         record_mock.assert_awaited_once_with(
             "00000000-0000-0000-0000-000000000001",
             f"default_session_{dataset_id}",
-            dataset_id=str(dataset_id),
+            dataset_id=dataset_id,
         )
 
 
