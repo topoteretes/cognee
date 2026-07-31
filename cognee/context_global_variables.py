@@ -1,7 +1,7 @@
 import os
 import warnings
 from contextvars import ContextVar
-from typing import Optional, Union
+from typing import Optional
 from uuid import UUID
 
 from cognee.base_config import get_base_config
@@ -27,7 +27,7 @@ from cognee.infrastructure.databases.utils.resolve_dataset_database_connection_i
 #       for different async tasks, threads and processes
 vector_db_config = ContextVar("vector_db_config", default=None)
 graph_db_config = ContextVar("graph_db_config", default=None)
-current_dataset_id = ContextVar("current_dataset_id", default=None)
+current_dataset_id: ContextVar[Optional[UUID]] = ContextVar("current_dataset_id", default=None)
 # Note: same mechanism for LLM and embedding configs so that the LiteLLM client
 #       and the embedding engine can use per-context (e.g. per-request) configs.
 llm_config: ContextVar[Optional[LLMConfig]] = ContextVar("llm_config", default=None)
@@ -130,7 +130,7 @@ class DatabaseContextManager:
 
     def __init__(
         self,
-        dataset: Union[str, UUID],
+        dataset: Optional[UUID],
         user_id: UUID,
         llm_config: Optional[LLMConfig] = None,
         embedding_config: Optional[EmbeddingConfig] = None,
@@ -145,31 +145,19 @@ class DatabaseContextManager:
         self._embedding_token = None
 
     async def apply_database_context_variables(
-        self, dataset: Union[str, UUID], user_id: UUID
+        self, dataset: Optional[UUID], user_id: UUID
     ) -> None:
-        # current_dataset_id always carries a dataset *id*. Only a UUID (or its
-        # string form) may enter the context: dataset names must be resolved by
-        # the caller (get_unique_dataset_id, resolve_authorized_user_datasets)
-        # so a context is never entered for a dataset the caller did not
-        # explicitly identify.
-        dataset_uuid: Optional[UUID] = None
-        if dataset is not None:
-            from cognee.shared.utils import as_uuid
-
-            dataset_uuid = as_uuid(dataset)
-            if dataset_uuid is None:
-                raise CogneeValidationError(
-                    message=f"dataset must be a dataset id (UUID or UUID string), got "
-                    f"{dataset!r}. Resolve dataset names to ids before entering the "
-                    "database context."
-                )
-            # Downstream (queue slot, per-dataset database row, release on exit)
-            # uses the canonical id so slot keys and rows never vary by the
-            # caller's spelling of the same dataset.
-            self._dataset = dataset_uuid
-        self._dataset_token = current_dataset_id.set(
-            str(dataset_uuid) if dataset_uuid is not None else None
-        )
+        # current_dataset_id always carries a dataset *id* (a UUID object) or
+        # None. Exactly one input type: callers resolve names/strings to a UUID
+        # (get_unique_dataset_id, resolve_authorized_user_datasets) before
+        # entering, so a context is never entered for a dataset the caller did
+        # not explicitly identify.
+        if dataset is not None and not isinstance(dataset, UUID):
+            raise CogneeValidationError(
+                message=f"dataset must be a dataset id (UUID), got {dataset!r}. "
+                "Resolve dataset names to ids before entering the database context."
+            )
+        self._dataset_token = current_dataset_id.set(dataset)
 
         # LLM and embedding configs are an explicit, caller-provided override and
         # are intentionally applied regardless of backend access control: callers
@@ -193,12 +181,12 @@ class DatabaseContextManager:
         # Imported lazily to avoid circular imports at module load.
         from cognee.infrastructure.databases.dataset_queue import dataset_queue
 
-        await dataset_queue().ensure_slot(dataset_uuid)
+        await dataset_queue().ensure_slot(dataset)
 
         user = await get_user(user_id)
 
         # To ensure permissions are enforced properly all datasets will have their own databases
-        dataset_database = await get_or_create_dataset_database(dataset_uuid, user)
+        dataset_database = await get_or_create_dataset_database(dataset, user)
         # Ensure that all connection info is resolved properly
         dataset_database = await resolve_dataset_database_connection_info(dataset_database)
 
@@ -323,7 +311,7 @@ class DatabaseContextManager:
 
 
 def set_database_global_context_variables(
-    dataset: Union[str, UUID],
+    dataset: Optional[UUID],
     user_id: UUID,
     llm_config: Optional[LLMConfig] = None,
     embedding_config: Optional[EmbeddingConfig] = None,

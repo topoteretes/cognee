@@ -24,7 +24,7 @@ async def test_database_context_sets_and_resets_current_dataset_id(monkeypatch):
     monkeypatch.setenv("ENABLE_BACKEND_ACCESS_CONTROL", "false")
 
     async with set_database_global_context_variables(dataset_id, user_id):
-        assert current_dataset_id.get() == str(dataset_id)
+        assert current_dataset_id.get() == dataset_id
 
     assert current_dataset_id.get() == "outer"
 
@@ -152,14 +152,13 @@ async def test_dataset_name_is_rejected(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_uuid_string_dataset_is_published_canonically_without_user_lookup(monkeypatch):
-    from unittest.mock import AsyncMock, patch
+async def test_uuid_string_dataset_is_rejected(monkeypatch):
+    """One input type: even a valid UUID in string form is refused — callers
+    hold real UUID objects, the boundary does no coercion."""
+    from cognee.exceptions import CogneeValidationError
 
-    dataset_id = uuid4()
     monkeypatch.setenv("ENABLE_BACKEND_ACCESS_CONTROL", "false")
 
-    with patch("cognee.context_global_variables.get_user", AsyncMock()) as get_user_mock:
-        async with set_database_global_context_variables(str(dataset_id), uuid4()):
-            assert current_dataset_id.get() == str(dataset_id)
-
-    get_user_mock.assert_not_awaited()
+    with pytest.raises(CogneeValidationError, match="must be a dataset id"):
+        async with set_database_global_context_variables(str(uuid4()), uuid4()):
+            pass
