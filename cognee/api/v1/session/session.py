@@ -44,10 +44,11 @@ async def get_session(
 ) -> List[SessionQAEntry]:
     """Return a session's Q&A entries.
 
-    ``session_id=None`` resolves to the same per-dataset default session that an
-    omitted session_id resolves to on the write side, so a default-session write
-    is readable back through this function. Passing the literal
-    ``"default_session"`` reads the legacy pre-dataset-scoping session instead.
+    ``session_id=None`` defers to the SessionManager: inside a dataset context
+    it resolves to the same per-dataset default session the write side uses, so
+    a default-session write is readable back; without a known dataset it reads
+    the plain global default session. Passing the literal ``"default_session"``
+    always reads the global session.
     """
     resolved_user = await _resolve_user(user)
     user_id = str(resolved_user.id)

@@ -418,7 +418,7 @@ class AgenticRetriever(GraphCompletionRetriever):
             return await build_active_context_block(
                 session_manager=session_manager,
                 user_id=str(user_id),
-                session_id=await session_manager.resolve_session_id(self.session_id, str(user_id)),
+                session_id=session_manager.resolve_session_id(self.session_id),
                 query=query or "",
             )
         except Exception as exc:

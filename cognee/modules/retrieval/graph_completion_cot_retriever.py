@@ -168,7 +168,7 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
             block, _served_ids = await build_active_context_block(
                 session_manager=sm,
                 user_id=user_id,
-                session_id=await sm.resolve_session_id(self.session_id, str(user_id)),
+                session_id=sm.resolve_session_id(self.session_id),
                 query=query or "",
             )
             return block or ""
