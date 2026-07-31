@@ -13,10 +13,18 @@ from cognee.infrastructure.databases.graph.ladybug.LadybugDatasetDatabaseHandler
 from cognee.infrastructure.databases.vector.pgvector.PGVectorDatasetDatabaseHandler import (
     PGVectorDatasetDatabaseHandler,
 )
+from cognee.infrastructure.databases.vector.turso.TursoVectorDatasetDatabaseHandler import (
+    TursoVectorDatasetDatabaseHandler,
+)
 from cognee.infrastructure.databases.graph.postgres.PostgresGraphDatasetDatabaseHandler import (
     PostgresGraphDatasetDatabaseHandler,
 )
+from cognee.infrastructure.databases.graph.turso.TursoGraphDatasetDatabaseHandler import (
+    TursoGraphDatasetDatabaseHandler,
+)
 
+# handler_provider is the database provider a handler works with: a plain string,
+# or a tuple only when the handler is compatible with multiple providers.
 supported_dataset_database_handlers = {
     "neo4j_aura_dev": {
         "handler_instance": Neo4jAuraDevDatasetDatabaseHandler,
@@ -31,13 +39,25 @@ supported_dataset_database_handlers = {
         "handler_instance": PGVectorDatasetDatabaseHandler,
         "handler_provider": "pgvector",
     },
+    "turso": {
+        "handler_instance": TursoVectorDatasetDatabaseHandler,
+        "handler_provider": "turso",
+    },
     "postgres_graph": {
         "handler_instance": PostgresGraphDatasetDatabaseHandler,
         "handler_provider": "postgres",
     },
+    # Ladybug is the renamed Kuzu engine — either provider name works with either handler.
     "ladybug": {
         "handler_instance": LadybugDatasetDatabaseHandler,
-        "handler_provider": "ladybug",
+        "handler_provider": ("ladybug", "kuzu"),
     },
-    "kuzu": {"handler_instance": LadybugDatasetDatabaseHandler, "handler_provider": "kuzu"},
+    "kuzu": {
+        "handler_instance": LadybugDatasetDatabaseHandler,
+        "handler_provider": ("ladybug", "kuzu"),
+    },
+    "turso_graph": {
+        "handler_instance": TursoGraphDatasetDatabaseHandler,
+        "handler_provider": "turso",
+    },
 }

@@ -1,10 +1,25 @@
 """Shared utilities for DLT ingestion."""
 
 import json
+from typing import Optional
 
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("dlt_utils")
+
+# A dlt source sets this attribute to opt into the "document" ingestion path:
+# each row becomes a text document that flows through normal cognify (LLM entity
+# extraction), instead of the default relational schema-context path. The value
+# is the ``external_metadata["source"]`` tag used for that source's rows. This
+# lets resolve_dlt_sources stay connector-agnostic — a connector declares its
+# own nature rather than the shared engine hard-coding connector names.
+DOCUMENT_SOURCE_ATTR = "cognee_document_source"
+
+
+def document_source_tag(item) -> Optional[str]:
+    """Return the document-source tag a dlt source opted into, else ``None``."""
+    tag = getattr(item, DOCUMENT_SOURCE_ATTR, None)
+    return tag if isinstance(tag, str) and tag else None
 
 
 def is_dlt_sourced(metadata) -> bool:

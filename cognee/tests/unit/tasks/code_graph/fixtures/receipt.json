@@ -1,0 +1,8 @@
+{
+  "enola_version": "0.3.1",
+  "snapshot_id": "sha256:abc123def456",
+  "quality": {
+    "files_parsed": 42,
+    "coverage": 0.92
+  }
+}

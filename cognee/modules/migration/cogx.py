@@ -21,11 +21,19 @@ COGX_VERSION = "0.1"
 
 
 def parse_timestamp(value: Any) -> Optional[datetime]:
-    """Parse a timestamp from ISO strings or epoch seconds/milli/micro/nanoseconds."""
+    """Parse a timestamp from ISO strings or epoch seconds/milli/micro/nanoseconds.
+
+    Always returns a timezone-aware UTC datetime, or None. Inputs that carry no
+    offset — ``"2026-01-01T10:00:00"``, a bare date, a naive ``datetime`` — are
+    read as UTC, which is what the exporting systems store. Returning them naive
+    mixes naive and aware values across a single import: comparing two of them
+    raises TypeError, and sorting them applies the importing machine's local
+    offset instead of the real instant.
+    """
     if value is None or value == "":
         return None
     if isinstance(value, datetime):
-        return value
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
     if isinstance(value, (int, float)):
         # Heuristic: values past the year ~2603 in seconds are a finer epoch
         # unit (milli/micro/nanoseconds); scale down until plausible.
@@ -40,9 +48,10 @@ def parse_timestamp(value: Any) -> Optional[datetime]:
             return None
     if isinstance(value, str):
         try:
-            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
         except ValueError:
             return None
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
     return None
 
 
