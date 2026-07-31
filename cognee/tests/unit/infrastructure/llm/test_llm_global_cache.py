@@ -67,9 +67,7 @@ async def test_set_database_global_context_variables_applies_llm_config(monkeypa
 
     # A dataset id (not a name) keeps this hermetic: names are resolved to ids
     # via a user lookup before publishing, and this test's user does not exist.
-    async with set_database_global_context_variables(
-        uuid4(), uuid4(), llm_config=_openai_config()
-    ):
+    async with set_database_global_context_variables(uuid4(), uuid4(), llm_config=_openai_config()):
         client = get_llm_client()
         assert client.model == OPENAI_MODEL
         assert client.endpoint == ""
