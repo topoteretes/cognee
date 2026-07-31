@@ -356,7 +356,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
 
     if chunks_per_batch is None:
         chunks_per_batch = (
-            cognify_config.chunks_per_batch if cognify_config.chunks_per_batch is not None else 100
+            cognify_config.chunks_per_batch if cognify_config.chunks_per_batch is not None else 2000
         )
 
     default_tasks = [
@@ -434,8 +434,6 @@ async def get_temporal_tasks(
         list[Task]: A list of Task objects representing the temporal processing pipeline.
     """
     if chunks_per_batch is None:
-        from cognee.modules.cognify.config import get_cognify_config
-
         configured = get_cognify_config().chunks_per_batch
         chunks_per_batch = configured if configured is not None else 10
 
