@@ -515,7 +515,7 @@ async def persist_trace(context: AgentMemoryContext) -> None:
 
     # Resolve through the manager so a dataset-scoped derived default matches
     # the session the trace step was just written to.
-    resolved_session_id = await session_manager._resolve_session_id(
+    resolved_session_id = await session_manager.resolve_session_id(
         context.config.session_id, user_id
     )
 
