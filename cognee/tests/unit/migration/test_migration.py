@@ -364,6 +364,50 @@ class TestZepSource:
         records = collect(GraphitiSource(export))
         assert [record.kind for record in records] == ["episode", "entity", "entity", "fact"]
 
+    def test_session_id_alias_is_read_on_every_record_kind(self):
+        # The episode branch already treats "session_id" as an alias for
+        # "group_id", so an export that spells it that way must keep its scope
+        # on entities and facts too, not just on episodes.
+        export = {
+            "episodes": [
+                {"uuid": "ep1", "content": "Alice moved to Berlin", "session_id": "tenant-a"}
+            ],
+            "nodes": [
+                {"uuid": "n1", "name": "Alice", "session_id": "tenant-a"},
+                {"uuid": "n2", "name": "Berlin", "session_id": "tenant-a"},
+            ],
+            "edges": [
+                {
+                    "uuid": "f1",
+                    "source_node_uuid": "n1",
+                    "target_node_uuid": "n2",
+                    "session_id": "tenant-a",
+                }
+            ],
+        }
+        records = collect(GraphitiSource(export))
+
+        assert [record.scope.session_id for record in records] == ["tenant-a"] * 4
+
+    def test_group_id_still_wins_over_session_id(self):
+        # Both spellings present: "group_id" is the canonical one and keeps
+        # precedence, matching how the episode branch resolves the pair.
+        export = {
+            "nodes": [{"uuid": "n1", "name": "Alice", "group_id": "g1", "session_id": "s1"}],
+            "edges": [
+                {
+                    "uuid": "f1",
+                    "source_node_uuid": "n1",
+                    "target_node_uuid": "n2",
+                    "group_id": "g1",
+                    "session_id": "s1",
+                }
+            ],
+        }
+        records = collect(GraphitiSource(export))
+
+        assert [record.scope.session_id for record in records] == ["g1", "g1"]
+
     def test_default_mode_is_hybrid(self):
         assert GraphitiSource({"nodes": []}).mode == "hybrid"
 
