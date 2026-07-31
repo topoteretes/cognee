@@ -22,6 +22,20 @@ from cognee.memify_pipelines.memify_default_tasks import (
 logger = get_logger("memify")
 
 
+def _any_task_consumes_memory_fragment(tasks) -> bool:
+    """Whether any task in ``tasks`` can use a projected memory fragment.
+
+    Tasks decorated with ``@ignores_memory_fragment`` either read the graph
+    themselves or drop non-``DataPoint`` inputs, so a pipeline built only from
+    those would discard the fragment. Anything else — every custom task — counts
+    as a consumer, so the projection is skipped only when it is provably wasted.
+    """
+    return any(
+        not getattr(getattr(task, "executable", None), "__cognee_ignores_memory_fragment__", False)
+        for task in tasks
+    )
+
+
 async def memify(
     extraction_tasks: Union[List[Task], List[str]] = None,
     enrichment_tasks: Union[List[Task], List[str]] = None,
@@ -49,7 +63,9 @@ async def memify(
         enrichment_tasks: List of Cognee Tasks to handle enrichment of provided graph/data from extraction tasks.
         data: The data to ingest. Can be anything when custom extraction and enrichment tasks are used.
               Data provided here will be forwarded to the first extraction task in the pipeline as input.
-              If no data is provided the whole graph (or subgraph if node_name/node_type is specified) will be forwarded
+              If no data is provided the whole graph (or subgraph if node_name/node_type is specified) will be forwarded,
+              unless every task in the pipeline is marked with ``@ignores_memory_fragment`` — those read the graph
+              themselves, so the projection is skipped rather than built and discarded.
         dataset: Dataset name or dataset uuid to process.
         user: User context for authentication and data access. Uses default if None.
         node_type: Filter graph to specific entity types (for advanced filtering). Used when no data is provided.
@@ -97,18 +113,28 @@ async def memify(
     user, authorized_dataset_list = await resolve_authorized_user_datasets(dataset, user)
     authorized_dataset = authorized_dataset_list[0]
 
-    if not data:
-        async with set_database_global_context_variables(
-            authorized_dataset.id, authorized_dataset.owner_id
-        ):
-            memory_fragment = await get_memory_fragment(node_type=node_type, node_name=node_name)
-            # Subgraphs should be a single element in the list to represent one data item
-            data = [memory_fragment]
-
     memify_tasks = [
         *extraction_tasks,  # Unpack tasks provided to memify pipeline
         *enrichment_tasks,
     ]
+
+    if not data:
+        if _any_task_consumes_memory_fragment(memify_tasks):
+            async with set_database_global_context_variables(
+                authorized_dataset.id, authorized_dataset.owner_id
+            ):
+                memory_fragment = await get_memory_fragment(
+                    node_type=node_type, node_name=node_name
+                )
+                # Subgraphs should be a single element in the list to represent one data item
+                data = [memory_fragment]
+        else:
+            # Projecting the graph costs a full graph read and, on a large graph,
+            # hundreds of megabytes of Python objects. The default pipeline reads
+            # the graph itself, so paying that here would produce nothing — most
+            # visibly on every remember(), which self-improves by default.
+            logger.debug("memify: no task consumes a memory fragment, skipping graph projection")
+            data = [{}]
 
     # By calling get pipeline executor we get a function that will have the run_pipeline run in the background or a function that we will need to wait for
     pipeline_executor_func = get_pipeline_executor(run_in_background=run_in_background)

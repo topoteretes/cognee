@@ -150,6 +150,25 @@ def task(fn=None, *, batch_size=None, enriches=False, **default_params):
     return decorator
 
 
+def ignores_memory_fragment(func):
+    """Mark a task as unable to consume a projected memory fragment.
+
+    ``memify()`` projects the whole graph into a ``CogneeGraph`` when the caller
+    passes no ``data``. Tasks marked here read what they need straight from the
+    graph database, or drop anything that is not a ``DataPoint``, so a pipeline
+    built only from marked tasks throws that projection away — on a large graph
+    that is a full graph read and hundreds of megabytes of Python objects for
+    nothing. Unmarked tasks (every custom one) still get the fragment.
+
+    Example::
+
+        @ignores_memory_fragment
+        async def get_triplet_datapoints(data): ...
+    """
+    func.__cognee_ignores_memory_fragment__ = True
+    return func
+
+
 def task_summary(template: str):
     """Decorator that attaches a human-readable summary template to a task function.
 

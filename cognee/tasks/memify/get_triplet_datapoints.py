@@ -5,6 +5,7 @@ from cognee.shared.logging_utils import get_logger
 from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.engine.models import Triplet
+from cognee.modules.pipelines.tasks.task import ignores_memory_fragment
 from cognee.tasks.storage import index_data_points
 
 logger = get_logger("get_triplet_datapoints")
@@ -166,6 +167,7 @@ def _process_single_triplet(
     return triplet_obj, None
 
 
+@ignores_memory_fragment
 async def get_triplet_datapoints(
     data,
     triplets_batch_size: int = 100,

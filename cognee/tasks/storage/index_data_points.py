@@ -4,10 +4,12 @@ from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.databases.vector.embeddings.config import get_embedding_context_config
 from cognee.infrastructure.engine import DataPoint
+from cognee.modules.pipelines.tasks.task import ignores_memory_fragment
 
 logger = get_logger("index_data_points")
 
 
+@ignores_memory_fragment
 async def index_data_points(data_points: list[DataPoint], vector_engine=None):
     """Index data points in the vector engine by creating embeddings for specified fields.
 
@@ -22,6 +24,11 @@ async def index_data_points(data_points: list[DataPoint], vector_engine=None):
                      contain an 'index_fields' list specifying which fields to embed.
         vector_engine: Optional pre-created vector engine. Falls back to
                        ``get_vector_engine_async()`` when not supplied.
+
+    Indexing upserts by data point id, so re-indexing points that are already
+    stored leaves the collection's row count unchanged. A flat row count is
+    therefore no evidence that no embedding happened — read the task's log
+    counters or the embedding provider's usage report instead.
 
     Returns:
         The original data_points list.
