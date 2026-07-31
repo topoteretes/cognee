@@ -15,7 +15,9 @@ upstream.
 
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
-from typing import Optional
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import Awaitable, Callable, Optional
 from uuid import UUID as UUIDType
 
 from cognee.shared.logging_utils import get_logger
@@ -40,6 +42,94 @@ async def track_session_usage(session_id: str, user_id: UUIDType):
         yield
     finally:
         _active_session.reset(token)
+
+
+# ── Activity log (opt-in; inert unless a sink is registered) ─────────────────
+#
+# A parallel, operation-scoped accumulator alongside the session tracker above,
+# for consumers (e.g. the Cognee Cloud control plane) that want a per-operation
+# activity log — one record per add/cognify/improve/remember/forget/recall/
+# search run, carrying who/what/when + token usage.
+#
+# Inert by default: with no sink registered, ``track_operation_usage`` is a
+# passthrough and ``record_llm_call`` skips the operation branch, so open-source
+# users incur zero overhead and nothing is stored anywhere. A deployment opts in
+# by calling ``register_activity_sink`` once at startup; the sink receives each
+# finished ``ActivityEvent`` and is responsible for persisting it.
+
+
+@dataclass
+class ActivityEvent:
+    """One completed user-facing operation, handed to the registered sink."""
+
+    operation: str
+    user_id: Optional[UUIDType] = None
+    tenant_id: Optional[UUIDType] = None
+    dataset_id: Optional[UUIDType] = None
+    dataset_name: Optional[str] = None
+    session_id: Optional[str] = None
+    origin: str = "api"
+    pipeline_run_id: Optional[UUIDType] = None
+    tokens_in: int = 0
+    tokens_out: int = 0
+    status: str = "completed"
+    error: Optional[str] = None
+    started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    ended_at: Optional[datetime] = None
+
+
+ActivitySink = Callable[[ActivityEvent], Awaitable[None]]
+
+_activity_sink: Optional[ActivitySink] = None
+
+_active_operation: ContextVar[Optional[ActivityEvent]] = ContextVar(
+    "cognee_activity_operation", default=None
+)
+
+
+def register_activity_sink(sink: Optional[ActivitySink]) -> None:
+    """Install (or clear, with ``None``) the process-wide activity-log sink.
+
+    Only one sink is supported; the last registration wins. Deployments that
+    persist an activity log call this once at startup; open-source leaves it
+    unset, keeping the whole mechanism inert.
+    """
+    global _activity_sink
+    _activity_sink = sink
+
+
+@asynccontextmanager
+async def track_operation_usage(operation: str, **context):
+    """Accumulate token usage for one user-facing operation, then emit it to the
+    registered activity sink on exit. No-op when no sink is registered.
+
+    Any LLM call made inside this scope adds its tokens to the event via
+    ``record_llm_call``. The finished event (with status/error/duration) is
+    handed to the sink; sink failures are swallowed so activity logging can
+    never break the operation it observes.
+    """
+    if _activity_sink is None:
+        # Open-source default: nothing consumes activity — add zero overhead.
+        yield
+        return
+
+    event = ActivityEvent(operation=operation, **context)
+    token = _active_operation.set(event)
+    try:
+        yield
+    except Exception as exc:
+        event.status = "errored"
+        event.error = str(exc)
+        raise
+    finally:
+        _active_operation.reset(token)
+        event.ended_at = datetime.now(timezone.utc)
+        sink = _activity_sink
+        if sink is not None:
+            try:
+                await sink(event)
+            except Exception as exc:
+                logger.debug("activity sink failed (%s)", exc)
 
 
 def _estimate_tokens(text: str) -> int:
@@ -141,17 +231,25 @@ async def record_llm_call(
     caller has exact counts from ``response.usage``; otherwise the
     char-based estimate is used.
     """
-    target = _active_session.get()
-    if target is None:
-        return
-    session_id, user_id = target
-
     tokens_in = (
         tokens_in_override if tokens_in_override is not None else _estimate_tokens(input_text)
     )
     tokens_out = (
         tokens_out_override if tokens_out_override is not None else _estimate_tokens(output_text)
     )
+
+    # Activity log (operation scope): accumulate independently of any session,
+    # so an operation's per-run tokens are captured even when no session is active.
+    operation = _active_operation.get()
+    if operation is not None:
+        operation.tokens_in += tokens_in
+        operation.tokens_out += tokens_out
+
+    # Session usage accumulation (unchanged): only when a session is active.
+    target = _active_session.get()
+    if target is None:
+        return
+    session_id, user_id = target
     cost = _estimate_cost_usd(model, tokens_in, tokens_out)
 
     try:
