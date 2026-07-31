@@ -3,6 +3,7 @@ import sys
 import pytest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
+from uuid import uuid4
 
 from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.cache.models import SessionQAEntry
@@ -48,6 +49,9 @@ def session_user_ctx():
 def sm():
     """Minimal SessionManager: only get_session, add_feedback, delete_feedback, update_qa."""
     s = SimpleNamespace()
+    # A manager that knows its dataset (the dataset-context case); the bare
+    # no-dataset path is covered by test_bare_call_scopes_to_main_dataset.
+    s.dataset_id = uuid4()
     s.get_session = AsyncMock(return_value=[])
     s.add_feedback = AsyncMock(return_value=True)
     s.delete_feedback = AsyncMock(return_value=True)
@@ -300,6 +304,38 @@ class TestGetSession:
 
         await get_session()
         assert sm.get_session.call_args.kwargs["session_id"] is None
+
+    @pytest.mark.asyncio
+    async def test_bare_call_scopes_to_main_dataset(self, session_user_ctx):
+        """A bare read (no dataset context) rebuilds the manager scoped to the
+        caller's existing main_dataset, so dataset-scoped default writes are
+        readable back. Nothing is created if no dataset exists."""
+        from cognee.api.v1.session.session import get_session
+
+        dataset = SimpleNamespace(id=uuid4())
+        bare = SimpleNamespace(dataset_id=None, get_session=AsyncMock(return_value=[]))
+        scoped = SimpleNamespace(dataset_id=dataset.id, get_session=AsyncMock(return_value=[]))
+        manager_calls = []
+
+        def fake_get_session_manager(dataset_id=None):
+            manager_calls.append(dataset_id)
+            return scoped if dataset_id is not None else bare
+
+        with (
+            patch.object(
+                _session_module(), "get_session_manager", side_effect=fake_get_session_manager
+            ),
+            patch(
+                "cognee.modules.data.methods.get_datasets_by_name",
+                AsyncMock(return_value=[dataset]),
+            ),
+        ):
+            await get_session()
+
+        assert manager_calls == [None, dataset.id]
+        scoped.get_session.assert_awaited_once()
+        assert scoped.get_session.call_args.kwargs["session_id"] is None
+        bare.get_session.assert_not_awaited()
 
 
 # add_feedback
