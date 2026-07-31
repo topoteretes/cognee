@@ -13,9 +13,9 @@ def get_session_manager(dataset_id: UUID | None = None) -> SessionManager:
     a SessionManager with cache_engine=None; all operations will no-op
     and return empty/False as appropriate.
 
-    dataset_id binds the manager to a dataset (falls back to the
+    dataset_id scopes the manager to a dataset (falls back to the
     current_dataset_id context variable) so omitted session IDs resolve
-    to a per-dataset default session and lifecycle rows carry the dataset.
+    to a per-dataset default session.
     """
     cache_engine = get_cache_engine()
     return SessionManager(cache_engine=cache_engine, dataset_id=dataset_id)

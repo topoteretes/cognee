@@ -85,10 +85,11 @@ class SessionManager:
                                "default_session".
             session_history_last_n: Number of prior Q&A entries to include in conversation
                                    history for completion. Defaults to 10.
-            dataset_id: Dataset this manager writes sessions for. Falls back to the
-                       current_dataset_id context variable, then to the caller's
-                       ``main_dataset``. Used to derive a per-dataset default session
-                       ID; explicit session IDs are stored unchanged.
+            dataset_id: Dataset this manager writes sessions for. Falls back to
+                       the current_dataset_id context variable. Used to derive a
+                       per-dataset default session ID; explicit session IDs are
+                       stored unchanged. (Bare SDK reads resolve main_dataset at
+                       the API layer — see cognee.api.v1.session.)
         """
         self._cache = cache_engine
         self.default_session_id = default_session_id
