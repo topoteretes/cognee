@@ -3,7 +3,9 @@ import asyncio
 import pytest
 from unittest.mock import patch, MagicMock
 
+import pytest
 from sqlalchemy import text, NullPool
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from cognee.infrastructure.databases.relational.sqlalchemy.SqlAlchemyAdapter import (
     SQLAlchemyAdapter,
@@ -250,3 +252,92 @@ class TestSQLAlchemyAdapterSqlitePoolArgs:
                 return (await session.execute(text("select 41 + 1"))).scalar()
 
         assert asyncio.run(run()) == 42
+
+
+class TestGetAsyncSessionCancellation:
+    """
+    get_async_session must invalidate the connection when its task is cancelled.
+
+    A cancelled request can leave the DBAPI connection inside an open
+    transaction. Returning it to the pool leaks an "idle in transaction"
+    backend until the pool ceiling is hit and every request fails. On
+    cancellation the session must be invalidated (connection dropped), and
+    only on cancellation. See issue #4197.
+
+    These tests assert the invalidate-on-cancel contract on the three paths
+    (happy, ordinary exception, cancellation). They run on SQLite, which has
+    no QueuePool or "idle in transaction" state, so they guard the behaviour
+    that fixes the leak rather than reproducing the pool exhaustion itself.
+    The end-to-end Postgres reproduction is the curl-abort + pg_stat_activity
+    check documented in the issue.
+    """
+
+    def _spy_adapter(self, monkeypatch):
+        adapter = SQLAlchemyAdapter("sqlite+aiosqlite:///:memory:")
+        calls = {"invalidate": 0}
+        original = AsyncSession.invalidate
+
+        async def spy(self):
+            calls["invalidate"] += 1
+            return await original(self)
+
+        monkeypatch.setattr(AsyncSession, "invalidate", spy)
+        return adapter, calls
+
+    @pytest.mark.asyncio
+    async def test_happy_path_does_not_invalidate(self, monkeypatch):
+        adapter, calls = self._spy_adapter(monkeypatch)
+        async with adapter.get_async_session() as session:
+            await session.execute(text("SELECT 1"))
+        assert calls["invalidate"] == 0
+
+    @pytest.mark.asyncio
+    async def test_ordinary_exception_does_not_invalidate(self, monkeypatch):
+        adapter, calls = self._spy_adapter(monkeypatch)
+        with pytest.raises(ValueError):
+            async with adapter.get_async_session() as session:
+                await session.execute(text("SELECT 1"))
+                raise ValueError("boom")
+        assert calls["invalidate"] == 0
+
+    @pytest.mark.asyncio
+    async def test_cancellation_invalidates_and_reraises(self, monkeypatch):
+        adapter, calls = self._spy_adapter(monkeypatch)
+        with pytest.raises(asyncio.CancelledError):
+            async with adapter.get_async_session() as session:
+                await session.execute(text("SELECT 1"))
+                raise asyncio.CancelledError()
+        assert calls["invalidate"] == 1
+
+    @pytest.mark.asyncio
+    async def test_outer_task_cancellation_invalidates(self, monkeypatch):
+        adapter, calls = self._spy_adapter(monkeypatch)
+        started = asyncio.Event()
+
+        async def worker():
+            async with adapter.get_async_session() as session:
+                await session.execute(text("SELECT 1"))
+                started.set()
+                await asyncio.sleep(10)
+
+        task = asyncio.create_task(worker())
+        await started.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert calls["invalidate"] == 1
+
+    @pytest.mark.asyncio
+    async def test_invalidate_failure_does_not_mask_cancellation(self, monkeypatch):
+        adapter, calls = self._spy_adapter(monkeypatch)
+
+        async def failing_invalidate(self):
+            calls["invalidate"] += 1
+            raise RuntimeError("invalidate failed")
+
+        monkeypatch.setattr(AsyncSession, "invalidate", failing_invalidate)
+        with pytest.raises(asyncio.CancelledError):
+            async with adapter.get_async_session() as session:
+                await session.execute(text("SELECT 1"))
+                raise asyncio.CancelledError()
+        assert calls["invalidate"] == 1

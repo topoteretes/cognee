@@ -188,8 +188,25 @@ class SQLAlchemyAdapter:
         async with async_session_maker() as session:
             try:
                 yield session
-            finally:
-                await session.close()  # Ensure the session is closed
+            except asyncio.CancelledError:
+                # A cancelled request can leave the connection in an open
+                # transaction; returning it to the pool leaks an "idle in
+                # transaction" backend. Invalidate (drop) it instead, shielded
+                # so the cleanup is not cut short by the same cancellation.
+                await asyncio.shield(self._discard_cancelled_session(session))
+                raise
+            # Happy path and ordinary exceptions: the sessionmaker context
+            # manager closes and rolls back, so no explicit close is needed.
+
+    @staticmethod
+    async def _discard_cancelled_session(session: AsyncSession) -> None:
+        # A graceful close needs a ROLLBACK round-trip that the cancellation
+        # keeps interrupting; invalidate() drops the DBAPI connection without
+        # it, so the connection is never reused dirty.
+        try:
+            await session.invalidate()
+        except Exception:
+            logger.exception("Failed to invalidate session on cancellation")
 
     def get_session(self):
         """
