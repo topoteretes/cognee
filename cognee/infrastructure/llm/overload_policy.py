@@ -18,9 +18,12 @@ logger = get_logger("llm_dispatch")
 # configured state — the reaction is never stuck on forever.
 COOLDOWN_SECONDS = 900.0
 
-# Server-overload statuses that arrive as plain HTTP errors: 503 (service
-# unavailable — e.g. Ollama's queue-full reply) and 529 (Anthropic overloaded).
-_OVERLOAD_STATUS_CODES = frozenset({503, 529})
+# Overload statuses, checked on any exception in the chain that exposes a
+# ``status_code`` attribute — openai, anthropic, and litellm error classes all
+# do, so the check is provider-neutral and needs no optional SDK imports:
+# 429 (rate limited), 503 (service unavailable — e.g. Ollama's queue-full
+# reply), 529 (Anthropic overloaded).
+_OVERLOAD_STATUS_CODES = frozenset({429, 503, 529})
 
 
 def overload_evidence(error: BaseException) -> str | None:
@@ -28,19 +31,26 @@ def overload_evidence(error: BaseException) -> str | None:
 
     Overload evidence is a rate-limit error (cloud providers), a timeout (how
     overwhelmed local servers usually surface — they never send rate limits),
-    or an HTTP 503/529 overload status. Wrappers hide the signal — instructor
-    re-raises provider errors inside InstructorRetryException — so the cause
-    chain is checked, not just the top-level type. The openai base classes
-    cover every client stack: litellm's exceptions subclass them, and
-    SDK-direct adapters raise them natively.
+    or an HTTP 429/503/529 overload status. Wrappers hide the signal —
+    instructor re-raises provider errors inside InstructorRetryException — so
+    the cause chain is checked, not just the top-level type.
+
+    Recognition is deliberately provider-neutral: HTTP statuses are read from
+    any exception's ``status_code`` attribute (openai, anthropic, and litellm
+    error classes all carry one), and timeouts are caught via the openai class
+    (litellm's subclass it), ``httpx.TimeoutException`` (the transport cause
+    SDK-direct clients such as anthropic chain their timeout errors from), and
+    the asyncio/builtin timeouts. Optional provider SDKs are never imported.
     """
     import asyncio
 
+    import httpx
     import openai
 
     overload_types = (
         openai.RateLimitError,
         openai.APITimeoutError,
+        httpx.TimeoutException,
         asyncio.TimeoutError,
         TimeoutError,
     )
@@ -49,11 +59,9 @@ def overload_evidence(error: BaseException) -> str | None:
     while node is not None and id(node) not in seen and len(seen) < 20:
         if isinstance(node, overload_types):
             return type(node).__name__
-        if (
-            isinstance(node, openai.APIStatusError)
-            and getattr(node, "status_code", None) in _OVERLOAD_STATUS_CODES
-        ):
-            return f"HTTP {node.status_code}"
+        status_code = getattr(node, "status_code", None)
+        if status_code in _OVERLOAD_STATUS_CODES:
+            return f"HTTP {status_code}"
         seen.add(id(node))
         node = node.__cause__ or node.__context__
     return None
