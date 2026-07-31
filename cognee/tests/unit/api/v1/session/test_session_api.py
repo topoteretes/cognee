@@ -276,6 +276,27 @@ class TestGetSession:
         assert result[0].qa_id == "v1"
 
     @pytest.mark.asyncio
+    async def test_explicit_session_id_skips_dataset_resolution(self, session_user_ctx):
+        """An explicit session_id never consults main_dataset: no lookup, no
+        rescope, no raise even when no dataset exists anywhere."""
+        from cognee.api.v1.session.session import get_session
+
+        bare = SimpleNamespace(dataset_id=None, get_session=AsyncMock(return_value=[]))
+        with (
+            patch.object(_session_module(), "get_session_manager", return_value=bare) as gsm,
+            patch(
+                "cognee.modules.data.methods.get_datasets_by_name",
+                AsyncMock(return_value=[]),
+            ) as lookup,
+        ):
+            result = await get_session(session_id="my_session")
+
+        assert result == []
+        lookup.assert_not_awaited()
+        gsm.assert_called_once_with()
+        assert bare.get_session.call_args.kwargs["session_id"] == "my_session"
+
+    @pytest.mark.asyncio
     async def test_session_manager_exception_propagates(self, session_user_ctx, sm):
         """A failed retrieval is an error, not an empty session."""
         from cognee.api.v1.session.session import get_session
