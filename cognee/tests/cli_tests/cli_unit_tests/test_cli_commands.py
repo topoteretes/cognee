@@ -714,11 +714,17 @@ class TestConfigGetSetPersistence:
         ):
             assert key in config_dict
 
-    def test_set_persists_across_process_boundary(self, tmp_path):
+    def test_set_persists_across_process_boundary(self, tmp_path, monkeypatch):
         """Reproduces the originally reported bug: `config set` must survive
         past the current process, since each `cognee-cli` invocation is a
         fresh process re-reading config from scratch."""
         from cognee.infrastructure.data.chunking.config import get_chunk_config
+
+        # A real CHUNK_SIZE env var (e.g. leftover from `dotenv.load_dotenv`
+        # picking up a developer's own .env at cognee import time) would
+        # outrank the .env file this test writes below, since pydantic-settings
+        # prioritizes real environment variables over dotenv-file values.
+        monkeypatch.delenv("CHUNK_SIZE", raising=False)
 
         original_cwd = os.getcwd()
         original_chunk_size = get_chunk_config().chunk_size
