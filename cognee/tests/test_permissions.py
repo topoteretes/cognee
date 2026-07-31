@@ -280,3 +280,79 @@ async def test_remove_user_from_tenant_user_not_in_tenant_404(permissions_exampl
         await remove_user_from_tenant(user_id=other_user.id, tenant_id=tenant_id, owner_id=owner.id)
 
     assert "User not found in this tenant" in exc_info.value.message
+
+
+async def test_improve_permission_matrix(permissions_example_env):
+    """Write-side pipelines (improve + its memify engine) enforce dataset permissions.
+
+    improve() mutates the dataset in every stage, so it requires *write*
+    permission. The matrix, with real users and ACLs:
+
+    1. no grant, by UUID        -> PermissionDeniedError (403)
+    1b. nonexistent UUID        -> PermissionDeniedError too — existence is
+                                   never confirmed to an unauthorized caller
+    2. read grant only, by UUID -> PermissionDeniedError (read is not enough)
+    3. write grant, by UUID     -> allowed, and the stage receives exactly the
+                                   authorized dataset (no retargeting)
+    4. by another owner's NAME  -> never touches their dataset (names are
+                                   owner-scoped; shared datasets are only
+                                   addressable by UUID)
+    5. memify directly          -> same write requirement as improve
+
+    No LLM involved: denials raise before any stage runs, and the success
+    paths patch the memify engine.
+    """
+    from importlib import import_module
+
+    from uuid import uuid4
+
+    from cognee.modules.data.methods import get_datasets_by_name
+
+    import_module("cognee.api.v1.improve.improve")
+
+    owner = await create_user("improve_owner@example.com", "example")
+    other = await create_user("improve_other@example.com", "example")
+
+    # add() creates the dataset and the owner's ACLs without any LLM work.
+    await cognee.add(["improve permission fixture text"], dataset_name="IMPROVE_PERMS", user=owner)
+    dataset_id = (await get_datasets_by_name(["IMPROVE_PERMS"], owner.id))[0].id
+
+    def memify_patch():
+        return patch("cognee.modules.memify.memify", new_callable=AsyncMock, return_value={})
+
+    # 1. No grant on an existing dataset: refused with 403.
+    with pytest.raises(PermissionDeniedError):
+        await cognee.improve(dataset=dataset_id, user=other)
+
+    # 1b. A UUID that exists nowhere gets the same 403 — the permission layer
+    #     never confirms dataset existence to an unauthorized caller.
+    with pytest.raises(PermissionDeniedError):
+        await cognee.improve(dataset=uuid4(), user=other)
+
+    # 2. Read grant is not enough — every improve stage writes.
+    await authorized_give_permission_on_datasets(other.id, [dataset_id], "read", owner.id)
+    with pytest.raises(PermissionDeniedError):
+        await cognee.improve(dataset=dataset_id, user=other)
+
+    # 3. Write grant allows it, and the engine receives the authorized dataset.
+    await authorized_give_permission_on_datasets(other.id, [dataset_id], "write", owner.id)
+    with memify_patch() as memify_mock:
+        await cognee.improve(dataset=dataset_id, user=other)
+    memify_mock.assert_awaited_once()
+    assert memify_mock.await_args.kwargs["dataset"] == dataset_id
+
+    # 4. Names are owner-scoped: improving the owner's dataset *name* as another
+    #    user creates that user's own dataset and never touches the owner's.
+    with memify_patch():
+        await cognee.improve(dataset="IMPROVE_PERMS", user=other)
+    others_datasets = await get_datasets_by_name(["IMPROVE_PERMS"], other.id)
+    assert len(others_datasets) == 1
+    assert others_datasets[0].id != dataset_id
+
+    # 5. memify (improve's engine) enforces the same write requirement directly.
+    from cognee.modules.memify import memify as real_memify
+
+    await cognee.add(["second fixture"], dataset_name="IMPROVE_PERMS_2", user=owner)
+    dataset_2_id = (await get_datasets_by_name(["IMPROVE_PERMS_2"], owner.id))[0].id
+    with pytest.raises(PermissionDeniedError):
+        await real_memify(dataset=dataset_2_id, user=other)
