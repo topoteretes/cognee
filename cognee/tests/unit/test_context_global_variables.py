@@ -132,3 +132,42 @@ async def test_dataset_database_configs_persist_after_exit(monkeypatch):
     assert graph_db_config.get()["graph_database_name"] == "test_graph_db"
     assert vector_db_config.get()["vector_db_name"] == "test_vector_db"
     assert file_storage_config.get() is not None
+
+
+@pytest.mark.asyncio
+async def test_dataset_name_is_resolved_to_its_id_before_publishing(monkeypatch):
+    """current_dataset_id always carries a dataset id: entering the context with
+    a *name* (the legacy creating entry style) publishes the same deterministic
+    id get_or_create_dataset_database uses, never the name itself."""
+    from unittest.mock import AsyncMock, patch
+
+    resolved_id = uuid4()
+    user_id = uuid4()
+    monkeypatch.setenv("ENABLE_BACKEND_ACCESS_CONTROL", "false")
+
+    with (
+        patch(
+            "cognee.modules.data.methods.get_unique_dataset_id",
+            AsyncMock(return_value=resolved_id),
+        ) as resolve,
+        patch("cognee.context_global_variables.get_user", AsyncMock(return_value=object())),
+    ):
+        async with set_database_global_context_variables("main_dataset", user_id):
+            assert current_dataset_id.get() == str(resolved_id)
+
+    resolve.assert_awaited_once()
+    assert resolve.await_args.args[0] == "main_dataset"
+
+
+@pytest.mark.asyncio
+async def test_uuid_string_dataset_is_published_canonically_without_user_lookup(monkeypatch):
+    from unittest.mock import AsyncMock, patch
+
+    dataset_id = uuid4()
+    monkeypatch.setenv("ENABLE_BACKEND_ACCESS_CONTROL", "false")
+
+    with patch("cognee.context_global_variables.get_user", AsyncMock()) as get_user_mock:
+        async with set_database_global_context_variables(str(dataset_id), uuid4()):
+            assert current_dataset_id.get() == str(dataset_id)
+
+    get_user_mock.assert_not_awaited()

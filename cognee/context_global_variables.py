@@ -147,7 +147,23 @@ class DatabaseContextManager:
     async def apply_database_context_variables(
         self, dataset: Union[str, UUID], user_id: UUID
     ) -> None:
-        self._dataset_token = current_dataset_id.set(str(dataset) if dataset is not None else None)
+        # current_dataset_id always carries a dataset *id* (UUID string), never a
+        # name. Callers may still enter the context with a name (the legacy,
+        # creating entry style honoured by get_or_create_dataset_database below);
+        # resolve it to the same deterministic id that path uses before
+        # publishing, so readers (session scoping, retrievers) never see a name.
+        dataset_uuid: Optional[UUID] = None
+        if dataset is not None:
+            from cognee.shared.utils import as_uuid
+
+            dataset_uuid = as_uuid(dataset)
+            if dataset_uuid is None:
+                from cognee.modules.data.methods import get_unique_dataset_id
+
+                dataset_uuid = await get_unique_dataset_id(dataset, await get_user(user_id))
+        self._dataset_token = current_dataset_id.set(
+            str(dataset_uuid) if dataset_uuid is not None else None
+        )
 
         # LLM and embedding configs are an explicit, caller-provided override and
         # are intentionally applied regardless of backend access control: callers
