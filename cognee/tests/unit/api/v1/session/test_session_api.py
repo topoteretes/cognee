@@ -276,12 +276,13 @@ class TestGetSession:
         assert result[0].qa_id == "v1"
 
     @pytest.mark.asyncio
-    async def test_returns_empty_on_session_manager_exception(self, session_user_ctx, sm):
+    async def test_session_manager_exception_propagates(self, session_user_ctx, sm):
+        """A failed retrieval is an error, not an empty session."""
         from cognee.api.v1.session.session import get_session
 
         sm.get_session.side_effect = RuntimeError("cache down")
-        result = await get_session(session_id="s1")
-        assert result == []
+        with pytest.raises(RuntimeError, match="cache down"):
+            await get_session(session_id="s1")
 
     @pytest.mark.asyncio
     async def test_passes_session_id_and_last_n(self, session_user_ctx, sm):

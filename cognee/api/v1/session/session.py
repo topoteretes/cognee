@@ -80,27 +80,18 @@ async def get_session(
     resolved_user = await _resolve_user(user)
     user_id = str(resolved_user.id)
 
-    try:
-        sm = get_session_manager()
-        if session_id is None and sm.dataset_id is None:
-            # Bare read outside any dataset context: scope to the caller's
-            # main_dataset so the session that dataset-scoped writes used is
-            # found. Read-only; before any dataset exists this stays None and
-            # the plain global default session is read.
-            sm = get_session_manager(dataset_id=await _default_dataset_id(resolved_user))
-        raw = await sm.get_session(
-            user_id=user_id,
-            session_id=session_id,
-            last_n=last_n,
-            formatted=False,
-        )
-    except CogneeValidationError:
-        # A missing main_dataset is a caller-actionable precondition, not an
-        # infrastructure hiccup — surface it instead of returning [].
-        raise
-    except Exception as e:
-        logger.warning("get_session: error from SessionManager: %s", e)
-        return []
+    sm = get_session_manager()
+    if session_id is None and sm.dataset_id is None:
+        # Bare read outside any dataset context: scope to the caller's
+        # main_dataset so the session that dataset-scoped writes used is
+        # found. Read-only; raises when no main_dataset exists.
+        sm = get_session_manager(dataset_id=await _default_dataset_id(resolved_user))
+    raw = await sm.get_session(
+        user_id=user_id,
+        session_id=session_id,
+        last_n=last_n,
+        formatted=False,
+    )
 
     if not raw:
         return []
