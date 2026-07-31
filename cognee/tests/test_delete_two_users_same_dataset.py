@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, patch
 import cognee
 from cognee.api.v1.datasets import datasets
 from cognee.context_global_variables import set_database_global_context_variables
-from cognee.modules.data.methods import get_unique_dataset_id
+from cognee.modules.data.methods import create_authorized_dataset
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.databases.graph import get_graph_engine
@@ -79,7 +79,7 @@ async def main(mock_create_structured_output: AsyncMock):
 
     # Johns's context
     await set_database_global_context_variables(
-        await get_unique_dataset_id("main_dataset", john), john.id
+        (await create_authorized_dataset("main_dataset", john)).id, john.id
     )
     graph_engine = await get_graph_engine()
     nodes, edges = await graph_engine.get_graph_data()
@@ -178,7 +178,7 @@ async def main(mock_create_structured_output: AsyncMock):
 
     # John's initial assertions
     await set_database_global_context_variables(
-        await get_unique_dataset_id("main_dataset", john), john.id
+        (await create_authorized_dataset("main_dataset", john)).id, john.id
     )
     # Assert data points presence in the graph, vector collections and nodes table
     await assert_graph_nodes_present(
