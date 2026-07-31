@@ -90,12 +90,23 @@ def standalone_sqlite_cache_path(alembic_conn) -> Optional[str]:
 
     from cognee.infrastructure.databases.cache.config import get_cache_config
     from cognee.infrastructure.databases.cache.get_cache_engine import _resolve_cache_db_url
+    from cognee.infrastructure.databases.exceptions import CacheConnectionError
 
     cache_config = get_cache_config()
     if cache_config.cache_backend not in ("sqlite", "postgres"):
         return None
 
-    url = make_url(_resolve_cache_db_url(cache_config.cache_backend, cache_config.cache_db_url))
+    try:
+        url = make_url(_resolve_cache_db_url(cache_config.cache_backend, cache_config.cache_db_url))
+    except CacheConnectionError:
+        # Mirror get_cache_engine: the implicit sqlite default degrades to the
+        # filesystem cache on deployments it cannot serve (e.g. system root on
+        # S3) — no SQL cache database exists there, so nothing to migrate. An
+        # explicitly chosen backend fails loudly at runtime too, so keep failing.
+        explicitly_chosen = "cache_backend" in cache_config.model_fields_set
+        if cache_config.cache_backend != "sqlite" or explicitly_chosen:
+            raise
+        return None
     alembic_url = alembic_conn.engine.url
 
     if url.get_backend_name() != "sqlite":
