@@ -88,7 +88,7 @@ class SessionManager:
         cache_engine: Any,
         default_session_id: str = "default_session",
         session_history_last_n: int = 10,
-        dataset_id: str | uuid.UUID | None = None,
+        dataset_id: uuid.UUID | None = None,
     ) -> None:
         """
         Initialize SessionManager with a cache engine.
@@ -114,31 +114,25 @@ class SessionManager:
         # Lazily-resolved fallback dataset (see _effective_dataset_id). Cached
         # per instance, including the miss, so an unbound manager does not hit
         # the relational DB on every call.
-        self._fallback_dataset_id: str | None = None
+        self._fallback_dataset_id: uuid.UUID | None = None
         self._fallback_resolved = False
 
     @staticmethod
-    def _normalize_dataset_id(value: Any) -> str | None:
-        """Return ``value`` as a canonical UUID string, or None when unset.
+    def _normalize_dataset_id(value: Any) -> uuid.UUID | None:
+        """Return ``value`` unchanged when it is a dataset id (UUID) or None.
 
-        The dataset context variable is guaranteed to carry a dataset id — the
-        database context manager resolves names before publishing — and an
-        explicit constructor argument must be one too. A name cannot scope a
-        session (lifecycle attribution and binding enforcement are both
-        UUID-typed), so reject it outright instead of silently degrading to an
-        unscoped session.
+        One input type, mirroring the database context manager: anything else —
+        a dataset name, a string — is a caller bug, so break loudly instead of
+        degrading to an unscoped session.
         """
-        if value is None:
-            return None
-        parsed = as_uuid(value)
-        if parsed is None:
-            raise SessionParameterValidationError(
-                message=f"dataset_id must be a dataset id (UUID), got {value!r}. "
-                "Resolve dataset names to ids before constructing a SessionManager."
-            )
-        return str(parsed)
+        if value is None or isinstance(value, uuid.UUID):
+            return value
+        raise SessionParameterValidationError(
+            message=f"dataset_id must be a dataset id (UUID), got {value!r}. "
+            "Resolve dataset names to ids before constructing a SessionManager."
+        )
 
-    async def _effective_dataset_id(self, user_id: str | None = None) -> str | None:
+    async def _effective_dataset_id(self, user_id: str | None = None) -> uuid.UUID | None:
         """Return the dataset this manager scopes sessions to.
 
         Explicit argument / context variable first, then the caller's
@@ -166,7 +160,7 @@ class SessionManager:
 
             datasets = await get_datasets_by_name([DEFAULT_DATASET_NAME], uuid.UUID(str(user_id)))
             if datasets:
-                self._fallback_dataset_id = str(datasets[0].id)
+                self._fallback_dataset_id = datasets[0].id
         except Exception as exc:
             logger.debug("Default dataset lookup for session scoping failed: %s", exc)
         return self._fallback_dataset_id

@@ -4,7 +4,7 @@ from cognee.infrastructure.databases.cache import get_cache_engine
 from cognee.infrastructure.session.session_manager import SessionManager
 
 
-def get_session_manager(dataset_id: str | UUID | None = None) -> SessionManager:
+def get_session_manager(dataset_id: UUID | None = None) -> SessionManager:
     """
     Return a SessionManager instance.
 

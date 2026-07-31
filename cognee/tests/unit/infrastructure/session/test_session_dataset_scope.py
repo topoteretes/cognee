@@ -55,22 +55,22 @@ class TestDatasetBinding:
     @pytest.mark.asyncio
     async def test_inherits_current_dataset_id_context(self):
         dataset_id = uuid4()
-        token = current_dataset_id.set(str(dataset_id))
+        token = current_dataset_id.set(dataset_id)
         try:
             manager = SessionManager(cache_engine=None)
         finally:
             current_dataset_id.reset(token)
-        assert manager.dataset_id == str(dataset_id)
+        assert manager.dataset_id == dataset_id
         assert await manager._resolve_session_id(None) == f"default_session_{dataset_id}"
 
     def test_explicit_dataset_overrides_context(self):
         explicit_id = uuid4()
-        token = current_dataset_id.set(str(uuid4()))
+        token = current_dataset_id.set(uuid4())
         try:
             manager = SessionManager(cache_engine=None, dataset_id=explicit_id)
         finally:
             current_dataset_id.reset(token)
-        assert manager.dataset_id == str(explicit_id)
+        assert manager.dataset_id == explicit_id
 
     def test_non_uuid_dataset_context_raises(self):
         """A name cannot scope a session — constructing against one must break,
