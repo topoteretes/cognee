@@ -252,7 +252,7 @@ async def test_graph_completion_decomposition_combined_mode_session_stores_only_
         top_k=20,
         session_id="session-1",
     )
-    user = SimpleNamespace(id="user-1")
+    user = SimpleNamespace(id="00000000-0000-0000-0000-000000000001")
 
     with (
         patch(
@@ -302,7 +302,9 @@ async def test_graph_completion_decomposition_combined_mode_session_stores_only_
 
     assert answer == ["Combined answer for both companies."]
 
-    entries = await session_manager.get_session(user_id="user-1", session_id="session-1")
+    entries = await session_manager.get_session(
+        user_id="00000000-0000-0000-0000-000000000001", session_id="session-1"
+    )
     assert len(entries) == 1
     assert entries[0].question == ORIGINAL_QUERY
     assert entries[0].answer == "Combined answer for both companies."

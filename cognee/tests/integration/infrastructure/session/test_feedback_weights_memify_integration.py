@@ -121,7 +121,7 @@ def session_manager_with_backend(request):
 
 def _make_user():
     user = MagicMock()
-    user.id = "u1"
+    user.id = "00000000-0000-0000-0000-000000000001"
     return user
 
 
@@ -131,7 +131,7 @@ async def test_feedback_weights_first_run_then_idempotent(session_manager_with_b
     user = _make_user()
 
     await sm.add_qa(
-        user_id="u1",
+        user_id="00000000-0000-0000-0000-000000000001",
         question="Q",
         context="C",
         answer="A",
@@ -175,7 +175,7 @@ async def test_feedback_weights_mixed_success_keeps_false(session_manager_with_b
     user = _make_user()
 
     await sm.add_qa(
-        user_id="u1",
+        user_id="00000000-0000-0000-0000-000000000001",
         question="Q",
         context="C",
         answer="A",
@@ -206,5 +206,7 @@ async def test_feedback_weights_mixed_success_keeps_false(session_manager_with_b
     assert result["processed"] == 1
     assert result["applied"] == 0
 
-    entries = await sm.get_session(user_id="u1", session_id="s1", formatted=False)
+    entries = await sm.get_session(
+        user_id="00000000-0000-0000-0000-000000000001", session_id="s1", formatted=False
+    )
     assert entries[0].memify_metadata[MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY] is False

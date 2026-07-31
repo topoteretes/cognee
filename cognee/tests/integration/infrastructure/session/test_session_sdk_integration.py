@@ -121,7 +121,7 @@ def sdk_uses_session_manager(request):
 @pytest.mark.asyncio
 async def test_sdk_get_session_returns_empty_when_no_data(sdk_uses_session_manager):
     """cognee.session.get_session returns [] when session has no QAs."""
-    user = _user("u1")
+    user = _user("00000000-0000-0000-0000-000000000001")
     result = await cognee.session.get_session(session_id="s1", user=user)
     assert result == []
 
@@ -129,9 +129,13 @@ async def test_sdk_get_session_returns_empty_when_no_data(sdk_uses_session_manag
 @pytest.mark.asyncio
 async def test_sdk_get_session_returns_entries_after_add_qa(sdk_uses_session_manager):
     """Add QA via SessionManager, then retrieve via cognee.session.get_session."""
-    user = _user("u1")
+    user = _user("00000000-0000-0000-0000-000000000001")
     qa_id = await sdk_uses_session_manager.add_qa(
-        user_id="u1", question="Q1?", context="ctx1", answer="A1.", session_id="s1"
+        user_id="00000000-0000-0000-0000-000000000001",
+        question="Q1?",
+        context="ctx1",
+        answer="A1.",
+        session_id="s1",
     )
     assert qa_id is not None
 
@@ -194,10 +198,10 @@ async def test_sdk_get_session_without_main_dataset_raises(sdk_uses_session_mana
 @pytest.mark.asyncio
 async def test_sdk_get_session_last_n(sdk_uses_session_manager):
     """get_session(last_n=N) returns only last N entries."""
-    user = _user("u1")
+    user = _user("00000000-0000-0000-0000-000000000001")
     for i in range(3):
         await sdk_uses_session_manager.add_qa(
-            user_id="u1",
+            user_id="00000000-0000-0000-0000-000000000001",
             question=f"Q{i}?",
             context=f"C{i}",
             answer=f"A{i}.",
@@ -213,9 +217,13 @@ async def test_sdk_get_session_last_n(sdk_uses_session_manager):
 @pytest.mark.asyncio
 async def test_sdk_add_feedback_roundtrip(sdk_uses_session_manager):
     """add_feedback via SDK updates entry; get_session returns updated feedback."""
-    user = _user("u1")
+    user = _user("00000000-0000-0000-0000-000000000001")
     qa_id = await sdk_uses_session_manager.add_qa(
-        user_id="u1", question="Q", context="C", answer="A", session_id="s1"
+        user_id="00000000-0000-0000-0000-000000000001",
+        question="Q",
+        context="C",
+        answer="A",
+        session_id="s1",
     )
 
     ok = await cognee.session.add_feedback(
@@ -236,9 +244,9 @@ async def test_sdk_add_feedback_roundtrip(sdk_uses_session_manager):
 @pytest.mark.asyncio
 async def test_sdk_delete_feedback_roundtrip(sdk_uses_session_manager):
     """delete_feedback via SDK clears feedback on entry."""
-    user = _user("u1")
+    user = _user("00000000-0000-0000-0000-000000000001")
     qa_id = await sdk_uses_session_manager.add_qa(
-        user_id="u1",
+        user_id="00000000-0000-0000-0000-000000000001",
         question="Q",
         context="C",
         answer="A",
@@ -259,9 +267,13 @@ async def test_sdk_delete_feedback_roundtrip(sdk_uses_session_manager):
 @pytest.mark.asyncio
 async def test_sdk_add_feedback_returns_false_when_qa_not_found(sdk_uses_session_manager):
     """add_feedback returns False when qa_id does not exist."""
-    user = _user("u1")
+    user = _user("00000000-0000-0000-0000-000000000001")
     await sdk_uses_session_manager.add_qa(
-        user_id="u1", question="Q", context="C", answer="A", session_id="s1"
+        user_id="00000000-0000-0000-0000-000000000001",
+        question="Q",
+        context="C",
+        answer="A",
+        session_id="s1",
     )
 
     ok = await cognee.session.add_feedback(
@@ -273,7 +285,7 @@ async def test_sdk_add_feedback_returns_false_when_qa_not_found(sdk_uses_session
 @pytest.mark.asyncio
 async def test_sdk_delete_feedback_returns_false_when_qa_not_found(sdk_uses_session_manager):
     """delete_feedback returns False when qa_id does not exist."""
-    user = _user("u1")
+    user = _user("00000000-0000-0000-0000-000000000001")
     ok = await cognee.session.delete_feedback(session_id="s1", qa_id="nonexistent-qa-id", user=user)
     assert ok is False
 
@@ -281,13 +293,21 @@ async def test_sdk_delete_feedback_returns_false_when_qa_not_found(sdk_uses_sess
 @pytest.mark.asyncio
 async def test_sdk_explicit_user_id_passed_to_cache(sdk_uses_session_manager):
     """Session SDK passes resolved user id to SessionManager (isolation by user)."""
-    user1 = _user("user-one")
-    user2 = _user("user-two")
+    user1 = _user("00000000-0000-0000-0000-000000000011")
+    user2 = _user("00000000-0000-0000-0000-000000000012")
     await sdk_uses_session_manager.add_qa(
-        user_id="user-one", question="Q1", context="C1", answer="A1", session_id="shared"
+        user_id="00000000-0000-0000-0000-000000000011",
+        question="Q1",
+        context="C1",
+        answer="A1",
+        session_id="shared",
     )
     await sdk_uses_session_manager.add_qa(
-        user_id="user-two", question="Q2", context="C2", answer="A2", session_id="shared"
+        user_id="00000000-0000-0000-0000-000000000012",
+        question="Q2",
+        context="C2",
+        answer="A2",
+        session_id="shared",
     )
 
     entries1 = await cognee.session.get_session(session_id="shared", user=user1)
