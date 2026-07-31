@@ -21,8 +21,9 @@ cognee-cli search "keyword" --query-type CHUNKS
 cognee-cli delete --all                      # wipe local state
 ```
 
-Search types match the SDK's `SearchType` enum (`cognee/modules/search/types/SearchType.py`):
-GRAPH_COMPLETION, RAG_COMPLETION, CHUNKS, SUMMARIES, TEMPORAL, FEELING_LUCKY, …
+Search types match exactly 7 of the SDK's `SearchType` enum (`cognee/modules/search/types/SearchType.py`), those 7 being chosen in (`cognee/cli/config.py:SEARCH_TYPE_CHOICES`):
+GRAPH_COMPLETION, RAG_COMPLETION, CHUNKS, SUMMARIES, CODE, CYPHER, GRAPH_REPORT
+Others must be reached from the SDK, not CLI; e.g. call cognee.search with `query_type=SearchType.TEMPORAL`
 
 ## Management
 
@@ -69,3 +70,5 @@ an old schema.
 - `add` without `--dataset-name` targets the default dataset `main_dataset`;
   cognify/search operate across your accessible datasets unless a dataset is
   given.
+- `memify` requires one of the arguments -d/--dataset-name --dataset-id
+- `cognee-cli get` is not implemented presently; `cognee-cli set` is not working. The user must presently rely on .env and environment variables for config
