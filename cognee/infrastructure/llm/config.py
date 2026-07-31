@@ -43,7 +43,7 @@ LOCAL_LLM_MODEL_PREFIXES = ("lm_studio/",)
 
 # Default RPM budget for local inference servers when LLM_RATE_LIMIT_REQUESTS
 # is not explicitly configured; cloud providers keep the regular default of 60.
-LOCAL_DEFAULT_RATE_LIMIT_REQUESTS = 20
+LOCAL_DEFAULT_RATE_LIMIT_REQUESTS = 10
 
 
 def is_local_llm(provider: str | None, model: str | None) -> bool:
