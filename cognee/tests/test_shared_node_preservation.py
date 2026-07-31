@@ -29,7 +29,6 @@ from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.llm import LLMGateway
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.modules.data.exceptions.exceptions import UnauthorizedDataAccessError
-from cognee.modules.data.methods import create_authorized_dataset
 from cognee.modules.data.processing.document_types.TextDocument import TextDocument
 from cognee.modules.engine.models import Entity
 from cognee.modules.engine.operations.setup import setup

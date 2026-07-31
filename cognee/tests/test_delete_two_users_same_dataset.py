@@ -16,7 +16,6 @@ from cognee.infrastructure.llm import LLMGateway
 from cognee.modules.chunking.models import DocumentChunk
 from cognee.modules.data.exceptions.exceptions import UnauthorizedDataAccessError
 from cognee.modules.data.methods import (
-    create_authorized_dataset,
     get_authorized_dataset_by_name,
 )
 from cognee.modules.data.models import Data
