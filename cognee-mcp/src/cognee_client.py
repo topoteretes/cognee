@@ -6,15 +6,19 @@ This module provides a unified interface for interacting with Cognee, supporting
 - API mode: Makes HTTP requests to a running Cognee FastAPI server
 """
 
+import hashlib
+import json
+import mimetypes
 import os
 import sys
-import hashlib
-from typing import Optional, Any, List, Dict
-from uuid import UUID
 from contextlib import redirect_stdout
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+from uuid import UUID
+
 import httpx
+
 from cognee.shared.logging_utils import get_logger
-import json
 
 try:
     from .server_utils import normalize_delete_mode
@@ -144,6 +148,29 @@ class CogneeClient:
         digest = hashlib.md5(content.encode("utf-8")).hexdigest()
         return {"data": (f"text_{digest}.txt", content, "text/plain")}
 
+    @staticmethod
+    def _file_upload(file_path: Path) -> Dict[str, tuple[str, bytes, str]]:
+        """Upload real file bytes using the original basename.
+
+        Used by cognify_file, which writes a tempfile named after the source
+        file so Data.name stays readable instead of text_<md5>.txt.
+        """
+        mime = mimetypes.guess_type(file_path.name)[0] or "application/octet-stream"
+        return {"data": (file_path.name, file_path.read_bytes(), mime)}
+
+    @staticmethod
+    def _resolve_existing_file(data: Any) -> Optional[Path]:
+        """Return a Path when data points at an existing filesystem file."""
+        if isinstance(data, Path):
+            return data if data.is_file() else None
+        if isinstance(data, str):
+            candidate = Path(data)
+            # Avoid treating arbitrary short text / multiline notes as paths.
+            if "\n" in data or len(data) > 4096:
+                return None
+            return candidate if candidate.is_file() else None
+        return None
+
     async def add(
         self, data: Any, dataset_name: str = "main_dataset", node_set: Optional[List[str]] = None
     ) -> Dict[str, Any]:
@@ -167,7 +194,11 @@ class CogneeClient:
         if self.use_api:
             endpoint = f"{self.api_url}/api/v1/add"
 
-            files = self._text_upload(data)
+            file_path = self._resolve_existing_file(data)
+            if file_path is not None:
+                files = self._file_upload(file_path)
+            else:
+                files = self._text_upload(data)
             form_data = {
                 "datasetName": dataset_name,
             }

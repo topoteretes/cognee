@@ -170,6 +170,37 @@ async def test_cognee_client_api_add_uses_content_addressed_filename():
 
 
 @pytest.mark.asyncio
+async def test_cognee_client_api_add_uploads_existing_file_with_basename(tmp_path):
+    requests: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"status": "ok"})
+
+    client = CogneeClient(api_url="http://cognee.local")
+    await client.client.aclose()
+    client.client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+    # Mimic cognify_file: tempfile dir + original basename.
+    upload_dir = tmp_path / "cognee_upload_abc"
+    upload_dir.mkdir()
+    file_path = upload_dir / "meeting-notes.md"
+    payload = b"# Meeting notes\nAction items for Alice.\n"
+    file_path.write_bytes(payload)
+
+    try:
+        await client.add(str(file_path), dataset_name="ds")
+    finally:
+        await client.close()
+
+    assert requests[0].url.path == "/api/v1/add"
+    body = requests[0].content
+    assert b'filename="meeting-notes.md"' in body
+    assert payload in body
+    assert b"text_" not in body
+
+
+@pytest.mark.asyncio
 async def test_cognee_client_api_remember_sends_session_id():
     requests: list[httpx.Request] = []
 
