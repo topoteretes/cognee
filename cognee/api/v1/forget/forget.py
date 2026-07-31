@@ -145,7 +145,14 @@ async def forget(
                 raise ValueError("data_id requires dataset or dataset_id.")
             raise ValueError("Specify dataset, dataset_id, data_id+dataset, or everything=True.")
 
-        async with set_database_global_context_variables(dataset_ref, user.id):
+        # Authorize before entering the dataset's database context: context
+        # entry provisions per-dataset database registry rows, a write that
+        # must never happen for a caller without delete permission (an
+        # unauthorized caller used to surface as a UniqueViolation 500 — or,
+        # for an unprovisioned dataset, actually created rows).
+        resolved_dataset_id = await _resolve_dataset_id(dataset_ref, user)
+
+        async with set_database_global_context_variables(resolved_dataset_id, user.id):
             if memory_only:
                 if data_id is not None:
                     return await _forget_data_memory(data_id, dataset_ref, user)

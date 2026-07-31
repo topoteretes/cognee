@@ -9,7 +9,19 @@ from hashlib import sha256
 from typing import List, Optional
 
 from pydantic import ValidationError
-from sqlalchemy import create_engine, delete, event, func, insert, or_, select, text, update
+from sqlalchemy import (
+    create_engine,
+    delete,
+    event,
+    func,
+    insert,
+    or_,
+    select,
+    text,
+    update,
+)
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -835,16 +847,27 @@ class SqlCacheAdapter(CacheDBInterface):
     async def create_session_context_entry(
         self, user_id: str, session_id: str, entry_dump: dict
     ) -> None:
-        """Append one session-context entry (kind-discriminated dict) to the session.
+        """Create or replace one session-context entry (kind-discriminated dict).
 
         The caller validates the payload; we only promote its ``id`` to the
-        ``entry_id`` column so updates can target a single row directly.
+        ``entry_id`` column so updates can target a single row directly. Writes
+        upsert on (user_id, session_id, entry_id) — last writer wins — so racing
+        update-then-create flows (e.g. the session persist watermark) converge
+        on a single row instead of accumulating duplicates.
         """
         await self._ensure_initialized()
         # Redis/FS append regardless of "id" (an id-less entry is simply never
         # targetable by update). Mirror that: fall back to a synthetic entry_id
         # only to satisfy the NOT NULL column; the stored payload is untouched.
         entry_id = entry_dump.get("id") or str(uuid.uuid4())
+        insert_into = pg_insert if self._is_postgres else sqlite_insert
+        statement = insert_into(cache_session_context).values(
+            user_id=user_id,
+            session_id=session_id,
+            entry_id=entry_id,
+            payload=entry_dump,
+            expires_at=self._session_expiry(),
+        )
         try:
             async with self.sessionmaker() as session, session.begin():
                 await self._lock_session_writes(session, cache_session_context, user_id, session_id)
@@ -852,12 +875,12 @@ class SqlCacheAdapter(CacheDBInterface):
                     session, cache_session_context, user_id, session_id
                 )
                 await session.execute(
-                    insert(cache_session_context).values(
-                        user_id=user_id,
-                        session_id=session_id,
-                        entry_id=entry_id,
-                        payload=entry_dump,
-                        expires_at=self._session_expiry(),
+                    statement.on_conflict_do_update(
+                        index_elements=["user_id", "session_id", "entry_id"],
+                        set_={
+                            "payload": statement.excluded.payload,
+                            "expires_at": statement.excluded.expires_at,
+                        },
                     )
                 )
                 await self._refresh_session_ttl(session, cache_session_context, user_id, session_id)
@@ -901,6 +924,11 @@ class SqlCacheAdapter(CacheDBInterface):
                     await self._lock_session_writes(
                         session, cache_session_context, user_id, session_id
                     )
+                    # The unique index keeps this to one row; if duplicates predate the
+                    # backfill, resolve to the newest instead of raising
+                    # MultipleResultsFound — the permanent per-session 503 of issue
+                    # #4226. The UPDATE below still targets every duplicate, so
+                    # stragglers converge on the merged payload.
                     result = await session.execute(
                         select(cache_session_context.c.payload)
                         .where(
@@ -908,9 +936,11 @@ class SqlCacheAdapter(CacheDBInterface):
                             cache_session_context.c.entry_id == entry_id,
                             self._not_expired(cache_session_context),
                         )
+                        .order_by(cache_session_context.c.seq.desc())
+                        .limit(1)
                         .with_for_update()
                     )
-                    payload = result.scalar_one_or_none()
+                    payload = result.scalars().first()
                     if payload is None:
                         return False
                     merged = {**dict(payload), **merge}

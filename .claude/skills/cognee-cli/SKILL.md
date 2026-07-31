@@ -21,14 +21,17 @@ cognee-cli search "keyword" --query-type CHUNKS
 cognee-cli delete --all                      # wipe local state
 ```
 
-Search types match the SDK's `SearchType` enum (`cognee/modules/search/types/SearchType.py`):
-GRAPH_COMPLETION, RAG_COMPLETION, CHUNKS, SUMMARIES, TEMPORAL, FEELING_LUCKY, …
+Search types match exactly 7 of the SDK's `SearchType` enum (`cognee/modules/search/types/SearchType.py`), those 7 being chosen in (`cognee/cli/config.py:SEARCH_TYPE_CHOICES`):
+GRAPH_COMPLETION, RAG_COMPLETION, CHUNKS, SUMMARIES, CODE, CYPHER, GRAPH_REPORT
+Others must be reached from the SDK, not CLI; e.g. call cognee.search with `query_type=SearchType.TEMPORAL`
 
 ## Management
 
 ```bash
 cognee-cli datasets list                     # dataset operations
-cognee-cli config get|set|list               # configuration management
+cognee-cli config get [key] [--show-secrets] # view one/all settings (API keys masked by default)
+cognee-cli config set <key> <value>          # set + persist to ./.env in the cwd
+cognee-cli config unset <key>                # reset a key to its default (also persisted)
 cognee-cli -ui                               # launch API server + UI (see cognee-server skill)
 cognee-cli serve --url http://localhost:8000 # connect CLI/SDK to a running instance
 ```
@@ -69,3 +72,9 @@ an old schema.
 - `add` without `--dataset-name` targets the default dataset `main_dataset`;
   cognify/search operate across your accessible datasets unless a dataset is
   given.
+- `memify` requires one of the arguments -d/--dataset-name --dataset-id
+- `config set`/`config unset` write to the `.env` file in whatever directory
+  you run the command from (creating it if missing) — run later
+  `cognee-cli`/SDK commands from that same directory to see the change take
+  effect, same as editing `.env` by hand. `config reset` (reset *all* keys)
+  is still not implemented.
