@@ -132,6 +132,49 @@ async def track_operation_usage(operation: str, **context):
                 logger.debug("activity sink failed (%s)", exc)
 
 
+def begin_operation(operation: str, **context) -> Optional[object]:
+    """Open an operation scope without a context manager (for async generators
+    like ``run_tasks`` where wrapping in ``async with`` is awkward).
+
+    Returns a reset token to hand to ``end_operation``, or ``None`` when no sink
+    is registered (inert — the caller's ``end_operation``/``mark_*`` become
+    no-ops).
+    """
+    if _activity_sink is None:
+        return None
+    event = ActivityEvent(operation=operation, **context)
+    return _active_operation.set(event)
+
+
+def mark_active_operation_errored(error: str) -> None:
+    """Mark the active operation (if any) errored, before ``end_operation``."""
+    event = _active_operation.get()
+    if event is not None:
+        event.status = "errored"
+        event.error = error
+
+
+async def end_operation(token) -> None:
+    """Close a scope opened by ``begin_operation``: emit the event, then reset.
+
+    ``token is None`` (no sink) is a no-op. Sink failures are swallowed so
+    activity logging can never break the operation it observes.
+    """
+    if token is None:
+        return
+    event = _active_operation.get()
+    _active_operation.reset(token)
+    if event is None:
+        return
+    event.ended_at = datetime.now(timezone.utc)
+    sink = _activity_sink
+    if sink is not None:
+        try:
+            await sink(event)
+        except Exception as exc:
+            logger.debug("activity sink failed (%s)", exc)
+
+
 # Exact per-call token usage, reported by an adapter right after a completion
 # so the gateway's usage hook can use real counts instead of the char estimate.
 # One-shot: consumed (and cleared) by the very next record_llm_call.

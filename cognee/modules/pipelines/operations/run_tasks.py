@@ -81,6 +81,23 @@ async def run_tasks(
     pipeline_run = await log_pipeline_run_start(pipeline_id, pipeline_name, dataset.id, data)
     pipeline_run_id = pipeline_run.pipeline_run_id
 
+    from cognee.modules.session_lifecycle.usage_tracking import (
+        begin_operation,
+        end_operation,
+        mark_active_operation_errored,
+    )
+
+    # Open an activity-log scope for this run (inert unless a sink is registered).
+    # Set before the per-item tasks are created so their LLM usage accrues here.
+    activity_token = begin_operation(
+        pipeline_name,
+        user_id=user.id,
+        tenant_id=getattr(user, "tenant_id", None),
+        dataset_id=dataset.id,
+        dataset_name=dataset.name,
+        pipeline_run_id=pipeline_run_id,
+    )
+
     yield PipelineRunStarted(
         pipeline_run_id=pipeline_run_id,
         dataset_id=dataset.id,
@@ -177,6 +194,8 @@ async def run_tasks(
                 pipeline_run_id, pipeline_id, pipeline_name, dataset.id, data
             )
 
+            await end_operation(activity_token)
+
             yield PipelineRunCompleted(
                 pipeline_run_id=pipeline_run_id,
                 dataset_id=dataset.id,
@@ -203,6 +222,9 @@ async def run_tasks(
             await log_pipeline_run_error(
                 pipeline_run_id, pipeline_id, pipeline_name, dataset.id, data, error
             )
+
+            mark_active_operation_errored(repr(error))
+            await end_operation(activity_token)
 
             yield PipelineRunErrored(
                 pipeline_run_id=pipeline_run_id,
