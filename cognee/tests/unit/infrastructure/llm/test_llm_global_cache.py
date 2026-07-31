@@ -65,8 +65,10 @@ async def test_set_database_global_context_variables_applies_llm_config(monkeypa
     # depend on the ambient .env providing a global LLM_API_KEY.
     assert get_llm_client(raise_api_key_error=False).model != OPENAI_MODEL
 
+    # A dataset id (not a name) keeps this hermetic: names are resolved to ids
+    # via a user lookup before publishing, and this test's user does not exist.
     async with set_database_global_context_variables(
-        "test_dataset", uuid4(), llm_config=_openai_config()
+        uuid4(), uuid4(), llm_config=_openai_config()
     ):
         client = get_llm_client()
         assert client.model == OPENAI_MODEL
