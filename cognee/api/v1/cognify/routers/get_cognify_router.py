@@ -1,7 +1,7 @@
 import os
 import asyncio
 from uuid import UUID
-from pydantic import Field
+from pydantic import Field, StrictInt
 from typing import List, Optional
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
@@ -102,16 +102,18 @@ class CognifyPayloadDTO(InDTO):
             "entity extraction. Leave empty to process without an ontology."
         ),
     )
-    chunks_per_batch: Optional[int] = Field(
+    chunks_per_batch: Optional[StrictInt] = Field(
         default=None,
+        gt=0,
         examples=[None],
         description=(
             "Number of chunks to process per task batch (e.g. 36). Controls processing "
             "parallelism/throughput; leave null for the pipeline default. Higher the value higher the parallelism/throughput"
         ),
     )
-    data_per_batch: Optional[int] = Field(
+    data_per_batch: StrictInt = Field(
         default=20,
+        gt=0,
         examples=[20],
         description="Maximum number of data items to process concurrently within a dataset.",
     )
