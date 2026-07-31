@@ -331,7 +331,7 @@ Graph memory traditionally means operating a stack — a graph database for rela
 > **⚠️ Warning:** Using Postgres as a graph store is currently a released as a demo feature. The production ready feature is available as a licenced product. Use it to demo keeping relational metadata, PGVector, and graph
 > state in a single Postgres service.
 >
-> Interested in production use of Postgres as a graph database? Book a call with our sales team at our [website](htpps://www.cognee.ai)
+> Interested in production use of Postgres as a graph database? Book a call with our sales team at our [website](https://www.cognee.ai)
 >
 | Memory layer | Traditional stack | cognee on Postgres |
 | --- | --- | --- |
