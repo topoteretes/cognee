@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, patch
 import cognee
 from cognee.api.v1.datasets import datasets
 from cognee.context_global_variables import set_database_global_context_variables
+from cognee.modules.data.methods import create_authorized_dataset
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.databases.graph import get_graph_engine
@@ -15,7 +16,6 @@ from cognee.infrastructure.llm import LLMGateway
 from cognee.modules.chunking.models import DocumentChunk
 from cognee.modules.data.exceptions.exceptions import UnauthorizedDataAccessError
 from cognee.modules.data.methods import (
-    create_authorized_dataset,
     get_authorized_dataset_by_name,
 )
 from cognee.modules.data.models import Data
@@ -77,7 +77,9 @@ async def main(mock_create_structured_output: AsyncMock):
     marie = await create_user(email="marie@example.com", password="marie_password")
 
     # Johns's context
-    await set_database_global_context_variables("main_dataset", john.id)
+    await set_database_global_context_variables(
+        (await create_authorized_dataset("main_dataset", john)).id, john.id
+    )
     graph_engine = await get_graph_engine()
     nodes, edges = await graph_engine.get_graph_data()
 
@@ -174,7 +176,9 @@ async def main(mock_create_structured_output: AsyncMock):
     )
 
     # John's initial assertions
-    await set_database_global_context_variables("main_dataset", john.id)
+    await set_database_global_context_variables(
+        (await create_authorized_dataset("main_dataset", john)).id, john.id
+    )
     # Assert data points presence in the graph, vector collections and nodes table
     await assert_graph_nodes_present(
         johns_data

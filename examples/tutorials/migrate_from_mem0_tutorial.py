@@ -1,197 +1,96 @@
-# ruff: noqa: E402
 """
-Tutorial: Migrate from mem0 to Cognee (using Mem0Source)
+Migrate from mem0 to Cognee using Mem0Source.
 
-This tutorial demonstrates how to bring **mem0** memories into Cognee using
-the built-in ``Mem0Source`` importer. The importer reads a mem0 export and
-translates each memory into a :class:`COGXMemory` record, which lands in the
-Cognee knowledge graph.
+Demonstrates how to import a mem0 export (platform JSON or OSS dump)
+into Cognee's knowledge graph and query the migrated memory.
 
-What this tutorial covers
--------------------------
-- Obtaining or preparing a mem0 dump (platform export / ``get_all()`` output).
-- Importing with **preserve** mode (memories map directly to graph nodes with
-  zero LLM calls — fast, no token cost).
-- Importing with **re-derive** mode (cognee re-runs its extraction pipeline on
-  the raw memory text — you get entity/relation extraction in addition to the
-  raw memories).
-- Querying the migrated memories with ``cognee.recall()`` to prove the data
-  landed correctly.
+Three import modes:
+  - ``"preserve"``  — map mem0 memories straight to graph nodes (no LLM).
+  - ``"re-derive"`` — ingest raw text and run Cognee's own extraction.
+  - ``"hybrid"``    — preserve the graph *and* cognify raw content.
 
-Usage::
-
+Usage:
     uv run python examples/tutorials/migrate_from_mem0_tutorial.py
 
 Requires:
-    ``LLM_API_KEY`` set in ``.env`` or environment (required for recall, and
-    for ``re-derive`` mode).
+    LLM_API_KEY set in .env (needed for re-derive mode and recall).
 
-Reference
----------
-- ``cognee/modules/migration/sources/mem0.py`` — the Mem0Source adapter.
-- ``cognee/modules/migration/cogx.py`` — the COGXMemory record definition.
-- ``examples/demos/remember_recall_improve_example.py`` — the v1.0 memory API.
+The sample mem0 export lives at ``examples/tutorials/data/mem0_export.json``.
 """
 
 import asyncio
-import os
 from pathlib import Path
 
-# Set up caching and environment BEFORE importing cognee.
-# Cognee reads env-backed settings at import time, so values assigned later
-# may not override defaults or ``.env``.
-os.environ["CACHING"] = "true"
-os.environ["CACHE_BACKEND"] = "fs"
-
 import cognee
-from cognee.modules.migration.cogx import COGXMemory
-from cognee.modules.migration.sources.mem0 import Mem0Source
+from cognee.migration import Mem0Source
+from cognee.shared.logging_utils import ERROR, setup_logging
 
-DATASET = "mem0_migration_tutorial"
-SAMPLE_EXPORT = Path(__file__).parent / "data" / "mem0_sample_export.json"
+DATA_FILE = Path(__file__).parent / "data" / "mem0_export.json"
 
 
 async def main():
-    """Run the mem0 migration tutorial end-to-end."""
-
     from cognee.infrastructure.databases.relational.create_db_and_tables import (
         create_db_and_tables,
     )
 
     await create_db_and_tables()
 
-    # Clear cached config so the env vars above take effect.
-    from cognee.infrastructure.databases.cache.config import get_cache_config
-
-    get_cache_config.cache_clear()
-
-    # ------------------------------------------------------------------
-    # Step 1: Start clean
-    # ------------------------------------------------------------------
-    print("--- Step 1: forget(everything=True) ---")
     await cognee.forget(everything=True)
-    print("  All existing data cleared.\n")
 
     # ------------------------------------------------------------------
-    # Step 2: Import with preserve mode (zero LLM calls)
+    # Step 1: Inspect the mem0 export
     # ------------------------------------------------------------------
-    # preserve mode maps each memory straight into a graph node — no LLM
-    # extraction is run.  This is fast and cost-free; useful when you
-    # want to keep the external system's memories exactly as they are.
-    print("--- Step 2: remember(Mem0Source, mode='preserve') ---")
-    await cognee.remember(
-        Mem0Source(SAMPLE_EXPORT, mode="preserve"),
-        dataset_name=DATASET,
-    )
-    print("  Mem0 export ingested in preserve mode.\n")
+    print("Step 1 — Mem0 export file:", DATA_FILE)
 
     # ------------------------------------------------------------------
-    # Step 3: Recall — prove the memories are queryable
+    # Step 2: Import with preserve mode (no LLM, fastest)
+    # To enable recall over the imported data, in addition to initial remember,
+    # you need to call an additional cognify() (calls LLM)
     # ------------------------------------------------------------------
-    print("--- Step 3: recall() — query migrated memories ---")
-    answer = await cognee.recall(
-        "Who developed the theory of general relativity and when?",
-        datasets=[DATASET],
-    )
-    print(f"  Answer: {answer}\n")
-
-    print("--- Step 4: recall() — query across multiple facts ---")
-    answer = await cognee.recall(
-        "Which scientists won Nobel Prizes?",
-        datasets=[DATASET],
-    )
-    print(f"  Answer: {answer}\n")
-
-    print("--- Step 5: recall() — query by category ---")
-    answer = await cognee.recall(
-        "What scientific discoveries were made in the early 20th century?",
-        datasets=[DATASET],
-    )
-    print(f"  Answer: {answer}\n")
+    print("\nStep 2 — Importing mem0 memories (mode=preserve) …")
+    source = Mem0Source(DATA_FILE, mode="preserve")
+    result = await cognee.remember(source)
+    await cognee.cognify()
+    print("  ", result)
 
     # ------------------------------------------------------------------
-    # Step 6: Import the same data with re-derive mode
+    # Step 3: Query the migrated memory
     # ------------------------------------------------------------------
-    # re-derive mode makes cognee re-run its extraction pipeline (cognify)
-    # on the raw memory text.  This costs LLM tokens but produces richer
-    # entities, relationships, and facts on top of the source memories.
-    DATASET_REDERIVE = "mem0_migration_tutorial_rederive"
+    print("\nStep 3 — Recall: what database does the project use?")
+    answers = await cognee.recall("What database does the project use?")
+    for answer in answers:
+        print("  ", answer)
 
-    print("--- Step 6: remember(Mem0Source, mode='re-derive') ---")
-    await cognee.remember(
-        Mem0Source(SAMPLE_EXPORT, mode="re-derive"),
-        dataset_name=DATASET_REDERIVE,
-    )
-    print("  Mem0 export ingested in re-derive mode (cognify ran).\n")
-
-    print("--- Step 7: recall() — query re-derived dataset ---")
-    answer = await cognee.recall(
-        "Where did Marie Curie conduct her research?",
-        datasets=[DATASET_REDERIVE],
-    )
-    print(f"  Answer: {answer}\n")
+    print("\nStep 4 — Recall: who is Alice's manager?")
+    answers = await cognee.recall("Who is Alice's manager?")
+    for answer in answers:
+        print("  ", answer)
 
     # ------------------------------------------------------------------
-    # Step 8: Using an inline payload (no file needed)
+    # Step 5: Re-import with re-derive mode (runs cognify)
     # ------------------------------------------------------------------
-    # Mem0Source also accepts already-parsed Python lists/dicts — useful
-    # when you fetch memories from the mem0 live API and want to pipe them
-    # straight into Cognee without touching the filesystem.
-    print("--- Step 8: remember() with inline Python dict ---")
-    inline_data = {
-        "results": [
-            {
-                "id": "inline-001",
-                "memory": "Alan Turing proposed the Turing Test in 1950, laying the philosophical foundations of artificial intelligence.",
-                "user_id": "user-inline",
-                "categories": ["computer_science", "ai"],
-                "created_at": "2024-06-01T12:00:00Z",
-            }
-        ]
-    }
-    await cognee.remember(
-        Mem0Source(inline_data, mode="preserve"),
-        dataset_name=DATASET,
-    )
-    print("  Inline payload ingested.\n")
-
-    print("--- Step 9: recall() — query inline-imported memory ---")
-    answer = await cognee.recall(
-        "What did Alan Turing propose?",
-        datasets=[DATASET],
-    )
-    print(f"  Answer: {answer}\n")
+    await cognee.forget(everything=True)
+    print("\nStep 5 — Re-importing with mode=re-derive (runs cognify) …")
+    source = Mem0Source(DATA_FILE, mode="re-derive")
+    result = await cognee.remember(source)
+    print("  ", result)
 
     # ------------------------------------------------------------------
-    # Step 10: Manual inspection — see the COGXMemory records
+    # Step 6: Query again after re-derive
     # ------------------------------------------------------------------
-    # The raw COGXMemory records are available when you iterate over the
-    # source's records() generator directly.  Each one represents a mem0
-    # memory mapped into the standard COGX exchange format.
-    print("--- Step 10: inspect Mem0Source.records() ---")
-    source = Mem0Source(SAMPLE_EXPORT, mode="preserve")
-    record_count = 0
-    async for record in source.records():
-        assert isinstance(record, COGXMemory), (
-            f"Expected COGXMemory, got {type(record).__name__}"
-        )
-        record_count += 1
-        print(
-            f"  [{record.external_id}] {record.content[:80]}..."
-            if len(record.content) > 80
-            else f"  [{record.external_id}] {record.content}"
-        )
-    print(f"  Total records yielded: {record_count}\n")
+    print("\nStep 6 — Recall after re-derive: what are the Q2 OKRs?")
+    answers = await cognee.recall("What are the Q2 OKRs?")
+    for answer in answers:
+        print("  ", answer)
 
     # ------------------------------------------------------------------
     # Cleanup
     # ------------------------------------------------------------------
-    print("--- Step 11: forget(everything=True) ---")
-    result = await cognee.forget(everything=True)
-    print(f"  {result}")
-
-    print("\nDone.  Mem0 memories have been migrated and are queryable via cognee.recall().")
+    print("\nStep 7 — Cleanup")
+    await cognee.forget(everything=True)
+    print("  Done.")
 
 
 if __name__ == "__main__":
+    logger = setup_logging(log_level=ERROR)
     asyncio.run(main())

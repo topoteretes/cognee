@@ -22,7 +22,7 @@ uv pip install -e .
 uv pip install -e ".[dev]"
 
 # Install with specific extras
-uv pip install -e ".[postgres,neo4j,docs,chromadb]"
+uv pip install -e ".[postgres,neo4j,docs]"
 
 # Set up pre-commit hooks
 pre-commit install
@@ -32,13 +32,12 @@ pre-commit install
 - **postgres** / **postgres-binary** - PostgreSQL + PGVector support (also enables the Postgres session-cache backend, `CACHE_BACKEND=postgres`)
 - **neo4j** - Neo4j graph database support
 - **neptune** - AWS Neptune support
-- **chromadb** - ChromaDB vector database
+- **turso** - Turso vector database support
 - **docs** - Document processing (unstructured library)
 - **scraping** - Web scraping (Tavily, BeautifulSoup, Playwright)
 - **langchain** - LangChain integration
 - **llama-index** - LlamaIndex integration
 - **anthropic** - Anthropic Claude models
-- **gemini** - Google Gemini models
 - **ollama** - Ollama local models
 - **mistral** - Mistral AI models
 - **groq** - Groq API support
@@ -130,7 +129,7 @@ All data flows through task-based pipelines (`cognee/modules/pipelines/`). Tasks
 #### 2. Interface-Based Database Adapters
 Multiple backends are supported through adapter interfaces:
 - **Graph**: Ladybug (default), Neo4j, Neptune, Postgres via `GraphDBInterface`
-- **Vector**: LanceDB (default), ChromaDB, PGVector via `VectorDBInterface`
+- **Vector**: LanceDB (default), PGVector, Neptune Analytics, Turso via `VectorDBInterface` (ChromaDB/Qdrant/Weaviate/Milvus via community adapters)
 - **Relational**: SQLite (default), PostgreSQL
 
 Key files:
@@ -254,11 +253,12 @@ DB_NAME=cognee_db
 ```
 
 #### Vector Databases
-Supported: lancedb (default), pgvector, chromadb, qdrant, weaviate, milvus
+Supported in-tree: lancedb (default), pgvector, neptune_analytics, turso.
+Others (ChromaDB, Qdrant, Weaviate, Milvus, …) are community adapters — install from
+https://github.com/topoteretes/cognee-community and register via `use_vector_adapter`
+before setting `VECTOR_DB_PROVIDER`, otherwise cognee raises
+"Unsupported vector database provider".
 ```bash
-# ChromaDB (requires chromadb extra)
-VECTOR_DB_PROVIDER=chromadb
-
 # PGVector (requires postgres extra)
 VECTOR_DB_PROVIDER=pgvector
 VECTOR_DB_URL=postgresql://cognee:cognee@localhost:5432/cognee_db
@@ -314,7 +314,7 @@ LLM_API_KEY="your_azure_api_key"
 LLM_API_VERSION="2024-12-01-preview"
 ```
 
-#### Google Gemini (requires gemini extra)
+#### Google Gemini (no extra required)
 ```bash
 LLM_PROVIDER="gemini"
 LLM_MODEL="gemini/gemini-2.0-flash-exp"
@@ -449,6 +449,19 @@ this rule applies only to internal PRs.
 - **Type hints**: Encouraged (ty checks enabled)
 - **Important**: Always run `pre-commit run --all-files` before committing to catch formatting issues
 
+## Commit & PR Title Style
+- **Subject line (required):**
+  - The format is (type): (short summary)
+  - Write summary as if it is giving an instruction (e.g., "Fix bug" instead of "Fixed bug")
+  - 50 chars or less
+  - Capitalize first char of summary
+  - Do NOT end with a period
+- **Body (optional):**
+  - **Description:** Explain the motivation behind the change, what problem it solves, and any relevant background.
+  - **Use the body to explain what and why, not how.** The body of the commit message should explain why the change was made and what problem it solves. You don't need to explain how the code works, as the code itself should be clear enough for that.
+- **Include issue tracking numbers where applicable.** Reference an issue in at least the subject line (e.g., Fixes COG-24), making it easier to trace changes to their corresponding issue.
+- **Separate the subject line from the body with a blank line.** This helps differentiate the short description from the detailed explanation. Generally, all commits should have separate subject and body.
+
 ## Testing Strategy
 
 Tests are organized in `cognee/tests/`:
@@ -565,8 +578,8 @@ Launch visualization server:
 cognee-cli -ui  # Launches full stack with UI at http://localhost:3000
 
 # Via Python
-from cognee.api.v1.visualize import start_visualization_server
-await start_visualization_server(port=8080)
+from cognee.api.v1.visualize import visualization_server
+shutdown = visualization_server(port=8080)  # synchronous; returns a shutdown callable
 ```
 
 ## Debugging & Troubleshooting
