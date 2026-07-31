@@ -20,7 +20,11 @@ logger = get_logger("improve")
 
 
 class ImproveKwargs(TypedDict, total=False):
-    """Power-user overrides for improve(). Most users never need these."""
+    """Power-user overrides for improve(). Most users never need these.
+
+    ``node_type`` defaults to ``NodeSet`` when omitted; pass it explicitly as
+    ``None`` to enrich without a type filter.
+    """
 
     extraction_tasks: list
     enrichment_tasks: list
@@ -223,7 +227,10 @@ async def improve(
             # Stage 3: default enrichment (triplet embeddings)
             from cognee.modules.memify import memify
 
-            if "node_type" not in kwargs or kwargs.get("node_type") is None:
+            # Only default the filter when the caller said nothing about it. An
+            # explicit node_type=None means "do not filter by type", and silently
+            # overriding it left callers with no way to ask for that.
+            if "node_type" not in kwargs:
                 from cognee.modules.engine.models.node_set import NodeSet
 
                 kwargs["node_type"] = NodeSet
