@@ -106,11 +106,16 @@ export default function pollDatasetStatus(
             }
           }
         }
-
-        setTimeout(check, intervalMs);
       } catch (err) {
-        reject(err);
+        // Transient failure (network blip, or the status row not written yet
+        // right after a background /v1/remember returns) — the upload itself
+        // already succeeded by this point, so keep polling instead of failing
+        // the whole upload. Only the deadline check above ends the poll.
+        const normalized = err instanceof Error ? err : new Error(String(err));
+        captureException(normalized, { datasetId, transient: true });
       }
+
+      setTimeout(check, intervalMs);
     };
 
     setTimeout(check, initialDelayMs);
