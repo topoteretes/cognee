@@ -15,7 +15,6 @@ from sqlalchemy import (
     event,
     func,
     insert,
-    inspect,
     or_,
     select,
     text,
@@ -189,40 +188,11 @@ class SqlCacheAdapter(CacheDBInterface):
             try:
                 async with self.engine.begin() as connection:
                     await connection.run_sync(cache_metadata.create_all, checkfirst=True)
-                    await connection.run_sync(self._heal_session_context_unique_index)
             except Exception as error:
                 error_msg = f"Failed to connect to SQL cache database: {error}"
                 logger.error(error_msg)
                 raise CacheConnectionError(error_msg) from error
             self._initialized = True
-
-    @staticmethod
-    def _heal_session_context_unique_index(connection) -> None:
-        """Backfill the (user_id, session_id, entry_id) unique index on a legacy table.
-
-        Fresh databases get ``uq_cache_session_context_entry`` from create_all, but a
-        table created before the index existed is skipped by checkfirst — and the cache
-        database is usually not the one alembic migrates (default sqlite uses a separate
-        cache.db; CACHE_DB_URL can point anywhere), so migration c3d5e7f9a1b2 may never
-        reach it. The upsert in create_session_context_entry requires the index, so
-        collapse any duplicates accumulated under the old append-only insert to the
-        newest row per key and create it here (issue #4226). IF NOT EXISTS keeps
-        concurrent initializers from racing each other on the create.
-        """
-        table = cache_session_context
-        index_names = {index["name"] for index in inspect(connection).get_indexes(table.name)}
-        if "uq_cache_session_context_entry" in index_names:
-            return
-        newest = select(func.max(table.c.seq)).group_by(
-            table.c.user_id, table.c.session_id, table.c.entry_id
-        )
-        connection.execute(delete(table).where(table.c.seq.notin_(newest)))
-        connection.execute(
-            text(
-                "CREATE UNIQUE INDEX IF NOT EXISTS uq_cache_session_context_entry "
-                "ON cache_session_context (user_id, session_id, entry_id)"
-            )
-        )
 
     @staticmethod
     def _now() -> datetime:

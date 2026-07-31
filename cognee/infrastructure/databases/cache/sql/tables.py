@@ -132,10 +132,10 @@ cache_session_context = Table(
 
 # Uniqueness lives in a named index (not an inline constraint): fresh tables
 # get it from create_all; pre-existing tables (skipped by checkfirst) receive
-# the identical index — after a one-time dedupe — from
-# SqlCacheAdapter._heal_session_context_unique_index on adapter init, and from
-# alembic migration c3d5e7f9a1b2 when the cache lives in the alembic-managed
-# relational database. The create upsert targets this index, so it must exist.
+# the identical index — after a one-time dedupe — from alembic migration
+# c3d5e7f9a1b2, which covers both the alembic-managed database and the
+# standalone sqlite cache.db, and fails when a cache database it cannot reach
+# would be left behind. The create upsert targets this index, so it must exist.
 uq_cache_session_context_entry = Index(
     "uq_cache_session_context_entry",
     cache_session_context.c.user_id,
