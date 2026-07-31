@@ -37,8 +37,8 @@ class TestValidateSessionParams:
 
     def test_valid_params(self):
         """Valid user_id and session_id do not raise."""
-        SessionManager._validate_session_params(user_id="u1", session_id="s1")
-        SessionManager._validate_session_params(user_id="u1", session_id="s1", qa_id="q1")
+        SessionManager._validate_session_params(user_id="00000000-0000-0000-0000-000000000001", session_id="s1")
+        SessionManager._validate_session_params(user_id="00000000-0000-0000-0000-000000000001", session_id="s1", qa_id="q1")
 
     def test_empty_user_id_raises(self):
         """Empty user_id raises SessionParameterValidationError."""
@@ -49,7 +49,7 @@ class TestValidateSessionParams:
     def test_empty_session_id_raises(self):
         """Empty session_id raises SessionParameterValidationError."""
         with pytest.raises(SessionParameterValidationError) as exc_info:
-            SessionManager._validate_session_params(user_id="u1", session_id="")
+            SessionManager._validate_session_params(user_id="00000000-0000-0000-0000-000000000001", session_id="")
         assert "session_id" in exc_info.value.message
 
     def test_whitespace_user_id_raises(self):
@@ -60,30 +60,30 @@ class TestValidateSessionParams:
     def test_empty_qa_id_raises(self):
         """Empty qa_id raises when provided."""
         with pytest.raises(SessionParameterValidationError) as exc_info:
-            SessionManager._validate_session_params(user_id="u1", session_id="s1", qa_id="")
+            SessionManager._validate_session_params(user_id="00000000-0000-0000-0000-000000000001", session_id="s1", qa_id="")
         assert "qa_id" in exc_info.value.message
 
     def test_valid_last_n(self):
         """Valid last_n (positive int or None) does not raise."""
-        SessionManager._validate_session_params(user_id="u1", session_id="s1", last_n=5)
-        SessionManager._validate_session_params(user_id="u1", session_id="s1", last_n=1)
+        SessionManager._validate_session_params(user_id="00000000-0000-0000-0000-000000000001", session_id="s1", last_n=5)
+        SessionManager._validate_session_params(user_id="00000000-0000-0000-0000-000000000001", session_id="s1", last_n=1)
 
     def test_invalid_last_n_zero_raises(self):
         """last_n=0 raises SessionParameterValidationError."""
         with pytest.raises(SessionParameterValidationError) as exc_info:
-            SessionManager._validate_session_params(user_id="u1", session_id="s1", last_n=0)
+            SessionManager._validate_session_params(user_id="00000000-0000-0000-0000-000000000001", session_id="s1", last_n=0)
         assert "last_n" in exc_info.value.message
 
     def test_invalid_last_n_negative_raises(self):
         """last_n negative raises."""
         with pytest.raises(SessionParameterValidationError) as exc_info:
-            SessionManager._validate_session_params(user_id="u1", session_id="s1", last_n=-1)
+            SessionManager._validate_session_params(user_id="00000000-0000-0000-0000-000000000001", session_id="s1", last_n=-1)
         assert "last_n" in exc_info.value.message
 
     def test_invalid_last_n_not_int_raises(self):
         """last_n not an int raises."""
         with pytest.raises(SessionParameterValidationError) as exc_info:
-            SessionManager._validate_session_params(user_id="u1", session_id="s1", last_n="5")
+            SessionManager._validate_session_params(user_id="00000000-0000-0000-0000-000000000001", session_id="s1", last_n="5")
         assert "last_n" in exc_info.value.message
 
 
@@ -157,7 +157,7 @@ class TestSessionManager:
     @pytest.mark.asyncio
     async def test_add_qa_session_id_none_uses_default(self, sm, mock_cache):
         """add_qa with session_id=None uses default_session_id."""
-        qa_id = await sm.add_qa(user_id="u1", question="Q", context="C", answer="A")
+        qa_id = await sm.add_qa(user_id="00000000-0000-0000-0000-000000000001", question="Q", context="C", answer="A")
         assert qa_id is not None
         call_kw = mock_cache.create_qa_entry.call_args.kwargs
         assert call_kw["session_id"] == "default_session"
@@ -167,7 +167,7 @@ class TestSessionManager:
         """add_qa returns generated qa_id and calls cache."""
         used_ids = {"node_ids": ["n1"], "edge_ids": ["e1"]}
         qa_id = await sm.add_qa(
-            user_id="u1",
+            user_id="00000000-0000-0000-0000-000000000001",
             question="Q",
             context="C",
             answer="A",
@@ -177,7 +177,7 @@ class TestSessionManager:
         assert qa_id is not None
         mock_cache.create_qa_entry.assert_called_once()
         call_kw = mock_cache.create_qa_entry.call_args.kwargs
-        assert call_kw["user_id"] == "u1"
+        assert call_kw["user_id"] == "00000000-0000-0000-0000-000000000001"
         assert call_kw["session_id"] == "s1"
         assert call_kw["question"] == "Q"
         assert call_kw["answer"] == "A"
@@ -185,7 +185,7 @@ class TestSessionManager:
         assert call_kw["used_graph_element_ids"] == used_ids
         assert "embedding" not in call_kw
         session_vector_mocks["index"].assert_awaited_once_with(
-            user_id="u1",
+            user_id="00000000-0000-0000-0000-000000000001",
             session_id="s1",
             qa_id=qa_id,
             question="Q",
@@ -197,7 +197,7 @@ class TestSessionManager:
         """add_qa returns None when cache unavailable."""
         assert (
             await sm_unavailable.add_qa(
-                user_id="u1", question="Q", context="C", answer="A", session_id="s1"
+                user_id="00000000-0000-0000-0000-000000000001", question="Q", context="C", answer="A", session_id="s1"
             )
             is None
         )
@@ -208,13 +208,13 @@ class TestSessionManager:
         with pytest.raises(SessionParameterValidationError):
             await sm.add_qa(user_id="", question="Q", context="C", answer="A", session_id="s1")
         with pytest.raises(SessionParameterValidationError):
-            await sm.add_qa(user_id="u1", question="Q", context="C", answer="A", session_id="")
+            await sm.add_qa(user_id="00000000-0000-0000-0000-000000000001", question="Q", context="C", answer="A", session_id="")
 
     @pytest.mark.asyncio
     async def test_add_agent_trace_step_session_id_none_uses_default(self, sm, mock_cache):
         """add_agent_trace_step with session_id=None uses default_session_id."""
         trace_id = await sm.add_agent_trace_step(
-            user_id="u1",
+            user_id="00000000-0000-0000-0000-000000000001",
             origin_function="plan_trip",
             status="success",
         )
@@ -236,7 +236,7 @@ class TestSessionManager:
         monkeypatch.setattr(sm, "is_auto_feedback_enabled", lambda: True)
 
         trace_id = await sm.add_agent_trace_step(
-            user_id="u1",
+            user_id="00000000-0000-0000-0000-000000000001",
             origin_function="run_tests",
             status="error",
             session_id="s1",
@@ -252,7 +252,7 @@ class TestSessionManager:
         assert call_kw["session_id"] == "s1"
         pending_spy.assert_awaited_once_with(
             session_manager=sm,
-            user_id="u1",
+            user_id="00000000-0000-0000-0000-000000000001",
             session_id="s1",
         )
 
@@ -270,7 +270,7 @@ class TestSessionManager:
         monkeypatch.setattr(sm, "is_auto_feedback_enabled", lambda: False)
 
         await sm.add_agent_trace_step(
-            user_id="u1",
+            user_id="00000000-0000-0000-0000-000000000001",
             origin_function="run_tests",
             status="error",
             session_id="s1",
@@ -298,7 +298,7 @@ class TestSessionManager:
             ),
         ):
             trace_id = await sm.add_agent_trace_step(
-                user_id="u1",
+                user_id="00000000-0000-0000-0000-000000000001",
                 origin_function="plan_trip",
                 status="success",
                 session_id="s1",
@@ -334,7 +334,7 @@ class TestSessionManager:
             ),
         ):
             trace_id = await sm.add_agent_trace_step(
-                user_id="u1",
+                user_id="00000000-0000-0000-0000-000000000001",
                 origin_function="book_hotel",
                 status="error",
                 session_id="s1",
@@ -360,7 +360,7 @@ class TestSessionManager:
             ),
         ):
             trace_id = await sm.add_agent_trace_step(
-                user_id="u1",
+                user_id="00000000-0000-0000-0000-000000000001",
                 origin_function="book_hotel",
                 status="error",
                 session_id="s1",
@@ -385,7 +385,7 @@ class TestSessionManager:
             ) as mock_llm,
         ):
             trace_id = await sm.add_agent_trace_step(
-                user_id="u1",
+                user_id="00000000-0000-0000-0000-000000000001",
                 origin_function="plan_trip",
                 status="success",
                 session_id="s1",
@@ -414,7 +414,7 @@ class TestSessionManager:
             ),
         ):
             trace_id = await sm.add_agent_trace_step(
-                user_id="u1",
+                user_id="00000000-0000-0000-0000-000000000001",
                 origin_function="plan_trip",
                 status="success",
                 session_id="s1",
@@ -435,7 +435,7 @@ class TestSessionManager:
             new_callable=AsyncMock,
         ) as mock_llm:
             trace_id = await sm.add_agent_trace_step(
-                user_id="u1",
+                user_id="00000000-0000-0000-0000-000000000001",
                 origin_function="plan_trip",
                 status="success",
                 session_id="s1",
@@ -455,7 +455,7 @@ class TestSessionManager:
             new_callable=AsyncMock,
         ) as mock_llm:
             trace_id = await sm.add_agent_trace_step(
-                user_id="u1",
+                user_id="00000000-0000-0000-0000-000000000001",
                 origin_function="plan_trip",
                 status="success",
                 session_id="s1",
@@ -472,7 +472,7 @@ class TestSessionManager:
     async def test_add_agent_trace_step_unavailable_returns_none(self, sm_unavailable):
         """add_agent_trace_step returns None when cache unavailable."""
         result = await sm_unavailable.add_agent_trace_step(
-            user_id="u1",
+            user_id="00000000-0000-0000-0000-000000000001",
             origin_function="plan_trip",
             status="success",
             session_id="s1",
@@ -483,9 +483,9 @@ class TestSessionManager:
     async def test_get_session_invalid_last_n_raises(self, sm):
         """get_session raises on invalid last_n."""
         with pytest.raises(SessionParameterValidationError):
-            await sm.get_session(user_id="u1", last_n=0, session_id="s1")
+            await sm.get_session(user_id="00000000-0000-0000-0000-000000000001", last_n=0, session_id="s1")
         with pytest.raises(SessionParameterValidationError):
-            await sm.get_session(user_id="u1", last_n=-1, session_id="s1")
+            await sm.get_session(user_id="00000000-0000-0000-0000-000000000001", last_n=-1, session_id="s1")
 
     def test_format_entries_empty(self):
         """format_entries returns empty string for empty list."""
@@ -506,10 +506,10 @@ class TestSessionManager:
         mock_cache.get_all_qa_entries.return_value = [
             {"qa_id": "1", "question": "Q", "context": "C", "answer": "A", "time": "t"}
         ]
-        entries = await sm.get_session(user_id="u1", session_id="s1")
+        entries = await sm.get_session(user_id="00000000-0000-0000-0000-000000000001", session_id="s1")
         assert len(entries) == 1
         assert entries[0]["question"] == "Q"
-        mock_cache.get_all_qa_entries.assert_called_once_with("u1", "s1")
+        mock_cache.get_all_qa_entries.assert_called_once_with("00000000-0000-0000-0000-000000000001", "s1")
 
     @pytest.mark.asyncio
     async def test_get_session_formatted(self, sm, mock_cache):
@@ -517,15 +517,15 @@ class TestSessionManager:
         mock_cache.get_all_qa_entries.return_value = [
             SessionQAEntry(qa_id="1", question="Q", context="C", answer="A", time="t")
         ]
-        out = await sm.get_session(user_id="u1", formatted=True, session_id="s1")
+        out = await sm.get_session(user_id="00000000-0000-0000-0000-000000000001", formatted=True, session_id="s1")
         assert isinstance(out, str)
         assert "Previous conversation" in out and "Q" in out
 
     @pytest.mark.asyncio
     async def test_get_session_unavailable_returns_empty(self, sm_unavailable):
         """get_session returns empty list when cache unavailable."""
-        assert await sm_unavailable.get_session(user_id="u1", session_id="s1") == []
-        assert await sm_unavailable.get_session(user_id="u1", formatted=True, session_id="s1") == ""
+        assert await sm_unavailable.get_session(user_id="00000000-0000-0000-0000-000000000001", session_id="s1") == []
+        assert await sm_unavailable.get_session(user_id="00000000-0000-0000-0000-000000000001", formatted=True, session_id="s1") == ""
 
     @pytest.mark.asyncio
     async def test_get_agent_trace_session_calls_cache(self, sm, mock_cache):
@@ -538,15 +538,15 @@ class TestSessionManager:
                 "session_feedback": "plan_trip succeeded.",
             }
         ]
-        entries = await sm.get_agent_trace_session(user_id="u1", session_id="s1")
+        entries = await sm.get_agent_trace_session(user_id="00000000-0000-0000-0000-000000000001", session_id="s1")
         assert len(entries) == 1
         assert entries[0]["trace_id"] == "t1"
-        mock_cache.get_agent_trace_session.assert_called_once_with("u1", "s1", last_n=None)
+        mock_cache.get_agent_trace_session.assert_called_once_with("00000000-0000-0000-0000-000000000001", "s1", last_n=None)
 
     @pytest.mark.asyncio
     async def test_get_agent_trace_session_unavailable_returns_empty(self, sm_unavailable):
         """get_agent_trace_session returns empty list when cache unavailable."""
-        assert await sm_unavailable.get_agent_trace_session(user_id="u1", session_id="s1") == []
+        assert await sm_unavailable.get_agent_trace_session(user_id="00000000-0000-0000-0000-000000000001", session_id="s1") == []
 
     @pytest.mark.asyncio
     async def test_get_agent_trace_feedback_calls_cache(self, sm, mock_cache):
@@ -555,42 +555,42 @@ class TestSessionManager:
             "plan_trip succeeded.",
             "book_hotel failed. Reason: No availability.",
         ]
-        feedback = await sm.get_agent_trace_feedback(user_id="u1", session_id="s1")
+        feedback = await sm.get_agent_trace_feedback(user_id="00000000-0000-0000-0000-000000000001", session_id="s1")
         assert feedback == [
             "plan_trip succeeded.",
             "book_hotel failed. Reason: No availability.",
         ]
-        mock_cache.get_agent_trace_feedback.assert_called_once_with("u1", "s1", last_n=None)
+        mock_cache.get_agent_trace_feedback.assert_called_once_with("00000000-0000-0000-0000-000000000001", "s1", last_n=None)
 
     @pytest.mark.asyncio
     async def test_get_agent_trace_feedback_passes_last_n_to_cache(self, sm, mock_cache):
         """get_agent_trace_feedback forwards last_n to cache."""
         mock_cache.get_agent_trace_feedback.return_value = ["book_hotel failed."]
 
-        feedback = await sm.get_agent_trace_feedback(user_id="u1", session_id="s1", last_n=1)
+        feedback = await sm.get_agent_trace_feedback(user_id="00000000-0000-0000-0000-000000000001", session_id="s1", last_n=1)
 
         assert feedback == ["book_hotel failed."]
-        mock_cache.get_agent_trace_feedback.assert_called_once_with("u1", "s1", last_n=1)
+        mock_cache.get_agent_trace_feedback.assert_called_once_with("00000000-0000-0000-0000-000000000001", "s1", last_n=1)
 
     @pytest.mark.asyncio
     async def test_get_agent_trace_feedback_unavailable_returns_empty(self, sm_unavailable):
         """get_agent_trace_feedback returns empty list when cache unavailable."""
-        assert await sm_unavailable.get_agent_trace_feedback(user_id="u1", session_id="s1") == []
+        assert await sm_unavailable.get_agent_trace_feedback(user_id="00000000-0000-0000-0000-000000000001", session_id="s1") == []
 
     @pytest.mark.asyncio
     async def test_get_agent_trace_count_calls_cache(self, sm, mock_cache):
         """get_agent_trace_count delegates to cache."""
         mock_cache.get_agent_trace_count.return_value = 3
 
-        count = await sm.get_agent_trace_count(user_id="u1", session_id="s1")
+        count = await sm.get_agent_trace_count(user_id="00000000-0000-0000-0000-000000000001", session_id="s1")
 
         assert count == 3
-        mock_cache.get_agent_trace_count.assert_called_once_with("u1", "s1")
+        mock_cache.get_agent_trace_count.assert_called_once_with("00000000-0000-0000-0000-000000000001", "s1")
 
     @pytest.mark.asyncio
     async def test_get_agent_trace_count_unavailable_returns_zero(self, sm_unavailable):
         """get_agent_trace_count returns zero when cache unavailable."""
-        assert await sm_unavailable.get_agent_trace_count(user_id="u1", session_id="s1") == 0
+        assert await sm_unavailable.get_agent_trace_count(user_id="00000000-0000-0000-0000-000000000001", session_id="s1") == 0
 
     @pytest.mark.asyncio
     async def test_update_qa_calls_cache_and_reindexes_when_text_changes(
@@ -601,11 +601,11 @@ class TestSessionManager:
             SessionQAEntry(qa_id="q1", question="Q2", context="C", answer="A", time="t")
         ]
 
-        ok = await sm.update_qa(user_id="u1", qa_id="q1", question="Q2", session_id="s1")
+        ok = await sm.update_qa(user_id="00000000-0000-0000-0000-000000000001", qa_id="q1", question="Q2", session_id="s1")
 
         assert ok is True
         mock_cache.update_qa_entry.assert_called_once_with(
-            user_id="u1",
+            user_id="00000000-0000-0000-0000-000000000001",
             session_id="s1",
             qa_id="q1",
             question="Q2",
@@ -617,10 +617,10 @@ class TestSessionManager:
             memify_metadata=None,
             used_session_context_ids=None,
         )
-        mock_cache.get_qa_entries_by_ids.assert_awaited_once_with("u1", "s1", ["q1"])
+        mock_cache.get_qa_entries_by_ids.assert_awaited_once_with("00000000-0000-0000-0000-000000000001", "s1", ["q1"])
         session_vector_mocks["delete_qa"].assert_awaited_once_with(qa_id="q1")
         session_vector_mocks["index"].assert_awaited_once_with(
-            user_id="u1",
+            user_id="00000000-0000-0000-0000-000000000001",
             session_id="s1",
             qa_id="q1",
             question="Q2",
@@ -633,7 +633,7 @@ class TestSessionManager:
     ):
         """Feedback-only updates leave QA vector rows unchanged."""
         ok = await sm.update_qa(
-            user_id="u1",
+            user_id="00000000-0000-0000-0000-000000000001",
             qa_id="q1",
             feedback_text="useful",
             feedback_score=5,
@@ -648,10 +648,10 @@ class TestSessionManager:
     @pytest.mark.asyncio
     async def test_delete_feedback_calls_cache(self, sm, mock_cache):
         """delete_feedback delegates to cache."""
-        ok = await sm.delete_feedback(user_id="u1", qa_id="q1", session_id="s1")
+        ok = await sm.delete_feedback(user_id="00000000-0000-0000-0000-000000000001", qa_id="q1", session_id="s1")
         assert ok is True
         mock_cache.delete_feedback.assert_called_once_with(
-            user_id="u1", session_id="s1", qa_id="q1"
+            user_id="00000000-0000-0000-0000-000000000001", session_id="s1", qa_id="q1"
         )
 
     @pytest.mark.asyncio
@@ -659,10 +659,10 @@ class TestSessionManager:
         self, sm, mock_cache, session_vector_mocks
     ):
         """delete_qa delegates to cache and removes its vector row."""
-        ok = await sm.delete_qa(user_id="u1", qa_id="q1", session_id="s1")
+        ok = await sm.delete_qa(user_id="00000000-0000-0000-0000-000000000001", qa_id="q1", session_id="s1")
         assert ok is True
         mock_cache.delete_qa_entry.assert_called_once_with(
-            user_id="u1", session_id="s1", qa_id="q1"
+            user_id="00000000-0000-0000-0000-000000000001", session_id="s1", qa_id="q1"
         )
         session_vector_mocks["delete_qa"].assert_awaited_once_with(qa_id="q1")
 
@@ -673,7 +673,7 @@ class TestSessionManager:
         """delete_qa leaves vectors alone when the cache row was not deleted."""
         mock_cache.delete_qa_entry.return_value = False
 
-        ok = await sm.delete_qa(user_id="u1", qa_id="q1", session_id="s1")
+        ok = await sm.delete_qa(user_id="00000000-0000-0000-0000-000000000001", qa_id="q1", session_id="s1")
 
         assert ok is False
         session_vector_mocks["delete_qa"].assert_not_awaited()
@@ -683,11 +683,11 @@ class TestSessionManager:
         self, sm, mock_cache, session_vector_mocks
     ):
         """delete_session delegates to cache and removes its scoped vector rows."""
-        ok = await sm.delete_session(user_id="u1", session_id="s1")
+        ok = await sm.delete_session(user_id="00000000-0000-0000-0000-000000000001", session_id="s1")
         assert ok is True
-        mock_cache.delete_session.assert_called_once_with(user_id="u1", session_id="s1")
+        mock_cache.delete_session.assert_called_once_with(user_id="00000000-0000-0000-0000-000000000001", session_id="s1")
         session_vector_mocks["delete_session"].assert_awaited_once_with(
-            user_id="u1",
+            user_id="00000000-0000-0000-0000-000000000001",
             session_id="s1",
         )
 
@@ -698,7 +698,7 @@ class TestSessionManager:
         """delete_session leaves vectors alone when the cache session was not deleted."""
         mock_cache.delete_session.return_value = False
 
-        ok = await sm.delete_session(user_id="u1", session_id="s1")
+        ok = await sm.delete_session(user_id="00000000-0000-0000-0000-000000000001", session_id="s1")
 
         assert ok is False
         session_vector_mocks["delete_session"].assert_not_awaited()
@@ -748,7 +748,7 @@ class TestSessionManager:
             ) as mock_generate,
         ):
             mock_user = MagicMock()
-            mock_user.id = "u1"
+            mock_user.id = "00000000-0000-0000-0000-000000000001"
             mock_session_user.get.return_value = mock_user
             mock_config = MagicMock()
             mock_config.caching = False
@@ -780,7 +780,7 @@ class TestSessionManager:
             ) as mock_generate,
         ):
             mock_user = MagicMock()
-            mock_user.id = "u1"
+            mock_user.id = "00000000-0000-0000-0000-000000000001"
             mock_session_user.get.return_value = mock_user
             mock_config = MagicMock()
             mock_config.caching = True
@@ -801,7 +801,7 @@ class TestSessionManager:
         mock_generate.assert_awaited_once()
         mock_cache.create_qa_entry.assert_called_once()
         call_kw = mock_cache.create_qa_entry.call_args.kwargs
-        assert call_kw["user_id"] == "u1"
+        assert call_kw["user_id"] == "00000000-0000-0000-0000-000000000001"
         assert call_kw["session_id"] == "s1"
         assert call_kw["question"] == "Q?"
         assert call_kw["answer"] == "Generated answer"
@@ -824,7 +824,7 @@ class TestSessionManager:
             ) as mock_generate,
         ):
             mock_user = MagicMock()
-            mock_user.id = "u1"
+            mock_user.id = "00000000-0000-0000-0000-000000000001"
             mock_session_user.get.return_value = mock_user
 
             result = await sm_unavailable.generate_completion_with_session(
@@ -855,7 +855,7 @@ class TestSessionManager:
             ),
         ):
             mock_user = MagicMock()
-            mock_user.id = "u1"
+            mock_user.id = "00000000-0000-0000-0000-000000000001"
             mock_session_user.get.return_value = mock_user
             mock_config = MagicMock()
             mock_config.caching = True
@@ -906,7 +906,7 @@ class TestSessionManager:
             ),
         ):
             mock_user = MagicMock()
-            mock_user.id = "u1"
+            mock_user.id = "00000000-0000-0000-0000-000000000001"
             mock_session_user.get.return_value = mock_user
             mock_config = MagicMock()
             mock_config.caching = True
@@ -948,7 +948,7 @@ class TestSessionManager:
             ),
         ):
             mock_user = MagicMock()
-            mock_user.id = "u1"
+            mock_user.id = "00000000-0000-0000-0000-000000000001"
             mock_session_user.get.return_value = mock_user
             mock_config = MagicMock()
             mock_config.caching = True
@@ -992,7 +992,7 @@ class TestSessionManager:
             ),
         ):
             mock_user = MagicMock()
-            mock_user.id = "u1"
+            mock_user.id = "00000000-0000-0000-0000-000000000001"
             mock_session_user.get.return_value = mock_user
             mock_config = MagicMock()
             mock_config.caching = True
@@ -1034,7 +1034,7 @@ class TestSessionManager:
             ),
         ):
             mock_user = MagicMock()
-            mock_user.id = "u1"
+            mock_user.id = "00000000-0000-0000-0000-000000000001"
             mock_session_user.get.return_value = mock_user
             mock_config = MagicMock()
             mock_config.caching = True
@@ -1079,7 +1079,7 @@ class TestSessionManager:
             ),
         ):
             mock_user = MagicMock()
-            mock_user.id = "u1"
+            mock_user.id = "00000000-0000-0000-0000-000000000001"
             mock_session_user.get.return_value = mock_user
             mock_config = MagicMock()
             mock_config.caching = True
@@ -1128,7 +1128,7 @@ class TestSessionManager:
             ),
         ):
             mock_user = MagicMock()
-            mock_user.id = "u1"
+            mock_user.id = "00000000-0000-0000-0000-000000000001"
             mock_session_user.get.return_value = mock_user
             mock_config = MagicMock()
             mock_config.caching = True
@@ -1169,7 +1169,7 @@ class TestSessionManager:
             ),
         ):
             mock_user = MagicMock()
-            mock_user.id = "u1"
+            mock_user.id = "00000000-0000-0000-0000-000000000001"
             mock_session_user.get.return_value = mock_user
             mock_config = MagicMock()
             mock_config.caching = True
@@ -1232,7 +1232,7 @@ class TestSessionContextEntryValidation:
             )
         with pytest.raises(SessionParameterValidationError):
             await sm.create_session_context_entry(
-                user_id="u1", entry_dump={"kind": "context"}, session_id="  "
+                user_id="00000000-0000-0000-0000-000000000001", entry_dump={"kind": "context"}, session_id="  "
             )
         mock_cache.create_session_context_entry.assert_not_called()
 
@@ -1242,7 +1242,7 @@ class TestSessionContextEntryValidation:
         with pytest.raises(SessionParameterValidationError):
             await sm.get_session_context_entries(user_id="", session_id="s1")
         with pytest.raises(SessionParameterValidationError):
-            await sm.get_session_context_entries(user_id="u1", session_id="  ")
+            await sm.get_session_context_entries(user_id="00000000-0000-0000-0000-000000000001", session_id="  ")
         mock_cache.get_session_context_entries.assert_not_called()
 
     @pytest.mark.asyncio
@@ -1254,7 +1254,7 @@ class TestSessionContextEntryValidation:
             )
         with pytest.raises(SessionParameterValidationError):
             await sm.update_session_context_entry(
-                user_id="u1", entry_id="e1", merge={}, session_id="  "
+                user_id="00000000-0000-0000-0000-000000000001", entry_id="e1", merge={}, session_id="  "
             )
         mock_cache.update_session_context_entry.assert_not_called()
 
@@ -1264,7 +1264,7 @@ class TestSessionContextEntryValidation:
         with pytest.raises(SessionParameterValidationError):
             await sm.delete_session_context(user_id="", session_id="s1")
         with pytest.raises(SessionParameterValidationError):
-            await sm.delete_session_context(user_id="u1", session_id="  ")
+            await sm.delete_session_context(user_id="00000000-0000-0000-0000-000000000001", session_id="  ")
         mock_cache.delete_session_context.assert_not_called()
 
     @pytest.mark.asyncio
@@ -1282,28 +1282,28 @@ class TestSessionContextEntryValidation:
     async def test_create_session_context_entry_fail_open_on_cache_error(self, sm_failing_cache):
         """Cache runtime failures stay fail-open: returns False, never raises."""
         result = await sm_failing_cache.create_session_context_entry(
-            user_id="u1", entry_dump={"kind": "context"}, session_id="s1"
+            user_id="00000000-0000-0000-0000-000000000001", entry_dump={"kind": "context"}, session_id="s1"
         )
         assert result is False
 
     @pytest.mark.asyncio
     async def test_get_session_context_entries_fail_open_on_cache_error(self, sm_failing_cache):
         """Cache runtime failures stay fail-open: returns [], never raises."""
-        result = await sm_failing_cache.get_session_context_entries(user_id="u1", session_id="s1")
+        result = await sm_failing_cache.get_session_context_entries(user_id="00000000-0000-0000-0000-000000000001", session_id="s1")
         assert result == []
 
     @pytest.mark.asyncio
     async def test_update_session_context_entry_fail_open_on_cache_error(self, sm_failing_cache):
         """Cache runtime failures stay fail-open: returns False, never raises."""
         result = await sm_failing_cache.update_session_context_entry(
-            user_id="u1", entry_id="e1", merge={"content": "x"}, session_id="s1"
+            user_id="00000000-0000-0000-0000-000000000001", entry_id="e1", merge={"content": "x"}, session_id="s1"
         )
         assert result is False
 
     @pytest.mark.asyncio
     async def test_delete_session_context_fail_open_on_cache_error(self, sm_failing_cache):
         """Cache runtime failures stay fail-open: returns False, never raises."""
-        result = await sm_failing_cache.delete_session_context(user_id="u1", session_id="s1")
+        result = await sm_failing_cache.delete_session_context(user_id="00000000-0000-0000-0000-000000000001", session_id="s1")
         assert result is False
 
     @pytest.mark.asyncio

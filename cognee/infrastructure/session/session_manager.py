@@ -30,7 +30,7 @@ from cognee.modules.observability import (
 from cognee.modules.retrieval.utils.completion import generate_completion
 from cognee.modules.session_lifecycle.metrics import record_session_activity
 from cognee.shared.logging_utils import get_logger
-from cognee.shared.utils import send_telemetry
+from cognee.shared.utils import as_uuid, send_telemetry
 
 logger = get_logger("SessionManager")
 
@@ -52,7 +52,8 @@ class SessionManager:
         Validate session parameters. Raises SessionParameterValidationError if any
         provided parameter is invalid.
 
-        - user_id, session_id, qa_id: must be non-empty strings when provided.
+        - user_id: must be a UUID (or UUID string) when provided.
+        - session_id, qa_id: must be non-empty strings when provided.
         - last_n: when provided, must be a positive integer.
         """
         checks = (
@@ -63,6 +64,11 @@ class SessionManager:
         for value, name in checks:
             if value is not None and (not str(value).strip()):
                 raise SessionParameterValidationError(message=f"{name} must be a non-empty string")
+        if user_id is not None and as_uuid(user_id) is None:
+            raise SessionParameterValidationError(
+                message=f"user_id must be a UUID, got {user_id!r}. Non-UUID user ids create "
+                "sessions invisible to lifecycle tracking, attribution, and cleanup."
+            )
         if last_n is not None and (not isinstance(last_n, int) or last_n < 1):
             raise SessionParameterValidationError(message="last_n must be a positive integer")
 
