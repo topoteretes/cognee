@@ -23,6 +23,7 @@ import pytest
 import cognee
 from cognee.api.v1.datasets import datasets
 from cognee.context_global_variables import set_database_global_context_variables
+from cognee.modules.data.methods import create_authorized_dataset
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.provenance import (
     GRAPH_DELETE_MODE_GRAPH_PROVENANCE,
@@ -111,7 +112,9 @@ async def _setup(tmp_path):
     await cognee.prune.prune_system(metadata=True)
     await setup_cognee()
     user = await get_default_user()
-    await set_database_global_context_variables("main_dataset", user.id)
+    await set_database_global_context_variables(
+        (await create_authorized_dataset("main_dataset", user)).id, user.id
+    )
     return user
 
 
