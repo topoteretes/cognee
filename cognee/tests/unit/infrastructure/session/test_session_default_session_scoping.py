@@ -23,19 +23,19 @@ class TestDatasetBinding:
     async def test_explicit_dataset_derives_default_session_id(self):
         dataset_id = uuid4()
         manager = SessionManager(cache_engine=None, dataset_id=dataset_id)
-        assert await manager._resolve_session_id(None) == f"default_session_{dataset_id}"
+        assert await manager.resolve_session_id(None) == f"default_session_{dataset_id}"
 
     @pytest.mark.asyncio
     async def test_no_dataset_and_no_default_uses_plain_default(self):
         """Without a resolvable main_dataset there is nothing to scope to."""
         manager = SessionManager(cache_engine=None)
         with patch.object(SessionManager, "_effective_dataset_id", AsyncMock(return_value=None)):
-            assert await manager._resolve_session_id(None) == "default_session"
+            assert await manager.resolve_session_id(None) == "default_session"
 
     @pytest.mark.asyncio
     async def test_explicit_session_id_unchanged(self):
         manager = SessionManager(cache_engine=None, dataset_id=uuid4())
-        assert await manager._resolve_session_id("my_session") == "my_session"
+        assert await manager.resolve_session_id("my_session") == "my_session"
 
     @pytest.mark.asyncio
     async def test_inherits_current_dataset_id_context(self):
@@ -46,7 +46,7 @@ class TestDatasetBinding:
         finally:
             current_dataset_id.reset(token)
         assert manager.dataset_id == dataset_id
-        assert await manager._resolve_session_id(None) == f"default_session_{dataset_id}"
+        assert await manager.resolve_session_id(None) == f"default_session_{dataset_id}"
 
     def test_explicit_dataset_overrides_context(self):
         explicit_id = uuid4()
@@ -86,9 +86,9 @@ class TestDefaultDatasetFallback:
             "cognee.modules.data.methods.get_datasets_by_name",
             AsyncMock(return_value=[dataset]),
         ) as by_name:
-            resolved = await manager._resolve_session_id(None, str(user_id))
+            resolved = await manager.resolve_session_id(None, str(user_id))
             # Second call must not re-query — the lookup is memoised per instance.
-            await manager._resolve_session_id(None, str(user_id))
+            await manager.resolve_session_id(None, str(user_id))
 
         assert resolved == f"default_session_{dataset_id}"
         by_name.assert_awaited_once_with(["main_dataset"], user_id)
@@ -101,7 +101,7 @@ class TestDefaultDatasetFallback:
             "cognee.modules.data.methods.get_datasets_by_name",
             AsyncMock(return_value=[]),
         ):
-            assert await manager._resolve_session_id(None, str(uuid4())) == "default_session"
+            assert await manager.resolve_session_id(None, str(uuid4())) == "default_session"
 
     @pytest.mark.asyncio
     async def test_explicit_dataset_skips_the_fallback(self):
@@ -110,5 +110,5 @@ class TestDefaultDatasetFallback:
             "cognee.modules.data.methods.get_datasets_by_name",
             AsyncMock(return_value=[]),
         ) as by_name:
-            await manager._resolve_session_id(None, str(uuid4()))
+            await manager.resolve_session_id(None, str(uuid4()))
         by_name.assert_not_awaited()
