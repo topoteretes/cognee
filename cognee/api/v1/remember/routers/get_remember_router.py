@@ -231,6 +231,16 @@ def get_remember_router() -> APIRouter:
                 "(defaults to 'skill')."
             ),
         ),
+        self_improvement: Optional[bool] = Form(
+            default=True,
+            description=(
+                "If true (default), runs the improve() enrichment pass after ingestion — "
+                "and, with session_id set, bridges the session into the permanent graph. "
+                "Set it to false to store the data and stop there: enrichment works over "
+                "the whole graph, so its cost grows with total graph size rather than with "
+                "what was just ingested."
+            ),
+        ),
         user: User = Depends(get_authenticated_user),
     ):
         """
@@ -256,6 +266,8 @@ def get_remember_router() -> APIRouter:
         - **graph_model** (Optional[str]): JSON-serialised graph model schema (same dict format accepted by the cognify endpoint).
         - **content_type** (Optional[str]): Set to "skills" to ingest SKILL.md files as
           Skill nodes; omit for normal ingestion.
+        - **self_improvement** (Optional[bool]): Run the improve() enrichment pass after
+          ingestion (default: True). Set to False to skip graph-wide enrichment.
 
         Either datasetName or datasetId must be provided.
 
@@ -361,6 +373,7 @@ def get_remember_router() -> APIRouter:
                 node_set=[tag for tag in (node_set or []) if tag] or None,
                 run_in_background=run_in_background or False,
                 custom_prompt=custom_prompt or None,
+                self_improvement=self_improvement if self_improvement is not None else True,
                 chunk_size=chunk_size,
                 chunks_per_batch=chunks_per_batch,
                 # Swagger UI submits every rendered form field, so an untouched
