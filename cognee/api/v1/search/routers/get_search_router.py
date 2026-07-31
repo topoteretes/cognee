@@ -9,12 +9,12 @@ from pydantic import Field
 
 from cognee import __version__ as cognee_version
 from cognee.api.DTO import ErrorResponse, InDTO, OutDTO
+from cognee.exceptions import CogneeApiError
 from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
 from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError
 from cognee.modules.search.operations import get_history
 from cognee.modules.search.types import SearchResult, SearchType
-from cognee.modules.users.exceptions.exceptions import PermissionDeniedError, UserNotFoundError
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.models import User
 from cognee.shared.usage_logger import log_usage
@@ -281,6 +281,8 @@ def get_search_router() -> APIRouter:
                 ).model_dump(),
             )
         except Exception as error:
+            if isinstance(error, CogneeApiError):
+                raise
             return JSONResponse(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 content=ErrorResponse(

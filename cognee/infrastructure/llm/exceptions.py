@@ -1,10 +1,11 @@
-from cognee.exceptions.exceptions import CogneeValidationError
+from cognee.exceptions import CogneeConfigurationError, CogneeValidationError
 
 
 class ContentPolicyFilterError(CogneeValidationError):
     pass
 
 
+class LLMAPIKeyNotSetError(CogneeConfigurationError):
 class LLMPaymentRequiredError(CogneeValidationError):
     """Raised when the LLM provider returns HTTP 402 (payment required / budget exhausted)."""
 
@@ -61,17 +62,25 @@ class LLMAPIKeyNotSetError(CogneeValidationError):
     """
 
     def __init__(self, message: str = "LLM API key is not set.") -> None:
-        super().__init__(message=message, name="LLMAPIKeyNotSetError")
+        super().__init__(
+            message=message,
+            name="LLMAPIKeyNotSetError",
+            remediation="Set LLM_API_KEY in your environment or .env file.",
+        )
 
 
-class UnsupportedLLMProviderError(CogneeValidationError):
+class UnsupportedLLMProviderError(CogneeConfigurationError):
     """
     Raised when an unsupported LLM provider is specified in the configuration.
     """
 
     def __init__(self, provider: str) -> None:
         message = f"Unsupported LLM provider: {provider}"
-        super().__init__(message=message, name="UnsupportedLLMProviderError")
+        super().__init__(
+            message=message,
+            name="UnsupportedLLMProviderError",
+            remediation="Set LLM_PROVIDER to a supported provider.",
+        )
 
 
 class LLMQuotaExceededError(CogneeValidationError):

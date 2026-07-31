@@ -7,6 +7,7 @@ from cognee.cli import DEFAULT_DOCS_URL
 from cognee.cli.config import SEARCH_TYPE_CHOICES, OUTPUT_FORMAT_CHOICES
 import cognee.cli.echo as fmt
 from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
+from cognee.exceptions import CogneeApiError
 
 
 class RecallCommand(SupportsCliCommand):
@@ -116,6 +117,8 @@ Otherwise, this is a memory-oriented alias for `cognee search`.
                         }
                         results = await cognee.recall(**recall_kwargs)
                     return results
+                except CogneeApiError:
+                    raise
                 except Exception as e:
                     raise CliCommandInnerException(f"Failed to recall: {str(e)}") from e
 
@@ -166,6 +169,8 @@ Otherwise, this is a memory-oriented alias for `cognee search`.
                             fmt.echo(f"{fmt.bold(f'Result {i}:')} {result}")
                             fmt.echo()
 
+        except CogneeApiError:
+            raise
         except Exception as e:
             if isinstance(e, CliCommandInnerException):
                 raise CliCommandException(str(e), error_code=1) from e

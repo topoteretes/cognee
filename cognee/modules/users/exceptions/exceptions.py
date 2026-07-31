@@ -1,4 +1,4 @@
-from cognee.exceptions import CogneeValidationError
+from cognee.exceptions import CogneePermissionError, CogneeValidationError
 from fastapi import status
 
 
@@ -38,7 +38,7 @@ class UserNotFoundError(CogneeValidationError):
         super().__init__(message, name, status_code)
 
 
-class PermissionDeniedError(CogneeValidationError):
+class PermissionDeniedError(CogneePermissionError):
     def __init__(
         self,
         message: str = "User does not have permission on documents.",
