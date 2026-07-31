@@ -1,7 +1,7 @@
 import uuid
 from typing import Any
 
-from cognee.context_global_variables import session_user
+from cognee.context_global_variables import current_dataset_id, session_user
 from cognee.infrastructure.databases.cache import SessionAgentTraceEntry, SessionQAEntry
 from cognee.infrastructure.databases.cache.cache_db_interface import CacheDBInterface
 from cognee.infrastructure.databases.cache.config import CacheConfig
@@ -73,6 +73,7 @@ class SessionManager:
         cache_engine: Any,
         default_session_id: str = "default_session",
         session_history_last_n: int = 10,
+        dataset_id: uuid.UUID | None = None,
     ) -> None:
         """
         Initialize SessionManager with a cache engine.
@@ -84,14 +85,46 @@ class SessionManager:
                                "default_session".
             session_history_last_n: Number of prior Q&A entries to include in conversation
                                    history for completion. Defaults to 10.
+            dataset_id: Dataset this manager writes sessions for. Falls back to
+                       the current_dataset_id context variable. Used to derive a
+                       per-dataset default session ID; explicit session IDs are
+                       stored unchanged. (Bare SDK reads resolve main_dataset at
+                       the API layer — see cognee.api.v1.session.)
         """
         self._cache = cache_engine
         self.default_session_id = default_session_id
         self.session_history_last_n = session_history_last_n
+        resolved_dataset_id = dataset_id if dataset_id is not None else current_dataset_id.get()
+        self.dataset_id = self._normalize_dataset_id(resolved_dataset_id)
 
-    def _resolve_session_id(self, session_id: str | None) -> str:
-        """Return session_id if provided, otherwise default_session_id."""
-        return session_id if session_id is not None else self.default_session_id
+    @staticmethod
+    def _normalize_dataset_id(value: Any) -> uuid.UUID | None:
+        """Return ``value`` unchanged when it is a dataset id (UUID) or None.
+
+        One input type, mirroring the database context manager: anything else —
+        a dataset name, a string — is a caller bug, so break loudly instead of
+        degrading to an unscoped session.
+        """
+        if value is None or isinstance(value, uuid.UUID):
+            return value
+        raise SessionParameterValidationError(
+            message=f"dataset_id must be a dataset id (UUID), got {value!r}. "
+            "Resolve dataset names to ids before constructing a SessionManager."
+        )
+
+    def resolve_session_id(self, session_id: str | None) -> str:
+        """Return session_id if provided, otherwise the default session ID.
+
+        The default is scoped to the manager's dataset (constructor argument or
+        the dataset context) so omitting session_id in two different datasets
+        can never mix their turns in one session. Without a known dataset the
+        plain global default is used, matching the previous behavior.
+        """
+        if session_id is not None:
+            return session_id
+        if self.dataset_id is not None:
+            return f"{self.default_session_id}_{self.dataset_id}"
+        return self.default_session_id
 
     @property
     def is_available(self) -> bool:
@@ -116,7 +149,7 @@ class SessionManager:
         used_graph_element_ids: Optional dict with keys "node_ids" and "edge_ids" (lists of str).
         used_session_context_ids: Optional list of session-context entry ids served to this answer.
         """
-        session_id = self._resolve_session_id(session_id)
+        session_id = self.resolve_session_id(session_id)
         self._validate_session_params(user_id=user_id, session_id=session_id)
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, skipping add_qa")
@@ -183,7 +216,7 @@ class SessionManager:
 
         Returns trace_id, or None if cache unavailable.
         """
-        session_id = self._resolve_session_id(session_id)
+        session_id = self.resolve_session_id(session_id)
         self._validate_session_params(user_id=user_id, session_id=session_id)
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, skipping add_agent_trace_step")
@@ -325,7 +358,7 @@ class SessionManager:
     ) -> Any:
         """Run one session turn under a session-usage scope, then return the answer."""
         user_id = getattr(session_user.get(), "id", None)
-        resolved_session_id = self._resolve_session_id(session_id)
+        resolved_session_id = self.resolve_session_id(session_id)
         async with self._session_usage_scope(user_id, resolved_session_id):
             return await self._run_session_turn(
                 user_id=user_id,
@@ -467,7 +500,7 @@ class SessionManager:
             List of QA entry dicts, or formatted string if formatted=True.
             Empty list or empty string if cache unavailable or session not found.
         """
-        session_id = self._resolve_session_id(session_id)
+        session_id = self.resolve_session_id(session_id)
         self._validate_session_params(user_id=user_id, session_id=session_id, last_n=last_n)
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, returning empty session")
@@ -505,7 +538,7 @@ class SessionManager:
         session_id: str | None = None,
     ) -> list[SessionQAEntry]:
         """Get specific session QA entries by qa_id, returned in chronological order."""
-        session_id = self._resolve_session_id(session_id)
+        session_id = self.resolve_session_id(session_id)
         self._validate_session_params(user_id=user_id, session_id=session_id)
         for qa_id in qa_ids:
             self._validate_session_params(qa_id=qa_id)
@@ -524,7 +557,7 @@ class SessionManager:
         """
         Get the agent trace session for the given user/session pair.
         """
-        session_id = self._resolve_session_id(session_id)
+        session_id = self.resolve_session_id(session_id)
         self._validate_session_params(user_id=user_id, session_id=session_id, last_n=last_n)
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, returning empty agent trace session")
@@ -543,7 +576,7 @@ class SessionManager:
         """
         Get only per-step feedback strings for the trace session.
         """
-        session_id = self._resolve_session_id(session_id)
+        session_id = self.resolve_session_id(session_id)
         self._validate_session_params(user_id=user_id, session_id=session_id, last_n=last_n)
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, returning empty agent trace feedback")
@@ -563,7 +596,7 @@ class SessionManager:
         """
         Get the number of trace steps stored for the given user/session pair.
         """
-        session_id = self._resolve_session_id(session_id)
+        session_id = self.resolve_session_id(session_id)
         self._validate_session_params(user_id=user_id, session_id=session_id)
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, returning empty agent trace count")
@@ -597,7 +630,7 @@ class SessionManager:
         """
         from cognee.infrastructure.locks import session_lock
 
-        session_id = self._resolve_session_id(session_id)
+        session_id = self.resolve_session_id(session_id)
         self._validate_session_params(user_id=user_id, session_id=session_id, qa_id=qa_id)
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, skipping update_qa")
@@ -680,7 +713,7 @@ class SessionManager:
 
         Returns True if updated, False if not found or cache unavailable.
         """
-        session_id = self._resolve_session_id(session_id)
+        session_id = self.resolve_session_id(session_id)
         self._validate_session_params(user_id=user_id, session_id=session_id, qa_id=qa_id)
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, skipping delete_feedback")
@@ -706,7 +739,7 @@ class SessionManager:
         """
         from cognee.infrastructure.locks import session_lock
 
-        session_id = self._resolve_session_id(session_id)
+        session_id = self.resolve_session_id(session_id)
         self._validate_session_params(user_id=user_id, session_id=session_id, qa_id=qa_id)
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, skipping delete_qa")
@@ -738,7 +771,7 @@ class SessionManager:
         Fail-open on infrastructure errors: returns False when the cache is
         unavailable or the cache operation fails.
         """
-        session_id = self._resolve_session_id(session_id)
+        session_id = self.resolve_session_id(session_id)
         self._validate_session_params(user_id=user_id, session_id=session_id)
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, skipping create_session_context_entry")
@@ -763,7 +796,7 @@ class SessionManager:
         Fail-open on infrastructure errors: returns [] when the cache is
         unavailable or the cache operation fails.
         """
-        session_id = self._resolve_session_id(session_id)
+        session_id = self.resolve_session_id(session_id)
         self._validate_session_params(user_id=user_id, session_id=session_id)
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, returning empty session context")
@@ -789,7 +822,7 @@ class SessionManager:
         Fail-open on infrastructure errors: returns False when the cache is
         unavailable or the cache operation fails.
         """
-        session_id = self._resolve_session_id(session_id)
+        session_id = self.resolve_session_id(session_id)
         self._validate_session_params(user_id=user_id, session_id=session_id)
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, skipping update_session_context_entry")
@@ -815,7 +848,7 @@ class SessionManager:
         Fail-open on infrastructure errors: returns False when the cache is
         unavailable or the cache operation fails.
         """
-        session_id = self._resolve_session_id(session_id)
+        session_id = self.resolve_session_id(session_id)
         self._validate_session_params(user_id=user_id, session_id=session_id)
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, skipping delete_session_context")
@@ -832,7 +865,7 @@ class SessionManager:
 
         Returns True if deleted, False if session did not exist or cache unavailable.
         """
-        session_id = self._resolve_session_id(session_id)
+        session_id = self.resolve_session_id(session_id)
         self._validate_session_params(user_id=user_id, session_id=session_id)
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, skipping delete_session")
