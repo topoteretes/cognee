@@ -128,6 +128,37 @@ async def test_owner_holds_the_whole_catalog():
 
 
 @pytest.mark.asyncio
+async def test_owner_short_circuits_before_the_membership_gate():
+    """Ownership alone is enough, with no row in user_tenants.
+
+    The order matters: if the membership gate ran first, an owner who is not
+    listed as a member would be locked out of their own tenant.
+    """
+    from sqlalchemy import delete
+
+    from cognee.infrastructure.databases.relational import get_relational_engine
+    from cognee.modules.users.models import UserTenant
+    from cognee.modules.users.permissions.methods import get_effective_capabilities
+    from cognee.modules.users.permissions.permission_types import CAPABILITY_TYPES
+
+    seed = await _seed()
+
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        await session.execute(
+            delete(UserTenant).where(
+                UserTenant.user_id == seed["owner_id"],
+                UserTenant.tenant_id == seed["tenant_id"],
+            )
+        )
+        await session.commit()
+
+    result = await get_effective_capabilities(seed["owner_id"], seed["tenant_id"])
+
+    assert result == set(CAPABILITY_TYPES)
+
+
+@pytest.mark.asyncio
 async def test_tenant_default_reaches_a_member():
     from cognee.infrastructure.databases.relational import get_relational_engine
     from cognee.modules.users.models import TenantDefaultPermissions
