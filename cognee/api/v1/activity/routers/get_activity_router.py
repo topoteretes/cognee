@@ -279,6 +279,8 @@ def get_activity_router() -> APIRouter:
         from datetime import datetime, timezone
 
         dataset_ids = await get_specific_user_permission_datasets(user.id, "read", [dataset_id])
+        if not dataset_ids:
+            return Response(content="Dataset not found or access denied", status_code=403)
         dataset_id = dataset_ids[0].id
 
         db_engine = get_relational_engine()
