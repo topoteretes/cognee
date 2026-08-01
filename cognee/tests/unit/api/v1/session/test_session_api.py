@@ -3,6 +3,7 @@ import sys
 import pytest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
+from uuid import uuid4
 
 from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.cache.models import SessionQAEntry
@@ -48,6 +49,9 @@ def session_user_ctx():
 def sm():
     """Minimal SessionManager: only get_session, add_feedback, delete_feedback, update_qa."""
     s = SimpleNamespace()
+    # A manager that knows its dataset (the dataset-context case); the bare
+    # no-dataset path is covered by test_bare_call_scopes_to_main_dataset.
+    s.dataset_id = uuid4()
     s.get_session = AsyncMock(return_value=[])
     s.add_feedback = AsyncMock(return_value=True)
     s.delete_feedback = AsyncMock(return_value=True)
@@ -272,12 +276,34 @@ class TestGetSession:
         assert result[0].qa_id == "v1"
 
     @pytest.mark.asyncio
-    async def test_returns_empty_on_session_manager_exception(self, session_user_ctx, sm):
+    async def test_explicit_session_id_skips_dataset_resolution(self, session_user_ctx):
+        """An explicit session_id never consults main_dataset: no lookup, no
+        rescope, no raise even when no dataset exists anywhere."""
+        from cognee.api.v1.session.session import get_session
+
+        bare = SimpleNamespace(dataset_id=None, get_session=AsyncMock(return_value=[]))
+        with (
+            patch.object(_session_module(), "get_session_manager", return_value=bare) as gsm,
+            patch(
+                "cognee.modules.data.methods.get_datasets_by_name",
+                AsyncMock(return_value=[]),
+            ) as lookup,
+        ):
+            result = await get_session(session_id="my_session")
+
+        assert result == []
+        lookup.assert_not_awaited()
+        gsm.assert_called_once_with()
+        assert bare.get_session.call_args.kwargs["session_id"] == "my_session"
+
+    @pytest.mark.asyncio
+    async def test_session_manager_exception_propagates(self, session_user_ctx, sm):
+        """A failed retrieval is an error, not an empty session."""
         from cognee.api.v1.session.session import get_session
 
         sm.get_session.side_effect = RuntimeError("cache down")
-        result = await get_session(session_id="s1")
-        assert result == []
+        with pytest.raises(RuntimeError, match="cache down"):
+            await get_session(session_id="s1")
 
     @pytest.mark.asyncio
     async def test_passes_session_id_and_last_n(self, session_user_ctx, sm):
@@ -290,11 +316,69 @@ class TestGetSession:
         assert kw["formatted"] is False
 
     @pytest.mark.asyncio
-    async def test_default_session_id(self, session_user_ctx, sm):
+    async def test_omitted_session_id_defers_to_the_manager(self, session_user_ctx, sm):
+        """None is forwarded so SessionManager derives the per-dataset default.
+
+        Passing the literal "default_session" here would read the legacy global
+        session instead of the one a default write actually lands in.
+        """
         from cognee.api.v1.session.session import get_session
 
         await get_session()
-        assert sm.get_session.call_args.kwargs["session_id"] == "default_session"
+        assert sm.get_session.call_args.kwargs["session_id"] is None
+
+    @pytest.mark.asyncio
+    async def test_bare_call_scopes_to_main_dataset(self, session_user_ctx):
+        """A bare read (no dataset context) rebuilds the manager scoped to the
+        caller's existing main_dataset, so dataset-scoped default writes are
+        readable back. Nothing is created if no dataset exists."""
+        from cognee.api.v1.session.session import get_session
+
+        dataset = SimpleNamespace(id=uuid4())
+        bare = SimpleNamespace(dataset_id=None, get_session=AsyncMock(return_value=[]))
+        scoped = SimpleNamespace(dataset_id=dataset.id, get_session=AsyncMock(return_value=[]))
+        manager_calls = []
+
+        def fake_get_session_manager(dataset_id=None):
+            manager_calls.append(dataset_id)
+            return scoped if dataset_id is not None else bare
+
+        with (
+            patch.object(
+                _session_module(), "get_session_manager", side_effect=fake_get_session_manager
+            ),
+            patch(
+                "cognee.modules.data.methods.get_datasets_by_name",
+                AsyncMock(return_value=[dataset]),
+            ),
+        ):
+            await get_session()
+
+        assert manager_calls == [None, dataset.id]
+        scoped.get_session.assert_awaited_once()
+        assert scoped.get_session.call_args.kwargs["session_id"] is None
+        bare.get_session.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_bare_call_without_main_dataset_raises(self, session_user_ctx):
+        """No main_dataset means there is no default session to read — a bare
+        call surfaces the precondition instead of silently reading an
+        unscoped global session."""
+        from cognee.api.v1.session.session import get_session
+
+        bare = SimpleNamespace(dataset_id=None, get_session=AsyncMock(return_value=[]))
+
+        with (
+            patch.object(_session_module(), "get_session_manager", return_value=bare),
+            patch(
+                "cognee.modules.data.methods.get_datasets_by_name",
+                AsyncMock(return_value=[]),
+            ),
+        ):
+            with pytest.raises(CogneeValidationError, match="no main_dataset"):
+                await get_session()
+
+        bare.get_session.assert_not_awaited()
 
 
 # add_feedback

@@ -67,7 +67,8 @@ class TestConfigSetMethod:
         params = list(sig.parameters.keys())
         assert "key" in params
         assert "value" in params
-        assert len(params) == 2
+        assert "persist" in params
+        assert len(params) == 3
 
     def test_set_can_be_called_without_instance(self):
         """Test that set can be called as a static method without instantiation."""

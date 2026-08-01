@@ -6,6 +6,7 @@ from cognee.cli import DEFAULT_DOCS_URL
 from cognee.cli.config import CHUNKER_CHOICES
 import cognee.cli.echo as fmt
 from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
+from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 
 
 class RememberCommand(SupportsCliCommand):
@@ -30,7 +31,7 @@ After completion, use `cognee recall` (or `cognee search`) to query the graph.
         parser.add_argument(
             "--dataset-name",
             "-d",
-            default="main_dataset",
+            default=DEFAULT_DATASET_NAME,
             help="Dataset name (default: main_dataset)",
         )
         parser.add_argument(

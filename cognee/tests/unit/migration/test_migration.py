@@ -302,6 +302,41 @@ class TestLettaSource:
         assert kinds.count("episode") == 1
         assert kinds.count("document") == 1
 
+    def test_null_content_falls_back_to_text(self):
+        # A serializer that emits unset optional fields writes an absent
+        # content as null rather than omitting the key, so the text fallback
+        # has to fire on a present-but-null content as well as a missing one.
+        agent_file = {
+            "agents": [
+                {
+                    "name": "support",
+                    "messages": [
+                        {"role": "user", "content": None, "text": "where is my order"},
+                        {"role": "assistant", "content": None, "text": "it ships today"},
+                    ],
+                }
+            ]
+        }
+        episode = next(r for r in collect(LettaSource(agent_file)) if r.kind == "episode")
+        assert [turn.content for turn in episode.turns] == [
+            "where is my order",
+            "it ships today",
+        ]
+
+    def test_null_content_does_not_drop_the_whole_episode(self):
+        # Every message in a file is serialized the same way, so dropping them
+        # one by one leaves no turns -- and an agent with no turns yields no
+        # episode at all, losing the conversation without raising.
+        agent_file = {
+            "agents": [
+                {
+                    "name": "support",
+                    "messages": [{"role": "user", "content": None, "text": "hello"}],
+                }
+            ]
+        }
+        assert [record.kind for record in collect(LettaSource(agent_file))] == ["episode"]
+
 
 class TestZepSource:
     def test_graphiti_export(self):
@@ -363,6 +398,50 @@ class TestZepSource:
         }
         records = collect(GraphitiSource(export))
         assert [record.kind for record in records] == ["episode", "entity", "entity", "fact"]
+
+    def test_session_id_alias_is_read_on_every_record_kind(self):
+        # The episode branch already treats "session_id" as an alias for
+        # "group_id", so an export that spells it that way must keep its scope
+        # on entities and facts too, not just on episodes.
+        export = {
+            "episodes": [
+                {"uuid": "ep1", "content": "Alice moved to Berlin", "session_id": "tenant-a"}
+            ],
+            "nodes": [
+                {"uuid": "n1", "name": "Alice", "session_id": "tenant-a"},
+                {"uuid": "n2", "name": "Berlin", "session_id": "tenant-a"},
+            ],
+            "edges": [
+                {
+                    "uuid": "f1",
+                    "source_node_uuid": "n1",
+                    "target_node_uuid": "n2",
+                    "session_id": "tenant-a",
+                }
+            ],
+        }
+        records = collect(GraphitiSource(export))
+
+        assert [record.scope.session_id for record in records] == ["tenant-a"] * 4
+
+    def test_group_id_still_wins_over_session_id(self):
+        # Both spellings present: "group_id" is the canonical one and keeps
+        # precedence, matching how the episode branch resolves the pair.
+        export = {
+            "nodes": [{"uuid": "n1", "name": "Alice", "group_id": "g1", "session_id": "s1"}],
+            "edges": [
+                {
+                    "uuid": "f1",
+                    "source_node_uuid": "n1",
+                    "target_node_uuid": "n2",
+                    "group_id": "g1",
+                    "session_id": "s1",
+                }
+            ],
+        }
+        records = collect(GraphitiSource(export))
+
+        assert [record.scope.session_id for record in records] == ["g1", "g1"]
 
     def test_default_mode_is_hybrid(self):
         assert GraphitiSource({"nodes": []}).mode == "hybrid"

@@ -9,6 +9,9 @@ except ImportError:
 from typing_extensions import TypedDict
 
 from cognee.shared.logging_utils import get_logger
+from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
+    resolve_authorized_user_datasets,
+)
 from cognee.modules.observability import (
     new_span,
     COGNEE_DATASET_NAME,
@@ -135,6 +138,18 @@ async def improve(
         if user is None:
             user = await get_default_user()
 
+        # One write-level resolution, shared by every stage below — the same
+        # resolver remember/memify use: names resolve
+        # or are created for the caller; a missing or unauthorized UUID raises
+        # DatasetNotFoundError instead of being silently retargeted. Downstream
+        # always receives the resolved UUID, never a name: names are
+        # owner-scoped, so a name collapsed from a *shared* dataset's UUID
+        # would re-resolve to the caller's own same-named dataset inside the
+        # pipelines.
+        user, authorized_datasets = await resolve_authorized_user_datasets(dataset, user)
+        resolved_dataset = authorized_datasets[0]
+        write_dataset_ref = resolved_dataset.id
+
         feedback_alpha = kwargs.pop("feedback_alpha", 0.1)
 
         # Mutex: single-session improves serialize on the session's
@@ -161,7 +176,7 @@ async def improve(
             # Stage 1 & 2: bridge sessions into the permanent graph
             if session_ids:
                 await _bridge_sessions(
-                    dataset=dataset,
+                    dataset=write_dataset_ref,
                     session_ids=session_ids,
                     user=user,
                     feedback_alpha=feedback_alpha,
@@ -174,7 +189,7 @@ async def improve(
                 # plugin's trace activity never reaches permanent
                 # memory — only QA entries do.
                 await _persist_session_traces(
-                    dataset=dataset,
+                    dataset=write_dataset_ref,
                     session_ids=session_ids,
                     user=user,
                     run_in_background=run_in_background,
@@ -282,16 +297,6 @@ async def _build_global_context_index(
         return False
 
 
-async def _resolve_dataset_name(dataset: Union[str, UUID], user) -> str:
-    """Resolve a dataset reference to its name string."""
-    if isinstance(dataset, str):
-        return dataset
-    from cognee.modules.data.methods.get_authorized_dataset import get_authorized_dataset
-
-    ds = await get_authorized_dataset(user, dataset, "write")
-    return ds.name if ds else "main_dataset"
-
-
 async def _bridge_sessions(
     dataset: Union[str, UUID],
     session_ids: List[str],
@@ -315,13 +320,11 @@ async def _bridge_sessions(
     # Stage 1: apply feedback weights from session retrieval traces
     from cognee.memify_pipelines.apply_feedback_weights import apply_feedback_weights_pipeline
 
-    dataset_name = await _resolve_dataset_name(dataset, user)
-
     try:
         await apply_feedback_weights_pipeline(
             user=user,
             session_ids=session_ids,
-            dataset=dataset_name,
+            dataset=dataset,
             alpha=feedback_alpha,
             run_in_background=run_in_background,
         )
@@ -337,7 +340,7 @@ async def _bridge_sessions(
     await persist_sessions_in_knowledge_graph_pipeline(
         user=user,
         session_ids=session_ids,
-        dataset=dataset_name,
+        dataset=dataset,
         run_in_background=run_in_background,
     )
     logger.info("improve: session Q&A persisted from %d session(s)", len(session_ids))
@@ -443,8 +446,6 @@ async def _persist_session_traces(
     that extracts per-step ``session_feedback`` from the cache and
     cognifies it into the ``agent_trace_feedbacks`` node-set.
     """
-    dataset_name = await _resolve_dataset_name(dataset, user)
-
     try:
         from cognee.memify_pipelines.persist_agent_trace_feedbacks_in_knowledge_graph import (
             persist_agent_trace_feedbacks_in_knowledge_graph_pipeline,
@@ -453,7 +454,7 @@ async def _persist_session_traces(
         await persist_agent_trace_feedbacks_in_knowledge_graph_pipeline(
             user=user,
             session_ids=session_ids,
-            dataset=dataset_name,
+            dataset=dataset,
             node_set_name="agent_trace_feedbacks",
             raw_trace_content=False,
             last_n_steps=None,  # persist all stored steps on demand
