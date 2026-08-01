@@ -135,3 +135,12 @@ class LLMGateway:
 
         llm_client = get_llm_client()
         return llm_client.transcribe_image(input=input)
+
+    @staticmethod
+    def transcribe_video(input: str) -> Coroutine[Any, Any, Any]:
+        from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.get_llm_client import (
+            get_llm_client,
+        )
+
+        llm_client = get_llm_client()
+        return llm_client.transcribe_video(input=input)

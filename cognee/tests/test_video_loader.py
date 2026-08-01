@@ -36,6 +36,21 @@ class _FakeTranscript:
         self.payload = _FakePayload(segments) if segments is not None else object()
 
 
+class _FakeMessage:
+    def __init__(self, content):
+        self.content = content
+
+
+class _FakeChoice:
+    def __init__(self, content):
+        self.message = _FakeMessage(content)
+
+
+class _FakeChatResponse:
+    def __init__(self, content):
+        self.choices = [_FakeChoice(content)]
+
+
 class _RemoveSpy:
     """Context manager recording paths passed to os.remove while still deleting them."""
 
@@ -63,6 +78,16 @@ class _RemoveSpy:
 @pytest.fixture
 def loader():
     return VideoLoader()
+
+
+@pytest.fixture(autouse=True)
+def mock_direct_video_transcription():
+    with patch(
+        "cognee.infrastructure.loaders.core.video_loader.LLMGateway.transcribe_video",
+        new_callable=AsyncMock,
+    ) as mock_transcribe_video:
+        mock_transcribe_video.side_effect = RuntimeError("video input unavailable")
+        yield mock_transcribe_video
 
 
 # ---------------------------------------------------------------------------
@@ -189,6 +214,40 @@ async def test_load_persist_false_returns_text(
         result = await loader.load(FIXTURE_PATH, persist=False)
 
     assert result == EXPECTED_TRANSCRIPT
+
+
+@pytest.mark.asyncio
+@patch(
+    "cognee.infrastructure.loaders.core.video_loader.LLMGateway.create_transcript",
+    new_callable=AsyncMock,
+)
+@patch.object(VideoLoader, "_extract_audio", new_callable=AsyncMock)
+@patch("cognee.infrastructure.loaders.core.video_loader._resolve_ffmpeg")
+@patch(
+    "cognee.infrastructure.loaders.core.video_loader.get_file_metadata",
+    new_callable=AsyncMock,
+)
+async def test_load_prefers_direct_video_transcription(
+    mock_metadata,
+    mock_ffmpeg,
+    mock_extract,
+    mock_transcript,
+    loader,
+    mock_direct_video_transcription,
+):
+    mock_metadata.return_value = {"content_hash": "hash123", "extension": "mp4"}
+    mock_direct_video_transcription.side_effect = None
+    mock_direct_video_transcription.return_value = _FakeChatResponse(
+        "Visual summary with relevant audio."
+    )
+
+    result = await loader.load(FIXTURE_PATH, persist=False)
+
+    assert result == "Visual summary with relevant audio."
+    mock_direct_video_transcription.assert_awaited_once_with(FIXTURE_PATH)
+    mock_ffmpeg.assert_not_called()
+    mock_extract.assert_not_awaited()
+    mock_transcript.assert_not_awaited()
 
 
 @pytest.mark.asyncio

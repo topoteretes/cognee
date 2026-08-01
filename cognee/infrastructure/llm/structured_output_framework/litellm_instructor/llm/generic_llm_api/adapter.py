@@ -401,3 +401,61 @@ class GenericAPIAdapter(LLMInterface):
             max_retries=self.MAX_RETRIES,
         )
         return response
+
+    @observe(as_type="transcribe_video")
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential_jitter(2, 128),
+        retry=retry_if_not_exception_type(
+            (
+                litellm.exceptions.NotFoundError,
+                litellm.exceptions.AuthenticationError,
+                asyncio.CancelledError,
+            )
+        ),
+        before_sleep=before_sleep_log(logger, logging.WARNING),
+        reraise=True,
+    )
+    async def transcribe_video(self, input: str) -> litellm.ModelResponse:
+        """
+        Generate a transcription of a video from a user query.
+
+        This method encodes the video and sends it as multimodal content so
+        models with video input can describe both visible content and audio.
+        """
+        async with open_data_file(input, mode="rb") as video_file:
+            encoded_video = base64.b64encode(video_file.read()).decode("utf-8")
+        mime_type, _ = mimetypes.guess_type(input)
+        if not mime_type or not mime_type.startswith("video/"):
+            raise ValueError(
+                f"Could not determine MIME type for video file: {input}. Is the extension correct?"
+            )
+        response: litellm.ModelResponse = await litellm.acompletion(
+            model=self.model,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": (
+                                "Describe this video. Include visible actions, scene changes, "
+                                "on-screen text, and relevant audio."
+                            ),
+                        },
+                        {
+                            "type": "video_url",
+                            "video_url": {
+                                "url": f"data:{mime_type};base64,{encoded_video}",
+                            },
+                        },
+                    ],
+                }
+            ],
+            api_key=self.api_key,
+            api_base=self.endpoint,
+            api_version=self.api_version,
+            max_completion_tokens=self.max_completion_tokens,
+            max_retries=self.MAX_RETRIES,
+        )
+        return response

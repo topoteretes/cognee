@@ -56,6 +56,15 @@ def _build_timestamped_text(segments: list) -> str:
     return "\n".join(lines)
 
 
+def _extract_message_text(response: Any) -> str:
+    """Return chat message text from a multimodal response."""
+    choices = getattr(response, "choices", None) or []
+    if not choices:
+        return ""
+    message = getattr(choices[0], "message", None)
+    return (getattr(message, "content", None) or "").strip()
+
+
 class VideoLoader(LoaderInterface):
     """
     Core video file loader.
@@ -141,8 +150,10 @@ class VideoLoader(LoaderInterface):
         storage_file_name = "text_" + file_metadata["content_hash"] + ".txt"
         extension = (file_metadata.get("extension") or "").lower()
 
-        async with self._audio_source(file_path, extension) as audio_path:
-            transcript = await self._transcribe(audio_path)
+        transcript = await self._transcribe_video(file_path)
+        if not transcript:
+            async with self._audio_source(file_path, extension) as audio_path:
+                transcript = await self._transcribe(audio_path)
 
         if not kwargs.get("persist", True):
             return transcript
@@ -154,6 +165,19 @@ class VideoLoader(LoaderInterface):
         full_file_path = await storage.store(storage_file_name, transcript)
 
         return full_file_path
+
+    async def _transcribe_video(self, file_path: str) -> str:
+        """Analyze a video directly when the configured LLM supports video input."""
+        try:
+            result = await LLMGateway.transcribe_video(file_path)
+        except Exception as error:
+            logger.debug(
+                "Direct video transcription request failed (%s); falling back to audio.",
+                error,
+            )
+            return ""
+
+        return _extract_message_text(result)
 
     @asynccontextmanager
     async def _audio_source(self, file_path: str, extension: str):
