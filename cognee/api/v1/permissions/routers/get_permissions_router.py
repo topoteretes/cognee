@@ -576,4 +576,35 @@ def get_permissions_router() -> APIRouter:
         tenants_list = await method_get_user_tenants(user=user)
         return JSONResponse(status_code=200, content=tenants_list)
 
+    @permissions_router.get("/tenants/{tenant_id}/capabilities/me")
+    async def get_my_capabilities_in_tenant(
+        tenant_id: UUID,
+        user: User = Depends(get_authenticated_user),
+    ):
+        """
+        List the capabilities the authenticated user has in a tenant.
+
+        Capabilities are tenant-scoped actions (as opposed to dataset permissions)
+        and are the union of what the tenant, the user's roles in it, and the user
+        directly have been granted. The tenant owner holds all of them.
+
+        Intended for the client to decide which controls to show. It is not an
+        authorization boundary on its own: every endpoint still enforces its own
+        capability, since anyone who knows the URL can call it without the UI.
+
+        ## Path Parameters
+        - **tenant_id** (UUID): The UUID of the tenant (find yours via GET /api/v1/permissions/tenants/me)
+
+        ## Response
+        Returns a JSON object: {"capabilities": ["manage_users", ...]}.
+        """
+        from cognee.modules.users.permissions.methods import get_effective_capabilities
+
+        capabilities = await get_effective_capabilities(user.id, tenant_id)
+
+        return JSONResponse(
+            status_code=200,
+            content={"capabilities": sorted(capabilities)},
+        )
+
     return permissions_router
