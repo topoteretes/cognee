@@ -1,7 +1,7 @@
 from typing import List, Union
 from uuid import UUID
 
-from fastapi import APIRouter, Body, Depends, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 
 from cognee import __version__ as cognee_version
@@ -618,5 +618,153 @@ def get_permissions_router() -> APIRouter:
             status_code=200,
             content={"capabilities": sorted(capabilities)},
         )
+
+    def _validate_capability(capability: str) -> None:
+        """Reject anything outside the catalog, including dataset permission names.
+
+        read/write/delete/share live in the same permissions table but are scoped
+        to a dataset through ACL; granting one here would write a row that
+        capability resolution filters out again, which looks like it worked.
+        """
+        from cognee.modules.users.permissions.permission_types import CAPABILITY_TYPES
+
+        if capability not in CAPABILITY_TYPES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown capability '{capability}'. Known: {sorted(CAPABILITY_TYPES)}",
+            )
+
+    @permissions_router.post("/tenants/{tenant_id}/capabilities")
+    async def give_capability_to_tenant(
+        tenant_id: UUID,
+        capability: str = Query(
+            ...,
+            examples=["manage_users"],
+            description="Capability to grant to every member of the tenant.",
+        ),
+        user: User = Depends(get_authenticated_user),
+    ):
+        """
+        Grant a capability to everyone in a tenant.
+
+        Note that this reaches every current and future member. To give it to
+        some people only, grant it to a role instead.
+
+        The caller needs user-management permission in the tenant; the tenant
+        owner always has it, which is how the first grant gets made.
+
+        ## Error Codes
+        - **400 Bad Request**: Capability is not in the catalog
+        - **403 Forbidden**: Caller lacks user-management permission in the tenant
+        """
+        from cognee.modules.users.permissions.methods import (
+            give_default_permission_to_tenant,
+            has_user_management_permission,
+        )
+
+        _validate_capability(capability)
+        await has_user_management_permission(requester_id=user.id, tenant_id=tenant_id)
+        await give_default_permission_to_tenant(tenant_id, capability)
+
+        return JSONResponse(status_code=200, content={"message": "Capability granted to tenant."})
+
+    @permissions_router.delete("/tenants/{tenant_id}/capabilities")
+    async def revoke_capability_from_tenant(
+        tenant_id: UUID,
+        capability: str = Query(
+            ...,
+            examples=["manage_users"],
+            description="Capability to take away from the tenant.",
+        ),
+        user: User = Depends(get_authenticated_user),
+    ):
+        """
+        Take a capability away from a tenant.
+
+        Members keep it if a role of theirs still grants it. Revoking something
+        the tenant never had succeeds and changes nothing.
+
+        ## Error Codes
+        - **400 Bad Request**: Capability is not in the catalog
+        - **403 Forbidden**: Caller lacks user-management permission in the tenant
+        """
+        from cognee.modules.users.permissions.methods import (
+            has_user_management_permission,
+            revoke_default_permission_from_tenant,
+        )
+
+        _validate_capability(capability)
+        await has_user_management_permission(requester_id=user.id, tenant_id=tenant_id)
+        await revoke_default_permission_from_tenant(tenant_id, capability)
+
+        return JSONResponse(status_code=200, content={"message": "Capability revoked from tenant."})
+
+    @permissions_router.post("/roles/{role_id}/capabilities")
+    async def give_capability_to_role(
+        role_id: UUID,
+        capability: str = Query(
+            ...,
+            examples=["manage_users"],
+            description="Capability to grant to every member of the role.",
+        ),
+        user: User = Depends(get_authenticated_user),
+    ):
+        """
+        Grant a capability to everyone holding a role.
+
+        Authorization is checked against the tenant that owns the role, so a
+        caller cannot grant into a tenant they do not administer.
+
+        ## Error Codes
+        - **400 Bad Request**: Capability is not in the catalog
+        - **403 Forbidden**: Caller lacks user-management permission in the role's tenant
+        - **404 Not Found**: Role does not exist
+        """
+        from cognee.modules.users.permissions.methods import (
+            get_role,
+            give_default_permission_to_role,
+            has_user_management_permission,
+        )
+
+        _validate_capability(capability)
+        role = await get_role(role_id)
+        await has_user_management_permission(requester_id=user.id, tenant_id=role.tenant_id)
+        await give_default_permission_to_role(role_id, capability)
+
+        return JSONResponse(status_code=200, content={"message": "Capability granted to role."})
+
+    @permissions_router.delete("/roles/{role_id}/capabilities")
+    async def revoke_capability_from_role(
+        role_id: UUID,
+        capability: str = Query(
+            ...,
+            examples=["manage_users"],
+            description="Capability to take away from the role.",
+        ),
+        user: User = Depends(get_authenticated_user),
+    ):
+        """
+        Take a capability away from a role.
+
+        Members keep it if the tenant or another of their roles still grants it.
+        Revoking something the role never had succeeds and changes nothing.
+
+        ## Error Codes
+        - **400 Bad Request**: Capability is not in the catalog
+        - **403 Forbidden**: Caller lacks user-management permission in the role's tenant
+        - **404 Not Found**: Role does not exist
+        """
+        from cognee.modules.users.permissions.methods import (
+            get_role,
+            has_user_management_permission,
+            revoke_default_permission_from_role,
+        )
+
+        _validate_capability(capability)
+        role = await get_role(role_id)
+        await has_user_management_permission(requester_id=user.id, tenant_id=role.tenant_id)
+        await revoke_default_permission_from_role(role_id, capability)
+
+        return JSONResponse(status_code=200, content={"message": "Capability revoked from role."})
 
     return permissions_router

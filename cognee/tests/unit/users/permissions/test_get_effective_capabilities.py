@@ -247,6 +247,71 @@ async def test_membership_is_required_and_leaks_nothing():
 
 
 @pytest.mark.asyncio
+async def test_granting_and_revoking_on_a_role_moves_the_member():
+    from cognee.infrastructure.databases.relational import get_relational_engine
+    from cognee.modules.users.models import Role, UserRole
+    from cognee.modules.users.permissions.methods import (
+        get_effective_capabilities,
+        give_default_permission_to_role,
+        revoke_default_permission_from_role,
+    )
+    from cognee.modules.users.permissions.permission_types import MANAGE_USERS
+
+    seed = await _seed()
+    role_id = uuid4()
+
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        session.add(Role(id=role_id, name=f"r-{role_id}", tenant_id=seed["tenant_id"]))
+        await session.flush()
+        session.add(UserRole(user_id=seed["member_id"], role_id=role_id))
+        await session.commit()
+
+    assert await get_effective_capabilities(seed["member_id"], seed["tenant_id"]) == set()
+
+    await give_default_permission_to_role(role_id, MANAGE_USERS)
+    assert MANAGE_USERS in await get_effective_capabilities(seed["member_id"], seed["tenant_id"])
+
+    await revoke_default_permission_from_role(role_id, MANAGE_USERS)
+    assert await get_effective_capabilities(seed["member_id"], seed["tenant_id"]) == set()
+
+
+@pytest.mark.asyncio
+async def test_granting_and_revoking_on_a_tenant_moves_the_member():
+    from cognee.modules.users.permissions.methods import (
+        get_effective_capabilities,
+        give_default_permission_to_tenant,
+        revoke_default_permission_from_tenant,
+    )
+    from cognee.modules.users.permissions.permission_types import MANAGE_USERS
+
+    seed = await _seed()
+
+    await give_default_permission_to_tenant(seed["tenant_id"], MANAGE_USERS)
+    assert MANAGE_USERS in await get_effective_capabilities(seed["member_id"], seed["tenant_id"])
+
+    # Still nothing for someone outside the tenant.
+    assert await get_effective_capabilities(seed["outsider_id"], seed["tenant_id"]) == set()
+
+    await revoke_default_permission_from_tenant(seed["tenant_id"], MANAGE_USERS)
+    assert await get_effective_capabilities(seed["member_id"], seed["tenant_id"]) == set()
+
+
+@pytest.mark.asyncio
+async def test_revoking_what_was_never_granted_is_a_no_op():
+    """Revoke has to be safe to retry, so an absent grant is not an error."""
+    from cognee.modules.users.permissions.methods import (
+        revoke_default_permission_from_tenant,
+    )
+    from cognee.modules.users.permissions.permission_types import MANAGE_USERS
+
+    seed = await _seed()
+
+    await revoke_default_permission_from_tenant(seed["tenant_id"], MANAGE_USERS)
+    await revoke_default_permission_from_tenant(seed["tenant_id"], MANAGE_USERS)
+
+
+@pytest.mark.asyncio
 async def test_dataset_permissions_are_not_capabilities():
     """read/write/delete/share live in the same table but are not capabilities."""
     from cognee.infrastructure.databases.relational import get_relational_engine

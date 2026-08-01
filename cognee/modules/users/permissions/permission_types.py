@@ -12,8 +12,12 @@ MANAGE_USERS = "manage_users"
 
 CAPABILITY_TYPES: FrozenSet[str] = frozenset({MANAGE_USERS})
 
-# Deprecated: superseded by the MANAGE_USERS capability. Kept as a fallback so
-# tenants that today rely on a role literally named "admin" do not lose user
-# management the moment they upgrade. Remove once those roles have been granted
-# the capability explicitly.
+# Deprecated in favour of the MANAGE_USERS capability, but still the only path
+# that grants user management to a non-owner today: nothing calls
+# give_default_permission_to_{tenant,role,user}, so no capability can actually be
+# assigned yet and resolution returns an empty set for everyone but the owner.
+#
+# Remove this set once granting is wired up (a capability-assignment endpoint,
+# tracked separately) and existing "admin" roles have been migrated onto
+# MANAGE_USERS. Removing it before then locks those tenants out.
 USER_MANAGEMENT_ALLOWED_ROLE_NAMES: FrozenSet[str] = frozenset({"admin"})
