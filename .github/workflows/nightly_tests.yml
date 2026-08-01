@@ -12,6 +12,8 @@ on:
     paths:
       - '.github/workflows/nightly_tests.yml'
       - '.github/workflows/performance_report.yml'
+      - '.github/workflows/performance_report_cloud.yml'
+      - '.github/workflows/performance_report_rust.yml'
 
 
 concurrency:
@@ -78,6 +80,71 @@ jobs:
       mock_memories_key: nightly_ci_artifacts/performance_test_artifacts/mock_war_and_peace.json
     secrets: inherit
 
+  # ══ Performance: Cognee Cloud tenant. No mock variants — the LLM runs ══════
+  # server-side on the tenant, so there is nothing to mock client-side.
+  perf-small-cloud:
+    name: Performance — 50 Small Documents (cloud)
+    uses: ./.github/workflows/performance_report_cloud.yml
+    with:
+      label: 50_small_documents
+      runs: '3'
+      num_memories: '50'
+      memories_key: nightly_ci_artifacts/performance_test_artifacts/memories.json
+    secrets: inherit
+
+  perf-wap-cloud:
+    name: Performance — War and Peace (cloud)
+    uses: ./.github/workflows/performance_report_cloud.yml
+    with:
+      label: war_and_peace
+      runs: '3'
+      memories_key: nightly_ci_artifacts/performance_test_artifacts/war_and_peace.json
+    secrets: inherit
+
+  # ══ Performance (Rust SDK): builds latest cognee-rs and drives the SAME ═════
+  # ══ orchestrator via cognee-cli bench (file_based, mock LLM, offline). ══════
+  perf-rust:
+    name: Performance — Rust SDK — 50 Small Documents (mock LLM)
+    uses: ./.github/workflows/performance_report_rust.yml
+    with:
+      runs: '3'
+      mode: mock_llm
+      label: 50_small_documents
+      memories: scripts/perf/fixtures/memories.json
+      cassette: scripts/perf/fixtures/cassette.json
+    secrets: inherit
+
+  perf-rust-wap:
+    name: Performance — Rust SDK — War and Peace (mock LLM)
+    uses: ./.github/workflows/performance_report_rust.yml
+    with:
+      runs: '3'
+      mode: mock_llm
+      label: war_and_peace
+      memories: scripts/perf/fixtures/war_and_peace/memories.json
+      cassette: scripts/perf/fixtures/war_and_peace/cassette.json
+    secrets: inherit
+
+  perf-rust-llm:
+    name: Performance — Rust SDK — 50 Small Documents (real LLM)
+    uses: ./.github/workflows/performance_report_rust.yml
+    with:
+      runs: '3'
+      mode: llm
+      label: 50_small_documents
+      memories: scripts/perf/fixtures/memories.json
+    secrets: inherit
+
+  perf-rust-wap-llm:
+    name: Performance — Rust SDK — War and Peace (real LLM)
+    uses: ./.github/workflows/performance_report_rust.yml
+    with:
+      runs: '3'
+      mode: llm
+      label: war_and_peace
+      memories: scripts/perf/fixtures/war_and_peace/memories.json
+    secrets: inherit
+
   notify:
     name: Test Completion Status
     needs: [
@@ -87,6 +154,12 @@ jobs:
       perf-small-mock,
       perf-wap-llm,
       perf-wap-mock,
+      perf-small-cloud,
+      perf-wap-cloud,
+      perf-rust,
+      perf-rust-wap,
+      perf-rust-llm,
+      perf-rust-wap-llm,
     ]
     runs-on: ubuntu-latest
     if: ${{ !cancelled() }}
@@ -99,7 +172,13 @@ jobs:
                 "${{ needs.perf-small-llm.result }}" == "success" &&
                 "${{ needs.perf-small-mock.result }}" == "success" &&
                 "${{ needs.perf-wap-llm.result }}" == "success" &&
-                "${{ needs.perf-wap-mock.result }}" == "success" ]]; then
+                "${{ needs.perf-wap-mock.result }}" == "success" &&
+                "${{ needs.perf-small-cloud.result }}" == "success" &&
+                "${{ needs.perf-wap-cloud.result }}" == "success" &&
+                "${{ needs.perf-rust.result }}" == "success" &&
+                "${{ needs.perf-rust-wap.result }}" == "success" &&
+                "${{ needs.perf-rust-llm.result }}" == "success" &&
+                "${{ needs.perf-rust-wap-llm.result }}" == "success" ]]; then
             echo "passed=true" >> "$GITHUB_OUTPUT"
             echo "emoji=✅" >> "$GITHUB_OUTPUT"
             echo "summary=All nightly test suites completed successfully!" >> "$GITHUB_OUTPUT"
@@ -128,6 +207,12 @@ jobs:
             url_pg_small_mock ${{ needs.perf-small-mock.outputs.postgres_html_key }}
             url_pg_wap_llm ${{ needs.perf-wap-llm.outputs.postgres_html_key }}
             url_pg_wap_mock ${{ needs.perf-wap-mock.outputs.postgres_html_key }}
+            url_cloud_small ${{ needs.perf-small-cloud.outputs.cloud_html_key }}
+            url_cloud_wap ${{ needs.perf-wap-cloud.outputs.cloud_html_key }}
+            url_rust ${{ needs.perf-rust.outputs.html_key }}
+            url_rust_wap ${{ needs.perf-rust-wap.outputs.html_key }}
+            url_rust_llm ${{ needs.perf-rust-llm.outputs.html_key }}
+            url_rust_wap_llm ${{ needs.perf-rust-wap-llm.outputs.html_key }}
         run: |
           set -euo pipefail
           # 7 days = 604800s is the maximum lifetime for an IAM-user presigned URL.
@@ -138,6 +223,9 @@ jobs:
           done <<< "$REPORT_KEYS"
 
       - name: Post status to Slack
+        # Posts on scheduled/manual runs AND on pull_request validation runs
+        # (which fire when the nightly workflow files themselves change), so
+        # workflow changes surface their reports in the channel too.
         uses: slackapi/slack-github-action@v2.1.0
         with:
           method: chat.postMessage
@@ -233,6 +321,37 @@ jobs:
                     search     p50 `${{ fromJSON(needs.perf-wap-mock.outputs.postgres_metrics || '{}').search.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-wap-mock.outputs.postgres_metrics || '{}').search.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-wap-mock.outputs.postgres_metrics || '{}').search.p99 }}s`
                     total      p50 `${{ fromJSON(needs.perf-wap-mock.outputs.postgres_metrics || '{}').total.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-wap-mock.outputs.postgres_metrics || '{}').total.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-wap-mock.outputs.postgres_metrics || '{}').total.p99 }}s`
                     <${{ steps.presign.outputs.url_pg_wap_mock }}|HTML report>
+              - type: "section"
+                text:
+                  type: "mrkdwn"
+                  text: |
+                    *📊 Cognee Cloud — 50 Small Documents* (`${{ needs.perf-small-cloud.result }}`)  •  runs `${{ fromJSON(needs.perf-small-cloud.outputs.cloud_metrics || '{}').success }}`
+                    tenant   p50 `${{ fromJSON(needs.perf-small-cloud.outputs.cloud_metrics || '{}').tenant_create.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-small-cloud.outputs.cloud_metrics || '{}').tenant_create.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-small-cloud.outputs.cloud_metrics || '{}').tenant_create.p99 }}s`
+                    add      p50 `${{ fromJSON(needs.perf-small-cloud.outputs.cloud_metrics || '{}').add.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-small-cloud.outputs.cloud_metrics || '{}').add.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-small-cloud.outputs.cloud_metrics || '{}').add.p99 }}s`
+                    cognify  p50 `${{ fromJSON(needs.perf-small-cloud.outputs.cloud_metrics || '{}').cognify.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-small-cloud.outputs.cloud_metrics || '{}').cognify.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-small-cloud.outputs.cloud_metrics || '{}').cognify.p99 }}s`
+                    search     p50 `${{ fromJSON(needs.perf-small-cloud.outputs.cloud_metrics || '{}').search.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-small-cloud.outputs.cloud_metrics || '{}').search.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-small-cloud.outputs.cloud_metrics || '{}').search.p99 }}s`
+                    total      p50 `${{ fromJSON(needs.perf-small-cloud.outputs.cloud_metrics || '{}').total.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-small-cloud.outputs.cloud_metrics || '{}').total.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-small-cloud.outputs.cloud_metrics || '{}').total.p99 }}s`
+                    <${{ steps.presign.outputs.url_cloud_small }}|HTML report>
+              - type: "section"
+                text:
+                  type: "mrkdwn"
+                  text: |
+                    *📚 Cognee Cloud — War and Peace* (`${{ needs.perf-wap-cloud.result }}`)  •  runs `${{ fromJSON(needs.perf-wap-cloud.outputs.cloud_metrics || '{}').success }}`
+                    tenant   p50 `${{ fromJSON(needs.perf-wap-cloud.outputs.cloud_metrics || '{}').tenant_create.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-wap-cloud.outputs.cloud_metrics || '{}').tenant_create.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-wap-cloud.outputs.cloud_metrics || '{}').tenant_create.p99 }}s`
+                    add      p50 `${{ fromJSON(needs.perf-wap-cloud.outputs.cloud_metrics || '{}').add.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-wap-cloud.outputs.cloud_metrics || '{}').add.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-wap-cloud.outputs.cloud_metrics || '{}').add.p99 }}s`
+                    cognify  p50 `${{ fromJSON(needs.perf-wap-cloud.outputs.cloud_metrics || '{}').cognify.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-wap-cloud.outputs.cloud_metrics || '{}').cognify.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-wap-cloud.outputs.cloud_metrics || '{}').cognify.p99 }}s`
+                    search     p50 `${{ fromJSON(needs.perf-wap-cloud.outputs.cloud_metrics || '{}').search.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-wap-cloud.outputs.cloud_metrics || '{}').search.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-wap-cloud.outputs.cloud_metrics || '{}').search.p99 }}s`
+                    total      p50 `${{ fromJSON(needs.perf-wap-cloud.outputs.cloud_metrics || '{}').total.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-wap-cloud.outputs.cloud_metrics || '{}').total.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-wap-cloud.outputs.cloud_metrics || '{}').total.p99 }}s`
+                    <${{ steps.presign.outputs.url_cloud_wap }}|HTML report>
+              - type: "section"
+                text:
+                  type: "mrkdwn"
+                  text: |
+                    *🦀 Rust SDK (file_based)* — total-latency percentiles; per-stage detail is in each HTML report
+                    50 small documents — mock LLM  (`${{ needs.perf-rust.result }}`)  •  total p50 `${{ fromJSON(needs.perf-rust.outputs.metrics || '{}').total.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-rust.outputs.metrics || '{}').total.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-rust.outputs.metrics || '{}').total.p99 }}s`  •  <${{ steps.presign.outputs.url_rust }}|HTML report>
+                    War and Peace — mock LLM  (`${{ needs.perf-rust-wap.result }}`)  •  total p50 `${{ fromJSON(needs.perf-rust-wap.outputs.metrics || '{}').total.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-rust-wap.outputs.metrics || '{}').total.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-rust-wap.outputs.metrics || '{}').total.p99 }}s`  •  <${{ steps.presign.outputs.url_rust_wap }}|HTML report>
+                    50 small documents — real LLM  (`${{ needs.perf-rust-llm.result }}`)  •  total p50 `${{ fromJSON(needs.perf-rust-llm.outputs.metrics || '{}').total.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-rust-llm.outputs.metrics || '{}').total.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-rust-llm.outputs.metrics || '{}').total.p99 }}s`  •  <${{ steps.presign.outputs.url_rust_llm }}|HTML report>
+                    War and Peace — real LLM  (`${{ needs.perf-rust-wap-llm.result }}`)  •  total p50 `${{ fromJSON(needs.perf-rust-wap-llm.outputs.metrics || '{}').total.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-rust-wap-llm.outputs.metrics || '{}').total.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-rust-wap-llm.outputs.metrics || '{}').total.p99 }}s`  •  <${{ steps.presign.outputs.url_rust_wap_llm }}|HTML report>
               - type: "section"
                 text:
                   type: "mrkdwn"
