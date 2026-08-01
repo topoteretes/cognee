@@ -223,6 +223,30 @@ async def test_role_in_another_tenant_does_not_leak():
 
 
 @pytest.mark.asyncio
+async def test_membership_is_required_and_leaks_nothing():
+    """A tenant you are not in and one that does not exist must be indistinguishable.
+
+    Otherwise any authenticated caller can tell real tenant ids from invented
+    ones by comparing the responses.
+    """
+    from cognee.modules.users.exceptions import PermissionDeniedError
+    from cognee.modules.users.permissions.methods import require_tenant_membership
+
+    seed = await _seed()
+
+    assert await require_tenant_membership(seed["owner_id"], seed["tenant_id"]) is True
+    assert await require_tenant_membership(seed["member_id"], seed["tenant_id"]) is True
+
+    with pytest.raises(PermissionDeniedError) as not_a_member:
+        await require_tenant_membership(seed["outsider_id"], seed["tenant_id"])
+
+    with pytest.raises(PermissionDeniedError) as no_such_tenant:
+        await require_tenant_membership(seed["member_id"], uuid4())
+
+    assert str(not_a_member.value) == str(no_such_tenant.value)
+
+
+@pytest.mark.asyncio
 async def test_dataset_permissions_are_not_capabilities():
     """read/write/delete/share live in the same table but are not capabilities."""
     from cognee.infrastructure.databases.relational import get_relational_engine

@@ -14,3 +14,4 @@ from .give_default_permission_to_role import give_default_permission_to_role
 from .give_default_permission_to_user import give_default_permission_to_user
 from .has_user_management_permission import has_user_management_permission
 from .get_effective_capabilities import get_effective_capabilities
+from .require_tenant_membership import require_tenant_membership

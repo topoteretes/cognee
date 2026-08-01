@@ -585,8 +585,12 @@ def get_permissions_router() -> APIRouter:
         List the capabilities the authenticated user has in a tenant.
 
         Capabilities are tenant-scoped actions (as opposed to dataset permissions)
-        and are the union of what the tenant, the user's roles in it, and the user
-        directly have been granted. The tenant owner holds all of them.
+        and are the union of what the tenant and the caller's roles in it grant.
+        The tenant owner holds all of them.
+
+        The caller must belong to the tenant. A tenant they are not a member of
+        and one that does not exist both answer 403, so the endpoint cannot be
+        used to discover which tenant ids are real.
 
         Intended for the client to decide which controls to show. It is not an
         authorization boundary on its own: every endpoint still enforces its own
@@ -597,8 +601,16 @@ def get_permissions_router() -> APIRouter:
 
         ## Response
         Returns a JSON object: {"capabilities": ["manage_users", ...]}.
+
+        ## Error Codes
+        - **403 Forbidden**: Caller is not a member of the tenant, or it does not exist
         """
-        from cognee.modules.users.permissions.methods import get_effective_capabilities
+        from cognee.modules.users.permissions.methods import (
+            get_effective_capabilities,
+            require_tenant_membership,
+        )
+
+        await require_tenant_membership(user.id, tenant_id)
 
         capabilities = await get_effective_capabilities(user.id, tenant_id)
 
