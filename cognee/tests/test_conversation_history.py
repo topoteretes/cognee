@@ -144,9 +144,19 @@ async def main():
         f"Default session should return non-empty list, got: {result4!r}"
     )
 
-    history_default = await cache_engine.get_latest_qa(str(user.id), "default_session", last_n=10)
+    # An omitted session_id derives the dataset-scoped default: the search ran
+    # in this dataset's context, so the turn lands in default_session_<dataset_id>.
+    from cognee.modules.data.methods import get_datasets_by_name
+
+    dataset = (await get_datasets_by_name([dataset_name], user.id))[0]
+    derived_default_session = f"default_session_{dataset.id}"
+    history_default = await cache_engine.get_latest_qa(
+        str(user.id), derived_default_session, last_n=10
+    )
     our_qa_default = [h for h in history_default if h.question == "Test default session"]
-    assert len(our_qa_default) == 1, "Should find 'Test default session' in default_session"
+    assert len(our_qa_default) == 1, (
+        f"Should find 'Test default session' in {derived_default_session}"
+    )
 
     session_id_rag = "test_session_rag"
 

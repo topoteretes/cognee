@@ -1,11 +1,10 @@
 import json
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from fastapi import Form, File, UploadFile as UF, Depends
-from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError
 from typing import List, Optional, Union, Literal, Annotated
 from pydantic import BaseModel, Field, WithJsonSchema
 
@@ -16,6 +15,7 @@ from cognee.shared.utils import send_telemetry
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.usage_logger import log_usage
 from cognee import __version__ as cognee_version
+from cognee.exceptions import CogneeApiError
 
 logger = get_logger()
 
@@ -84,6 +84,11 @@ async def _import_cogx_archives(
             aggregate["items"] = items
         return jsonable_encoder(aggregate)
     except HTTPException:
+        raise
+    except CogneeApiError:
+        # Cognee errors (e.g. permission denied) carry their own status code
+        # and actionable message; the global handler in cognee/api/client.py
+        # returns them.
         raise
     except (ValueError, tarfile.TarError) as error:
         # Log the detail server-side; the response stays generic so exception
@@ -376,11 +381,10 @@ def get_remember_router() -> APIRouter:
                 )
 
             return jsonable_encoder(result.to_dict())
-        except LLMPaymentRequiredError as error:
-            return JSONResponse(
-                status_code=status.HTTP_402_PAYMENT_REQUIRED,
-                content={"error": "Token budget exhausted", "detail": str(error)},
-            )
+        except CogneeApiError:
+            # Cognee errors carry their own status code and actionable message;
+            # the global handler in cognee/api/client.py returns them.
+            raise
         except ValueError as error:
             logger.error("Remember endpoint validation error: %s", error, exc_info=True)
             return JSONResponse(
@@ -407,6 +411,13 @@ def get_remember_router() -> APIRouter:
             Field(discriminator="type"),
         ]
         dataset_name: str = "main_dataset"
+        dataset_id: Optional[UUID] = Field(
+            default=None,
+            description=(
+                "UUID of an existing writable dataset. Takes precedence over dataset_name "
+                "and is required to target a shared dataset by ID."
+            ),
+        )
         session_id: Optional[str] = Field(
             default=None,
             examples=["claude-code-1718000000"],
@@ -449,6 +460,7 @@ def get_remember_router() -> APIRouter:
             result = await cognee_remember(
                 payload.entry,
                 dataset_name=payload.dataset_name,
+                dataset_id=payload.dataset_id,
                 session_id=payload.session_id,
                 user=user,
                 skill_improvement=payload.skill_improvement,
@@ -460,6 +472,10 @@ def get_remember_router() -> APIRouter:
         except RuntimeError as error:
             # Session cache unavailable
             return JSONResponse(status_code=503, content={"error": str(error)})
+        except CogneeApiError:
+            # Cognee errors carry their own status code and actionable message;
+            # the global handler in cognee/api/client.py returns them.
+            raise
         except Exception as error:
             logger.error("Remember entry endpoint error: %s", error, exc_info=True)
             return JSONResponse(

@@ -166,6 +166,7 @@ Same scripts, indexed by what they demonstrate.
 
 ### Connectors / Integrations
 - [`integrations/`](integrations/) — data-source connectors (installed from cognee-community)
+- [`tutorials/migrate_from_mem0_tutorial.py`](tutorials/migrate_from_mem0_tutorial.py) — import mem0 memories into Cognee
 
 ### SQL → knowledge graph
 - [`custom_pipelines/relational_database_to_knowledge_graph_migration_example.py`](custom_pipelines/relational_database_to_knowledge_graph_migration_example.py)
@@ -225,7 +226,7 @@ uv run python examples/demos/simple_cognee_example.py
 ```
 
 For non-OpenAI providers (Anthropic, Bedrock, Ollama, fastembed, …) see
-[the cognee docs](https://docs.cognee.ai) and `.env.template`.
+[the cognee docs](https://docs.cognee.ai), the [Ollama model matrix guide](../docs/ollama_models.md), and `.env.template`.
 
 ## 🤝 Contributing a new example
 
