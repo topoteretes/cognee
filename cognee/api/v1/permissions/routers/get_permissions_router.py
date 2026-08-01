@@ -721,13 +721,13 @@ def get_permissions_router() -> APIRouter:
         - **404 Not Found**: Role does not exist
         """
         from cognee.modules.users.permissions.methods import (
-            get_role,
+            get_role_by_id,
             give_default_permission_to_role,
             has_user_management_permission,
         )
 
         _validate_capability(capability)
-        role = await get_role(role_id)
+        role = await get_role_by_id(role_id)
         await has_user_management_permission(requester_id=user.id, tenant_id=role.tenant_id)
         await give_default_permission_to_role(role_id, capability)
 
@@ -755,13 +755,13 @@ def get_permissions_router() -> APIRouter:
         - **404 Not Found**: Role does not exist
         """
         from cognee.modules.users.permissions.methods import (
-            get_role,
+            get_role_by_id,
             has_user_management_permission,
             revoke_default_permission_from_role,
         )
 
         _validate_capability(capability)
-        role = await get_role(role_id)
+        role = await get_role_by_id(role_id)
         await has_user_management_permission(requester_id=user.id, tenant_id=role.tenant_id)
         await revoke_default_permission_from_role(role_id, capability)
 

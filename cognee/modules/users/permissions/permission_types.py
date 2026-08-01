@@ -12,12 +12,12 @@ MANAGE_USERS = "manage_users"
 
 CAPABILITY_TYPES: FrozenSet[str] = frozenset({MANAGE_USERS})
 
-# Deprecated in favour of the MANAGE_USERS capability, but still the only path
-# that grants user management to a non-owner today: nothing calls
-# give_default_permission_to_{tenant,role,user}, so no capability can actually be
-# assigned yet and resolution returns an empty set for everyone but the owner.
+# Deprecated in favour of the MANAGE_USERS capability. Kept because a tenant
+# that has not been migrated yet has no capability rows at all, so resolution
+# returns an empty set for everyone but the owner and this set is the only thing
+# still granting its "admin" role user management.
 #
-# Remove this set once granting is wired up (a capability-assignment endpoint,
-# tracked separately) and existing "admin" roles have been migrated onto
-# MANAGE_USERS. Removing it before then locks those tenants out.
+# Remove it once existing "admin" roles have been granted MANAGE_USERS through
+# the capability endpoints on the permissions router. Removing it before then
+# locks those tenants out.
 USER_MANAGEMENT_ALLOWED_ROLE_NAMES: FrozenSet[str] = frozenset({"admin"})

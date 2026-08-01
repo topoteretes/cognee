@@ -30,27 +30,32 @@ _SYSTEM_ROOT = str(
 @pytest.fixture(autouse=True, scope="module")
 def _isolated_db():
     """Point cognee at a database of its own so these rows never touch dev data."""
-    cognee.config.system_root_directory(_SYSTEM_ROOT)
-
-    async def _run():
-        from cognee.infrastructure.databases.relational import get_relational_engine
-        from cognee.run_migrations import run_migrations
-
-        try:
-            await run_migrations()
-        except Exception:
-            db_engine = get_relational_engine()
-            await db_engine.create_database()
-            await run_migrations()
-
-    asyncio.run(_run())
-
-    # The engine built above is process-global (@lru_cache) and bound to the event
-    # loop asyncio.run() just closed. Drop the cache so each test gets a fresh one.
     from cognee.infrastructure.databases.relational.create_relational_engine import (
         create_relational_engine,
     )
 
+    cognee.config.system_root_directory(_SYSTEM_ROOT)
+
+    # The engine is process-global (@lru_cache), so another module in the same
+    # run leaves one cached against its own system root.
+    create_relational_engine.cache_clear()
+
+    async def _run():
+        from cognee.infrastructure.databases.relational import get_relational_engine
+
+        # create_database() rather than run_migrations(): the latter is
+        # once-per-process and its relational step logs failures instead of
+        # raising, so in a run with more than one module it is a silent no-op
+        # and this database is never created. create_database() makes the
+        # directory and the tables outright.
+        import cognee.modules.users.models  # noqa: F401  register the tables
+
+        await get_relational_engine().create_database()
+
+    asyncio.run(_run())
+
+    # The engine built above is bound to the event loop asyncio.run() just
+    # closed. Drop the cache again so each test gets a fresh one.
     create_relational_engine.cache_clear()
 
 

@@ -18,8 +18,8 @@ async def has_user_management_permission(requester_id: UUID, tenant_id: UUID) ->
     Check if requester is allowed to manage users for a tenant.
 
     The requester is allowed if they hold the MANAGE_USERS capability in this
-    tenant, granted at tenant, role or user level. The tenant owner holds every
-    capability, so they always pass.
+    tenant, granted either to the tenant or to one of their roles in it. The
+    tenant owner holds every capability, so they always pass.
 
     Reuse this across all user management endpoints (list users, assign/remove
     roles, add/remove users from tenant, etc.) for consistent authorization.

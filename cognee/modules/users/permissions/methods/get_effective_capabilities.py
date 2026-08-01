@@ -39,11 +39,11 @@ async def get_effective_capabilities(user_id: UUID, tenant_id: UUID) -> Set[str]
         The tenant owner holds every capability in the catalog regardless of what
         is stored, matching how has_user_management_permission already treats them.
 
-        Read side only for now: nothing calls give_default_permission_to_{tenant,
-        role,user}, so no capability can be assigned yet and this returns an empty
-        set for every non-owner. Until an assignment path exists, the deprecated
-        role-name fallback in has_user_management_permission is what actually
-        grants user management.
+        What this resolves is written by the capability endpoints on the
+        permissions router, which grant to a tenant or to a role. A tenant with
+        no grants yet resolves to an empty set for everyone but the owner, and
+        the deprecated role-name fallback in has_user_management_permission is
+        what carries such a tenant until its capabilities are assigned.
     Args:
         user_id: Id of the user.
         tenant_id: Id of the tenant the capabilities are scoped to.

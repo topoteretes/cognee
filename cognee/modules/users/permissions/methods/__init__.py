@@ -1,4 +1,5 @@
 from .get_role import get_role
+from .get_role_by_id import get_role_by_id
 from .get_tenant import get_tenant
 from .get_principal import get_principal
 from .get_principal_datasets import get_principal_datasets
