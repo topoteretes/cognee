@@ -202,10 +202,20 @@ jobs:
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
           LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           LLM_ARGS: ${{ secrets.LLM_ARGS }}
-          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_MODEL_RAW: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
         run: |
           set -euo pipefail
+          # The Rust embedding client sends the model id verbatim to the API,
+          # so a litellm-style prefixed secret ("openai/text-embedding-3-small")
+          # 400s with "invalid model ID". Split the secret into the bare model
+          # and a provider the Rust client understands.
+          if [[ "$EMBEDDING_MODEL_RAW" == */* ]]; then
+            export EMBEDDING_PROVIDER="${EMBEDDING_MODEL_RAW%%/*}"
+          else
+            export EMBEDDING_PROVIDER="openai"
+          fi
+          export EMBEDDING_MODEL="${EMBEDDING_MODEL_RAW##*/}"
           mkdir -p "$GITHUB_WORKSPACE/perf-out"
           BENCH_CMD="$GITHUB_WORKSPACE/cognee-rs/target/release/cognee-cli bench --memories $GITHUB_WORKSPACE/cognee-rs/${{ inputs.memories }}" \
             python3 "$GITHUB_WORKSPACE/cognee/tests/performance/statistics_percentile_report.py" \
