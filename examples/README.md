@@ -27,6 +27,7 @@ to verify behaviour across the SDK.
 | [`guides/`](guides/) | Short focused how-to guides | 13 |
 | [`integrations/`](integrations/) | Data-source connectors — installed from cognee-community | 1 |
 | [`pocs/`](pocs/) | Research-grade proofs of concept (entity disambiguation, canonicalization, prefetch) | 7 |
+| [`tutorials/`](tutorials/) | Step-by-step tutorials for common workflows (migration, ...) | 1 |
 
 Most runnable demos and backend examples use the v1.0 memory API (`remember`, `recall`, `forget`, `improve`). The lower-level `add`, `cognify`, `search`, and `prune` calls are intentionally kept in examples that demonstrate pipeline internals, permissions, relational migrations, or research POCs.
 
@@ -165,6 +166,7 @@ Same scripts, indexed by what they demonstrate.
 
 ### Connectors / Integrations
 - [`integrations/`](integrations/) — data-source connectors (installed from cognee-community)
+- [`tutorials/migrate_from_mem0_tutorial.py`](tutorials/migrate_from_mem0_tutorial.py) — import mem0 memories into Cognee
 
 ### SQL → knowledge graph
 - [`custom_pipelines/relational_database_to_knowledge_graph_migration_example.py`](custom_pipelines/relational_database_to_knowledge_graph_migration_example.py)
@@ -224,7 +226,7 @@ uv run python examples/demos/simple_cognee_example.py
 ```
 
 For non-OpenAI providers (Anthropic, Bedrock, Ollama, fastembed, …) see
-[the cognee docs](https://docs.cognee.ai) and `.env.template`.
+[the cognee docs](https://docs.cognee.ai), the [Ollama model matrix guide](../docs/ollama_models.md), and `.env.template`.
 
 ## 🤝 Contributing a new example
 
