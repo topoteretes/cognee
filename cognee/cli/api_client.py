@@ -17,6 +17,7 @@ import mimetypes
 import os
 from typing import Any, Optional
 from urllib.parse import urljoin
+from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 
 
 def _import_httpx():
@@ -122,7 +123,7 @@ class CogneeApiClient:
     def add(
         self,
         data_items: list[str],
-        dataset_name: str = "main_dataset",
+        dataset_name: str = DEFAULT_DATASET_NAME,
     ) -> dict:
         files = []
         opened = []
@@ -255,7 +256,7 @@ class CogneeApiClient:
     def remember(
         self,
         data_items: list[str],
-        dataset_name: str = "main_dataset",
+        dataset_name: str = DEFAULT_DATASET_NAME,
         session_id: Optional[str] = None,
         node_set: Optional[list[str]] = None,
         run_in_background: bool = False,
