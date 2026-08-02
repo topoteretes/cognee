@@ -89,11 +89,16 @@ def setup_log_bridge(console_output: bool = False) -> Optional[object]:
 
 
 def _try_add_otlp_log_exporter(provider, endpoint: str, headers) -> None:
+    import logging as _logging
+
+    _log = _logging.getLogger("cognee.observability")
+    from cognee.modules.observability.tracing import _requires_http_exporter
+
     logs_endpoint = os.getenv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT") or (
         endpoint.replace("/v1/traces", "/v1/logs") if "/v1/traces" in endpoint else endpoint
     )
 
-    if "/api/public/otel" in logs_endpoint:
+    if _requires_http_exporter(logs_endpoint):
         _add_http_log_exporter(provider, logs_endpoint, headers)
         return
 
@@ -103,6 +108,7 @@ def _try_add_otlp_log_exporter(provider, endpoint: str, headers) -> None:
         provider.add_log_record_processor(
             SimpleLogRecordProcessor(OTLPLogExporter(endpoint=logs_endpoint, headers=headers))
         )
+        _log.info("OTel: OTLP gRPC log exporter registered → %s", logs_endpoint)
     except ImportError:
         _add_http_log_exporter(provider, logs_endpoint, headers)
 

@@ -213,7 +213,11 @@ def setup_metrics(console_output: bool = False) -> object:
 
 def _try_add_otlp_metric_reader(readers: list, endpoint: str, config) -> None:
     """Try to add an OTLP metric reader; silently skip if package missing."""
-    from cognee.modules.observability.tracing import _parse_otlp_headers
+    import logging as _logging
+
+    _log = _logging.getLogger("cognee.observability")
+
+    from cognee.modules.observability.tracing import _parse_otlp_headers, _requires_http_exporter
 
     headers = _parse_otlp_headers(getattr(config, "otel_exporter_otlp_headers", None))
 
@@ -222,8 +226,7 @@ def _try_add_otlp_metric_reader(readers: list, endpoint: str, config) -> None:
         endpoint.replace("/v1/traces", "/v1/metrics") if "/v1/traces" in endpoint else endpoint
     )
 
-    # Langfuse and similar: HTTP only
-    if "/api/public/otel" in metrics_endpoint:
+    if _requires_http_exporter(metrics_endpoint):
         _add_http_metric_reader(readers, metrics_endpoint, headers)
         return
 
@@ -236,11 +239,15 @@ def _try_add_otlp_metric_reader(readers: list, endpoint: str, config) -> None:
                 export_interval_millis=30_000,
             )
         )
+        _log.info("OTel: OTLP gRPC metric exporter registered → %s", metrics_endpoint)
     except ImportError:
         _add_http_metric_reader(readers, metrics_endpoint, headers)
 
 
 def _add_http_metric_reader(readers: list, endpoint: str, headers) -> None:
+    import logging as _logging
+
+    _log = _logging.getLogger("cognee.observability")
     try:
         from opentelemetry.exporter.otlp.proto.http.metric_exporter import (
             OTLPMetricExporter as OTLPHttpMetricExporter,
@@ -252,14 +259,17 @@ def _add_http_metric_reader(readers: list, endpoint: str, headers) -> None:
                 export_interval_millis=30_000,
             )
         )
+        _log.info("OTel: OTLP HTTP metric exporter registered → %s", endpoint)
     except ImportError:
         import warnings
 
-        warnings.warn(
-            "OTEL_EXPORTER_OTLP_ENDPOINT is set but no OTLP metrics exporter is installed. "
-            "Install with: pip install cognee[tracing]",
-            stacklevel=3,
+        msg = (
+            f"OTEL_EXPORTER_OTLP_ENDPOINT is set to '{endpoint}' but no OTLP metrics "
+            "exporter is installed. Metrics will NOT be exported. "
+            "Install with: pip install cognee[tracing]"
         )
+        _log.error("OTel: %s", msg)
+        warnings.warn(msg, stacklevel=3,)
 
 
 def get_meter() -> Optional[object]:

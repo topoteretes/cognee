@@ -299,3 +299,41 @@ def test_enable_tracing_wires_log_bridge():
     assert has_otel
 
     disable_tracing()
+
+
+# ---------------------------------------------------------------------------
+# Dynatrace / HTTP-only exporter detection tests
+# ---------------------------------------------------------------------------
+
+
+def test_requires_http_exporter_dynatrace():
+    """Dynatrace endpoints are correctly identified as HTTP-only."""
+    from cognee.modules.observability.tracing import _requires_http_exporter
+
+    assert _requires_http_exporter("https://abc12345.live.dynatrace.com/api/v2/otlp/v1/traces")
+    assert _requires_http_exporter("https://otel.live.dynatrace.com/api/v2/otlp")
+    assert _requires_http_exporter("https://myenv.dynatrace.com/api/v2/otlp/v1/traces")
+
+
+def test_requires_http_exporter_langfuse():
+    """Langfuse endpoints are correctly identified as HTTP-only."""
+    from cognee.modules.observability.tracing import _requires_http_exporter
+
+    assert _requires_http_exporter("https://cloud.langfuse.com/api/public/otel")
+    assert _requires_http_exporter("https://us.cloud.langfuse.com/api/public/otel/v1/traces")
+
+
+def test_requires_http_exporter_port_4318():
+    """Port 4318 is the standard OTLP HTTP port and must force HTTP."""
+    from cognee.modules.observability.tracing import _requires_http_exporter
+
+    assert _requires_http_exporter("http://collector.example.com:4318")
+
+
+def test_requires_http_exporter_grpc_passes():
+    """Standard gRPC endpoints (port 4317) do not trigger HTTP-only mode."""
+    from cognee.modules.observability.tracing import _requires_http_exporter
+
+    # Standard gRPC collector should NOT be forced to HTTP
+    assert not _requires_http_exporter("http://otel-collector.example.com:4317")
+    assert not _requires_http_exporter("http://localhost:4317")
