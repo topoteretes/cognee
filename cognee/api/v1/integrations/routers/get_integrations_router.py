@@ -101,9 +101,7 @@ def get_integrations_router():
             span.set_attribute("cognee.integrations.provider", provider)
             integration = _integration_or_404(provider)
             try:
-                state = make_state(
-                    user_id=user.id, signing_secret=integration.state_signing_secret()
-                )
+                state = make_state(user.id, signing_secret=integration.state_signing_secret())
                 return AuthorizeUrlDTO(authorize_url=integration.authorize_url(state))
             except RuntimeError:
                 # A provider's require()-style settings guard raises when its
