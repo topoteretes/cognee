@@ -52,6 +52,10 @@ class DataDTO(OutDTO):
     mime_type: str
     raw_data_location: str
     dataset_id: UUID
+    # Whether this document has been fully cognified into this dataset's graph.
+    # False means it isn't in the graph yet (e.g. a cognify run stopped early on
+    # budget) — re-running cognify processes the still-incomplete documents.
+    cognify_completed: bool = False
 
 
 class DatasetGraphSummaryDTO(OutDTO):
@@ -393,10 +397,18 @@ def get_datasets_router() -> APIRouter:
         if dataset_data is None:
             return []
 
+        from cognee.modules.pipelines.models.DataItemStatus import DataItemStatus
+
+        def _cognify_completed(data) -> bool:
+            return (data.pipeline_status or {}).get("cognify_pipeline", {}).get(
+                str(dataset_id)
+            ) == DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED
+
         return [
             dict(
                 **jsonable_encoder(data),
                 dataset_id=dataset_id,
+                cognify_completed=_cognify_completed(data),
             )
             for data in dataset_data
         ]

@@ -17,6 +17,9 @@ from cognee.modules.users.methods import get_default_user
 from cognee.modules.pipelines.utils import generate_pipeline_id
 from cognee.modules.pipelines.exceptions import PipelineRunFailedError
 from cognee.tasks.ingestion import resolve_data_directories
+from cognee.infrastructure.llm.exceptions import is_budget_exhausted_error
+from cognee.modules.data.methods import get_dataset_data
+from cognee.modules.pipelines.models.DataItemStatus import DataItemStatus
 from cognee.modules.pipelines.models import PipelineContext
 from cognee.modules.pipelines.models.PipelineRunInfo import (
     PipelineRunCompleted,
@@ -33,6 +36,28 @@ from ..tasks.task import Task
 
 
 logger = get_logger("run_tasks(tasks: [Task], data)")
+
+
+async def _cognify_progress(dataset_id: UUID, pipeline_name: str) -> dict:
+    """Per-document progress for a dataset, derived from the completion markers.
+
+    Reports how many of the dataset's documents are already cognified (carry the
+    ``DATA_ITEM_PROCESSING_COMPLETED`` flag for this pipeline) vs still remaining —
+    used to tell the caller what is left when a run stops early (e.g. budget).
+    """
+    items = await get_dataset_data(dataset_id)
+    total = len(items)
+    cognified = sum(
+        1
+        for d in items
+        if (d.pipeline_status or {}).get(pipeline_name, {}).get(str(dataset_id))
+        == DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED
+    )
+    return {
+        "documents_total": total,
+        "documents_cognified": cognified,
+        "documents_remaining": total - cognified,
+    }
 
 
 def override_run_tasks(new_gen):
@@ -129,9 +154,10 @@ async def run_tasks(
                         data_cache,
                     )
 
-            gathered = await asyncio.gather(
-                *[asyncio.create_task(_run_item(item)) for item in data],
-            )
+            # Keep task references so siblings can be cancelled if the run stops
+            # early (see the budget-exhaustion path in the except below).
+            in_flight = [asyncio.create_task(_run_item(item)) for item in data]
+            gathered = await asyncio.gather(*in_flight)
 
             # Separate successes from unhandled exceptions
             results = []
@@ -185,6 +211,50 @@ async def run_tasks(
             )
 
         except Exception as error:
+            # Stop any siblings still running so a failed or budget-limited run does
+            # not keep issuing (and, on a budget stop, billing) LLM calls after we
+            # have already decided to stop.
+            in_flight = locals().get("in_flight") or []
+            for task in in_flight:
+                if not task.done():
+                    task.cancel()
+            if in_flight:
+                await asyncio.gather(*in_flight, return_exceptions=True)
+
+            # Budget/quota exhaustion is a resource limit, not a failure. Keep every
+            # document already cognified (skip rollback, so the graph stays queryable)
+            # and record a COMPLETED run that reports what is left — a later cognify
+            # resumes only the remaining documents (incremental loading skips the ones
+            # already marked complete). No new pipeline status is introduced: the
+            # "stopped early" signal lives in run_info.stopped_reason.
+            if is_budget_exhausted_error(error):
+                progress = await _cognify_progress(dataset.id, pipeline_name)
+                logger.warning(
+                    "Cognify stopped early for dataset %s: budget exhausted — "
+                    "%s/%s documents cognified, %s remaining",
+                    dataset.id,
+                    progress["documents_cognified"],
+                    progress["documents_total"],
+                    progress["documents_remaining"],
+                )
+                stopped_info = {"stopped_reason": "budget_exhausted", **progress}
+                await log_pipeline_run_complete(
+                    pipeline_run_id,
+                    pipeline_id,
+                    pipeline_name,
+                    dataset.id,
+                    data,
+                    run_info_extra=stopped_info,
+                )
+                yield PipelineRunCompleted(
+                    pipeline_run_id=pipeline_run_id,
+                    dataset_id=dataset.id,
+                    dataset_name=dataset.name,
+                    payload=stopped_info,
+                    data_ingestion_info=locals().get("results"),
+                )
+                return
+
             if callable(rollback_handler):
                 try:
                     await rollback_handler(
