@@ -28,9 +28,9 @@ from starlette.middleware.cors import CORSMiddleware
 import uvicorn
 
 try:
-    from .cognee_client import CogneeClient
+    from .cognee_client import CogneeClient, normalize_api_url
 except ImportError:
-    from cognee_client import CogneeClient
+    from cognee_client import CogneeClient, normalize_api_url
 
 try:
     from .strip_vectors import strip_vectors
@@ -2031,7 +2031,7 @@ async def main():
     apply_tool_mode(args.tool_mode)
 
     # Resolve cloud connection: CLI args take precedence over env vars
-    serve_url = args.serve_url or os.environ.get("COGNEE_SERVICE_URL", "")
+    serve_url = normalize_api_url(args.serve_url or os.environ.get("COGNEE_SERVICE_URL", ""))
     serve_api_key = args.serve_api_key or os.environ.get("COGNEE_API_KEY", "")
 
     # Connect to Cognee Cloud if configured (before migrations — cloud handles its own DB)
