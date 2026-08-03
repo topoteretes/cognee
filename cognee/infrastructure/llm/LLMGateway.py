@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import Coroutine
 from typing import Any, TypeVar
 
@@ -64,6 +65,38 @@ async def _fail_fast_on_quota(coro: Coroutine) -> T:
         raise
 
 
+# Per-event-loop concurrency semaphores, keyed by loop id so a process that
+# (re)creates event loops (e.g. tests using asyncio.run) never reuses a semaphore
+# bound to a closed loop. Recreated when the configured limit changes.
+_concurrency_semaphores: dict[int, tuple[int, asyncio.Semaphore]] = {}
+
+
+def _concurrency_semaphore(limit: int) -> asyncio.Semaphore:
+    loop_key = id(asyncio.get_running_loop())
+    cached = _concurrency_semaphores.get(loop_key)
+    if cached is None or cached[0] != limit:
+        semaphore = asyncio.Semaphore(limit)
+        _concurrency_semaphores[loop_key] = (limit, semaphore)
+        return semaphore
+    return cached[1]
+
+
+async def _limit_concurrency(coro: Coroutine) -> T:
+    """Bound global in-flight structured-output concurrency (CLO-409 Phase 0b).
+
+    ``acreate_structured_output`` is the single choke point every structured-output
+    call flows through, so acquiring one semaphore here caps the whole engine's
+    concurrent LLM fan-out — bounding the burst that lets a cognify run overshoot a
+    LiteLLM key's async budget cap. A no-op when ``llm_max_concurrent_requests <= 0``
+    (OSS default), so behavior is unchanged unless a deployment opts in.
+    """
+    limit = get_llm_config().llm_max_concurrent_requests
+    if limit <= 0:
+        return await coro
+    async with _concurrency_semaphore(limit):
+        return await coro
+
+
 class LLMGateway:
     """
     Class handles selection of structured output frameworks and LLM functions.
@@ -114,9 +147,12 @@ class LLMGateway:
                 **kwargs,
             )
 
-        # Wrap so usage is recorded against any active session tracker.
-        # No-op when no tracker is installed.
-        return _fail_fast_on_quota(_record_session_usage_after(inner, text_input=text_input))
+        # Wrap so usage is recorded against any active session tracker (no-op when no
+        # tracker is installed), then bound global concurrency at this single choke
+        # point (no-op unless llm_max_concurrent_requests is set).
+        return _limit_concurrency(
+            _fail_fast_on_quota(_record_session_usage_after(inner, text_input=text_input))
+        )
 
     @staticmethod
     def create_transcript(input, **kwargs) -> Coroutine[Any, Any, TranscriptionReturnType | None]:

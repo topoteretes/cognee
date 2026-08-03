@@ -94,6 +94,12 @@ class LLMConfig(BaseSettings):
     embedding_rate_limit_interval: int = 60  # in seconds (default is 60 requests per minute)
     embedding_rate_limit_tokens: int = 0  # max tokens per interval (0 = disabled)
 
+    # Global ceiling on concurrent in-flight structured-output LLM calls across the
+    # process, enforced at the single LLMGateway choke point. 0 = disabled (unbounded,
+    # preserves OSS default). Bounds the cognify fan-out burst so it cannot overshoot a
+    # LiteLLM key's async budget cap (CLO-409 Phase 0b).
+    llm_max_concurrent_requests: int = 0
+
     # Budget/payment exhaustion (HTTP 402, or LiteLLM's "Budget has been exceeded" 429)
     # is terminal by default: retrying a spend-capped key only produces more
     # proxy-rejected calls (CLO-409). Set > 0 to allow a small bounded retry for
