@@ -17,6 +17,7 @@ from tenacity import (
 )
 
 from cognee.infrastructure.llm.retry_config import (
+    instructor_async_retrying,
     llm_retry_condition,
     llm_retry_stop_condition,
 )
@@ -170,7 +171,7 @@ class OpenAIAdapter(GenericAPIAdapter):
                     api_base=self.endpoint,
                     api_version=self.api_version,
                     response_model=response_model,
-                    max_retries=self.MAX_RETRIES,
+                    max_retries=instructor_async_retrying(self.MAX_RETRIES),
                     **merged_kwargs,
                 )
         except (
@@ -197,7 +198,7 @@ class OpenAIAdapter(GenericAPIAdapter):
                         api_key=self.fallback_api_key,
                         api_base=self.fallback_endpoint,
                         response_model=response_model,
-                        max_retries=self.MAX_RETRIES,
+                        max_retries=instructor_async_retrying(self.MAX_RETRIES),
                         **merged_kwargs,
                     )
             except (

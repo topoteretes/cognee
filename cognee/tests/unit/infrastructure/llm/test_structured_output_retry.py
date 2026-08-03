@@ -321,3 +321,37 @@ def test_budget_error_is_retryable_when_payg_bounded_retry_enabled():
 
 def test_transient_error_unaffected_by_budget_gate():
     assert should_retry_llm_exception(RuntimeError("connection reset by peer")) is True
+
+
+# --------------------------------------------------------------------------- #
+# 5. instructor_async_retrying (CLO-420): the AsyncRetrying handed to instructor's
+#    `max_retries` re-asks transient/validation errors up to the cap, but stops
+#    immediately on a terminal budget error (so a spend-capped key is hit once, not
+#    ~MAX_RETRIES times, per logical call).
+# --------------------------------------------------------------------------- #
+def _attempts_until_stop(max_attempts, error) -> int:
+    from cognee.infrastructure.llm.retry_config import instructor_async_retrying
+
+    holder = {"n": 0}
+
+    async def _run():
+        async for attempt in instructor_async_retrying(max_attempts):
+            with attempt:
+                holder["n"] += 1
+                raise error
+
+    try:
+        asyncio.run(_run())
+    except Exception:
+        pass  # tenacity raises RetryError once it stops; we only care about the count
+    return holder["n"]
+
+
+def test_instructor_retrying_stops_immediately_on_budget():
+    assert _attempts_until_stop(3, _ProxyBudget429()) == 1
+
+
+def test_instructor_retrying_reasks_transient_up_to_cap():
+    # A non-terminal error (a validation re-ask looks the same to the predicate)
+    # keeps retrying until the attempt cap.
+    assert _attempts_until_stop(3, RuntimeError("boom")) == 3

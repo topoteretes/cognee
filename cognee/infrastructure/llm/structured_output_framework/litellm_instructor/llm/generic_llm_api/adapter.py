@@ -21,6 +21,7 @@ from tenacity import (
 )
 
 from cognee.infrastructure.llm.retry_config import (
+    instructor_async_retrying,
     llm_retry_condition,
     llm_retry_stop_condition,
 )
@@ -207,7 +208,7 @@ class GenericAPIAdapter(LLMInterface):
                             "content": f"""{text_input}""",
                         },
                     ],
-                    max_retries=self.MAX_RETRIES,
+                    max_retries=instructor_async_retrying(self.MAX_RETRIES),
                     api_key=self.api_key,
                     api_base=self.endpoint,
                     response_model=response_model,
@@ -248,7 +249,7 @@ class GenericAPIAdapter(LLMInterface):
                                 "content": f"""{text_input}""",
                             },
                         ],
-                        max_retries=self.MAX_RETRIES,
+                        max_retries=instructor_async_retrying(self.MAX_RETRIES),
                         api_key=self.fallback_api_key,
                         api_base=self.fallback_endpoint,
                         response_model=response_model,

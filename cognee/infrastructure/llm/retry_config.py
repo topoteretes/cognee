@@ -19,7 +19,7 @@ retryable.
 import asyncio
 
 import litellm
-from tenacity import retry_if_exception, stop_after_attempt, stop_after_delay
+from tenacity import AsyncRetrying, retry_if_exception, stop_after_attempt, stop_after_delay
 
 from cognee.infrastructure.llm.exceptions import (
     LLMPaymentRequiredError,
@@ -157,3 +157,22 @@ def raise_if_quota_error(error: BaseException) -> None:
 
 
 llm_retry_condition = retry_if_exception(should_retry_llm_exception)
+
+
+def instructor_async_retrying(max_attempts: int) -> AsyncRetrying:
+    """Inner-retry policy for instructor's ``max_retries`` (CLO-420).
+
+    Instructor re-asks the model on validation errors; by default (an int
+    ``max_retries``) it retries on *any* error, so a budget/quota rejection is
+    hit ``max_attempts`` times per logical call. Passing this ``AsyncRetrying``
+    instead re-asks on validation errors up to ``max_attempts`` but stops
+    immediately on terminal budget/quota/auth errors — reusing the same
+    ``llm_retry_condition`` as the outer adapter retry, so classification is
+    consistent across both layers.
+
+    Must NOT set ``reraise=True``: instructor catches tenacity's ``RetryError``
+    and wraps it in ``InstructorRetryException`` (with ``failed_attempts``
+    populated), which the adapters' fallback / content-policy handlers and the
+    outer budget detection all depend on.
+    """
+    return AsyncRetrying(stop=stop_after_attempt(max_attempts), retry=llm_retry_condition)
