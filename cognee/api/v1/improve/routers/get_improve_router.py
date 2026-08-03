@@ -14,6 +14,7 @@ from cognee.modules.pipelines.models import PipelineRunErrored
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.usage_logger import log_usage
 from cognee import __version__ as cognee_version
+from cognee.exceptions import CogneeApiError
 
 logger = get_logger()
 
@@ -95,6 +96,10 @@ def get_improve_router() -> APIRouter:
             if isinstance(improve_run, PipelineRunErrored):
                 return JSONResponse(status_code=420, content=improve_run)
             return improve_run
+        except CogneeApiError:
+            # Cognee errors carry their own status code and actionable message;
+            # the global handler in cognee/api/client.py returns them.
+            raise
         except Exception as error:
             logger.error("Improve endpoint error: %s", error, exc_info=True)
             return JSONResponse(

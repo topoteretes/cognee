@@ -72,16 +72,27 @@ async def save_data_item_to_storage(data_item: Union[BinaryIO, str, Any]) -> str
             else:
                 raise IngestionError(message="Local files are not accepted.")
 
-        # data is an absolute file path
+        # data is an absolute file path that points at an existing file
         elif (
-            data_item.startswith("/")
-            or (os.name == "nt" and len(data_item) > 1 and data_item[1] == ":")
-        ) and Path(os.path.normpath(data_item)).is_absolute():
+            (
+                data_item.startswith("/")
+                or (os.name == "nt" and len(data_item) > 1 and data_item[1] == ":")
+            )
+            and Path(os.path.normpath(data_item)).is_absolute()
+            and abs_path.is_file()
+        ):
             # Handle both Unix absolute paths (/path) and Windows absolute paths (C:\path).
-            # The is_absolute() guard matters on Windows: a POSIX-style "/path" (or a
-            # drive-relative "C:path") normalizes to a *drive-relative* WindowsPath, and
-            # Path.as_uri() raises ValueError for it. Such strings are not usable file
-            # paths on this platform and continue to the relative-path/text handling below.
+            #
+            # is_absolute() guard: on Windows a POSIX-style "/path" (or a drive-relative
+            # "C:path") normalizes to a *drive-relative* WindowsPath, and Path.as_uri()
+            # raises ValueError for it. Such strings are not usable file paths on this
+            # platform and continue to the relative-path/text handling below.
+            #
+            # abs_path.is_file() guard: only convert an absolute-looking string to a
+            # file:// URI when it actually points at an existing file, mirroring the
+            # relative-path branch below. A "/"-prefixed string that is not an existing
+            # file (e.g. a plain text note such as "/remember to call Bob") falls through
+            # to text ingestion on every platform instead of becoming a broken file:// URI.
             if settings.accept_local_file_path:
                 # Normalize path separators before creating file URL
                 normalized_path = os.path.normpath(data_item)

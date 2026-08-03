@@ -8,6 +8,7 @@ from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
 
 # Tiny constants-only import; the cognee package is already loaded by the CLI.
 from cognee.modules.migration.sources.base import IMPORT_MODES
+from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 
 
 class PushCommand(SupportsCliCommand):
@@ -42,7 +43,7 @@ Examples:
         parser.add_argument(
             "dataset",
             nargs="?",
-            default="main_dataset",
+            default=DEFAULT_DATASET_NAME,
             help="Local dataset name to push (default: main_dataset)",
         )
         parser.add_argument(
