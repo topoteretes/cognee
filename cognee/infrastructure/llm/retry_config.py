@@ -24,6 +24,7 @@ from tenacity import retry_if_exception, stop_after_attempt, stop_after_delay
 from cognee.infrastructure.llm.exceptions import (
     LLMPaymentRequiredError,
     LLMQuotaExceededError,
+    is_budget_exhausted_error,
 )
 
 # Minimum number of attempts before the call is allowed to give up.
@@ -46,6 +47,7 @@ _TERMINAL_QUOTA_PATTERNS = (
     "billing hard limit",  # OpenAI: monthly hard limit reached
     "credit balance is too low",  # Anthropic: prepaid credits exhausted
     "out of credits",
+    "budget has been exceeded",  # LiteLLM proxy: virtual-key spend cap reached (CLO-409)
 )
 
 
@@ -67,6 +69,62 @@ def is_quota_or_billing_error(error: BaseException) -> bool:
     return False
 
 
+def _find_budget_error(error: BaseException) -> BaseException | None:
+    """Return the innermost budget/payment-exhaustion exception wrapped by ``error``.
+
+    Robust to ``instructor`` wrapping: after instructor exhausts its own retries it
+    raises ``InstructorRetryException``, whose top-level ``status_code``/``response`` no
+    longer describe the provider error. The raw provider 402/429 still survives on the
+    tenacity ``RetryError``'s ``last_attempt`` and on each
+    ``InstructorRetryException.failed_attempts[*].exception``, so the structured
+    :func:`is_budget_exhausted_error` detector is run across all of them — not merely
+    a ``str()`` match — so budget exhaustion is caught even if the wording changes.
+
+    Returns the matched exception (so callers can preserve its original wording — e.g.
+    LiteLLM's "Budget has been exceeded", which downstream status classification keys
+    off), or ``None`` when no budget error is present.
+    """
+    seen: set[int] = set()
+
+    def _walk(exc: BaseException | None) -> BaseException | None:
+        while exc is not None and id(exc) not in seen:
+            seen.add(id(exc))
+            if is_budget_exhausted_error(exc):
+                return exc
+            # tenacity RetryError wraps the final failed attempt.
+            last_attempt = getattr(exc, "last_attempt", None)
+            if last_attempt is not None:
+                found = _walk(getattr(last_attempt, "_exception", None))
+                if found is not None:
+                    return found
+            # instructor records the raw provider error for every retry it made.
+            for attempt in getattr(exc, "failed_attempts", None) or []:
+                found = _walk(getattr(attempt, "exception", None))
+                if found is not None:
+                    return found
+            exc = exc.__cause__
+        return None
+
+    return _walk(error)
+
+
+def _is_budget_error(error: BaseException) -> bool:
+    """True when ``error`` — or anything it wraps — signals budget/payment exhaustion."""
+    return _find_budget_error(error) is not None
+
+
+def _budget_retry_enabled() -> bool:
+    """Whether budget/payment exhaustion may be retried (pay-as-you-go bounded retry).
+
+    Off by default (``LLM_BUDGET_MAX_RETRY_ATTEMPTS == 0``): a spend-capped key fails
+    fast so it cannot drive a retry storm (CLO-409). Pay-as-you-go tenants can opt in.
+    """
+    # Imported lazily: importing config at module top is circular.
+    from cognee.infrastructure.llm.config import get_llm_config
+
+    return get_llm_config().llm_budget_max_retry_attempts > 0
+
+
 def should_retry_llm_exception(error: BaseException) -> bool:
     non_retryable: tuple[type[BaseException], ...] = (
         asyncio.CancelledError,
@@ -77,13 +135,23 @@ def should_retry_llm_exception(error: BaseException) -> bool:
     )
     if isinstance(error, non_retryable):
         return False
+    # Budget/payment exhaustion is terminal: retrying a spend-capped key only produces
+    # more proxy-rejected 429s (the CLO-409 retry storm). Opt-in bounded retry only.
+    if _is_budget_error(error):
+        return _budget_retry_enabled()
     return not is_quota_or_billing_error(error)
 
 
 def raise_if_quota_error(error: BaseException) -> None:
-    """Re-raise quota/billing exhaustion as the actionable ``LLMQuotaExceededError``."""
-    if isinstance(error, LLMQuotaExceededError):
+    """Re-raise quota/billing/budget exhaustion as an actionable terminal error."""
+    if isinstance(error, (LLMQuotaExceededError, LLMPaymentRequiredError)):
         raise error
+    # Budget exhaustion becomes a 402-typed error, keeping the matched provider error's
+    # original wording (e.g. LiteLLM's "Budget has been exceeded") — not the wrapper's —
+    # so downstream status classification (pod insufficient-credits labelling) still matches.
+    budget_error = _find_budget_error(error)
+    if budget_error is not None:
+        raise LLMPaymentRequiredError(str(budget_error)) from error
     if is_quota_or_billing_error(error):
         raise LLMQuotaExceededError(str(error)) from error
 

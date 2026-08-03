@@ -94,6 +94,13 @@ class LLMConfig(BaseSettings):
     embedding_rate_limit_interval: int = 60  # in seconds (default is 60 requests per minute)
     embedding_rate_limit_tokens: int = 0  # max tokens per interval (0 = disabled)
 
+    # Budget/payment exhaustion (HTTP 402, or LiteLLM's "Budget has been exceeded" 429)
+    # is terminal by default: retrying a spend-capped key only produces more
+    # proxy-rejected calls (CLO-409). Set > 0 to allow a small bounded retry for
+    # pay-as-you-go tenants where an auto-recharge top-up may lift the cap mid-run.
+    llm_budget_max_retry_attempts: int = 0
+    llm_budget_max_retry_seconds: int = 0
+
     llama_cpp_model_path: str | None = None
     llama_cpp_n_ctx: int = 2048
     llama_cpp_n_gpu_layers: int = 0

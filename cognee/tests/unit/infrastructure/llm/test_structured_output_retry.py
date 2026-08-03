@@ -18,7 +18,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from pydantic import BaseModel
-from cognee.infrastructure.llm.exceptions import LLMQuotaExceededError
+from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError, LLMQuotaExceededError
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.openai.adapter import (
     OpenAIAdapter,
 )
@@ -27,6 +27,7 @@ from cognee.infrastructure.llm.retry_config import (
     LLM_MIN_RETRY_SECONDS,
     is_quota_or_billing_error,
     llm_retry_stop_condition,
+    raise_if_quota_error,
     should_retry_llm_exception,
 )
 
@@ -240,3 +241,83 @@ async def test_structured_output_keeps_retrying_until_time_floor():
     )
     # It only gave up once the elapsed-time floor was actually crossed.
     assert clock[0] >= MIN_SECONDS
+
+
+# --------------------------------------------------------------------------- #
+# 4. Budget/payment exhaustion is terminal by default (CLO-409): a spend-capped
+#    LiteLLM key must fail fast, never feed the ~15x retry storm — even though
+#    ``instructor`` wraps the raw 429 in ``InstructorRetryException`` before we
+#    see it. Opt-in bounded retry (pay-as-you-go) is exercised separately.
+# --------------------------------------------------------------------------- #
+class _FakeResponse:
+    def __init__(self, body):
+        self._body = body
+
+    def json(self):
+        return self._body
+
+
+class _ProxyBudget429(Exception):
+    """Mimics LiteLLM's proxy budget rejection: HTTP 429 + error.type budget_exceeded."""
+
+    status_code = 429
+
+    def __init__(self):
+        super().__init__(
+            "Litellm_proxyException - Budget has been exceeded! "
+            "Current cost: 503.6, Max budget: 345.0"
+        )
+        self.response = _FakeResponse({"error": {"type": "budget_exceeded"}})
+
+
+class _FailedAttempt:
+    def __init__(self, exc):
+        self.exception = exc
+
+
+class _InstructorRetryLike(Exception):
+    """Mimics instructor.InstructorRetryException: the raw error is on failed_attempts."""
+
+    def __init__(self, exc):
+        super().__init__("All retries exhausted")
+        self.failed_attempts = [_FailedAttempt(exc)]
+
+
+def _make_budget_errors():
+    raw = _ProxyBudget429()
+    return {
+        "structured_429": raw,
+        "instructor_wrapped": _InstructorRetryLike(raw),  # raw survives on failed_attempts
+        "string_only": RuntimeError("Budget has been exceeded! Max budget: 345"),
+        "http_402": type("PaymentRequired", (Exception,), {"status_code": 402})(),
+    }
+
+
+@pytest.mark.parametrize(
+    "error", list(_make_budget_errors().values()), ids=list(_make_budget_errors())
+)
+def test_budget_errors_are_terminal_by_default(error):
+    # Default config: llm_budget_max_retry_attempts == 0 -> never retry.
+    assert should_retry_llm_exception(error) is False
+
+
+def test_raise_if_quota_error_preserves_budget_marker_for_wrapped_error():
+    # The pod classifies "insufficient_credits" by matching the budget marker in the
+    # stored run error, so the INNER provider wording must survive the wrapper.
+    wrapped = _InstructorRetryLike(_ProxyBudget429())
+    with pytest.raises(LLMPaymentRequiredError) as excinfo:
+        raise_if_quota_error(wrapped)
+    assert "budget has been exceeded" in str(excinfo.value).lower()
+
+
+def test_budget_error_is_retryable_when_payg_bounded_retry_enabled():
+    # Pay-as-you-go tenants may opt in (auto-recharge can lift the cap mid-run).
+    error = _InstructorRetryLike(_ProxyBudget429())
+    fake_config = SimpleNamespace(llm_budget_max_retry_attempts=3)
+    # _budget_retry_enabled imports get_llm_config lazily from the config module.
+    with patch("cognee.infrastructure.llm.config.get_llm_config", return_value=fake_config):
+        assert should_retry_llm_exception(error) is True
+
+
+def test_transient_error_unaffected_by_budget_gate():
+    assert should_retry_llm_exception(RuntimeError("connection reset by peer")) is True
