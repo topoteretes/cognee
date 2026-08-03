@@ -1,6 +1,7 @@
 import asyncio
 from collections.abc import Coroutine
 from typing import Any, TypeVar
+from weakref import WeakKeyDictionary
 
 from pydantic import BaseModel
 
@@ -65,18 +66,23 @@ async def _fail_fast_on_quota(coro: Coroutine) -> T:
         raise
 
 
-# Per-event-loop concurrency semaphores, keyed by loop id so a process that
-# (re)creates event loops (e.g. tests using asyncio.run) never reuses a semaphore
-# bound to a closed loop. Recreated when the configured limit changes.
-_concurrency_semaphores: dict[int, tuple[int, asyncio.Semaphore]] = {}
+# Per-event-loop concurrency semaphores. Keyed by a WEAK reference to the loop
+# object (not id(loop)): CPython reuses object addresses, so a fresh loop could get a
+# GC'd loop's id and be handed a semaphore bound to the dead loop (RuntimeError on
+# await) — a real hazard for the asyncio.run-per-call test pattern. A WeakKeyDictionary
+# keys on identity and drops entries when the loop is collected, so no stale reuse.
+# Recreated when the configured limit changes.
+_concurrency_semaphores: "WeakKeyDictionary[asyncio.AbstractEventLoop, tuple[int, asyncio.Semaphore]]" = (
+    WeakKeyDictionary()
+)
 
 
 def _concurrency_semaphore(limit: int) -> asyncio.Semaphore:
-    loop_key = id(asyncio.get_running_loop())
-    cached = _concurrency_semaphores.get(loop_key)
+    loop = asyncio.get_running_loop()
+    cached = _concurrency_semaphores.get(loop)
     if cached is None or cached[0] != limit:
         semaphore = asyncio.Semaphore(limit)
-        _concurrency_semaphores[loop_key] = (limit, semaphore)
+        _concurrency_semaphores[loop] = (limit, semaphore)
         return semaphore
     return cached[1]
 

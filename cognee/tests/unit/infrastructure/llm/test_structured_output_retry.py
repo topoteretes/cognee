@@ -297,7 +297,7 @@ def _make_budget_errors():
     "error", list(_make_budget_errors().values()), ids=list(_make_budget_errors())
 )
 def test_budget_errors_are_terminal_by_default(error):
-    # Default config: llm_budget_max_retry_attempts == 0 -> never retry.
+    # Default config: llm_budget_retry_enabled is False -> never retry.
     assert should_retry_llm_exception(error) is False
 
 
@@ -313,7 +313,7 @@ def test_raise_if_quota_error_preserves_budget_marker_for_wrapped_error():
 def test_budget_error_is_retryable_when_payg_bounded_retry_enabled():
     # Pay-as-you-go tenants may opt in (auto-recharge can lift the cap mid-run).
     error = _InstructorRetryLike(_ProxyBudget429())
-    fake_config = SimpleNamespace(llm_budget_max_retry_attempts=3)
+    fake_config = SimpleNamespace(llm_budget_retry_enabled=True)
     # _budget_retry_enabled imports get_llm_config lazily from the config module.
     with patch("cognee.infrastructure.llm.config.get_llm_config", return_value=fake_config):
         assert should_retry_llm_exception(error) is True

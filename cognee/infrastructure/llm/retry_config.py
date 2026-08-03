@@ -91,10 +91,12 @@ def _find_budget_error(error: BaseException) -> BaseException | None:
             seen.add(id(exc))
             if is_budget_exhausted_error(exc):
                 return exc
-            # tenacity RetryError wraps the final failed attempt.
+            # tenacity RetryError wraps the final failed attempt. Use the public
+            # exception() accessor (the attempt is known-failed, so it won't raise)
+            # rather than the private _exception attribute.
             last_attempt = getattr(exc, "last_attempt", None)
-            if last_attempt is not None:
-                found = _walk(getattr(last_attempt, "_exception", None))
+            if last_attempt is not None and hasattr(last_attempt, "exception"):
+                found = _walk(last_attempt.exception())
                 if found is not None:
                     return found
             # instructor records the raw provider error for every retry it made.
@@ -114,15 +116,16 @@ def _is_budget_error(error: BaseException) -> bool:
 
 
 def _budget_retry_enabled() -> bool:
-    """Whether budget/payment exhaustion may be retried (pay-as-you-go bounded retry).
+    """Whether budget/payment exhaustion may be retried (pay-as-you-go).
 
-    Off by default (``LLM_BUDGET_MAX_RETRY_ATTEMPTS == 0``): a spend-capped key fails
-    fast so it cannot drive a retry storm (CLO-409). Pay-as-you-go tenants can opt in.
+    Off by default: a spend-capped key fails fast so it cannot drive a retry storm
+    (CLO-409). When enabled, budget errors merely become retryable and inherit the
+    generic outer stop condition — there is no dedicated budget attempt/time budget.
     """
     # Imported lazily: importing config at module top is circular.
     from cognee.infrastructure.llm.config import get_llm_config
 
-    return get_llm_config().llm_budget_max_retry_attempts > 0
+    return get_llm_config().llm_budget_retry_enabled
 
 
 def should_retry_llm_exception(error: BaseException) -> bool:
@@ -136,7 +139,14 @@ def should_retry_llm_exception(error: BaseException) -> bool:
     if isinstance(error, non_retryable):
         return False
     # Budget/payment exhaustion is terminal: retrying a spend-capped key only produces
-    # more proxy-rejected 429s (the CLO-409 retry storm). Opt-in bounded retry only.
+    # more proxy-rejected 429s (the CLO-409 retry storm). Opt-in retry only.
+    #
+    # Asymmetry by design: only the STRUCTURAL detector (_is_budget_error) consults the
+    # PAYG opt-in and yields a 402 LLMPaymentRequiredError downstream. A string-only
+    # budget error (matched by is_quota_or_billing_error's _TERMINAL_QUOTA_PATTERNS but
+    # lacking the 402/429 structure) stays unconditionally terminal and becomes an
+    # LLMQuotaExceededError — the string match is a last-resort heuristic, so it never
+    # enables retry even when PAYG is on.
     if _is_budget_error(error):
         return _budget_retry_enabled()
     return not is_quota_or_billing_error(error)

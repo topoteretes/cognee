@@ -137,14 +137,23 @@ class LLMConfig(BaseSettings):
     # process, enforced at the single LLMGateway choke point. 0 = disabled (unbounded,
     # preserves OSS default). Bounds the cognify fan-out burst so it cannot overshoot a
     # LiteLLM key's async budget cap (CLO-409 Phase 0b).
+    #
+    # NOTE: the semaphore wraps the adapter's @retry, so a slot is held for the WHOLE
+    # retry lifecycle — up to LLM_MIN_RETRY_SECONDS (240s) of backoff on transient
+    # errors, not just the in-flight request. With a low cap, a handful of
+    # transiently-failing calls can starve the engine while they sit in backoff holding
+    # slots. Size the cap accounting for backoff-held slots (see the deploy runbook).
     llm_max_concurrent_requests: int = 0
 
     # Budget/payment exhaustion (HTTP 402, or LiteLLM's "Budget has been exceeded" 429)
     # is terminal by default: retrying a spend-capped key only produces more
-    # proxy-rejected calls (CLO-409). Set > 0 to allow a small bounded retry for
-    # pay-as-you-go tenants where an auto-recharge top-up may lift the cap mid-run.
-    llm_budget_max_retry_attempts: int = 0
-    llm_budget_max_retry_seconds: int = 0
+    # proxy-rejected calls (CLO-409). A single boolean switch, not an attempt/time
+    # budget: when enabled, budget errors simply become retryable and inherit the
+    # generic outer stop condition (stop_after_attempt(2) & stop_after_delay(240)) —
+    # there is no dedicated budget attempt/time budget yet. Intended for pay-as-you-go
+    # tenants where an auto-recharge top-up may lift the cap mid-run; a proper bounded
+    # policy is future work (pairs with the deferred PAYG path).
+    llm_budget_retry_enabled: bool = False
 
     llama_cpp_model_path: str | None = None
     llama_cpp_n_ctx: int = 2048
