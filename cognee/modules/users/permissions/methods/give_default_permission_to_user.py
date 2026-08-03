@@ -18,12 +18,6 @@ from cognee.modules.users.models import (
 async def give_default_permission_to_user(user_id: UUID, permission_name: str):
     """
         Give the permission with given name to the user with the given id as a default permission.
-
-        Note that get_effective_capabilities deliberately ignores this table:
-        UserDefaultPermissions is keyed on the user alone, so a capability written
-        here would apply in every tenant in the system, including ones the user
-        does not belong to. Rows written by this function therefore have no effect
-        on capability resolution until a (user, tenant, permission) triple exists.
     Args:
         user_id: Id of the tenant
         permission_name: Name of the permission

@@ -60,10 +60,9 @@ def _isolated_db():
 
 
 async def _seed(*, tenant_owner_id=None):
-    """Create a tenant with one member, one outsider and a "manage_users" permission."""
+    """Create a tenant with one member and one outsider."""
     from cognee.infrastructure.databases.relational import get_relational_engine
     from cognee.modules.users.models import Tenant, User, UserTenant
-    from cognee.modules.users.permissions.permission_types import MANAGE_USERS
 
     owner_id = tenant_owner_id or uuid4()
     member_id = uuid4()
@@ -88,9 +87,6 @@ async def _seed(*, tenant_owner_id=None):
 
         session.add(UserTenant(user_id=owner_id, tenant_id=tenant_id))
         session.add(UserTenant(user_id=member_id, tenant_id=tenant_id))
-
-        # Permission.name is unique, so the row is shared across tests in this module.
-        permission_id = await _permission_id(session, MANAGE_USERS)
         await session.commit()
 
         return {
@@ -98,26 +94,21 @@ async def _seed(*, tenant_owner_id=None):
             "owner_id": owner_id,
             "member_id": member_id,
             "outsider_id": outsider_id,
-            "permission_id": permission_id,
         }
 
 
-async def _permission_id(session, name: str):
-    """Return the id of the named permission, creating the row the first time."""
-    from sqlalchemy import select
+async def _add_role_with_member(tenant_id, member_id, name="managers"):
+    from cognee.infrastructure.databases.relational import get_relational_engine
+    from cognee.modules.users.models import Role, UserRole
 
-    from cognee.modules.users.models import Permission
-
-    existing = (
-        (await session.execute(select(Permission).where(Permission.name == name))).scalars().first()
-    )
-    if existing is not None:
-        return existing.id
-
-    permission = Permission(id=uuid4(), name=name)
-    session.add(permission)
-    await session.flush()
-    return permission.id
+    role_id = uuid4()
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        session.add(Role(id=role_id, name=f"{name}-{role_id}", tenant_id=tenant_id))
+        await session.flush()
+        session.add(UserRole(user_id=member_id, role_id=role_id))
+        await session.commit()
+    return role_id
 
 
 @pytest.mark.asyncio
@@ -164,22 +155,16 @@ async def test_owner_short_circuits_before_the_membership_gate():
 
 
 @pytest.mark.asyncio
-async def test_tenant_default_reaches_a_member():
-    from cognee.infrastructure.databases.relational import get_relational_engine
-    from cognee.modules.users.models import TenantDefaultPermissions
-    from cognee.modules.users.permissions.methods import get_effective_capabilities
+async def test_tenant_grant_reaches_a_member():
+    from cognee.modules.users.permissions.methods import (
+        get_effective_capabilities,
+        grant_capability,
+    )
     from cognee.modules.users.permissions.permission_types import MANAGE_USERS
 
     seed = await _seed()
 
-    db_engine = get_relational_engine()
-    async with db_engine.get_async_session() as session:
-        session.add(
-            TenantDefaultPermissions(
-                tenant_id=seed["tenant_id"], permission_id=seed["permission_id"]
-            )
-        )
-        await session.commit()
+    await grant_capability(seed["tenant_id"], seed["tenant_id"], MANAGE_USERS)
 
     result = await get_effective_capabilities(seed["member_id"], seed["tenant_id"])
 
@@ -187,22 +172,17 @@ async def test_tenant_default_reaches_a_member():
 
 
 @pytest.mark.asyncio
-async def test_tenant_default_does_not_reach_a_non_member():
+async def test_tenant_grant_does_not_reach_a_non_member():
     """The bug this test exists for: a tenant-level grant answering for outsiders."""
-    from cognee.infrastructure.databases.relational import get_relational_engine
-    from cognee.modules.users.models import TenantDefaultPermissions
-    from cognee.modules.users.permissions.methods import get_effective_capabilities
+    from cognee.modules.users.permissions.methods import (
+        get_effective_capabilities,
+        grant_capability,
+    )
+    from cognee.modules.users.permissions.permission_types import MANAGE_USERS
 
     seed = await _seed()
 
-    db_engine = get_relational_engine()
-    async with db_engine.get_async_session() as session:
-        session.add(
-            TenantDefaultPermissions(
-                tenant_id=seed["tenant_id"], permission_id=seed["permission_id"]
-            )
-        )
-        await session.commit()
+    await grant_capability(seed["tenant_id"], seed["tenant_id"], MANAGE_USERS)
 
     result = await get_effective_capabilities(seed["outsider_id"], seed["tenant_id"])
 
@@ -211,21 +191,16 @@ async def test_tenant_default_does_not_reach_a_non_member():
 
 @pytest.mark.asyncio
 async def test_role_capability_reaches_its_member():
-    from cognee.infrastructure.databases.relational import get_relational_engine
-    from cognee.modules.users.models import Role, RoleDefaultPermissions, UserRole
-    from cognee.modules.users.permissions.methods import get_effective_capabilities
+    from cognee.modules.users.permissions.methods import (
+        get_effective_capabilities,
+        grant_capability,
+    )
     from cognee.modules.users.permissions.permission_types import MANAGE_USERS
 
     seed = await _seed()
-    role_id = uuid4()
+    role_id = await _add_role_with_member(seed["tenant_id"], seed["member_id"])
 
-    db_engine = get_relational_engine()
-    async with db_engine.get_async_session() as session:
-        session.add(Role(id=role_id, name="managers", tenant_id=seed["tenant_id"]))
-        await session.flush()
-        session.add(UserRole(user_id=seed["member_id"], role_id=role_id))
-        session.add(RoleDefaultPermissions(role_id=role_id, permission_id=seed["permission_id"]))
-        await session.commit()
+    await grant_capability(role_id, seed["tenant_id"], MANAGE_USERS)
 
     result = await get_effective_capabilities(seed["member_id"], seed["tenant_id"])
 
@@ -236,26 +211,72 @@ async def test_role_capability_reaches_its_member():
 async def test_role_in_another_tenant_does_not_leak():
     """A role carries capabilities only inside the tenant that owns it."""
     from cognee.infrastructure.databases.relational import get_relational_engine
-    from cognee.modules.users.models import Role, RoleDefaultPermissions, UserRole, UserTenant
-    from cognee.modules.users.permissions.methods import get_effective_capabilities
+    from cognee.modules.users.models import UserTenant
+    from cognee.modules.users.permissions.methods import (
+        get_effective_capabilities,
+        grant_capability,
+    )
+    from cognee.modules.users.permissions.permission_types import MANAGE_USERS
 
     home = await _seed()
     other = await _seed()
-    role_id = uuid4()
 
     db_engine = get_relational_engine()
     async with db_engine.get_async_session() as session:
         # The user is a member of both tenants but only privileged in "home".
         session.add(UserTenant(user_id=home["member_id"], tenant_id=other["tenant_id"]))
-        session.add(Role(id=role_id, name="managers", tenant_id=home["tenant_id"]))
-        await session.flush()
-        session.add(UserRole(user_id=home["member_id"], role_id=role_id))
-        session.add(RoleDefaultPermissions(role_id=role_id, permission_id=home["permission_id"]))
         await session.commit()
+
+    role_id = await _add_role_with_member(home["tenant_id"], home["member_id"])
+    await grant_capability(role_id, home["tenant_id"], MANAGE_USERS)
 
     result = await get_effective_capabilities(home["member_id"], other["tenant_id"])
 
     assert result == set()
+
+
+@pytest.mark.asyncio
+async def test_user_grant_is_scoped_to_its_tenant():
+    """The reason the table carries tenant_id: a personal grant stays put.
+
+    The old storage could not represent this at all — UserDefaultPermissions
+    had no tenant column, which is why per-user grants used to be refused.
+    """
+    from cognee.infrastructure.databases.relational import get_relational_engine
+    from cognee.modules.users.models import UserTenant
+    from cognee.modules.users.permissions.methods import (
+        get_effective_capabilities,
+        grant_capability,
+    )
+    from cognee.modules.users.permissions.permission_types import MANAGE_USERS
+
+    home = await _seed()
+    other = await _seed()
+
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        session.add(UserTenant(user_id=home["member_id"], tenant_id=other["tenant_id"]))
+        await session.commit()
+
+    await grant_capability(home["member_id"], home["tenant_id"], MANAGE_USERS)
+
+    assert MANAGE_USERS in await get_effective_capabilities(home["member_id"], home["tenant_id"])
+    assert await get_effective_capabilities(home["member_id"], other["tenant_id"]) == set()
+
+
+@pytest.mark.asyncio
+async def test_grant_rejects_a_principal_from_another_tenant():
+    """A role can only be granted capabilities inside the tenant that owns it."""
+    from cognee.modules.users.exceptions import PermissionDeniedError
+    from cognee.modules.users.permissions.methods import grant_capability
+    from cognee.modules.users.permissions.permission_types import MANAGE_USERS
+
+    home = await _seed()
+    other = await _seed()
+    role_id = await _add_role_with_member(home["tenant_id"], home["member_id"])
+
+    with pytest.raises(PermissionDeniedError):
+        await grant_capability(role_id, other["tenant_id"], MANAGE_USERS)
 
 
 @pytest.mark.asyncio
@@ -284,31 +305,22 @@ async def test_membership_is_required_and_leaks_nothing():
 
 @pytest.mark.asyncio
 async def test_granting_and_revoking_on_a_role_moves_the_member():
-    from cognee.infrastructure.databases.relational import get_relational_engine
-    from cognee.modules.users.models import Role, UserRole
     from cognee.modules.users.permissions.methods import (
         get_effective_capabilities,
-        give_default_permission_to_role,
-        revoke_default_permission_from_role,
+        grant_capability,
+        revoke_capability,
     )
     from cognee.modules.users.permissions.permission_types import MANAGE_USERS
 
     seed = await _seed()
-    role_id = uuid4()
-
-    db_engine = get_relational_engine()
-    async with db_engine.get_async_session() as session:
-        session.add(Role(id=role_id, name=f"r-{role_id}", tenant_id=seed["tenant_id"]))
-        await session.flush()
-        session.add(UserRole(user_id=seed["member_id"], role_id=role_id))
-        await session.commit()
+    role_id = await _add_role_with_member(seed["tenant_id"], seed["member_id"])
 
     assert await get_effective_capabilities(seed["member_id"], seed["tenant_id"]) == set()
 
-    await give_default_permission_to_role(role_id, MANAGE_USERS)
+    await grant_capability(role_id, seed["tenant_id"], MANAGE_USERS)
     assert MANAGE_USERS in await get_effective_capabilities(seed["member_id"], seed["tenant_id"])
 
-    await revoke_default_permission_from_role(role_id, MANAGE_USERS)
+    await revoke_capability(role_id, seed["tenant_id"], MANAGE_USERS)
     assert await get_effective_capabilities(seed["member_id"], seed["tenant_id"]) == set()
 
 
@@ -316,51 +328,60 @@ async def test_granting_and_revoking_on_a_role_moves_the_member():
 async def test_granting_and_revoking_on_a_tenant_moves_the_member():
     from cognee.modules.users.permissions.methods import (
         get_effective_capabilities,
-        give_default_permission_to_tenant,
-        revoke_default_permission_from_tenant,
+        grant_capability,
+        revoke_capability,
     )
     from cognee.modules.users.permissions.permission_types import MANAGE_USERS
 
     seed = await _seed()
 
-    await give_default_permission_to_tenant(seed["tenant_id"], MANAGE_USERS)
+    await grant_capability(seed["tenant_id"], seed["tenant_id"], MANAGE_USERS)
     assert MANAGE_USERS in await get_effective_capabilities(seed["member_id"], seed["tenant_id"])
 
     # Still nothing for someone outside the tenant.
     assert await get_effective_capabilities(seed["outsider_id"], seed["tenant_id"]) == set()
 
-    await revoke_default_permission_from_tenant(seed["tenant_id"], MANAGE_USERS)
+    await revoke_capability(seed["tenant_id"], seed["tenant_id"], MANAGE_USERS)
     assert await get_effective_capabilities(seed["member_id"], seed["tenant_id"]) == set()
 
 
 @pytest.mark.asyncio
-async def test_revoking_what_was_never_granted_is_a_no_op():
-    """Revoke has to be safe to retry, so an absent grant is not an error."""
-    from cognee.modules.users.permissions.methods import (
-        revoke_default_permission_from_tenant,
-    )
+async def test_granting_twice_and_revoking_the_absent_are_no_ops():
+    """Both directions have to be safe to retry."""
+    from cognee.modules.users.permissions.methods import grant_capability, revoke_capability
     from cognee.modules.users.permissions.permission_types import MANAGE_USERS
 
     seed = await _seed()
 
-    await revoke_default_permission_from_tenant(seed["tenant_id"], MANAGE_USERS)
-    await revoke_default_permission_from_tenant(seed["tenant_id"], MANAGE_USERS)
+    await grant_capability(seed["tenant_id"], seed["tenant_id"], MANAGE_USERS)
+    await grant_capability(seed["tenant_id"], seed["tenant_id"], MANAGE_USERS)
+
+    await revoke_capability(seed["tenant_id"], seed["tenant_id"], MANAGE_USERS)
+    await revoke_capability(seed["tenant_id"], seed["tenant_id"], MANAGE_USERS)
 
 
 @pytest.mark.asyncio
-async def test_dataset_permissions_are_not_capabilities():
-    """read/write/delete/share live in the same table but are not capabilities."""
+async def test_names_outside_the_catalog_do_not_resolve():
+    """Grants are validated when written, but the catalog is code and can shrink.
+
+    A row whose name is no longer (or never was) in the catalog must stop
+    resolving rather than gate nothing under a stale name. Written directly to
+    storage because the write path correctly refuses to produce such a row.
+    """
     from cognee.infrastructure.databases.relational import get_relational_engine
-    from cognee.modules.users.models import TenantDefaultPermissions
+    from cognee.modules.users.models import PrincipalCapability
     from cognee.modules.users.permissions.methods import get_effective_capabilities
 
     seed = await _seed()
 
     db_engine = get_relational_engine()
     async with db_engine.get_async_session() as session:
-        read_permission_id = await _permission_id(session, "read")
         session.add(
-            TenantDefaultPermissions(tenant_id=seed["tenant_id"], permission_id=read_permission_id)
+            PrincipalCapability(
+                principal_id=seed["tenant_id"],
+                tenant_id=seed["tenant_id"],
+                capability="read",
+            )
         )
         await session.commit()
 

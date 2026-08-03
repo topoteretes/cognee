@@ -1,17 +1,10 @@
 from typing import Set
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.modules.users.models import (
-    Permission,
-    Role,
-    RoleDefaultPermissions,
-    TenantDefaultPermissions,
-    UserRole,
-    UserTenant,
-)
+from cognee.modules.users.models import PrincipalCapability, Role, UserRole, UserTenant
 from cognee.modules.users.permissions.methods.get_tenant import get_tenant
 from cognee.modules.users.permissions.permission_types import CAPABILITY_TYPES
 
@@ -20,30 +13,29 @@ async def get_effective_capabilities(user_id: UUID, tenant_id: UUID) -> Set[str]
     """
         Return every capability the user has in the given tenant.
 
-        Capabilities are the union of what the tenant grants all of its members
-        and what the user's roles in that tenant grant. There is no deny anywhere
-        in this model, so the union is unambiguous and a grant can only widen the
-        result.
+        Capabilities are the union of what the tenant grants all of its members,
+        what the user's roles in that tenant grant, and what the user was granted
+        personally in that tenant. There is no deny anywhere in this model, so
+        the union is unambiguous and a grant can only widen the result.
 
-        Every level is scoped to this tenant and to actual membership in it. That
-        matters because the callers of this function guard user management for a
-        tenant_id supplied by the request, so an unscoped grant would answer for
-        tenants the caller has nothing to do with.
+        All three levels are rows in principal_capabilities, keyed on
+        (principal, tenant, capability), so the union is one query and a grant
+        scoped to another tenant is unrepresentable rather than filtered out.
 
-        Capabilities granted directly to a person (UserDefaultPermissions) are
-        deliberately not resolved here: that table is keyed on the user alone, so
-        honouring it would hand the capability to that person in every tenant in
-        the system. Per-person capabilities need a (user, tenant, permission)
-        triple that does not exist yet.
+        Resolution is additionally gated on actual membership in the tenant,
+        once, at the top. That matters because the callers of this function
+        guard user management for a tenant_id supplied by the request, and it is
+        also what makes granting to an invited person safe: the grant may exist
+        before they accept, but resolves to nothing until they are a member.
 
-        The tenant owner holds every capability in the catalog regardless of what
-        is stored, matching how has_user_management_permission already treats them.
+        The tenant owner holds every capability in the catalog regardless of
+        what is stored, matching how has_user_management_permission already
+        treats them.
 
-        What this resolves is written by the capability endpoints on the
-        permissions router, which grant to a tenant or to a role. A tenant with
-        no grants yet resolves to an empty set for everyone but the owner, and
-        the deprecated role-name fallback in has_user_management_permission is
-        what carries such a tenant until its capabilities are assigned.
+        A tenant with no grants yet resolves to an empty set for everyone but
+        the owner; the deprecated role-name fallback in
+        has_user_management_permission is what carries such a tenant until its
+        capabilities are assigned.
     Args:
         user_id: Id of the user.
         tenant_id: Id of the tenant the capabilities are scoped to.
@@ -69,31 +61,24 @@ async def get_effective_capabilities(user_id: UUID, tenant_id: UUID) -> Set[str]
         if membership.first() is None:
             return set()
 
-        tenant_level = (
-            select(Permission.name)
-            .join(
-                TenantDefaultPermissions,
-                TenantDefaultPermissions.permission_id == Permission.id,
-            )
-            .where(TenantDefaultPermissions.tenant_id == tenant_id)
-        )
-
-        role_level = (
-            select(Permission.name)
-            .join(
-                RoleDefaultPermissions,
-                RoleDefaultPermissions.permission_id == Permission.id,
-            )
-            .join(Role, Role.id == RoleDefaultPermissions.role_id)
-            .join(UserRole, UserRole.role_id == Role.id)
+        user_role_ids = (
+            select(UserRole.role_id)
+            .join(Role, Role.id == UserRole.role_id)
             .where(UserRole.user_id == user_id, Role.tenant_id == tenant_id)
         )
 
-        capabilities: Set[str] = set()
-        for query in (tenant_level, role_level):
-            result = await session.execute(query)
-            capabilities.update(row[0] for row in result.all())
+        result = await session.execute(
+            select(PrincipalCapability.capability).where(
+                PrincipalCapability.tenant_id == tenant_id,
+                or_(
+                    PrincipalCapability.principal_id == tenant_id,
+                    PrincipalCapability.principal_id == user_id,
+                    PrincipalCapability.principal_id.in_(user_role_ids),
+                ),
+            )
+        )
+        capabilities: Set[str] = {row[0] for row in result.all()}
 
-    # The same table holds dataset permission names (read/write/delete/share);
-    # only catalog entries are capabilities.
+    # Grants are validated against the catalog when written, but the catalog is
+    # code and can shrink; a name that fell out of it must stop resolving.
     return capabilities & CAPABILITY_TYPES

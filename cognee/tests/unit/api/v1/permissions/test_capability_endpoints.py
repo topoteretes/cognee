@@ -3,9 +3,9 @@
 The methods behind these routes are unit tested elsewhere. What is only
 testable here is the wiring: which collaborator each handler calls, with which
 arguments, and what the caller ends up seeing. That gap is not theoretical --
-both role routes called get_role(role_id) against a get_role that takes
-(tenant_id, role_name), so they raised TypeError before reaching their
-permission check, and no method-level test could see it.
+an earlier revision's role routes called get_role(role_id) against a get_role
+that takes (tenant_id, role_name), so they raised TypeError before reaching
+their permission check, and no method-level test could see it.
 
 Collaborators are stubbed with real functions rather than bare mocks so a call
 with the wrong arity fails here the way it would in production.
@@ -22,7 +22,7 @@ from fastapi.testclient import TestClient
 
 from cognee.api.v1.permissions.routers import get_permissions_router
 from cognee.exceptions import CogneeApiError
-from cognee.modules.users.exceptions import PermissionDeniedError, RoleNotFoundError
+from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.permissions import methods as permission_methods
 
@@ -43,7 +43,7 @@ def client():
 
     # The real app registers this in cognee/api/client.py. Without it the
     # cognee exceptions these routes raise surface as 500 instead of their own
-    # status code, which is precisely what the 403/404 cases assert.
+    # status code, which is precisely what the 403 cases assert.
     @app.exception_handler(CogneeApiError)
     async def cognee_error_handler(_, exc: CogneeApiError):
         return JSONResponse(
@@ -69,6 +69,13 @@ async def _allow_membership(user_id, tenant_id):
 
 async def _allow_management(requester_id, tenant_id):
     return True
+
+
+def _principal(kind):
+    async def get_principal(principal_id):
+        return SimpleNamespace(id=principal_id, type=kind)
+
+    return get_principal
 
 
 class TestReadingOwnCapabilities:
@@ -114,92 +121,30 @@ class TestReadingOwnCapabilities:
         assert foreign.json() == unknown.json()
 
 
-class TestTenantCapabilities:
-    def test_grant_reaches_the_method_with_the_capability(self, client):
+class TestGrantScope:
+    """One endpoint, three principal kinds: the scope has to follow the kind."""
+
+    def test_a_tenant_principal_is_its_own_scope(self, client):
         tenant_id = uuid4()
         granted = []
 
-        async def give(target_tenant_id, permission_name):
-            granted.append((str(target_tenant_id), permission_name))
+        async def grant(principal_id, scope_tenant_id, capability):
+            granted.append((str(principal_id), str(scope_tenant_id), capability))
 
         with (
+            _stub("get_principal", _principal("tenant")),
             _stub("has_user_management_permission", _allow_management),
-            _stub("give_default_permission_to_tenant", give),
+            _stub("grant_capability", grant),
         ):
             response = client.post(
-                f"{_PREFIX}/tenants/{tenant_id}/capabilities",
+                f"{_PREFIX}/capabilities/{tenant_id}",
                 params={"capability": "manage_users"},
             )
 
         assert response.status_code == 200
-        assert granted == [(str(tenant_id), "manage_users")]
+        assert granted == [(str(tenant_id), str(tenant_id), "manage_users")]
 
-    def test_revoke_reaches_the_method_with_the_capability(self, client):
-        tenant_id = uuid4()
-        revoked = []
-
-        async def revoke(target_tenant_id, permission_name):
-            revoked.append((str(target_tenant_id), permission_name))
-
-        with (
-            _stub("has_user_management_permission", _allow_management),
-            _stub("revoke_default_permission_from_tenant", revoke),
-        ):
-            response = client.request(
-                "DELETE",
-                f"{_PREFIX}/tenants/{tenant_id}/capabilities",
-                params={"capability": "manage_users"},
-            )
-
-        assert response.status_code == 200
-        assert revoked == [(str(tenant_id), "manage_users")]
-
-    @pytest.mark.parametrize("capability", ["read", "write", "delete", "share", "not_a_capability"])
-    def test_names_outside_the_catalog_are_rejected(self, client, capability):
-        """Dataset permissions share the table, so granting one would write a
-        row that capability resolution filters out again -- silently doing
-        nothing while looking like it worked."""
-
-        async def give(tenant_id, permission_name):
-            raise AssertionError(f"{permission_name} must not be written")
-
-        with (
-            _stub("has_user_management_permission", _allow_management),
-            _stub("give_default_permission_to_tenant", give),
-        ):
-            response = client.post(
-                f"{_PREFIX}/tenants/{uuid4()}/capabilities",
-                params={"capability": capability},
-            )
-
-        assert response.status_code == 400
-        assert "Unknown capability" in response.json()["detail"]
-
-    def test_a_caller_without_user_management_is_refused(self, client):
-        async def deny(requester_id, tenant_id):
-            raise PermissionDeniedError(
-                message="User is not authorized to manage users for this tenant"
-            )
-
-        async def give(tenant_id, permission_name):
-            raise AssertionError("must not reach the write")
-
-        with (
-            _stub("has_user_management_permission", deny),
-            _stub("give_default_permission_to_tenant", give),
-        ):
-            response = client.post(
-                f"{_PREFIX}/tenants/{uuid4()}/capabilities",
-                params={"capability": "manage_users"},
-            )
-
-        assert response.status_code == 403
-
-
-class TestRoleCapabilities:
-    """The branch that never ran: the lookup takes a role id alone."""
-
-    def test_grant_looks_the_role_up_by_id_and_authorizes_against_its_tenant(self, client):
+    def test_a_role_principal_is_scoped_and_authorized_against_its_owning_tenant(self, client):
         role_id = uuid4()
         owning_tenant_id = uuid4()
         authorized_against = []
@@ -213,16 +158,17 @@ class TestRoleCapabilities:
             authorized_against.append(str(tenant_id))
             return True
 
-        async def give(target_role_id, permission_name):
-            granted.append((str(target_role_id), permission_name))
+        async def grant(principal_id, scope_tenant_id, capability):
+            granted.append((str(principal_id), str(scope_tenant_id), capability))
 
         with (
+            _stub("get_principal", _principal("role")),
             _stub("get_role_by_id", get_role_by_id),
             _stub("has_user_management_permission", has_management),
-            _stub("give_default_permission_to_role", give),
+            _stub("grant_capability", grant),
         ):
             response = client.post(
-                f"{_PREFIX}/roles/{role_id}/capabilities",
+                f"{_PREFIX}/capabilities/{role_id}",
                 params={"capability": "manage_users"},
             )
 
@@ -230,53 +176,149 @@ class TestRoleCapabilities:
         # Not the caller's own tenant: authorization follows the role's owner,
         # so a caller cannot grant into a tenant they do not administer.
         assert authorized_against == [str(owning_tenant_id)]
-        assert granted == [(str(role_id), "manage_users")]
+        assert granted == [(str(role_id), str(owning_tenant_id), "manage_users")]
 
-    def test_revoke_looks_the_role_up_by_id_and_authorizes_against_its_tenant(self, client):
+    def test_a_user_principal_requires_an_explicit_tenant(self, client):
+        """A person can belong to several tenants, so the scope cannot be derived."""
+
+        async def grant(principal_id, scope_tenant_id, capability):
+            raise AssertionError("must not write without a scope")
+
+        with (
+            _stub("get_principal", _principal("user")),
+            _stub("has_user_management_permission", _allow_management),
+            _stub("grant_capability", grant),
+        ):
+            response = client.post(
+                f"{_PREFIX}/capabilities/{uuid4()}",
+                params={"capability": "manage_users"},
+            )
+
+        assert response.status_code == 400
+        assert "tenant_id is required" in response.json()["detail"]
+
+    def test_a_user_principal_with_a_tenant_is_granted_in_that_tenant(self, client):
+        person_id = uuid4()
+        tenant_id = uuid4()
+        granted = []
+
+        async def grant(principal_id, scope_tenant_id, capability):
+            granted.append((str(principal_id), str(scope_tenant_id), capability))
+
+        with (
+            _stub("get_principal", _principal("user")),
+            _stub("has_user_management_permission", _allow_management),
+            _stub("grant_capability", grant),
+        ):
+            response = client.post(
+                f"{_PREFIX}/capabilities/{person_id}",
+                params={"capability": "manage_users", "tenant_id": str(tenant_id)},
+            )
+
+        assert response.status_code == 200
+        assert granted == [(str(person_id), str(tenant_id), "manage_users")]
+
+    def test_an_unknown_principal_reads_as_missing_permission(self, client):
+        """A principal that does not exist must not be distinguishable from one
+        the caller may not touch, or the endpoint enumerates real ids."""
+
+        async def missing(principal_id):
+            raise LookupError("no such principal")
+
+        async def deny(requester_id, tenant_id):
+            raise PermissionDeniedError(
+                message="User is not authorized to manage users for this tenant"
+            )
+
+        with (
+            _stub("get_principal", missing),
+            _stub("has_user_management_permission", _allow_management),
+        ):
+            unknown = client.post(
+                f"{_PREFIX}/capabilities/{uuid4()}",
+                params={"capability": "manage_users"},
+            )
+
+        with (
+            _stub("get_principal", _principal("tenant")),
+            _stub("has_user_management_permission", deny),
+        ):
+            forbidden = client.post(
+                f"{_PREFIX}/capabilities/{uuid4()}",
+                params={"capability": "manage_users"},
+            )
+
+        assert unknown.status_code == 403
+        assert forbidden.status_code == 403
+        assert unknown.json() == forbidden.json()
+
+
+class TestValidationAndAuthorization:
+    @pytest.mark.parametrize("capability", ["read", "write", "delete", "share", "not_a_capability"])
+    def test_names_outside_the_catalog_are_rejected(self, client, capability):
+        """Dataset permissions are ACL business, and an arbitrary name gates
+        nothing; storing either would look like it worked while doing nothing."""
+
+        async def get_principal(principal_id):
+            raise AssertionError("validation must run before any lookup")
+
+        with (
+            _stub("get_principal", get_principal),
+            _stub("has_user_management_permission", _allow_management),
+        ):
+            response = client.post(
+                f"{_PREFIX}/capabilities/{uuid4()}",
+                params={"capability": capability},
+            )
+
+        assert response.status_code == 400
+        assert "Unknown capability" in response.json()["detail"]
+
+    def test_a_caller_without_user_management_is_refused(self, client):
+        async def deny(requester_id, tenant_id):
+            raise PermissionDeniedError(
+                message="User is not authorized to manage users for this tenant"
+            )
+
+        async def grant(principal_id, scope_tenant_id, capability):
+            raise AssertionError("must not reach the write")
+
+        with (
+            _stub("get_principal", _principal("tenant")),
+            _stub("has_user_management_permission", deny),
+            _stub("grant_capability", grant),
+        ):
+            response = client.post(
+                f"{_PREFIX}/capabilities/{uuid4()}",
+                params={"capability": "manage_users"},
+            )
+
+        assert response.status_code == 403
+
+
+class TestRevoking:
+    def test_revoke_reaches_the_method_with_the_same_scope_rules(self, client):
         role_id = uuid4()
         owning_tenant_id = uuid4()
-        authorized_against = []
         revoked = []
 
         async def get_role_by_id(requested_role_id):
             return SimpleNamespace(id=role_id, tenant_id=owning_tenant_id)
 
-        async def has_management(requester_id, tenant_id):
-            authorized_against.append(str(tenant_id))
-            return True
-
-        async def revoke(target_role_id, permission_name):
-            revoked.append((str(target_role_id), permission_name))
+        async def revoke(principal_id, scope_tenant_id, capability):
+            revoked.append((str(principal_id), str(scope_tenant_id), capability))
 
         with (
+            _stub("get_principal", _principal("role")),
             _stub("get_role_by_id", get_role_by_id),
-            _stub("has_user_management_permission", has_management),
-            _stub("revoke_default_permission_from_role", revoke),
+            _stub("has_user_management_permission", _allow_management),
+            _stub("revoke_capability", revoke),
         ):
             response = client.request(
                 "DELETE",
-                f"{_PREFIX}/roles/{role_id}/capabilities",
+                f"{_PREFIX}/capabilities/{role_id}",
                 params={"capability": "manage_users"},
             )
 
         assert response.status_code == 200
-        assert authorized_against == [str(owning_tenant_id)]
-        assert revoked == [(str(role_id), "manage_users")]
-
-    def test_an_unknown_role_is_a_404(self, client):
-        async def missing(role_id):
-            raise RoleNotFoundError(message=f"Could not find role: {role_id}")
-
-        async def has_management(requester_id, tenant_id):
-            raise AssertionError("must not authorize against a role that does not exist")
-
-        with (
-            _stub("get_role_by_id", missing),
-            _stub("has_user_management_permission", has_management),
-        ):
-            response = client.post(
-                f"{_PREFIX}/roles/{uuid4()}/capabilities",
-                params={"capability": "manage_users"},
-            )
-
-        assert response.status_code == 404
+        assert revoked == [(str(role_id), str(owning_tenant_id), "manage_users")]
