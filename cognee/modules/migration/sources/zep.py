@@ -109,7 +109,7 @@ class ZepSource(MemorySource):
                 description=node.get("summary") or node.get("description"),
                 attributes=node.get("attributes") or {},
                 created_at=parse_timestamp(node.get("created_at")),
-                scope=COGXScope(session_id=node.get("group_id")),
+                scope=COGXScope(session_id=node.get("group_id") or node.get("session_id")),
             )
 
         for index, edge in enumerate(_first_list(data, "facts", "edges", "entity_edges")):
@@ -128,7 +128,7 @@ class ZepSource(MemorySource):
                 invalid_at=parse_timestamp(edge.get("invalid_at") or edge.get("expired_at")),
                 created_at=parse_timestamp(edge.get("created_at")),
                 provenance=[str(episode) for episode in edge.get("episodes") or []],
-                scope=COGXScope(session_id=edge.get("group_id")),
+                scope=COGXScope(session_id=edge.get("group_id") or edge.get("session_id")),
             )
 
 

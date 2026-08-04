@@ -352,7 +352,7 @@ async def prepare_session_turn(
     if not session_manager.is_auto_feedback_enabled():
         return _empty_turn_preparation(query)
 
-    resolved_session_id = session_manager._resolve_session_id(session_id)
+    resolved_session_id = session_manager.resolve_session_id(session_id)
 
     try:
         previous_entries = await session_manager.get_session(

@@ -36,7 +36,16 @@ from cognee.tasks.temporal_graph.extract_events_and_entities import extract_even
 from cognee.tasks.temporal_graph.extract_knowledge_graph_from_events import (
     extract_knowledge_graph_from_events,
 )
-from cognee.modules.observability import new_span, COGNEE_PIPELINE_NAME, COGNEE_RESULT_SUMMARY
+from cognee.modules.observability import (
+    new_span,
+    COGNEE_PIPELINE_NAME,
+    COGNEE_RESULT_SUMMARY,
+    MEMORY_SYSTEM,
+    MEMORY_OPERATION,
+    record_operation_duration,
+    increment_graph_edges,
+    increment_graph_nodes,
+)
 
 
 logger = get_logger("cognify")
@@ -230,7 +239,13 @@ async def cognify(
             run_in_background=run_in_background,
         )
 
-    with new_span("cognee.api.cognify") as span:
+    import time as _time
+
+    _cognify_start_ns = _time.monotonic_ns()
+
+    with new_span("memory.process") as span:
+        span.set_attribute(MEMORY_SYSTEM, "cognee")
+        span.set_attribute(MEMORY_OPERATION, "process")
         span.set_attribute(COGNEE_PIPELINE_NAME, "cognify")
         if datasets is not None:
             span.set_attribute("cognee.cognify.datasets", str(datasets))
@@ -319,6 +334,10 @@ async def cognify(
             f"Cognify completed for {dataset_desc}",
         )
 
+        _duration_ms = (_time.monotonic_ns() - _cognify_start_ns) / 1_000_000
+        _attrs = {"memory.system": "cognee", "memory.operation": "process"}
+        record_operation_duration(_duration_ms, _attrs)
+
         return result
 
 
@@ -356,7 +375,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
 
     if chunks_per_batch is None:
         chunks_per_batch = (
-            cognify_config.chunks_per_batch if cognify_config.chunks_per_batch is not None else 100
+            cognify_config.chunks_per_batch if cognify_config.chunks_per_batch is not None else 2000
         )
 
     default_tasks = [
@@ -434,8 +453,6 @@ async def get_temporal_tasks(
         list[Task]: A list of Task objects representing the temporal processing pipeline.
     """
     if chunks_per_batch is None:
-        from cognee.modules.cognify.config import get_cognify_config
-
         configured = get_cognify_config().chunks_per_batch
         chunks_per_batch = configured if configured is not None else 10
 
