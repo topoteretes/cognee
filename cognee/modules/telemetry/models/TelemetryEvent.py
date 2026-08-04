@@ -24,6 +24,11 @@ class TelemetryEvent(Base):
     """
 
     __tablename__ = "telemetry_events"
+    # A process that prunes metadata and re-runs migrations (the performance
+    # benchmark does this between runs) executes this declaration more than once
+    # against the same MetaData, which is an error by default. Same reason
+    # PGVectorAdapter sets it on its dynamically-built tables.
+    __table_args__ = {"extend_existing": True}
 
     id = Column(UUID, primary_key=True, default=uuid4)
 

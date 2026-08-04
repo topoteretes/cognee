@@ -231,6 +231,25 @@ def test_to_row_maps_payload_onto_the_model():
     assert row.properties["mode"] == "test"
 
 
+def test_model_declaration_is_idempotent():
+    """The table must survive its declaration running twice.
+
+    A process that prunes metadata and re-runs migrations in-process (the
+    performance benchmark does) re-executes the model module, which raises
+    "Table 'telemetry_events' is already defined for this MetaData instance"
+    unless the declaration opts into extend_existing.
+    """
+    import importlib
+
+    module = importlib.import_module("cognee.modules.telemetry.models.TelemetryEvent")
+
+    importlib.reload(module)  # must not raise
+
+    from cognee.infrastructure.databases.relational import Base
+
+    assert "telemetry_events" in Base.metadata.tables
+
+
 def test_to_row_tolerates_a_non_uuid_tenant_sentinel():
     """``"Single User Tenant"`` must land as NULL, not raise."""
     from cognee.modules.telemetry.postgres_sink import _to_row
