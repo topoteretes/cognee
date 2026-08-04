@@ -1275,6 +1275,26 @@ def test_normalize_api_url_leaves_explicit_non_http_scheme_alone():
     assert normalize_api_url("ftp://weird.host") == "ftp://weird.host"
 
 
+def test_normalize_api_url_warning_names_the_setting_it_was_given(monkeypatch):
+    # Serve mode resolves COGNEE_SERVICE_URL, so pointing the reader at
+    # COGNEE_BASE_URL would send them to a knob they never set.
+    warnings = []
+    client_module = importlib.import_module("src.cognee_client")
+    monkeypatch.setattr(
+        client_module.logger,
+        "warning",
+        lambda msg, *args, **kwargs: warnings.append(msg % args if args else msg),
+    )
+
+    normalize_api_url("tenant-abc.aws.cognee.ai", source="COGNEE_SERVICE_URL/--serve-url")
+
+    assert len(warnings) == 1
+    assert "COGNEE_SERVICE_URL/--serve-url" in warnings[0]
+    assert "COGNEE_BASE_URL" not in warnings[0]
+    # The suggested value is the actual fix, ready to paste.
+    assert "https://tenant-abc.aws.cognee.ai" in warnings[0]
+
+
 def test_normalize_api_url_passthrough_empty():
     assert normalize_api_url(None) is None
     assert normalize_api_url("") == ""

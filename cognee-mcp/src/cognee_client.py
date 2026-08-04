@@ -61,7 +61,9 @@ def _assumed_scheme(url: str) -> str:
     return "http" if host.lower() in _LOOPBACK_HOSTS else "https"
 
 
-def normalize_api_url(api_url: Optional[str]) -> Optional[str]:
+def normalize_api_url(
+    api_url: Optional[str], source: str = "COGNEE_BASE_URL/--api-url"
+) -> Optional[str]:
     """Normalize a Cognee base URL so requests never fail on a missing scheme.
 
     Users routinely paste a bare tenant host (e.g. ``tenant-xxx.aws.cognee.ai``)
@@ -69,6 +71,10 @@ def normalize_api_url(api_url: Optional[str]) -> Optional[str]:
     cryptic "Request URL is missing an 'http://' or 'https://' protocol" only on
     the first request (e.g. remember), long after startup. Infer the scheme for a
     schemeless URL and warn, so the common case just works and the fix is clear.
+
+    ``source`` names the setting the value came from; it is echoed in the warning
+    so the reader is pointed at the knob they actually set (serve mode resolves
+    ``COGNEE_SERVICE_URL`` / ``--serve-url``, not ``COGNEE_BASE_URL``).
     """
     if not api_url:
         return api_url
@@ -86,9 +92,7 @@ def normalize_api_url(api_url: Optional[str]) -> Optional[str]:
     repaired = _SINGLE_SLASH_SCHEME_RE.sub(r"\1://", url, count=1)
     if repaired != url:
         logger.warning(
-            "COGNEE_BASE_URL/--api-url %r is missing a slash after the scheme; reading it as %r.",
-            url,
-            repaired,
+            "%s %r is missing a slash after the scheme; reading it as %r.", source, url, repaired
         )
         return repaired
 
@@ -96,8 +100,8 @@ def normalize_api_url(api_url: Optional[str]) -> Optional[str]:
     scheme = _assumed_scheme(host_part)
     normalized = f"{scheme}://{host_part}"
     logger.warning(
-        "COGNEE_BASE_URL/--api-url %r has no scheme; assuming %s://. "
-        "Set the full URL (e.g. %s) to silence this.",
+        "%s %r has no scheme; assuming %s://. Set the full URL (e.g. %s) to silence this.",
+        source,
         url,
         scheme,
         normalized,

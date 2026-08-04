@@ -2031,7 +2031,10 @@ async def main():
     apply_tool_mode(args.tool_mode)
 
     # Resolve cloud connection: CLI args take precedence over env vars
-    serve_url = normalize_api_url(args.serve_url or os.environ.get("COGNEE_SERVICE_URL", ""))
+    serve_url = normalize_api_url(
+        args.serve_url or os.environ.get("COGNEE_SERVICE_URL", ""),
+        source="COGNEE_SERVICE_URL/--serve-url",
+    )
     serve_api_key = args.serve_api_key or os.environ.get("COGNEE_API_KEY", "")
 
     # Connect to Cognee Cloud if configured (before migrations — cloud handles its own DB)
