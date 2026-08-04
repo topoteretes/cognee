@@ -102,11 +102,16 @@ ty check .
 # Using Python SDK
 uv run python examples/demos/simple_cognee_example.py
 
-# Using CLI
-cognee-cli add "Your text here"
-cognee-cli cognify
+# Using CLI (memory API — the primary surface)
+cognee-cli remember "Your text here"   # also accepts file paths / URLs
+cognee-cli recall "Your question"
+cognee-cli improve -d my_project       # enrich/index the graph
+cognee-cli forget --all                # NOTE: no confirmation prompt
+
+# Legacy primitives (still ship; what the memory commands call underneath)
+cognee-cli add "Your text here" && cognee-cli cognify
 cognee-cli search "Your query"
-cognee-cli delete --all
+cognee-cli delete --all                # prompts before deleting
 
 # Launch full stack with UI
 cognee-cli -ui
@@ -114,12 +119,25 @@ cognee-cli -ui
 
 ## Architecture Overview
 
-### Core Workflow: add → cognify → search/memify
+### Core Workflow: remember → recall (+ improve / forget)
+
+As of cognee 1.x the memory API is the primary surface. All functions are async.
+
+1. **remember()** - Store data in memory. Without `session_id` it runs `add()` + `cognify()` and then `improve()` (`self_improvement=True` by default); with `session_id` it writes to the fast session cache and bridges into the graph in the background.
+2. **recall()** - Query memory. Auto-routes to a search strategy unless `query_type` is passed (`auto_route=False` falls back to `GRAPH_COMPLETION`). A `session_id` reads the session cache first and falls through to the graph.
+3. **improve()** - Enrich/index the graph: triplet embeddings, feedback weights, and (with `session_ids`) bridging session Q&A and distilled learnings into the permanent graph.
+4. **forget()** - Unified deletion (`data_id` / `dataset` / `dataset_id` / `everything=True`, plus `memory_only=True` to drop graph+vectors but keep raw files).
+
+#### Legacy primitives: add → cognify → search/memify
+
+These still ship and are what the memory API calls underneath. Reach for them to drive one stage in isolation (custom pipeline tasks, stage-level debugging), not for ordinary ingestion or retrieval.
 
 1. **add()** - Ingest data (files, URLs, text) into datasets
 2. **cognify()** - Extract entities/relationships and build knowledge graph
 3. **search()** - Query knowledge using various retrieval strategies
 4. **memify()** - Enrich graph with additional context and rules
+
+`cognee.delete` is deprecated (since 0.3.9, in favor of `datasets.delete_data`); `forget()` is the v1 replacement that unifies the old delete/prune/empty_dataset paths.
 
 ### Key Architectural Patterns
 
@@ -144,7 +162,9 @@ User → Dataset → Data hierarchy with permission-based filtering. Enable with
 ```
 API Layer (cognee/api/v1/)
     ↓
-Main Functions (add, cognify, search, memify)
+Memory API (remember, recall, improve, forget)
+    ↓
+Legacy Primitives (add, cognify, search, memify)
     ↓
 Pipeline Orchestrator (cognee/modules/pipelines/)
     ↓
@@ -158,6 +178,15 @@ External Services (OpenAI, Ladybug, LanceDB, etc.)
 ```
 
 ### Critical Data Flow Paths
+
+#### REMEMBER / RECALL: Memory API
+`remember(data)` → `add()` → `cognify()` → `improve()` (when `self_improvement=True`)
+`remember(data, session_id=...)` → session cache → background `improve()` bridge
+`recall(query)` → auto-route to a `SearchType` → `search()` → permission filter → results
+
+Key files: `cognee/api/v1/remember/remember.py`, `cognee/api/v1/recall/recall.py`, `cognee/api/v1/improve/improve.py`, `cognee/api/v1/forget/forget.py`
+
+The stages below are the legacy primitives these call underneath.
 
 #### ADD: Data Ingestion
 `add()` → `resolve_data_directories` → `ingest_data` → `save_data_item_to_storage` → Create Dataset + Data records in relational DB
@@ -175,7 +204,7 @@ Key files:
 #### SEARCH: Retrieval
 `search(query_text, query_type)` → route to retriever type → filter by permissions → return results
 
-Available search types (from `cognee/modules/search/types/SearchType.py`):
+Available search types (from `cognee/modules/search/types/SearchType.py`), passed as `query_type` to `recall()` or `search()`:
 - **GRAPH_COMPLETION** (default) - Graph traversal + LLM completion
 - **GRAPH_SUMMARY_COMPLETION** - Uses pre-computed summaries with graph context
 - **GRAPH_COMPLETION_COT** - Chain-of-thought reasoning over graph
@@ -190,6 +219,8 @@ Available search types (from `cognee/modules/search/types/SearchType.py`):
 - **TEMPORAL** - Time-aware graph search
 - **FEELING_LUCKY** - Automatic search type selection
 - **CODING_RULES** - Code-specific search rules
+
+`recall()` picks one of these automatically when `query_type` is omitted. The CLI is narrower: `cognee-cli recall --query-type` accepts only the 7 choices in `cognee/cli/config.py:SEARCH_TYPE_CHOICES` and defaults to `GRAPH_COMPLETION`; the rest are SDK-only.
 
 Key files:
 - `cognee/api/v1/search/search.py`
@@ -470,31 +501,45 @@ Tests are organized in `cognee/tests/`:
 - `cli_tests/` - CLI command tests
 - `tasks/` - Task-specific tests
 
-When adding features, add corresponding tests. Integration tests should cover the full add → cognify → search flow.
+When adding features, add corresponding tests. Integration tests should cover the full remember → recall flow (or add → cognify → search when the feature lives in one of those stages).
 
 ## API Structure
 
-FastAPI application with versioned routes under `cognee/api/v1/`:
-- `/add` - Data ingestion
-- `/cognify` - Knowledge graph processing
-- `/search` - Query interface
-- `/memify` - Graph enrichment
+FastAPI application with versioned routes under `/api/v1/` (routers registered in `cognee/api/client.py`):
+- `/remember` - Store data in memory
+- `/recall` - Query memory
+- `/improve` - Graph enrichment/indexing
+- `/forget` - Unified deletion
+- `/add`, `/cognify`, `/search`, `/memify`, `/delete` - Legacy primitives
 - `/datasets` - Dataset management
 - `/users` - Authentication (when `REQUIRE_AUTHENTICATION` is effectively true; see auth posture below)
 - `/visualize` - Graph visualization server
 
+Request bodies accept both snake_case and camelCase (`cognee/api/DTO.py` sets `alias_generator=to_camel` with `populate_by_name=True`). There is no `/feedback` route — feedback is CLI- and SDK-only.
+
 ## Python SDK Entry Points
 
-Main functions exported from `cognee/__init__.py`:
+Main functions exported from `cognee/__init__.py`.
+
+Memory API (primary):
+- `remember(data, dataset_name="main_dataset", session_id=..., self_improvement=True)` - Store data
+- `recall(query_text, query_type=None, datasets=..., top_k=15, session_id=...)` - Query memory
+- `improve(dataset="main_dataset", session_ids=..., node_name=...)` - Enrich/index the graph
+- `forget(data_id=..., dataset=..., dataset_id=..., everything=False, memory_only=False)` - Remove data
+
+Legacy primitives:
 - `add(data, dataset_name)` - Ingest data
 - `cognify(datasets)` - Build knowledge graph
 - `search(query_text, query_type)` - Query knowledge
 - `memify(extraction_tasks, enrichment_tasks)` - Enrich graph
-- `delete(data_id)` - Remove data
+- `delete(data_id)` - Remove data (deprecated since 0.3.9)
+
+Supporting:
 - `config()` - Configuration management
 - `datasets()` - Dataset operations
+- `serve(url)` / `disconnect()` - Point the SDK at a running instance
 
-All functions are async - use `await` or `asyncio.run()`.
+All functions are async - use `await` or `asyncio.run()`. See `examples/demos/remember_recall_improve_example.py` for permanent memory, session memory, and the sync between them.
 
 ## Security Considerations
 
@@ -550,9 +595,11 @@ Datasets are project-level containers that support organization, permissions, an
 
 ```python
 # Create/use a dataset
-await cognee.add(data, dataset_name="my_project")
-await cognee.cognify(datasets=["my_project"])
+await cognee.remember(data, dataset_name="my_project")
+await cognee.recall("my question", datasets=["my_project"])
 ```
+
+`remember()`/`add()` without `dataset_name` target the default dataset `main_dataset`; `recall()`/`search()` span all accessible datasets unless one is given.
 
 ### DataPoints
 Atomic knowledge units that form the foundation of graph structures. All graph nodes extend the `DataPoint` base class with versioning and metadata support.
