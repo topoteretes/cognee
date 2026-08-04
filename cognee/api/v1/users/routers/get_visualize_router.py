@@ -209,7 +209,8 @@ def get_visualize_router() -> APIRouter:
 
         ## Error Codes
         - **409 Conflict**: Dataset not found, permission denied, or the
-          payload could not be built (detail in the `error` field)
+          payload could not be built (generic message; full detail is
+          server-logged, not returned, to avoid leaking internals)
 
         ## Notes
         - User must have read permissions on the dataset
@@ -242,9 +243,12 @@ def get_visualize_router() -> APIRouter:
             )
             return JSONResponse(status_code=200, content=payload)
 
-        except Exception as error:
+        except Exception:
             logger.exception("Visualization JSON payload failed for dataset %s", dataset_id)
-            return JSONResponse(status_code=409, content={"error": str(error)})
+            return JSONResponse(
+                status_code=409,
+                content={"error": "Failed to build the visualization payload"},
+            )
 
     @router.get("/semantic", response_model=None)
     async def visualize_semantic(
@@ -305,7 +309,8 @@ def get_visualize_router() -> APIRouter:
 
         ## Error Codes
         - **409 Conflict**: Dataset not found, permission denied, or the
-          payload could not be built (detail in the `error` field)
+          payload could not be built (generic message; full detail is
+          server-logged, not returned, to avoid leaking internals)
 
         ## Notes
         - User must have read permissions on the dataset
@@ -337,9 +342,12 @@ def get_visualize_router() -> APIRouter:
             )
             return JSONResponse(status_code=200, content=payload)
 
-        except Exception as error:
+        except Exception:
             logger.exception("Semantic payload failed for dataset %s", dataset_id)
-            return JSONResponse(status_code=409, content={"error": str(error)})
+            return JSONResponse(
+                status_code=409,
+                content={"error": "Failed to build the semantic layout"},
+            )
 
     @router.get("/brains", response_model=None)
     async def visualize_brains(
@@ -386,9 +394,12 @@ def get_visualize_router() -> APIRouter:
             payload = await build_brains_payload(user=user, max_nodes=max_nodes)
             return JSONResponse(status_code=200, content=payload)
 
-        except Exception as error:
+        except Exception:
             logger.exception("Brains overview payload failed")
-            return JSONResponse(status_code=409, content={"error": str(error)})
+            return JSONResponse(
+                status_code=409,
+                content={"error": "Failed to build the brains overview"},
+            )
 
     @router.get("/live-events", response_model=None)
     async def visualize_live_events(
@@ -429,8 +440,9 @@ def get_visualize_router() -> APIRouter:
         ## Error Codes
         - **403 Forbidden**: Caller lacks read permission on the dataset (or
           it does not exist)
-        - **409 Conflict**: Payload could not be built (detail in the
-          `error` field)
+        - **409 Conflict**: Payload could not be built (generic message;
+          full detail is server-logged, not returned, to avoid leaking
+          internals)
 
         ## Notes
         - User must have read permissions on the dataset
@@ -456,9 +468,12 @@ def get_visualize_router() -> APIRouter:
                 status_code=403,
                 content={"error": "Not authorized to read this dataset"},
             )
-        except Exception as error:
+        except Exception:
             logger.exception("Live events payload failed for dataset %s", dataset_id)
-            return JSONResponse(status_code=409, content={"error": str(error)})
+            return JSONResponse(
+                status_code=409,
+                content={"error": "Failed to fetch live events"},
+            )
 
     @router.post("/multi", response_model=None)
     async def visualize_multi(
