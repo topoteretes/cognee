@@ -96,7 +96,7 @@ def get_sync_router() -> APIRouter:
         """
         send_telemetry(
             "Cloud Sync API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "POST /v1/sync",
                 "cognee_version": cognee_version,
@@ -203,7 +203,7 @@ def get_sync_router() -> APIRouter:
         """
         send_telemetry(
             "Sync Status Overview API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "GET /v1/sync/status",
                 "cognee_version": cognee_version,

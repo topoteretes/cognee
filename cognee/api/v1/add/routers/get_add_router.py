@@ -95,7 +95,7 @@ def get_add_router() -> APIRouter:
         """
         send_telemetry(
             "Add API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "POST /v1/add",
                 "node_set": node_set,

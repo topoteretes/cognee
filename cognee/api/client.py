@@ -91,6 +91,16 @@ async def lifespan(app: FastAPI):
 
     yield
 
+    # Drain buffered telemetry before the DB engines go away. The local sink
+    # batches on an interval, so without this every restart loses its last
+    # window of events — noticeable on a hosted deployment that redeploys often.
+    try:
+        from cognee.modules.telemetry.postgres_sink import flush as flush_telemetry
+
+        await flush_telemetry()
+    except Exception as error:
+        logger.debug("Telemetry flush on shutdown failed: %s", error)
+
     # Flush and close all cached database adapters so Ladybug can
     # CHECKPOINT its WAL before the process exits.  Without this,
     # a SIGTERM during an active WAL write leaves a half-written

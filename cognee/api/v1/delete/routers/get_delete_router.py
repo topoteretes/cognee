@@ -43,7 +43,7 @@ def get_delete_router() -> APIRouter:
         """
         send_telemetry(
             "Delete API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "DELETE /v1/delete",
                 "dataset_id": str(dataset_id),

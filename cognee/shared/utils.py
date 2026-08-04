@@ -17,8 +17,9 @@ from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 
-# Analytics Proxy Url, currently hosted by Vercel
-proxy_url = "https://test.prometh.ai"
+# Analytics Proxy Url, currently hosted by Vercel. Overridable so a deployment
+# can point the HTTP sink at its own collector without a code change.
+proxy_url = os.getenv("TELEMETRY_ENDPOINT", "https://test.prometh.ai")
 
 # Timeout for telemetry HTTP request; short to avoid blocking if proxy is unreachable
 TELEMETRY_REQUEST_TIMEOUT: int = int(os.getenv("TELEMETRY_REQUEST_TIMEOUT", "5"))
@@ -231,21 +232,86 @@ def _get_api_key_fingerprint() -> str:
     return _get_api_key_tracking_id()
 
 
-def send_telemetry(event_name: str, user_id: str | UUID, additional_properties: dict | None = None):
+def _resolve_identity(user) -> tuple[str, str | None]:
+    """Resolve a telemetry caller into ``(user_id, tenant_id)`` strings.
+
+    Callers pass whatever they have in hand — a ``User`` model, a bare UUID, or
+    the literal ``"sdk"`` sentinel. Resolving here rather than at each call site
+    is deliberate: ``str()`` on a ``User`` yields its object repr (the model
+    defines no ``__str__``), so any site that forwarded the object was silently
+    recording ``<...User object at 0x...>`` as the user id. Centralising it fixes
+    every emitter at once and keeps ``tenant_id`` from having to be threaded
+    through ~40 call sites by hand.
+    """
+    resolved_id = getattr(user, "id", user)
+    tenant_id = getattr(user, "tenant_id", None)
+    return str(resolved_id), str(tenant_id) if tenant_id else None
+
+
+def _telemetry_sinks() -> list[str]:
+    """Sinks this deployment writes telemetry to, in order.
+
+    ``TELEMETRY_SINK`` is a comma-separated list rather than a single choice so
+    that adding a destination is configuration, not code: a hosted deployment can
+    start on ``postgres`` only (tenant-local, nothing leaves the boundary) and
+    later run ``postgres,http`` to *also* feed the shared analytics pipeline,
+    with no redeploy of new logic and no schema change.
+    """
+    raw = os.getenv("TELEMETRY_SINK", "http")
+    return [sink.strip().lower() for sink in raw.split(",") if sink.strip()]
+
+
+# Per-task pipeline events (``f"{task_type} Task Started"`` and friends, emitted
+# from run_tasks_base) are internal execution detail: they are the majority of
+# all telemetry volume by a wide margin and mean nothing to an end user. The
+# HTTP sink still receives them — historical analytics depend on them — but
+# local sinks skip them so a tenant-facing table stays small and readable, and
+# so telemetry writes don't peak exactly when the workload is busiest.
+_LOCAL_SINK_EXCLUDED_SUFFIXES = (" Task Started", " Task Completed", " Task Errored")
+
+
+def _is_internal_task_event(event_name: str) -> bool:
+    return event_name.endswith(_LOCAL_SINK_EXCLUDED_SUFFIXES)
+
+
+def send_telemetry(
+    event_name: str,
+    user=None,
+    additional_properties: dict | None = None,
+    *,
+    user_id=None,
+):
     """Send a product telemetry event.
 
-    Three identity layers are sent with every event:
+    Args:
+        event_name: The event to record.
+        user: A ``User`` model, a user UUID, or a string sentinel such as
+            ``"sdk"``. When a ``User`` is given, both its ``id`` and its
+            ``tenant_id`` are recorded — prefer passing the model over
+            pre-resolving ``user.id``, or the event carries no tenant.
+        additional_properties: Extra event properties.
+        user_id: Deprecated alias for ``user``, kept so out-of-tree callers that
+            pass it by keyword keep working. Ignored when ``user`` is given.
+
+    Identity layers sent with every event:
 
     - **anonymous_id**: Original project-root ID (.anon_id). May change
       on reinstall. Kept for backward compatibility with historical data.
+      Overridable with ``TRACKING_ID`` — hosted deployments should set it to a
+      stable per-deployment value, since the on-disk file is regenerated
+      whenever the filesystem is ephemeral.
     - **persistent_id**: Stable machine-level ID (~/.cognee/.persistent_id).
       Survives data deletion, reinstalls, user recreation. Use this to
       correlate a single machine across all user_id changes.
     - **user_id**: Transient Cognee User UUID from the database. Changes
       when the user is deleted and recreated via forget(everything=True).
+    - **tenant_id**: The user's tenant UUID, or ``"Single User Tenant"`` when the
+      deployment has no tenancy.
     - **api_key_tracking_id**: Stable pseudonymous ID derived from the full
       LLM API key when configured. Use this to group activity by key without
       sending the key or visible key fragments.
+
+    Destinations are controlled by ``TELEMETRY_SINK`` (default ``http``).
     """
     if additional_properties is None:
         additional_properties = {}
@@ -258,6 +324,7 @@ def send_telemetry(event_name: str, user_id: str | UUID, additional_properties: 
     additional_properties = _sanitize_nested_properties(
         obj=additional_properties, property_names=["url"]
     )
+    resolved_user_id, tenant_id = _resolve_identity(user if user is not None else user_id)
     anonymous_id = str(get_anonymous_id())
     persistent_id = str(get_persistent_id())
     api_key_tracking_id = _get_api_key_tracking_id()
@@ -266,29 +333,44 @@ def send_telemetry(event_name: str, user_id: str | UUID, additional_properties: 
         "anonymous_id": anonymous_id,
         "event_name": event_name,
         "user_properties": {
-            "user_id": str(user_id),
+            "user_id": resolved_user_id,
+            "tenant_id": tenant_id or "Single User Tenant",
             "persistent_id": persistent_id,
             "api_key_tracking_id": api_key_tracking_id,
             "api_key_hash": api_key_tracking_id,
         },
         "properties": {
             "time": current_time.strftime("%m/%d/%Y"),
-            "user_id": str(user_id),
+            "user_id": resolved_user_id,
+            "tenant_id": tenant_id or "Single User Tenant",
             "anonymous_id": anonymous_id,
             "persistent_id": persistent_id,
             "api_key_tracking_id": api_key_tracking_id,
             "api_key_hash": api_key_tracking_id,
+            # An explicit tenant_id in additional_properties still wins, so
+            # existing call sites that pass their own keep their behaviour.
             **additional_properties,
         },
     }
 
-    try:
-        loop = asyncio.get_running_loop()
-        loop.create_task(_send_telemetry_request(payload))
-    except RuntimeError:
-        # No running event loop (shutdown, sync context, etc.) — telemetry is
-        # best-effort; dropping the event is better than crashing the caller.
-        pass
+    sinks = _telemetry_sinks()
+
+    if "postgres" in sinks and not _is_internal_task_event(event_name):
+        try:
+            from cognee.modules.telemetry.postgres_sink import enqueue
+
+            enqueue(payload)
+        except Exception as error:
+            logger.debug("Local telemetry sink failed: %s", error)
+
+    if "http" in sinks:
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(_send_telemetry_request(payload))
+        except RuntimeError:
+            # No running event loop (shutdown, sync context, etc.) — telemetry is
+            # best-effort; dropping the event is better than crashing the caller.
+            pass
 
 
 def embed_logo(p: Any, layout_scale: float, logo_alpha: float, position: str):

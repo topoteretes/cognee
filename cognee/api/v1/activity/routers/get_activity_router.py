@@ -400,4 +400,61 @@ def get_activity_router() -> APIRouter:
             headers={"Content-Disposition": f'attachment; filename="{filename}"'},
         )
 
+    @router.get("/events")
+    async def get_telemetry_events(
+        days: int = Query(30, ge=1, le=90),
+        event_name: Optional[str] = Query(None),
+        limit: int = Query(500, ge=1, le=5000),
+        user: User = Depends(get_authenticated_user),
+    ):
+        """Return recent telemetry events recorded by the local sink.
+
+        Empty unless the deployment runs with ``TELEMETRY_SINK=postgres`` — the
+        table exists everywhere but only that sink writes to it.
+        """
+        from datetime import datetime, timedelta, timezone
+
+        from sqlalchemy import select
+
+        from cognee.infrastructure.databases.relational import get_relational_engine
+        from cognee.modules.telemetry.models.TelemetryEvent import TelemetryEvent
+
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+
+        stmt = (
+            select(TelemetryEvent)
+            .where(TelemetryEvent.created_at >= cutoff)
+            .order_by(TelemetryEvent.created_at.desc())
+            .limit(limit)
+        )
+        # The relational DB is per-tenant on hosted deployments, so rows are
+        # already scoped. Filter anyway: a shared-DB deployment must not leak
+        # another tenant's events through this endpoint.
+        if user.tenant_id:
+            stmt = stmt.where(TelemetryEvent.tenant_id == user.tenant_id)
+        if event_name:
+            stmt = stmt.where(TelemetryEvent.event_name == event_name)
+
+        db_engine = get_relational_engine()
+        try:
+            async with db_engine.get_async_session() as session:
+                result = await session.execute(stmt)
+                events = result.scalars().all()
+        except Exception:
+            # Table absent (migration not yet applied) — an empty feed is the
+            # right answer for a UI, not a 500.
+            return []
+
+        return [
+            {
+                "id": str(event.id),
+                "event_name": event.event_name,
+                "user_id": str(event.user_id) if event.user_id else None,
+                "tenant_id": str(event.tenant_id) if event.tenant_id else None,
+                "properties": event.properties,
+                "created_at": event.created_at.isoformat() if event.created_at else None,
+            }
+            for event in events
+        ]
+
     return router

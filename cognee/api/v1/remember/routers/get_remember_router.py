@@ -266,7 +266,7 @@ def get_remember_router() -> APIRouter:
         """
         send_telemetry(
             "Remember API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "POST /v1/remember",
                 "node_set": node_set,
@@ -446,7 +446,7 @@ def get_remember_router() -> APIRouter:
         """
         send_telemetry(
             "Remember Entry API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "POST /v1/remember/entry",
                 "entry_type": payload.entry.type,
