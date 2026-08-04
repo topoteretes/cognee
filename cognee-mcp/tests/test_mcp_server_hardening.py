@@ -1245,6 +1245,20 @@ def test_normalize_api_url_strips_whitespace():
     assert normalize_api_url("  tenant-abc.aws.cognee.ai  ") == "https://tenant-abc.aws.cognee.ai"
 
 
+def test_normalize_api_url_repairs_near_miss_schemes():
+    # Neither may be blindly prefixed: that yields "https://https:/host" and
+    # "https:////host" respectively.
+    assert (
+        normalize_api_url("https:/tenant-abc.aws.cognee.ai") == "https://tenant-abc.aws.cognee.ai"
+    )
+    assert normalize_api_url("//tenant-abc.aws.cognee.ai") == "https://tenant-abc.aws.cognee.ai"
+
+
+def test_normalize_api_url_leaves_explicit_non_http_scheme_alone():
+    # Not ours to rewrite — httpx reports the unsupported protocol clearly.
+    assert normalize_api_url("ftp://weird.host") == "ftp://weird.host"
+
+
 def test_normalize_api_url_passthrough_empty():
     assert normalize_api_url(None) is None
     assert normalize_api_url("") == ""

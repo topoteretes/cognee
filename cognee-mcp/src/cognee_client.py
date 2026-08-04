@@ -7,6 +7,7 @@ This module provides a unified interface for interacting with Cognee, supporting
 """
 
 import os
+import re
 import sys
 import base64
 import hashlib
@@ -33,6 +34,15 @@ except ImportError:
 logger = get_logger()
 
 
+# A scheme is "scheme://", per RFC 3986 (letter, then letters/digits/+-.).
+# Deliberately requires the "//" so a bare "localhost:8000" is treated as a
+# schemeless host:port rather than a URL whose scheme is "localhost" — the
+# reading urlsplit() gives it.
+_SCHEME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.\-]*://")
+# ...and the same prefix with a single slash, the common typo ("https:/host").
+_SINGLE_SLASH_SCHEME_RE = re.compile(r"^([a-zA-Z][a-zA-Z0-9+.\-]*):/(?!/)")
+
+
 def normalize_api_url(api_url: Optional[str]) -> Optional[str]:
     """Normalize a Cognee base URL so requests never fail on a missing scheme.
 
@@ -49,15 +59,27 @@ def normalize_api_url(api_url: Optional[str]) -> Optional[str]:
     if not url:
         return None
 
-    if "://" not in url:
-        logger.warning(
-            "COGNEE_BASE_URL/--api-url %r has no scheme; assuming https://. "
-            "Set the full URL (e.g. https://your-tenant.aws.cognee.ai) to silence this.",
-            url,
-        )
-        url = f"https://{url}"
+    if _SCHEME_RE.match(url):
+        return url
 
-    return url
+    # Repair near-misses rather than prefixing them into nonsense: "https:/host"
+    # would otherwise become "https://https:/host", and the protocol-relative
+    # "//host" would become "https:////host".
+    repaired = _SINGLE_SLASH_SCHEME_RE.sub(r"\1://", url, count=1)
+    if repaired != url:
+        logger.warning(
+            "COGNEE_BASE_URL/--api-url %r is missing a slash after the scheme; reading it as %r.",
+            url,
+            repaired,
+        )
+        return repaired
+
+    logger.warning(
+        "COGNEE_BASE_URL/--api-url %r has no scheme; assuming https://. "
+        "Set the full URL (e.g. https://your-tenant.aws.cognee.ai) to silence this.",
+        url,
+    )
+    return f"https://{url.lstrip('/')}"
 
 
 # Read-only GETs (dataset list/status) should fail fast rather than inherit the
@@ -116,8 +138,6 @@ class CogneeClient:
         # Extract tenant ID from tenant URL pattern: tenant-<uuid>.*.cognee.ai
         self.tenant_id: Optional[str] = None
         if self.api_url:
-            import re
-
             match = re.search(r"tenant-([0-9a-f-]{36})", self.api_url)
             if match:
                 self.tenant_id = match.group(1)
