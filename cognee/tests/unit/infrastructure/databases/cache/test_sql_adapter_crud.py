@@ -751,6 +751,26 @@ async def test_create_and_get_session_context_entries_preserve_order(adapter):
 
 
 @pytest.mark.asyncio
+async def test_create_session_context_entry_upserts_on_duplicate_id(adapter):
+    """Re-creating an existing entry id replaces the row instead of duplicating it."""
+    await adapter.create_session_context_entry("u1", "s1", _ctx("c1", content="old"))
+    await adapter.create_session_context_entry("u1", "s1", _ctx("c1", content="new"))
+    (entry,) = await adapter.get_session_context_entries("u1", "s1")
+    assert entry["content"] == "new"
+
+
+@pytest.mark.asyncio
+async def test_session_context_same_entry_id_allowed_across_sessions(adapter):
+    """The unique key is scoped to (user, session): same entry id may exist in each."""
+    await adapter.create_session_context_entry("u1", "s1", _ctx("c1"))
+    await adapter.create_session_context_entry("u1", "s2", _ctx("c1"))
+    await adapter.create_session_context_entry("u2", "s1", _ctx("c1"))
+    assert len(await adapter.get_session_context_entries("u1", "s1")) == 1
+    assert len(await adapter.get_session_context_entries("u1", "s2")) == 1
+    assert len(await adapter.get_session_context_entries("u2", "s1")) == 1
+
+
+@pytest.mark.asyncio
 async def test_create_session_context_entry_without_id_is_stored(adapter):
     """An id-less payload is stored (parity with Redis/FS); it is just never updatable."""
     await adapter.create_session_context_entry("u1", "s1", {"kind": "context", "content": "x"})

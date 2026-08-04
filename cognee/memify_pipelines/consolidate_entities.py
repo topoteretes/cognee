@@ -21,6 +21,7 @@ from cognee.tasks.memify.consolidate_entities import (
     detect_entity_duplicates,
     merge_entity_duplicates,
 )
+from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 
 logger = get_logger("consolidate_entities_pipeline")
 
@@ -33,7 +34,7 @@ async def consolidate_entities_pipeline(
     top_k: int = 10,
     allow_cross_type: bool = False,
     user: Optional[User] = None,
-    dataset: str = "main_dataset",
+    dataset: str = DEFAULT_DATASET_NAME,
     run_in_background: bool = False,
 ):
     """Merge near-duplicate ``Entity`` nodes in an existing graph.
