@@ -284,13 +284,13 @@ def _requires_http_exporter(endpoint: str) -> bool:
     closed) which causes traces to disappear without any visible error.
     """
     http_only_patterns = (
-        "/api/public/otel",        # Langfuse
-        "live.dynatrace.com",      # Dynatrace SaaS
-        "dynatrace.com",           # Dynatrace (any subdomain)
-        "/api/v2/otlp",            # Dynatrace OTLP path
-        "otel.live.dynatrace.com", # Dynatrace dedicated ingest
-        ":4318",                   # standard OTLP HTTP port
-        ":443/",                   # standard HTTPS — almost certainly HTTP OTLP
+        "/api/public/otel",  # Langfuse
+        "live.dynatrace.com",  # Dynatrace SaaS
+        "dynatrace.com",  # Dynatrace (any subdomain)
+        "/api/v2/otlp",  # Dynatrace OTLP path
+        "otel.live.dynatrace.com",  # Dynatrace dedicated ingest
+        ":4318",  # standard OTLP HTTP port
+        ":443/",  # standard HTTPS — almost certainly HTTP OTLP
     )
     return any(pat in endpoint for pat in http_only_patterns)
 
@@ -408,6 +408,7 @@ def setup_tracing(console_output: bool = False) -> "trace.Tracer":
         )
 
         import logging as _logging
+
         _log = _logging.getLogger("cognee.observability")
 
         _provider = TracerProvider(resource=resource)
@@ -424,7 +425,9 @@ def setup_tracing(console_output: bool = False) -> "trace.Tracer":
         endpoint = config.otel_exporter_otlp_endpoint
         _log.info(
             "OTel tracing initialised — service=%s version=%s endpoint=%s",
-            config.otel_service_name, version, endpoint or "none (in-memory only)",
+            config.otel_service_name,
+            version,
+            endpoint or "none (in-memory only)",
         )
 
     _tracer = _provider.get_tracer("cognee", version)

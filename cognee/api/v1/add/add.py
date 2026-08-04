@@ -233,6 +233,7 @@ async def add(
     await setup()
 
     import time as _time
+
     _add_start_ns = _time.monotonic_ns()
 
     with new_span("memory.store") as _span:

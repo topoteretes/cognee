@@ -101,6 +101,7 @@ async def forget(
     )
 
     import time as _time
+
     _forget_start_ns = _time.monotonic_ns()
 
     with new_span("memory.delete") as span:
