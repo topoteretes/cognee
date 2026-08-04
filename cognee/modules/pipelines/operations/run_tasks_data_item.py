@@ -12,6 +12,7 @@ from sqlalchemy import select
 import cognee.modules.ingestion as ingestion
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
+from cognee.infrastructure.llm.exceptions import is_budget_exhausted_error
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.users.models import User
 from cognee.modules.data.models import Data, Dataset
@@ -152,7 +153,15 @@ async def run_tasks_data_item_incremental(
             "data_id": data_id,
         }
 
-        if os.getenv("RAISE_INCREMENTAL_LOADING_ERRORS", "true").lower() == "true":
+        # Budget/quota exhaustion is terminal — every remaining document would hit the
+        # same dead key, and run_tasks' graceful-stop handler needs the typed error to
+        # keep already-cognified data. So always propagate it, even when
+        # RAISE_INCREMENTAL_LOADING_ERRORS is off (otherwise it'd be masked as a
+        # PipelineRunErrored result → PipelineRunFailedError the handler can't classify).
+        if (
+            is_budget_exhausted_error(error)
+            or os.getenv("RAISE_INCREMENTAL_LOADING_ERRORS", "true").lower() == "true"
+        ):
             raise error
 
 

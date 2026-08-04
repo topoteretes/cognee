@@ -14,19 +14,8 @@ class LLMPaymentRequiredError(CogneeValidationError):
         super().__init__(message=message, name="LLMPaymentRequiredError", status_code=402)
 
 
-def is_budget_exhausted_error(e: Exception) -> bool:
-    """Return True if e signals LLM budget or payment exhaustion.
-
-    Three cases are handled:
-    1. Any provider returning HTTP 402 Payment Required directly.
-    2. litellm's own budget manager raising BudgetExceededError (status_code 429,
-       rate_limit_type "budget") when litellm is used as a library with a configured budget.
-    3. LiteLLM proxy (≥v1.x) returning HTTP 429 with a JSON body whose "error.type" field
-       equals "budget_exceeded". This is LiteLLM-proxy-specific: the proxy enforces virtual-key
-       and per-user spend caps and uses this response shape to distinguish budget exhaustion from
-       ordinary rate limiting. If LiteLLM changes this response format this branch silently falls
-       through, so callers should monitor for unhandled 429s after proxy upgrades.
-    """
+def _is_budget_exhausted_single(e: BaseException) -> bool:
+    """Whether a single exception object (ignoring its cause chain) is a budget error."""
     # Case 1: provider-level payment required
     if getattr(e, "status_code", None) == 402:
         return True
@@ -52,6 +41,32 @@ def is_budget_exhausted_error(e: Exception) -> bool:
             except Exception:
                 pass
 
+    return False
+
+
+def is_budget_exhausted_error(e: Exception) -> bool:
+    """Return True if e — or anything it wraps via ``__cause__`` — signals LLM budget
+    or payment exhaustion.
+
+    Three underlying cases are recognized on each exception in the chain:
+    1. Any provider returning HTTP 402 Payment Required directly.
+    2. litellm's own budget manager raising BudgetExceededError (status_code 429,
+       rate_limit_type "budget") when litellm is used as a library with a configured budget.
+    3. LiteLLM proxy (≥v1.x) returning HTTP 429 with a JSON body whose "error.type" field
+       equals "budget_exceeded".
+
+    The ``__cause__`` chain is walked (like ``retry_config.is_quota_or_billing_error``)
+    because budget errors travel wrapped in practice (``raise X from budget_err``). Only
+    the explicit-cause chain is followed, not ``__context__``, so an unrelated error
+    merely raised while handling a budget error is not misclassified.
+    """
+    seen: set[int] = set()
+    current: BaseException | None = e
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if _is_budget_exhausted_single(current):
+            return True
+        current = current.__cause__
     return False
 
 

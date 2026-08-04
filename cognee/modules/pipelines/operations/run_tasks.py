@@ -14,12 +14,11 @@ from cognee.infrastructure.llm.config import LLMConfig
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.users.methods import get_default_user
-from cognee.modules.pipelines.utils import generate_pipeline_id
+from cognee.modules.pipelines.utils import generate_pipeline_id, is_data_item_cognified
 from cognee.modules.pipelines.exceptions import PipelineRunFailedError
 from cognee.tasks.ingestion import resolve_data_directories
 from cognee.infrastructure.llm.exceptions import is_budget_exhausted_error
 from cognee.modules.data.methods import get_dataset_data
-from cognee.modules.pipelines.models.DataItemStatus import DataItemStatus
 from cognee.modules.pipelines.models import PipelineContext
 from cognee.modules.pipelines.models.PipelineRunInfo import (
     PipelineRunCompleted,
@@ -47,12 +46,7 @@ async def _cognify_progress(dataset_id: UUID, pipeline_name: str) -> dict:
     """
     items = await get_dataset_data(dataset_id)
     total = len(items)
-    cognified = sum(
-        1
-        for d in items
-        if (d.pipeline_status or {}).get(pipeline_name, {}).get(str(dataset_id))
-        == DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED
-    )
+    cognified = sum(1 for d in items if is_data_item_cognified(d, pipeline_name, dataset_id))
     return {
         "documents_total": total,
         "documents_cognified": cognified,
@@ -121,6 +115,10 @@ async def run_tasks(
         llm_config=llm_config,
         embedding_config=embedding_config,
     ):
+        # Initialized before the try so the except can reference them directly even if
+        # an error is raised before they're assigned (scheduling / the results loop).
+        in_flight: list = []
+        results = None
         try:
             if not isinstance(data, list):
                 data = [data]
@@ -214,7 +212,6 @@ async def run_tasks(
             # Stop any siblings still running so a failed or budget-limited run does
             # not keep issuing (and, on a budget stop, billing) LLM calls after we
             # have already decided to stop.
-            in_flight = locals().get("in_flight") or []
             for task in in_flight:
                 if not task.done():
                     task.cancel()
@@ -227,7 +224,13 @@ async def run_tasks(
             # resumes only the remaining documents (incremental loading skips the ones
             # already marked complete). No new pipeline status is introduced: the
             # "stopped early" signal lives in run_info.stopped_reason.
-            if is_budget_exhausted_error(error):
+            #
+            # Gated on incremental_loading: the resume-without-re-bill guarantee and
+            # the per-document counts both rely on the DATA_ITEM_PROCESSING_COMPLETED
+            # markers, which only the incremental path writes. Without it, fall through
+            # to the normal error path rather than record misleading progress. (cognify
+            # runs incremental by default.)
+            if is_budget_exhausted_error(error) and incremental_loading:
                 progress = await _cognify_progress(dataset.id, pipeline_name)
                 logger.warning(
                     "Cognify stopped early for dataset %s: budget exhausted — "
@@ -251,7 +254,7 @@ async def run_tasks(
                     dataset_id=dataset.id,
                     dataset_name=dataset.name,
                     payload=stopped_info,
-                    data_ingestion_info=locals().get("results"),
+                    data_ingestion_info=results,
                 )
                 return
 
@@ -264,7 +267,7 @@ async def run_tasks(
                         dataset=dataset,
                         user=user,
                         data=data,
-                        data_ingestion_info=locals().get("results"),
+                        data_ingestion_info=results,
                         error=error,
                     )
                 except Exception as rollback_error:
@@ -279,9 +282,7 @@ async def run_tasks(
                 payload=repr(error),
                 dataset_id=dataset.id,
                 dataset_name=dataset.name,
-                data_ingestion_info=locals().get(
-                    "results"
-                ),  # Returns results if they exist or returns None
+                data_ingestion_info=results,  # Returns results if they exist or returns None
             )
 
             # In case of error during incremental loading of data just let the user know the pipeline Errored, don't raise error

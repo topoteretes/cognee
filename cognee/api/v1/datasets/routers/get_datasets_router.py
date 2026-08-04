@@ -397,18 +397,13 @@ def get_datasets_router() -> APIRouter:
         if dataset_data is None:
             return []
 
-        from cognee.modules.pipelines.models.DataItemStatus import DataItemStatus
-
-        def _cognify_completed(data) -> bool:
-            return (data.pipeline_status or {}).get("cognify_pipeline", {}).get(
-                str(dataset_id)
-            ) == DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED
+        from cognee.modules.pipelines.utils import is_data_item_cognified
 
         return [
             dict(
                 **jsonable_encoder(data),
                 dataset_id=dataset_id,
-                cognify_completed=_cognify_completed(data),
+                cognify_completed=is_data_item_cognified(data, "cognify_pipeline", dataset_id),
             )
             for data in dataset_data
         ]
