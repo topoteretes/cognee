@@ -54,6 +54,7 @@ MEMORY_OPERATION_ERRORS = "memory.operation.errors"
 # Null-object pattern — zero overhead when metrics are off
 # ---------------------------------------------------------------------------
 
+
 class _NullInstrument:
     """No-op stand-in for any OTel instrument."""
 
@@ -269,7 +270,10 @@ def _add_http_metric_reader(readers: list, endpoint: str, headers) -> None:
             "Install with: pip install cognee[tracing]"
         )
         _log.error("OTel: %s", msg)
-        warnings.warn(msg, stacklevel=3,)
+        warnings.warn(
+            msg,
+            stacklevel=3,
+        )
 
 
 def get_meter() -> Optional[object]:
@@ -280,6 +284,7 @@ def get_meter() -> Optional[object]:
 # ---------------------------------------------------------------------------
 # Public metric helpers (no-op when not configured)
 # ---------------------------------------------------------------------------
+
 
 def record_operation_duration(duration_ms: float, attributes: dict) -> None:
     _op_duration.record(duration_ms, attributes)

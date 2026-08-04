@@ -57,7 +57,11 @@ def test_memory_semconv_constants_exported():
 
 def test_enable_tracing_sets_up_all_signals():
     """enable_tracing() initialises tracing, metrics, and log bridge without error."""
-    from cognee.modules.observability.trace_context import enable_tracing, disable_tracing, is_tracing_enabled
+    from cognee.modules.observability.trace_context import (
+        enable_tracing,
+        disable_tracing,
+        is_tracing_enabled,
+    )
 
     enable_tracing()
     assert is_tracing_enabled()
@@ -74,7 +78,13 @@ def test_new_span_emits_memory_operation_retrieve():
     pytest.importorskip("opentelemetry")
 
     from cognee.modules.observability.trace_context import enable_tracing
-    from cognee.modules.observability import new_span, MEMORY_SYSTEM, MEMORY_OPERATION, MEMORY_QUERY_TEXT, MEMORY_RESULT_COUNT
+    from cognee.modules.observability import (
+        new_span,
+        MEMORY_SYSTEM,
+        MEMORY_OPERATION,
+        MEMORY_QUERY_TEXT,
+        MEMORY_RESULT_COUNT,
+    )
     from cognee.modules.observability.trace_context import get_last_trace
 
     enable_tracing()
@@ -103,7 +113,12 @@ def test_new_span_emits_memory_operation_store():
     pytest.importorskip("opentelemetry")
 
     from cognee.modules.observability.trace_context import enable_tracing
-    from cognee.modules.observability import new_span, MEMORY_SYSTEM, MEMORY_OPERATION, MEMORY_COLLECTION
+    from cognee.modules.observability import (
+        new_span,
+        MEMORY_SYSTEM,
+        MEMORY_OPERATION,
+        MEMORY_COLLECTION,
+    )
     from cognee.modules.observability.trace_context import get_last_trace
 
     enable_tracing()
@@ -267,12 +282,10 @@ def test_log_bridge_attaches_without_error():
     import logging
     from cognee.modules.observability.logs import setup_log_bridge, shutdown_log_bridge
 
-    provider = setup_log_bridge()
+    setup_log_bridge()
 
     cognee_logger = logging.getLogger("cognee")
-    has_otel_handler = any(
-        type(h).__name__ == "LoggingHandler" for h in cognee_logger.handlers
-    )
+    has_otel_handler = any(type(h).__name__ == "LoggingHandler" for h in cognee_logger.handlers)
     assert has_otel_handler, "Expected OTel LoggingHandler on cognee logger"
 
     # Logging through the bridge should not raise
