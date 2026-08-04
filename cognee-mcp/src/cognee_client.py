@@ -42,6 +42,24 @@ _SCHEME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.\-]*://")
 # ...and the same prefix with a single slash, the common typo ("https:/host").
 _SINGLE_SLASH_SCHEME_RE = re.compile(r"^([a-zA-Z][a-zA-Z0-9+.\-]*):/(?!/)")
 
+_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "0.0.0.0", "::1", "[::1]"})
+
+
+def _assumed_scheme(url: str) -> str:
+    """Pick the scheme to assume for a schemeless URL from its host.
+
+    Loopback hosts are self-hosted dev servers that almost never speak TLS —
+    assuming https there swaps the "missing protocol" error for an equally
+    cryptic "[SSL: WRONG_VERSION_NUMBER]". Everything else is a real host and
+    should get https.
+    """
+    host = url.split("/", 1)[0].rsplit("@", 1)[-1]
+    if host.startswith("["):  # bracketed IPv6, e.g. [::1]:8000
+        host = host[: host.find("]") + 1]
+    else:
+        host = host.split(":", 1)[0]  # strip :port
+    return "http" if host.lower() in _LOOPBACK_HOSTS else "https"
+
 
 def normalize_api_url(api_url: Optional[str]) -> Optional[str]:
     """Normalize a Cognee base URL so requests never fail on a missing scheme.
@@ -49,8 +67,8 @@ def normalize_api_url(api_url: Optional[str]) -> Optional[str]:
     Users routinely paste a bare tenant host (e.g. ``tenant-xxx.aws.cognee.ai``)
     into ``COGNEE_BASE_URL`` / ``--api-url``. Without a scheme, httpx raises the
     cryptic "Request URL is missing an 'http://' or 'https://' protocol" only on
-    the first request (e.g. remember), long after startup. Assume ``https://`` for
-    a schemeless URL and warn, so the common case just works and the fix is clear.
+    the first request (e.g. remember), long after startup. Infer the scheme for a
+    schemeless URL and warn, so the common case just works and the fix is clear.
     """
     if not api_url:
         return api_url
@@ -74,12 +92,17 @@ def normalize_api_url(api_url: Optional[str]) -> Optional[str]:
         )
         return repaired
 
+    host_part = url.lstrip("/")
+    scheme = _assumed_scheme(host_part)
+    normalized = f"{scheme}://{host_part}"
     logger.warning(
-        "COGNEE_BASE_URL/--api-url %r has no scheme; assuming https://. "
-        "Set the full URL (e.g. https://your-tenant.aws.cognee.ai) to silence this.",
+        "COGNEE_BASE_URL/--api-url %r has no scheme; assuming %s://. "
+        "Set the full URL (e.g. %s) to silence this.",
         url,
+        scheme,
+        normalized,
     )
-    return f"https://{url.lstrip('/')}"
+    return normalized
 
 
 # Read-only GETs (dataset list/status) should fail fast rather than inherit the

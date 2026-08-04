@@ -1245,6 +1245,22 @@ def test_normalize_api_url_strips_whitespace():
     assert normalize_api_url("  tenant-abc.aws.cognee.ai  ") == "https://tenant-abc.aws.cognee.ai"
 
 
+def test_normalize_api_url_assumes_http_for_loopback():
+    # A self-hosted server on localhost almost never speaks TLS; assuming https
+    # would trade "missing protocol" for an equally cryptic SSL handshake error.
+    assert normalize_api_url("localhost:8000") == "http://localhost:8000"
+    assert normalize_api_url("127.0.0.1:8000") == "http://127.0.0.1:8000"
+    assert normalize_api_url("[::1]:8000") == "http://[::1]:8000"
+    assert normalize_api_url("localhost") == "http://localhost"
+
+
+def test_normalize_api_url_keeps_https_for_remote_host_with_port():
+    assert (
+        normalize_api_url("tenant-abc.aws.cognee.ai:8000")
+        == "https://tenant-abc.aws.cognee.ai:8000"
+    )
+
+
 def test_normalize_api_url_repairs_near_miss_schemes():
     # Neither may be blindly prefixed: that yields "https://https:/host" and
     # "https:////host" respectively.
