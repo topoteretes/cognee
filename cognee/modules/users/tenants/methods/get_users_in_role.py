@@ -10,9 +10,12 @@ from cognee.modules.users.permissions.methods.has_user_management_permission imp
 
 
 async def get_users_in_role(tenant_id: UUID, role_id: UUID, user: User):
-    # TODO: Consider if regular users should be able to see the list of users in roles
-    await has_user_management_permission(user.id, tenant_id)
+    """
+    List the users assigned to a role.
 
+    Visible to members of the role itself, and to anyone with user management
+    permission in the tenant (owner or admin).
+    """
     db_engine = get_relational_engine()
     async with db_engine.get_async_session() as session:
         # Scope the role to the tenant the caller was authorized for, so a role id
@@ -25,6 +28,19 @@ async def get_users_in_role(tenant_id: UUID, role_id: UUID, user: User):
 
         if role is None:
             raise RoleNotFoundError(message="Role not found for this tenant.")
+
+        requester_is_member = (
+            await session.execute(
+                select(UserRole.user_id).where(
+                    UserRole.role_id == role_id, UserRole.user_id == user.id
+                )
+            )
+        ).scalar_one_or_none() is not None
+
+        # Members may see who shares their own roles. Everyone else needs the
+        # tenant-wide user management permission, which raises when absent.
+        if not requester_is_member:
+            await has_user_management_permission(user.id, tenant_id)
 
         member_results = await session.execute(
             select(User)
