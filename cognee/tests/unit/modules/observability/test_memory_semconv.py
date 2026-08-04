@@ -57,6 +57,8 @@ def test_memory_semconv_constants_exported():
 
 def test_enable_tracing_sets_up_all_signals():
     """enable_tracing() initialises tracing, metrics, and log bridge without error."""
+    pytest.importorskip("opentelemetry")
+
     from cognee.modules.observability.trace_context import (
         enable_tracing,
         disable_tracing,
