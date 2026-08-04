@@ -7,6 +7,7 @@ from sqlalchemy import text
 from datetime import datetime, timezone
 from typing import Dict
 from enum import Enum
+from uuid import uuid4
 from pydantic import BaseModel
 
 from cognee.version import get_cognee_version
@@ -148,7 +149,6 @@ class HealthChecker:
         """Check file storage health."""
         start_time = time.time()
         try:
-            import os
             from cognee.infrastructure.files.storage.get_file_storage import get_file_storage
             from cognee.base_config import get_base_config
 
@@ -158,18 +158,13 @@ class HealthChecker:
             # Determine provider
             provider = "s3" if base_config.data_root_directory.startswith("s3://") else "local"
 
-            # Test storage accessibility - for local storage, just check directory exists
-            if provider == "local":
-                os.makedirs(base_config.data_root_directory, exist_ok=True)
-                # Simple write/read test
-                test_file = os.path.join(base_config.data_root_directory, "health_check_test")
-                with open(test_file, "w") as f:
-                    f.write("test")
-                os.remove(test_file)
-            else:
-                # For S3, test basic operations
-                test_path = "health_check_test"
+            # Use a unique key so concurrent probes cannot collide or delete a
+            # pre-existing object. Exercise the same StorageManager path for
+            # local and remote backends, and clean up even after a partial write.
+            test_path = f".cognee-health-{uuid4().hex}"
+            try:
                 await storage.store(test_path, BytesIO(b"test"))
+            finally:
                 await storage.remove(test_path)
 
             response_time = int((time.time() - start_time) * 1000)
