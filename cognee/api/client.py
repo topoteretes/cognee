@@ -136,6 +136,27 @@ app.add_middleware(
     allow_methods=["OPTIONS", "GET", "PUT", "POST", "DELETE"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def tag_telemetry_origin(request: Request, call_next):
+    """Label this request's telemetry with the interface it came through.
+
+    Clients that identify themselves (`X-Cognee-Client: mcp`, a coding-agent
+    name, …) are recorded verbatim; everything else is plain `api`. Without this
+    every cloud event looks identical and there is no way to tell an MCP or
+    coding-agent call from someone using the dashboard.
+    """
+    from cognee.context_global_variables import telemetry_origin
+
+    client = (request.headers.get("x-cognee-client") or "api").strip()[:64]
+    token = telemetry_origin.set(client or "api")
+    try:
+        return await call_next(request)
+    finally:
+        telemetry_origin.reset(token)
+
+
 # To allow origins, set CORS_ALLOWED_ORIGINS env variable to a comma-separated list, e.g.:
 # CORS_ALLOWED_ORIGINS="https://yourdomain.com,https://another.com"
 

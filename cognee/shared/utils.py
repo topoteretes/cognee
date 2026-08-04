@@ -248,6 +248,32 @@ def _resolve_identity(user) -> tuple[str, str | None]:
     return str(resolved_id), str(tenant_id) if tenant_id else None
 
 
+def _telemetry_context() -> tuple[str, str | None]:
+    """Resolve ``(origin, pipeline_run_id)`` from the ambient context.
+
+    Both are read from ContextVars rather than passed by callers, because the
+    interesting emitters are deep inside pipelines that have no reason to know
+    which interface invoked them. ``origin`` falls back to ``TELEMETRY_ORIGIN``
+    so a deployment can label all of its traffic with one env var.
+
+    Imported lazily: ``cognee.context_global_variables`` pulls in config models,
+    and this module is imported during package init.
+    """
+    try:
+        from cognee.context_global_variables import (
+            current_pipeline_run_id,
+            telemetry_origin,
+        )
+
+        origin = telemetry_origin.get()
+        pipeline_run_id = current_pipeline_run_id.get()
+    except Exception:
+        origin, pipeline_run_id = None, None
+
+    origin = origin or os.getenv("TELEMETRY_ORIGIN") or "sdk"
+    return origin, str(pipeline_run_id) if pipeline_run_id else None
+
+
 def _telemetry_sinks() -> list[str]:
     """Sinks this deployment writes telemetry to, in order.
 
@@ -325,6 +351,7 @@ def send_telemetry(
         obj=additional_properties, property_names=["url"]
     )
     resolved_user_id, tenant_id = _resolve_identity(user if user is not None else user_id)
+    origin, pipeline_run_id = _telemetry_context()
     anonymous_id = str(get_anonymous_id())
     persistent_id = str(get_persistent_id())
     api_key_tracking_id = _get_api_key_tracking_id()
@@ -347,8 +374,11 @@ def send_telemetry(
             "persistent_id": persistent_id,
             "api_key_tracking_id": api_key_tracking_id,
             "api_key_hash": api_key_tracking_id,
-            # An explicit tenant_id in additional_properties still wins, so
-            # existing call sites that pass their own keep their behaviour.
+            "origin": origin,
+            **({"pipeline_run_id": pipeline_run_id} if pipeline_run_id else {}),
+            # An explicit value in additional_properties still wins, so existing
+            # call sites that pass their own tenant_id / pipeline_run_id keep
+            # their behaviour.
             **additional_properties,
         },
     }

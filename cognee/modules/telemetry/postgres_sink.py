@@ -166,6 +166,8 @@ def _to_row(model, payload: dict):
         user_id=as_uuid(properties.get("user_id")),
         tenant_id=as_uuid(properties.get("tenant_id")),
         dataset_id=_dataset_id(properties),
+        pipeline_run_id=as_uuid(properties.get("pipeline_run_id")),
+        origin=properties.get("origin"),
         anonymous_id=payload.get("anonymous_id"),
         properties=properties,
     )

@@ -39,6 +39,11 @@ class TelemetryEvent(Base):
     # dataset without a JSON scan. Null for events with no dataset (or with
     # several — a multi-dataset recall keeps the full list in ``properties``).
     dataset_id = Column(UUID, index=True, nullable=True)
+    # Correlates the event with its PipelineRun row (and so with
+    # /v1/activity/pipeline-runs). Null for events raised outside a pipeline.
+    pipeline_run_id = Column(UUID, index=True, nullable=True)
+    # Which interface the call arrived through: "api", "mcp", "cli", "sdk", …
+    origin = Column(String, index=True, nullable=True)
     # Machine/install identity as sent to the proxy. Kept for parity with the
     # warehouse rows; on a per-tenant deployment it is constant per pod.
     anonymous_id = Column(String, nullable=True)

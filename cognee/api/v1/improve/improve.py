@@ -102,7 +102,7 @@ async def improve(
         # Enrich graph only (no session bridging)
         await cognee.improve(dataset="docs")
     """
-    from cognee.shared.utils import send_telemetry
+    from cognee.shared.utils import as_uuid, send_telemetry
     from cognee import __version__ as cognee_version
 
     stages_run = []
@@ -111,7 +111,13 @@ async def improve(
         "cognee.improve",
         kwargs.get("user", "sdk"),
         additional_properties={
+            # `dataset` accepts either a name or an id, so split it out: the
+            # activity table's dataset_id column can only be populated when the
+            # id is identifiable. `dataset` is kept as-is for the existing
+            # warehouse queries that read it.
             "dataset": str(dataset),
+            "dataset_id": str(dataset) if as_uuid(dataset) else "",
+            "dataset_name": "" if as_uuid(dataset) else str(dataset),
             "session_count": len(session_ids) if session_ids else 0,
             "session_ids": ",".join(session_ids) if session_ids else "",
             "run_in_background": run_in_background,

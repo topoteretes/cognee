@@ -405,6 +405,7 @@ def get_activity_router() -> APIRouter:
         days: int = Query(30, ge=1, le=90),
         event_name: Optional[str] = Query(None),
         dataset_id: Optional[UUID] = Query(None),
+        origin: Optional[str] = Query(None),
         limit: int = Query(500, ge=1, le=5000),
         user: User = Depends(get_authenticated_user),
     ):
@@ -437,6 +438,8 @@ def get_activity_router() -> APIRouter:
             stmt = stmt.where(TelemetryEvent.event_name == event_name)
         if dataset_id:
             stmt = stmt.where(TelemetryEvent.dataset_id == dataset_id)
+        if origin:
+            stmt = stmt.where(TelemetryEvent.origin == origin)
 
         db_engine = get_relational_engine()
         try:
@@ -455,6 +458,8 @@ def get_activity_router() -> APIRouter:
                 "user_id": str(event.user_id) if event.user_id else None,
                 "tenant_id": str(event.tenant_id) if event.tenant_id else None,
                 "dataset_id": str(event.dataset_id) if event.dataset_id else None,
+                "pipeline_run_id": str(event.pipeline_run_id) if event.pipeline_run_id else None,
+                "origin": event.origin,
                 "properties": event.properties,
                 "created_at": event.created_at.isoformat() if event.created_at else None,
             }

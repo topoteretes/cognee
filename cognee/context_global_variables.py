@@ -38,6 +38,17 @@ session_user = ContextVar("session_user", default=None)
 current_pipeline_stage: ContextVar[Optional[str]] = ContextVar(
     "current_pipeline_stage", default=None
 )
+# Which interface the current call arrived through — "api", "mcp", "cli", a
+# coding-agent name, … — recorded on every telemetry event. Set per request by
+# the API layer; falls back to the TELEMETRY_ORIGIN env var, then "sdk", so a
+# deployment can label all of its traffic without touching call sites.
+telemetry_origin: ContextVar[Optional[str]] = ContextVar("telemetry_origin", default=None)
+# The pipeline run the current work belongs to, so telemetry emitted anywhere
+# inside a pipeline can be correlated with the PipelineRun row without every
+# emitter having to thread it through.
+current_pipeline_run_id: ContextVar[Optional[UUID]] = ContextVar(
+    "current_pipeline_run_id", default=None
+)
 
 
 async def set_session_user_context_variable(user):

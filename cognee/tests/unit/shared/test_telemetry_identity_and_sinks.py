@@ -271,6 +271,89 @@ def test_to_row_populates_dataset_id():
     assert row.dataset_id == dataset
 
 
+def test_origin_defaults_to_sdk(monkeypatch):
+    payloads = _capture_http(monkeypatch)
+    monkeypatch.setenv("TELEMETRY_SINK", "http")
+    monkeypatch.delenv("TELEMETRY_ORIGIN", raising=False)
+
+    send_telemetry("cognee.remember", FakeUser(uuid.uuid4(), uuid.uuid4()))
+
+    assert payloads[0]["properties"]["origin"] == "sdk"
+
+
+def test_origin_can_be_set_deployment_wide_by_env(monkeypatch):
+    payloads = _capture_http(monkeypatch)
+    monkeypatch.setenv("TELEMETRY_SINK", "http")
+    monkeypatch.setenv("TELEMETRY_ORIGIN", "cloud")
+
+    send_telemetry("cognee.remember", FakeUser(uuid.uuid4(), uuid.uuid4()))
+
+    assert payloads[0]["properties"]["origin"] == "cloud"
+
+
+def test_context_origin_beats_the_env_default(monkeypatch):
+    """The API middleware sets this per request, so it must win."""
+    from cognee.context_global_variables import telemetry_origin
+
+    payloads = _capture_http(monkeypatch)
+    monkeypatch.setenv("TELEMETRY_SINK", "http")
+    monkeypatch.setenv("TELEMETRY_ORIGIN", "cloud")
+
+    token = telemetry_origin.set("mcp")
+    try:
+        send_telemetry("cognee.recall", FakeUser(uuid.uuid4(), uuid.uuid4()))
+    finally:
+        telemetry_origin.reset(token)
+
+    assert payloads[0]["properties"]["origin"] == "mcp"
+
+
+def test_pipeline_run_id_is_picked_up_from_context(monkeypatch):
+    from cognee.context_global_variables import current_pipeline_run_id
+
+    payloads = _capture_http(monkeypatch)
+    monkeypatch.setenv("TELEMETRY_SINK", "http")
+    run_id = uuid.uuid4()
+
+    token = current_pipeline_run_id.set(run_id)
+    try:
+        send_telemetry("Pipeline Run Completed", FakeUser(uuid.uuid4(), uuid.uuid4()))
+    finally:
+        current_pipeline_run_id.reset(token)
+
+    assert payloads[0]["properties"]["pipeline_run_id"] == str(run_id)
+
+
+def test_pipeline_run_id_absent_outside_a_pipeline(monkeypatch):
+    payloads = _capture_http(monkeypatch)
+    monkeypatch.setenv("TELEMETRY_SINK", "http")
+
+    send_telemetry("cognee.forget", FakeUser(uuid.uuid4(), uuid.uuid4()))
+
+    assert "pipeline_run_id" not in payloads[0]["properties"]
+
+
+def test_to_row_populates_pipeline_run_id_and_origin():
+    from cognee.modules.telemetry.postgres_sink import _to_row
+
+    run_id = uuid.uuid4()
+
+    class Row:
+        def __init__(self, **kwargs):
+            self.__dict__.update(kwargs)
+
+    row = _to_row(
+        Row,
+        {
+            "event_name": "cognee.remember",
+            "properties": {"pipeline_run_id": str(run_id), "origin": "mcp"},
+        },
+    )
+
+    assert row.pipeline_run_id == run_id
+    assert row.origin == "mcp"
+
+
 def test_model_declaration_is_idempotent():
     """The table must survive its declaration running twice.
 
