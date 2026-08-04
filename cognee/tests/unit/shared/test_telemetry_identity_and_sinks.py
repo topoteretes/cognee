@@ -354,6 +354,66 @@ def test_to_row_populates_pipeline_run_id_and_origin():
     assert row.origin == "mcp"
 
 
+def test_event_names_normalise_to_a_stable_operation_and_kind():
+    """Five legacy naming styles must collapse to one contract for the UI."""
+    from cognee.modules.telemetry.event_names import normalize_event
+
+    cases = {
+        # cognee.<op>
+        "cognee.remember": ("remember", "operation"),
+        "cognee.forget": ("forget", "operation"),
+        "cognee.remember.code_graph": ("remember", "operation"),
+        "cognee.session.add_qa": ("session", "operation"),
+        # cognee.<op> EXECUTION <STATE>, with and without the prefix
+        "cognee.search EXECUTION STARTED": ("search", "operation"),
+        "cognee.add EXECUTION COMPLETED": ("add", "operation"),
+        "code_description_to_code_part_search EXECUTION FAILED": (
+            "code_description_to_code_part_search",
+            "operation",
+        ),
+        # trailing prose must not leak into the operation
+        "cognee.cognify DEFAULT TASKS CREATION ERRORED": ("cognify", "operation"),
+        # <Thing> API Endpoint Invoked
+        "Remember API Endpoint Invoked": ("remember", "endpoint"),
+        "Remember Entry API Endpoint Invoked": ("remember", "endpoint"),
+        "Cognify AIPTS API Endpoint Invoked": ("cognify", "endpoint"),
+        "Add By Text API Endpoint Invoked": ("add", "endpoint"),
+        "Api Key Management API Endpoint Invoked": ("api_key", "endpoint"),
+        "List Principal Dataset Grants API Endpoint Invoked": ("permissions", "endpoint"),
+        "Datasets API Endpoint Invoked": ("datasets", "endpoint"),
+        # bookkeeping: owned by no single operation
+        "Pipeline Run Started": (None, "pipeline"),
+        "Pipeline Run Errored": (None, "pipeline"),
+        "Coroutine Task Started": (None, "task"),
+        "Async Generator Task Completed": (None, "task"),
+        "Function Task Errored": (None, "task"),
+    }
+    for raw, expected in cases.items():
+        assert normalize_event(raw) == expected, raw
+
+
+def test_unknown_event_names_still_get_a_kind():
+    """A new emitter must never produce a null event_kind."""
+    from cognee.modules.telemetry.event_names import normalize_event
+
+    assert normalize_event("Something Brand New") == ("something_brand_new", "operation")
+    assert normalize_event("") == (None, "operation")
+
+
+def test_to_row_populates_operation_and_event_kind():
+    from cognee.modules.telemetry.postgres_sink import _to_row
+
+    class Row:
+        def __init__(self, **kwargs):
+            self.__dict__.update(kwargs)
+
+    row = _to_row(Row, {"event_name": "Remember Entry API Endpoint Invoked", "properties": {}})
+
+    assert row.event_name == "Remember Entry API Endpoint Invoked"  # raw preserved
+    assert row.operation == "remember"
+    assert row.event_kind == "endpoint"
+
+
 def test_model_declaration_is_idempotent():
     """The table must survive its declaration running twice.
 

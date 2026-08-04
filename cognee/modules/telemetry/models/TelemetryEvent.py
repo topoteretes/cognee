@@ -32,7 +32,15 @@ class TelemetryEvent(Base):
 
     id = Column(UUID, primary_key=True, default=uuid4)
 
+    # The raw emitted name, preserved verbatim so this table stays comparable
+    # with the warehouse's pipeline_events.tracking_event.
     event_name = Column(String, index=True)
+    # Stable, derived contract for consumers — see modules/telemetry/event_names.
+    # `operation` is the user-facing verb ("remember", "recall", …); `event_kind`
+    # is the layer that emitted it (operation | endpoint | pipeline | task), so a
+    # UI can pick one layer instead of showing an action several times.
+    operation = Column(String, index=True, nullable=True)
+    event_kind = Column(String, index=True, nullable=True)
     user_id = Column(UUID, index=True, nullable=True)
     tenant_id = Column(UUID, index=True, nullable=True)
     # Promoted out of ``properties`` so an activity view can be filtered per

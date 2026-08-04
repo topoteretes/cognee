@@ -293,11 +293,15 @@ def _telemetry_sinks() -> list[str]:
 # HTTP sink still receives them — historical analytics depend on them — but
 # local sinks skip them so a tenant-facing table stays small and readable, and
 # so telemetry writes don't peak exactly when the workload is busiest.
-_LOCAL_SINK_EXCLUDED_SUFFIXES = (" Task Started", " Task Completed", " Task Errored")
-
-
 def _is_internal_task_event(event_name: str) -> bool:
-    return event_name.endswith(_LOCAL_SINK_EXCLUDED_SUFFIXES)
+    """True for the per-task bookkeeping events local sinks skip.
+
+    The suffix list lives with the rest of the event-name logic so the two can
+    never drift apart.
+    """
+    from cognee.modules.telemetry.event_names import TASK_SUFFIXES
+
+    return event_name.endswith(TASK_SUFFIXES)
 
 
 def send_telemetry(

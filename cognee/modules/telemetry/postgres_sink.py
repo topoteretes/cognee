@@ -160,9 +160,15 @@ def _dataset_id(properties: dict):
 
 def _to_row(model, payload: dict):
     """Map a proxy-shaped telemetry payload onto a ``TelemetryEvent`` row."""
+    from cognee.modules.telemetry.event_names import normalize_event
+
     properties = payload.get("properties") or {}
+    event_name = payload.get("event_name")
+    operation, event_kind = normalize_event(event_name)
     return model(
-        event_name=payload.get("event_name"),
+        event_name=event_name,
+        operation=operation,
+        event_kind=event_kind,
         user_id=as_uuid(properties.get("user_id")),
         tenant_id=as_uuid(properties.get("tenant_id")),
         dataset_id=_dataset_id(properties),

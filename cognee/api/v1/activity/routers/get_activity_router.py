@@ -404,6 +404,8 @@ def get_activity_router() -> APIRouter:
     async def get_telemetry_events(
         days: int = Query(30, ge=1, le=90),
         event_name: Optional[str] = Query(None),
+        operation: Optional[str] = Query(None),
+        event_kind: Optional[str] = Query(None),
         dataset_id: Optional[UUID] = Query(None),
         origin: Optional[str] = Query(None),
         limit: int = Query(500, ge=1, le=5000),
@@ -436,6 +438,12 @@ def get_activity_router() -> APIRouter:
             stmt = stmt.where(TelemetryEvent.tenant_id == user.tenant_id)
         if event_name:
             stmt = stmt.where(TelemetryEvent.event_name == event_name)
+        # Prefer these two over event_name: they are the stable contract, while
+        # event_name is the raw emitted string in one of several legacy styles.
+        if operation:
+            stmt = stmt.where(TelemetryEvent.operation == operation)
+        if event_kind:
+            stmt = stmt.where(TelemetryEvent.event_kind == event_kind)
         if dataset_id:
             stmt = stmt.where(TelemetryEvent.dataset_id == dataset_id)
         if origin:
@@ -455,6 +463,8 @@ def get_activity_router() -> APIRouter:
             {
                 "id": str(event.id),
                 "event_name": event.event_name,
+                "operation": event.operation,
+                "event_kind": event.event_kind,
                 "user_id": str(event.user_id) if event.user_id else None,
                 "tenant_id": str(event.tenant_id) if event.tenant_id else None,
                 "dataset_id": str(event.dataset_id) if event.dataset_id else None,

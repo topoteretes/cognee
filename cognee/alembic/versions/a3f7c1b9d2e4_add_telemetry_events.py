@@ -31,6 +31,8 @@ def upgrade() -> None:
         "telemetry_events",
         sa.Column("id", sa.UUID(), primary_key=True),
         sa.Column("event_name", sa.String(), nullable=True),
+        sa.Column("operation", sa.String(), nullable=True),
+        sa.Column("event_kind", sa.String(), nullable=True),
         sa.Column("user_id", sa.UUID(), nullable=True),
         sa.Column("tenant_id", sa.UUID(), nullable=True),
         sa.Column("dataset_id", sa.UUID(), nullable=True),
@@ -41,6 +43,8 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=True),
     )
     op.create_index("ix_telemetry_events_event_name", "telemetry_events", ["event_name"])
+    op.create_index("ix_telemetry_events_operation", "telemetry_events", ["operation"])
+    op.create_index("ix_telemetry_events_event_kind", "telemetry_events", ["event_kind"])
     op.create_index("ix_telemetry_events_user_id", "telemetry_events", ["user_id"])
     op.create_index("ix_telemetry_events_tenant_id", "telemetry_events", ["tenant_id"])
     op.create_index("ix_telemetry_events_dataset_id", "telemetry_events", ["dataset_id"])
