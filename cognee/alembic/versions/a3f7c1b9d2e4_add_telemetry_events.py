@@ -33,6 +33,7 @@ def upgrade() -> None:
         sa.Column("event_name", sa.String(), nullable=True),
         sa.Column("user_id", sa.UUID(), nullable=True),
         sa.Column("tenant_id", sa.UUID(), nullable=True),
+        sa.Column("dataset_id", sa.UUID(), nullable=True),
         sa.Column("anonymous_id", sa.String(), nullable=True),
         sa.Column("properties", sa.JSON(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=True),
@@ -40,6 +41,7 @@ def upgrade() -> None:
     op.create_index("ix_telemetry_events_event_name", "telemetry_events", ["event_name"])
     op.create_index("ix_telemetry_events_user_id", "telemetry_events", ["user_id"])
     op.create_index("ix_telemetry_events_tenant_id", "telemetry_events", ["tenant_id"])
+    op.create_index("ix_telemetry_events_dataset_id", "telemetry_events", ["dataset_id"])
     # The retention prune and every read path filter on created_at.
     op.create_index("ix_telemetry_events_created_at", "telemetry_events", ["created_at"])
 

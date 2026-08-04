@@ -35,6 +35,10 @@ class TelemetryEvent(Base):
     event_name = Column(String, index=True)
     user_id = Column(UUID, index=True, nullable=True)
     tenant_id = Column(UUID, index=True, nullable=True)
+    # Promoted out of ``properties`` so an activity view can be filtered per
+    # dataset without a JSON scan. Null for events with no dataset (or with
+    # several — a multi-dataset recall keeps the full list in ``properties``).
+    dataset_id = Column(UUID, index=True, nullable=True)
     # Machine/install identity as sent to the proxy. Kept for parity with the
     # warehouse rows; on a per-tenant deployment it is constant per pod.
     anonymous_id = Column(String, nullable=True)

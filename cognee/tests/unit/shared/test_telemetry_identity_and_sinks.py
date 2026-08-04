@@ -231,6 +231,46 @@ def test_to_row_maps_payload_onto_the_model():
     assert row.properties["mode"] == "test"
 
 
+def test_dataset_id_is_extracted_from_every_spelling_call_sites_use():
+    """remember/forget use dataset_id, recall uses dataset_ids, improve uses dataset."""
+    from cognee.modules.telemetry.postgres_sink import _dataset_id
+
+    dataset = uuid.uuid4()
+
+    assert _dataset_id({"dataset_id": str(dataset)}) == dataset
+    assert _dataset_id({"dataset_ids": str(dataset)}) == dataset
+    assert _dataset_id({"dataset": str(dataset)}) == dataset
+
+
+def test_dataset_id_is_null_when_absent_ambiguous_or_a_name():
+    from cognee.modules.telemetry.postgres_sink import _dataset_id
+
+    one, two = uuid.uuid4(), uuid.uuid4()
+
+    assert _dataset_id({}) is None
+    assert _dataset_id({"dataset_id": ""}) is None
+    # A multi-dataset recall has no single dataset; the list stays in properties.
+    assert _dataset_id({"dataset_ids": f"{one},{two}"}) is None
+    # ``dataset`` is usually a human name, not an id.
+    assert _dataset_id({"dataset": "product-docs"}) is None
+
+
+def test_to_row_populates_dataset_id():
+    from cognee.modules.telemetry.postgres_sink import _to_row
+
+    dataset = uuid.uuid4()
+
+    class Row:
+        def __init__(self, **kwargs):
+            self.__dict__.update(kwargs)
+
+    row = _to_row(
+        Row, {"event_name": "cognee.remember", "properties": {"dataset_id": str(dataset)}}
+    )
+
+    assert row.dataset_id == dataset
+
+
 def test_model_declaration_is_idempotent():
     """The table must survive its declaration running twice.
 

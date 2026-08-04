@@ -132,6 +132,32 @@ async def flush() -> None:
         await _prune()
 
 
+def _dataset_id(properties: dict):
+    """Pull a single dataset UUID out of a payload's properties, if there is one.
+
+    Call sites spell it several ways — ``dataset_id`` (remember, forget),
+    ``dataset_ids`` as a comma-joined list (recall), and ``dataset`` which may be
+    a name or an id (improve). Normalising here rather than at each call site
+    keeps the emitters untouched and means a new one only has to use any of the
+    existing spellings.
+
+    Returns None when there is no dataset or when the event legitimately spans
+    several; the full list is still in ``properties`` either way.
+    """
+    single = as_uuid(properties.get("dataset_id"))
+    if single:
+        return single
+
+    joined = properties.get("dataset_ids") or ""
+    if isinstance(joined, str):
+        candidates = [part for part in (p.strip() for p in joined.split(",")) if part]
+        if len(candidates) == 1:
+            return as_uuid(candidates[0])
+
+    # ``dataset`` is usually a name; keep it only when it happens to be an id.
+    return as_uuid(properties.get("dataset"))
+
+
 def _to_row(model, payload: dict):
     """Map a proxy-shaped telemetry payload onto a ``TelemetryEvent`` row."""
     properties = payload.get("properties") or {}
@@ -139,6 +165,7 @@ def _to_row(model, payload: dict):
         event_name=payload.get("event_name"),
         user_id=as_uuid(properties.get("user_id")),
         tenant_id=as_uuid(properties.get("tenant_id")),
+        dataset_id=_dataset_id(properties),
         anonymous_id=payload.get("anonymous_id"),
         properties=properties,
     )
