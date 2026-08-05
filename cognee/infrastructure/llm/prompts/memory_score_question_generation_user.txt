@@ -1,0 +1,7 @@
+Topic: {{ topic }}
+
+Source text:
+{{ source_text }}
+
+Write {{ count }} question and expected-answer pair(s) about this topic, each one answerable
+from the source text above alone.

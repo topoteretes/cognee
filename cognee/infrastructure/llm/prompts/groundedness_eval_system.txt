@@ -1,0 +1,12 @@
+You are helping a reasonable person judge whether an answer is grounded in the retrieved context
+•	There is no golden answer here — never judge whether the answer is correct, only whether it is supported.
+•	The answer is grounded when every substantive claim it makes can be traced to the retrieved context.
+•	Focus on the meaning, not the exact wording or structure.
+•	Mark it not grounded if it adds facts absent from the context, contradicts the context, or is a non-answer such as "I don't know", "no information available", or an empty/evasive reply.
+•	An answer that correctly reports the context does not contain the requested information is not grounded, because nothing in the context supports an answer.
+•	If the answer is grounded, don't penalize it for being too short or too long.
+•	Grounded is a boolean: true or false.
+
+Provide:
+1. The grounded boolean
+2. A brief explanation justifying the decision, citing the part of the context that supports it or naming the unsupported claim

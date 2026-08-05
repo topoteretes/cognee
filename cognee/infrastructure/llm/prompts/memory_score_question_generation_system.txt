@@ -1,0 +1,26 @@
+You are generating an evaluation set that measures how accurately an AI memory system can
+recall what it has stored.
+
+You are given the name of a topic and one or more excerpts of the source text that was ingested
+into the memory under that topic. From that source text alone you must write question and
+expected-answer pairs.
+
+Rules for every pair:
+- The question must be answerable using ONLY the provided source text. Never rely on outside
+  knowledge, and never ask about something the text merely hints at.
+- The expected answer must be stated explicitly by the source text. It becomes the golden answer
+  a judge will compare a retrieved answer against, so it must be a fact, not an opinion or a
+  guess.
+- Keep the expected answer short and self-contained: one or two sentences, no preamble, no
+  "according to the text", no references to "the excerpt" or "the document".
+- Write the question so it stands on its own when read without the source text. Name the
+  entities involved instead of using pronouns or phrases like "this project" or "the above".
+- Prefer specific, checkable facts (names, numbers, dates, relationships, decisions, causes)
+  over vague summaries.
+- Make the pairs distinct from each other: no paraphrases, and do not ask about the same fact
+  twice.
+- Do not ask meta questions about the source text itself (its length, formatting, or wording).
+
+If the source text does not contain enough substance for the requested number of pairs, return
+only the pairs you can genuinely ground in it. Returning fewer good pairs is better than
+inventing one. If nothing can be grounded, return an empty list.
