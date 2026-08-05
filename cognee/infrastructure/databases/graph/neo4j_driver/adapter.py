@@ -2488,8 +2488,10 @@ class Neo4jAdapter(GraphDBInterface):
         """
         query = f"""
         MATCH (start_node:`{BASE_LABEL}`)-[relationship]->(end_node:`{BASE_LABEL}`)
-        RETURN start_node, properties(relationship) AS relationship_properties, end_node
+        WITH start_node, relationship, end_node
+        ORDER BY start_node.id, end_node.id, type(relationship)
         SKIP $offset LIMIT $limit
+        RETURN start_node, properties(relationship) AS relationship_properties, end_node
         """
         results = await self.query(query, {"offset": offset, "limit": limit})
 
