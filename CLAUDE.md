@@ -108,7 +108,7 @@ cognee-cli recall "Your question"
 cognee-cli improve -d my_project       # enrich/index the graph
 cognee-cli forget --all                # NOTE: no confirmation prompt
 
-# Legacy primitives (still ship; what the memory commands call underneath)
+# Legacy operations (still ship; what the memory commands call underneath)
 cognee-cli add "Your text here" && cognee-cli cognify
 cognee-cli search "Your query"
 cognee-cli delete --all                # prompts before deleting
@@ -128,7 +128,7 @@ As of cognee 1.x the memory API is the primary surface. All functions are async.
 3. **improve()** - Enrich/index the graph: triplet embeddings, feedback weights, and (with `session_ids`) bridging session Q&A and distilled learnings into the permanent graph.
 4. **forget()** - Unified deletion (`data_id` / `dataset` / `dataset_id` / `everything=True`, plus `memory_only=True` to drop graph+vectors but keep raw files).
 
-#### Legacy primitives: add → cognify → search/memify
+#### Legacy operations: add → cognify → search/memify
 
 These still ship and are what the memory API calls underneath. Reach for them to drive one stage in isolation (custom pipeline tasks, stage-level debugging), not for ordinary ingestion or retrieval.
 
@@ -136,6 +136,15 @@ These still ship and are what the memory API calls underneath. Reach for them to
 2. **cognify()** - Extract entities/relationships and build knowledge graph
 3. **search()** - Query knowledge using various retrieval strategies
 4. **memify()** - Enrich graph with additional context and rules
+
+Note: Using legacy operations over core is useful in the following contexts.
+1) functional_relationships= is completely unreachable from remember(). So Only cognify can constrain single-target relationships.
+2) remember() hardcodes datasets_arg = [dataset_name]: always exactly one. Use cognify for this: cognify(datasets=["a","b","c"]) or datasets=None (every dataset the user owns.)
+3) remember() always runs add() first. To rebuild a graph over data already in the DB — after forget(memory_only=True), or with a new graph_model/ontology, cognify() is the only path.
+4) add() is like a staging area for cognify(). But remember automatically adds every time.
+5) search() packs skills/tools/max_iter/code_query into retriever_specific_config for you. Using recall() you hand-build that dict yourself.
+6) prune.prune_system(metadata=True) drops the relational DB (users, tenants, ACLs, the dataset_database registry, pipeline runs, search history.) forget() touches none of that. Full test teardown is prune's job.
+Improve & Memify are virtually the same, though. So no reason not to use improve.
 
 `cognee.delete` is deprecated (since 0.3.9, in favor of `datasets.delete_data`); `forget()` is the v1 replacement that unifies the old delete/prune/empty_dataset paths.
 
@@ -164,7 +173,7 @@ API Layer (cognee/api/v1/)
     ↓
 Memory API (remember, recall, improve, forget)
     ↓
-Legacy Primitives (add, cognify, search, memify)
+Legacy Operations (add, cognify, search, memify)
     ↓
 Pipeline Orchestrator (cognee/modules/pipelines/)
     ↓
@@ -186,7 +195,7 @@ External Services (OpenAI, Ladybug, LanceDB, etc.)
 
 Key files: `cognee/api/v1/remember/remember.py`, `cognee/api/v1/recall/recall.py`, `cognee/api/v1/improve/improve.py`, `cognee/api/v1/forget/forget.py`
 
-The stages below are the legacy primitives these call underneath.
+The stages below are the legacy operations these call underneath.
 
 #### ADD: Data Ingestion
 `add()` → `resolve_data_directories` → `ingest_data` → `save_data_item_to_storage` → Create Dataset + Data records in relational DB
@@ -510,7 +519,7 @@ FastAPI application with versioned routes under `/api/v1/` (routers registered i
 - `/recall` - Query memory
 - `/improve` - Graph enrichment/indexing
 - `/forget` - Unified deletion
-- `/add`, `/cognify`, `/search`, `/memify`, `/delete` - Legacy primitives
+- `/add`, `/cognify`, `/search`, `/memify`, `/delete` - Legacy operations
 - `/datasets` - Dataset management
 - `/users` - Authentication (when `REQUIRE_AUTHENTICATION` is effectively true; see auth posture below)
 - `/visualize` - Graph visualization server
@@ -527,7 +536,7 @@ Memory API (primary):
 - `improve(dataset="main_dataset", session_ids=..., node_name=...)` - Enrich/index the graph
 - `forget(data_id=..., dataset=..., dataset_id=..., everything=False, memory_only=False)` - Remove data
 
-Legacy primitives:
+Legacy operations:
 - `add(data, dataset_name)` - Ingest data
 - `cognify(datasets)` - Build knowledge graph
 - `search(query_text, query_type)` - Query knowledge
