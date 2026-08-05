@@ -45,7 +45,10 @@ video becomes queryable memory with no special handling downstream.
 ### Run the example
 
 ```bash
-# .mp4 or .webm works without ffmpeg
+# uses the bundled sample-video.mp4 next to the script
+python video_processing_example.py
+
+# or pass your own file (.mp4 or .webm works without ffmpeg)
 python video_processing_example.py /path/to/your/video.mp4
 ```
 
