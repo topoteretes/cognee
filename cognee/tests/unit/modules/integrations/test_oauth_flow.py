@@ -73,3 +73,44 @@ def test_different_signing_secrets_are_isolated():
     assert validate_state(state_b, signing_secret="secret-a") is None
     assert validate_state(state_a, signing_secret="secret-a") == user_id
     assert validate_state(state_b, signing_secret="secret-b") == user_id
+
+
+def test_make_state_requires_at_least_one_field():
+    with pytest.raises(ValueError):
+        make_state(signing_secret=_SECRET)
+
+
+def test_multi_field_roundtrip_returns_raw_string_tuple():
+    tenant_id = uuid4()
+    user_id = uuid4()
+    state = make_state(tenant_id, user_id, signing_secret=_SECRET)
+    assert validate_state(state, signing_secret=_SECRET, field_count=2) == (
+        str(tenant_id),
+        str(user_id),
+    )
+
+
+def test_multi_field_wrong_field_count_fails():
+    tenant_id = uuid4()
+    user_id = uuid4()
+    state = make_state(tenant_id, user_id, signing_secret=_SECRET)
+    # Reading a 2-field state back with field_count=1 (or 3) must fail closed
+    # rather than misparse the fields/expires/hmac boundary.
+    assert validate_state(state, signing_secret=_SECRET, field_count=1) is None
+    assert validate_state(state, signing_secret=_SECRET, field_count=3) is None
+
+
+def test_multi_field_tampered_field_fails():
+    state = make_state(uuid4(), uuid4(), signing_secret=_SECRET)
+    tenant_str, _user_str, expires_part, signature = state.split(":")
+    forged = f"{tenant_str}:{uuid4()}:{expires_part}:{signature}"
+    assert validate_state(forged, signing_secret=_SECRET, field_count=2) is None
+
+
+def test_multi_field_expired_state_fails():
+    tenant_id = uuid4()
+    user_id = uuid4()
+    expires = int(time.time()) - 1
+    payload = f"{tenant_id}:{user_id}:{expires}"
+    state = f"{payload}:{sign_state_payload(payload, signing_secret=_SECRET)}"
+    assert validate_state(state, signing_secret=_SECRET, field_count=2) is None
