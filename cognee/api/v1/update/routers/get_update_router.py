@@ -91,7 +91,7 @@ def get_update_router() -> APIRouter:
         """
         send_telemetry(
             "Update API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "PATCH /v1/update",
                 "dataset_id": str(dataset_id),

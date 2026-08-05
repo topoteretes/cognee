@@ -100,7 +100,7 @@ def get_schema_router() -> APIRouter:
         """
         send_telemetry(
             "Schema Inventory API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "GET /v1/schema/inventory",
                 "dataset_id": str(dataset_id),
@@ -156,7 +156,7 @@ def get_schema_router() -> APIRouter:
         """
         send_telemetry(
             "Schema Provenance API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "GET /v1/schema/provenance",
                 "cognee_version": cognee_version,

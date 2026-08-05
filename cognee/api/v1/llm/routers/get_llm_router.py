@@ -215,7 +215,7 @@ def get_llm_router() -> APIRouter:
         """
         send_telemetry(
             "LLM Custom Prompt Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "POST /v1/llm/custom-prompt",
                 "response_model": "str",
@@ -273,7 +273,7 @@ def get_llm_router() -> APIRouter:
         """
         send_telemetry(
             "LLM Infer Schema Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "POST /v1/llm/infer-schema",
                 "filenames": [f.filename for f in (data or [])],
