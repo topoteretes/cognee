@@ -5,7 +5,7 @@ not a local server:
 1. An AWS account with a **provisioned Neptune Analytics graph**
    (https://docs.aws.amazon.com/neptune-analytics/latest/userguide/create-graph-using-console.html).
    The graph's vector search dimension must match your embedding model's dimension.
-2. Install the Neptune extra: `pip install cognee[neptune]`
+2. Install the Neptune extra: `uv pip install "cognee[neptune]"`
 3. AWS credentials in `.env` or the environment (AWS_ACCESS_KEY_ID,
    AWS_SECRET_ACCESS_KEY, AWS_REGION — plus AWS_SESSION_TOKEN for temporary
    credentials), authorized to access the graph.

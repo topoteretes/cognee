@@ -1,7 +1,7 @@
 """Use PostgreSQL with the PGVector extension as cognee's vector (and relational) store.
 
 Prerequisites:
-1. Install the Postgres extra: `pip install cognee[postgres]`
+1. Install the Postgres extra: `uv pip install "cognee[postgres]"`
 2. Start a Postgres server with the pgvector extension, e.g. with Docker:
    docker run -p 5432:5432 -e POSTGRES_USER=cognee -e POSTGRES_PASSWORD=cognee \
        -e POSTGRES_DB=cognee_db pgvector/pgvector:pg17
