@@ -31,10 +31,18 @@ def test_cost_by_user_agent_returns_module_result(monkeypatch):
     captured = {}
     fake_result = [{"user_id": str(user_id), "user_email": "me@example.com", "agent_type": "codex"}]
 
+    async def fake_permitted(_user):
+        return ["dataset-1"]
+
+    async def fake_visible(_user):
+        return [user_id]
+
     async def fake_compute(**kwargs):
         captured.update(kwargs)
         return fake_result
 
+    monkeypatch.setattr(router_module, "_permitted_dataset_ids_for", fake_permitted)
+    monkeypatch.setattr(router_module, "_visible_user_ids", fake_visible)
     monkeypatch.setattr(router_module, "compute_cost_by_user_agent", fake_compute)
 
     response = TestClient(app).get("/api/v1/sessions/cost-by-user-agent", params={"range": "7d"})
@@ -43,6 +51,8 @@ def test_cost_by_user_agent_returns_module_result(monkeypatch):
     assert response.json() == fake_result
     assert captured["user"].id == user_id
     assert captured["since"] is not None
+    assert captured["visible_user_ids"] == [user_id]
+    assert captured["permitted_dataset_ids"] == ["dataset-1"]
 
 
 def test_cost_by_user_agent_failure_returns_500(monkeypatch):
@@ -52,9 +62,17 @@ def test_cost_by_user_agent_failure_returns_500(monkeypatch):
         id=user_id, tenant_id=None, email="me@example.com"
     )
 
+    async def fake_permitted(_user):
+        return []
+
+    async def fake_visible(_user):
+        return [user_id]
+
     async def failing_compute(**_kwargs):
         raise RuntimeError("db unavailable")
 
+    monkeypatch.setattr(router_module, "_permitted_dataset_ids_for", fake_permitted)
+    monkeypatch.setattr(router_module, "_visible_user_ids", fake_visible)
     monkeypatch.setattr(router_module, "compute_cost_by_user_agent", failing_compute)
 
     response = TestClient(app).get("/api/v1/sessions/cost-by-user-agent")

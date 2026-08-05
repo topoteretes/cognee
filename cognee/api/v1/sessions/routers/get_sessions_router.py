@@ -407,15 +407,24 @@ def get_sessions_router() -> APIRouter:
         """Cost + token totals grouped by (user, agent type) — feeds a
         "who spends the most, with which agent" chart (CLO-434 follow-up).
 
-        Role-scoped, not all-or-nothing: a tenant owner/admin (same
-        check ``GET /tenants/{id}/users`` uses) sees every member's
-        spend. A regular member — or anyone with no tenant, i.e.
-        single-user/local mode — falls back to just their own sessions
-        rather than being denied outright.
+        Visibility matches every other endpoint in this router: the
+        caller, their child agents, and dataset-shared sessions. On top
+        of that base scope, a tenant owner/admin (same check
+        ``GET /tenants/{id}/users`` uses) additionally sees every
+        member's spend. A regular member — or anyone with no tenant,
+        i.e. single-user/local mode — just keeps the base scope rather
+        than being denied outright.
         """
         since = _range_since(range)
         try:
-            result = await compute_cost_by_user_agent(user=user, since=since)
+            permitted = await _permitted_dataset_ids_for(user)
+            visible_ids = await _visible_user_ids(user)
+            result = await compute_cost_by_user_agent(
+                user=user,
+                visible_user_ids=visible_ids,
+                permitted_dataset_ids=permitted,
+                since=since,
+            )
             return jsonable_encoder(result)
         except Exception as exc:
             logger.error("cost_by_user_agent failed: %s", exc, exc_info=True)

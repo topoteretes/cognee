@@ -154,12 +154,42 @@ async def test_single_user_mode_falls_back_to_caller_only(monkeypatch):
     monkeypatch.setattr(agent_usage, "list_persisted_agent_connections", fake_persisted)
     monkeypatch.setattr(agent_usage, "list_registered_agent_connections", lambda: [])
 
-    result = await agent_usage.compute_cost_by_user_agent(user=user, since=None)
+    result = await agent_usage.compute_cost_by_user_agent(
+        user=user, visible_user_ids=[user_id], permitted_dataset_ids=[], since=None
+    )
     by_type = {r["agent_type"]: r for r in result}
 
     assert by_type["claude_code"]["user_email"] == "solo@example.com"
     assert by_type["claude_code"]["session_count"] == 1
     assert by_type["codex"]["session_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_solo_mode_includes_child_agent_sessions(monkeypatch):
+    """No tenant, but the caller has a child agent (e.g. a delegated
+    sub-account) — those sessions must still be included, same as
+    every other /sessions endpoint does via ``_visible_user_ids``."""
+    user_id = uuid4()
+    child_id = uuid4()
+    user = SimpleNamespace(id=user_id, tenant_id=None, email="solo@example.com")
+
+    rows = [_row(user_id, "claude-code-1"), _row(child_id, "codex-1")]
+    monkeypatch.setattr(agent_usage, "get_relational_engine", lambda: _FakeEngine(rows))
+
+    async def fake_persisted(_user_ids, active_only=False):
+        return []
+
+    monkeypatch.setattr(agent_usage, "list_persisted_agent_connections", fake_persisted)
+    monkeypatch.setattr(agent_usage, "list_registered_agent_connections", lambda: [])
+
+    result = await agent_usage.compute_cost_by_user_agent(
+        user=user, visible_user_ids=[user_id, child_id], permitted_dataset_ids=[], since=None
+    )
+    by_type = {r["agent_type"]: r for r in result}
+
+    assert by_type["claude_code"]["user_email"] == "solo@example.com"
+    assert by_type["codex"]["user_id"] == str(child_id)
+    assert by_type["codex"]["user_email"] == "unknown"
 
 
 @pytest.mark.asyncio
@@ -196,7 +226,9 @@ async def test_tenant_mode_aggregates_across_users_and_sorts_by_cost(monkeypatch
     monkeypatch.setattr(agent_usage, "list_persisted_agent_connections", fake_persisted)
     monkeypatch.setattr(agent_usage, "list_registered_agent_connections", lambda: [])
 
-    result = await agent_usage.compute_cost_by_user_agent(user=user, since=None)
+    result = await agent_usage.compute_cost_by_user_agent(
+        user=user, visible_user_ids=[caller_id], permitted_dataset_ids=[], since=None
+    )
 
     # Highest spender first.
     assert result[0]["user_email"] == "member@example.com"
@@ -209,7 +241,8 @@ async def test_tenant_mode_aggregates_across_users_and_sorts_by_cost(monkeypatch
 @pytest.mark.asyncio
 async def test_tenant_mode_member_falls_back_to_own_sessions(monkeypatch):
     """A non-admin member isn't denied outright — they just don't get the
-    tenant-wide view; the function scopes down to their own sessions."""
+    tenant-wide view; the function scopes down to their base visibility
+    (self + child agents), same as every other /sessions endpoint."""
     caller_id = uuid4()
     tenant_id = uuid4()
     user = SimpleNamespace(id=caller_id, tenant_id=tenant_id, email="member@example.com")
@@ -227,9 +260,48 @@ async def test_tenant_mode_member_falls_back_to_own_sessions(monkeypatch):
     monkeypatch.setattr(agent_usage, "list_persisted_agent_connections", fake_persisted)
     monkeypatch.setattr(agent_usage, "list_registered_agent_connections", lambda: [])
 
-    result = await agent_usage.compute_cost_by_user_agent(user=user, since=None)
+    result = await agent_usage.compute_cost_by_user_agent(
+        user=user, visible_user_ids=[caller_id], permitted_dataset_ids=[], since=None
+    )
 
     assert len(result) == 1
     assert result[0]["user_id"] == str(caller_id)
     assert result[0]["user_email"] == "member@example.com"
     assert result[0]["agent_type"] == "claude_code"
+
+
+@pytest.mark.asyncio
+async def test_tenant_mode_member_keeps_child_agents_when_denied_tenant_view(monkeypatch):
+    """A non-admin member denied the tenant-wide view must still keep
+    their own child-agent sessions — the tenant lookup failing shouldn't
+    collapse the base visibility down to just the caller."""
+    caller_id = uuid4()
+    child_id = uuid4()
+    tenant_id = uuid4()
+    user = SimpleNamespace(id=caller_id, tenant_id=tenant_id, email="member@example.com")
+
+    async def fake_get_users_in_tenant(_tenant_id, _user):
+        raise PermissionDeniedError(message="nope")
+
+    rows = [
+        _row(caller_id, "claude-code-1", cost_usd=0.02),
+        _row(child_id, "codex-1", cost_usd=0.03),
+    ]
+
+    async def fake_persisted(_user_ids, active_only=False):
+        return []
+
+    monkeypatch.setattr(agent_usage, "get_users_in_tenant", fake_get_users_in_tenant)
+    monkeypatch.setattr(agent_usage, "get_relational_engine", lambda: _FakeEngine(rows))
+    monkeypatch.setattr(agent_usage, "list_persisted_agent_connections", fake_persisted)
+    monkeypatch.setattr(agent_usage, "list_registered_agent_connections", lambda: [])
+
+    result = await agent_usage.compute_cost_by_user_agent(
+        user=user, visible_user_ids=[caller_id, child_id], permitted_dataset_ids=[], since=None
+    )
+    by_type = {r["agent_type"]: r for r in result}
+
+    assert len(result) == 2
+    assert by_type["claude_code"]["user_email"] == "member@example.com"
+    assert by_type["codex"]["user_id"] == str(child_id)
+    assert by_type["codex"]["user_email"] == "unknown"

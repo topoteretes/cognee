@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from typing import Iterable, Optional
 from uuid import UUID as UUIDType
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.agents.models import AgentConnection
@@ -117,45 +117,73 @@ async def build_sessions_with_agent_info_page(
     }
 
 
-async def _resolve_scope_emails(user: User) -> dict[UUIDType, str]:
+async def _resolve_scope_emails(
+    user: User, *, visible_user_ids: Iterable[UUIDType]
+) -> dict[UUIDType, str]:
     """Return {user_id: email} for the callers this request may report on.
 
-    A tenant owner/admin (same check ``GET /tenants/{id}/users`` uses)
-    gets every member. Anyone else — a regular member, or a caller with
-    no tenant at all (single-user/local mode) — is scoped to just
-    themselves rather than denied outright.
+    Always includes ``visible_user_ids`` — the caller plus their child
+    agents, the same base scope every other ``/sessions`` endpoint uses
+    (see ``_visible_user_ids`` in the router). A tenant owner/admin (same
+    check ``GET /tenants/{id}/users`` uses) additionally gets every
+    tenant member unioned in on top of that base scope; a regular
+    member — or a caller with no tenant at all (single-user/local mode)
+    — just keeps the base scope rather than being denied outright.
+
+    Child-agent ids without a resolvable email map to "unknown" here;
+    the caller's own email and any tenant member emails (from
+    ``get_users_in_tenant``) are always known.
     """
-    if user.tenant_id is None:
-        return {user.id: user.email}
+    email_by_id: dict[UUIDType, str] = {uid: "unknown" for uid in visible_user_ids}
+    email_by_id[user.id] = user.email
 
-    try:
-        users_data = await get_users_in_tenant(user.tenant_id, user)
-        return {UUIDType(u["id"]): u["email"] for u in users_data}
-    except PermissionDeniedError:
-        return {user.id: user.email}
+    if user.tenant_id is not None:
+        try:
+            users_data = await get_users_in_tenant(user.tenant_id, user)
+            for u in users_data:
+                email_by_id[UUIDType(u["id"])] = u["email"]
+        except PermissionDeniedError:
+            pass
+
+    return email_by_id
 
 
-async def compute_cost_by_user_agent(*, user: User, since: Optional[datetime]) -> list[dict]:
+async def compute_cost_by_user_agent(
+    *,
+    user: User,
+    visible_user_ids: list[UUIDType],
+    permitted_dataset_ids: list[UUIDType],
+    since: Optional[datetime],
+) -> list[dict]:
     """Token/cost totals grouped by (user, agent type) for a spend chart.
 
-    Role-scoped per ``_resolve_scope_emails``. Returns rows sorted by
+    Visibility mirrors every other ``/sessions`` endpoint — the caller,
+    their child agents (``visible_user_ids``), and sessions whose
+    dataset is shared with them (``permitted_dataset_ids``) — unioned
+    with every tenant member's sessions when the caller is a tenant
+    owner/admin (see ``_resolve_scope_emails``). Returns rows sorted by
     ``cost_usd`` descending — ready to feed a "who spends the most, with
     which agent" chart without further client-side sorting.
     """
-    email_by_user_id = await _resolve_scope_emails(user)
+    email_by_user_id = await _resolve_scope_emails(user, visible_user_ids=visible_user_ids)
     scoped_user_ids = list(email_by_user_id.keys())
-    if not scoped_user_ids:
+    if not scoped_user_ids and not permitted_dataset_ids:
         return []
 
     engine = get_relational_engine()
     async with engine.get_async_session() as session:
+        visibility_terms = []
+        if scoped_user_ids:
+            visibility_terms.append(SessionRecord.user_id.in_(scoped_user_ids))
+        if permitted_dataset_ids:
+            visibility_terms.append(SessionRecord.dataset_id.in_(permitted_dataset_ids))
         stmt = select(
             SessionRecord.user_id,
             SessionRecord.session_id,
             SessionRecord.tokens_in,
             SessionRecord.tokens_out,
             SessionRecord.cost_usd,
-        ).where(SessionRecord.user_id.in_(scoped_user_ids))
+        ).where(or_(*visibility_terms) if len(visibility_terms) > 1 else visibility_terms[0])
         if since is not None:
             stmt = stmt.where(SessionRecord.last_activity_at >= since)
         rows = (await session.execute(stmt)).all()
