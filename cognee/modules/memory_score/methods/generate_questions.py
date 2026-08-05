@@ -38,10 +38,28 @@ MAX_NODES_PER_TOPIC = 60
 # Topics made purely of entities have no text of their own; their chunk is one hop
 # away. We probe only a few of them so the fallback stays cheap.
 NEIGHBOUR_PROBE_LIMIT = 5
-# Grounding context sent to the LLM for one topic.
+# Grounding context sent to the LLM in ONE call.
 MAX_CHUNKS_PER_PROMPT = 3
 MAX_CONTEXT_CHARS = 6000
 MIN_TEXT_CHARS = 40
+
+# How many distinct pairs one chunk can realistically ground. A chunk holds a
+# bounded number of checkable facts, and the prompt is instructed to return fewer
+# pairs rather than invent one, so asking a single call for more than this yields
+# silence, not more questions.
+#
+# This is the SAME assumption the PR's cost model is built on ("5 pairs/chunk"),
+# and it has to be reconciled with MAX_CHUNKS_PER_PROMPT: one call over 3 chunks
+# can ground about 15 pairs, so a topic allocated 39 questions in a single call
+# returns ~15 and the rest are silently lost. Measured before this was derived:
+# a synthetic_target of 100 across 5 topics produced 59 questions, with the two
+# topics allocated 20 and 39 returning 7 and 15.
+#
+# So generation now BATCHES: a topic needing more pairs than one call can ground
+# is spread over several calls, each grounded in its own chunks. Per-call context
+# stays bounded (quality), while the target stays reachable (honesty).
+PAIRS_PER_CHUNK = 5
+MAX_PAIRS_PER_CALL = PAIRS_PER_CHUNK * MAX_CHUNKS_PER_PROMPT
 
 # Base weight every topic carries in the allocation, regardless of real traffic.
 REAL_TRAFFIC_WEIGHT_BASE = 1
@@ -208,6 +226,33 @@ def _build_context(texts: list[str]) -> str:
     return "\n\n---\n\n".join(selected)
 
 
+def _context_batches(texts: list[str], count: int) -> list[str]:
+    """Split a topic's texts into as many bounded contexts as ``count`` needs.
+
+    One call over ``MAX_CHUNKS_PER_PROMPT`` chunks can ground about
+    ``MAX_PAIRS_PER_CALL`` pairs, so a topic allocated more than that needs more
+    chunks and more calls — not a larger ask against the same three chunks, which
+    the prompt correctly answers with silence rather than invention.
+
+    Returns at most as many batches as there are chunks to fill them, so a topic
+    whose graph simply has little text still generates only what it can ground.
+    """
+    if not texts or count <= 0:
+        return []
+
+    batches_needed = -(-count // MAX_PAIRS_PER_CALL)  # ceil
+    batches_available = -(-len(texts) // MAX_CHUNKS_PER_PROMPT)
+
+    batches: list[str] = []
+    for index in range(min(batches_needed, batches_available)):
+        window = texts[index * MAX_CHUNKS_PER_PROMPT : (index + 1) * MAX_CHUNKS_PER_PROMPT]
+        context = _build_context(window)
+        if context:
+            batches.append(context)
+
+    return batches
+
+
 async def _generate_for_topic(topic: Topic, count: int, context: str) -> list[GeneratedQuestion]:
     """Ask the LLM for ``count`` pairs grounded in ``context``, in a single call."""
     # Only the PROMPT gets a fallback name: every pair is tagged with the plan's
@@ -290,22 +335,50 @@ async def generate_questions(topic_plan: TopicPlan, target_count: int) -> list[G
             continue
 
         texts = await _collect_topic_texts(graph_engine, topic)
-        context = _build_context(texts)
-        if not context:
+        contexts = _context_batches(texts, count)
+        if not contexts:
             logger.warning(
                 "memory score: topic '%s' has no usable chunk text, skipping generation",
                 topic.label,
             )
             continue
 
-        try:
-            generated.extend(await _generate_for_topic(topic, count, context))
-        except Exception as error:
-            logger.warning(
-                "memory score: question generation failed for topic '%s': %s",
+        # Batched, because one call over MAX_CHUNKS_PER_PROMPT chunks can only
+        # ground about MAX_PAIRS_PER_CALL pairs. Each batch gets its own chunks, and
+        # `remaining` keeps the topic's allocation a strict ceiling across them.
+        remaining = count
+        produced = 0
+        for context in contexts:
+            if remaining <= 0:
+                break
+            try:
+                batch = await _generate_for_topic(
+                    topic, min(remaining, MAX_PAIRS_PER_CALL), context
+                )
+            except Exception as error:
+                logger.warning(
+                    "memory score: question generation failed for topic '%s': %s",
+                    topic.label,
+                    error,
+                    exc_info=True,
+                )
+                continue
+            generated.extend(batch)
+            produced += len(batch)
+            remaining -= len(batch)
+
+        if produced < count:
+            # Not an error: the prompt returns fewer pairs rather than inventing one,
+            # so this is the graph having less groundable substance than the
+            # allocation assumed. Logged because it is the difference between
+            # synthetic_target and synthetic_question_count.
+            logger.info(
+                "memory score: topic '%s' grounded %d of %d allocated question(s) "
+                "across %d context batch(es)",
                 topic.label,
-                error,
-                exc_info=True,
+                produced,
+                count,
+                len(contexts),
             )
 
     logger.info(

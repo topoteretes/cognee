@@ -374,3 +374,54 @@ def test_topic_ceiling_does_not_force_clusters_on_a_small_graph():
 
     assert min(default_k(10), MAX_TOPICS) == default_k(10) == 2
     assert min(default_k(5000), MAX_TOPICS) == MAX_TOPICS
+
+
+# --------------------------------------------------------------------------
+# Context batching: making synthetic_target reachable
+# --------------------------------------------------------------------------
+
+
+def test_context_batches_scale_with_the_allocation():
+    """One call over 3 chunks grounds ~15 pairs; 39 pairs needs more calls.
+
+    Measured before this existed: synthetic_target=100 over 5 topics produced 59
+    questions, because each topic got a single call over MAX_CHUNKS_PER_PROMPT
+    chunks no matter how many questions it was allocated.
+    """
+    from cognee.modules.memory_score.methods.generate_questions import (
+        MAX_CHUNKS_PER_PROMPT,
+        MAX_PAIRS_PER_CALL,
+        _context_batches,
+    )
+
+    texts = [f"chunk {index} " + "x" * 300 for index in range(30)]
+
+    assert len(_context_batches(texts, MAX_PAIRS_PER_CALL)) == 1
+    assert len(_context_batches(texts, MAX_PAIRS_PER_CALL + 1)) == 2
+    assert len(_context_batches(texts, 39)) == -(-39 // MAX_PAIRS_PER_CALL)
+
+    # Distinct chunks per batch — reusing the same three would just re-ask.
+    batches = _context_batches(texts, 45)
+    assert len(batches) == 3
+    assert len(set(batches)) == 3
+    assert all(batch for batch in batches)
+    assert MAX_CHUNKS_PER_PROMPT == 3
+
+
+def test_context_batches_bounded_by_available_text():
+    """A thin topic generates what it can ground, not what it was allocated."""
+    from cognee.modules.memory_score.methods.generate_questions import _context_batches
+
+    assert _context_batches([], 100) == []
+    assert _context_batches(["only one chunk " + "y" * 300], 100) == ["only one chunk " + "y" * 300]
+
+
+def test_context_batches_respect_the_char_budget():
+    from cognee.modules.memory_score.methods.generate_questions import (
+        MAX_CONTEXT_CHARS,
+        _context_batches,
+    )
+
+    texts = ["z" * 10_000 for _ in range(9)]
+    for batch in _context_batches(texts, 45):
+        assert len(batch) <= MAX_CONTEXT_CHARS + 32  # + joiner

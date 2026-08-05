@@ -15,11 +15,23 @@ Rules for every pair:
   "according to the text", no references to "the excerpt" or "the document".
 - Write the question so it stands on its own when read without the source text. Name the
   entities involved instead of using pronouns or phrases like "this project" or "the above".
+- The QUESTION must never mention the source, the same way the expected answer must not. Ask
+  about the subject matter, not about what some text says regarding it. Write the question the
+  way a user of the system would ask it, knowing nothing about how the material is stored or
+  which file it came from.
+    Wrong: "What does the document multi-user-mode-overview.md teach about Cognee?"
+    Wrong: "What is the Kuzu Dataset Database Handler described as in the source text?"
+    Wrong: "According to the Cognee Architecture document, which storage types are combined?"
+    Right: "Which types of storage does Cognee combine?"
+    Right: "What is the Kuzu Dataset Database Handler for?"
+  Never use the words "document", "source text", "excerpt", "page", "snippet", "section" or
+  "according to" in a question, and never name a filename or a document title in one.
 - Prefer specific, checkable facts (names, numbers, dates, relationships, decisions, causes)
   over vague summaries.
 - Make the pairs distinct from each other: no paraphrases, and do not ask about the same fact
   twice.
-- Do not ask meta questions about the source text itself (its length, formatting, or wording).
+- Do not ask meta questions about the source text itself — not about its length, formatting or
+  wording, and not about what it covers, teaches, explains, describes or mentions.
 
 If the source text does not contain enough substance for the requested number of pairs, return
 only the pairs you can genuinely ground in it. Returning fewer good pairs is better than
