@@ -204,7 +204,7 @@ class LocalFileStorage(Storage):
 
         return (
             os.path.getsize(os.path.join(parsed_storage_path, file_path))
-            if self.file_exists(file_path)
+            if await self.file_exists(file_path)
             else 0
         )
 
