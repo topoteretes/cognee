@@ -332,3 +332,45 @@ def test_document_shape_is_stable():
         "questions",
         "ungrounded_real_questions",
     }
+
+
+# --------------------------------------------------------------------------
+# Topic ceiling
+# --------------------------------------------------------------------------
+
+
+def test_topic_ceiling_keeps_per_topic_accuracy_meaningful():
+    """More topics than questions makes every per-topic accuracy noise.
+
+    _allocate_counts floors each topic at one question, so the topic count is a
+    direct divisor of the question budget. compute_clusters' visualization default
+    goes to 12, which leaves 1-2 questions per topic at a 20-question target and a
+    per-topic accuracy that can only read 0/50/100%.
+    """
+    from cognee.modules.memory_score.methods.build_topics import MAX_TOPICS
+    from cognee.modules.visualization.semantic_clusters import default_k
+
+    assert MAX_TOPICS < default_k(2000), "the cap must actually bind on a large graph"
+    assert MAX_TOPICS >= 3, "must stay at or above build_topics' min_topics=3"
+
+    # At the default target every topic gets a usable sample.
+    assert 100 // MAX_TOPICS >= 20
+
+    topics = [_topic(f"t{index}") for index in range(MAX_TOPICS)]
+    counts = _allocate_counts(topics, 100)
+    assert sum(counts) == 100
+    assert min(counts) >= 20
+
+
+def test_topic_ceiling_does_not_force_clusters_on_a_small_graph():
+    """min(default_k, MAX_TOPICS): overriding upward would gate a thin graph.
+
+    default_k shrinks k on a small graph; forcing MAX_TOPICS there would split it
+    into clusters below min_nodes_per_topic, failing the floor for a reason that is
+    an artifact of the ceiling rather than of the data.
+    """
+    from cognee.modules.memory_score.methods.build_topics import MAX_TOPICS
+    from cognee.modules.visualization.semantic_clusters import default_k
+
+    assert min(default_k(10), MAX_TOPICS) == default_k(10) == 2
+    assert min(default_k(5000), MAX_TOPICS) == MAX_TOPICS

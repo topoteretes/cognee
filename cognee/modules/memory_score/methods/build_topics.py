@@ -41,13 +41,29 @@ from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector.embeddings import get_embedding_engine
 from cognee.modules.visualization.embedding_join import fetch_node_embeddings, select_nodes
 from cognee.modules.visualization.preprocessor import preprocess
-from cognee.modules.visualization.semantic_clusters import compute_clusters
+from cognee.modules.visualization.semantic_clusters import compute_clusters, default_k
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("memory_score.build_topics")
 
 # Graph node type that carries the source text a synthetic question is grounded in.
 CHUNK_NODE_TYPE = "DocumentChunk"
+
+# Ceiling on how many topics one run measures.
+#
+# compute_clusters' own default (default_k, capped at 12) is tuned for a
+# VISUALIZATION, where more clusters means a more informative picture and nothing
+# is being measured. Here every topic costs questions: _allocate_counts gives each
+# one a floor of a single question, so 12 topics consume 12 of a 20-question budget
+# and leave 1-2 questions per topic. A per-topic accuracy computed from one or two
+# samples is noise — it reads as 0%, 50% or 100% and moves wildly between runs on
+# an unchanged graph — which makes the per-topic breakdown misleading rather than
+# merely coarse.
+#
+# 5 keeps the breakdown meaningful at the default synthetic_target of 100 (~20
+# questions per topic) while staying above min_topics=3, so the floor gate still
+# has room to fail honestly rather than being pinned open by the ceiling.
+MAX_TOPICS = 5
 
 _EPS = 1e-12
 
@@ -213,6 +229,7 @@ async def build_topics(
     min_chunks: int = 50,
     min_topics: int = 3,
     min_nodes_per_topic: int = 5,
+    max_topics: int = MAX_TOPICS,
 ) -> TopicPlan:
     """Gate on the data floor, then cluster the graph into weighted topics.
 
@@ -223,6 +240,9 @@ async def build_topics(
         min_chunks: minimum ``DocumentChunk`` nodes required in the graph.
         min_topics: minimum topics that must survive the size filter.
         min_nodes_per_topic: minimum nodes for a cluster to count as a topic.
+        max_topics: ceiling on clusters requested from k-means. See
+            :data:`MAX_TOPICS` for why the visualization default is too high for
+            a measurement.
 
     Returns:
         A :class:`TopicPlan`. ``below_data_floor=True`` means the caller stops
@@ -263,7 +283,13 @@ async def build_topics(
             ),
         )
 
-    clusters = compute_clusters(nodes, embeddings)["clusters"]
+    # k is passed explicitly rather than left to compute_clusters' own default.
+    # min(), not a flat max_topics: default_k already shrinks k on a small graph
+    # (sqrt(n/2), floor 2), and overriding that upward would carve a thin graph
+    # into clusters too small to survive min_nodes_per_topic and gate the run.
+    requested_k = min(default_k(len(embeddings)), max_topics)
+
+    clusters = compute_clusters(nodes, embeddings, k=requested_k)["clusters"]
     # compute_clusters already drops empty clusters; drop the too-small ones.
     kept = [cluster for cluster in clusters if cluster["size"] >= min_nodes_per_topic]
 
