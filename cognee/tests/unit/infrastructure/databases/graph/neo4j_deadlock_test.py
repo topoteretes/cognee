@@ -1,7 +1,31 @@
 import pytest
 import asyncio
-from unittest.mock import MagicMock
-from neo4j.exceptions import Neo4jError
+import sys
+import types
+from unittest.mock import AsyncMock, MagicMock
+
+try:
+    from neo4j.exceptions import DatabaseUnavailable, Neo4jError
+except ModuleNotFoundError:
+    class Neo4jError(Exception):
+        pass
+
+
+    class DatabaseUnavailable(Exception):
+        pass
+
+
+@pytest.fixture(autouse=True)
+def stub_neo4j_modules(monkeypatch):
+    if "neo4j" not in sys.modules:
+        neo4j_module = types.ModuleType("neo4j")
+        exceptions_module = types.ModuleType("neo4j.exceptions")
+        exceptions_module.DatabaseUnavailable = DatabaseUnavailable
+        exceptions_module.Neo4jError = Neo4jError
+        neo4j_module.exceptions = exceptions_module
+        monkeypatch.setitem(sys.modules, "neo4j", neo4j_module)
+        monkeypatch.setitem(sys.modules, "neo4j.exceptions", exceptions_module)
+
 from cognee.infrastructure.databases.graph.neo4j_driver.deadlock_retry import deadlock_retry
 
 
@@ -43,6 +67,23 @@ async def test_deadlock_retry_exhaustive():
 
     result = await wrapped_function(self=None)
     assert result, "Function should have succeded on second time"
+
+
+@pytest.mark.asyncio
+async def test_deadlock_retry_allows_database_unavailable_retry(monkeypatch):
+    mock_return = asyncio.Future()
+    mock_return.set_result(True)
+    mock_function = MagicMock(side_effect=[DatabaseUnavailable("temporary outage"), mock_return])
+
+    wrapped_function = deadlock_retry(max_retries=1)(mock_function)
+
+    monkeypatch.setattr(
+        "cognee.infrastructure.databases.graph.neo4j_driver.deadlock_retry.asyncio.sleep",
+        AsyncMock(),
+    )
+
+    result = await wrapped_function(self=None)
+    assert result, "Function should succeed after one DatabaseUnavailable retry"
 
 
 if __name__ == "__main__":
