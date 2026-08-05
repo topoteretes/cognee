@@ -1,7 +1,7 @@
 """Use Neo4j as cognee's graph database.
 
 Prerequisites:
-1. Install the Neo4j extra: `pip install cognee[neo4j]`
+1. Install the Neo4j extra: `uv pip install "cognee[neo4j]"`
 2. Start a Neo4j server, e.g. with Docker:
    docker run -p 7474:7474 -p 7687:7687 -e NEO4J_AUTH=neo4j/yourpassword neo4j:5
 3. Set the password (and any non-default connection values) in `.env` or the
