@@ -18,10 +18,20 @@ class IntegrationCredential(Base):
     ``provider_account_id`` is the external workspace/org id (Slack ``team_id``,
     a Notion workspace id, a GitHub org id). The UNIQUE(provider,
     provider_account_id) constraint is what lets an inbound webhook that
-    carries only that external id resolve back to exactly one owning user — so
-    a workspace can belong to only one cognee user, and the routing is never
-    ambiguous. It is scoped by ``user_id`` (the connecting cognee user), not a
-    tenant — this is a single/multi-user SDK concept, not a SaaS tenant.
+    carries only that external id resolve back to exactly one owning row — so
+    the external account belongs to exactly one owner, and the routing is
+    never ambiguous.
+
+    ``user_id`` is always the connecting cognee user. ``workspace_id`` is an
+    optional second owner dimension — nullable, no FK — for a deployment
+    where several users share one connection (a cognee-hosted multi-user
+    workspace, or a downstream layer's own tenant concept). When
+    ``workspace_id`` is set, it is the conflict/ownership key instead of
+    ``user_id`` (see
+    :func:`cognee.modules.integrations.credentials.upsert_credential`);
+    ``user_id`` still records who actually connected it. Left unset (the
+    default), behavior is exactly the original single-user contract:
+    ``user_id`` is the owner.
     """
 
     __tablename__ = "integration_credentials"
@@ -38,6 +48,10 @@ class IntegrationCredential(Base):
     id: Mapped[UUID] = mapped_column(SAUUID, primary_key=True, default=uuid4)
 
     user_id: Mapped[UUID] = mapped_column(SAUUID, nullable=False, index=True)
+
+    # Optional second owner dimension — see the class docstring. No FK: a
+    # plain opaque id, same as user_id.
+    workspace_id: Mapped[Optional[UUID]] = mapped_column(SAUUID, nullable=True, index=True)
 
     provider: Mapped[str] = mapped_column(String, nullable=False)
     provider_account_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)

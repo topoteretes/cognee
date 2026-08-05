@@ -55,6 +55,9 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
     collection tables.
     """
 
+    # Graph queries run as SQL via the wrapped PostgresAdapter, not Cypher.
+    supports_cypher_queries = False
+
     def __init__(
         self,
         graph_adapter: "PostgresAdapter",
