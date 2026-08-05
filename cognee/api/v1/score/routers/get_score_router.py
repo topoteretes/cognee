@@ -68,8 +68,9 @@ class StartScoreRunPayload(BaseModel):
     )
     # Both are capped, because both are spend dials: a question costs ~2,300
     # tokens end to end, so an uncapped synthetic_target lets one request commit
-    # an unbounded LLM bill. Out of range is refused with a 422 rather than
-    # silently clamped, so the caller knows it did not get what it asked for.
+    # an unbounded LLM bill. Out of range is refused rather than silently clamped,
+    # so the caller knows it did not get what it asked for — as a 400, because
+    # client.py maps every RequestValidationError to 400 app-wide.
     synthetic_target: int = Field(
         default=100,
         ge=0,

@@ -6,6 +6,9 @@ dataset's contents or spends unbounded LLM budget:
 * starting a run requires READ permission on the dataset, not just shared tenancy;
 * reading a run requires the same, and answers 404 rather than confirming the id;
 * the request parameters that drive LLM spend are bounded by the API.
+
+Asserted against the REAL app from cognee.api.client, so the status codes here are
+the ones callers actually receive.
 """
 
 from importlib import import_module
@@ -13,7 +16,6 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from cognee.modules.users.exceptions import PermissionDeniedError
@@ -24,15 +26,30 @@ router_module = import_module("cognee.api.v1.score.routers.get_score_router")
 methods_module = import_module("cognee.modules.memory_score.methods")
 run_module = import_module("cognee.modules.memory_score.methods.run_memory_score")
 
+# The REAL app, not a bare FastAPI() with the router bolted on. A hand-built app
+# has none of the app-wide exception handlers, which silently changes the status
+# codes under test: client.py maps every RequestValidationError to 400, so a
+# bare app reports an out-of-range cap as 422 while production reports 400. Tests
+# that assert against a hand-built app therefore certify statuses no caller ever
+# sees. Using the real app also covers the mount prefix and route ordering
+# (/latest must be matched before /{run_id}).
+client_module = import_module("cognee.api.client")
+
 TENANT_ID = uuid4()
 USER_ID = uuid4()
 
+# What the app-wide RequestValidationError handler turns a rejected body into.
+VALIDATION_ERROR_STATUS = 400
+
 
 def _client(monkeypatch, tenant_id=TENANT_ID) -> TestClient:
-    app = FastAPI()
-    app.include_router(router_module.get_score_router(), prefix="/api/v1/score")
-    app.dependency_overrides[router_module.get_authenticated_user] = lambda: SimpleNamespace(
-        id=USER_ID, tenant_id=tenant_id
+    app = client_module.app
+    # setitem, not assignment: dependency_overrides lives on the shared app object,
+    # and monkeypatch reverts this entry after the test instead of leaking it.
+    monkeypatch.setitem(
+        app.dependency_overrides,
+        router_module.get_authenticated_user,
+        lambda: SimpleNamespace(id=USER_ID, tenant_id=tenant_id),
     )
     monkeypatch.setattr(router_module, "send_telemetry", lambda *args, **kwargs: None)
     return TestClient(app, raise_server_exceptions=False)
@@ -155,7 +172,7 @@ def test_out_of_range_spend_parameters_are_refused(monkeypatch, field, value):
         "/api/v1/score", json={"dataset_id": str(uuid4()), field: value}
     )
 
-    assert response.status_code == 422
+    assert response.status_code == VALIDATION_ERROR_STATUS
 
 
 def test_api_advertises_the_same_ceilings_it_enforces(monkeypatch):

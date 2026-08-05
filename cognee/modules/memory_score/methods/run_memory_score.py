@@ -69,7 +69,11 @@ from cognee.modules.memory_score.models import (
     MemoryScoreRunStatus,
     ScoredQuestion,
 )
-from cognee.modules.search.operations import get_queries
+
+# Submodule, not the package: cognee.modules.search.operations does not re-export
+# get_queries, so importing it from the package binds the MODULE and every call
+# raises "'module' object is not callable".
+from cognee.modules.search.operations.get_queries import get_queries
 from cognee.modules.users.methods import get_user
 from cognee.modules.users.permissions.methods import (
     get_all_user_permission_datasets,
@@ -104,7 +108,8 @@ MEMORY_SCORE_CONCURRENCY = 5
 # the request parameters are a direct spend dial: at 500 synthetic questions a run
 # is ~1.15M tokens (~$2.90) and that is the most a single call may authorise. The
 # caps are enforced in BOTH places on purpose — the API rejects an out-of-range
-# value outright (422) so the caller learns it was refused, and this module clamps
+# value outright (400, via the app-wide RequestValidationError handler) so the
+# caller learns it was refused, and this module clamps
 # whatever it is handed, so a scheduler or an SDK caller reaching past the HTTP
 # layer cannot commit unbounded spend either.
 MAX_SYNTHETIC_TARGET = 500
@@ -754,7 +759,7 @@ async def run_memory_score(
         triggered_by_user_id = getattr(user, "id", None)
 
     # Clamped, not rejected: the HTTP layer already refuses an out-of-range value
-    # with a 422, so anything arriving here past a cap came from a scheduler or an
+    # with a 400, so anything arriving here past a cap came from a scheduler or an
     # in-process caller, and a run capped at the documented ceiling is a better
     # outcome for those than either a crash or unbounded spend.
     synthetic_target = max(0, min(synthetic_target, MAX_SYNTHETIC_TARGET))

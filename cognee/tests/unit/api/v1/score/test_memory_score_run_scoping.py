@@ -12,7 +12,7 @@ they are asserted at the seams the run calls out through:
 import asyncio
 from contextlib import asynccontextmanager
 from importlib import import_module
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from uuid import uuid4
 
 from cognee.modules.memory_score.methods.build_topics import TopicPlan
@@ -82,6 +82,34 @@ def _install(monkeypatch, recorder, *, topic_plan, run_id):
     monkeypatch.setattr(run_module, "AnswerGeneratorExecutor", lambda *a, **k: object())
     monkeypatch.setattr(run_module, "DirectLLMEvalAdapter", lambda *a, **k: object())
     monkeypatch.setattr(run_module, "GroundednessAdapter", lambda *a, **k: object())
+
+
+def test_patched_boundaries_are_callable_before_any_monkeypatching():
+    """Guard against a stub masking a broken import.
+
+    Every name `_install` replaces is asserted to be a real callable as imported,
+    because monkeypatching hides the failure otherwise. This caught
+    `from cognee.modules.search.operations import get_queries` binding the
+    submodule rather than the function — the package does not re-export it, so
+    every call raised "'module' object is not callable" while the stubbed tests
+    passed. A live run found it; this test is what should have.
+    """
+    for name in (
+        "get_queries",
+        "build_topics",
+        "generate_questions",
+        "resolve_memory_score_dataset",
+        "set_database_global_context_variables",
+        "AnswerGeneratorExecutor",
+        "DirectLLMEvalAdapter",
+        "GroundednessAdapter",
+    ):
+        attribute = getattr(run_module, name)
+        assert not isinstance(attribute, ModuleType), (
+            f"run_memory_score.{name} is a module, not a callable — the import binds "
+            f"the submodule instead of the object inside it"
+        )
+        assert callable(attribute), f"run_memory_score.{name} is not callable"
 
 
 def _scoreable_plan():
