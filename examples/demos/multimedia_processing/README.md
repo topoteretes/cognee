@@ -47,9 +47,6 @@ video becomes queryable memory with no special handling downstream.
 ```bash
 # .mp4 or .webm works without ffmpeg
 python video_processing_example.py /path/to/your/video.mp4
-
-# or drop a file at data/sample_video.mp4 and run
-python video_processing_example.py
 ```
 
 Requires an `LLM_API_KEY` in your `.env` (see the repository README for setup).

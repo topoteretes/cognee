@@ -1,3 +1,18 @@
+"""Use ChromaDB as cognee's vector database.
+
+Prerequisites:
+1. ChromaDB support is **not bundled with cognee core**: the built-in adapter was
+   removed in favor of community adapters
+   (https://github.com/topoteretes/cognee-community), which register themselves via
+   `cognee.infrastructure.databases.vector.use_vector_adapter("chromadb", Adapter)`
+   before cognee is configured. Install and register a ChromaDB community adapter
+   first — without one, cognee will not recognize the "chromadb" provider.
+2. Start a ChromaDB server, e.g. with Docker:
+   docker run -p 8000:8000 chromadb/chroma
+   (matches the default `vector_db_url` below).
+3. A configured LLM (`LLM_API_KEY` in `.env`).
+"""
+
 import asyncio
 import os
 import pathlib
