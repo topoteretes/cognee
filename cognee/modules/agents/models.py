@@ -8,9 +8,9 @@ from pydantic import BaseModel, Field
 
 
 # Free-form on purpose: the set of client types keeps growing (Claude Code,
-# Codex, Slack, Cursor, Windsurf, ...) and gating it behind a closed Literal
-# meant every new integration needed a backend code change just to be
-# recognized. Callers should self-declare their type via
+# Codex, Slack, OpenCode, Cursor, Windsurf, ...) and gating it behind a
+# closed Literal meant every new integration needed a backend code change
+# just to be recognized. Callers should self-declare their type via
 # ``RegisterAgentRequest.type`` at registration; ``derive_connection_type()``
 # is only a best-effort fallback for sessions that never registered. This
 # list is documentation, not an enum member set — pick a value from it when
@@ -22,6 +22,7 @@ KNOWN_AGENT_CONNECTION_TYPES = (
     "claude_code",
     "codex",
     "slack",
+    "opencode",
     "workflow",
     "unknown",
 )
