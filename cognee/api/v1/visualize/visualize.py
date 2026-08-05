@@ -20,6 +20,7 @@ from cognee.shared.logging_utils import get_logger, setup_logging, ERROR
 
 
 import asyncio
+from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 
 
 logger = get_logger()
@@ -30,7 +31,7 @@ async def visualize_graph(
     include_session_events: bool = True,
     session_ids: list = None,
     user: Optional[User] = None,
-    dataset: Optional[Union[str, UUID]] = "main_dataset",
+    dataset: Optional[Union[str, UUID]] = DEFAULT_DATASET_NAME,
     *,
     full: bool = False,
     query: Optional[str] = None,
