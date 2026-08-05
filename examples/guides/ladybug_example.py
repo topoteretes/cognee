@@ -1,3 +1,10 @@
+"""Use Ladybug — cognee's default embedded graph database — as the graph store.
+
+Prerequisites: none beyond a configured LLM (`LLM_API_KEY` in `.env`). Ladybug is
+embedded and ships with cognee, so this guide runs as-is — no server to start, no
+pip extra to install.
+"""
+
 import asyncio
 import pathlib
 

@@ -1,3 +1,22 @@
+"""Use Amazon Neptune Analytics as cognee's graph and vector database.
+
+Prerequisites — unlike the other backend guides, this one needs a cloud account,
+not a local server:
+1. An AWS account with a **provisioned Neptune Analytics graph**
+   (https://docs.aws.amazon.com/neptune-analytics/latest/userguide/create-graph-using-console.html).
+   The graph's vector search dimension must match your embedding model's dimension.
+2. Install the Neptune extra: `pip install cognee[neptune]`
+3. AWS credentials in `.env` or the environment (AWS_ACCESS_KEY_ID,
+   AWS_SECRET_ACCESS_KEY, AWS_REGION — plus AWS_SESSION_TOKEN for temporary
+   credentials), authorized to access the graph.
+4. Set GRAPH_ID in `.env` to your Neptune Analytics graph identifier — it is
+   turned into the `neptune-graph://<GRAPH_ID>` endpoint below.
+5. A configured LLM (`LLM_API_KEY` in `.env`).
+
+Note: the final `cognee.forget(everything=True)` wipes the configured graph — do
+not point this script at a Neptune graph holding data you want to keep.
+"""
+
 import asyncio
 import os
 import pathlib

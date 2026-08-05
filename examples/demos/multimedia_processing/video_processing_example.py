@@ -1,6 +1,5 @@
 import asyncio
 import os
-import pathlib
 import sys
 
 import cognee
@@ -11,8 +10,7 @@ from cognee.shared.logging_utils import ERROR, setup_logging
 # 1. Copy `.env.template` and rename it to `.env`.
 # 2. Add your OpenAI API key to the `.env` file in the `LLM_API_KEY` field:
 #    LLM_API_KEY = "your_key_here"
-# 3. Provide a video file. Pass its path as the first argument, or drop a file
-#    named `sample_video.mp4` into the `data/` folder next to this script.
+# 3. Provide a video file and pass its path as the first argument.
 #
 # ffmpeg is optional:
 #   - `.mp4` and `.webm` are transcribed directly, no ffmpeg needed.
@@ -20,20 +18,14 @@ from cognee.shared.logging_utils import ERROR, setup_logging
 #     the audio track. Install a system ffmpeg and make sure it is on your PATH.
 
 
-def resolve_video_path() -> str:
-    if len(sys.argv) > 1:
-        return sys.argv[1]
-    return os.path.join(pathlib.Path(__file__).parent, "data", "sample_video.mp4")
-
-
 async def main():
-    video_file_path = resolve_video_path()
+    if len(sys.argv) < 2:
+        print("Usage: python video_processing_example.py /path/to/your/video.mp4")
+        return
+
+    video_file_path = sys.argv[1]
     if not os.path.exists(video_file_path):
-        print(
-            f"No video found at '{video_file_path}'.\n"
-            "Pass a video path as the first argument, or place a file at "
-            "data/sample_video.mp4, then rerun."
-        )
+        print(f"No video found at '{video_file_path}'. Pass a valid video path and rerun.")
         return
 
     # Create a clean slate for cognee -- reset data and system state

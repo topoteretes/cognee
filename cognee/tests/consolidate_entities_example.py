@@ -1,4 +1,8 @@
-"""Runnable integration demo for the ``consolidate_entities`` memify pipeline.
+"""Runnable integration test for the ``consolidate_entities`` memify pipeline.
+
+Script-style like the other ``cognee/tests/*.py`` e2e scripts (run with
+``python``, not pytest — the module-level env defaults below must not leak into
+a shared pytest process).
 
 It seeds two near-duplicate entities — "New York City" and "NYC" — into the
 default local backends (Kuzu graph + LanceDB vectors) using the offline
@@ -17,7 +21,7 @@ Run it with the offline embedder::
     EMBEDDING_PROVIDER=fastembed \
     EMBEDDING_MODEL=BAAI/bge-small-en-v1.5 \
     EMBEDDING_DIMENSIONS=384 \
-    uv run python examples/guides/consolidate_entities_example.py
+    uv run python cognee/tests/consolidate_entities_example.py
 
 The script exits non-zero if any assertion fails.
 """
