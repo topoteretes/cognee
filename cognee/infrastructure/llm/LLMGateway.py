@@ -1,5 +1,5 @@
 from collections.abc import Coroutine
-from typing import Any, TypeVar
+from typing import Any, Optional, TypeVar
 
 from pydantic import BaseModel
 
@@ -23,6 +23,33 @@ def _inject_agent_memory(text_input: str) -> str:
     return f"Additional Memory Context:\n{context.memory_context}\n\nOriginal Input:\n{text_input}"
 
 
+def _exact_usage_from_result(result: Any) -> tuple[Optional[int], Optional[int]]:
+    """Real prompt/completion token counts, when the instructor path made them
+    available — (None, None) otherwise, so the caller falls back to its
+    char-based estimate.
+
+    Instructor attaches the raw provider response as ``_raw_response`` on
+    every parsed model it returns (see
+    ``instructor.processing.response.process_response``), and that raw
+    response carries ``.usage`` with exact counts. This is the *same*
+    object ``acreate_structured_output`` already returns — no adapter
+    changes or extra provider calls needed, just reading what instructor
+    already attached before it's discarded.
+
+    Returns (None, None) for the plain-string path (skips instructor
+    entirely, see ``acreate_str_output``) and for the litellm_native/BAML
+    frameworks, which don't attach ``_raw_response``.
+    """
+    usage = getattr(getattr(result, "_raw_response", None), "usage", None)
+    if usage is None:
+        return None, None
+    tokens_in = getattr(usage, "prompt_tokens", None)
+    tokens_out = getattr(usage, "completion_tokens", None)
+    if tokens_in is None or tokens_out is None:
+        return None, None
+    return int(tokens_in), int(tokens_out)
+
+
 async def _record_session_usage_after(
     coro: Coroutine,
     *,
@@ -41,10 +68,13 @@ async def _record_session_usage_after(
         else:
             output_repr = str(result)
         model = get_llm_context_config().llm_model
+        tokens_in, tokens_out = _exact_usage_from_result(result)
         await record_llm_call(
             input_text=text_input,
             output_text=output_repr,
             model=model,
+            tokens_in_override=tokens_in,
+            tokens_out_override=tokens_out,
         )
     except Exception:
         pass

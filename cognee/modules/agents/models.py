@@ -7,7 +7,25 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 
 
-AgentConnectionType = Literal["sdk", "api", "mcp", "claude_code", "workflow", "unknown"]
+# Free-form on purpose: the set of client types keeps growing (Claude Code,
+# Codex, Slack, Cursor, Windsurf, ...) and gating it behind a closed Literal
+# meant every new integration needed a backend code change just to be
+# recognized. Callers should self-declare their type via
+# ``RegisterAgentRequest.type`` at registration; ``derive_connection_type()``
+# is only a best-effort fallback for sessions that never registered. This
+# list is documentation, not an enum member set — pick a value from it when
+# your client matches one, otherwise just use your own lowercase name.
+KNOWN_AGENT_CONNECTION_TYPES = (
+    "sdk",
+    "api",
+    "mcp",
+    "claude_code",
+    "codex",
+    "slack",
+    "workflow",
+    "unknown",
+)
+AgentConnectionType = str
 AgentMemoryMode = Literal["session", "cognee", "hybrid", "none", "unknown"]
 AgentStatus = Literal["active", "inactive", "unknown"]
 AgentSource = Literal["agent_memory", "session_trace", "serve", "api_key", "mcp", "api"]

@@ -15,6 +15,10 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import and_, func, or_, select
 
 from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.modules.session_lifecycle.agent_usage import (
+    build_sessions_with_agent_info_page,
+    compute_cost_by_user_agent,
+)
 from cognee.modules.session_lifecycle.metrics import (
     SessionStatus,
     get_effective_status_sql,
@@ -337,6 +341,85 @@ def get_sessions_router() -> APIRouter:
                 for row in rows
             ]
         )
+
+    @router.get("/with-agent-info")
+    async def list_sessions_with_agent_info(
+        range: _RangeLiteral = Query(
+            "30d",
+            description="Time window filtered on last_activity_at: 24h, 7d, 30d, or all.",
+            examples=["30d"],
+        ),
+        status: Optional[str] = Query(
+            None,
+            description="Effective-status filter: running, completed, failed, or abandoned.",
+        ),
+        limit: int = Query(50, ge=1, le=500, description="Page size (max 500)."),
+        offset: int = Query(0, ge=0, description="Rows to skip for pagination."),
+        order_by: str = Query("last_activity_at"),
+        descending: bool = Query(True),
+        user: User = Depends(get_authenticated_user),
+    ):
+        """Session records merged with their agent-connection metadata (CLO-434).
+
+        Joins ``session_records`` to the agent-connections registry on
+        ``session_id`` so the cloud UI can group/filter usage by client
+        (Claude Code, Codex, Slack, MCP, ...) without a second round
+        trip. When no registered connection matches a session, the
+        agent type is inferred from the session_id/origin_function
+        prefix convention (e.g. ``claude-code-...``, ``codex-...``).
+
+        Memory sources are intentionally omitted — per-agent dataset
+        attribution isn't reliably populated yet.
+
+        Response envelope mirrors ``GET /api/v1/sessions``, with each
+        session additionally carrying ``agent_type``, ``agent_source``,
+        ``agent_session_name``, and ``origin_function``.
+        """
+        since = _range_since(range)
+        try:
+            permitted = await _permitted_dataset_ids_for(user)
+            visible_ids = await _visible_user_ids(user)
+            result = await build_sessions_with_agent_info_page(
+                user=user,
+                permitted_dataset_ids=permitted,
+                visible_user_ids=visible_ids,
+                since=since,
+                status_filter=status,
+                limit=limit,
+                offset=offset,
+                order_by=order_by,
+                descending=descending,
+            )
+            return jsonable_encoder(result)
+        except Exception as exc:
+            logger.error("list_sessions_with_agent_info failed: %s", exc, exc_info=True)
+            return JSONResponse(status_code=500, content={"error": "list failed"})
+
+    @router.get("/cost-by-user-agent")
+    async def cost_by_user_agent(
+        range: _RangeLiteral = Query(
+            "30d",
+            description="Time window filtered on last_activity_at: 24h, 7d, 30d, or all.",
+            examples=["30d"],
+        ),
+        user: User = Depends(get_authenticated_user),
+    ):
+        """Cost + token totals grouped by (user, agent type) — feeds a
+        "who spends the most, with which agent" chart (CLO-434 follow-up).
+
+        Role-scoped, not all-or-nothing: a tenant owner/admin (same
+        check ``GET /tenants/{id}/users`` uses) sees every member's
+        spend. A regular member — or anyone with no tenant, i.e.
+        single-user/local mode — falls back to just their own sessions
+        rather than being denied outright.
+        """
+        since = _range_since(range)
+        try:
+            result = await compute_cost_by_user_agent(user=user, since=since)
+            return jsonable_encoder(result)
+        except Exception as exc:
+            logger.error("cost_by_user_agent failed: %s", exc, exc_info=True)
+            return JSONResponse(status_code=500, content={"error": "aggregation failed"})
 
     @router.get("/{session_id}")
     async def get_session_detail(
