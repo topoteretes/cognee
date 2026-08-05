@@ -71,9 +71,7 @@ def setup_log_bridge(console_output: bool = False) -> Optional[object]:
     if console_output:
         from opentelemetry.sdk._logs.export import ConsoleLogExporter
 
-        _log_provider.add_log_record_processor(
-            SimpleLogRecordProcessor(ConsoleLogExporter())
-        )
+        _log_provider.add_log_record_processor(SimpleLogRecordProcessor(ConsoleLogExporter()))
 
     set_logger_provider(_log_provider)
 

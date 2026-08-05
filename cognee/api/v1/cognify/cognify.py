@@ -236,6 +236,7 @@ async def cognify(
         )
 
     import time as _time
+
     _cognify_start_ns = _time.monotonic_ns()
 
     with new_span("memory.process") as span:

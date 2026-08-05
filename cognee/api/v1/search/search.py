@@ -372,7 +372,11 @@ async def search(
             f"Found {n} result(s) via {query_type.value}",
         )
         _duration_ms = (__import__("time").monotonic_ns() - _search_start_ns) / 1_000_000
-        _attrs = {"memory.system": "cognee", "memory.operation": "retrieve", "memory.query.type": str(query_type.value)}
+        _attrs = {
+            "memory.system": "cognee",
+            "memory.operation": "retrieve",
+            "memory.query.type": str(query_type.value),
+        }
         record_operation_duration(_duration_ms, _attrs)
         record_query_results(n, _attrs)
         increment_items_retrieved(n, _attrs)
