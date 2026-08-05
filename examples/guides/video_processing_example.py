@@ -10,8 +10,7 @@ from cognee.shared.logging_utils import ERROR, setup_logging
 # 1. Copy `.env.template` and rename it to `.env`.
 # 2. Add your OpenAI API key to the `.env` file in the `LLM_API_KEY` field:
 #    LLM_API_KEY = "your_key_here"
-# 3. Optionally pass a video path as the first argument; without one, the
-#    bundled clip in `video_processing_example_data/` is used.
+# 3. Pass a video path as the first argument.
 #
 # The video's audio track is transcribed with per-segment [HH:MM:SS] timestamps
 # inlined into the text, so they survive chunking and stay searchable.
@@ -24,13 +23,10 @@ from cognee.shared.logging_utils import ERROR, setup_logging
 
 async def main():
     if len(sys.argv) < 2:
-        # Default to the bundled clip, resolved relative to this script so the
-        # example works from any working directory.
-        video_file_path = os.path.join(
-            os.path.dirname(__file__), "video_processing_example_data", "sample-video.mp4"
-        )
-    else:
-        video_file_path = sys.argv[1]
+        print("Usage: python video_processing_example.py /path/to/video.mp4")
+        return
+
+    video_file_path = sys.argv[1]
 
     if not os.path.exists(video_file_path):
         print(f"No video found at '{video_file_path}'. Pass a valid video path and rerun.")
