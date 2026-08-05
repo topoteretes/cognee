@@ -1,14 +1,14 @@
 """Orchestrate one memory-accuracy-score run over a single dataset.
 
 The dataset is named by the caller and entered as a database context here — see
-:func:`run_memory_score` for why it cannot be inferred. The real-question history
-is the one tenant-wide input.
+:func:`run_memory_score` for why it cannot be inferred. The caller must hold READ
+permission on it; see :func:`resolve_memory_score_dataset`.
 
 Pipeline, in order:
 
 1. Register the run (``INITIATED`` -> ``RUNNING``) and enter the dataset context.
-2. Collect the tenant's REAL past questions (tenant-wide, via
-   :func:`get_tenant_queries`).
+2. Collect the REAL past questions of the user the run is attributed to (via the
+   existing per-user :func:`cognee.modules.search.operations.get_queries`).
 3. Cluster the graph into topics weighted by that real traffic, and evaluate the
    DATA FLOOR GATE (:func:`build_topics`). A gated run is persisted as
    ``SKIPPED_INSUFFICIENT_DATA`` and returns immediately — nothing past this
@@ -64,11 +64,16 @@ from cognee.modules.memory_score.methods.generate_questions import (
     GeneratedQuestion,
     generate_questions,
 )
-from cognee.modules.memory_score.methods.get_tenant_queries import get_tenant_queries
 from cognee.modules.memory_score.models import (
     MemoryScoreRun,
     MemoryScoreRunStatus,
     ScoredQuestion,
+)
+from cognee.modules.search.operations import get_queries
+from cognee.modules.users.methods import get_user
+from cognee.modules.users.permissions.methods import (
+    get_all_user_permission_datasets,
+    get_specific_user_permission_datasets,
 )
 from cognee.shared.logging_utils import get_logger
 
@@ -93,6 +98,17 @@ MEMORY_SCORE_TOP_K = 5
 # is the ceiling on concurrent LLM work for a run — a 120-question run must not
 # open 120 sockets at once.
 MEMORY_SCORE_CONCURRENCY = 5
+
+# HARD CEILINGS ON WHAT ONE RUN MAY SPEND.
+# Every question costs ~2,300 tokens end to end (generation + recall + judge), so
+# the request parameters are a direct spend dial: at 500 synthetic questions a run
+# is ~1.15M tokens (~$2.90) and that is the most a single call may authorise. The
+# caps are enforced in BOTH places on purpose — the API rejects an out-of-range
+# value outright (422) so the caller learns it was refused, and this module clamps
+# whatever it is handed, so a scheduler or an SDK caller reaching past the HTTP
+# layer cannot commit unbounded spend either.
+MAX_SYNTHETIC_TARGET = 500
+MAX_REAL_QUESTION_LIMIT = 200
 
 # A run whose process died mid-flight would otherwise sit in RUNNING forever and
 # block the tenant from ever scoring again. Past this age an INITIATED/RUNNING
@@ -148,11 +164,32 @@ class MemoryScoreDatasetNotFoundError(CogneeValidationError):
         super().__init__(message, name, status_code, log_level="WARNING")
 
 
-async def resolve_memory_score_dataset(tenant_id: UUID | None, dataset_id: UUID) -> Dataset:
-    """Load the dataset to score, verifying it belongs to ``tenant_id``.
+async def resolve_memory_score_dataset(
+    tenant_id: UUID | None, dataset_id: UUID, requesting_user_id: UUID | None = None
+) -> Dataset:
+    """Load the dataset to score, verifying tenancy and then READ permission.
 
-    404 rather than 403 on a tenant mismatch: whether some other tenant's
-    dataset id exists is not this caller's business.
+    Two checks, in this order, because the order is what keeps each answer from
+    leaking more than it should:
+
+    1. Existence and tenancy -> ``MemoryScoreDatasetNotFoundError`` (404).
+       Whether some other tenant's dataset id exists is not this caller's
+       business, so a cross-tenant id is indistinguishable from a made-up one.
+    2. ``requesting_user_id``'s READ permission on the dataset ->
+       ``PermissionDeniedError`` (403), via the repo's standard
+       ``get_specific_user_permission_datasets``. Belonging to the tenant is NOT
+       permission to read: a run over this dataset returns ``expected_answer``
+       values lifted verbatim out of its chunk text plus full recall answers over
+       it, so scoring it is a read of its contents and is gated like one.
+
+    The ACL check cannot be left to the database layer, because the run enters
+    the dataset context as ``dataset.owner_id`` (below) rather than as the
+    caller — per-user database isolation would therefore never see the caller at
+    all. This is the only place the caller's permission is consulted.
+
+    ``requesting_user_id`` is None only for a run with no acting user (a
+    scheduler), where there is no caller to authorise and the trigger itself is
+    the trusted party. API callers always pass one.
 
     ``Dataset.owner_id`` is what makes a system-triggered run possible — the
     dataset context needs a user id, and the owner is the right one to use when
@@ -168,7 +205,30 @@ async def resolve_memory_score_dataset(tenant_id: UUID | None, dataset_id: UUID)
             message=f"Dataset {dataset_id} not found for this tenant."
         )
 
+    if requesting_user_id is not None:
+        # Raises PermissionDeniedError (403) when the caller cannot read it.
+        await get_specific_user_permission_datasets(requesting_user_id, "read", [dataset_id])
+
     return dataset
+
+
+async def readable_dataset_ids(user_id: UUID) -> set[str]:
+    """Ids of the datasets ``user_id`` may READ, as strings.
+
+    The non-raising counterpart to the check in
+    :func:`resolve_memory_score_dataset`, for the read endpoints: they answer 404
+    rather than 403 for a run they may not see, so they need a predicate rather
+    than an exception.
+
+    Ids are stringified because a UUID column comes back as ``UUID`` or ``str``
+    depending on the configured driver, and this set is compared against run rows.
+    """
+    user = await get_user(user_id)
+    if user is None:
+        return set()
+
+    datasets = await get_all_user_permission_datasets(user, "read")
+    return {str(dataset.id) for dataset in datasets}
 
 
 def _now() -> datetime:
@@ -183,7 +243,7 @@ def _tenant_filter(tenant_id: UUID | None):
 
 
 async def create_memory_score_run(
-    tenant_id: UUID, dataset_id: UUID, triggered_by_user_id: UUID | None = None
+    tenant_id: UUID | None, dataset_id: UUID, triggered_by_user_id: UUID | None = None
 ) -> UUID:
     """Register a run in ``INITIATED`` and return its id.
 
@@ -213,7 +273,7 @@ async def create_memory_score_run(
     return run_id
 
 
-async def find_active_memory_score_run(tenant_id: UUID) -> UUID | None:
+async def find_active_memory_score_run(tenant_id: UUID | None) -> UUID | None:
     """Return the tenant's active run id, or None.
 
     Active means ``INITIATED`` or ``RUNNING`` and younger than
@@ -239,7 +299,7 @@ async def find_active_memory_score_run(tenant_id: UUID) -> UUID | None:
     return run.id if run is not None else None
 
 
-async def _claim_initiated_run(tenant_id: UUID) -> UUID | None:
+async def _claim_initiated_run(tenant_id: UUID | None) -> UUID | None:
     """Take over the tenant's newest ``INITIATED`` run, flipping it to ``RUNNING``.
 
     The flip is a conditional UPDATE rather than a read-modify-write, so two
@@ -441,6 +501,19 @@ async def _score_synthetic_question(
 
     ``grounded`` stays NULL: a synthetic question has a golden answer, so it is
     scored for correctness and never mixed into the groundedness signal.
+
+    ``score`` distinguishes two outcomes that both leave the judge unconsulted,
+    because they mean opposite things for the headline number:
+
+    * recall or the judge FAILED -> ``score`` stays NULL. Unmeasured. The row is
+      excluded from ``overall_accuracy``'s denominator, because an outage is not
+      evidence about the memory.
+    * recall SUCCEEDED and returned an empty answer -> ``score`` is 0.0. This
+      question was generated from a chunk that is definitely in the graph, so
+      recall finding nothing for it is precisely the failure this score exists to
+      measure. Dropping it from the denominator instead would inflate
+      ``overall_accuracy`` on exactly the thin or degraded datasets the feature is
+      meant to flag.
     """
     row: dict[str, Any] = {
         "topic": question.topic,
@@ -458,8 +531,13 @@ async def _score_synthetic_question(
         answered = await _answer(executor, question.text, question.expected_answer)
         row["answer"] = answered["answer"]
 
-        if answered["error"] or not answered["answer"].strip():
-            row["reason"] = answered["error"] or "Recall produced an empty answer."
+        if answered["error"]:
+            row["reason"] = answered["error"]
+            return row
+
+        if not answered["answer"].strip():
+            row["score"] = 0.0
+            row["reason"] = "Recall produced an empty answer."
             return row
 
         try:
@@ -548,7 +626,14 @@ def _mean(values: list[float]) -> float | None:
 
 
 def _synthetic_scores(rows: list[dict[str, Any]]) -> list[float]:
-    """Scores of the synthetic rows that were actually judged."""
+    """Scores of the synthetic rows that produced a verdict.
+
+    A row is included whenever ``score`` is not NULL, which covers both a judged
+    answer and the 0.0 recorded for an answer recall could not produce at all (see
+    :func:`_score_synthetic_question`). Only rows left UNMEASURED by a recall or
+    judge failure are excluded, so ``overall_accuracy``'s denominator is exactly
+    the questions the memory was actually given a fair chance at.
+    """
     return [row["score"] for row in rows if row["score"] is not None]
 
 
@@ -594,7 +679,7 @@ def _aggregate_topics(
 
 
 async def run_memory_score(
-    tenant_id: UUID,
+    tenant_id: UUID | None,
     dataset_id: UUID,
     triggered_by_user_id: UUID | None = None,
     synthetic_target: int = 100,
@@ -604,19 +689,20 @@ async def run_memory_score(
     """Score one dataset's memory accuracy and return the run id.
 
     Args:
-        tenant_id: tenant that owns the dataset. Scopes the real-question
-            history, which is tenant-wide. ``User.tenant_id`` is nullable, so
-            None is accepted and means the NULL-tenant (OSS) case.
+        tenant_id: tenant that owns the dataset. ``User.tenant_id`` is nullable,
+            so None is accepted and means the NULL-tenant (OSS) case.
         dataset_id: the dataset to score. REQUIRED and never inferred — see the
-            scope note below.
-        triggered_by_user_id: acting user, or None for a scheduled run.
+            scope note below. ``triggered_by_user_id`` must hold READ permission
+            on it.
+        triggered_by_user_id: acting user, or None for a scheduled run. Two jobs
+            beyond attribution: it is the identity whose dataset READ permission
+            is checked, and it is whose real question history gets replayed.
         synthetic_target: total synthetic questions to aim for, split across
-            topics by real-traffic weight.
-        real_question_limit: how many of the tenant's most recent real questions
-            to replay.
+            topics by real-traffic weight. Clamped to ``MAX_SYNTHETIC_TARGET``.
+        real_question_limit: how many of the acting user's most recent real
+            questions to replay. Clamped to ``MAX_REAL_QUESTION_LIMIT``.
         user: the acting ``User``, when the caller already has it. Only used to
-            fill in ``triggered_by_user_id``; the run is scoped by
-            ``tenant_id``, never by this user.
+            fill in ``triggered_by_user_id``.
 
     Returns:
         The ``MemoryScoreRun.id``, always — including for a gated
@@ -644,20 +730,40 @@ async def run_memory_score(
     floor and recall all run inside that dataset's context, entered here via
     ``set_database_global_context_variables``.
 
-    The one thing that stays tenant-wide is the REAL QUESTION history, because
-    ``queries`` records no dataset. A tenant with several datasets can therefore
-    have real questions replayed against a dataset they were never asked
-    against, which shows up as ungrounded answers. The run reports the dataset it
-    scored so a caller can caveat that; attributing questions to datasets needs a
-    ``dataset_id`` on ``Query`` at log time, which would only help questions
-    logged after it ships.
+    Real questions are read PER USER, not tenant-wide. ``queries`` rows are one
+    member's search history, and the run document hands their verbatim text back
+    to whoever reads it (in ``questions[].text`` and
+    ``ungrounded_real_questions``), so a tenant-wide read would show every member
+    what their colleagues have been searching for. The run therefore replays only
+    the questions of the user it is attributed to — the trigger, or the dataset
+    owner for a scheduled run. The cost is that the real-traffic topic weighting
+    reflects one member's usage rather than the tenant's, so two members
+    triggering a run over the same dataset can get slightly different topic
+    splits; ``overall_accuracy`` itself stays comparable, since it comes from
+    synthetic questions and the retriever and top_k are pinned.
+
+    Real questions still carry no dataset attribution — ``queries`` records
+    ``text``, ``query_type``, ``user_id`` and ``created_at``, no dataset — so a
+    user active in several datasets can have their questions replayed against a
+    dataset they were never asked against, which shows up as ungrounded answers.
+    The run reports the dataset it scored so a caller can caveat that; fixing it
+    properly needs a ``dataset_id`` on ``Query`` at log time, which would only
+    help questions logged after it ships.
     """
     if triggered_by_user_id is None and user is not None:
         triggered_by_user_id = getattr(user, "id", None)
 
-    # Resolved before any run row is written, so a bad dataset id 404s without
-    # leaving an INITIATED row behind to block the tenant's next attempt.
-    dataset = await resolve_memory_score_dataset(tenant_id, dataset_id)
+    # Clamped, not rejected: the HTTP layer already refuses an out-of-range value
+    # with a 422, so anything arriving here past a cap came from a scheduler or an
+    # in-process caller, and a run capped at the documented ceiling is a better
+    # outcome for those than either a crash or unbounded spend.
+    synthetic_target = max(0, min(synthetic_target, MAX_SYNTHETIC_TARGET))
+    real_question_limit = max(0, min(real_question_limit, MAX_REAL_QUESTION_LIMIT))
+
+    # Resolved before any run row is written, so a bad dataset id 404s (and an
+    # unpermitted one 403s) without leaving an INITIATED row behind to block the
+    # tenant's next attempt.
+    dataset = await resolve_memory_score_dataset(tenant_id, dataset_id, triggered_by_user_id)
 
     # A caller that pre-registered the run (background mode) left an INITIATED
     # row behind; claim it so the run id it already handed out is the one that
@@ -690,7 +796,15 @@ async def run_memory_score(
         async with set_database_global_context_variables(dataset.id, dataset.owner_id):
             schema_defined = await _detect_schema_defined()
 
-            queries = await get_tenant_queries(tenant_id, real_question_limit)
+            # Per user, never tenant-wide — see the docstring. The dataset owner
+            # stands in for a scheduled run, which has no acting user but does
+            # have someone the report is for.
+            question_owner_id = triggered_by_user_id or dataset.owner_id
+            queries = (
+                await get_queries(question_owner_id, real_question_limit)
+                if question_owner_id is not None and real_question_limit > 0
+                else []
+            )
             real_questions = [
                 (query.id, query.text.strip())
                 for query in queries
@@ -790,18 +904,33 @@ async def get_memory_score_run(run_id: UUID) -> MemoryScoreRun | None:
         return await session.get(MemoryScoreRun, run_id)
 
 
-async def get_latest_memory_score_run(tenant_id: UUID) -> MemoryScoreRun | None:
-    """Return the tenant's most recent run, or None when it has never scored."""
+async def get_latest_memory_score_run(
+    tenant_id: UUID | None, dataset_ids: set[str] | None = None
+) -> MemoryScoreRun | None:
+    """Return the most recent run, or None when there is none to return.
+
+    Args:
+        tenant_id: tenant to scope to. None means the NULL-tenant (OSS) case.
+        dataset_ids: when given, only runs over one of these datasets count —
+            the caller's readable set. "Latest" then means the latest run the
+            caller is allowed to see, not the tenant's latest, so a member cannot
+            read a run over a dataset they have no permission on just because a
+            colleague scored it more recently. An empty set matches nothing.
+    """
     db_engine = get_relational_engine()
 
     async with db_engine.get_async_session() as session:
-        return (
-            await session.scalars(
-                select(MemoryScoreRun)
-                .where(_tenant_filter(tenant_id))
-                .order_by(MemoryScoreRun.created_at.desc())
-                .limit(1)
+        statement = select(MemoryScoreRun).where(_tenant_filter(tenant_id))
+
+        if dataset_ids is not None:
+            # Cast to the column's own type: a UUID column may round-trip as
+            # UUID or str depending on the driver, and IN needs the driver's form.
+            statement = statement.where(
+                MemoryScoreRun.dataset_id.in_([UUID(dataset_id) for dataset_id in dataset_ids])
             )
+
+        return (
+            await session.scalars(statement.order_by(MemoryScoreRun.created_at.desc()).limit(1))
         ).first()
 
 
@@ -838,8 +967,21 @@ def build_memory_score_document(
 
     ``dataset_id`` names the dataset actually scored, so a caller never has to
     infer what the number covers.
+
+    ``judged_synthetic_question_count`` is ``overall_accuracy``'s real
+    DENOMINATOR, and it is reported because it is not derivable from
+    ``synthetic_question_count`` — that one counts every synthetic row asked,
+    including the ones a recall or judge failure left unmeasured. A consumer
+    comparing the two can see how much of the run actually landed, and can
+    distinguish "82% over 100 questions" from "82% over 9 of them".
     """
     status_value = run.status.value if isinstance(run.status, MemoryScoreRunStatus) else run.status
+
+    judged_synthetic_question_count = sum(
+        1
+        for question in questions
+        if question.source == SOURCE_SYNTHETIC and question.score is not None
+    )
 
     return {
         "run_id": str(run.id),
@@ -853,6 +995,7 @@ def build_memory_score_document(
         "schema_defined": bool(run.schema_defined),
         "overall_accuracy": run.overall_accuracy,
         "synthetic_question_count": run.synthetic_question_count or 0,
+        "judged_synthetic_question_count": judged_synthetic_question_count,
         "real_question_count": run.real_question_count or 0,
         "created_at": run.created_at.isoformat() if run.created_at else None,
         "completed_at": run.completed_at.isoformat() if run.completed_at else None,

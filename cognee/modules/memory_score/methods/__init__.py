@@ -2,8 +2,9 @@
 
 from .build_topics import Topic, TopicPlan, build_topics
 from .generate_questions import GeneratedQuestion, generate_questions
-from .get_tenant_queries import get_tenant_queries
 from .run_memory_score import (
+    MAX_REAL_QUESTION_LIMIT,
+    MAX_SYNTHETIC_TARGET,
     MemoryScoreDatasetNotFoundError,
     MemoryScoreRunInProgressError,
     build_memory_score_document,
@@ -12,11 +13,14 @@ from .run_memory_score import (
     get_latest_memory_score_run,
     get_memory_score_questions,
     get_memory_score_run,
+    readable_dataset_ids,
     resolve_memory_score_dataset,
     run_memory_score,
 )
 
 __all__ = [
+    "MAX_REAL_QUESTION_LIMIT",
+    "MAX_SYNTHETIC_TARGET",
     "GeneratedQuestion",
     "MemoryScoreDatasetNotFoundError",
     "MemoryScoreRunInProgressError",
@@ -30,7 +34,7 @@ __all__ = [
     "get_latest_memory_score_run",
     "get_memory_score_questions",
     "get_memory_score_run",
-    "get_tenant_queries",
+    "readable_dataset_ids",
     "resolve_memory_score_dataset",
     "run_memory_score",
 ]

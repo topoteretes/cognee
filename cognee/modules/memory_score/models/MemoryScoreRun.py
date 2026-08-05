@@ -35,11 +35,13 @@ class MemoryScoreRun(Base):
     ``ENABLE_BACKEND_ACCESS_CONTROL`` each user+dataset pair has its own graph
     database, so "the tenant's graph" is not a single graph and the dataset to
     score cannot be inferred — the caller states it (``default_dataset`` on
-    Cloud, ``main_dataset`` in OSS). ``tenant_id`` still scopes ownership and
-    the real-question history, which is tenant-wide.
+    Cloud, ``main_dataset`` in OSS). ``tenant_id`` scopes ownership of the run
+    row itself.
 
     ``triggered_by_user_id`` is nullable because a run can be started by a
-    scheduler with no acting user.
+    scheduler with no acting user. When set it is also whose real question
+    history was replayed — query text is one member's search history and is
+    never read tenant-wide.
 
     ``overall_accuracy`` is computed from SYNTHETIC questions only —
     real questions have no golden answer and only carry a groundedness

@@ -18,6 +18,16 @@ from pydantic import BaseModel, Field
 
 from cognee import __version__ as cognee_version
 from cognee.exceptions import CogneeApiError
+
+# Only the spend ceilings are imported at module scope — the request model needs
+# them at class-definition time, and duplicating the numbers here would let the
+# API's advertised limit drift away from the one actually enforced on the run. The
+# function imports stay inside the handlers.
+from cognee.modules.memory_score.methods.run_memory_score import (
+    MAX_REAL_QUESTION_LIMIT,
+    MAX_SYNTHETIC_TARGET,
+)
+from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
@@ -32,8 +42,8 @@ logger = get_logger()
 _BACKGROUND_SCORE_TASKS: set[asyncio.Task] = set()
 
 _NO_TENANT_ERROR = (
-    "The authenticated user has no tenant. The memory accuracy score is a "
-    "tenant-wide measurement and cannot be scoped without one."
+    "The authenticated user has no tenant. Memory score runs are owned by a "
+    "tenant and cannot be scoped without one."
 )
 
 
@@ -56,19 +66,31 @@ class StartScoreRunPayload(BaseModel):
             "and returns the full run document."
         ),
     )
+    # Both are capped, because both are spend dials: a question costs ~2,300
+    # tokens end to end, so an uncapped synthetic_target lets one request commit
+    # an unbounded LLM bill. Out of range is refused with a 422 rather than
+    # silently clamped, so the caller knows it did not get what it asked for.
     synthetic_target: int = Field(
         default=100,
         ge=0,
+        le=MAX_SYNTHETIC_TARGET,
         description=(
             "Total synthetic questions to aim for, split across topics by how much "
-            "real traffic each topic receives."
+            f"real traffic each topic receives. At most {MAX_SYNTHETIC_TARGET}; this "
+            "is a strict ceiling, and a value below the number of topics means only "
+            "the most-asked-about topics are measured."
         ),
         examples=[100],
     )
     real_question_limit: int = Field(
         default=20,
         ge=0,
-        description="How many of the tenant's most recent real questions to replay.",
+        le=MAX_REAL_QUESTION_LIMIT,
+        description=(
+            "How many of the calling user's most recent real questions to replay. "
+            f"At most {MAX_REAL_QUESTION_LIMIT}. Scoped to the caller, not the "
+            "tenant: query text is one member's search history."
+        ),
         examples=[20],
     )
 
@@ -88,7 +110,7 @@ class ScoreRunTopic(BaseModel):
     real_count: int = Field(
         default=0,
         ge=0,
-        description="Real questions from tenant traffic that landed in this topic.",
+        description="Real questions from the caller's own traffic that landed in this topic.",
     )
     from_real_traffic: bool = Field(
         default=False,
@@ -138,9 +160,9 @@ class ScoreRunDocument(BaseModel):
     dataset_id: str | None = Field(
         default=None,
         description=(
-            "The dataset this score describes. Replayed real questions are "
-            "tenant-wide, so on a multi-dataset tenant some of them may not belong "
-            "to this dataset."
+            "The dataset this score describes. Replayed real questions carry no "
+            "dataset of their own, so for a user active in several datasets some of "
+            "them may not belong to this one."
         ),
     )
     below_data_floor: bool = Field(
@@ -165,7 +187,19 @@ class ScoreRunDocument(BaseModel):
             "golden answer and are never folded into this number."
         ),
     )
-    synthetic_question_count: int = Field(default=0, ge=0)
+    synthetic_question_count: int = Field(
+        default=0, ge=0, description="Synthetic questions asked, judged or not."
+    )
+    judged_synthetic_question_count: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "The DENOMINATOR of overall_accuracy: synthetic questions that produced a "
+            "verdict. Lower than synthetic_question_count when a recall or judge "
+            "failure left questions unmeasured, so compare the two before reading "
+            "overall_accuracy as representative."
+        ),
+    )
     real_question_count: int = Field(default=0, ge=0)
     created_at: str | None = Field(default=None, description="When the run was registered.")
     completed_at: str | None = Field(default=None, description="When the run stopped.")
@@ -191,6 +225,7 @@ def get_score_router() -> APIRouter:
         response_model=None,
         responses={
             400: {"model": ErrorResponse},
+            403: {"model": ErrorResponse},
             404: {"model": ErrorResponse},
             409: {"model": ErrorResponse},
             500: {"model": ErrorResponse},
@@ -215,18 +250,10 @@ def get_score_router() -> APIRouter:
 
         Errors:
             400: the authenticated user has no tenant.
+            403: the caller has no read permission on the dataset.
             404: the dataset does not exist or is not this tenant's.
             409: a run is already active for this tenant.
         """
-        send_telemetry(
-            "Memory Score API Endpoint Invoked",
-            user.id,
-            additional_properties={
-                "endpoint": "POST /v1/score",
-                "cognee_version": cognee_version,
-            },
-        )
-
         from cognee.modules.memory_score.methods import (
             MemoryScoreDatasetNotFoundError,
             MemoryScoreRunInProgressError,
@@ -243,13 +270,27 @@ def get_score_router() -> APIRouter:
         if tenant_id is None:
             return JSONResponse(status_code=400, content={"error": _NO_TENANT_ERROR})
 
-        request = payload
+        # After the tenant check, so a rejected request is not counted as a run
+        # having been invoked.
+        send_telemetry(
+            "Memory Score API Endpoint Invoked",
+            user.id,
+            additional_properties={
+                "endpoint": "POST /v1/score",
+                "cognee_version": cognee_version,
+            },
+        )
 
         try:
             # Validated before the run row is registered: in background mode the
             # row is written first, and a bad dataset id must not leave an
             # INITIATED run behind blocking the tenant's next attempt.
-            await resolve_memory_score_dataset(tenant_id, request.dataset_id)
+            #
+            # user.id is what makes this an AUTHORISATION check and not just a
+            # tenancy one. Sharing a tenant is not permission to read a dataset,
+            # and a run returns that dataset's chunk-derived expected answers and
+            # recall output. A refusal raises PermissionDeniedError, caught below.
+            await resolve_memory_score_dataset(tenant_id, payload.dataset_id, user.id)
 
             active_run_id = await find_active_memory_score_run(tenant_id)
             if active_run_id is not None:
@@ -263,18 +304,18 @@ def get_score_router() -> APIRouter:
                     },
                 )
 
-            if request.run_in_background:
+            if payload.run_in_background:
                 # Register the run first so the caller gets an id it can poll
                 # immediately; run_memory_score claims this row rather than
                 # creating a second one.
-                run_id = await create_memory_score_run(tenant_id, request.dataset_id, user.id)
+                run_id = await create_memory_score_run(tenant_id, payload.dataset_id, user.id)
                 task = asyncio.create_task(
                     run_memory_score(
                         tenant_id=tenant_id,
-                        dataset_id=request.dataset_id,
+                        dataset_id=payload.dataset_id,
                         triggered_by_user_id=user.id,
-                        synthetic_target=request.synthetic_target,
-                        real_question_limit=request.real_question_limit,
+                        synthetic_target=payload.synthetic_target,
+                        real_question_limit=payload.real_question_limit,
                         user=user,
                     )
                 )
@@ -284,10 +325,10 @@ def get_score_router() -> APIRouter:
 
             run_id = await run_memory_score(
                 tenant_id=tenant_id,
-                dataset_id=request.dataset_id,
+                dataset_id=payload.dataset_id,
                 triggered_by_user_id=user.id,
-                synthetic_target=request.synthetic_target,
-                real_question_limit=request.real_question_limit,
+                synthetic_target=payload.synthetic_target,
+                real_question_limit=payload.real_question_limit,
                 user=user,
             )
             run = await get_memory_score_run(run_id)
@@ -297,6 +338,11 @@ def get_score_router() -> APIRouter:
                 )
             questions = await get_memory_score_questions(run_id)
             return build_memory_score_document(run, questions)
+        except PermissionDeniedError as error:
+            # Handled here rather than left to the app-wide CogneeApiError handler,
+            # so the refusal has the same {"error": ...} shape as this router's
+            # other refusals instead of the handler's {"detail": ...}.
+            return JSONResponse(status_code=403, content={"error": error.message})
         except MemoryScoreDatasetNotFoundError as error:
             return JSONResponse(status_code=404, content={"error": error.message})
         except MemoryScoreRunInProgressError as error:
@@ -321,12 +367,27 @@ def get_score_router() -> APIRouter:
         },
     )
     async def get_latest_score_run(user: User = Depends(get_authenticated_user)):
-        """Return the most recent memory accuracy score run for the caller's tenant.
+        """Return the most recent memory accuracy score run the caller may read.
+
+        "Latest" is the latest run over a dataset the caller has READ permission
+        on, not the tenant's latest run — otherwise a colleague scoring a dataset
+        this caller cannot read would put its contents at this URL.
 
         Errors:
             400: the authenticated user has no tenant.
-            404: the tenant has never been scored.
+            404: no readable run for this caller.
         """
+        from cognee.modules.memory_score.methods import (
+            build_memory_score_document,
+            get_latest_memory_score_run,
+            get_memory_score_questions,
+            readable_dataset_ids,
+        )
+
+        tenant_id = getattr(user, "tenant_id", None)
+        if tenant_id is None:
+            return JSONResponse(status_code=400, content={"error": _NO_TENANT_ERROR})
+
         send_telemetry(
             "Memory Score API Endpoint Invoked",
             user.id,
@@ -336,22 +397,13 @@ def get_score_router() -> APIRouter:
             },
         )
 
-        from cognee.modules.memory_score.methods import (
-            build_memory_score_document,
-            get_latest_memory_score_run,
-            get_memory_score_questions,
-        )
-
-        tenant_id = getattr(user, "tenant_id", None)
-        if tenant_id is None:
-            return JSONResponse(status_code=400, content={"error": _NO_TENANT_ERROR})
-
         try:
-            run = await get_latest_memory_score_run(tenant_id)
+            run = await get_latest_memory_score_run(tenant_id, await readable_dataset_ids(user.id))
             if run is None:
                 return JSONResponse(
                     status_code=404, content={"error": "No memory score run for this tenant"}
                 )
+
             questions = await get_memory_score_questions(run.id)
             return build_memory_score_document(run, questions)
         except CogneeApiError:
@@ -374,13 +426,27 @@ def get_score_router() -> APIRouter:
     async def get_score_run(run_id: UUID, user: User = Depends(get_authenticated_user)):
         """Return one memory accuracy score run document.
 
-        A run belonging to another tenant is reported as 404 rather than 403, so
-        the endpoint does not confirm that the id exists.
+        A run the caller may not see — another tenant's, or one over a dataset
+        they have no READ permission on — is reported as 404 rather than 403, so
+        the endpoint never confirms that the id exists. Sharing a tenant with
+        whoever started the run is not enough: the document carries that dataset's
+        chunk-derived expected answers and full recall output.
 
         Errors:
             400: the authenticated user has no tenant.
-            404: no such run for this tenant.
+            404: no such run, or none the caller may read.
         """
+        from cognee.modules.memory_score.methods import (
+            build_memory_score_document,
+            get_memory_score_questions,
+            get_memory_score_run,
+            readable_dataset_ids,
+        )
+
+        tenant_id = getattr(user, "tenant_id", None)
+        if tenant_id is None:
+            return JSONResponse(status_code=400, content={"error": _NO_TENANT_ERROR})
+
         send_telemetry(
             "Memory Score API Endpoint Invoked",
             user.id,
@@ -391,16 +457,6 @@ def get_score_router() -> APIRouter:
             },
         )
 
-        from cognee.modules.memory_score.methods import (
-            build_memory_score_document,
-            get_memory_score_questions,
-            get_memory_score_run,
-        )
-
-        tenant_id = getattr(user, "tenant_id", None)
-        if tenant_id is None:
-            return JSONResponse(status_code=400, content={"error": _NO_TENANT_ERROR})
-
         try:
             run = await get_memory_score_run(run_id)
             # str() on both sides: a UUID column comes back as UUID or str
@@ -409,6 +465,12 @@ def get_score_router() -> APIRouter:
                 return JSONResponse(
                     status_code=404, content={"error": "Memory score run not found"}
                 )
+
+            if str(run.dataset_id) not in await readable_dataset_ids(user.id):
+                return JSONResponse(
+                    status_code=404, content={"error": "Memory score run not found"}
+                )
+
             questions = await get_memory_score_questions(run_id)
             return build_memory_score_document(run, questions)
         except CogneeApiError:

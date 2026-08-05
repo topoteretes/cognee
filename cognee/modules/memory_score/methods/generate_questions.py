@@ -78,16 +78,31 @@ def _allocate_counts(topics: list[Topic], target_count: int) -> list[int]:
     9 real questions is weighted 10x a topic hit by none. Every topic then keeps a
     floor of one question so no topic goes unmeasured, and the remaining budget is
     handed out by weight with largest-remainder rounding so the parts sum to exactly
-    ``target_count``. When the budget is smaller than the number of topics the floor
-    wins and every topic gets its single question.
+    ``target_count``.
+
+    ``target_count`` is a STRICT CEILING, never a target the floor is allowed to
+    overshoot: it is the caller's spend authorisation, and the run is billed per
+    question. When the budget cannot cover one question per topic, the per-topic
+    floor is what gives — the most-asked-about topics keep their question and the
+    rest get zero (skipped by :func:`generate_questions`, which also spares their
+    graph reads). Measuring fewer topics than asked for is a legible outcome;
+    quietly generating 5 questions for a caller who authorised 2 is not.
     """
     topic_count = len(topics)
+    if topic_count == 0 or target_count <= 0:
+        return [0] * topic_count
+
+    weights = [REAL_TRAFFIC_WEIGHT_BASE + max(0, topic.real_question_count) for topic in topics]
 
     if target_count <= topic_count:
-        return [1] * topic_count
+        # Ties break on the lower index, as in the largest-remainder pass below.
+        order = sorted(range(topic_count), key=lambda index: (-weights[index], index))
+        counts = [0] * topic_count
+        for index in order[:target_count]:
+            counts[index] = 1
+        return counts
 
     remaining = target_count - topic_count
-    weights = [REAL_TRAFFIC_WEIGHT_BASE + max(0, topic.real_question_count) for topic in topics]
     total_weight = sum(weights)
 
     shares = [remaining * weight / total_weight for weight in weights]
@@ -246,13 +261,15 @@ async def generate_questions(topic_plan: TopicPlan, target_count: int) -> list[G
     Args:
         topic_plan: The plan from ``build_topics``. A plan below the data floor, or
             with no topics, generates nothing.
-        target_count: Total number of questions to aim for across all topics. It is
-            split by ``_allocate_counts`` (real-traffic weighted, one-per-topic floor).
+        target_count: Strict upper bound on questions across all topics. It is
+            split by ``_allocate_counts`` (real-traffic weighted, one-per-topic floor
+            where the budget allows).
 
     Returns:
-        The generated pairs, grouped topic by topic. Topics whose nodes yield no
-        usable text — and topics whose LLM call fails — are skipped, so the result
-        can be shorter than ``target_count`` and can legitimately be empty.
+        The generated pairs, grouped topic by topic. Never more than
+        ``target_count``. Topics whose nodes yield no usable text — and topics whose
+        LLM call fails — are skipped, so the result can be shorter and can
+        legitimately be empty.
     """
     if topic_plan is None or topic_plan.below_data_floor:
         return []
@@ -267,6 +284,11 @@ async def generate_questions(topic_plan: TopicPlan, target_count: int) -> list[G
     generated: list[GeneratedQuestion] = []
 
     for topic, count in zip(topics, counts):
+        # Zero budget: the target could not cover every topic. Skipped before the
+        # graph reads, since nothing would be generated from them anyway.
+        if count <= 0:
+            continue
+
         texts = await _collect_topic_texts(graph_engine, topic)
         context = _build_context(texts)
         if not context:
