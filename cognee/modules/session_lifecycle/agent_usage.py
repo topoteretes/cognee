@@ -33,6 +33,18 @@ from cognee.modules.session_lifecycle.models import SessionRecord
 from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.modules.users.models import User
 from cognee.modules.users.tenants.methods.get_users_in_tenant import get_users_in_tenant
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger("session_lifecycle.agent_usage")
+
+# list_agent_connections has no server-side pagination — it builds the
+# full in-memory list, then slices. This is the slice size we ask for
+# when we need "effectively all of them" to build the session->agent
+# map below. If a scope ever has more connections than this, the excess
+# silently falls back to the prefix heuristic (see the has_more check
+# below) rather than erroring, so it's raised here as a single visible
+# constant instead of a bare literal at the call site.
+_AGENT_CONNECTIONS_PAGE_CAP = 10_000
 
 
 def _latest_wins_agent_map(
@@ -87,9 +99,18 @@ async def build_sessions_with_agent_info_page(
         user=user,
         include_sources=False,
         active_only=False,
-        limit=10000,
+        limit=_AGENT_CONNECTIONS_PAGE_CAP,
         offset=0,
     )
+    if agents_response.has_more:
+        logger.warning(
+            "build_sessions_with_agent_info_page: agent-connection page capped at %d of "
+            "%d total for user %s — sessions past the cap fall back to the prefix "
+            "heuristic instead of their registered agent type.",
+            _AGENT_CONNECTIONS_PAGE_CAP,
+            agents_response.total,
+            user.id,
+        )
     agents_by_session = _latest_wins_agent_map(agents_response.agents)
 
     sessions = []

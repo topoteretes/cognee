@@ -135,6 +135,48 @@ async def test_merges_matched_and_falls_back_for_unmatched(monkeypatch):
     assert unmatched["agent_session_name"] is None
 
 
+@pytest.mark.asyncio
+async def test_warns_when_agent_connection_page_is_capped(monkeypatch, caplog):
+    """If a scope has more agent connections than the page cap, sessions past
+    the cap silently fall back to the prefix heuristic — that should at least
+    be visible in logs instead of failing silently."""
+    user_id = uuid4()
+    user = SimpleNamespace(id=user_id, tenant_id=None, email="me@example.com")
+
+    row = _session_row("claude-code-123", user_id)
+
+    async def fake_list_session_rows(**_kwargs):
+        return SessionListPage(sessions=[row], total=1, limit=50, offset=0)
+
+    async def fake_list_agent_connections(**_kwargs):
+        return AgentsListResponse(
+            agents=[],
+            memory_sources=[],
+            total=20_000,
+            limit=agent_usage._AGENT_CONNECTIONS_PAGE_CAP,
+            offset=0,
+            has_more=True,
+        )
+
+    monkeypatch.setattr(agent_usage, "list_session_rows", fake_list_session_rows)
+    monkeypatch.setattr(agent_usage, "list_agent_connections", fake_list_agent_connections)
+
+    with caplog.at_level("WARNING"):
+        await agent_usage.build_sessions_with_agent_info_page(
+            user=user,
+            permitted_dataset_ids=[],
+            visible_user_ids=[user_id],
+            since=None,
+            status_filter=None,
+            limit=50,
+            offset=0,
+            order_by="last_activity_at",
+            descending=True,
+        )
+
+    assert any("capped" in record.message for record in caplog.records)
+
+
 # --------------------------------------------------------------------------- #
 # compute_cost_by_user_agent
 # --------------------------------------------------------------------------- #
