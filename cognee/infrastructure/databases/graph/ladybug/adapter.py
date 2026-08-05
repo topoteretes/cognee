@@ -3637,6 +3637,9 @@ class LadybugAdapter(GraphDBInterface):
 
         query = """
         MATCH (start_node:Node)-[relationship:EDGE]->(end_node:Node)
+        WITH start_node, relationship, end_node
+        ORDER BY start_node.id, end_node.id, relationship.relationship_name
+        SKIP $offset LIMIT $limit
         RETURN {
             start_node: {
                 id: start_node.id,
@@ -3655,7 +3658,6 @@ class LadybugAdapter(GraphDBInterface):
                 properties: end_node.properties
             }
         } AS triplet
-        SKIP $offset LIMIT $limit
         """
 
         try:
