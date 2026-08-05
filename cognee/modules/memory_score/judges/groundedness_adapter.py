@@ -1,13 +1,25 @@
-"""Reference-free groundedness judge for real user questions.
+"""Reference-free judge for real user questions: coverage and groundedness.
 
-Real questions collected from tenant traffic have no golden answer, so they cannot be
-scored for correctness. This adapter judges only whether the answer cognee produced is
-actually supported by the context that was retrieved for it.
+Real questions have no golden answer, so they cannot be scored for correctness. This
+adapter returns the two things that ARE knowable without one, as independent booleans:
+
+* ``answered`` — did the memory supply the information asked for, or decline? This is the
+  COVERAGE signal. A synthetic question cannot produce it, because synthetic questions are
+  generated from chunks that exist by construction; a question the tenant actually asked is
+  the only input that can reveal the memory holding nothing relevant.
+* ``grounded`` — is what the answer does assert supported by the retrieved context? This is
+  the HALLUCINATION signal.
+
+They are separate because they are independent, and because overloading one boolean with
+both did not work: the prompt previously asked ``grounded`` to be false for a refusal, and
+the judge overrode it, since a refusal's claim ("the context does not contain this") is
+genuinely traceable to the context. A coverage gap is answered=false/grounded=true; a
+hallucination is answered=true/grounded=false.
 """
 
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from cognee.infrastructure.llm import LLMGateway
 from cognee.infrastructure.llm.prompts import read_query_prompt, render_prompt
@@ -17,9 +29,20 @@ GROUNDEDNESS_EVAL_PROMPT = "groundedness_eval_prompt.txt"
 
 
 class GroundednessEvaluation(BaseModel):
-    """Response model containing the groundedness verdict and explanation."""
+    """Response model: the coverage and groundedness verdicts, plus one explanation."""
 
-    grounded: bool
+    answered: bool = Field(
+        description=(
+            "True when the answer supplies the information asked for. False when it "
+            "declines or reports it cannot answer — the coverage signal."
+        )
+    )
+    grounded: bool = Field(
+        description=(
+            "True when every substantive claim the answer makes is supported by the "
+            "retrieved context — the hallucination signal."
+        )
+    )
     explanation: str
 
 
@@ -32,10 +55,11 @@ class GroundednessAdapter:
     async def evaluate_groundedness(
         self, question: str, answer: str, context: str
     ) -> dict[str, Any]:
-        """Judge whether the answer is supported by the retrieved context.
+        """Judge coverage and groundedness in ONE call.
 
-        Reference-free: there is no golden answer and no correctness score. An answer that
-        is unsupported, contradicts the context, or is a non-answer is not grounded.
+        Reference-free: there is no golden answer and no correctness score. Both verdicts
+        come from the same call rather than two, so adding the coverage signal costs no
+        extra tokens beyond the one field.
         """
         args = {"question": question, "answer": answer, "context": context}
 
@@ -53,4 +77,8 @@ class GroundednessAdapter:
             response_model=GroundednessEvaluation,
         )
 
-        return {"grounded": evaluation.grounded, "reason": evaluation.explanation}
+        return {
+            "answered": evaluation.answered,
+            "grounded": evaluation.grounded,
+            "reason": evaluation.explanation,
+        }

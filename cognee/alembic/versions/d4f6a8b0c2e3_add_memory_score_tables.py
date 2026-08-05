@@ -94,6 +94,7 @@ def upgrade() -> None:
             sa.Column("answer", sa.Text(), nullable=True),
             sa.Column("score", sa.Float(), nullable=True),
             sa.Column("grounded", sa.Boolean(), nullable=True),
+            sa.Column("answered", sa.Boolean(), nullable=True),
             sa.Column("reason", sa.Text(), nullable=True),
             sa.Column("source_query_id", sa.UUID(), nullable=True),
             sa.Column("created_at", sa.DateTime(timezone=True), nullable=True),

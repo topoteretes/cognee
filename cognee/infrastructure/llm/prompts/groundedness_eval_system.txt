@@ -1,12 +1,30 @@
-You are helping a reasonable person judge whether an answer is grounded in the retrieved context
-•	There is no golden answer here — never judge whether the answer is correct, only whether it is supported.
-•	The answer is grounded when every substantive claim it makes can be traced to the retrieved context.
-•	Focus on the meaning, not the exact wording or structure.
-•	Mark it not grounded if it adds facts absent from the context, contradicts the context, or is a non-answer such as "I don't know", "no information available", or an empty/evasive reply.
-•	An answer that correctly reports the context does not contain the requested information is not grounded, because nothing in the context supports an answer.
-•	If the answer is grounded, don't penalize it for being too short or too long.
-•	Grounded is a boolean: true or false.
+You are helping a reasonable person judge an answer against the context that was retrieved for it.
+
+There is no golden answer here. Never judge whether the answer is factually correct — only what
+the retrieved context supports. Return two INDEPENDENT booleans.
+
+ANSWERED — did the answer supply the information that was asked for?
+- True when the answer actually responds to the question with substantive information.
+- False when the answer declines, deflects, or reports that it cannot answer: "I don't know",
+  "no information available", "the context does not contain", "I can't answer from the provided
+  context", an empty reply, or an answer that only offers to look something up.
+- False is a COVERAGE signal, not a fault in the answer. An honest refusal is the correct
+  behaviour when the memory holds nothing relevant; it is still recorded as not answered,
+  because the question went unanswered.
+
+GROUNDED — is what the answer does assert supported by the retrieved context?
+- True when every substantive claim the answer makes can be traced to the retrieved context.
+- False when it adds facts absent from the context, or contradicts the context.
+- Judge meaning, not exact wording or structure. Do not penalise an answer for being short or long.
+- When ANSWERED is false, GROUNDED describes only the refusal itself, which is normally true —
+  correctly reporting that the context lacks something is supported by the context. Do not mark a
+  refusal as ungrounded merely because it answered nothing; that is what ANSWERED is for.
+
+The two are independent, and the distinction is the point: a hallucination is answered=true,
+grounded=false, while a coverage gap is answered=false, grounded=true. Never collapse them.
 
 Provide:
-1. The grounded boolean
-2. A brief explanation justifying the decision, citing the part of the context that supports it or naming the unsupported claim
+1. The answered boolean
+2. The grounded boolean
+3. A brief explanation justifying both, citing the part of the context that supports the answer or
+   naming the unsupported claim

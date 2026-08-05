@@ -142,8 +142,17 @@ class ScoreRunQuestion(BaseModel):
     grounded: bool | None = Field(
         default=None,
         description=(
-            "Whether the answer was supported by the retrieved context. Real questions "
-            "only; null for synthetic questions."
+            "Whether the answer was supported by the retrieved context — the "
+            "hallucination signal. Real questions only; null for synthetic questions."
+        ),
+    )
+    answered: bool | None = Field(
+        default=None,
+        description=(
+            "Whether the memory supplied the information asked for, rather than "
+            "declining — the coverage signal. Independent of grounded: an honest "
+            "refusal is answered=false, grounded=true. Real questions only; null for "
+            "synthetic questions, which cannot evidence a coverage gap."
         ),
     )
     reason: str | None = Field(default=None, description="The judge's explanation.")
@@ -202,13 +211,41 @@ class ScoreRunDocument(BaseModel):
         ),
     )
     real_question_count: int = Field(default=0, ge=0)
+    coverage: float | None = Field(
+        default=None,
+        description=(
+            "SECOND KPI, never folded into overall_accuracy: the fraction of replayed "
+            "real questions the memory could answer at all. Accuracy is 'of what it "
+            "attempted, how much was right'; coverage is 'of what was asked, how much "
+            "could it attempt'. A thin memory scores HIGH on accuracy and LOW here, so "
+            "read the pair together — low coverage means data is missing, while high "
+            "coverage with low accuracy means the data is there and recall is failing. "
+            "Null when no real question produced a verdict."
+        ),
+    )
+    measured_real_question_count: int = Field(
+        default=0,
+        ge=0,
+        description="Coverage's denominator: real questions that produced a verdict.",
+    )
+    answered_real_question_count: int = Field(default=0, ge=0, description="Coverage's numerator.")
     created_at: str | None = Field(default=None, description="When the run was registered.")
     completed_at: str | None = Field(default=None, description="When the run stopped.")
     topics: list[ScoreRunTopic] = Field(default_factory=list)
     questions: list[ScoreRunQuestion] = Field(default_factory=list)
     ungrounded_real_questions: list[str] = Field(
         default_factory=list,
-        description="Texts of the real questions whose answers were judged not grounded.",
+        description=(
+            "Real questions the memory answered with claims the retrieved context did "
+            "not support — HALLUCINATIONS. Not the same as unanswerable_real_questions."
+        ),
+    )
+    unanswerable_real_questions: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Real questions the memory had nothing to say about — COVERAGE GAPS. This "
+            "is the 'questions your users asked that could not be answered' list."
+        ),
     )
 
 

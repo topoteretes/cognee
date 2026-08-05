@@ -38,8 +38,14 @@ class ScoredQuestion(Base):
 
     # Correctness score, synthetic questions only.
     score = Column(Float, nullable=True)
-    # Groundedness boolean, real questions only.
+    # Groundedness boolean, real questions only. The HALLUCINATION signal: was what the
+    # answer asserted supported by the retrieved context.
     grounded = Column(Boolean, nullable=True)
+    # Coverage boolean, real questions only. The COVERAGE signal: did the memory supply
+    # the information asked for, or decline. Independent of ``grounded`` — an honest
+    # refusal is answered=False, grounded=True, and a hallucination is the reverse.
+    # NULL means unmeasured (a recall or judge failure), never "no".
+    answered = Column(Boolean, nullable=True)
 
     reason = Column(Text, nullable=True)
     source_query_id = Column(UUID, nullable=True)

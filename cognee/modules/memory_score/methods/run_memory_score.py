@@ -528,6 +528,9 @@ async def _score_synthetic_question(
         "answer": None,
         "score": None,
         "grounded": None,
+        # Coverage is not knowable from a synthetic question: it was generated from a
+        # chunk that is in the graph, so it can never evidence a gap.
+        "answered": None,
         "reason": None,
         "source_query_id": None,
     }
@@ -570,11 +573,21 @@ async def _score_real_question(
     question: str,
     semaphore: asyncio.Semaphore,
 ) -> dict[str, Any]:
-    """Answer + groundedness-judge one real question.
+    """Answer + judge one real question for COVERAGE and groundedness.
 
     ``expected_answer`` and ``score`` stay NULL: a question the tenant actually
     asked has no golden answer, so correctness is not knowable and is never
-    guessed at. The only verdict is the reference-free groundedness boolean.
+    guessed at. What is knowable without one is two independent booleans:
+
+    * ``answered`` — did the memory supply what was asked, or decline? This is the
+      only place a COVERAGE gap can surface. Synthetic questions cannot reveal one,
+      because they are generated from chunks that exist by construction, so a
+      question the tenant actually asked is the sole input that can show the memory
+      holding nothing relevant.
+    * ``grounded`` — was what the answer asserted supported by the retrieved
+      context? The hallucination signal.
+
+    Both NULL means unmeasured (recall or judge failure), never "no".
     """
     row: dict[str, Any] = {
         "topic": None,
@@ -584,6 +597,7 @@ async def _score_real_question(
         "answer": None,
         "score": None,
         "grounded": None,
+        "answered": None,
         "reason": None,
         "source_query_id": query_id,
     }
@@ -592,19 +606,29 @@ async def _score_real_question(
         answered = await _answer(executor, question, "")
         row["answer"] = answered["answer"]
 
-        if answered["error"] or not answered["answer"].strip():
-            # UNMEASURED, not ungrounded: an infrastructure failure is not a
-            # groundedness verdict, and ``ungrounded_real_questions`` is a memory
-            # quality signal that a recall outage must not pollute. ``grounded``
-            # stays NULL, exactly as ``score`` does on the synthetic path for the
-            # same class of failure.
-            row["reason"] = answered["error"] or "Recall produced an empty answer."
+        if answered["error"]:
+            # UNMEASURED: an infrastructure failure is not a verdict about the
+            # memory, and neither the coverage nor the hallucination list may be
+            # polluted by a recall outage. Both booleans stay NULL, exactly as
+            # ``score`` does on the synthetic path for the same class of failure.
+            row["reason"] = answered["error"]
+            return row
+
+        if not answered["answer"].strip():
+            # Recall succeeded and produced nothing to say: a COVERAGE gap, and the
+            # clearest one there is. Not a groundedness verdict — an empty answer
+            # asserts nothing, so there is nothing to be unsupported.
+            row["answered"] = False
+            row["reason"] = "Recall produced an empty answer."
             return row
 
         if not answered["context"].strip():
-            # No retrieved context means nothing can support the answer. That is
-            # a groundedness verdict on its own; no need to pay for a judge call.
-            row["grounded"] = False
+            # Nothing was retrieved, so the memory held nothing relevant. That is a
+            # coverage gap decided without paying for a judge call. ``grounded``
+            # stays NULL rather than False: with no context, "supported by the
+            # context" has no truth value, and forcing False here would file a
+            # coverage gap as a hallucination.
+            row["answered"] = False
             row["reason"] = "No context was retrieved for this question."
             return row
 
@@ -621,6 +645,7 @@ async def _score_real_question(
             row["reason"] = f"Groundedness judge failed: {error}"
             return row
 
+    row["answered"] = verdict.get("answered")
     row["grounded"] = verdict.get("grounded")
     row["reason"] = verdict.get("reason")
     return row
@@ -979,6 +1004,21 @@ def build_memory_score_document(
     including the ones a recall or judge failure left unmeasured. A consumer
     comparing the two can see how much of the run actually landed, and can
     distinguish "82% over 100 questions" from "82% over 9 of them".
+
+    ``coverage`` is a SECOND KPI, deliberately not folded into
+    ``overall_accuracy``. The two answer different questions — accuracy is "of what
+    the memory attempted, how much was right", coverage is "of what was asked, how
+    much could it attempt at all" — and a thin memory scores HIGH on the first and
+    LOW on the second. Blending them would produce a number where 0.6 could mean
+    either wrong answers or absent data, which are opposite remedies. Kept apart,
+    the pair reads directly: low coverage means the data is missing, while high
+    coverage with low accuracy means the data is there and recall is failing.
+
+    Coverage comes only from real questions. A synthetic question is generated from a
+    chunk that is in the graph, so it can never evidence a gap; a question the tenant
+    actually asked is the only input that can. It is therefore null when the run
+    replayed no real questions, and it inherits their sample size — see
+    ``real_question_limit``.
     """
     status_value = run.status.value if isinstance(run.status, MemoryScoreRunStatus) else run.status
 
@@ -987,6 +1027,17 @@ def build_memory_score_document(
         for question in questions
         if question.source == SOURCE_SYNTHETIC and question.score is not None
     )
+
+    # COVERAGE, over the real questions that produced a verdict. Rows left NULL by a
+    # recall or judge failure are excluded from both sides of the fraction, so an
+    # outage lowers confidence in the number rather than the number itself.
+    measured_real = [
+        question
+        for question in questions
+        if question.source == SOURCE_REAL and question.answered is not None
+    ]
+    answered_real = [question for question in measured_real if question.answered]
+    coverage = len(answered_real) / len(measured_real) if measured_real else None
 
     return {
         "run_id": str(run.id),
@@ -1002,6 +1053,9 @@ def build_memory_score_document(
         "synthetic_question_count": run.synthetic_question_count or 0,
         "judged_synthetic_question_count": judged_synthetic_question_count,
         "real_question_count": run.real_question_count or 0,
+        "coverage": coverage,
+        "measured_real_question_count": len(measured_real),
+        "answered_real_question_count": len(answered_real),
         "created_at": run.created_at.isoformat() if run.created_at else None,
         "completed_at": run.completed_at.isoformat() if run.completed_at else None,
         "topics": run.topics if isinstance(run.topics, list) else [],
@@ -1014,13 +1068,24 @@ def build_memory_score_document(
                 "expected_answer": question.expected_answer,
                 "score": question.score,
                 "grounded": question.grounded,
+                "answered": question.answered,
                 "reason": question.reason,
             }
             for question in questions
         ],
+        # Two lists, because they are two different failures with two different
+        # remedies. Ungrounded means the memory answered and the answer was not
+        # supported — a hallucination. Unanswerable means the memory had nothing to
+        # say — a coverage gap. The second is the "questions your users asked that
+        # could not be answered" list; the first must never be read as that.
         "ungrounded_real_questions": [
             question.text
             for question in questions
             if question.source == SOURCE_REAL and question.grounded is False
+        ],
+        "unanswerable_real_questions": [
+            question.text
+            for question in questions
+            if question.source == SOURCE_REAL and question.answered is False
         ],
     }

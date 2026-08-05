@@ -278,6 +278,7 @@ def _question_row(**overrides):
         "expected_answer": None,
         "score": None,
         "grounded": None,
+        "answered": None,
         "reason": None,
     }
     row.update(overrides)
@@ -326,11 +327,15 @@ def test_document_shape_is_stable():
         "synthetic_question_count",
         "judged_synthetic_question_count",
         "real_question_count",
+        "coverage",
+        "measured_real_question_count",
+        "answered_real_question_count",
         "created_at",
         "completed_at",
         "topics",
         "questions",
         "ungrounded_real_questions",
+        "unanswerable_real_questions",
     }
 
 
@@ -425,3 +430,78 @@ def test_context_batches_respect_the_char_budget():
     texts = ["z" * 10_000 for _ in range(9)]
     for batch in _context_batches(texts, 45):
         assert len(batch) <= MAX_CONTEXT_CHARS + 32  # + joiner
+
+
+# --------------------------------------------------------------------------
+# Coverage: the second KPI
+# --------------------------------------------------------------------------
+
+
+def test_coverage_is_separate_from_accuracy():
+    """A thin memory scores HIGH on accuracy and LOW on coverage.
+
+    This is the inversion the data-floor gate was added to paper over: questions
+    drawn from a handful of chunks are trivially answerable from those same chunks,
+    so accuracy alone flatters exactly the customer who needs to upload more. The two
+    numbers must therefore stay separate — blended, 0.6 could mean either wrong
+    answers or absent data, which are opposite remedies.
+    """
+    questions = [
+        # Perfect recall on everything it actually holds.
+        _question_row(source=SOURCE_SYNTHETIC, score=1.0),
+        _question_row(source=SOURCE_SYNTHETIC, score=1.0),
+        # But it could answer only one of four real questions.
+        _question_row(source=SOURCE_REAL, text="held", answered=True, grounded=True),
+        _question_row(source=SOURCE_REAL, text="gap a", answered=False, grounded=True),
+        _question_row(source=SOURCE_REAL, text="gap b", answered=False, grounded=True),
+        _question_row(source=SOURCE_REAL, text="gap c", answered=False, grounded=True),
+    ]
+
+    document = build_memory_score_document(_run_row(overall_accuracy=1.0), questions)
+
+    assert document["overall_accuracy"] == 1.0, "accuracy stays flattering"
+    assert document["coverage"] == 0.25, "coverage tells the real story"
+    assert document["answered_real_question_count"] == 1
+    assert document["measured_real_question_count"] == 4
+    assert document["unanswerable_real_questions"] == ["gap a", "gap b", "gap c"]
+
+
+def test_coverage_gap_is_not_reported_as_a_hallucination():
+    """An honest refusal is answered=False, grounded=True — opposite failure modes.
+
+    Collapsing them was the original defect: a live run returned grounded=true for a
+    question the corpus could not answer, because the refusal's claim really is
+    traceable to the context, so ungrounded_real_questions stayed empty for exactly
+    the customer the CTA targets.
+    """
+    questions = [
+        _question_row(source=SOURCE_REAL, text="refused", answered=False, grounded=True),
+        _question_row(source=SOURCE_REAL, text="made up", answered=True, grounded=False),
+    ]
+
+    document = build_memory_score_document(_run_row(), questions)
+
+    assert document["unanswerable_real_questions"] == ["refused"]
+    assert document["ungrounded_real_questions"] == ["made up"]
+
+
+def test_unmeasured_real_questions_leave_coverage_alone():
+    """A recall outage must lower confidence in coverage, not coverage itself."""
+    questions = [
+        _question_row(source=SOURCE_REAL, text="ok", answered=True),
+        _question_row(source=SOURCE_REAL, text="outage", answered=None),
+    ]
+
+    document = build_memory_score_document(_run_row(), questions)
+
+    assert document["coverage"] == 1.0
+    assert document["measured_real_question_count"] == 1, "the NULL row is excluded"
+    assert document["unanswerable_real_questions"] == []
+
+
+def test_coverage_is_null_without_real_questions():
+    """No real questions means coverage is unknown, not zero."""
+    document = build_memory_score_document(_run_row(), [_question_row(score=1.0)])
+
+    assert document["coverage"] is None
+    assert document["measured_real_question_count"] == 0
