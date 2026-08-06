@@ -1,8 +1,13 @@
 """Session vector retrieval + distillation demo.
 
+The advanced companion to ``examples/guides/session_distillation.py``. That guide runs a
+minimal before/after distillation experiment on one stated preference; this one replays an
+eight-message scripted session, adds hybrid vector recall over the indexed QA turns, and
+verifies after distillation that the surviving lessons landed in the graph.
+
 Run with:
 
-    uv run python examples/demos/session_distillation_demo.py
+    uv run python examples/advanced_guides/session_distillation_demo.py
 
 This demo exercises both halves of the session memory story on the real public path:
 
