@@ -1,3 +1,18 @@
+"""
+Persist conversation sessions into the knowledge graph.
+
+The advanced companion to ``examples/guides/sessions.py``. That guide shows recall keeping
+two ``session_id`` conversations apart; this one runs six turns across two sessions, then
+goes further: it persists both sessions into the permanent knowledge graph with
+``persist_sessions_in_knowledge_graph_pipeline`` and renders the resulting graph.
+
+Usage:
+    uv run python examples/advanced_guides/conversation_session_persistence_example.py
+
+Requires:
+    LLM_API_KEY set in .env or environment, and session caching enabled (CACHING=true).
+"""
+
 import asyncio
 import os
 

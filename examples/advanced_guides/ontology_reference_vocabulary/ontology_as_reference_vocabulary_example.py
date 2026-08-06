@@ -1,3 +1,19 @@
+"""
+Ontology as a reference vocabulary for extraction.
+
+The advanced companion to ``examples/guides/ontology_quickstart.py``. That guide applies a
+bundled ontology to two inline sentences; this one grounds two bundled real documents
+(``data/text_1.txt``, ``data/text_2.txt``) in ``data/basic_ontology.owl``, building the
+ontology ``Config`` with ``RDFLibOntologyResolver`` explicitly, then queries the
+ontology-constrained graph and renders it for inspection.
+
+Usage:
+    uv run python examples/advanced_guides/ontology_reference_vocabulary/ontology_as_reference_vocabulary_example.py
+
+Requires:
+    LLM_API_KEY set in .env or environment.
+"""
+
 import asyncio
 import os
 from pathlib import Path
