@@ -796,6 +796,8 @@ class SessionManager:
         Fail-open on infrastructure errors: returns [] when the cache is
         unavailable or the cache operation fails.
         """
+        session_id = self.resolve_session_id(session_id)
+        self._validate_session_params(user_id=user_id, session_id=session_id)
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, returning empty session context")
             return []

@@ -8,6 +8,7 @@ from cognee.modules.observability import (
     new_span,
 )
 from cognee.modules.retrieval.utils.access_tracking import update_node_access_timestamps
+from cognee.modules.retrieval.session_search import run_latency_session_search
 from cognee.modules.search.methods.get_search_type_retriever_instance import (
     get_search_type_retriever_instance,
 )
@@ -57,6 +58,24 @@ async def get_retriever_output(
 
     retriever_class = type(retriever_instance).__name__
     only_context = kwargs.get("only_context", False)
+    latency_result = await run_latency_session_search(
+        retriever_instance,
+        raw_query=query_text,
+        original_search_type=query_type,
+        only_context=only_context,
+    )
+    if latency_result is not None:
+        return SearchResultPayload(
+            result_object=latency_result.retrieved_objects,
+            context=latency_result.context,
+            completion=latency_result.completion,
+            search_type=effective_query_type,
+            only_context=False,
+            dataset_name=kwargs.get("dataset").name if kwargs.get("dataset") else None,
+            dataset_id=kwargs.get("dataset").id if kwargs.get("dataset") else None,
+            dataset_tenant_id=kwargs.get("dataset").tenant_id if kwargs.get("dataset") else None,
+        )
+
     effective_query = query_text
     turn_preparation = None
 

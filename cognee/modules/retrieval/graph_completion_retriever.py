@@ -321,6 +321,9 @@ class GraphCompletionRetriever(BaseRetriever):
             enabled=self.include_references and self.response_model is str,
         )
 
+    async def _append_references(self, completions: List[Any], retrieved_objects: Any) -> List[Any]:
+        return await self._append_graph_evidence(completions)
+
     async def get_completion_from_context(
         self,
         query: Optional[str] = None,
@@ -376,7 +379,7 @@ class GraphCompletionRetriever(BaseRetriever):
         # this method (including via super()) appends references once. Evidence is
         # grounded in each completion's own text, so a cache-hit answer never
         # cites chunks that share nothing with it.
-        return await self._append_graph_evidence(completions)
+        return await self._append_references(completions, retrieved_objects)
 
     async def get_completion(
         self, query: Optional[str] = None, query_batch: Optional[List[str]] = None
@@ -392,6 +395,16 @@ class GraphCompletionRetriever(BaseRetriever):
             List[Any]: A list containing the generated completions or response objects.
         """
         validate_retriever_input(query, query_batch)
+
+        from cognee.modules.retrieval.session_search import run_latency_session_search
+
+        latency_result = await run_latency_session_search(
+            self,
+            raw_query=query or "",
+            is_batch=query_batch is not None,
+        )
+        if latency_result is not None:
+            return latency_result.completion
 
         effective_query = query
         turn_preparation = None

@@ -119,6 +119,13 @@ class TripletRetriever(BaseRetriever):
         completion = await generate_completion(query=query, **kwargs)
         return [completion]
 
+    async def _append_references(self, completions: List[Any], retrieved_objects: Any) -> List[Any]:
+        return append_chunk_evidence(
+            completions,
+            retrieved_objects,
+            enabled=self.include_references and self.response_model is str,
+        )
+
     async def get_completion_from_context(
         self,
         query: str,
@@ -175,8 +182,4 @@ class TripletRetriever(BaseRetriever):
             completions = await self._generate_completion_without_session(query, context)
 
         # Both the session/cache branch and the non-session branch rejoin here.
-        return append_chunk_evidence(
-            completions,
-            retrieved_objects,
-            enabled=self.include_references and self.response_model is str,
-        )
+        return await self._append_references(completions, retrieved_objects)

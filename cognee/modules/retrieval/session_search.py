@@ -4,7 +4,20 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any, Literal
 
-from cognee.infrastructure.session.session_search_models import SessionTurnSnapshot
+from cognee.context_global_variables import session_user
+from cognee.infrastructure.databases.cache.config import CacheConfig
+from cognee.infrastructure.llm.LLMGateway import LLMGateway
+from cognee.infrastructure.locks import session_turn_lock
+from cognee.infrastructure.session.get_session_manager import get_session_manager
+from cognee.infrastructure.session.session_latency_turn import (
+    commit_latency_turn,
+    complete_latency_turn,
+    load_latency_turn_snapshot,
+)
+from cognee.infrastructure.session.session_search_models import (
+    SessionTurnSnapshot,
+    get_session_search_completion_model,
+)
 from cognee.modules.retrieval.session_result_fusion import (
     fuse_graph_results,
     fuse_hybrid_results,
@@ -24,6 +37,13 @@ MAX_CONTEXTUAL_QUERY_CHARS = 2000
 class LatencyRetrievalResult:
     retrieved_objects: Any
     context: Any
+
+
+@dataclass(frozen=True, slots=True)
+class LatencySearchResult:
+    retrieved_objects: Any
+    context: Any
+    completion: list[Any]
 
 
 @lru_cache(maxsize=1)
@@ -178,3 +198,92 @@ async def retrieve_latency_context(
     if retrieved_objects:
         await update_node_access_timestamps(retrieved_objects)
     return LatencyRetrievalResult(retrieved_objects=retrieved_objects, context=context)
+
+
+async def run_latency_session_search(
+    retriever,
+    *,
+    raw_query: str,
+    original_search_type: SearchType | None = None,
+    is_batch: bool = False,
+    only_context: bool = False,
+) -> LatencySearchResult | None:
+    """Run the complete latency turn, or return None when policy selects accuracy."""
+    cache_config = CacheConfig()
+    if cache_config.session_search_mode != LATENCY_OPTIMIZED:
+        return None
+
+    user = session_user.get()
+    user_id = getattr(user, "id", None)
+    if not user_id or type(retriever) not in _latency_retriever_types():
+        return None
+
+    session_manager = get_session_manager()
+    response_model = getattr(retriever, "response_model", str)
+    try:
+        completion_model = get_session_search_completion_model(response_model)
+        structured_output_supported = LLMGateway.supports_structured_output_model(completion_model)
+    except TypeError:
+        structured_output_supported = False
+
+    mode = resolve_session_search_mode(
+        cache_config.session_search_mode,
+        original_search_type=original_search_type,
+        retriever_type=type(retriever),
+        session_available=session_manager.is_session_available_for_completion(user_id),
+        is_batch=is_batch,
+        only_context=only_context,
+        structured_output_supported=structured_output_supported,
+    )
+    if mode != LATENCY_OPTIMIZED:
+        return None
+
+    resolved_user_id = str(user_id)
+    resolved_session_id = session_manager.resolve_session_id(getattr(retriever, "session_id", None))
+    async with session_turn_lock(resolved_user_id, resolved_session_id):
+        snapshot = await load_latency_turn_snapshot(
+            session_manager,
+            user_id=resolved_user_id,
+            session_id=resolved_session_id,
+            raw_message=raw_query,
+        )
+        retrieval = await retrieve_latency_context(
+            retriever,
+            raw_query=raw_query,
+            snapshot=snapshot,
+        )
+        auto_feedback = session_manager.is_auto_feedback_enabled()
+        completion = await complete_latency_turn(
+            snapshot=snapshot,
+            context=retrieval.context,
+            user_id=user_id,
+            session_id=resolved_session_id,
+            user_prompt_path=retriever.user_prompt_path,
+            system_prompt_path=retriever.system_prompt_path,
+            system_prompt=retriever.system_prompt,
+            response_model=response_model,
+            auto_feedback=auto_feedback,
+        )
+        used_graph_element_ids = retriever._extract_context_object_ids(retrieval.retrieved_objects)
+        await commit_latency_turn(
+            session_manager,
+            snapshot=snapshot,
+            completion=completion,
+            user_id=resolved_user_id,
+            session_id=resolved_session_id,
+            dataset_id=str(session_manager.dataset_id) if session_manager.dataset_id else None,
+            used_graph_element_ids=used_graph_element_ids,
+            auto_feedback=auto_feedback,
+        )
+
+    completions = [completion.response]
+    if not completion.is_acknowledgement and isinstance(completion.response, str):
+        completions = await retriever._append_references(
+            completions,
+            retrieval.retrieved_objects,
+        )
+    return LatencySearchResult(
+        retrieved_objects=retrieval.retrieved_objects,
+        context=retrieval.context,
+        completion=completions,
+    )

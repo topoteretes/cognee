@@ -84,6 +84,10 @@ class BaseRetriever(ABC):
         """
         return None
 
+    async def _append_references(self, completions: list[Any], retrieved_objects: Any) -> list[Any]:
+        """Apply retriever-owned references; unsupported retrievers leave answers unchanged."""
+        return completions
+
     async def prepare_session_turn_for_retrieval(self, query: str):
         """Analyze a session turn before retrieval and fail open to the original query."""
         try:
@@ -113,6 +117,12 @@ class BaseRetriever(ABC):
         Returns:
             List[Any]: A list containing the generated completions or response objects.
         """
+        from cognee.modules.retrieval.session_search import run_latency_session_search
+
+        latency_result = await run_latency_session_search(self, raw_query=query)
+        if latency_result is not None:
+            return latency_result.completion
+
         retrieved_objects = await self.get_retrieved_objects(query=query)
         context = await self.get_context_from_objects(
             query=query, retrieved_objects=retrieved_objects

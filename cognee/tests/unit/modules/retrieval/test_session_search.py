@@ -1,13 +1,20 @@
-from unittest.mock import AsyncMock, patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import uuid4
 
 import pytest
 
 from cognee.infrastructure.session.session_search_models import SessionTurnSnapshot
+from cognee.infrastructure.session.session_search_models import (
+    get_session_search_completion_model,
+)
 from cognee.modules.retrieval.completion_retriever import CompletionRetriever
 from cognee.modules.retrieval.session_search import (
+    LatencyRetrievalResult,
     MAX_CONTEXTUAL_QUERY_CHARS,
     build_contextual_query,
     retrieve_latency_context,
+    run_latency_session_search,
 )
 
 
@@ -122,3 +129,117 @@ async def test_latency_retrieval_skips_duplicate_contextual_lane():
         await retrieve_latency_context(retriever, raw_query="current", snapshot=snapshot)
 
     retriever.get_retrieved_objects.assert_awaited_once_with(query="current")
+
+
+@pytest.mark.asyncio
+async def test_latency_orchestrator_commits_then_applies_retriever_references():
+    retriever = CompletionRetriever(session_id="s1", include_references=True)
+    retriever._extract_context_object_ids = lambda objects: {"node_ids": ["n1"]}
+    retriever._append_references = AsyncMock(return_value=["answer with references"])
+    manager = MagicMock()
+    manager.is_session_available_for_completion.return_value = True
+    manager.resolve_session_id.return_value = "s1"
+    manager.is_auto_feedback_enabled.return_value = True
+    manager.dataset_id = uuid4()
+    snapshot = SessionTurnSnapshot(raw_message="question")
+    completion = get_session_search_completion_model(str)(response="answer")
+
+    with (
+        patch(
+            "cognee.modules.retrieval.session_search.CacheConfig",
+            return_value=SimpleNamespace(session_search_mode="latency_optimized"),
+        ),
+        patch("cognee.modules.retrieval.session_search.session_user") as current_user,
+        patch(
+            "cognee.modules.retrieval.session_search.get_session_manager",
+            return_value=manager,
+        ),
+        patch(
+            "cognee.modules.retrieval.session_search.LLMGateway.supports_structured_output_model",
+            return_value=True,
+        ),
+        patch(
+            "cognee.modules.retrieval.session_search.load_latency_turn_snapshot",
+            new_callable=AsyncMock,
+            return_value=snapshot,
+        ),
+        patch(
+            "cognee.modules.retrieval.session_search.retrieve_latency_context",
+            new_callable=AsyncMock,
+            return_value=LatencyRetrievalResult([item("n1")], "context"),
+        ),
+        patch(
+            "cognee.modules.retrieval.session_search.complete_latency_turn",
+            new_callable=AsyncMock,
+            return_value=completion,
+        ),
+        patch(
+            "cognee.modules.retrieval.session_search.commit_latency_turn",
+            new_callable=AsyncMock,
+        ) as commit,
+    ):
+        current_user.get.return_value = SimpleNamespace(id=uuid4())
+        result = await run_latency_session_search(retriever, raw_query="question")
+
+    assert result.completion == ["answer with references"]
+    commit.assert_awaited_once()
+    retriever._append_references.assert_awaited_once_with(
+        ["answer"],
+        [item("n1")],
+    )
+
+
+@pytest.mark.asyncio
+async def test_latency_orchestrator_skips_references_for_acknowledgement():
+    retriever = CompletionRetriever(session_id="s1", include_references=True)
+    retriever._extract_context_object_ids = lambda objects: None
+    retriever._append_references = AsyncMock()
+    manager = MagicMock()
+    manager.is_session_available_for_completion.return_value = True
+    manager.resolve_session_id.return_value = "s1"
+    manager.is_auto_feedback_enabled.return_value = True
+    manager.dataset_id = None
+    completion = get_session_search_completion_model(str)(
+        response="Understood.",
+        is_acknowledgement=True,
+    )
+
+    with (
+        patch(
+            "cognee.modules.retrieval.session_search.CacheConfig",
+            return_value=SimpleNamespace(session_search_mode="latency_optimized"),
+        ),
+        patch("cognee.modules.retrieval.session_search.session_user") as current_user,
+        patch(
+            "cognee.modules.retrieval.session_search.get_session_manager",
+            return_value=manager,
+        ),
+        patch(
+            "cognee.modules.retrieval.session_search.LLMGateway.supports_structured_output_model",
+            return_value=True,
+        ),
+        patch(
+            "cognee.modules.retrieval.session_search.load_latency_turn_snapshot",
+            new_callable=AsyncMock,
+            return_value=SessionTurnSnapshot(raw_message="question"),
+        ),
+        patch(
+            "cognee.modules.retrieval.session_search.retrieve_latency_context",
+            new_callable=AsyncMock,
+            return_value=LatencyRetrievalResult([], "context"),
+        ),
+        patch(
+            "cognee.modules.retrieval.session_search.complete_latency_turn",
+            new_callable=AsyncMock,
+            return_value=completion,
+        ),
+        patch(
+            "cognee.modules.retrieval.session_search.commit_latency_turn",
+            new_callable=AsyncMock,
+        ),
+    ):
+        current_user.get.return_value = SimpleNamespace(id=uuid4())
+        result = await run_latency_session_search(retriever, raw_query="question")
+
+    assert result.completion == ["Understood."]
+    retriever._append_references.assert_not_awaited()

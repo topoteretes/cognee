@@ -480,6 +480,12 @@ class HybridRetriever(BaseRetriever):
             )
             completions = [completion]
 
+        return await self._append_references(completions, retrieved_objects)
+
+    def _extract_context_object_ids(self, retrieved_objects: Any) -> Optional[Dict[str, List[str]]]:
+        return extract_context_object_ids(retrieved_objects)
+
+    async def _append_references(self, completions: List[Any], retrieved_objects: Any) -> List[Any]:
         return self._append_chunk_references(completions, retrieved_objects)
 
     def _append_chunk_references(self, completions: List[Any], retrieved_objects: Any) -> List[Any]:
@@ -502,6 +508,16 @@ class HybridRetriever(BaseRetriever):
         self, query: Optional[str] = None, query_batch: Optional[List[str]] = None
     ) -> List[Any]:
         validate_retriever_input(query, query_batch, self._use_session_cache())
+
+        from cognee.modules.retrieval.session_search import run_latency_session_search
+
+        latency_result = await run_latency_session_search(
+            self,
+            raw_query=query or "",
+            is_batch=query_batch is not None,
+        )
+        if latency_result is not None:
+            return latency_result.completion
 
         retrieved_objects = await self.get_retrieved_objects(query=query, query_batch=query_batch)
         context = await self.get_context_from_objects(

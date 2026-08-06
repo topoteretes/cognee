@@ -109,6 +109,13 @@ class CompletionRetriever(BaseRetriever):
         completion = await generate_completion(query=query, **kwargs)
         return [completion]
 
+    async def _append_references(self, completions: List[Any], retrieved_objects: Any) -> List[Any]:
+        return append_chunk_evidence(
+            completions,
+            retrieved_objects,
+            enabled=self.include_references and self.response_model is str,
+        )
+
     async def get_completion_from_context(
         self,
         query: str,
@@ -168,8 +175,4 @@ class CompletionRetriever(BaseRetriever):
         # logged-in/cached calls also receive references. Evidence is grounded in
         # each completion's own text, so a cache-hit answer never cites chunks
         # that share nothing with it.
-        return append_chunk_evidence(
-            completions,
-            retrieved_objects,
-            enabled=self.include_references and self.response_model is str,
-        )
+        return await self._append_references(completions, retrieved_objects)

@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from cognee.infrastructure.session.session_manager import SessionTurnPreparation
+from cognee.modules.retrieval.session_search import LatencySearchResult
 from cognee.modules.search.methods.get_retriever_output import (
     _count_retrieved_objects,
     get_retriever_output,
@@ -169,6 +170,47 @@ async def test_get_retriever_output_can_bypass_session_preparation_without_only_
         result = await get_retriever_output(SearchType.CODE, "Checkout")
 
     assert result.completion == {"operation": "query_facts", "facts": []}
+
+
+@pytest.mark.asyncio
+async def test_get_retriever_output_maps_latency_result_without_accuracy_preparation():
+    retriever = _NoAnswerRetriever()
+    latency_result = LatencySearchResult(
+        retrieved_objects=[{"id": "obj-1"}],
+        context="context",
+        completion=["answer"],
+    )
+    with (
+        patch.object(
+            get_retriever_output_module,
+            "get_graph_engine",
+            new_callable=AsyncMock,
+            return_value=_FakeGraphEngine(),
+        ),
+        patch.object(
+            get_retriever_output_module,
+            "get_search_type_retriever_instance",
+            new_callable=AsyncMock,
+            return_value=retriever,
+        ),
+        patch.object(
+            get_retriever_output_module,
+            "run_latency_session_search",
+            new_callable=AsyncMock,
+            return_value=latency_result,
+        ) as run_latency,
+    ):
+        result = await get_retriever_output(SearchType.RAG_COMPLETION, "question")
+
+    assert result.result_object == latency_result.retrieved_objects
+    assert result.context == "context"
+    assert result.completion == ["answer"]
+    run_latency.assert_awaited_once_with(
+        retriever,
+        raw_query="question",
+        original_search_type=SearchType.RAG_COMPLETION,
+        only_context=False,
+    )
 
 
 def test_count_retrieved_objects_counts_structured_lists():
