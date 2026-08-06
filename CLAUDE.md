@@ -108,7 +108,7 @@ cognee-cli recall "Your question"
 cognee-cli improve -d my_project       # enrich/index the graph
 cognee-cli forget --all                # NOTE: no confirmation prompt
 
-# low level operations (still ship; what the memory commands call underneath)
+# Low level operations (still ship; what the memory commands call underneath)
 cognee-cli add "Your text here" && cognee-cli cognify
 cognee-cli search "Your query"
 cognee-cli delete --all                # prompts before deleting
@@ -128,7 +128,7 @@ As of cognee 1.x the memory API is the primary surface. All functions are async.
 3. **improve()** - Enrich/index the graph: triplet embeddings, feedback weights, and (with `session_ids`) bridging session Q&A and distilled learnings into the permanent graph.
 4. **forget()** - Unified deletion (`data_id` / `dataset` / `dataset_id` / `everything=True`, plus `memory_only=True` to drop graph+vectors but keep raw files).
 
-#### low level operations: add → cognify → search/memify
+#### Low level operations: add → cognify → search/memify
 
 These still ship and are what the memory API calls underneath. Reach for them to drive one stage in isolation (custom pipeline tasks, stage-level debugging), not for ordinary ingestion or retrieval.
 
@@ -137,7 +137,7 @@ These still ship and are what the memory API calls underneath. Reach for them to
 3. **search()** - Query knowledge using various retrieval strategies
 4. **memify()** - Enrich graph with additional context and rules
 
-Note: Using low level operations over core is useful in the following contexts.
+Note: Using Low level operations over core is useful in the following contexts.
 1) functional_relationships= is completely unreachable from remember(). So Only cognify can constrain single-target relationships.
 2) remember() hardcodes datasets_arg = [dataset_name]: always exactly one. Use cognify for this: cognify(datasets=["a","b","c"]) or datasets=None (every dataset the user owns.)
 3) remember() always runs add() first. To rebuild a graph over data already in the DB — after forget(memory_only=True), or with a new graph_model/ontology, cognify() is the only path.
@@ -173,7 +173,7 @@ API Layer (cognee/api/v1/)
     ↓
 Memory API (remember, recall, improve, forget)
     ↓
-low level operations (add, cognify, search, memify)
+Low level operations (add, cognify, search, memify)
     ↓
 Pipeline Orchestrator (cognee/modules/pipelines/)
     ↓
@@ -196,7 +196,7 @@ NOTE: This is how the memory API flow works under the hood; it's read as a flow 
 
 Key files: `cognee/api/v1/remember/remember.py`, `cognee/api/v1/recall/recall.py`, `cognee/api/v1/improve/improve.py`, `cognee/api/v1/forget/forget.py`
 
-The stages below are the low level operations these call underneath.
+The stages below are the Low level operations these call underneath.
 
 #### ADD: Data Ingestion
 `add()` → `resolve_data_directories` → `ingest_data` → `save_data_item_to_storage` → Create Dataset + Data records in relational DB
@@ -520,7 +520,7 @@ FastAPI application with versioned routes under `/api/v1/` (routers registered i
 - `/recall` - Query memory
 - `/improve` - Graph enrichment/indexing
 - `/forget` - Unified deletion
-- `/add`, `/cognify`, `/search`, `/memify`, `/delete` - low level operations
+- `/add`, `/cognify`, `/search`, `/memify`, `/delete` - Low level operations
 - `/datasets` - Dataset management
 - `/users` - Authentication (when `REQUIRE_AUTHENTICATION` is effectively true; see auth posture below)
 - `/visualize` - Graph visualization server
@@ -537,7 +537,7 @@ Memory API (primary):
 - `improve(dataset="main_dataset", session_ids=..., node_name=...)` - Enrich/index the graph
 - `forget(data_id=..., dataset=..., dataset_id=..., everything=False, memory_only=False)` - Remove data
 
-low level operations:
+Low level operations:
 - `add(data, dataset_name)` - Ingest data
 - `cognify(datasets)` - Build knowledge graph
 - `search(query_text, query_type)` - Query knowledge
