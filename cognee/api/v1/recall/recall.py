@@ -105,20 +105,13 @@ async def _resolve_session_cache_user_id(session_id: str, caller_user_id: str | 
 
         from cognee.infrastructure.databases.relational import get_relational_engine
         from cognee.modules.session_lifecycle.models import SessionRecord
-        from cognee.modules.users.permissions.methods.get_specific_user_permission_datasets import (
-            get_specific_user_permission_datasets,
-        )
+        from cognee.modules.users.permissions.methods import get_permitted_dataset_ids
 
         caller_uuid = UUID(caller_user_id) if caller_user_id else None
         if caller_uuid is None:
             return caller_user_id
 
-        permitted_ids: list[UUID] = []
-        try:
-            permitted = await get_specific_user_permission_datasets(caller_uuid, "read", None)
-            permitted_ids = [ds.id for ds in permitted] if permitted else []
-        except Exception:
-            permitted_ids = []
+        permitted_ids = await get_permitted_dataset_ids(caller_uuid)
 
         # Fetch ALL candidate rows the caller can see for this
         # session_id. Owner match OR permitted-dataset match.

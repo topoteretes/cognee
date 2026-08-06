@@ -4,9 +4,6 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Literal, Optional
 from uuid import UUID as UUIDType
 
-from sqlalchemy import select
-
-from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.agents.models import (
     AgentConnection,
     AgentDatasetRef,
@@ -21,11 +18,9 @@ from cognee.modules.agents.registry import (
     list_registered_agent_connections,
     register_agent_connection,
 )
-from cognee.modules.users.exceptions import PermissionDeniedError
+from cognee.modules.users.methods import get_visible_user_ids
 from cognee.modules.users.models import User
-from cognee.modules.users.permissions.methods.get_specific_user_permission_datasets import (
-    get_specific_user_permission_datasets,
-)
+from cognee.modules.users.permissions.methods import get_readable_datasets
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("agents")
@@ -52,39 +47,6 @@ def _entry_to_dict(entry: Any) -> dict[str, Any]:
     if hasattr(entry, "dict"):
         return entry.dict()
     return {"value": str(entry)}
-
-
-async def _readable_datasets_for(user: User) -> list[Any]:
-    try:
-        return await get_specific_user_permission_datasets(user.id, "read", None)
-    except PermissionDeniedError:
-        return []
-    except Exception as error:
-        logger.warning("Failed to resolve readable datasets for agents API: %s", error)
-        return []
-
-
-async def _child_agent_user_ids(user_id: UUIDType) -> list[UUIDType]:
-    try:
-        engine = get_relational_engine()
-        async with engine.get_async_session() as session:
-            from cognee.modules.users.models import User as UserModel
-
-            rows = (
-                await session.execute(
-                    select(UserModel.id).where(UserModel.parent_user_id == user_id)
-                )
-            ).all()
-            return [row.id for row in rows]
-    except Exception as error:
-        logger.debug("Failed to resolve child agent users for agents API: %s", error)
-        return []
-
-
-async def _visible_user_ids(user: User) -> list[UUIDType]:
-    ids = [user.id]
-    ids.extend(await _child_agent_user_ids(user.id))
-    return ids
 
 
 def _memory_sources_from_datasets(datasets: list[Any]) -> list[MemorySourceConnection]:
@@ -171,9 +133,9 @@ async def list_agent_connections(
     limit: int = 50,
     offset: int = 0,
 ) -> AgentsListResponse:
-    readable_datasets = await _readable_datasets_for(user)
+    readable_datasets = await get_readable_datasets(user.id)
     memory_sources = _memory_sources_from_datasets(readable_datasets)
-    visible_user_ids = await _visible_user_ids(user)
+    visible_user_ids = await get_visible_user_ids(user.id)
     visible_user_id_set = set(visible_user_ids)
     permitted_dataset_id_strings = {source.id for source in memory_sources}
 

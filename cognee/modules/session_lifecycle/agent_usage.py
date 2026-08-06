@@ -31,11 +31,9 @@ from cognee.modules.agents.registry import (
 from cognee.modules.session_lifecycle.metrics import list_session_rows
 from cognee.modules.session_lifecycle.models import SessionRecord
 from cognee.modules.users.exceptions import PermissionDeniedError
-from cognee.modules.users.methods import get_default_user
+from cognee.modules.users.methods import get_default_user, get_visible_user_ids
 from cognee.modules.users.models import User
-from cognee.modules.users.permissions.methods.get_specific_user_permission_datasets import (
-    get_specific_user_permission_datasets,
-)
+from cognee.modules.users.permissions.methods import get_permitted_dataset_ids
 from cognee.modules.users.tenants.methods.get_users_in_tenant import get_users_in_tenant
 from cognee.shared.logging_utils import get_logger
 
@@ -49,36 +47,6 @@ logger = get_logger("session_lifecycle.agent_usage")
 # below) rather than erroring, so it's raised here as a single visible
 # constant instead of a bare literal at the call site.
 _AGENT_CONNECTIONS_PAGE_CAP = 10_000
-
-
-async def _permitted_dataset_ids_for(user: User) -> list[UUIDType]:
-    """Return the UUIDs of datasets this user can read (empty on none)."""
-    try:
-        datasets = await get_specific_user_permission_datasets(user.id, "read", None)
-        return [ds.id for ds in datasets] if datasets else []
-    except PermissionDeniedError:
-        return []
-    except Exception:
-        return []
-
-
-async def _child_agent_user_ids(user_id: UUIDType) -> list[UUIDType]:
-    """Return user IDs of agents whose parent_user_id matches this user."""
-    from cognee.modules.users.models import User as UserModel
-
-    engine = get_relational_engine()
-    async with engine.get_async_session() as session:
-        rows = (
-            await session.execute(select(UserModel.id).where(UserModel.parent_user_id == user_id))
-        ).all()
-        return [row.id for row in rows]
-
-
-async def _visible_user_ids(user: User) -> list[UUIDType]:
-    """User's own ID plus any child agent IDs."""
-    ids = [user.id]
-    ids.extend(await _child_agent_user_ids(user.id))
-    return ids
 
 
 def _latest_wins_agent_map(
@@ -179,7 +147,7 @@ async def _resolve_scope_emails(
 
     Always includes ``visible_user_ids`` — the caller plus their child
     agents, the same base scope every other ``/sessions`` endpoint uses
-    (see ``_visible_user_ids`` in the router). A tenant owner/admin (same
+    (see ``get_visible_user_ids``). A tenant owner/admin (same
     check ``GET /tenants/{id}/users`` uses) additionally gets every
     tenant member unioned in on top of that base scope; a regular
     member — or a caller with no tenant at all (single-user/local mode)
@@ -306,8 +274,8 @@ async def get_sessions_with_agent_info(
     """
     if user is None:
         user = await get_default_user()
-    permitted = await _permitted_dataset_ids_for(user)
-    visible_ids = await _visible_user_ids(user)
+    permitted = await get_permitted_dataset_ids(user.id)
+    visible_ids = await get_visible_user_ids(user.id)
     return await build_sessions_with_agent_info_page(
         user=user,
         permitted_dataset_ids=permitted,
@@ -335,8 +303,8 @@ async def get_cost_by_user_agent(
     """
     if user is None:
         user = await get_default_user()
-    permitted = await _permitted_dataset_ids_for(user)
-    visible_ids = await _visible_user_ids(user)
+    permitted = await get_permitted_dataset_ids(user.id)
+    visible_ids = await get_visible_user_ids(user.id)
     return await compute_cost_by_user_agent(
         user=user,
         visible_user_ids=visible_ids,

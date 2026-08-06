@@ -210,7 +210,7 @@ async def test_single_user_mode_falls_back_to_caller_only(monkeypatch):
 async def test_solo_mode_includes_child_agent_sessions(monkeypatch):
     """No tenant, but the caller has a child agent (e.g. a delegated
     sub-account) — those sessions must still be included, same as
-    every other /sessions endpoint does via ``_visible_user_ids``."""
+    every other /sessions endpoint does via ``get_visible_user_ids``."""
     user_id = uuid4()
     child_id = uuid4()
     user = SimpleNamespace(id=user_id, tenant_id=None, email="solo@example.com")
@@ -373,8 +373,8 @@ async def test_get_sessions_with_agent_info_resolves_visibility_then_delegates(m
         captured.update(kwargs)
         return {"sessions": [], "total": 0, "limit": 50, "offset": 0, "has_more": False}
 
-    monkeypatch.setattr(agent_usage, "_permitted_dataset_ids_for", fake_permitted)
-    monkeypatch.setattr(agent_usage, "_visible_user_ids", fake_visible)
+    monkeypatch.setattr(agent_usage, "get_permitted_dataset_ids", fake_permitted)
+    monkeypatch.setattr(agent_usage, "get_visible_user_ids", fake_visible)
     monkeypatch.setattr(agent_usage, "build_sessions_with_agent_info_page", fake_build_page)
 
     result = await agent_usage.get_sessions_with_agent_info(
@@ -412,8 +412,8 @@ async def test_get_cost_by_user_agent_resolves_visibility_then_delegates(monkeyp
         captured.update(kwargs)
         return [{"user_id": str(user_id)}]
 
-    monkeypatch.setattr(agent_usage, "_permitted_dataset_ids_for", fake_permitted)
-    monkeypatch.setattr(agent_usage, "_visible_user_ids", fake_visible)
+    monkeypatch.setattr(agent_usage, "get_permitted_dataset_ids", fake_permitted)
+    monkeypatch.setattr(agent_usage, "get_visible_user_ids", fake_visible)
     monkeypatch.setattr(agent_usage, "compute_cost_by_user_agent", fake_compute)
 
     result = await agent_usage.get_cost_by_user_agent(user=user, since=None)
@@ -446,8 +446,8 @@ async def test_get_sessions_with_agent_info_defaults_user_when_omitted(monkeypat
         return {"sessions": [], "total": 0, "limit": 50, "offset": 0, "has_more": False}
 
     monkeypatch.setattr(agent_usage, "get_default_user", fake_get_default_user)
-    monkeypatch.setattr(agent_usage, "_permitted_dataset_ids_for", fake_permitted)
-    monkeypatch.setattr(agent_usage, "_visible_user_ids", fake_visible)
+    monkeypatch.setattr(agent_usage, "get_permitted_dataset_ids", fake_permitted)
+    monkeypatch.setattr(agent_usage, "get_visible_user_ids", fake_visible)
     monkeypatch.setattr(agent_usage, "build_sessions_with_agent_info_page", fake_build_page)
 
     await agent_usage.get_sessions_with_agent_info(
@@ -482,8 +482,8 @@ async def test_get_cost_by_user_agent_defaults_user_when_omitted(monkeypatch):
         return []
 
     monkeypatch.setattr(agent_usage, "get_default_user", fake_get_default_user)
-    monkeypatch.setattr(agent_usage, "_permitted_dataset_ids_for", fake_permitted)
-    monkeypatch.setattr(agent_usage, "_visible_user_ids", fake_visible)
+    monkeypatch.setattr(agent_usage, "get_permitted_dataset_ids", fake_permitted)
+    monkeypatch.setattr(agent_usage, "get_visible_user_ids", fake_visible)
     monkeypatch.setattr(agent_usage, "compute_cost_by_user_agent", fake_compute)
 
     await agent_usage.get_cost_by_user_agent(since=None)
