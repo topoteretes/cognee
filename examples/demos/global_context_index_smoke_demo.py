@@ -12,6 +12,7 @@ import asyncio
 
 import cognee
 from cognee import SearchType
+from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.shared.logging_utils import ERROR, setup_logging
 
 DATASET = "global_context_index_smoke_demo"
@@ -55,8 +56,7 @@ async def _search_context(query: str, include_global_context: bool) -> str:
     )
     if not results:
         return ""
-    first = results[0]
-    return first if isinstance(first, str) else str(first)
+    return results[0].text
 
 
 async def _ask_meeting_questions() -> None:
@@ -71,15 +71,53 @@ async def _ask_meeting_questions() -> None:
                 "global_context_index_top_k": 3,
             },
         )
-        answer = results[0] if results else ""
-        if not isinstance(answer, str):
-            answer = str(answer)
+        answer = results[0].text if results else "(empty)"
         print(f"\nQ{index}: {query}")
-        print(f"A: {answer or '(empty)'}")
+        print(f"A: {answer}")
 
 
 def _has_global_context_prelude(context: str) -> bool:
     return WORLD_SUMMARY_HEADER in context or RELEVANT_AREAS_HEADER in context
+
+
+async def _print_index_structure() -> None:
+    """Print the built index as source summary count -> buckets per level -> root.
+
+    Reads the graph directly through the public GraphDBInterface
+    (get_graph_engine().get_graph_data()) -- the same low-level access
+    pattern used for graph inspection elsewhere in the docs. This is a
+    read-only tour of what improve(build_global_context_index=True) just
+    built; it is not part of the retrieval path.
+    """
+    graph_engine = await get_graph_engine()
+    nodes_data, _edges_data = await graph_engine.get_graph_data()
+
+    root_text: str | None = None
+    buckets_by_level: dict[int, list[str]] = {}
+    text_summary_count = 0
+
+    for _node_id, properties in nodes_data:
+        node_type = properties.get("type")
+        if node_type == "TextSummary":
+            text_summary_count += 1
+        elif node_type == "GlobalContextSummary":
+            if properties.get("is_root"):
+                root_text = properties.get("text", "")
+            else:
+                level = properties.get("level") or 0
+                buckets_by_level.setdefault(level, []).append(properties.get("text", ""))
+
+    print("\nGlobal context index structure")
+    if root_text is None:
+        print("(no root found -- did improve(build_global_context_index=True) run?)")
+        return
+
+    print(f"Source summaries: {text_summary_count} TextSummary nodes")
+    for level in sorted(buckets_by_level):
+        print(f"Level {level} buckets: {len(buckets_by_level[level])}")
+        for text in buckets_by_level[level]:
+            print(f"  - {text[:80]}...")
+    print(f"Root: {root_text[:100]}...")
 
 
 async def main() -> None:
@@ -96,6 +134,8 @@ async def main() -> None:
 
     print("Running improve() with global context indexing enabled...")
     await cognee.improve(dataset=DATASET, build_global_context_index=True)
+
+    await _print_index_structure()
 
     print(f"\nContext comparison for: {COMPARISON_QUERY}")
     off_context = await _search_context(COMPARISON_QUERY, include_global_context=False)
