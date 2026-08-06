@@ -123,6 +123,13 @@ class DatasetQueue:
         # ``"acquire:<unique>"`` for ``acquire()``. A task may hold multiple
         # entries; all are released together when the task finishes.
         self._task_slots: Dict[int, Dict[str, SlotEntry]] = {}
+        # Pending-close latches: ds_key -> future that resolves when a
+        # backgrounded engine teardown for that dataset has finished. The next
+        # acquirer of the same dataset awaits it before proceeding, so file
+        # locks are provably free before a fresh engine opens the same files.
+        # (Same pending-close idea closing_lru_cache uses internally.)
+        self._pending_closes: Dict[str, asyncio.Future] = {}
+        self._background_closes: Set[asyncio.Task] = set()
         # Track which tasks already have a done-callback registered so we
         # don't register multiple cleanup handlers for a single task.
         self._registered_tasks: Set[int] = set()
@@ -205,6 +212,13 @@ class DatasetQueue:
             entry.depth += 1
             return
 
+        # If a backgrounded teardown for this dataset is still closing its
+        # engines, wait for it: the whole point of the latch is that the
+        # response path no longer waits, so the (rare) next acquirer must.
+        pending = self._pending_closes.get(ds_key)
+        if pending is not None:
+            await pending
+
         # Acquire a fresh slot for this (task, dataset).
         logger.debug("Task %d acquiring dataset queue slot for dataset_id=%s", task_id, dataset_id)
         await self._semaphore.acquire()
@@ -215,6 +229,33 @@ class DatasetQueue:
         self._task_slots[task_id][ds_key] = SlotEntry(release, depth=1)
 
     # ----------------------------------------- subprocess engine teardown
+    def _schedule_background_teardown(self, ds_key: str) -> None:
+        """Run :meth:`_teardown_subprocess_engines` off the response path.
+
+        Registers a pending-close latch for ``ds_key`` first, so a subsequent
+        acquirer of the same dataset waits for the close instead of racing a
+        fresh engine against still-locked database files. The latch always
+        opens — teardown failures are logged, never propagated (the request
+        this teardown belonged to has already returned).
+        """
+        loop = asyncio.get_running_loop()
+        latch: asyncio.Future = loop.create_future()
+        self._pending_closes[ds_key] = latch
+
+        async def _close() -> None:
+            try:
+                await self._teardown_subprocess_engines()
+            except Exception as error:
+                logger.warning("Background engine teardown failed for %s: %s", ds_key, error)
+            finally:
+                latch.set_result(None)
+                if self._pending_closes.get(ds_key) is latch:
+                    del self._pending_closes[ds_key]
+
+        task = loop.create_task(_close())
+        self._background_closes.add(task)
+        task.add_done_callback(self._background_closes.discard)
+
     async def _teardown_subprocess_engines(self) -> None:
         """Evict and close subprocess-mode engines so DB file locks are released.
 
@@ -288,17 +329,19 @@ class DatasetQueue:
             return
 
         # About to fully release.  Tear down subprocess engines only when
-        # no other task holds the same dataset.  The cross-task scan and
-        # the cache eviction are both synchronous, so no other task can
-        # interleave between the check and the eviction.  The subsequent
-        # ``await engine.close()`` happens after eviction, so new callers
-        # already get a fresh engine by that point.
+        # no other task holds the same dataset — but do it in the background:
+        # the caller's response must not wait on engine.close() of engines it
+        # has already finished using.  Correctness moves to the pending-close
+        # latch: the eviction + close run in a task that inherits this
+        # context (create_task snapshots contextvars, so the teardown sees
+        # this dataset's engine config), and the next ``ensure_slot`` for the
+        # same dataset awaits the latch before touching engines.
         try:
             other_holds = any(
                 ds_key in slots for tid, slots in self._task_slots.items() if tid != task_id
             )
             if not other_holds:
-                await self._teardown_subprocess_engines()
+                self._schedule_background_teardown(ds_key)
         finally:
             self._task_slots.get(task_id, {}).pop(ds_key, None)
             logger.debug(

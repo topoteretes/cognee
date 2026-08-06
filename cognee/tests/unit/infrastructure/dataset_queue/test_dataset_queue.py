@@ -419,6 +419,14 @@ class TestReleaseSlotFor:
         yield
 
     @staticmethod
+    async def _drain(queue):
+        """Wait for any backgrounded teardown tasks to finish."""
+        import asyncio
+
+        while queue._background_closes:
+            await asyncio.gather(*list(queue._background_closes))
+
+    @staticmethod
     def _mock_teardown(queue):
         """Replace _teardown_subprocess_engines with a counter."""
         call_count = 0
@@ -445,6 +453,7 @@ class TestReleaseSlotFor:
 
         await queue.ensure_slot("ds-A")
         await queue.release_slot_for("ds-A")
+        await self._drain(queue)
         assert counter.value == 1
 
     @pytest.mark.asyncio
@@ -458,9 +467,11 @@ class TestReleaseSlotFor:
         await queue.ensure_slot("ds-B")  # depth = 2
 
         await queue.release_slot_for("ds-B")
+        await self._drain(queue)
         assert counter.value == 0  # inner exit — skipped
 
         await queue.release_slot_for("ds-B")
+        await self._drain(queue)
         assert counter.value == 1  # outer exit — fires
 
     @pytest.mark.asyncio
@@ -485,10 +496,12 @@ class TestReleaseSlotFor:
 
         await queue.ensure_slot(ds)
         await queue.release_slot_for(ds)
+        await self._drain(queue)
         assert counter.value == 0  # other task still holds the dataset
 
         check_done.set()
         await task
+        await self._drain(queue)
         assert counter.value == 1  # other task was last
 
     @pytest.mark.asyncio
@@ -513,10 +526,12 @@ class TestReleaseSlotFor:
 
         await queue.ensure_slot(ds)
         await queue.release_slot_for(ds)
+        await self._drain(queue)
         assert counter.value == 0  # not last
 
         main_released.set()
         await task
+        await self._drain(queue)
         assert counter.value == 1  # other task was last, teardown fired
 
     @pytest.mark.asyncio
@@ -540,6 +555,7 @@ class TestReleaseSlotFor:
 
         await queue.ensure_slot("dataset-OURS")
         await queue.release_slot_for("dataset-OURS")
+        await self._drain(queue)
         assert counter.value == 1  # different dataset — we're last for ours
 
         check_done.set()
@@ -553,6 +569,7 @@ class TestReleaseSlotFor:
         counter = self._mock_teardown(queue)
 
         await queue.release_slot_for("any-dataset")
+        await self._drain(queue)
         assert counter.value == 0
 
     @pytest.mark.asyncio
@@ -570,8 +587,11 @@ class TestReleaseSlotFor:
 
         await queue.ensure_slot(ds)
 
-        with pytest.raises(ValueError, match="engine teardown failed"):
-            await queue.release_slot_for(ds)
+        # The teardown runs in the background: its failure is logged, never
+        # raised into the caller (whose response has already returned).
+        await queue.release_slot_for(ds)
+        await self._drain(queue)
+        assert queue._pending_closes == {}
 
         # Replace the failing mock so the verification calls below don't blow up.
         self._mock_teardown(queue)
@@ -589,6 +609,7 @@ class TestReleaseSlotFor:
         counter = self._mock_teardown(queue)
 
         await queue.release_slot_for("never-acquired")
+        await self._drain(queue)
         assert counter.value == 0  # no entry — teardown not called
         assert queue._semaphore._value == 5  # nothing consumed
 
@@ -606,11 +627,13 @@ class TestReleaseSlotFor:
 
         await queue.release_slot_for(ds)
         assert queue._semaphore._value == 2
+        await self._drain(queue)
         assert counter.value == 1
 
         # Second release — entry already popped, should be a no-op.
         await queue.release_slot_for(ds)
         assert queue._semaphore._value == 2  # not over-released
+        await self._drain(queue)
         assert counter.value == 1  # not called again
 
     @pytest.mark.asyncio
@@ -671,14 +694,17 @@ class TestReleaseSlotFor:
         await queue.ensure_slot(ds)
 
         await queue.release_slot_for(ds)
+        await self._drain(queue)
         assert counter.value == 0
 
         gate_1.set()
         await t1
+        await self._drain(queue)
         assert counter.value == 0
 
         gate_2.set()
         await t2
+        await self._drain(queue)
         assert counter.value == 1
 
     @pytest.mark.asyncio
@@ -705,6 +731,7 @@ class TestReleaseSlotFor:
             await queue.release_slot_for(ds)
 
         await asyncio.gather(*[asyncio.create_task(worker()) for _ in range(n_tasks)])
+        await self._drain(queue)
         assert counter.value == 1
 
     @pytest.mark.asyncio
@@ -737,6 +764,7 @@ class TestReleaseSlotFor:
 
         await queue.ensure_slot(ds)
         await queue.release_slot_for(ds)
+        await self._drain(queue)
         assert counter.value == 1
 
     @pytest.mark.asyncio
@@ -765,13 +793,16 @@ class TestReleaseSlotFor:
         await queue.ensure_slot(ds)  # depth = 2
 
         await queue.release_slot_for(ds)
+        await self._drain(queue)
         assert counter.value == 0  # depth 2 → 1
 
         await queue.release_slot_for(ds)
+        await self._drain(queue)
         assert counter.value == 0  # depth 0, but other task holds it
 
         main_done.set()
         await task
+        await self._drain(queue)
         assert counter.value == 1  # other task was last
 
     @pytest.mark.asyncio
@@ -787,10 +818,12 @@ class TestReleaseSlotFor:
         assert queue._semaphore._value == 3
 
         await queue.release_slot_for("ds-A")
+        await self._drain(queue)
         assert counter.value == 1
         assert queue._semaphore._value == 4
 
         await queue.release_slot_for("ds-B")
+        await self._drain(queue)
         assert counter.value == 2
         assert queue._semaphore._value == 5
 
@@ -806,6 +839,7 @@ class TestReleaseSlotFor:
         assert queue._semaphore._value == 1
 
         await queue.release_slot_for(None)
+        await self._drain(queue)
         assert counter.value == 1
         assert queue._semaphore._value == 2
 
@@ -828,12 +862,17 @@ class TestReleaseSlotFor:
         await queue.ensure_slot("ds-ok")
         await queue.ensure_slot("ds-fail")
 
-        with pytest.raises(RuntimeError, match="kaboom"):
-            await queue.release_slot_for("ds-fail")
+        # Background teardown failure for ds-fail is logged, not raised.
+        await queue.release_slot_for("ds-fail")
 
         # ds-ok is still held and can be released normally.
         await queue.release_slot_for("ds-ok")
+        while queue._background_closes:
+            import asyncio
+
+            await asyncio.gather(*list(queue._background_closes))
         assert call_count == 2
+        assert queue._pending_closes == {}
         assert queue._semaphore._value == 5
 
 
@@ -883,3 +922,88 @@ class TestActiveDatasetIds:
         assert queue.active_dataset_ids() == {"dataset-1"}  # depth 1 remains
         await queue.release_slot_for("dataset-1")
         assert queue.active_dataset_ids() == set()
+
+
+class TestBackgroundTeardownLatch:
+    """The teardown runs off the response path; the latch keeps correctness."""
+
+    @pytest.mark.asyncio
+    async def test_release_returns_before_teardown_completes(self):
+        import asyncio
+
+        from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
+
+        queue = DatasetQueue(enabled=True, max_concurrent=5)
+        started = asyncio.Event()
+        finish = asyncio.Event()
+        done = False
+
+        async def slow_teardown():
+            nonlocal done
+            started.set()
+            await finish.wait()
+            done = True
+
+        queue._teardown_subprocess_engines = slow_teardown
+
+        await queue.ensure_slot("ds-L")
+        await queue.release_slot_for("ds-L")  # must NOT wait for the close
+        assert not done, "release_slot_for waited on the teardown"
+
+        await started.wait()
+        finish.set()
+        while queue._background_closes:
+            await asyncio.gather(*list(queue._background_closes))
+        assert done
+        assert queue._pending_closes == {}
+
+    @pytest.mark.asyncio
+    async def test_next_acquirer_waits_on_pending_close(self):
+        import asyncio
+
+        from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
+
+        queue = DatasetQueue(enabled=True, max_concurrent=5)
+        finish = asyncio.Event()
+
+        async def slow_teardown():
+            await finish.wait()
+
+        queue._teardown_subprocess_engines = slow_teardown
+
+        await queue.ensure_slot("ds-L")
+        await queue.release_slot_for("ds-L")
+
+        async def reacquire():
+            await queue.ensure_slot("ds-L")
+            return True
+
+        acquirer = asyncio.create_task(reacquire())
+        await asyncio.sleep(0.05)
+        assert not acquirer.done(), "acquirer must wait for the in-flight close"
+
+        finish.set()
+        assert await asyncio.wait_for(acquirer, timeout=1)
+        await queue.release_slot_for("ds-L")
+
+    @pytest.mark.asyncio
+    async def test_failed_teardown_still_opens_the_latch(self):
+        import asyncio
+
+        from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
+
+        queue = DatasetQueue(enabled=True, max_concurrent=5)
+
+        async def broken_teardown():
+            raise RuntimeError("boom")
+
+        queue._teardown_subprocess_engines = broken_teardown
+
+        await queue.ensure_slot("ds-L")
+        await queue.release_slot_for("ds-L")
+        while queue._background_closes:
+            await asyncio.gather(*list(queue._background_closes))
+        assert queue._pending_closes == {}
+        # And the dataset is acquirable again.
+        await asyncio.wait_for(queue.ensure_slot("ds-L"), timeout=1)
+        await queue.release_slot_for("ds-L")
