@@ -11,9 +11,8 @@ touched.
 
 from unittest.mock import patch
 
-from cognee.infrastructure.databases.vector.embeddings.FastembedEmbeddingEngine import (
-    FastembedEmbeddingEngine,
-)
+import pytest
+
 from cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine import (
     LiteLLMEmbeddingEngine,
 )
@@ -37,6 +36,11 @@ def _engine(cls, **attrs):
 
 
 def test_fastembed_delegates_to_resolver():
+    pytest.importorskip("fastembed", reason="fastembed extra not installed")
+    from cognee.infrastructure.databases.vector.embeddings.FastembedEmbeddingEngine import (
+        FastembedEmbeddingEngine,
+    )
+
     engine = _engine(
         FastembedEmbeddingEngine,
         model="BAAI/bge-small-en-v1.5",

@@ -6,6 +6,7 @@ import { useCogniInstance, useTenant } from "@/modules/tenant/TenantProvider";
 import TopBar from "./TopBar";
 import CustomAppShellNavbar from "./Navbar/CustomAppShellNavbar";
 import PageLoading from "@/ui/elements/PageLoading";
+import PodUnreachableCard from "@/ui/elements/PodUnreachableCard";
 import ProvisioningBanner from "./ProvisioningBanner";
 import WorkspaceProvisioning from "./WorkspaceProvisioning";
 
@@ -17,7 +18,6 @@ const SHELL_HIDDEN_PATHS = [
   "/welcome",
   "/sign-in",
   "/sign-up",
-  "/reset-password",
   "/forgot-password",
 ];
 
@@ -42,14 +42,22 @@ export default function CustomAppShell({ children }: PropsWithChildren) {
   const pathname = usePathname();
   const hideShell = SHELL_HIDDEN_PATHS.includes(pathname);
   const { cogniInstance, statusMessage, isInitializing } = useCogniInstance();
-  const { tenantReady } = useTenant();
+  const { tenantReady, podUnreachable } = useTenant();
 
   if (hideShell) {
     return <>{children}</>;
   }
 
   // Pod-dependent routes can't render real content until the pod is reachable.
-  const podPending = isPodDependent(pathname) && (!tenantReady || !cogniInstance);
+  // Split the two states: podUnreachable is terminal (readiness polling gave
+  // up) and gets the error card with Try again / Sign out; podPending is still
+  // connecting and gets the provisioning spinner. Without this split, a dead
+  // pod left every non-dashboard pod-dependent route stuck on an eternal
+  // "Setting up your workspace" spinner with no error and no way out.
+  const onPodDependent = isPodDependent(pathname);
+  const podUnreachableHere = onPodDependent && podUnreachable;
+  const podPending = onPodDependent && !podUnreachable && (!tenantReady || !cogniInstance);
+  const isDashboard = pathname === "/dashboard";
 
   return (
     <div
@@ -64,10 +72,15 @@ export default function CustomAppShell({ children }: PropsWithChildren) {
       <div className="flex flex-1 overflow-hidden">
         <CustomAppShellNavbar />
         <main className="flex-1 overflow-auto flex flex-col" style={{ background: "transparent" }}>
-          {/* App-wide provisioning banner — shown until the pod is ready. */}
-          {!isInitializing && !tenantReady && <ProvisioningBanner />}
-          {isInitializing ? (
+          {/* App-wide provisioning banner — shown only while still connecting.
+              Suppressed once podUnreachable is terminal, otherwise the
+              "Setting up your workspace" banner contradicted the "trouble
+              reaching your workspace" error card by rendering alongside it. */}
+          {!isInitializing && !tenantReady && !podUnreachable && <ProvisioningBanner />}
+          {isInitializing && !isDashboard ? (
             <PageLoading name={statusMessage?.title ?? ""} />
+          ) : podUnreachableHere ? (
+            <PodUnreachableCard pageName="Workspace" />
           ) : podPending ? (
             <WorkspaceProvisioning />
           ) : children}

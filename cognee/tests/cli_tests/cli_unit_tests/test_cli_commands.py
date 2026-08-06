@@ -265,6 +265,7 @@ class TestCognifyCommand:
             chunker=TextChunker,
             run_in_background=False,
             chunks_per_batch=None,
+            dry_run=False,
         )
 
     @patch(_RESOLVE_USER_PATCH, new_callable=lambda: AsyncMock(return_value=_mock_user()))
@@ -658,3 +659,91 @@ class TestConfigCommand:
         # This should not raise CliCommandException, just handle it gracefully
         # The config command handles unknown actions by showing an error message
         command.execute(args)
+
+
+class TestConfigGetSetPersistence:
+    """Exercise the real (unmocked) cognee.config.get/get_all/set behavior.
+
+    These reproduce the originally reported bugs directly against
+    cognee.config rather than through ConfigCommand, since that's where the
+    actual get/get_all/persistence logic lives.
+    """
+
+    def test_get_unknown_key_raises(self):
+        from cognee.api.v1.exceptions.exceptions import InvalidConfigAttributeError
+
+        with pytest.raises(InvalidConfigAttributeError):
+            cognee.config.get("not_a_real_config_key")
+
+    def test_get_reflects_in_process_set(self):
+        from cognee.infrastructure.data.chunking.config import get_chunk_config
+
+        original = get_chunk_config().chunk_size
+        try:
+            cognee.config.set("chunk_size", 777)
+            assert cognee.config.get("chunk_size") == 777
+        finally:
+            cognee.config.set_chunk_size(original)
+
+    def test_get_masks_secret_by_default(self):
+        from cognee.infrastructure.llm.config import get_llm_config
+
+        original = get_llm_config().llm_api_key
+        try:
+            cognee.config.set_llm_api_key("sk-1234567890abcdef")
+
+            masked = cognee.config.get("llm_api_key")
+            assert masked != "sk-1234567890abcdef"
+            assert masked.startswith("sk-")
+
+            full = cognee.config.get("llm_api_key", reveal_secrets=True)
+            assert full == "sk-1234567890abcdef"
+        finally:
+            cognee.config.set_llm_api_key(original)
+
+    def test_get_all_covers_documented_keys(self):
+        config_dict = cognee.config.get_all()
+
+        for key in (
+            "llm_provider",
+            "llm_model",
+            "chunk_size",
+            "chunk_overlap",
+            "vector_db_provider",
+            "graph_database_provider",
+        ):
+            assert key in config_dict
+
+    def test_set_persists_across_process_boundary(self, tmp_path, monkeypatch):
+        """Reproduces the originally reported bug: `config set` must survive
+        past the current process, since each `cognee-cli` invocation is a
+        fresh process re-reading config from scratch."""
+        from cognee.infrastructure.data.chunking.config import get_chunk_config
+
+        # A real CHUNK_SIZE env var (e.g. leftover from `dotenv.load_dotenv`
+        # picking up a developer's own .env at cognee import time) would
+        # outrank the .env file this test writes below, since pydantic-settings
+        # prioritizes real environment variables over dotenv-file values.
+        monkeypatch.delenv("CHUNK_SIZE", raising=False)
+
+        original_cwd = os.getcwd()
+        original_chunk_size = get_chunk_config().chunk_size
+        try:
+            os.chdir(tmp_path)
+
+            result = cognee.config.set("chunk_size", "999", persist=True)
+
+            assert result["created"] is True
+            env_path = tmp_path / ".env"
+            assert env_path.exists()
+            # dotenv.set_key quotes values, e.g. CHUNK_SIZE='999'.
+            assert "CHUNK_SIZE=" in env_path.read_text()
+            assert "999" in env_path.read_text()
+
+            # Simulate a fresh process re-reading config from the persisted .env.
+            get_chunk_config.cache_clear()
+            assert get_chunk_config().chunk_size == 999
+        finally:
+            os.chdir(original_cwd)
+            get_chunk_config.cache_clear()
+            get_chunk_config().chunk_size = original_chunk_size

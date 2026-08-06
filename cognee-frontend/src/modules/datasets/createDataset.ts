@@ -4,11 +4,13 @@ export default async function createDataset(
   dataset: { name: string },
   instance: CogneeInstance,
   tenantId?: string | null,
+  signal?: AbortSignal,
 ) {
   const response = await instance.fetch(`/v1/datasets/`, {
     method: "POST",
     body: JSON.stringify(dataset),
     headers: { "Content-Type": "application/json" },
+    signal,
   });
   const created = await response.json();
 
@@ -21,11 +23,13 @@ export default async function createDataset(
           method: "POST",
           body,
           headers: { "Content-Type": "application/json" },
+          signal,
         }),
         instance.fetch(`/v1/permissions/datasets/${tenantId}?permission_name=write`, {
           method: "POST",
           body,
           headers: { "Content-Type": "application/json" },
+          signal,
         }),
       ]);
     } catch {

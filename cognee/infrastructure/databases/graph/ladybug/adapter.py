@@ -2358,6 +2358,41 @@ class LadybugAdapter(GraphDBInterface):
         updated_ids = await self._execute_node_truth_state_updates(updates)
         return {nid: (nid in updated_ids) for nid in node_ids}
 
+    async def update_node(self, node_id: str, values: Dict[str, Any]) -> bool:
+        """Merge *values* into an existing node's JSON property blob.
+
+        Reads the node, layers the patch on top of its current properties, and writes
+        the blob back in a single MATCH/SET. Only ``id``/``name``/``type`` are excluded
+        when rebuilding the blob: those are the native columns ``get_node`` injects and
+        ``add_node`` keeps out of the blob. Every other field — ``created_at``,
+        ``updated_at``, ``version``, ... — lives *inside* the blob (that is where
+        ``get_node`` reads them from), so it is carried through untouched and a patch
+        never silently drops a field the caller did not name. Returns False if the node
+        does not exist (or *values* is empty, i.e. there is nothing to patch).
+        """
+        if not isinstance(node_id, str) or not node_id or not values:
+            return False
+        node = await self.get_node(node_id)
+        if node is None:
+            return False
+        # get_node merges the JSON blob with the native id/name/type columns; rebuild
+        # the blob from everything except those three (created_at/updated_at and the
+        # rest are stored in the blob, not as native columns get_node returns), then
+        # layer the patch on top.
+        properties = {k: v for k, v in node.items() if k not in {"id", "name", "type"}}
+        properties.update(values)
+        query = """
+        MATCH (n:Node)
+        WHERE n.id = $id
+        SET n.properties = $properties
+        RETURN n.id AS id
+        """
+        result = await self.query(
+            query,
+            {"id": node_id, "properties": json.dumps(properties, cls=JSONEncoder)},
+        )
+        return bool(result)
+
     async def get_edge_feedback_weights(self, edge_object_ids: List[str]) -> Dict[str, float]:
         if not edge_object_ids:
             return {}
@@ -2708,7 +2743,18 @@ class LadybugAdapter(GraphDBInterface):
         Get the k-hop neighborhood subgraph around a set of seed nodes.
 
         Returns all nodes and edges within `depth` hops of any seed node,
-        in the same format as get_graph_data().
+        in the same format as get_graph_data(). A neighbor is included iff there
+        exists a path of length 1..depth reaching it whose every edge type is in
+        `edge_types` (matching the Neo4j/Postgres backends); `edge_types=None` or
+        `[]` disables the filter.
+
+        Performance note: the `edge_types` branch enumerates every path up to
+        `depth` (Kuzu cannot filter a variable-length relationship binding in
+        Cypher — see #3585) and post-filters in Python, so its cost grows
+        combinatorially with node degree × depth on dense graphs. It is intended
+        for shallow, targeted neighborhoods; a future refactor could push per-hop
+        type filtering into Cypher via a fixed-length UNION to return distinct
+        neighbors instead of walks.
         """
         import time
 
@@ -2719,18 +2765,36 @@ class LadybugAdapter(GraphDBInterface):
                 logger.warning("No node IDs provided for neighborhood retrieval.")
                 return [], []
 
-            # Use variable-length path to find all nodes within depth hops
-            path_query = f"""
-            MATCH (seed:Node)-[r*1..{depth}]-(neighbor:Node)
-            WHERE seed.id IN $node_ids{" AND ALL(rel IN r WHERE rel.relationship_name IN $edge_types)" if edge_types else ""}
-            RETURN DISTINCT neighbor.id
-            """
-            params = {"node_ids": node_ids}
+            # Use variable-length path to find all nodes within depth hops.
+            # Kuzu's `r` from `-[r*1..N]-` is a RECURSIVE_REL, not a LIST, so the
+            # engine rejects `ALL(rel IN r WHERE ...)` with a binder error (and an
+            # internal assertion when combined with a parameter reference). When
+            # edge_types is set, fetch paths unfiltered and discard neighbors whose
+            # every path crosses a disallowed edge type (#3585).
             if edge_types:
-                params["edge_types"] = edge_types
-
-            neighbor_rows = await self.query(path_query, params)
-            neighbor_ids = [row[0] for row in neighbor_rows if row[0]]
+                path_query = f"""
+                MATCH (seed:Node)-[r*1..{depth}]-(neighbor:Node)
+                WHERE seed.id IN $node_ids
+                RETURN neighbor.id, r
+                """
+                path_rows = await self.query(path_query, {"node_ids": node_ids})
+                allowed = set(edge_types)
+                neighbor_ids_set: set = set()
+                for neighbor_id, path in path_rows:
+                    if not neighbor_id or neighbor_id in neighbor_ids_set:
+                        continue
+                    rels = path.get("_RELS", []) if isinstance(path, dict) else []
+                    if rels and all(rel.get("relationship_name") in allowed for rel in rels):
+                        neighbor_ids_set.add(neighbor_id)
+                neighbor_ids = list(neighbor_ids_set)
+            else:
+                path_query = f"""
+                MATCH (seed:Node)-[r*1..{depth}]-(neighbor:Node)
+                WHERE seed.id IN $node_ids
+                RETURN DISTINCT neighbor.id
+                """
+                neighbor_rows = await self.query(path_query, {"node_ids": node_ids})
+                neighbor_ids = [row[0] for row in neighbor_rows if row[0]]
 
             # Combine seed nodes and neighbor nodes
             all_ids = list(set(node_ids) | set(neighbor_ids))
@@ -3573,6 +3637,9 @@ class LadybugAdapter(GraphDBInterface):
 
         query = """
         MATCH (start_node:Node)-[relationship:EDGE]->(end_node:Node)
+        WITH start_node, relationship, end_node
+        ORDER BY start_node.id, end_node.id, relationship.relationship_name
+        SKIP $offset LIMIT $limit
         RETURN {
             start_node: {
                 id: start_node.id,
@@ -3591,7 +3658,6 @@ class LadybugAdapter(GraphDBInterface):
                 properties: end_node.properties
             }
         } AS triplet
-        SKIP $offset LIMIT $limit
         """
 
         try:

@@ -1,5 +1,6 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import SkeletonBar from "@/ui/elements/SkeletonBar";
 
 const cardStyle: React.CSSProperties = {
@@ -45,13 +46,26 @@ function ConnectionCard() {
 }
 
 export default function DashboardSkeleton() {
+  // Escalates the message after 30s so a genuinely slow (but not yet
+  // podUnreachable) pod doesn't sit silently under the same "usually under a
+  // minute" text well past when that stops being true.
+  const [elapsedMs, setElapsedMs] = useState(0);
+  useEffect(() => {
+    const start = Date.now();
+    const id = setInterval(() => setElapsedMs(Date.now() - start), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const takingLonger = elapsedMs > 30_000;
+
   return (
     <div style={{ minHeight: "100%", flexShrink: 0 }}>
       <div style={{ padding: "clamp(16px, 3vw, 32px)", display: "flex", flexDirection: "column", gap: 40 }}>
 
         {/* Provisioning note */}
         <p style={{ margin: 0, fontSize: 13, color: "rgba(237,236,234,0.5)" }}>
-          Your workspace is being set up — usually takes under a minute.
+          {takingLonger
+            ? "Still going — this can take a couple of minutes on a brand-new account."
+            : "Your workspace is being set up — usually takes under a minute."}
         </p>
 
         {/* Greeting */}
