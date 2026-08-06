@@ -93,17 +93,19 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
         # Resolve effective pool_args for any new PGVector engine we create:
         # 1. Explicit VECTOR_POOL_ARGS always wins.
-        # 2. When access control is on, each dataset gets its own engine — use a small default
-        #    to avoid connection fan-out (N datasets × pool_size).
-        # 3. Otherwise inherit the relational pool config.
+        # 2. Then the relational POOL_ARGS, when configured — an operator who
+        #    sized the pool explicitly outranks our built-in default.
+        # 3. Otherwise, when access control is on, each dataset gets its own
+        #    engine — use a small default to avoid connection fan-out
+        #    (N datasets × pool_size).
         if vector_config.vector_pool_args is not None:
             effective_pool_args = dict(vector_config.vector_pool_args)
+        elif relational_config.pool_args:
+            effective_pool_args = dict(relational_config.pool_args)
         elif backend_access_control_enabled():
             effective_pool_args = _ACCESS_CONTROL_DEFAULT_POOL_ARGS
         else:
-            effective_pool_args = (
-                dict(relational_config.pool_args) if relational_config.pool_args else {}
-            )
+            effective_pool_args = {}
 
         # A per-dataset PGVector engine may connect to managed
         # Postgres (Neon) which requires SSL. Reuse the relational connect_args
