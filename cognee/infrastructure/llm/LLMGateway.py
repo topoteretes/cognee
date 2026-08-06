@@ -71,6 +71,22 @@ class LLMGateway:
     """
 
     @staticmethod
+    def supports_structured_output_model(model: type) -> bool:
+        """Return whether the selected framework can validate this model without a request."""
+        if not isinstance(model, type) or not issubclass(model, BaseModel):
+            return False
+
+        framework = get_llm_config().structured_output_framework.strip().lower()
+        if framework not in {"instructor", "litellm_native"}:
+            return False
+
+        try:
+            model.model_json_schema()
+        except (AttributeError, TypeError, ValueError):
+            return False
+        return True
+
+    @staticmethod
     def acreate_structured_output(
         text_input: str,
         system_prompt: str,

@@ -14,6 +14,7 @@ from cognee.infrastructure.session.feedback_models import (
     FeedbackDetectionResult,
 )
 from cognee.infrastructure.session.session_manager import SessionManager
+from cognee.infrastructure.session.session_search_models import SessionTurnEvidence
 from cognee.infrastructure.session.session_turn import SessionTurnPreparation
 
 
@@ -80,6 +81,29 @@ async def test_add_qa_and_get_session(session_manager):
     assert entries[0].question == "Q1?"
     assert entries[0].answer == "A1."
     assert entries[0].qa_id == qa_id
+
+
+@pytest.mark.asyncio
+async def test_turn_evidence_round_trips_through_session_context_storage(session_manager):
+    evidence = SessionTurnEvidence(
+        id="e1",
+        created_at="2026-08-06T10:00:00+00:00",
+        current_raw_message="question",
+        current_response="answer",
+    )
+
+    created = await session_manager.create_session_context_entry(
+        user_id="u1",
+        session_id="s1",
+        entry_dump=evidence.model_dump(),
+    )
+    entries = await session_manager.get_session_context_entries_strict(
+        user_id="u1",
+        session_id="s1",
+    )
+
+    assert created is True
+    assert entries == [evidence.model_dump(mode="json")]
 
 
 @pytest.mark.asyncio

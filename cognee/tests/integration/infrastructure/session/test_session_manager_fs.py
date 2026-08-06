@@ -72,6 +72,19 @@ async def test_add_qa_and_get_session(session_manager: SessionManager):
 
 
 @pytest.mark.asyncio
+async def test_strict_session_context_read_distinguishes_storage_failure(
+    session_manager: SessionManager,
+):
+    session_manager._cache.get_session_context_entries = AsyncMock(
+        side_effect=RuntimeError("storage failed")
+    )
+
+    with pytest.raises(RuntimeError, match="storage failed"):
+        await session_manager.get_session_context_entries_strict(user_id="u1", session_id="s1")
+    assert await session_manager.get_session_context_entries(user_id="u1", session_id="s1") == []
+
+
+@pytest.mark.asyncio
 async def test_add_qa_with_used_graph_element_ids_round_trip(session_manager: SessionManager):
     """add_qa with used_graph_element_ids stores and returns it via get_session."""
     used_ids = {"node_ids": ["n1"], "edge_ids": ["e1"]}
