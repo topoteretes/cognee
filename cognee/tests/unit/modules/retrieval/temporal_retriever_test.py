@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from uuid import UUID
 import pytest
 import os
 from unittest.mock import AsyncMock, patch, MagicMock
@@ -76,6 +77,24 @@ async def test_filter_top_k_events_sorts_and_limits():
     assert all("score" in e for e in top)
     assert top[0]["score"] == 0.10
     assert top[1]["score"] == 0.20
+
+
+@pytest.mark.asyncio
+async def test_filter_top_k_events_matches_uuid_scores_to_string_event_ids():
+    tr = TemporalRetriever(top_k=2)
+    event_id = UUID("12345678-1234-5678-1234-567812345678")
+    other_id = UUID("87654321-4321-6789-4321-678943216789")
+
+    relevant_events = [{"events": [{"id": str(event_id)}, {"id": str(other_id)}]}]
+    scored_results = [
+        SimpleNamespace(id=other_id, score=0.30),
+        SimpleNamespace(id=event_id, score=0.05),
+    ]
+
+    top = await tr.filter_top_k_events(relevant_events, scored_results)
+
+    assert [e["id"] for e in top] == [str(event_id), str(other_id)]
+    assert [e["score"] for e in top] == [0.05, 0.30]
 
 
 # Test filter_top_k_events handles unknown ids as infinite scores

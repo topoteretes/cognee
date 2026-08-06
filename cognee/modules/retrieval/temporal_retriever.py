@@ -9,6 +9,7 @@ from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.infrastructure.llm.prompts import render_prompt
 from cognee.infrastructure.llm import LLMGateway
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
+from cognee.modules.retrieval.utils.ids import normalize_id
 from cognee.modules.retrieval.utils.used_graph_elements import extract_from_temporal_dict
 from cognee.shared.logging_utils import get_logger
 
@@ -108,11 +109,11 @@ class TemporalRetriever(GraphCompletionRetriever):
 
     async def filter_top_k_events(self, relevant_events, scored_results):
         # Build a score lookup from vector search results
-        score_lookup = {res.id: res.score for res in scored_results}
+        score_lookup = {normalize_id(res.id): res.score for res in scored_results}
 
         events_with_scores = []
         for event in relevant_events[0]["events"]:
-            score = score_lookup.get(event["id"], float("inf"))
+            score = score_lookup.get(normalize_id(event["id"]), float("inf"))
             events_with_scores.append({**event, "score": score})
 
         events_with_scores.sort(key=itemgetter("score"))

@@ -5,6 +5,7 @@ from typing import List, Optional
 from pydantic import BaseModel
 
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
+from cognee.modules.retrieval.utils.ids import triplet_key
 
 
 class DecompositionMode(str, Enum):
@@ -60,13 +61,13 @@ def normalize_subqueries(original_query: str, subqueries: Optional[List[str]]) -
 
 
 def merge_deduplicated_edges(edge_batches: List[List[Edge]]) -> List[Edge]:
-    """Merge edge batches using identity-based deduplication."""
+    """Merge edge batches using value-based triplet deduplication."""
 
     merged_edges: List[Edge] = []
-    seen_ids: set[int] = set()
+    seen_ids: set[tuple[str, str, bool, str]] = set()
     for edge_batch in edge_batches:
         for edge in edge_batch:
-            edge_id = id(edge)
+            edge_id = triplet_key(edge)
             if edge_id in seen_ids:
                 continue
             merged_edges.append(edge)
