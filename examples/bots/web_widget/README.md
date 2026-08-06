@@ -57,6 +57,18 @@ Ask *“What is cognee?”*, then type `/forget` to wipe the conversation.
         data-api="http://localhost:8000"></script>
 ```
 
+Cross-origin embeds need CORS. By default the server allows any origin
+(`WIDGET_ALLOWED_ORIGINS=*`), which is fine for the local demo. For
+production, set an explicit comma-separated list:
+
+```bash
+export WIDGET_ALLOWED_ORIGINS="https://docs.example.com,https://www.example.com"
+```
+
+When origins are restricted (not `*`), the server also enables credentialed
+requests. Wildcard + credentials is invalid per the CORS spec, so credentials
+are off when the default `*` is used.
+
 ### Seed your real docs
 
 ```python

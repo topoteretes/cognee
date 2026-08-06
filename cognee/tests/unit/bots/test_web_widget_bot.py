@@ -106,6 +106,8 @@ def test_answer_returns_text_and_citations(cognee_calls):
     assert answer.session_id == "web:demo:v1:c1"
     assert len(answer.citations) == 1
     assert answer.citations[0].reference == "doc-1"
+    # HTTP / widget contract uses "answer", not "text".
+    assert answer.as_dict()["answer"] == answer.text
 
     # recall must be session-scoped, docs-scoped, and ask for references.
     recall_kwargs = calls["recall"][0]

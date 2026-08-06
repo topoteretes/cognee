@@ -30,13 +30,15 @@ from __future__ import annotations
 
 import os
 import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import List, Optional
+from typing import List
 
 # Make the example importable whether run as a script or a module.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
@@ -59,8 +61,39 @@ DEMO_DOCS: List[str] = [
 
 DEMO_SITE_ID = os.getenv("WIDGET_SITE_ID", "demo")
 
+# Comma-separated origins allowed to call the API. Default "*" is fine for the
+# local demo; production embeds should list explicit origins
+# (e.g. WIDGET_ALLOWED_ORIGINS=https://docs.example.com,https://www.example.com).
+_ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv("WIDGET_ALLOWED_ORIGINS", "*").split(",")
+    if origin.strip()
+]
+# Browsers reject Access-Control-Allow-Origin: * together with credentials.
+_ALLOW_CREDENTIALS = _ALLOWED_ORIGINS != ["*"]
+
 adapter = ChatMemoryAdapter(namespace="web", top_k=8)
-app = FastAPI(title="cognee web chat widget")
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Seed the demo "ask our docs" corpus once, best-effort."""
+    if os.getenv("WIDGET_SKIP_SEED") != "1":
+        try:
+            await adapter.ingest_docs(site_id=DEMO_SITE_ID, documents=DEMO_DOCS)
+        except Exception as error:  # noqa: BLE001 - demo should still boot
+            print(f"[web_widget] docs seeding skipped: {error}")
+    yield
+
+
+app = FastAPI(title="cognee web chat widget", lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_ALLOWED_ORIGINS,
+    allow_credentials=_ALLOW_CREDENTIALS,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["*"],
+)
 
 
 class ChatRequest(BaseModel):
@@ -76,17 +109,6 @@ class ForgetRequest(BaseModel):
     conversation_id: str
     visitor_id: str = "anonymous"
     site_id: str = DEMO_SITE_ID
-
-
-@app.on_event("startup")
-async def _seed_docs() -> None:
-    """Seed the demo "ask our docs" corpus once, best-effort."""
-    if os.getenv("WIDGET_SKIP_SEED") == "1":
-        return
-    try:
-        await adapter.ingest_docs(site_id=DEMO_SITE_ID, documents=DEMO_DOCS)
-    except Exception as error:  # noqa: BLE001 - demo should still boot
-        print(f"[web_widget] docs seeding skipped: {error}")
 
 
 @app.post("/api/chat")

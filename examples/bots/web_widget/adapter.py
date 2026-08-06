@@ -25,7 +25,7 @@ it.
 from __future__ import annotations
 
 import dataclasses
-from typing import Any, List, Optional, Sequence
+from typing import Any, List, Sequence
 
 import cognee
 from cognee.infrastructure.session.get_session_manager import get_session_manager
@@ -57,8 +57,9 @@ class Answer:
     session_id: str
 
     def as_dict(self) -> dict:
+        # Key name matches the HTTP API / widget contract ({answer, citations, ...}).
         return {
-            "text": self.text,
+            "answer": self.text,
             "citations": [c.as_dict() for c in self.citations],
             "session_id": self.session_id,
         }

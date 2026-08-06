@@ -18,9 +18,9 @@ from __future__ import annotations
 import dataclasses
 from typing import Any, Iterable, List, Optional
 
-# Score in cognee is a raw backend distance where *lower is better*. At the
-# surface we want the intuitive direction (higher = more relevant), matching
-# the ranking work in issue #3604.
+# Score is passed through as returned by the backend (often a distance where
+# lower is better). No inversion is applied here; ranking polish is tracked
+# in issue #3604.
 _MAX_SNIPPET = 240
 
 
