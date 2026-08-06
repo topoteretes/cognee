@@ -1,18 +1,22 @@
 """Wiring tests for GET /api/v1/sessions/cost-by-user-agent (CLO-434 follow-up).
 
-The aggregation/role-scoping logic lives in
-``cognee.modules.session_lifecycle.agent_usage`` and is covered there
-(see ``test_agent_usage.py``). This file only checks that the router
-forwards the range filter and maps errors to HTTP.
+The visibility-resolution + aggregation logic lives in
+``cognee.modules.session_lifecycle.agent_usage.get_cost_by_user_agent`` and
+is covered there (see ``test_agent_usage.py``). This file only checks that
+the router forwards the range filter and maps errors to HTTP — including
+that a ``CogneeApiError`` is left for the global handler instead of being
+turned into a generic 500.
 """
 
 from types import SimpleNamespace
 from uuid import uuid4
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from cognee.api.v1.sessions.routers import get_sessions_router as router_module
+from cognee.exceptions import CogneeSystemError
 
 
 def _app() -> FastAPI:
@@ -31,19 +35,11 @@ def test_cost_by_user_agent_returns_module_result(monkeypatch):
     captured = {}
     fake_result = [{"user_id": str(user_id), "user_email": "me@example.com", "agent_type": "codex"}]
 
-    async def fake_permitted(_user):
-        return ["dataset-1"]
-
-    async def fake_visible(_user):
-        return [user_id]
-
-    async def fake_compute(**kwargs):
+    async def fake_get_cost_by_user_agent(**kwargs):
         captured.update(kwargs)
         return fake_result
 
-    monkeypatch.setattr(router_module, "_permitted_dataset_ids_for", fake_permitted)
-    monkeypatch.setattr(router_module, "_visible_user_ids", fake_visible)
-    monkeypatch.setattr(router_module, "compute_cost_by_user_agent", fake_compute)
+    monkeypatch.setattr(router_module, "get_cost_by_user_agent", fake_get_cost_by_user_agent)
 
     response = TestClient(app).get("/api/v1/sessions/cost-by-user-agent", params={"range": "7d"})
 
@@ -51,8 +47,6 @@ def test_cost_by_user_agent_returns_module_result(monkeypatch):
     assert response.json() == fake_result
     assert captured["user"].id == user_id
     assert captured["since"] is not None
-    assert captured["visible_user_ids"] == [user_id]
-    assert captured["permitted_dataset_ids"] == ["dataset-1"]
 
 
 def test_cost_by_user_agent_failure_returns_500(monkeypatch):
@@ -62,19 +56,30 @@ def test_cost_by_user_agent_failure_returns_500(monkeypatch):
         id=user_id, tenant_id=None, email="me@example.com"
     )
 
-    async def fake_permitted(_user):
-        return []
-
-    async def fake_visible(_user):
-        return [user_id]
-
     async def failing_compute(**_kwargs):
         raise RuntimeError("db unavailable")
 
-    monkeypatch.setattr(router_module, "_permitted_dataset_ids_for", fake_permitted)
-    monkeypatch.setattr(router_module, "_visible_user_ids", fake_visible)
-    monkeypatch.setattr(router_module, "compute_cost_by_user_agent", failing_compute)
+    monkeypatch.setattr(router_module, "get_cost_by_user_agent", failing_compute)
 
     response = TestClient(app).get("/api/v1/sessions/cost-by-user-agent")
     assert response.status_code == 500
     assert response.json() == {"error": "aggregation failed"}
+
+
+def test_cost_by_user_agent_lets_cognee_api_error_propagate(monkeypatch):
+    """A CogneeApiError carries its own status/message — it must reach the
+    global exception_handler in cognee/api/client.py, not get flattened
+    into the generic {"error": "aggregation failed"} 500."""
+    app = _app()
+    user_id = uuid4()
+    app.dependency_overrides[router_module.get_authenticated_user] = lambda: SimpleNamespace(
+        id=user_id, tenant_id=None, email="me@example.com"
+    )
+
+    async def failing(**_kwargs):
+        raise CogneeSystemError(message="boom")
+
+    monkeypatch.setattr(router_module, "get_cost_by_user_agent", failing)
+
+    with pytest.raises(CogneeSystemError):
+        TestClient(app).get("/api/v1/sessions/cost-by-user-agent")

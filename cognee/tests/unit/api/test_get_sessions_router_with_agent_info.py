@@ -1,18 +1,22 @@
 """Wiring tests for GET /api/v1/sessions/with-agent-info (CLO-434).
 
-The join/merge logic itself lives in
-``cognee.modules.session_lifecycle.agent_usage`` and is covered there
-(see ``test_agent_usage.py``). This file only checks that the router
-resolves auth/visibility, forwards params, and maps errors to HTTP.
+The visibility-resolution + join/merge logic lives in
+``cognee.modules.session_lifecycle.agent_usage.get_sessions_with_agent_info``
+and is covered there (see ``test_agent_usage.py``). This file only checks
+that the router forwards params and maps errors to HTTP — including that a
+``CogneeApiError`` is left for the global handler instead of being turned
+into a generic 500.
 """
 
 from types import SimpleNamespace
 from uuid import uuid4
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from cognee.api.v1.sessions.routers import get_sessions_router as router_module
+from cognee.exceptions import CogneeSystemError
 
 
 def _app() -> FastAPI:
@@ -37,19 +41,13 @@ def test_with_agent_info_returns_module_result(monkeypatch):
         "has_more": False,
     }
 
-    async def fake_permitted(_user):
-        return ["dataset-1"]
-
-    async def fake_visible(_user):
-        return [user_id]
-
-    async def fake_build_page(**kwargs):
+    async def fake_get_sessions_with_agent_info(**kwargs):
         captured_kwargs.update(kwargs)
         return fake_page
 
-    monkeypatch.setattr(router_module, "_permitted_dataset_ids_for", fake_permitted)
-    monkeypatch.setattr(router_module, "_visible_user_ids", fake_visible)
-    monkeypatch.setattr(router_module, "build_sessions_with_agent_info_page", fake_build_page)
+    monkeypatch.setattr(
+        router_module, "get_sessions_with_agent_info", fake_get_sessions_with_agent_info
+    )
 
     response = TestClient(app).get(
         "/api/v1/sessions/with-agent-info", params={"limit": 10, "offset": 5}
@@ -57,8 +55,8 @@ def test_with_agent_info_returns_module_result(monkeypatch):
 
     assert response.status_code == 200
     assert response.json() == fake_page
-    assert captured_kwargs["visible_user_ids"] == [user_id]
-    assert captured_kwargs["permitted_dataset_ids"] == ["dataset-1"]
+    assert captured_kwargs["user"].id == user_id
+    assert captured_kwargs["since"] is not None
     assert captured_kwargs["limit"] == 10
     assert captured_kwargs["offset"] == 5
 
@@ -70,19 +68,30 @@ def test_with_agent_info_failure_returns_500(monkeypatch):
         id=user_id, tenant_id=None
     )
 
-    async def fake_permitted(_user):
-        return []
-
-    async def fake_visible(_user):
-        return [user_id]
-
-    async def failing_build_page(**_kwargs):
+    async def failing(**_kwargs):
         raise RuntimeError("db unavailable")
 
-    monkeypatch.setattr(router_module, "_permitted_dataset_ids_for", fake_permitted)
-    monkeypatch.setattr(router_module, "_visible_user_ids", fake_visible)
-    monkeypatch.setattr(router_module, "build_sessions_with_agent_info_page", failing_build_page)
+    monkeypatch.setattr(router_module, "get_sessions_with_agent_info", failing)
 
     response = TestClient(app).get("/api/v1/sessions/with-agent-info")
     assert response.status_code == 500
     assert response.json() == {"error": "list failed"}
+
+
+def test_with_agent_info_lets_cognee_api_error_propagate(monkeypatch):
+    """A CogneeApiError carries its own status/message — it must reach the
+    global exception_handler in cognee/api/client.py, not get flattened
+    into the generic {"error": "list failed"} 500."""
+    app = _app()
+    user_id = uuid4()
+    app.dependency_overrides[router_module.get_authenticated_user] = lambda: SimpleNamespace(
+        id=user_id, tenant_id=None
+    )
+
+    async def failing(**_kwargs):
+        raise CogneeSystemError(message="boom")
+
+    monkeypatch.setattr(router_module, "get_sessions_with_agent_info", failing)
+
+    with pytest.raises(CogneeSystemError):
+        TestClient(app).get("/api/v1/sessions/with-agent-info")

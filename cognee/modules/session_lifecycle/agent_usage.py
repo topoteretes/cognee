@@ -31,7 +31,11 @@ from cognee.modules.agents.registry import (
 from cognee.modules.session_lifecycle.metrics import list_session_rows
 from cognee.modules.session_lifecycle.models import SessionRecord
 from cognee.modules.users.exceptions import PermissionDeniedError
+from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
+from cognee.modules.users.permissions.methods.get_specific_user_permission_datasets import (
+    get_specific_user_permission_datasets,
+)
 from cognee.modules.users.tenants.methods.get_users_in_tenant import get_users_in_tenant
 from cognee.shared.logging_utils import get_logger
 
@@ -45,6 +49,36 @@ logger = get_logger("session_lifecycle.agent_usage")
 # below) rather than erroring, so it's raised here as a single visible
 # constant instead of a bare literal at the call site.
 _AGENT_CONNECTIONS_PAGE_CAP = 10_000
+
+
+async def _permitted_dataset_ids_for(user: User) -> list[UUIDType]:
+    """Return the UUIDs of datasets this user can read (empty on none)."""
+    try:
+        datasets = await get_specific_user_permission_datasets(user.id, "read", None)
+        return [ds.id for ds in datasets] if datasets else []
+    except PermissionDeniedError:
+        return []
+    except Exception:
+        return []
+
+
+async def _child_agent_user_ids(user_id: UUIDType) -> list[UUIDType]:
+    """Return user IDs of agents whose parent_user_id matches this user."""
+    from cognee.modules.users.models import User as UserModel
+
+    engine = get_relational_engine()
+    async with engine.get_async_session() as session:
+        rows = (
+            await session.execute(select(UserModel.id).where(UserModel.parent_user_id == user_id))
+        ).all()
+        return [row.id for row in rows]
+
+
+async def _visible_user_ids(user: User) -> list[UUIDType]:
+    """User's own ID plus any child agent IDs."""
+    ids = [user.id]
+    ids.extend(await _child_agent_user_ids(user.id))
+    return ids
 
 
 def _latest_wins_agent_map(
@@ -245,3 +279,67 @@ async def compute_cost_by_user_agent(
     ]
     result.sort(key=lambda r: r["cost_usd"], reverse=True)
     return result
+
+
+async def get_sessions_with_agent_info(
+    *,
+    user: Optional[User] = None,
+    since: Optional[datetime],
+    status_filter: Optional[str],
+    limit: int,
+    offset: int,
+    order_by: str,
+    descending: bool,
+) -> dict:
+    """SDK-usable entry point backing ``GET /sessions/with-agent-info``.
+
+    Resolves the caller's own visibility (child agents + dataset read
+    grants) and delegates to ``build_sessions_with_agent_info_page``.
+    Kept out of the router so a plain Python/SDK caller can await this
+    directly, without going through FastAPI, and so any
+    ``CogneeApiError`` raised while resolving visibility or aggregating
+    propagates to the caller instead of being swallowed by a router-level
+    catch-all.
+
+    ``user`` defaults to ``get_default_user()`` when omitted, matching
+    every other SDK-facing function in ``cognee.api.v1.agents.agents``.
+    """
+    if user is None:
+        user = await get_default_user()
+    permitted = await _permitted_dataset_ids_for(user)
+    visible_ids = await _visible_user_ids(user)
+    return await build_sessions_with_agent_info_page(
+        user=user,
+        permitted_dataset_ids=permitted,
+        visible_user_ids=visible_ids,
+        since=since,
+        status_filter=status_filter,
+        limit=limit,
+        offset=offset,
+        order_by=order_by,
+        descending=descending,
+    )
+
+
+async def get_cost_by_user_agent(
+    *, user: Optional[User] = None, since: Optional[datetime]
+) -> list[dict]:
+    """SDK-usable entry point backing ``GET /sessions/cost-by-user-agent``.
+
+    Resolves visibility the same way ``get_sessions_with_agent_info``
+    does, then delegates to ``compute_cost_by_user_agent``. See that
+    function's docstring for why this isn't just inlined in the router.
+
+    ``user`` defaults to ``get_default_user()`` when omitted, matching
+    every other SDK-facing function in ``cognee.api.v1.agents.agents``.
+    """
+    if user is None:
+        user = await get_default_user()
+    permitted = await _permitted_dataset_ids_for(user)
+    visible_ids = await _visible_user_ids(user)
+    return await compute_cost_by_user_agent(
+        user=user,
+        visible_user_ids=visible_ids,
+        permitted_dataset_ids=permitted,
+        since=since,
+    )

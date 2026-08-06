@@ -347,3 +347,145 @@ async def test_tenant_mode_member_keeps_child_agents_when_denied_tenant_view(mon
     assert by_type["claude_code"]["user_email"] == "member@example.com"
     assert by_type["codex"]["user_id"] == str(child_id)
     assert by_type["codex"]["user_email"] == "unknown"
+
+
+# --------------------------------------------------------------------------- #
+# get_sessions_with_agent_info / get_cost_by_user_agent (SDK-usable entry
+# points — resolve visibility, then delegate; see review discussion on
+# moving this out of the router so a plain SDK caller can use it too)
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.asyncio
+async def test_get_sessions_with_agent_info_resolves_visibility_then_delegates(monkeypatch):
+    user_id = uuid4()
+    user = SimpleNamespace(id=user_id, tenant_id=None, email="me@example.com")
+
+    async def fake_permitted(_user):
+        return ["dataset-1"]
+
+    async def fake_visible(_user):
+        return [user_id]
+
+    captured = {}
+
+    async def fake_build_page(**kwargs):
+        captured.update(kwargs)
+        return {"sessions": [], "total": 0, "limit": 50, "offset": 0, "has_more": False}
+
+    monkeypatch.setattr(agent_usage, "_permitted_dataset_ids_for", fake_permitted)
+    monkeypatch.setattr(agent_usage, "_visible_user_ids", fake_visible)
+    monkeypatch.setattr(agent_usage, "build_sessions_with_agent_info_page", fake_build_page)
+
+    result = await agent_usage.get_sessions_with_agent_info(
+        user=user,
+        since=None,
+        status_filter=None,
+        limit=10,
+        offset=5,
+        order_by="last_activity_at",
+        descending=True,
+    )
+
+    assert result["total"] == 0
+    assert captured["user"] is user
+    assert captured["permitted_dataset_ids"] == ["dataset-1"]
+    assert captured["visible_user_ids"] == [user_id]
+    assert captured["limit"] == 10
+    assert captured["offset"] == 5
+
+
+@pytest.mark.asyncio
+async def test_get_cost_by_user_agent_resolves_visibility_then_delegates(monkeypatch):
+    user_id = uuid4()
+    user = SimpleNamespace(id=user_id, tenant_id=None, email="me@example.com")
+
+    async def fake_permitted(_user):
+        return ["dataset-1"]
+
+    async def fake_visible(_user):
+        return [user_id]
+
+    captured = {}
+
+    async def fake_compute(**kwargs):
+        captured.update(kwargs)
+        return [{"user_id": str(user_id)}]
+
+    monkeypatch.setattr(agent_usage, "_permitted_dataset_ids_for", fake_permitted)
+    monkeypatch.setattr(agent_usage, "_visible_user_ids", fake_visible)
+    monkeypatch.setattr(agent_usage, "compute_cost_by_user_agent", fake_compute)
+
+    result = await agent_usage.get_cost_by_user_agent(user=user, since=None)
+
+    assert result == [{"user_id": str(user_id)}]
+    assert captured["user"] is user
+    assert captured["permitted_dataset_ids"] == ["dataset-1"]
+    assert captured["visible_user_ids"] == [user_id]
+
+
+@pytest.mark.asyncio
+async def test_get_sessions_with_agent_info_defaults_user_when_omitted(monkeypatch):
+    """Matches every other SDK-facing function in cognee.api.v1.agents.agents:
+    a caller with no HTTP auth context can omit ``user`` entirely."""
+    default_user = SimpleNamespace(id=uuid4(), tenant_id=None, email="default@example.com")
+
+    async def fake_get_default_user():
+        return default_user
+
+    async def fake_permitted(_user):
+        return []
+
+    async def fake_visible(_user):
+        return [default_user.id]
+
+    captured = {}
+
+    async def fake_build_page(**kwargs):
+        captured.update(kwargs)
+        return {"sessions": [], "total": 0, "limit": 50, "offset": 0, "has_more": False}
+
+    monkeypatch.setattr(agent_usage, "get_default_user", fake_get_default_user)
+    monkeypatch.setattr(agent_usage, "_permitted_dataset_ids_for", fake_permitted)
+    monkeypatch.setattr(agent_usage, "_visible_user_ids", fake_visible)
+    monkeypatch.setattr(agent_usage, "build_sessions_with_agent_info_page", fake_build_page)
+
+    await agent_usage.get_sessions_with_agent_info(
+        since=None,
+        status_filter=None,
+        limit=50,
+        offset=0,
+        order_by="last_activity_at",
+        descending=True,
+    )
+
+    assert captured["user"] is default_user
+
+
+@pytest.mark.asyncio
+async def test_get_cost_by_user_agent_defaults_user_when_omitted(monkeypatch):
+    default_user = SimpleNamespace(id=uuid4(), tenant_id=None, email="default@example.com")
+
+    async def fake_get_default_user():
+        return default_user
+
+    async def fake_permitted(_user):
+        return []
+
+    async def fake_visible(_user):
+        return [default_user.id]
+
+    captured = {}
+
+    async def fake_compute(**kwargs):
+        captured.update(kwargs)
+        return []
+
+    monkeypatch.setattr(agent_usage, "get_default_user", fake_get_default_user)
+    monkeypatch.setattr(agent_usage, "_permitted_dataset_ids_for", fake_permitted)
+    monkeypatch.setattr(agent_usage, "_visible_user_ids", fake_visible)
+    monkeypatch.setattr(agent_usage, "compute_cost_by_user_agent", fake_compute)
+
+    await agent_usage.get_cost_by_user_agent(since=None)
+
+    assert captured["user"] is default_user

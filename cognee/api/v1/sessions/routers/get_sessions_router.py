@@ -7,17 +7,19 @@ abandonment-by-idle rule so no sweeper is needed.
 
 from datetime import datetime, timedelta, timezone
 from typing import Literal, Optional
-from uuid import UUID as UUIDType
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from sqlalchemy import and_, func, or_, select
 
+from cognee.exceptions import CogneeApiError
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.session_lifecycle.agent_usage import (
-    build_sessions_with_agent_info_page,
-    compute_cost_by_user_agent,
+    _permitted_dataset_ids_for,
+    _visible_user_ids,
+    get_cost_by_user_agent,
+    get_sessions_with_agent_info,
 )
 from cognee.modules.session_lifecycle.metrics import (
     SessionStatus,
@@ -26,12 +28,8 @@ from cognee.modules.session_lifecycle.metrics import (
     list_session_rows,
 )
 from cognee.modules.session_lifecycle.models import SessionModelUsage, SessionRecord
-from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.models import User
-from cognee.modules.users.permissions.methods.get_specific_user_permission_datasets import (
-    get_specific_user_permission_datasets,
-)
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("sessions_api")
@@ -49,36 +47,6 @@ def _range_since(range_key: _RangeLiteral) -> Optional[datetime]:
     if range_key == "30d":
         return now - timedelta(days=30)
     return None  # "all"
-
-
-async def _permitted_dataset_ids_for(user: User) -> list[UUIDType]:
-    """Return the UUIDs of datasets this user can read (empty on none)."""
-    try:
-        datasets = await get_specific_user_permission_datasets(user.id, "read", None)
-        return [ds.id for ds in datasets] if datasets else []
-    except PermissionDeniedError:
-        return []
-    except Exception:
-        return []
-
-
-async def _child_agent_user_ids(user_id: UUIDType) -> list[UUIDType]:
-    """Return user IDs of agents whose parent_user_id matches this user."""
-    engine = get_relational_engine()
-    async with engine.get_async_session() as session:
-        from cognee.modules.users.models import User as UserModel
-
-        rows = (
-            await session.execute(select(UserModel.id).where(UserModel.parent_user_id == user_id))
-        ).all()
-        return [row.id for row in rows]
-
-
-async def _visible_user_ids(user: User) -> list[UUIDType]:
-    """User's own ID plus any child agent IDs."""
-    ids = [user.id]
-    ids.extend(await _child_agent_user_ids(user.id))
-    return ids
 
 
 def get_sessions_router() -> APIRouter:
@@ -377,12 +345,8 @@ def get_sessions_router() -> APIRouter:
         """
         since = _range_since(range)
         try:
-            permitted = await _permitted_dataset_ids_for(user)
-            visible_ids = await _visible_user_ids(user)
-            result = await build_sessions_with_agent_info_page(
+            result = await get_sessions_with_agent_info(
                 user=user,
-                permitted_dataset_ids=permitted,
-                visible_user_ids=visible_ids,
                 since=since,
                 status_filter=status,
                 limit=limit,
@@ -391,6 +355,11 @@ def get_sessions_router() -> APIRouter:
                 descending=descending,
             )
             return jsonable_encoder(result)
+        except CogneeApiError:
+            # Cognee errors carry their own status code and actionable
+            # message; the global handler in cognee/api/client.py returns
+            # them to the caller.
+            raise
         except Exception as exc:
             logger.error("list_sessions_with_agent_info failed: %s", exc, exc_info=True)
             return JSONResponse(status_code=500, content={"error": "list failed"})
@@ -417,15 +386,13 @@ def get_sessions_router() -> APIRouter:
         """
         since = _range_since(range)
         try:
-            permitted = await _permitted_dataset_ids_for(user)
-            visible_ids = await _visible_user_ids(user)
-            result = await compute_cost_by_user_agent(
-                user=user,
-                visible_user_ids=visible_ids,
-                permitted_dataset_ids=permitted,
-                since=since,
-            )
+            result = await get_cost_by_user_agent(user=user, since=since)
             return jsonable_encoder(result)
+        except CogneeApiError:
+            # Cognee errors carry their own status code and actionable
+            # message; the global handler in cognee/api/client.py returns
+            # them to the caller.
+            raise
         except Exception as exc:
             logger.error("cost_by_user_agent failed: %s", exc, exc_info=True)
             return JSONResponse(status_code=500, content={"error": "aggregation failed"})
