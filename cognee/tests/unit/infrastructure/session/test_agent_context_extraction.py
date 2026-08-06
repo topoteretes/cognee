@@ -50,8 +50,12 @@ class FakeSessionManager:
     async def get_session_context_entries(self, user_id, session_id):
         return list(self.store)
 
+    async def get_session_context_entries_strict(self, user_id, session_id):
+        return list(self.store)
+
     async def create_session_context_entry(self, user_id, session_id, entry_dump):
         self.store.append(entry_dump)
+        return True
 
     async def update_session_context_entry(self, user_id, session_id, entry_id, merge):
         for row in self.store:
@@ -72,6 +76,9 @@ class FakeSessionManager:
 
 class RaisingSessionManager:
     async def get_session_context_entries(self, user_id, session_id):
+        raise RuntimeError("boom")
+
+    async def get_session_context_entries_strict(self, user_id, session_id):
         raise RuntimeError("boom")
 
     async def create_session_context_entry(self, user_id, session_id, entry_dump):

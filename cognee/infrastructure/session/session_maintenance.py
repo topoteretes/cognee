@@ -134,6 +134,13 @@ async def _process_with_manager(
             system_prompt=system_prompt,
             response_model=SessionMaintenanceResult,
         )
+        latest_rows = await session_manager.get_session_context_entries_strict(
+            user_id=work_item.user_id,
+            session_id=work_item.session_id,
+        )
+        evidence = _find_evidence(latest_rows, work_item.evidence_id)
+        if evidence is None or evidence.status == "completed" or evidence.distilled_at is not None:
+            return None
         apply_result = await apply_maintenance_result(
             session_manager,
             work_item=work_item,

@@ -86,14 +86,19 @@ async def enqueue_session_maintenance(
 
 
 def get_tracked_evidence_ids() -> set[str]:
-    """Return evidence owned by the worker on the current event loop."""
-    try:
-        state = _states.get(asyncio.get_running_loop())
-    except RuntimeError:
-        return set()
-    if state is None:
-        return set()
-    return set(state.queued_ids | state.in_flight_ids)
+    """Return evidence owned by a live worker in this process.
+
+    Distillation may run on a different loop than the worker that owns the evidence, so
+    every live loop counts. A closed loop owns nothing: its evidence is abandoned and
+    stays recoverable.
+    """
+    tracked = set()
+    for loop, state in list(_states.items()):
+        if loop.is_closed():
+            continue
+        tracked.update(state.queued_ids)
+        tracked.update(state.in_flight_ids)
+    return tracked
 
 
 async def _cancel_worker(state: _WorkerState) -> None:

@@ -211,3 +211,29 @@ async def test_failed_completion_status_write_leaves_evidence_pending(monkeypatc
 
     assert result is not None and result.errors == ("evidence completion status update failed",)
     assert manager.rows[0]["status"] == "pending"
+
+
+@pytest.mark.asyncio
+async def test_worker_skips_apply_when_evidence_was_distilled_during_llm(monkeypatch):
+    manager = FakeSessionManager([_evidence()])
+
+    async def distill_during_call(**kwargs):
+        manager.rows[0]["distilled_at"] = "2026-08-06T10:00:00+00:00"
+        return SessionMaintenanceResult(
+            candidate_context_updates=[
+                {"section": "rules", "content": "Always cite sources.", "confidence": 0.9}
+            ]
+        )
+
+    monkeypatch.setattr(
+        "cognee.infrastructure.session.session_maintenance.get_session_manager",
+        lambda dataset_id: manager,
+    )
+    monkeypatch.setattr(
+        "cognee.infrastructure.session.session_maintenance.LLMGateway.acreate_structured_output",
+        distill_during_call,
+    )
+
+    assert await process_session_maintenance(_work_item()) is None
+    assert len(manager.rows) == 1
+    assert manager.updates == []
