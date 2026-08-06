@@ -20,6 +20,8 @@ are factored so that's a local change.
 """
 
 import asyncio
+import threading
+import weakref
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -57,6 +59,39 @@ async def session_lock(session_id: str, op: str = "write") -> AsyncGenerator[Non
 
     lock = await _get_lock(session_id, op)
     async with lock:
+        yield
+
+
+_turn_lock_registries: weakref.WeakKeyDictionary[
+    asyncio.AbstractEventLoop,
+    weakref.WeakValueDictionary[tuple[str, str], asyncio.Lock],
+] = weakref.WeakKeyDictionary()
+_turn_registry_guard = threading.Lock()
+
+
+def _get_turn_lock(user_id: str, session_id: str) -> asyncio.Lock:
+    loop = asyncio.get_running_loop()
+    key = (str(user_id), str(session_id))
+    with _turn_registry_guard:
+        registry = _turn_lock_registries.get(loop)
+        if registry is None:
+            registry = weakref.WeakValueDictionary()
+            _turn_lock_registries[loop] = registry
+        lock = registry.get(key)
+        if lock is None:
+            lock = asyncio.Lock()
+            registry[key] = lock
+        return lock
+
+
+@asynccontextmanager
+async def session_turn_lock(user_id: str, session_id: str) -> AsyncGenerator[None, None]:
+    """Serialize full latency turns for one cache user/session identity."""
+    if not user_id or not session_id:
+        yield
+        return
+
+    async with _get_turn_lock(user_id, session_id):
         yield
 
 
