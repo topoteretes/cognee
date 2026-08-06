@@ -125,7 +125,7 @@ jobs:
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-        run: uv run python ./examples/demos/temporal_awareness_example/temporal_awareness_example.py
+        run: uv run python ./examples/advanced_guides/temporal_awareness_example/temporal_awareness_example.py
 
   test-ontology-example:
     name: Run Ontology Tests
@@ -152,7 +152,7 @@ jobs:
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-        run: uv run python ./examples/demos/ontology_reference_vocabulary/ontology_as_reference_vocabulary_example.py
+        run: uv run python ./examples/advanced_guides/ontology_reference_vocabulary/ontology_as_reference_vocabulary_example.py
 
   test-feedback-score-shifting-example:
     name: Run Feedback Score Shifting Example
