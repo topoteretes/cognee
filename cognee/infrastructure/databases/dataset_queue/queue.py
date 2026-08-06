@@ -123,12 +123,20 @@ class DatasetQueue:
         # ``"acquire:<unique>"`` for ``acquire()``. A task may hold multiple
         # entries; all are released together when the task finishes.
         self._task_slots: Dict[int, Dict[str, SlotEntry]] = {}
-        # Pending-close latches: ds_key -> future that resolves when a
-        # backgrounded engine teardown for that dataset has finished. The next
-        # acquirer of the same dataset awaits it before proceeding, so file
-        # locks are provably free before a fresh engine opens the same files.
+        # Pending-close latches — "who must wait, per dataset": ds_key -> future
+        # that resolves when a backgrounded engine teardown for that dataset has
+        # finished. The next acquirer of the same dataset awaits it before
+        # proceeding, so file locks are provably free before a fresh engine
+        # opens the same files. Created when a close is scheduled; resolved and
+        # removed in the close task's ``finally``, success or failure alike.
         # (Same pending-close idea closing_lru_cache uses internally.)
         self._pending_closes: Dict[str, asyncio.Future] = {}
+        # Live close tasks — "which closes are still running, so they can't be
+        # lost". asyncio holds only weak references to tasks: a fire-and-forget
+        # close with no strong reference can be garbage-collected mid-flight,
+        # never finishing the close and never opening its latch. Entries are
+        # removed by the task's done-callback (which also surfaces failures);
+        # tests and shutdown drain this set to wait for in-flight closes.
         self._background_closes: Set[asyncio.Task] = set()
         # Track which tasks already have a done-callback registered so we
         # don't register multiple cleanup handlers for a single task.
