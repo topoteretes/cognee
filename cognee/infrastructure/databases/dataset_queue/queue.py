@@ -265,10 +265,14 @@ class DatasetQueue:
                 # the loudest honest channel. If the close genuinely left file
                 # locks behind, the next engine open fails loudly in a real
                 # request; nothing is silently lost.
+                exc = done.exception()
                 logger.error(
                     "Background engine teardown failed for %s",
                     ds_key,
-                    exc_info=done.exception(),
+                    # The structlog exception processor only unpacks a real
+                    # (type, value, traceback) tuple; anything else falls back
+                    # to sys.exc_info(), which is empty in a done-callback.
+                    exc_info=(type(exc), exc, exc.__traceback__),
                 )
 
         task.add_done_callback(_surface)
