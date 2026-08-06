@@ -9,7 +9,19 @@ from hashlib import sha256
 from typing import List, Optional
 
 from pydantic import ValidationError
-from sqlalchemy import create_engine, delete, event, func, insert, or_, select, text, update
+from sqlalchemy import (
+    create_engine,
+    delete,
+    event,
+    func,
+    insert,
+    or_,
+    select,
+    text,
+    update,
+)
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -202,8 +214,27 @@ class SqlCacheAdapter(CacheDBInterface):
         return or_(table.c.expires_at.is_(None), table.c.expires_at > self._now())
 
     def _session_filter(self, table, user_id: str, session_id: str):
-        """WHERE clause for one session's rows."""
+        """WHERE clause for one session's rows (StringKey columns stringify the binds)."""
         return (table.c.user_id == user_id) & (table.c.session_id == session_id)
+
+    async def _lock_session_writes(self, session, table, user_id: str, session_id: str) -> None:
+        """Serialize same-session write transactions on Postgres.
+
+        Session writes end with the sliding-TTL UPDATE over all of the session's
+        rows while already holding row locks taken earlier in the transaction
+        (a FOR UPDATE read or a fresh insert), so two concurrent writers acquire
+        row locks in opposite orders and deadlock. One transaction-scoped
+        advisory lock per (table, user, session) makes them queue instead; it
+        auto-releases at COMMIT/ROLLBACK. No-op on SQLite (single-writer lock).
+        """
+        if not self._is_postgres:
+            return
+        lock_id = int.from_bytes(
+            sha256(f"{table.name}:{user_id}:{session_id}".encode()).digest()[:8],
+            "big",
+            signed=True,
+        )
+        await session.execute(text("SELECT pg_advisory_xact_lock(:lock_id)"), {"lock_id": lock_id})
 
     async def _refresh_session_ttl(self, session, table, user_id: str, session_id: str) -> None:
         """Slide the whole session's expiry forward (Redis EXPIRE-on-write parity)."""
@@ -471,6 +502,7 @@ class SqlCacheAdapter(CacheDBInterface):
                 used_session_context_ids=used_session_context_ids,
             )
             async with self.sessionmaker() as session, session.begin():
+                await self._lock_session_writes(session, cache_qa_entries, user_id, session_id)
                 await self._purge_session_expired(session, cache_qa_entries, user_id, session_id)
                 await session.execute(
                     insert(cache_qa_entries).values(
@@ -566,6 +598,7 @@ class SqlCacheAdapter(CacheDBInterface):
         while True:
             try:
                 async with self.sessionmaker() as session, session.begin():
+                    await self._lock_session_writes(session, cache_qa_entries, user_id, session_id)
                     result = await session.execute(
                         select(cache_qa_entries.c.payload)
                         .where(
@@ -662,6 +695,7 @@ class SqlCacheAdapter(CacheDBInterface):
         await self._ensure_initialized()
         try:
             async with self.sessionmaker() as session, session.begin():
+                await self._lock_session_writes(session, cache_qa_entries, user_id, session_id)
                 result = await session.execute(
                     delete(cache_qa_entries).where(
                         self._session_filter(cache_qa_entries, user_id, session_id),
@@ -687,6 +721,10 @@ class SqlCacheAdapter(CacheDBInterface):
         try:
             async with self.sessionmaker() as session, session.begin():
                 deleted_rows = 0
+                # Fixed acquisition order (matching the tuple below) so this
+                # multi-table writer can never cycle with single-table writers.
+                for table in (cache_qa_entries, cache_trace_entries, cache_session_context):
+                    await self._lock_session_writes(session, table, user_id, session_id)
                 for table in (cache_qa_entries, cache_trace_entries, cache_session_context):
                     # Expired rows are invisible — drop them first so they don't
                     # count toward "session existed".
@@ -734,6 +772,7 @@ class SqlCacheAdapter(CacheDBInterface):
                 session_feedback=session_feedback,
             )
             async with self.sessionmaker() as session, session.begin():
+                await self._lock_session_writes(session, cache_trace_entries, user_id, session_id)
                 await self._purge_session_expired(session, cache_trace_entries, user_id, session_id)
                 await session.execute(
                     insert(cache_trace_entries).values(
@@ -808,28 +847,40 @@ class SqlCacheAdapter(CacheDBInterface):
     async def create_session_context_entry(
         self, user_id: str, session_id: str, entry_dump: dict
     ) -> None:
-        """Append one session-context entry (kind-discriminated dict) to the session.
+        """Create or replace one session-context entry (kind-discriminated dict).
 
         The caller validates the payload; we only promote its ``id`` to the
-        ``entry_id`` column so updates can target a single row directly.
+        ``entry_id`` column so updates can target a single row directly. Writes
+        upsert on (user_id, session_id, entry_id) — last writer wins — so racing
+        update-then-create flows (e.g. the session persist watermark) converge
+        on a single row instead of accumulating duplicates.
         """
         await self._ensure_initialized()
         # Redis/FS append regardless of "id" (an id-less entry is simply never
         # targetable by update). Mirror that: fall back to a synthetic entry_id
         # only to satisfy the NOT NULL column; the stored payload is untouched.
         entry_id = entry_dump.get("id") or str(uuid.uuid4())
+        insert_into = pg_insert if self._is_postgres else sqlite_insert
+        statement = insert_into(cache_session_context).values(
+            user_id=user_id,
+            session_id=session_id,
+            entry_id=entry_id,
+            payload=entry_dump,
+            expires_at=self._session_expiry(),
+        )
         try:
             async with self.sessionmaker() as session, session.begin():
+                await self._lock_session_writes(session, cache_session_context, user_id, session_id)
                 await self._purge_session_expired(
                     session, cache_session_context, user_id, session_id
                 )
                 await session.execute(
-                    insert(cache_session_context).values(
-                        user_id=user_id,
-                        session_id=session_id,
-                        entry_id=entry_id,
-                        payload=entry_dump,
-                        expires_at=self._session_expiry(),
+                    statement.on_conflict_do_update(
+                        index_elements=["user_id", "session_id", "entry_id"],
+                        set_={
+                            "payload": statement.excluded.payload,
+                            "expires_at": statement.excluded.expires_at,
+                        },
                     )
                 )
                 await self._refresh_session_ttl(session, cache_session_context, user_id, session_id)
@@ -870,6 +921,14 @@ class SqlCacheAdapter(CacheDBInterface):
         while True:
             try:
                 async with self.sessionmaker() as session, session.begin():
+                    await self._lock_session_writes(
+                        session, cache_session_context, user_id, session_id
+                    )
+                    # The unique index keeps this to one row; if duplicates predate the
+                    # backfill, resolve to the newest instead of raising
+                    # MultipleResultsFound — the permanent per-session 503 of issue
+                    # #4226. The UPDATE below still targets every duplicate, so
+                    # stragglers converge on the merged payload.
                     result = await session.execute(
                         select(cache_session_context.c.payload)
                         .where(
@@ -877,9 +936,11 @@ class SqlCacheAdapter(CacheDBInterface):
                             cache_session_context.c.entry_id == entry_id,
                             self._not_expired(cache_session_context),
                         )
+                        .order_by(cache_session_context.c.seq.desc())
+                        .limit(1)
                         .with_for_update()
                     )
-                    payload = result.scalar_one_or_none()
+                    payload = result.scalars().first()
                     if payload is None:
                         return False
                     merged = {**dict(payload), **merge}
@@ -913,6 +974,7 @@ class SqlCacheAdapter(CacheDBInterface):
         await self._ensure_initialized()
         try:
             async with self.sessionmaker() as session, session.begin():
+                await self._lock_session_writes(session, cache_session_context, user_id, session_id)
                 await self._purge_session_expired(
                     session, cache_session_context, user_id, session_id
                 )

@@ -14,6 +14,11 @@ import {
   type TraceEntry,
   type TimeRange,
 } from "@/modules/sessions/getSessions";
+import SelfImprovementCard from "./partials/SelfImprovementCard";
+import ImproveCard from "./partials/ImproveCard";
+import { useGraphEnrichment } from "./partials/useGraphEnrichment";
+import type { EnrichmentRun } from "@/modules/sessions/getSessions";
+import { parseServerIso, formatDate, formatRelativeTime, durationSeconds, formatDuration } from "./partials/format";
 
 const ACCENT = "#6510F4";
 const RANGES: TimeRange[] = ["24h", "7d", "30d", "all"];
@@ -34,34 +39,6 @@ function statusLabel(s: SessionRow): string {
 
 function shortId(id: string): string {
   return id.length <= 40 ? id : id.slice(0, 40) + "…";
-}
-
-// Server returns some timestamps as naive ISO (no timezone designator), but
-// they are actually UTC. Appending "Z" forces JS to parse them as UTC instead
-// of local — without this, CEST users see everything offset by 2 hours.
-function parseServerIso(iso: string): Date {
-  const hasTz = /Z$|[+-]\d{2}:?\d{2}$/.test(iso);
-  return new Date(hasTz ? iso : iso + "Z");
-}
-
-function formatDate(iso: string | null): string {
-  if (!iso) return "—";
-  return parseServerIso(iso).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
-}
-
-function durationSeconds(s: { started_at: string | null; ended_at: string | null; last_activity_at: string | null }): number {
-  if (!s.started_at) return 0;
-  const start = new Date(s.started_at).getTime();
-  const endIso = s.ended_at || s.last_activity_at;
-  if (!endIso) return 0;
-  return Math.max(0, (new Date(endIso).getTime() - start) / 1000);
-}
-
-function formatDuration(sec: number): string {
-  if (sec < 1) return `${sec.toFixed(1)}s`;
-  if (sec < 60) return `${Math.round(sec)}s`;
-  if (sec < 3600) return `${Math.floor(sec / 60)}m ${Math.round(sec % 60)}s`;
-  return `${Math.floor(sec / 3600)}h ${Math.floor((sec % 3600) / 60)}m`;
 }
 
 function StatusBadge({ status }: { status: string }) {
@@ -108,19 +85,6 @@ function asQA(raw: Record<string, unknown>): QAItem {
     feedback_text: s(raw.feedback_text) ?? null,
     feedback_score: n(raw.feedback_score),
   };
-}
-
-function formatRelativeTime(iso?: string): string {
-  if (!iso) return "—";
-  const d = parseServerIso(iso);
-  const t = d.getTime();
-  if (Number.isNaN(t)) return "—";
-  const diffMs = Date.now() - t;
-  const diffSec = Math.round(diffMs / 1000);
-  if (diffSec < 60) return `${diffSec}s ago`;
-  if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m ago`;
-  if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h ago`;
-  return d.toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
 // Visual tokens per source. Recall keeps the existing purple "question" look; remember
@@ -268,7 +232,7 @@ function MessageCard({ qa, index }: { qa: QAItem; index: number }) {
   );
 }
 
-function Transcript({ qas, traces }: { qas: Record<string, unknown>[]; traces: TraceEntry[] }) {
+function Transcript({ qas, traces, enrichmentRuns }: { qas: Record<string, unknown>[]; traces: TraceEntry[]; enrichmentRuns: EnrichmentRun[] }) {
   // /recall always writes a trace with memory_query=question; /remember/entry never does.
   // Build the recall-question set from traces and tag each QA accordingly.
   // ponytail: heuristic only — replace with an explicit `source` field on SessionQAEntry
@@ -293,6 +257,17 @@ function Transcript({ qas, traces }: { qas: Record<string, unknown>[]; traces: T
       (q.answer?.toLowerCase().includes(needle))
     );
   }, [items, query]);
+
+  // Improve entries join the timeline chronologically; hidden while searching,
+  // since the search matches question/answer text only.
+  const timeline = useMemo(() => {
+    const ts = (iso?: string | null): number => (iso ? parseServerIso(iso).getTime() || 0 : 0);
+    const qaEntries = filtered.map((qa) => ({ kind: "qa" as const, qa, run: null, ts: ts(qa.time), key: qa.qa_id ?? `qa-${items.indexOf(qa)}` }));
+    const runEntries = query.trim()
+      ? []
+      : enrichmentRuns.map((run, i) => ({ kind: "improve" as const, qa: null, run, ts: ts(run.created_at), key: run.id ?? `improve-${i}` }));
+    return [...qaEntries, ...runEntries].sort((a, b) => b.ts - a.ts);
+  }, [filtered, enrichmentRuns, query, items]);
 
   return (
     <div style={{ border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, padding: 16, display: "flex", flexDirection: "column", gap: 12, background: "rgba(255,255,255,0.06)", backdropFilter: "blur(12px)" }}>
@@ -319,18 +294,20 @@ function Transcript({ qas, traces }: { qas: Record<string, unknown>[]; traces: T
         )}
       </div>
 
-      {items.length === 0 ? (
+      {items.length === 0 && enrichmentRuns.length === 0 ? (
         <div style={{ fontSize: 12, color: "rgba(237,236,234,0.45)", textAlign: "center", padding: "16px 0" }}>
           No transcript entries yet. Send a /remember/entry with this session_id to populate it.
         </div>
-      ) : filtered.length === 0 ? (
+      ) : timeline.length === 0 ? (
         <div style={{ fontSize: 12, color: "rgba(237,236,234,0.45)", textAlign: "center", padding: "16px 0" }}>
           No turns match &ldquo;{query}&rdquo;.
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {filtered.map((qa, i) => (
-            <MessageCard key={qa.qa_id ?? i} qa={qa} index={items.indexOf(qa)} />
+          {timeline.map((entry) => (
+            entry.kind === "qa"
+              ? <MessageCard key={entry.key} qa={entry.qa} index={items.indexOf(entry.qa)} />
+              : <ImproveCard key={entry.key} run={entry.run} />
           ))}
         </div>
       )}
@@ -394,7 +371,7 @@ function MetaRow({ label, value, copyable }: { label: string; value: React.React
   );
 }
 
-function SessionDetailPanel({ detail }: { detail: SessionDetail }) {
+function SessionDetailPanel({ detail, refreshNonce }: { detail: SessionDetail; refreshNonce: number }) {
   const dur = durationSeconds(detail);
   const tokens = (detail.tokens_in ?? 0) + (detail.tokens_out ?? 0);
   const lastActivity = detail.ended_at ?? detail.last_activity_at;
@@ -402,20 +379,20 @@ function SessionDetailPanel({ detail }: { detail: SessionDetail }) {
   const startedRel = detail.started_at ? formatRelativeTime(detail.started_at) : null;
   const lastFull = formatDate(lastActivity);
   const lastRel = lastActivity ? formatRelativeTime(lastActivity) : null;
+
+  const { runs: enrichmentRuns, loading: enrichmentLoading } = useGraphEnrichment(detail.dataset_id, refreshNonce);
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       {/* Header */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-        <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 0 }}>
-          <span style={{ fontSize: 11, fontWeight: 700, color: "rgba(237,236,234,0.35)", letterSpacing: "0.08em", textTransform: "uppercase" }}>Session</span>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-            <span style={{ fontSize: 18, fontWeight: 700, color: "#EDECEA", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {detail.session_id}
-            </span>
-            <CopyableId value={detail.session_id} label="session id" />
-          </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 0 }}>
+        <span style={{ fontSize: 11, fontWeight: 700, color: "rgba(237,236,234,0.35)", letterSpacing: "0.08em", textTransform: "uppercase" }}>Session</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+          <span style={{ fontSize: 18, fontWeight: 700, color: "#EDECEA", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {detail.session_id}
+          </span>
+          <CopyableId value={detail.session_id} label="session id" />
         </div>
-        <StatusBadge status={statusLabel(detail)} />
       </div>
 
       {/* Stat cards */}
@@ -426,6 +403,9 @@ function SessionDetailPanel({ detail }: { detail: SessionDetail }) {
         <StatCard label="Cost" value={`$${(detail.cost_usd ?? 0).toFixed(4)}`} />
         <StatCard label="Duration" value={formatDuration(dur)} />
       </div>
+
+      {/* Session→graph bridge state — the visible improve() signal */}
+      <SelfImprovementCard datasetId={detail.dataset_id} runs={enrichmentRuns} loading={enrichmentLoading} />
 
       {/* Metadata — between KPIs and transcript */}
       <div style={{ border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, padding: 16, display: "flex", flexDirection: "column", gap: 10, background: "rgba(255,255,255,0.06)", backdropFilter: "blur(12px)" }}>
@@ -440,27 +420,11 @@ function SessionDetailPanel({ detail }: { detail: SessionDetail }) {
         </div>
       </div>
 
-      {/* Conversation transcript — what the agent actually asked and stored */}
-      <Transcript qas={detail.qas ?? []} traces={detail.traces ?? []} />
+      {/* Conversation transcript — what the agent actually asked and stored,
+          with improve (graph enrichment) entries interleaved */}
+      <Transcript qas={detail.qas ?? []} traces={detail.traces ?? []} enrichmentRuns={enrichmentRuns} />
 
       <ToolInvocations traces={detail.traces ?? []} />
-
-      {/* Recent activity (traces) */}
-      {(detail.traces ?? []).length > 0 && (
-        <div style={{ border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, padding: 16, display: "flex", flexDirection: "column", gap: 10, background: "rgba(255,255,255,0.06)", backdropFilter: "blur(12px)" }}>
-          <span style={{ fontSize: 11, fontWeight: 700, color: "rgba(237,236,234,0.7)", letterSpacing: "0.06em", textTransform: "uppercase" }}>Recent activity</span>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {detail.traces.slice(-12).reverse().map((t, i) => (
-              <div key={t.trace_id ?? i} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "rgba(237,236,234,0.7)" }}>
-                <span style={{ width: 6, height: 6, borderRadius: "50%", background: t.status === "error" ? "#EF4444" : "#22C55E", flexShrink: 0 }} />
-                <span style={{ fontWeight: 500, color: "#EDECEA" }}>{t.origin_function || "step"}</span>
-                {t.session_feedback && <span style={{ color: "rgba(237,236,234,0.55)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>— {t.session_feedback}</span>}
-                {t.error_message && <span style={{ color: "#EF4444", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>— {t.error_message}</span>}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
 
     </div>
   );
@@ -478,6 +442,7 @@ export default function SessionsPage() {
   const [detail, setDetail] = useState<SessionDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [refreshNonce, setRefreshNonce] = useState(0);
 
   const load = useCallback(async () => {
     if (!cogniInstance) { setLoading(false); return; }
@@ -505,6 +470,7 @@ export default function SessionsPage() {
     if (selectedId) {
       tasks.push(getSessionDetail(cogniInstance, selectedId).then(setDetail));
     }
+    setRefreshNonce((n) => n + 1);
     await Promise.all(tasks);
     setRefreshing(false);
   }, [cogniInstance, range, selectedId]);
@@ -650,7 +616,7 @@ export default function SessionsPage() {
                 <span style={{ fontSize: 13, color: "rgba(237,236,234,0.35)" }}>Loading session…</span>
               </div>
             ) : detail ? (
-              <SessionDetailPanel detail={detail} />
+              <SessionDetailPanel detail={detail} refreshNonce={refreshNonce} />
             ) : (
               <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%" }}>
                 <span style={{ fontSize: 13, color: "rgba(237,236,234,0.35)" }}>Could not load this session.</span>

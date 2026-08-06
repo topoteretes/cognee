@@ -1,4 +1,5 @@
-from typing import List, Optional
+from typing import List, Optional, cast
+from uuid import UUID
 
 from cognee.context_global_variables import session_user
 from cognee.exceptions import CogneeValidationError
@@ -37,25 +38,60 @@ async def _resolve_user(user: Optional[User]) -> User:
         ) from error
 
 
+async def _default_dataset_id(user: User) -> UUID:
+    """The caller's existing ``main_dataset`` id.
+
+    Read-only — never creates a dataset. Raises when none exists: a bare
+    default-session read has nothing to be scoped to before any data was
+    added, and silently reading an unscoped global session instead would
+    hide the real problem."""
+    from cognee.modules.data.constants import DEFAULT_DATASET_NAME
+    from cognee.modules.data.methods import get_datasets_by_name
+
+    datasets = await get_datasets_by_name([DEFAULT_DATASET_NAME], cast(UUID, user.id))
+    if not datasets:
+        raise CogneeValidationError(
+            message=(
+                "Session prerequisites not met: no main_dataset exists for this user, "
+                "so there is no default session to read. Add data first "
+                "(`await cognee.add(...)` or `await cognee.remember(...)`), run inside "
+                "a dataset context, or pass an explicit session_id."
+            ),
+            name="SessionPreconditionError",
+        )
+    return cast(UUID, datasets[0].id)
+
+
 async def get_session(
-    session_id: str = "default_session",
+    session_id: Optional[str] = None,
     last_n: Optional[int] = None,
     user: Optional[User] = None,
 ) -> List[SessionQAEntry]:
+    """Return a session's Q&A entries.
+
+    ``session_id=None`` resolves to the same per-dataset default session the
+    write side uses — from the active dataset context, or, for a bare call,
+    the caller's existing ``main_dataset``, so a default-session write is
+    readable back through this function. A bare call with no main_dataset
+    raises: there is no default session before any data was added. Passing
+    the literal ``"default_session"`` always reads the global (legacy)
+    session.
+    """
     resolved_user = await _resolve_user(user)
     user_id = str(resolved_user.id)
 
-    try:
-        sm = get_session_manager()
-        raw = await sm.get_session(
-            user_id=user_id,
-            session_id=session_id,
-            last_n=last_n,
-            formatted=False,
-        )
-    except Exception as e:
-        logger.warning("get_session: error from SessionManager: %s", e)
-        return []
+    sm = get_session_manager()
+    if session_id is None and sm.dataset_id is None:
+        # Bare read outside any dataset context: scope to the caller's
+        # main_dataset so the session that dataset-scoped writes used is
+        # found. Read-only; raises when no main_dataset exists.
+        sm = get_session_manager(dataset_id=await _default_dataset_id(resolved_user))
+    raw = await sm.get_session(
+        user_id=user_id,
+        session_id=session_id,
+        last_n=last_n,
+        formatted=False,
+    )
 
     if not raw:
         return []

@@ -18,7 +18,10 @@ import os
 from urllib.parse import urlparse
 import httpx
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
-from cognee.infrastructure.databases.exceptions import EmbeddingException
+from cognee.infrastructure.databases.exceptions import (
+    EmbeddingContextWindowTooSmallError,
+    EmbeddingException,
+)
 
 from cognee.infrastructure.llm.tokenizer.resolver import resolve_embedding_tokenizer
 from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager
@@ -106,7 +109,11 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         stop=stop_after_delay(128),
         wait=wait_exponential_jitter(2, 128),
         retry=retry_if_not_exception_type(
-            (litellm.exceptions.NotFoundError, asyncio.CancelledError)
+            (
+                EmbeddingContextWindowTooSmallError,
+                litellm.exceptions.NotFoundError,
+                asyncio.CancelledError,
+            )
         ),
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
@@ -148,6 +155,24 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                         "api_base": self.endpoint,
                         "api_version": self.api_version,
                     }
+                    # Older LiteLLM releases serialize an omitted encoding format as null,
+                    # which OpenRouter rejects (it only accepts "float"/"base64"). Cognee
+                    # always consumes float vectors, so make the valid format explicit for
+                    # every OpenRouter route: the "openrouter/" model prefix, an explicit
+                    # provider, or a custom endpoint aimed at openrouter.ai. The last case
+                    # (an unprefixed model + endpoint) is driven through litellm's OpenAI
+                    # handler -- the branch that historically injected the null -- so it is
+                    # the one that still needs the guard on current litellm. We keep this
+                    # scoped to OpenRouter because providers such as gemini/bedrock/vertex_ai
+                    # reject encoding_format and cognee does not enable litellm.drop_params.
+                    routed_to_openrouter = (
+                        (self.provider or "").lower() == "openrouter"
+                        or (self.model or "").lower().startswith("openrouter/")
+                        or "openrouter.ai" in (self.endpoint or "").lower()
+                    )
+                    if routed_to_openrouter:
+                        embedding_kwargs["encoding_format"] = "float"
+
                     # Pass through target embedding dimensions when supported
                     if self.dimensions is not None:
                         embedding_kwargs["dimensions"] = self.dimensions
@@ -187,6 +212,8 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                 logger.debug(f"Pooling embeddings of text string with size: {len(text[0])}")
                 s = text[0]
                 third = len(s) // 3
+                if third == 0:
+                    raise EmbeddingContextWindowTooSmallError from error
                 # We are using thirds to intentionally have overlap between split parts
                 # for better embedding calculation
                 left_part, right_part = s[: third * 2], s[third:]
