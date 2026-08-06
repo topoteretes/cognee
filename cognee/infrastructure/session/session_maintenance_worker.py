@@ -1,0 +1,135 @@
+"""Process-local queue lifecycle for session maintenance."""
+
+import asyncio
+from contextlib import suppress
+from contextvars import Context
+from dataclasses import dataclass, field
+
+from cognee.infrastructure.session.session_search_models import SessionMaintenanceWorkItem
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger("session_maintenance_worker")
+MAX_QUEUED_MAINTENANCE = 100
+
+
+@dataclass
+class _WorkerState:
+    queue: asyncio.Queue[SessionMaintenanceWorkItem] = field(
+        default_factory=lambda: asyncio.Queue(maxsize=MAX_QUEUED_MAINTENANCE)
+    )
+    task: asyncio.Task | None = None
+    queued_ids: set[str] = field(default_factory=set)
+    in_flight_ids: set[str] = field(default_factory=set)
+
+
+_states: dict[asyncio.AbstractEventLoop, _WorkerState] = {}
+
+
+async def _process_work_item(work_item: SessionMaintenanceWorkItem) -> None:
+    from cognee.infrastructure.session.session_maintenance import process_session_maintenance
+
+    await process_session_maintenance(work_item)
+
+
+async def _run_worker(state: _WorkerState) -> None:
+    while True:
+        work_item = await state.queue.get()
+        state.queued_ids.discard(work_item.evidence_id)
+        state.in_flight_ids.add(work_item.evidence_id)
+        try:
+            await _process_work_item(work_item)
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            logger.warning("Session maintenance failed: %s", error)
+        finally:
+            state.in_flight_ids.discard(work_item.evidence_id)
+            state.queue.task_done()
+
+
+def _start_worker(state: _WorkerState) -> None:
+    if state.task is not None and not state.task.done():
+        return
+    coroutine = _run_worker(state)
+    state.task = Context().run(asyncio.create_task, coroutine)
+
+
+async def enqueue_session_maintenance(
+    work_item: SessionMaintenanceWorkItem,
+    session_manager,
+) -> bool:
+    """Queue durable evidence without waiting for its maintenance operation."""
+    loop = asyncio.get_running_loop()
+    state = _states.setdefault(loop, _WorkerState())
+    if work_item.evidence_id in state.queued_ids | state.in_flight_ids:
+        return False
+
+    try:
+        state.queue.put_nowait(work_item)
+    except asyncio.QueueFull:
+        try:
+            updated = await session_manager.update_session_context_entry(
+                user_id=work_item.user_id,
+                session_id=work_item.session_id,
+                entry_id=work_item.evidence_id,
+                merge={"status": "deferred", "error": None},
+            )
+            if not updated:
+                logger.warning("Could not defer session evidence: %s", work_item.evidence_id)
+        except Exception:
+            logger.warning("Could not defer session evidence: %s", work_item.evidence_id)
+        return False
+
+    state.queued_ids.add(work_item.evidence_id)
+    _start_worker(state)
+    return True
+
+
+def get_tracked_evidence_ids() -> set[str]:
+    """Return evidence owned by the worker on the current event loop."""
+    try:
+        state = _states.get(asyncio.get_running_loop())
+    except RuntimeError:
+        return set()
+    if state is None:
+        return set()
+    return set(state.queued_ids | state.in_flight_ids)
+
+
+async def _cancel_worker(state: _WorkerState) -> None:
+    if state.task is None:
+        return
+    state.task.cancel()
+    with suppress(asyncio.CancelledError):
+        await state.task
+
+
+async def drain_session_maintenance(timeout_seconds: float = 30.0) -> None:
+    """Finish maintenance on this loop, or cancel it cleanly on timeout.
+
+    Short-lived SDK callers should call this in the same coroutine as ``cognee.search``.
+    Search returns before background maintenance completes.
+    """
+    loop = asyncio.get_running_loop()
+    state = _states.get(loop)
+    if state is None:
+        if _states:
+            raise RuntimeError("session maintenance must be drained on its originating event loop")
+        return
+
+    try:
+        await asyncio.wait_for(state.queue.join(), timeout=timeout_seconds)
+    except asyncio.TimeoutError:
+        await _cancel_worker(state)
+        while True:
+            try:
+                queued = state.queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            state.queued_ids.discard(queued.evidence_id)
+            state.queue.task_done()
+        _states.pop(loop, None)
+        raise
+
+    await _cancel_worker(state)
+    _states.pop(loop, None)

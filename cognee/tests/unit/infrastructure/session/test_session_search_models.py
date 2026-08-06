@@ -3,7 +3,6 @@ from datetime import datetime, timezone
 import pytest
 from pydantic import BaseModel, ValidationError
 
-from cognee.infrastructure.llm.config import LLMConfig
 from cognee.infrastructure.session.session_context_models import MAX_CONTEXT_CONTENT_CHARS
 from cognee.infrastructure.session.session_search_models import (
     MaintenanceApplyResult,
@@ -80,7 +79,6 @@ def test_snapshot_and_work_item_are_immutable():
         evidence_id="e1",
         user_id="u1",
         session_id="s1",
-        llm_config=LLMConfig(),
     )
 
     with pytest.raises(ValidationError):

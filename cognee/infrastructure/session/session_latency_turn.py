@@ -5,7 +5,6 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel
 
-from cognee.infrastructure.llm.config import get_llm_context_config
 from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.infrastructure.session.session_search_models import (
     SessionMaintenanceWorkItem,
@@ -216,5 +215,4 @@ async def commit_latency_turn(
         user_id=user_id,
         session_id=session_id,
         dataset_id=dataset_id,
-        llm_config=get_llm_context_config().model_copy(deep=True),
     )

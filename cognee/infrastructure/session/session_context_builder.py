@@ -348,7 +348,7 @@ async def _apply_single_candidate(
     )
 
     # Look for an existing entry in the same (profile, section) with identical normalized content.
-    existing = await session_manager.get_session_context_entries(
+    existing = await session_manager.get_session_context_entries_strict(
         user_id=user_id,
         session_id=session_id,
     )
@@ -375,12 +375,14 @@ async def _apply_single_candidate(
         source_ids = list(duplicate_row.get(source_field) or [])
         if source_id and source_id not in source_ids:
             source_ids.append(source_id)
-            await session_manager.update_session_context_entry(
+            updated = await session_manager.update_session_context_entry(
                 user_id=user_id,
                 session_id=session_id,
                 entry_id=entry_id,
                 merge={source_field: source_ids},
             )
+            if not updated:
+                raise RuntimeError(f"context entry update failed: {entry_id}")
         return entry_id
 
     # Novel content: create a new active entry under this profile/section.
@@ -397,11 +399,13 @@ async def _apply_single_candidate(
         source_trace_ids=linked_ids if source_field == "source_trace_ids" else [],
         kind="context",
     )
-    await session_manager.create_session_context_entry(
+    created = await session_manager.create_session_context_entry(
         user_id=user_id,
         session_id=session_id,
         entry_dump=new_entry.model_dump(),
     )
+    if not created:
+        raise RuntimeError(f"context entry creation failed: {new_entry.id}")
     return new_entry.id
 
 
@@ -415,6 +419,39 @@ def _coerce_candidate_model(candidate) -> CandidateContextUpdate:
     ):
         return _AGENT_CANDIDATE_ADAPTER.validate_python(candidate)
     return CandidateContextUpdate.model_validate(candidate)
+
+
+async def apply_candidate_updates_strict(
+    *,
+    session_manager,
+    user_id,
+    session_id,
+    source_id,
+    candidates: list,
+) -> tuple[List[str], List[str], List[str]]:
+    """Apply candidates while reporting every applied, skipped, and failed item."""
+    applied: List[str] = []
+    skipped: List[str] = []
+    errors: List[str] = []
+    for index, candidate in enumerate(candidates or []):
+        result_id = f"candidate:{index}"
+        try:
+            model = _coerce_candidate_model(candidate)
+            entry_id = await _apply_single_candidate(
+                session_manager=session_manager,
+                user_id=user_id,
+                session_id=session_id,
+                source_id=source_id,
+                candidate=model,
+            )
+        except Exception as error:
+            errors.append(f"{result_id}: {error}")
+            continue
+        if entry_id:
+            applied.append(entry_id)
+        else:
+            skipped.append(result_id)
+    return applied, skipped, errors
 
 
 async def apply_candidate_updates(
@@ -436,23 +473,14 @@ async def apply_candidate_updates(
 
     Returns the list of touched/created entry ids.
     """
-    touched: List[str] = []
     try:
-        for candidate in candidates or []:
-            try:
-                model = _coerce_candidate_model(candidate)
-                entry_id = await _apply_single_candidate(
-                    session_manager=session_manager,
-                    user_id=user_id,
-                    session_id=session_id,
-                    source_id=source_id,
-                    candidate=model,
-                )
-                if entry_id:
-                    touched.append(entry_id)
-            except Exception:
-                # Per-candidate fail-open: skip this candidate, keep going.
-                continue
-        return touched
+        applied, _, _ = await apply_candidate_updates_strict(
+            session_manager=session_manager,
+            user_id=user_id,
+            session_id=session_id,
+            source_id=source_id,
+            candidates=candidates,
+        )
+        return applied
     except Exception:
-        return touched
+        return []

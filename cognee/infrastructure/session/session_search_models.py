@@ -3,7 +3,6 @@ from typing import Any, Generic, Literal, TypeVar, cast
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from cognee.infrastructure.llm.config import LLMConfig
 from cognee.infrastructure.session.session_context_models import (
     MAX_CONTEXT_CONTENT_CHARS,
     CandidateContextUpdateVariant,
@@ -120,7 +119,7 @@ class SessionTurnEvidence(BaseModel):
 
 
 class SessionMaintenanceWorkItem(BaseModel):
-    """Immutable identity and provider state handed to process-local maintenance."""
+    """Immutable identity handed to process-local maintenance."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -128,7 +127,7 @@ class SessionMaintenanceWorkItem(BaseModel):
     user_id: str
     session_id: str
     dataset_id: str | None = None
-    llm_config: LLMConfig
+    trace_id: str | None = None
 
 
 class SessionMaintenanceResult(BaseModel):

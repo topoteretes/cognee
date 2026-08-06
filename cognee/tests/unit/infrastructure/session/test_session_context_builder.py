@@ -13,6 +13,7 @@ import pytest
 from cognee.infrastructure.session.session_context_builder import (
     DeterministicRanker,
     apply_candidate_updates,
+    apply_candidate_updates_strict,
     build_active_context_block,
     coerce_active_context_entries,
 )
@@ -45,8 +46,12 @@ class FakeSessionManager:
     async def get_session_context_entries(self, user_id, session_id):
         return list(self.store)
 
+    async def get_session_context_entries_strict(self, user_id, session_id):
+        return list(self.store)
+
     async def create_session_context_entry(self, user_id, session_id, entry_dump):
         self.store.append(entry_dump)
+        return True
 
     async def update_session_context_entry(self, user_id, session_id, entry_id, merge):
         for row in self.store:
@@ -60,6 +65,9 @@ class RaisingSessionManager:
     """Every call raises, to exercise the fail-open paths."""
 
     async def get_session_context_entries(self, user_id, session_id):
+        raise RuntimeError("boom")
+
+    async def get_session_context_entries_strict(self, user_id, session_id):
         raise RuntimeError("boom")
 
     async def create_session_context_entry(self, user_id, session_id, entry_dump):
@@ -329,6 +337,21 @@ async def test_apply_fail_open_on_raising_manager():
         candidates=candidates,
     )
     assert touched == []
+
+
+@pytest.mark.asyncio
+async def test_apply_strict_reports_store_failure():
+    applied, skipped, errors = await apply_candidate_updates_strict(
+        session_manager=RaisingSessionManager(),
+        user_id="u",
+        session_id="s",
+        source_id="fb1",
+        candidates=[{"section": "rules", "content": "do something", "confidence": 0.9}],
+    )
+
+    assert applied == []
+    assert skipped == []
+    assert len(errors) == 1
 
 
 @pytest.mark.asyncio

@@ -155,6 +155,7 @@ class TestSearchCommand:
         # Mock the cognee module and SearchType
         mock_cognee = MagicMock()
         mock_cognee.search = AsyncMock(return_value=["result1", "result2"])
+        mock_cognee.drain_session_maintenance = AsyncMock()
         mock_search_type = MagicMock()
         mock_search_type.__getitem__.return_value = "GRAPH_COMPLETION"
 
@@ -181,6 +182,7 @@ class TestSearchCommand:
             system_prompt_path="answer_simple_question.txt",
             session_id=ANY,
         )
+        mock_cognee.drain_session_maintenance.assert_awaited_once()
         # verify the enum’s name separately
         called_enum = mock_cognee.search.await_args.kwargs["query_type"]
         assert called_enum.name == "GRAPH_COMPLETION"

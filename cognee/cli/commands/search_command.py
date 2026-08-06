@@ -10,6 +10,34 @@ import cognee.cli.echo as fmt
 from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
 
 
+def _render_search_results(args: argparse.Namespace, results) -> None:
+    if args.output_format == "json":
+        fmt.echo(json.dumps(results, indent=2, default=str))
+    elif args.output_format == "simple":
+        for i, result in enumerate(results, 1):
+            fmt.echo(f"{i}. {result}")
+    else:
+        if not results:
+            fmt.warning("No results found for your query.")
+            return
+
+        fmt.echo(f"\nFound {len(results)} result(s) using {args.query_type}:")
+        fmt.echo("=" * 60)
+        if args.query_type in ["GRAPH_COMPLETION", "RAG_COMPLETION"]:
+            for i, result in enumerate(results, 1):
+                fmt.echo(f"{fmt.bold('Response:')} {result}")
+                if i < len(results):
+                    fmt.echo("-" * 40)
+        elif args.query_type == "CHUNKS":
+            for i, result in enumerate(results, 1):
+                fmt.echo(f"{fmt.bold(f'Chunk {i}:')} {result}")
+                fmt.echo()
+        else:
+            for i, result in enumerate(results, 1):
+                fmt.echo(f"{fmt.bold(f'Result {i}:')} {result}")
+                fmt.echo()
+
+
 class SearchCommand(SupportsCliCommand):
     command_string = "search"
     help_string = "Search and query the knowledge graph for insights, information, and connections"
@@ -111,42 +139,13 @@ Search Types & Use Cases:
                         top_k=args.top_k,
                         session_id=None,
                     )
-                    return results
+                    _render_search_results(args, results)
                 except Exception as e:
                     raise CliCommandInnerException(f"Failed to search: {str(e)}") from e
+                finally:
+                    await cognee.drain_session_maintenance()
 
-            results = asyncio.run(run_search())
-
-            # Format and display results
-            if args.output_format == "json":
-                fmt.echo(json.dumps(results, indent=2, default=str))
-            elif args.output_format == "simple":
-                for i, result in enumerate(results, 1):
-                    fmt.echo(f"{i}. {result}")
-            else:  # pretty format
-                if not results:
-                    fmt.warning("No results found for your query.")
-                    return
-
-                fmt.echo(f"\nFound {len(results)} result(s) using {args.query_type}:")
-                fmt.echo("=" * 60)
-
-                if args.query_type in ["GRAPH_COMPLETION", "RAG_COMPLETION"]:
-                    # These return conversational responses
-                    for i, result in enumerate(results, 1):
-                        fmt.echo(f"{fmt.bold('Response:')} {result}")
-                        if i < len(results):
-                            fmt.echo("-" * 40)
-                elif args.query_type == "CHUNKS":
-                    # These return text chunks
-                    for i, result in enumerate(results, 1):
-                        fmt.echo(f"{fmt.bold(f'Chunk {i}:')} {result}")
-                        fmt.echo()
-                else:
-                    # Generic formatting for other types
-                    for i, result in enumerate(results, 1):
-                        fmt.echo(f"{fmt.bold(f'Result {i}:')} {result}")
-                        fmt.echo()
+            asyncio.run(run_search())
 
         except Exception as e:
             if isinstance(e, CliCommandInnerException):

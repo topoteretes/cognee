@@ -4,8 +4,9 @@ from uuid import uuid4
 
 import pytest
 
-from cognee.infrastructure.session.session_search_models import SessionTurnSnapshot
 from cognee.infrastructure.session.session_search_models import (
+    SessionMaintenanceWorkItem,
+    SessionTurnSnapshot,
     get_session_search_completion_model,
 )
 from cognee.modules.retrieval.completion_retriever import CompletionRetriever
@@ -143,6 +144,11 @@ async def test_latency_orchestrator_commits_then_applies_retriever_references():
     manager.dataset_id = uuid4()
     snapshot = SessionTurnSnapshot(raw_message="question")
     completion = get_session_search_completion_model(str)(response="answer")
+    work_item = SessionMaintenanceWorkItem(
+        evidence_id="e1",
+        user_id=str(uuid4()),
+        session_id="s1",
+    )
 
     with (
         patch(
@@ -176,13 +182,19 @@ async def test_latency_orchestrator_commits_then_applies_retriever_references():
         patch(
             "cognee.modules.retrieval.session_search.commit_latency_turn",
             new_callable=AsyncMock,
+            return_value=work_item,
         ) as commit,
+        patch(
+            "cognee.modules.retrieval.session_search.enqueue_session_maintenance",
+            new_callable=AsyncMock,
+        ) as enqueue,
     ):
         current_user.get.return_value = SimpleNamespace(id=uuid4())
         result = await run_latency_session_search(retriever, raw_query="question")
 
     assert result.completion == ["answer with references"]
     commit.assert_awaited_once()
+    enqueue.assert_awaited_once_with(work_item, manager)
     retriever._append_references.assert_awaited_once_with(
         ["answer"],
         [item("n1")],
@@ -236,6 +248,7 @@ async def test_latency_orchestrator_skips_references_for_acknowledgement():
         patch(
             "cognee.modules.retrieval.session_search.commit_latency_turn",
             new_callable=AsyncMock,
+            return_value=None,
         ),
     ):
         current_user.get.return_value = SimpleNamespace(id=uuid4())

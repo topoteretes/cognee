@@ -14,6 +14,9 @@ from cognee.infrastructure.session.session_latency_turn import (
     complete_latency_turn,
     load_latency_turn_snapshot,
 )
+from cognee.infrastructure.session.session_maintenance_worker import (
+    enqueue_session_maintenance,
+)
 from cognee.infrastructure.session.session_search_models import (
     SessionTurnSnapshot,
     get_session_search_completion_model,
@@ -265,7 +268,7 @@ async def run_latency_session_search(
             auto_feedback=auto_feedback,
         )
         used_graph_element_ids = retriever._extract_context_object_ids(retrieval.retrieved_objects)
-        await commit_latency_turn(
+        work_item = await commit_latency_turn(
             session_manager,
             snapshot=snapshot,
             completion=completion,
@@ -275,6 +278,8 @@ async def run_latency_session_search(
             used_graph_element_ids=used_graph_element_ids,
             auto_feedback=auto_feedback,
         )
+        if work_item is not None:
+            await enqueue_session_maintenance(work_item, session_manager)
 
     completions = [completion.response]
     if not completion.is_acknowledgement and isinstance(completion.response, str):
