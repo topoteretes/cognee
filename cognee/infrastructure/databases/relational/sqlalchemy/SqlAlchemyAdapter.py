@@ -73,9 +73,23 @@ class SQLAlchemyAdapter:
                 run_sync(self.pull_from_s3())
 
         if "sqlite" in connection_string:
+            # POOL_ARGS was silently discarded on this branch (issue #4328): the
+            # factory forwards it, but only the non-sqlite branch read it. Honor
+            # the pool-sizing keys so deployments can opt into a bounded pool;
+            # with none set, the NullPool default is unchanged. Only sizing keys
+            # pass through — ``poolclass`` is deliberately not accepted here:
+            # POOL_ARGS is a shared surface also splatted unfiltered into the
+            # cache engine (SqlCacheAdapter), where the ``"nullpool"`` string
+            # this file's other branch normalizes would be an error.
+            sqlite_pool_args = {
+                key: value
+                for key, value in (pool_args or {}).items()
+                if key
+                in ("pool_size", "max_overflow", "pool_recycle", "pool_timeout", "pool_pre_ping")
+            }
             self.engine = create_async_engine(
                 connection_string,
-                poolclass=NullPool,
+                **(sqlite_pool_args or {"poolclass": NullPool}),
                 connect_args={**{"timeout": 120}, **final_connect_args},
             )
 
@@ -83,7 +97,7 @@ class SQLAlchemyAdapter:
             # holds a read lock and then tries to upgrade to a write lock can
             # deadlock against another reader's lock. Because cognify() fans
             # work out to parallel greenlets that each open their own connection
-            # (NullPool), those read-then-write transactions race and surface as
+            # (NullPool by default), those read-then-write transactions race and surface as
             # "sqlite3.OperationalError: database is locked" (see issue #2717).
             #
             # Enabling WAL serializes writers on a single write lock while
