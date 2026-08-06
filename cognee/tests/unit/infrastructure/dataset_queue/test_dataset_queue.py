@@ -420,11 +420,16 @@ class TestReleaseSlotFor:
 
     @staticmethod
     async def _drain(queue):
-        """Wait for any backgrounded teardown tasks to finish."""
+        """Wait for any backgrounded teardown tasks to finish.
+
+        return_exceptions: a failing teardown propagates out of its task (it
+        is surfaced by the done-callback, not eaten) — draining must not
+        re-raise it into the test.
+        """
         import asyncio
 
         while queue._background_closes:
-            await asyncio.gather(*list(queue._background_closes))
+            await asyncio.gather(*list(queue._background_closes), return_exceptions=True)
 
     @staticmethod
     def _mock_teardown(queue):
@@ -870,7 +875,7 @@ class TestReleaseSlotFor:
         while queue._background_closes:
             import asyncio
 
-            await asyncio.gather(*list(queue._background_closes))
+            await asyncio.gather(*list(queue._background_closes), return_exceptions=True)
         assert call_count == 2
         assert queue._pending_closes == {}
         assert queue._semaphore._value == 5
@@ -953,7 +958,7 @@ class TestBackgroundTeardownLatch:
         await started.wait()
         finish.set()
         while queue._background_closes:
-            await asyncio.gather(*list(queue._background_closes))
+            await asyncio.gather(*list(queue._background_closes), return_exceptions=True)
         assert done
         assert queue._pending_closes == {}
 
@@ -1002,7 +1007,7 @@ class TestBackgroundTeardownLatch:
         await queue.ensure_slot("ds-L")
         await queue.release_slot_for("ds-L")
         while queue._background_closes:
-            await asyncio.gather(*list(queue._background_closes))
+            await asyncio.gather(*list(queue._background_closes), return_exceptions=True)
         assert queue._pending_closes == {}
         # And the dataset is acquirable again.
         await asyncio.wait_for(queue.ensure_slot("ds-L"), timeout=1)

@@ -235,18 +235,20 @@ class DatasetQueue:
         Registers a pending-close latch for ``ds_key`` first, so a subsequent
         acquirer of the same dataset waits for the close instead of racing a
         fresh engine against still-locked database files. The latch always
-        opens — teardown failures are logged, never propagated (the request
-        this teardown belonged to has already returned).
+        opens; a teardown failure is surfaced at ERROR with its traceback from
+        the task's done-callback (the request this teardown belonged to has
+        already returned, so there is no caller to raise into).
         """
         loop = asyncio.get_running_loop()
         latch: asyncio.Future = loop.create_future()
         self._pending_closes[ds_key] = latch
 
         async def _close() -> None:
+            # No exception is expected here, so none is caught: the latch must
+            # open either way (a failed close must not brick the dataset), and
+            # the failure itself is surfaced below with its full traceback.
             try:
                 await self._teardown_subprocess_engines()
-            except Exception as error:
-                logger.warning("Background engine teardown failed for %s: %s", ds_key, error)
             finally:
                 latch.set_result(None)
                 if self._pending_closes.get(ds_key) is latch:
@@ -254,7 +256,22 @@ class DatasetQueue:
 
         task = loop.create_task(_close())
         self._background_closes.add(task)
-        task.add_done_callback(self._background_closes.discard)
+
+        def _surface(done: asyncio.Task) -> None:
+            self._background_closes.discard(done)
+            if not done.cancelled() and done.exception() is not None:
+                # The request this teardown belonged to has already returned,
+                # so there is no caller to raise into — ERROR with the stack is
+                # the loudest honest channel. If the close genuinely left file
+                # locks behind, the next engine open fails loudly in a real
+                # request; nothing is silently lost.
+                logger.error(
+                    "Background engine teardown failed for %s",
+                    ds_key,
+                    exc_info=done.exception(),
+                )
+
+        task.add_done_callback(_surface)
 
     async def _teardown_subprocess_engines(self) -> None:
         """Evict and close subprocess-mode engines so DB file locks are released.
