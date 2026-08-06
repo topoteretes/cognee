@@ -49,6 +49,18 @@ class SQLAlchemyAdapter:
 
                     SQLite with custom timeout:
                         DATABASE_CONNECT_ARGS='{"timeout": 60}'
+            pool_args (dict, optional): SQLAlchemy connection-pool settings, loaded from
+                RelationalConfig.pool_args, which reads from the POOL_ARGS environment
+                variable.
+
+                For SQLite, only the pool-sizing keys (pool_size, max_overflow,
+                pool_recycle, pool_timeout, pool_pre_ping) are applied; setting any of
+                them switches the engine from its NullPool default to a bounded pool.
+                For other databases every key is forwarded, with QueuePool defaults
+                filled in when no poolclass is given.
+
+                Example:
+                    POOL_ARGS='{"pool_size": 5, "max_overflow": 10}'
         """
         self.db_path: str = None
         self.db_uri: str = connection_string
@@ -73,14 +85,11 @@ class SQLAlchemyAdapter:
                 run_sync(self.pull_from_s3())
 
         if "sqlite" in connection_string:
-            # POOL_ARGS was silently discarded on this branch (issue #4328): the
-            # factory forwards it, but only the non-sqlite branch read it. Honor
-            # the pool-sizing keys so deployments can opt into a bounded pool;
-            # with none set, the NullPool default is unchanged. Only sizing keys
-            # pass through — ``poolclass`` is deliberately not accepted here:
-            # POOL_ARGS is a shared surface also splatted unfiltered into the
-            # cache engine (SqlCacheAdapter), where the ``"nullpool"`` string
-            # this file's other branch normalizes would be an error.
+            # Pool-sizing keys opt into a bounded pool; without them the engine
+            # uses NullPool (no connection reuse). ``poolclass`` itself is not
+            # accepted here: pool_args is shared configuration also consumed
+            # unfiltered by the cache engine, where a string value like
+            # "nullpool" is not a valid pool class.
             sqlite_pool_args = {
                 key: value
                 for key, value in (pool_args or {}).items()
