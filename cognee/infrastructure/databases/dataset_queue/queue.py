@@ -238,15 +238,22 @@ class DatasetQueue:
 
     # ----------------------------------------- subprocess engine teardown
     def _schedule_background_teardown(self, ds_key: str) -> None:
-        """Run :meth:`_teardown_subprocess_engines` off the response path.
+        """Detach engines now; close them off the response path.
 
-        Registers a pending-close latch for ``ds_key`` first, so a subsequent
-        acquirer of the same dataset waits for the close instead of racing a
-        fresh engine against still-locked database files. The latch always
-        opens; a teardown failure is surfaced at ERROR with its traceback from
-        the task's done-callback (the request this teardown belonged to has
-        already returned, so there is no caller to raise into).
+        The eviction happens synchronously right here — callers arriving after
+        this line build fresh engines, never the dying ones. Only the
+        expensive ``engine.close()`` is backgrounded, behind a pending-close
+        latch for ``ds_key`` so a subsequent acquirer of the same dataset
+        waits for the close instead of racing a fresh engine against
+        still-locked database files. The latch always opens; a close failure
+        is surfaced at ERROR with its traceback from the task's done-callback
+        (the request this close belonged to has already returned, so there is
+        no caller to raise into).
         """
+        engines = self._detach_subprocess_engines()
+        if not engines:
+            return
+
         loop = asyncio.get_running_loop()
         latch: asyncio.Future = loop.create_future()
         self._pending_closes[ds_key] = latch
@@ -256,7 +263,7 @@ class DatasetQueue:
             # open either way (a failed close must not brick the dataset), and
             # the failure itself is surfaced below with its full traceback.
             try:
-                await self._teardown_subprocess_engines()
+                await self._close_engines(engines)
             finally:
                 latch.set_result(None)
                 if self._pending_closes.get(ds_key) is latch:
@@ -285,15 +292,22 @@ class DatasetQueue:
 
         task.add_done_callback(_surface)
 
-    async def _teardown_subprocess_engines(self) -> None:
-        """Evict and close subprocess-mode engines so DB file locks are released.
+    def _detach_subprocess_engines(self) -> list:
+        """Synchronously evict subprocess-mode engines from their caches.
+
+        This MUST stay synchronous and run before the release returns: eviction
+        is what guarantees no later caller can fetch a dying engine from the
+        LRU (they build a fresh one instead). Only the expensive
+        ``engine.close()`` of the returned engines may be deferred.
 
         Reads the current task's ContextVar-based graph/vector config to
-        identify which cached engines to tear down.  Lazy imports avoid
-        circular dependencies at module load time.
+        identify which cached engines to detach.  Lazy imports avoid circular
+        dependencies at module load time.
         """
         from cognee.infrastructure.databases.graph.config import get_graph_context_config
         from cognee.infrastructure.databases.vector.config import get_vectordb_context_config
+
+        detached = []
 
         g_cfg = get_graph_context_config()
         if g_cfg.get("graph_database_subprocess_enabled"):
@@ -304,10 +318,8 @@ class DatasetQueue:
             )
 
             if is_graph_engine_cached(**g_cfg):
-                engine = create_graph_engine(**g_cfg)
+                detached.append(create_graph_engine(**g_cfg))
                 evict_graph_engine(**g_cfg)
-                if hasattr(engine, "close"):
-                    await engine.close()
 
         v_cfg = get_vectordb_context_config()
         if v_cfg.get("vector_db_subprocess_enabled"):
@@ -318,10 +330,24 @@ class DatasetQueue:
             )
 
             if is_vector_engine_cached(**v_cfg):
-                engine = create_vector_engine(**v_cfg)
+                detached.append(create_vector_engine(**v_cfg))
                 evict_vector_engine(**v_cfg)
-                if hasattr(engine, "close"):
-                    await engine.close()
+
+        return detached
+
+    async def _close_engines(self, engines: list) -> None:
+        """Close detached engines so their DB file locks are released."""
+        for engine in engines:
+            if hasattr(engine, "close"):
+                await engine.close()
+
+    async def _teardown_subprocess_engines(self) -> None:
+        """Detach and close subprocess-mode engines in one awaited step.
+
+        Used where there is no task to background the close onto (and by
+        callers/tests that want the full synchronous-contract teardown).
+        """
+        await self._close_engines(self._detach_subprocess_engines())
 
     # -------------------------------------------------------- release_slot_for
     async def release_slot_for(self, dataset_id: Any = None) -> None:
@@ -357,14 +383,15 @@ class DatasetQueue:
         if entry.depth > 0:
             return
 
-        # About to fully release.  Tear down subprocess engines only when
-        # no other task holds the same dataset — but do it in the background:
-        # the caller's response must not wait on engine.close() of engines it
-        # has already finished using.  Correctness moves to the pending-close
-        # latch: the eviction + close run in a task that inherits this
-        # context (create_task snapshots contextvars, so the teardown sees
-        # this dataset's engine config), and the next ``ensure_slot`` for the
-        # same dataset awaits the latch before touching engines.
+        # About to fully release.  Detach (evict) subprocess engines only when
+        # no other task holds the same dataset. The eviction itself is
+        # synchronous — after this line no caller can fetch the dying engines
+        # from the cache; they build fresh ones. Only the expensive
+        # ``engine.close()`` runs in the background: the caller's response
+        # must not wait on the close of engines it has already finished
+        # using. The pending-close latch makes the next ``ensure_slot`` for
+        # the same dataset wait for that close before spawning fresh engines
+        # against the same database files.
         try:
             other_holds = any(
                 ds_key in slots for tid, slots in self._task_slots.items() if tid != task_id

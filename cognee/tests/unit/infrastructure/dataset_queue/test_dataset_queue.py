@@ -433,14 +433,20 @@ class TestReleaseSlotFor:
 
     @staticmethod
     def _mock_teardown(queue):
-        """Replace _teardown_subprocess_engines with a counter."""
+        """Count teardown firings via the synchronous detach seam.
+
+        Detach is the part that must run inline at release (it evicts the
+        engines from the cache); returning no engines means nothing needs a
+        background close, which keeps these tests synchronous.
+        """
         call_count = 0
 
-        async def fake_teardown():
+        def fake_detach():
             nonlocal call_count
             call_count += 1
+            return []
 
-        queue._teardown_subprocess_engines = fake_teardown
+        queue._detach_subprocess_engines = fake_detach
 
         class Counter:
             @property
@@ -585,10 +591,12 @@ class TestReleaseSlotFor:
         queue = DatasetQueue(enabled=True, max_concurrent=1)
         ds = "ds-E"
 
-        async def failing_teardown():
+        queue._detach_subprocess_engines = lambda: [object()]
+
+        async def failing_close(engines):
             raise ValueError("engine teardown failed")
 
-        queue._teardown_subprocess_engines = failing_teardown
+        queue._close_engines = failing_close
 
         await queue.ensure_slot(ds)
 
@@ -856,13 +864,15 @@ class TestReleaseSlotFor:
         queue = DatasetQueue(enabled=True, max_concurrent=5)
         call_count = 0
 
-        async def teardown_fails_once():
+        queue._detach_subprocess_engines = lambda: [object()]
+
+        async def close_fails_once(engines):
             nonlocal call_count
             call_count += 1
             if call_count == 1:
                 raise RuntimeError("kaboom")
 
-        queue._teardown_subprocess_engines = teardown_fails_once
+        queue._close_engines = close_fails_once
 
         await queue.ensure_slot("ds-ok")
         await queue.ensure_slot("ds-fail")
@@ -930,7 +940,29 @@ class TestActiveDatasetIds:
 
 
 class TestBackgroundTeardownLatch:
-    """The teardown runs off the response path; the latch keeps correctness."""
+    """The close runs off the response path; detach stays synchronous."""
+
+    @pytest.mark.asyncio
+    async def test_detach_is_synchronous_at_release(self):
+        """Eviction must complete before release returns — a caller on the
+        very next line must never fetch a dying engine from the cache.
+        (Regression: deferring eviction into the background task let e2e
+        flows grab an engine the close then killed under them:
+        "LadybugAdapter is closed; a new adapter must be created".)"""
+        from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
+
+        queue = DatasetQueue(enabled=True, max_concurrent=5)
+        detached = False
+
+        def detach():
+            nonlocal detached
+            detached = True
+            return []
+
+        queue._detach_subprocess_engines = detach
+        await queue.ensure_slot("ds-S")
+        await queue.release_slot_for("ds-S")
+        assert detached, "detach must run inline at release, not in the background task"
 
     @pytest.mark.asyncio
     async def test_release_returns_before_teardown_completes(self):
@@ -943,13 +975,15 @@ class TestBackgroundTeardownLatch:
         finish = asyncio.Event()
         done = False
 
-        async def slow_teardown():
+        queue._detach_subprocess_engines = lambda: [object()]
+
+        async def slow_close(engines):
             nonlocal done
             started.set()
             await finish.wait()
             done = True
 
-        queue._teardown_subprocess_engines = slow_teardown
+        queue._close_engines = slow_close
 
         await queue.ensure_slot("ds-L")
         await queue.release_slot_for("ds-L")  # must NOT wait for the close
@@ -971,10 +1005,12 @@ class TestBackgroundTeardownLatch:
         queue = DatasetQueue(enabled=True, max_concurrent=5)
         finish = asyncio.Event()
 
-        async def slow_teardown():
+        queue._detach_subprocess_engines = lambda: [object()]
+
+        async def slow_close(engines):
             await finish.wait()
 
-        queue._teardown_subprocess_engines = slow_teardown
+        queue._close_engines = slow_close
 
         await queue.ensure_slot("ds-L")
         await queue.release_slot_for("ds-L")
@@ -999,10 +1035,12 @@ class TestBackgroundTeardownLatch:
 
         queue = DatasetQueue(enabled=True, max_concurrent=5)
 
-        async def broken_teardown():
+        queue._detach_subprocess_engines = lambda: [object()]
+
+        async def broken_close(engines):
             raise RuntimeError("boom")
 
-        queue._teardown_subprocess_engines = broken_teardown
+        queue._close_engines = broken_close
 
         await queue.ensure_slot("ds-L")
         await queue.release_slot_for("ds-L")
