@@ -914,6 +914,21 @@ class TestEvictSubprocessEngines:
         await queue.release_slot_for("ds-S")
         assert evicted, "eviction must run inline at release"
 
+    @staticmethod
+    def _modules():
+        """Resolve the patched modules via importlib: dotted-string patch
+        targets like ``...graph.get_graph_engine`` can resolve to the
+        same-named FUNCTION exported by the package __init__ instead of the
+        submodule (broke on Python 3.10 in CI)."""
+        import importlib
+
+        return (
+            importlib.import_module("cognee.infrastructure.databases.graph.config"),
+            importlib.import_module("cognee.infrastructure.databases.vector.config"),
+            importlib.import_module("cognee.infrastructure.databases.graph.get_graph_engine"),
+            importlib.import_module("cognee.infrastructure.databases.vector.create_vector_engine"),
+        )
+
     def test_eviction_routes_through_cache_evict(self):
         """_evict_subprocess_engines must evict via the cache helpers — it must
         NOT fetch engines or close them itself: a fetched lease proxy defers
@@ -924,33 +939,25 @@ class TestEvictSubprocessEngines:
         from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
 
         queue = DatasetQueue(enabled=True, max_concurrent=5)
+        g_conf_mod, v_conf_mod, g_engine_mod, v_engine_mod = self._modules()
 
         g_cfg = {"graph_database_subprocess_enabled": True, "graph_database_name": "g"}
         v_cfg = {"vector_db_subprocess_enabled": True, "vector_db_name": "v"}
 
         with (
-            patch(
-                "cognee.infrastructure.databases.graph.config.get_graph_context_config",
-                return_value=g_cfg,
-            ),
-            patch(
-                "cognee.infrastructure.databases.vector.config.get_vectordb_context_config",
-                return_value=v_cfg,
-            ),
-            patch(
-                "cognee.infrastructure.databases.graph.get_graph_engine.evict_graph_engine"
-            ) as evict_graph,
-            patch(
-                "cognee.infrastructure.databases.vector.create_vector_engine.evict_vector_engine"
-            ) as evict_vector,
-            patch(
-                "cognee.infrastructure.databases.graph.get_graph_engine.create_graph_engine"
-            ) as create_graph,
+            patch.object(g_conf_mod, "get_graph_context_config", return_value=g_cfg),
+            patch.object(v_conf_mod, "get_vectordb_context_config", return_value=v_cfg),
+            patch.object(g_engine_mod, "evict_graph_engine") as evict_graph,
+            patch.object(v_engine_mod, "evict_vector_engine") as evict_vector,
+            patch.object(g_engine_mod, "create_graph_engine") as create_graph,
         ):
             queue._evict_subprocess_engines()
 
-        evict_graph.assert_called_once_with(**g_cfg)
-        evict_vector.assert_called_once_with(**v_cfg)
+        # force_close: an idle holder pinning the lease proxy (e.g. a test
+        # keeping a get_graph_engine() handle) must not defer the close and
+        # keep the worker's file locks alive indefinitely.
+        evict_graph.assert_called_once_with(force_close=True, **g_cfg)
+        evict_vector.assert_called_once_with(force_close=True, **v_cfg)
         create_graph.assert_not_called()
 
     def test_eviction_skips_non_subprocess_engines(self):
@@ -958,22 +965,21 @@ class TestEvictSubprocessEngines:
         from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
 
         queue = DatasetQueue(enabled=True, max_concurrent=5)
+        g_conf_mod, v_conf_mod, g_engine_mod, v_engine_mod = self._modules()
 
         with (
-            patch(
-                "cognee.infrastructure.databases.graph.config.get_graph_context_config",
+            patch.object(
+                g_conf_mod,
+                "get_graph_context_config",
                 return_value={"graph_database_subprocess_enabled": False},
             ),
-            patch(
-                "cognee.infrastructure.databases.vector.config.get_vectordb_context_config",
+            patch.object(
+                v_conf_mod,
+                "get_vectordb_context_config",
                 return_value={"vector_db_subprocess_enabled": False},
             ),
-            patch(
-                "cognee.infrastructure.databases.graph.get_graph_engine.evict_graph_engine"
-            ) as evict_graph,
-            patch(
-                "cognee.infrastructure.databases.vector.create_vector_engine.evict_vector_engine"
-            ) as evict_vector,
+            patch.object(g_engine_mod, "evict_graph_engine") as evict_graph,
+            patch.object(v_engine_mod, "evict_vector_engine") as evict_vector,
         ):
             queue._evict_subprocess_engines()
 

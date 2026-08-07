@@ -238,6 +238,15 @@ class DatasetQueue:
         * a close on those threads survives event-loop teardown, so
           sequential ``asyncio.run()`` phases in one process are safe.
 
+        The eviction is ``force_close=True``: the adapter closes now even if
+        an idle holder still pins its lease proxy (e.g. a test keeping a
+        ``get_graph_engine()`` handle across pipeline calls). A deferred
+        lease-close would keep the worker — and its file locks — alive
+        indefinitely, and the next engine open for the dataset would exhaust
+        its retries against a lock that never frees. Holders re-resolve on
+        next use; nothing is mid-query here because teardown only fires when
+        no other task holds the dataset.
+
         Closing engines here instead re-implements that machinery one level
         up, loop-bound and invisible to the registry: fetching a lease proxy
         in order to close it defers the real close behind the lease and hides
@@ -260,7 +269,7 @@ class DatasetQueue:
         if g_cfg.get("graph_database_subprocess_enabled"):
             from cognee.infrastructure.databases.graph.get_graph_engine import evict_graph_engine
 
-            evict_graph_engine(**g_cfg)
+            evict_graph_engine(force_close=True, **g_cfg)
 
         v_cfg = get_vectordb_context_config()
         if v_cfg.get("vector_db_subprocess_enabled"):
@@ -268,7 +277,7 @@ class DatasetQueue:
                 evict_vector_engine,
             )
 
-            evict_vector_engine(**v_cfg)
+            evict_vector_engine(force_close=True, **v_cfg)
 
     # -------------------------------------------------------- release_slot_for
     async def release_slot_for(self, dataset_id: Any = None) -> None:
