@@ -125,10 +125,15 @@ def get_visualize_router() -> APIRouter:
 
         from cognee.api.v1.visualize import visualize_graph
 
-        try:
-            # Verify user has permission to read dataset
-            dataset = await get_authorized_existing_datasets([dataset_id], "read", user)
+        # Verify user has permission to read dataset
+        dataset = await get_authorized_existing_datasets([dataset_id], "read", user)
+        if not dataset:
+            return JSONResponse(
+                status_code=403,
+                content={"error": "Dataset not found or access denied"},
+            )
 
+        try:
             html_visualization = await visualize_graph(
                 dataset=dataset[0].id,
                 user=user,
@@ -143,7 +148,7 @@ def get_visualize_router() -> APIRouter:
 
         except Exception as error:
             logger.exception("Visualization failed for dataset %s", dataset_id)
-            return JSONResponse(status_code=409, content={"error": str(error)})
+            return JSONResponse(status_code=409, content={"error": "Visualization failed"})
 
     @router.get("/json", response_model=None)
     async def visualize_json(
@@ -529,6 +534,11 @@ def get_visualize_router() -> APIRouter:
                 datasets = await get_authorized_existing_datasets(
                     [pair.dataset_id], "read", target_user
                 )
+                if not datasets:
+                    return JSONResponse(
+                        status_code=409,
+                        content={"error": f"Dataset {pair.dataset_id} not found or access denied"},
+                    )
                 user_dataset_pairs.append((target_user, datasets[0]))
 
             html_visualization = await visualize_multi_user_graph(user_dataset_pairs)
