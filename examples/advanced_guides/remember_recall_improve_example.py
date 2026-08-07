@@ -2,6 +2,11 @@
 """
 V2 Memory-Oriented API: remember, recall, improve, forget, status.
 
+The advanced companion to ``examples/guides/simple_cognee_example.py`` and
+``examples/guides/improve_quickstart.py``. Those show a single remember → recall flow and a
+minimal before/after ``improve()``; this one tours the whole memory API surface in nine
+steps, adding session memory, per-source tracking, and freshness checking.
+
 Demonstrates two memory patterns:
   1. Permanent memory -- remember() without session_id ingests data
      directly into the knowledge graph.
@@ -13,7 +18,7 @@ Also shows per-source tracking (status with items/since) and freshness
 checking via source_content_hash on graph nodes.
 
 Usage:
-    uv run python examples/demos/remember_recall_improve_example.py
+    uv run python examples/advanced_guides/remember_recall_improve_example.py
 
 Requires:
     LLM_API_KEY set in .env or environment.

@@ -19,7 +19,7 @@ exactly as ``cognify`` already needs. With no embeddings the tab simply shows a
 friendly empty state — the classic render never breaks.
 
 Run:
-    python examples/python/semantic_memory_map.py
+    python examples/guides/semantic_memory_map.py
 Then open the printed HTML and click the **Semantic** tab (or append
 ``#semantic`` to deep-link straight to it).
 """
@@ -56,14 +56,10 @@ async def main():
     await cognee.add(TEXT)
     await cognee.cognify()
 
-    html = await visualize_graph(destination_file_path=DEST)
+    await visualize_graph(destination_file_path=DEST)
 
-    has_semantic = 'data-view="semantic"' in html
-    has_positions = "window._semanticPositions = null" not in html
     print(f"\nSaved: {DEST}")
-    print(f"Semantic tab present:   {has_semantic}")
-    print(f"Semantic positions set: {has_positions}")
-    print("\nOpen the file and click the Semantic tab (or append #semantic to the URL).")
+    print("Open the file and click the Semantic tab (or append #semantic to the URL).")
 
 
 if __name__ == "__main__":

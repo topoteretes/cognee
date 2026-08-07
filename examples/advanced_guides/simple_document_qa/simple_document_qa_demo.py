@@ -1,4 +1,19 @@
 # ruff: noqa: E402
+"""
+Q&A over a full real document.
+
+The advanced companion to ``examples/guides/simple_cognee_example.py``. Same
+remember → recall flow, but instead of a short inline string it ingests a bundled real
+document (``data/alice_in_wonderland.txt``, the full text of Alice in Wonderland) and
+asks questions that require reading across the whole book.
+
+Usage:
+    uv run python examples/advanced_guides/simple_document_qa/simple_document_qa_demo.py
+
+Requires:
+    LLM_API_KEY set in .env or environment.
+"""
+
 import asyncio
 import os
 

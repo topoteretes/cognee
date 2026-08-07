@@ -100,7 +100,7 @@ ty check .
 ### Running Cognee
 ```bash
 # Using Python SDK
-uv run python examples/demos/simple_cognee_example.py
+uv run python examples/guides/simple_cognee_example.py
 
 # Using CLI
 cognee-cli add "Your text here"

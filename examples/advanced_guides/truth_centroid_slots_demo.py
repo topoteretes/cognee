@@ -1,12 +1,21 @@
 """End-to-end demo of truth centroid slots changing HybridRetriever ranking.
 
+The advanced companion to ``examples/demos/truth_subspace_reranking_demo.py``: that demo
+shows what truth-subspace weighting does to ranking; this one shows how it works underneath —
+the deterministic centroid slots and their epochs, including rebuilds that keep anchors
+current across learning batches. Both are covered by the "Truth subspace re-ranking" guide
+in cognee-docs (``guides/truth-subspace-reranking.mdx``).
+
+Caveat: ``load_centroids``, ``get_node_truth_state``, and ``align.cosine`` used here are
+internal APIs and may change without notice.
+
 This demo uses real cognee ingestion, cognification, vector search, graph state,
 and embeddings. It skips only the live session flow: instead, it writes distilled
 learnings directly into the ``session_learnings`` node set.
 
 Run from the repository root:
 
-    uv run python examples/demos/truth_centroid_slots_demo.py
+    uv run python examples/advanced_guides/truth_centroid_slots_demo.py
 """
 
 import asyncio

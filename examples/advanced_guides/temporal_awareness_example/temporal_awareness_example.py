@@ -1,3 +1,19 @@
+"""
+Temporal search over real biography documents.
+
+The advanced companion to ``examples/guides/temporal_recall.py``. That guide inlines a
+four-sentence timeline; this one ingests two bundled real biographies
+(``data/biography_1.txt``, ``data/biography_2.txt``) with ``temporal_cognify=True`` and runs
+``SearchType.TEMPORAL`` queries — before / after / between ranges plus person-centric
+questions — over the extracted event timeline.
+
+Usage:
+    uv run python examples/advanced_guides/temporal_awareness_example/temporal_awareness_example.py
+
+Requires:
+    LLM_API_KEY set in .env or environment.
+"""
+
 import asyncio
 from pathlib import Path
 
