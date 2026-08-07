@@ -68,7 +68,10 @@ writes to a fast session cache rather than running add+cognify inline, and
 `recall(..., session_id="chat_1")` reads it back (session hits short-circuit the
 graph search). With the default `self_improvement=True` it still bridges that
 data into the permanent graph in the background; `improve(dataset=...,
-session_ids=[...])` does the same explicitly.
+session_ids=[...])` does the same explicitly. Session memory runs on the
+session cache, which is on by default (`CACHING=true`); setting
+`CACHING=false` disables it entirely and makes `remember(session_id=...)`
+raise.
 
 Start with `examples/demos/remember_recall_improve_example.py`, which walks
 through permanent memory, session memory, and the sync between them.
@@ -78,7 +81,8 @@ are what `remember`/`recall`/`improve` call underneath — reach for them when y
 need to drive a stage in isolation (e.g. custom pipeline tasks), not for
 ordinary ingestion. `cognee.delete` is formally deprecated (since 0.3.9);
 `forget()` is the v1 replacement, unifying the old delete/prune/empty_dataset
-paths behind one call.
+paths behind one call. When to use `recall()` versus the low-level `search()`
+is covered in `docs/recall-vs-search.md`.
 
 ## Verify / troubleshoot
 
@@ -86,5 +90,8 @@ paths behind one call.
   flow from the shell.
 - To wipe local state during experiments: `cognee-cli forget --all` (or
   `await cognee.forget(everything=True)`).
+- Reads slow or spending tokens on every query → set `AUTO_FEEDBACK=false`
+  (keep `CACHING=true`); by default cognee makes one structured-output LLM
+  call per answered query to self-tune its memory.
 - Structured LLM output errors usually mean the model/provider needs an
   explicit instructor mode: `LLM_INSTRUCTOR_MODE="json_schema_mode"`.

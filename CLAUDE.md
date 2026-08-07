@@ -148,6 +148,10 @@ Improve & Memify are virtually the same, though. So no reason not to use improve
 
 `cognee.delete` is deprecated (since 0.3.9, in favor of `datasets.delete_data`); `forget()` is the v1 replacement that unifies the old delete/prune/empty_dataset paths.
 
+#### recall() vs search()
+
+`recall()` wraps `search()` — its graph path calls the same authorized search — and adds three things: rule-based query routing when `query_type` is omitted (regex scoring, no LLM call, so auto-routing is free), session memory as a searchable source (`scope` = `graph` / `session` / `trace` / `session_context`; with a bare `session_id` a session hit short-circuits the graph search), and normalized results tagged with a `_source` key. Use `recall()` for ordinary retrieval. Drop to `search()` when you need the agentic extras as first-class parameters (`skills`, `tools`, `max_iter`, `code_query`, `node_type`), raw `SearchResult` objects instead of tagged entries, or a pinned `query_type` with no router in the path. Note `search(session_id=...)` only adds session history to the retrieval context — it never searches the session cache as a source; that is `recall()`-only. Full guide: `docs/recall-vs-search.md`.
+
 ### Key Architectural Patterns
 
 #### 1. Pipeline-Based Processing
@@ -164,7 +168,28 @@ Key files:
 - `cognee/infrastructure/databases/vector/vector_db_interface.py`
 
 #### 3. Multi-Tenant Access Control
-User → Dataset → Data hierarchy with permission-based filtering. Enable with `ENABLE_BACKEND_ACCESS_CONTROL=True`. Each user+dataset combination can have isolated graph/vector databases (when using supported backends: Ladybug, LanceDB, SQLite, Postgres).
+User → Dataset → Data hierarchy with permission-based filtering. Enable with `ENABLE_BACKEND_ACCESS_CONTROL=True`. Each user+dataset combination can have isolated graph/vector databases — but only on backends with a dataset-database handler.
+
+**Multi-tenancy support matrix** (source of truth: `cognee/infrastructure/databases/dataset_database_handler/supported_dataset_database_handlers.py`):
+
+| Layer | Backend | Isolated per user+dataset? | Notes |
+|---|---|---|---|
+| Graph | Ladybug/Kuzu (default) | ✅ | embedded, one database per dataset |
+| Graph | Neo4j | ✅ | one Neo4j database per dataset inside the DBMS — requires an edition with multi-database support (Enterprise/Aura). A second handler, `neo4j_aura_dev`, provisions a whole Aura instance per dataset; dev/PoC only, not production-ready |
+| Graph | Postgres | ✅ | graph-on-Postgres is itself a demo feature (see warning above) |
+| Graph | Turso | ✅ | |
+| Graph | Neptune, ladybug-remote | ❌ | requires `ENABLE_BACKEND_ACCESS_CONTROL=false` |
+| Vector | LanceDB (default) | ✅ | |
+| Vector | PGVector | ✅ | |
+| Vector | Turso | ✅ | |
+| Vector | Neptune Analytics | ❌ | requires `ENABLE_BACKEND_ACCESS_CONTROL=false` |
+| Vector | Community adapters (ChromaDB, Qdrant, …) | ❌ | unless the adapter registers a handler via `use_dataset_database_handler()` |
+| Relational | SQLite / Postgres | n/a — always shared | one relational DB holds users, ACLs, and the dataset-database registry; it is never isolated per dataset |
+
+How it works:
+- The handler is selected automatically from the configured provider (`GraphConfig.fill_derived` and the vector-config equivalent) — you never set it by hand for in-tree backends.
+- **Both** the graph and vector backends must support isolation. If either doesn't, cognee raises an `EnvironmentError` naming the unsupported handler — with the flag on (its default), an unsupported backend is a hard error, not a silent fallback to shared databases. The fix is switching backends or setting `ENABLE_BACKEND_ACCESS_CONTROL=false`.
+- New backends gain multi-tenancy by registering a `DatasetDatabaseHandlerInterface` implementation in the registry (or at runtime via `use_dataset_database_handler()`).
 
 ### Layer Structure
 
@@ -343,6 +368,18 @@ CACHE_BACKEND=sqlite
 # Optional explicit SQLAlchemy URL for sqlite/postgres cache backends (overrides defaults)
 CACHE_DB_URL=postgresql+asyncpg://cognee:cognee@localhost:5432/cognee_db
 ```
+
+### Memory & Performance Tuning Flags
+
+Three flags trade memory features for speed. Know what each turns off before flipping it:
+
+| Flag (default) | Turns off when disabled | Cost of disabling |
+|---|---|---|
+| `CACHING=true` | The entire session-memory layer: `remember(session_id=...)` raises, `recall()` loses session history and the session-cache short-circuit, `agent_memory` session options error, and `AUTO_FEEDBACK` becomes moot | You lose the fast session write path and self-improving memory — only the slower add+cognify path remains. Do not benchmark cognee with this off; that measures cognee with its memory layer removed |
+| `AUTO_FEEDBACK=true` | The automatic per-turn analysis: one structured-output LLM call after each answered query that detects implicit feedback, guides later retrievals, and feeds `improve()`'s agent-context lessons | Memory stops self-tuning from conversation signals. Session store/recall itself keeps working — this is the flag to disable for low-latency reads, since the per-turn LLM call dominates default read latency |
+| `DATASET_QUEUE_ENABLED=true` | The per-process cap on concurrent datasets (`DATASET_QUEUE_MAX_CONCURRENT`, default 6), subprocess-engine teardown on scope exit, and pinning of in-use engines against cache eviction | Saves minor per-operation overhead, but embedded engines become unbounded: file-lock leaks and mid-use engine eviction under parallel multi-dataset load. Safe only for single-dataset scripts |
+
+`AUTO_FEEDBACK` is only consulted when `CACHING=true`. If reads feel slow on defaults, set `AUTO_FEEDBACK=false` and keep `CACHING=true` — that keeps session memory while removing the per-turn LLM call.
 
 ### LLM Provider Configuration
 
@@ -635,7 +672,7 @@ Opt-in LLM check that runs as the last `cognify()` task (default **off**). After
 Multi-tenant architecture with users, roles, and Access Control Lists (ACLs):
 - Read, write, delete, and share permissions per dataset
 - Enable with `ENABLE_BACKEND_ACCESS_CONTROL=True`
-- Supports isolated databases per user+dataset (Ladybug, LanceDB, SQLite, Postgres)
+- Supports isolated graph/vector databases per user+dataset — backend support varies; see the multi-tenancy support matrix under "Multi-Tenant Access Control" above
 
 ### Graph Visualization
 Launch visualization server:
@@ -658,6 +695,10 @@ shutdown = visualization_server(port=8080)  # synchronous; returns a shutdown ca
 - Use `debugpy` optional dependency for debugging: `pip install cognee[debug]`
 
 ### Common Issues
+
+**Slow search/recall on default settings**
+- Issue: Each answered query on the session path makes one structured-output LLM call for automatic feedback analysis
+- Solution: Set `AUTO_FEEDBACK=false` (keep `CACHING=true` so session memory stays on); see "Memory & Performance Tuning Flags"
 
 **Ollama + OpenAI Embeddings NoDataError**
 - Issue: Mixing Ollama with OpenAI embeddings can cause errors

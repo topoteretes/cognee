@@ -45,11 +45,16 @@ Note the CLI defaults `--query-type` to `GRAPH_COMPLETION`, whereas the SDK's
 
 ## Session memory and enrichment
 
+Session entries are currently written from the SDK — `cognee.remember(...,
+session_id="chat_1")` — not the CLI (`cognee-cli remember` has no session
+flag). The CLI side of session memory is reading and bridging:
+
 ```bash
-cognee-cli remember "fact" --dataset-name my_project
-cognee-cli improve -d my_project             # enrich/index the graph
-cognee-cli improve -d my_project -s chat_1   # + bridge session content into the graph
+cognee-cli recall "question" -s chat_1       # session cache first: without -d/-t
+                                             # this searches the session directly
 cognee-cli sessions get                      # retrieve session Q&A history
+cognee-cli improve -d my_project -s chat_1   # bridge session content into the graph
+cognee-cli improve -d my_project             # enrich/index the graph (no session)
 cognee-cli feedback ...                      # attach feedback to results
 ```
 
@@ -66,7 +71,7 @@ isolation; prefer `remember`/`recall`/`forget`/`improve` otherwise.
 
 ```bash
 cognee-cli add "text" && cognee-cli cognify  # what `remember` does in one step
-cognee-cli search "question"                 # `recall` without session support
+cognee-cli search "question"                 # `recall` minus routing/scope/session sources
 cognee-cli memify -d my_project              # custom extraction/enrichment tasks
 cognee-cli delete --all                      # superseded by `forget --all`
 ```
@@ -103,6 +108,12 @@ an old schema.
   unless a dataset is given.
 - `forget` refuses to run bare — pass `--dataset`, `--dataset-id`, `--data-id`
   (with a dataset), or `--everything`/`--all`.
+- Session commands (`recall -s`, `sessions get`, `improve -s`) require
+  `CACHING=true` (the default) — with it off, session reads return nothing and
+  SDK session writes raise. To cut read latency and token cost while keeping
+  session memory, `cognee-cli config set AUTO_FEEDBACK false` — by default
+  cognee makes one structured-output LLM call per answered query to self-tune
+  its memory.
 - `memify` requires one of the arguments -d/--dataset-name --dataset-id
 - `config set`/`config unset` write to the `.env` file in whatever directory
   you run the command from (creating it if missing). `config reset` (reset
