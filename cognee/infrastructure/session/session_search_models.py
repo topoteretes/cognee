@@ -2,9 +2,9 @@ from pydantic import BaseModel, ConfigDict
 
 
 class SessionTurnSnapshot(BaseModel):
-    """Immutable session state read once and used by both lanes of a latency turn.
+    """Immutable session state read once and used by both lanes of a concurrent turn.
 
-    A latency turn analyzes the user's message and answers it concurrently, so both
+    A concurrent turn analyzes the user's message and answers it at the same time, so both
     lanes have to work from the same reading of the session. Loading it once also keeps
     the two lanes from racing each other's cache reads.
     """

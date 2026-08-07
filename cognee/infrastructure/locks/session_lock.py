@@ -86,7 +86,7 @@ def _get_turn_lock(user_id: str, session_id: str) -> asyncio.Lock:
 
 @asynccontextmanager
 async def session_turn_lock(user_id: str, session_id: str) -> AsyncGenerator[None, None]:
-    """Serialize full latency turns for one cache user/session identity."""
+    """Serialize full concurrent turns for one cache user/session identity."""
     if not user_id or not session_id:
         yield
         return

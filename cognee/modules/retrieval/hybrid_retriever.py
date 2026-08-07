@@ -520,15 +520,15 @@ class HybridRetriever(BaseRetriever):
     ) -> List[Any]:
         validate_retriever_input(query, query_batch, self._use_session_cache())
 
-        from cognee.modules.retrieval.session_search import run_latency_session_search
+        from cognee.modules.retrieval.session_search import try_concurrent_turn
 
-        latency_result = await run_latency_session_search(
+        turn_result = await try_concurrent_turn(
             self,
             raw_query=query or "",
             is_batch=query_batch is not None,
         )
-        if latency_result is not None:
-            return latency_result.completion
+        if turn_result is not None:
+            return turn_result.completion
 
         retrieved_objects = await self.get_retrieved_objects(query=query, query_batch=query_batch)
         context = await self.get_context_from_objects(

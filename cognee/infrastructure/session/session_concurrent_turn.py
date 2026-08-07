@@ -1,6 +1,6 @@
-"""Session reads and writes for one latency-optimized turn.
+"""Session reads and writes for one concurrent turn.
 
-A latency turn does not chain analysis before retrieval the way the accuracy path does.
+A concurrent turn does not chain analysis before retrieval the way the accuracy path does.
 It reads the session once, then runs the turn analysis and the answer concurrently, and
 applies the analysis after both land. These are the session-side pieces of that: the
 snapshot both lanes read from, the analysis lane, the answer call, and the commit.
@@ -28,7 +28,7 @@ from cognee.modules.retrieval.utils.completion import generate_completion
 from cognee.modules.session_lifecycle import track_session_usage
 from cognee.shared.logging_utils import get_logger
 
-logger = get_logger("session_latency_turn")
+logger = get_logger("session_concurrent_turn")
 
 # The analysis runs alongside the answer, so it normally finishes first. This only bounds
 # the pathological case where it would hold the turn open past its own answer.
@@ -40,14 +40,14 @@ ANALYSIS_TIMEOUT_SECONDS = 30.0
 CONVERSATIONAL_TURN_PROMPT = "session_conversational_turn.txt"
 
 
-async def load_latency_turn_snapshot(
+async def load_turn_snapshot(
     session_manager,
     *,
     user_id: str,
     session_id: str,
     raw_message: str,
 ) -> SessionTurnSnapshot:
-    """Read every piece of session state one latency turn needs, in one pass."""
+    """Read every piece of session state one concurrent turn needs, in one pass."""
     auto_feedback = session_manager.is_auto_feedback_enabled()
     loads = [
         session_manager.get_session(
@@ -116,7 +116,7 @@ async def load_latency_turn_snapshot(
     )
 
 
-async def analyze_latency_turn(snapshot: SessionTurnSnapshot) -> SessionTurnAnalysis:
+async def analyze_turn_concurrently(snapshot: SessionTurnSnapshot) -> SessionTurnAnalysis:
     """Run the turn analysis alongside the answer. Fail open to no context updates.
 
     Latency mode uses only the two context-maintenance outputs; the routing fields are
@@ -136,11 +136,11 @@ async def analyze_latency_turn(snapshot: SessionTurnSnapshot) -> SessionTurnAnal
             timeout=ANALYSIS_TIMEOUT_SECONDS,
         )
     except Exception as error:
-        logger.warning("Latency turn analysis failed open: %s", error)
+        logger.warning("Concurrent turn analysis failed open: %s", error)
         return SessionTurnAnalysis()
 
 
-async def complete_latency_turn(
+async def complete_turn(
     *,
     snapshot: SessionTurnSnapshot,
     context: Any,
@@ -180,7 +180,7 @@ async def complete_latency_turn(
     return await completion_call
 
 
-async def commit_latency_turn(
+async def commit_turn(
     session_manager,
     *,
     snapshot: SessionTurnSnapshot,

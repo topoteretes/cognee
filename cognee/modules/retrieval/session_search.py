@@ -9,11 +9,11 @@ from cognee.infrastructure.databases.cache.config import CacheConfig
 from cognee.infrastructure.locks import session_turn_lock
 from cognee.infrastructure.session.feedback_models import SessionTurnAnalysis
 from cognee.infrastructure.session.get_session_manager import get_session_manager
-from cognee.infrastructure.session.session_latency_turn import (
-    analyze_latency_turn,
-    commit_latency_turn,
-    complete_latency_turn,
-    load_latency_turn_snapshot,
+from cognee.infrastructure.session.session_concurrent_turn import (
+    analyze_turn_concurrently,
+    commit_turn,
+    complete_turn,
+    load_turn_snapshot,
 )
 from cognee.infrastructure.session.session_search_models import SessionTurnSnapshot
 from cognee.modules.retrieval.utils.access_tracking import update_node_access_timestamps
@@ -24,15 +24,15 @@ MAX_CONTEXTUAL_QUERY_CHARS = 2000
 
 
 @dataclass(frozen=True, slots=True)
-class LatencySearchResult:
+class ConcurrentTurnResult:
     retrieved_objects: Any
     context: Any
     completion: list[Any]
 
 
 @lru_cache(maxsize=1)
-def _latency_retriever_types() -> frozenset[type]:
-    """Exact concrete classes that support a latency turn.
+def _eligible_retriever_types() -> frozenset[type]:
+    """Exact concrete classes that support a concurrent turn.
 
     Opt-in is by exact type, never by subclass: a variant that overrides retrieval or
     runs its own LLM rounds (chain-of-thought, context extension) cannot honour the
@@ -57,7 +57,7 @@ def _latency_retriever_types() -> frozenset[type]:
     )
 
 
-def supports_latency_turn(
+def can_run_as_concurrent_turn(
     *,
     original_search_type: SearchType | None,
     retriever_type: type,
@@ -65,7 +65,7 @@ def supports_latency_turn(
     is_batch: bool,
     only_context: bool,
 ) -> bool:
-    """Whether this call can run as one latency turn, given latency mode is configured.
+    """Whether this call can run as one concurrent turn, given latency mode is configured.
 
     Everything else falls back to the accuracy path, which is unchanged.
     """
@@ -74,7 +74,7 @@ def supports_latency_turn(
         or not session_available
         or is_batch
         or only_context
-        or retriever_type not in _latency_retriever_types()
+        or retriever_type not in _eligible_retriever_types()
     )
 
 
@@ -123,7 +123,7 @@ def build_contextual_query(
     return contextual[:max_chars]
 
 
-async def retrieve_latency_context(
+async def retrieve_turn_context(
     retriever,
     *,
     raw_query: str,
@@ -173,12 +173,12 @@ async def _retrieve_and_answer(
     session_id: str,
 ) -> tuple[Any, Any, Any]:
     """The answer lane: retrieve both queries, merge, format, and answer once."""
-    retrieved_objects, context = await retrieve_latency_context(
+    retrieved_objects, context = await retrieve_turn_context(
         retriever,
         raw_query=raw_query,
         snapshot=snapshot,
     )
-    answer = await complete_latency_turn(
+    answer = await complete_turn(
         snapshot=snapshot,
         context=context,
         user_id=user_id,
@@ -191,15 +191,18 @@ async def _retrieve_and_answer(
     return retrieved_objects, context, answer
 
 
-async def run_latency_session_search(
+async def try_concurrent_turn(
     retriever,
     *,
     raw_query: str,
     original_search_type: SearchType | None = None,
     is_batch: bool = False,
     only_context: bool = False,
-) -> LatencySearchResult | None:
-    """Run the complete latency turn, or return None when policy selects accuracy.
+) -> ConcurrentTurnResult | None:
+    """Run this search as one concurrent turn, or return None if it does not qualify.
+
+    Returning None is the caller's signal to fall through to the accuracy path, which is
+    why this is the only integration point the rest of the search flow needs.
 
     The turn analysis and the answer are independent — the analysis reads the user's
     message against the previous turn, never this turn's answer — so they run
@@ -216,7 +219,7 @@ async def run_latency_session_search(
         return None
 
     session_manager = get_session_manager()
-    if not supports_latency_turn(
+    if not can_run_as_concurrent_turn(
         original_search_type=original_search_type,
         retriever_type=type(retriever),
         session_available=session_manager.is_session_available_for_completion(user_id),
@@ -228,7 +231,7 @@ async def run_latency_session_search(
     resolved_user_id = str(user_id)
     resolved_session_id = session_manager.resolve_session_id(retriever.session_id)
     async with session_turn_lock(resolved_user_id, resolved_session_id):
-        snapshot = await load_latency_turn_snapshot(
+        snapshot = await load_turn_snapshot(
             session_manager,
             user_id=resolved_user_id,
             session_id=resolved_session_id,
@@ -243,7 +246,7 @@ async def run_latency_session_search(
         )
         if session_manager.is_auto_feedback_enabled():
             analysis, answered = await asyncio.gather(
-                analyze_latency_turn(snapshot),
+                analyze_turn_concurrently(snapshot),
                 answer_lane,
             )
         else:
@@ -251,7 +254,7 @@ async def run_latency_session_search(
             answered = await answer_lane
         retrieved_objects, context, answer = answered
 
-        await commit_latency_turn(
+        await commit_turn(
             session_manager,
             snapshot=snapshot,
             analysis=analysis,
@@ -264,7 +267,7 @@ async def run_latency_session_search(
     completions = [answer]
     if isinstance(answer, str):
         completions = await retriever._append_references(completions, retrieved_objects)
-    return LatencySearchResult(
+    return ConcurrentTurnResult(
         retrieved_objects=retrieved_objects,
         context=context,
         completion=completions,

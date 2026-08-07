@@ -28,7 +28,7 @@ from cognee.modules.retrieval.graph_summary_completion_retriever import (
     GraphSummaryCompletionRetriever,
 )
 from cognee.modules.retrieval.hybrid_retriever import HybridRetriever
-from cognee.modules.retrieval.session_search import run_latency_session_search
+from cognee.modules.retrieval.session_search import try_concurrent_turn
 from cognee.modules.retrieval.triplet_retriever import TripletRetriever
 from cognee.modules.search.types import SearchType
 
@@ -50,7 +50,7 @@ PARTIAL_METHODS = [
 
 
 class FakeSessionManager:
-    """Session facade recording exactly what a latency turn persists."""
+    """Session facade recording exactly what a concurrent turn persists."""
 
     def __init__(self, *, available=True, auto_feedback=True):
         self.available = available
@@ -116,7 +116,7 @@ def latency(monkeypatch):
     monkeypatch.setattr(session_search, "get_session_manager", lambda: state.manager)
     monkeypatch.setattr(
         session_search,
-        "load_latency_turn_snapshot",
+        "load_turn_snapshot",
         AsyncMock(return_value=SessionTurnSnapshot(raw_message="question")),
     )
     monkeypatch.setattr(
@@ -152,16 +152,14 @@ class TestModeBoundary:
         latency.mode = "accuracy_optimized"
 
         assert (
-            await run_latency_session_search(
-                build_retriever(CompletionRetriever), raw_query="question"
-            )
+            await try_concurrent_turn(build_retriever(CompletionRetriever), raw_query="question")
             is None
         )
         assert latency.llm_calls == []
         assert latency.manager.qas == []
 
     @pytest.mark.asyncio
-    async def test_get_retriever_output_maps_the_latency_result(self, latency, monkeypatch):
+    async def test_get_retriever_output_maps_the_turn_result(self, latency, monkeypatch):
         # The package re-exports the function under the module's own name.
         module = import_module("cognee.modules.search.methods.get_retriever_output")
 
@@ -187,7 +185,7 @@ class TestModeBoundary:
                 method = getattr(retriever_class, name, None)
                 if method is None:
                     continue
-                assert "run_latency_session_search" not in inspect.getsource(method), (
+                assert "try_concurrent_turn" not in inspect.getsource(method), (
                     f"{retriever_class.__name__}.{name} is a partial operation"
                 )
 
@@ -203,7 +201,7 @@ class TestUnsupportedInputsFallBack:
         ],
     )
     async def test_unsupported_call_shapes(self, call_kwargs, latency):
-        result = await run_latency_session_search(
+        result = await try_concurrent_turn(
             build_retriever(CompletionRetriever), raw_query="question", **call_kwargs
         )
 
@@ -216,9 +214,7 @@ class TestUnsupportedInputsFallBack:
             pass
 
         assert (
-            await run_latency_session_search(
-                build_retriever(CustomGraphRetriever), raw_query="question"
-            )
+            await try_concurrent_turn(build_retriever(CustomGraphRetriever), raw_query="question")
             is None
         )
 
@@ -227,11 +223,11 @@ class TestUnsupportedInputsFallBack:
         retriever = build_retriever(CompletionRetriever)
 
         latency.user = None
-        assert await run_latency_session_search(retriever, raw_query="question") is None
+        assert await try_concurrent_turn(retriever, raw_query="question") is None
 
         latency.user = SimpleNamespace(id=uuid4())
         latency.manager.available = False
-        assert await run_latency_session_search(retriever, raw_query="question") is None
+        assert await try_concurrent_turn(retriever, raw_query="question") is None
 
         assert latency.llm_calls == []
 
@@ -239,7 +235,7 @@ class TestUnsupportedInputsFallBack:
 class TestTurnCost:
     @pytest.mark.asyncio
     async def test_turn_costs_one_answer_call_plus_the_analysis(self, latency):
-        result = await run_latency_session_search(
+        result = await try_concurrent_turn(
             build_retriever(CompletionRetriever), raw_query="question"
         )
 
@@ -254,7 +250,7 @@ class TestTurnCost:
     async def test_auto_feedback_off_answers_without_analyzing(self, latency):
         latency.manager.auto_feedback = False
 
-        result = await run_latency_session_search(
+        result = await try_concurrent_turn(
             build_retriever(CompletionRetriever), raw_query="question"
         )
 
@@ -267,7 +263,7 @@ class TestTurnCost:
         retriever = build_retriever(CompletionRetriever)
         peak = 0
         active = 0
-        original = session_search.retrieve_latency_context
+        original = session_search.retrieve_turn_context
 
         async def counted(*args, **kwargs):
             nonlocal peak, active
@@ -279,14 +275,14 @@ class TestTurnCost:
             finally:
                 active -= 1
 
-        session_search.retrieve_latency_context = counted
+        session_search.retrieve_turn_context = counted
         try:
             await asyncio.gather(
-                run_latency_session_search(retriever, raw_query="first"),
-                run_latency_session_search(retriever, raw_query="second"),
+                try_concurrent_turn(retriever, raw_query="first"),
+                try_concurrent_turn(retriever, raw_query="second"),
             )
         finally:
-            session_search.retrieve_latency_context = original
+            session_search.retrieve_turn_context = original
 
         assert peak == 1
         assert len(latency.manager.qas) == 2
@@ -299,7 +295,7 @@ def test_session_facade_stays_free_of_search_mode_state():
 
     session_manager_source = inspect.getsource(session_manager)
     assert "session_search_mode" not in session_manager_source
-    assert "run_latency_session_search" not in session_manager_source
+    assert "try_concurrent_turn" not in session_manager_source
 
     # Generic reference helpers keep receiving plain strings and lists.
     assert "session_search_models" not in inspect.getsource(references)

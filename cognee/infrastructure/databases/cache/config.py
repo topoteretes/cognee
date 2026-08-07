@@ -42,6 +42,10 @@ class CacheConfig(BaseSettings):
       one answer call of wall-clock time. Set SESSION_SEARCH_MODE=accuracy_optimized to
       analyze first and let that analysis rewrite the retrieval query and apply context
       updates before the answer is generated.
+
+      Naming bridge: this setting names the goal (optimize for latency); the code names
+      the mechanism. One turn executed this way is a *concurrent turn* -- see
+      ``try_concurrent_turn`` in cognee/modules/retrieval/session_search.py.
     """
 
     cache_backend: Literal["redis", "fs", "tapes", "sqlite", "postgres"] = "sqlite"

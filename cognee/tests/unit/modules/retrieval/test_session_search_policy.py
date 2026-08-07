@@ -6,7 +6,7 @@ from cognee.modules.retrieval.graph_summary_completion_retriever import (
     GraphSummaryCompletionRetriever,
 )
 from cognee.modules.retrieval.hybrid_retriever import HybridRetriever
-from cognee.modules.retrieval.session_search import supports_latency_turn
+from cognee.modules.retrieval.session_search import can_run_as_concurrent_turn
 from cognee.modules.retrieval.triplet_retriever import TripletRetriever
 from cognee.modules.search.types import SearchType
 
@@ -20,7 +20,7 @@ def supports(retriever_type: type, **overrides):
         "only_context": False,
     }
     inputs.update(overrides)
-    return supports_latency_turn(**inputs)
+    return can_run_as_concurrent_turn(**inputs)
 
 
 @pytest.mark.parametrize(

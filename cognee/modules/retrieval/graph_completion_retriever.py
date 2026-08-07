@@ -400,15 +400,15 @@ class GraphCompletionRetriever(BaseRetriever):
         """
         validate_retriever_input(query, query_batch)
 
-        from cognee.modules.retrieval.session_search import run_latency_session_search
+        from cognee.modules.retrieval.session_search import try_concurrent_turn
 
-        latency_result = await run_latency_session_search(
+        turn_result = await try_concurrent_turn(
             self,
             raw_query=query or "",
             is_batch=query_batch is not None,
         )
-        if latency_result is not None:
-            return latency_result.completion
+        if turn_result is not None:
+            return turn_result.completion
 
         effective_query = query
         turn_preparation = None

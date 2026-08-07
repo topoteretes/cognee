@@ -127,11 +127,11 @@ class BaseRetriever(ABC):
         Returns:
             List[Any]: A list containing the generated completions or response objects.
         """
-        from cognee.modules.retrieval.session_search import run_latency_session_search
+        from cognee.modules.retrieval.session_search import try_concurrent_turn
 
-        latency_result = await run_latency_session_search(self, raw_query=query)
-        if latency_result is not None:
-            return latency_result.completion
+        turn_result = await try_concurrent_turn(self, raw_query=query)
+        if turn_result is not None:
+            return turn_result.completion
 
         retrieved_objects = await self.get_retrieved_objects(query=query)
         context = await self.get_context_from_objects(

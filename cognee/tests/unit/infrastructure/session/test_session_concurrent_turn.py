@@ -5,11 +5,11 @@ import pytest
 from pydantic import BaseModel
 
 from cognee.infrastructure.session.feedback_models import SessionTurnAnalysis
-from cognee.infrastructure.session.session_latency_turn import (
-    analyze_latency_turn,
-    commit_latency_turn,
-    complete_latency_turn,
-    load_latency_turn_snapshot,
+from cognee.infrastructure.session.session_concurrent_turn import (
+    analyze_turn_concurrently,
+    commit_turn,
+    complete_turn,
+    load_turn_snapshot,
 )
 from cognee.infrastructure.session.session_search_models import SessionTurnSnapshot
 
@@ -36,22 +36,22 @@ async def test_snapshot_loads_history_guidance_and_previous_served_context():
 
     with (
         patch(
-            "cognee.infrastructure.session.session_latency_turn.select_session_history",
+            "cognee.infrastructure.session.session_concurrent_turn.select_session_history",
             new_callable=AsyncMock,
             return_value="formatted history",
         ),
         patch(
-            "cognee.infrastructure.session.session_latency_turn.build_active_context_block_safe",
+            "cognee.infrastructure.session.session_concurrent_turn.build_active_context_block_safe",
             new_callable=AsyncMock,
             return_value=("active guidance", ["ctx-2"]),
         ),
         patch(
-            "cognee.infrastructure.session.session_latency_turn.load_served_context_payload",
+            "cognee.infrastructure.session.session_concurrent_turn.load_served_context_payload",
             new_callable=AsyncMock,
             return_value=[{"id": "ctx-1", "content": "previous guidance"}],
         ) as load_served,
     ):
-        snapshot = await load_latency_turn_snapshot(
+        snapshot = await load_turn_snapshot(
             manager,
             user_id="u1",
             session_id="s1",
@@ -92,20 +92,20 @@ async def test_snapshot_skips_context_reads_when_auto_feedback_is_disabled():
 
     with (
         patch(
-            "cognee.infrastructure.session.session_latency_turn.select_session_history",
+            "cognee.infrastructure.session.session_concurrent_turn.select_session_history",
             new_callable=AsyncMock,
             return_value="formatted history",
         ),
         patch(
-            "cognee.infrastructure.session.session_latency_turn.build_active_context_block_safe",
+            "cognee.infrastructure.session.session_concurrent_turn.build_active_context_block_safe",
             new_callable=AsyncMock,
         ) as build_active,
         patch(
-            "cognee.infrastructure.session.session_latency_turn.load_served_context_payload",
+            "cognee.infrastructure.session.session_concurrent_turn.load_served_context_payload",
             new_callable=AsyncMock,
         ) as load_served,
     ):
-        snapshot = await load_latency_turn_snapshot(
+        snapshot = await load_turn_snapshot(
             manager,
             user_id="u1",
             session_id="s1",
@@ -130,11 +130,11 @@ async def test_analysis_reads_the_user_turn_and_the_context_it_may_rate():
     analysis = SessionTurnAnalysis(query_to_answer="restated")
 
     with patch(
-        "cognee.infrastructure.session.session_latency_turn.analyze_turn_for_session_context",
+        "cognee.infrastructure.session.session_concurrent_turn.analyze_turn_for_session_context",
         new_callable=AsyncMock,
         return_value=analysis,
     ) as analyze:
-        assert await analyze_latency_turn(snapshot) is analysis
+        assert await analyze_turn_concurrently(snapshot) is analysis
 
     analyze.assert_awaited_once_with(
         "that was wrong",
@@ -148,11 +148,11 @@ async def test_analysis_reads_the_user_turn_and_the_context_it_may_rate():
 @pytest.mark.parametrize("failure", [RuntimeError("llm down"), TimeoutError()])
 async def test_analysis_fails_open_to_no_context_updates(failure):
     with patch(
-        "cognee.infrastructure.session.session_latency_turn.analyze_turn_for_session_context",
+        "cognee.infrastructure.session.session_concurrent_turn.analyze_turn_for_session_context",
         new_callable=AsyncMock,
         side_effect=failure,
     ):
-        analysis = await analyze_latency_turn(SessionTurnSnapshot(raw_message="question"))
+        analysis = await analyze_turn_concurrently(SessionTurnSnapshot(raw_message="question"))
 
     assert analysis.candidate_context_updates == []
     assert analysis.served_context_ratings == []
@@ -170,11 +170,11 @@ async def test_answer_uses_the_callers_own_prompts_and_response_model():
     )
 
     with patch(
-        "cognee.infrastructure.session.session_latency_turn.generate_completion",
+        "cognee.infrastructure.session.session_concurrent_turn.generate_completion",
         new_callable=AsyncMock,
         return_value=Answer(text="structured"),
     ) as generate:
-        answer = await complete_latency_turn(
+        answer = await complete_turn(
             snapshot=snapshot,
             context="context",
             user_id="not-a-uuid",
@@ -197,11 +197,11 @@ async def test_answer_uses_the_callers_own_prompts_and_response_model():
 async def test_answer_prompt_carries_the_conversational_turn_rule():
     """Latency mode answers acknowledgements itself, so the rule must reach the model."""
     with patch(
-        "cognee.infrastructure.session.session_latency_turn.generate_completion",
+        "cognee.infrastructure.session.session_concurrent_turn.generate_completion",
         new_callable=AsyncMock,
         return_value="Got it.",
     ) as generate:
-        await complete_latency_turn(
+        await complete_turn(
             snapshot=SessionTurnSnapshot(raw_message="ok thanks"),
             context="unrelated context",
             user_id="not-a-uuid",
@@ -225,15 +225,15 @@ async def test_answer_tracks_usage_only_for_uuid_users():
 
     with (
         patch(
-            "cognee.infrastructure.session.session_latency_turn.generate_completion",
+            "cognee.infrastructure.session.session_concurrent_turn.generate_completion",
             new_callable=AsyncMock,
             return_value="answer",
         ),
         patch(
-            "cognee.infrastructure.session.session_latency_turn.track_session_usage"
+            "cognee.infrastructure.session.session_concurrent_turn.track_session_usage"
         ) as track_usage,
     ):
-        await complete_latency_turn(
+        await complete_turn(
             snapshot=snapshot,
             context="context",
             user_id=user_id,
@@ -265,11 +265,11 @@ async def test_commit_applies_the_analysis_then_stores_the_qa():
     )
 
     with patch(
-        "cognee.infrastructure.session.session_latency_turn.apply_session_turn_analysis",
+        "cognee.infrastructure.session.session_concurrent_turn.apply_session_turn_analysis",
         new_callable=AsyncMock,
         side_effect=lambda *args, **kwargs: order.append("analysis"),
     ) as apply_analysis:
-        await commit_latency_turn(
+        await commit_turn(
             manager,
             snapshot=snapshot,
             analysis=analysis,
@@ -300,10 +300,10 @@ async def test_commit_serializes_a_custom_response_model_for_storage():
     manager.add_qa = AsyncMock()
 
     with patch(
-        "cognee.infrastructure.session.session_latency_turn.apply_session_turn_analysis",
+        "cognee.infrastructure.session.session_concurrent_turn.apply_session_turn_analysis",
         new_callable=AsyncMock,
     ):
-        await commit_latency_turn(
+        await commit_turn(
             manager,
             snapshot=SessionTurnSnapshot(raw_message="question"),
             analysis=SessionTurnAnalysis(),

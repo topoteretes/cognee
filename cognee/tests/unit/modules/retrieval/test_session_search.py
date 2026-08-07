@@ -12,8 +12,8 @@ from cognee.infrastructure.session.feedback_models import SessionTurnAnalysis
 from cognee.modules.retrieval.session_search import (
     MAX_CONTEXTUAL_QUERY_CHARS,
     build_contextual_query,
-    retrieve_latency_context,
-    run_latency_session_search,
+    retrieve_turn_context,
+    try_concurrent_turn,
 )
 
 
@@ -54,7 +54,7 @@ async def test_latency_retrieval_fuses_lanes_formats_and_tracks_once():
         "cognee.modules.retrieval.session_search.update_node_access_timestamps",
         new_callable=AsyncMock,
     ) as track_access:
-        retrieved_objects, context = await retrieve_latency_context(
+        retrieved_objects, context = await retrieve_turn_context(
             retriever,
             raw_query="current",
             snapshot=snapshot,
@@ -91,7 +91,7 @@ async def test_latency_retrieval_uses_the_successful_lane(side_effect, expected)
         "cognee.modules.retrieval.session_search.update_node_access_timestamps",
         new_callable=AsyncMock,
     ):
-        retrieved_objects, _context = await retrieve_latency_context(
+        retrieved_objects, _context = await retrieve_turn_context(
             retriever,
             raw_query="current",
             snapshot=snapshot,
@@ -111,7 +111,7 @@ async def test_latency_retrieval_reraises_raw_failure_when_both_lanes_fail():
     )
 
     with pytest.raises(RuntimeError, match="raw"):
-        await retrieve_latency_context(retriever, raw_query="current", snapshot=snapshot)
+        await retrieve_turn_context(retriever, raw_query="current", snapshot=snapshot)
 
 
 @pytest.mark.asyncio
@@ -125,7 +125,7 @@ async def test_latency_retrieval_skips_duplicate_contextual_lane():
         "cognee.modules.retrieval.session_search.update_node_access_timestamps",
         new_callable=AsyncMock,
     ):
-        await retrieve_latency_context(retriever, raw_query="current", snapshot=snapshot)
+        await retrieve_turn_context(retriever, raw_query="current", snapshot=snapshot)
 
     retriever.get_retrieved_objects.assert_awaited_once_with(query="current")
 
@@ -162,13 +162,13 @@ def _latency_environment(manager, *, analysis, order):
             return_value=manager,
         ),
         patch(
-            "cognee.modules.retrieval.session_search.load_latency_turn_snapshot",
+            "cognee.modules.retrieval.session_search.load_turn_snapshot",
             new_callable=AsyncMock,
             return_value=SessionTurnSnapshot(raw_message="question"),
         ),
-        patch("cognee.modules.retrieval.session_search.analyze_latency_turn", analyze),
-        patch("cognee.modules.retrieval.session_search.retrieve_latency_context", retrieve),
-        patch("cognee.modules.retrieval.session_search.complete_latency_turn", complete),
+        patch("cognee.modules.retrieval.session_search.analyze_turn_concurrently", analyze),
+        patch("cognee.modules.retrieval.session_search.retrieve_turn_context", retrieve),
+        patch("cognee.modules.retrieval.session_search.complete_turn", complete),
     )
     with ExitStack() as stack:
         for patcher in patchers:
@@ -199,11 +199,11 @@ async def test_analysis_runs_alongside_retrieval_and_commits_after_both():
     with (
         _latency_environment(_session_manager(), analysis=analysis, order=order),
         patch(
-            "cognee.modules.retrieval.session_search.commit_latency_turn",
+            "cognee.modules.retrieval.session_search.commit_turn",
             new_callable=AsyncMock,
         ) as commit,
     ):
-        result = await run_latency_session_search(retriever, raw_query="question")
+        result = await try_concurrent_turn(retriever, raw_query="question")
 
     # The analysis does not wait on retrieval, and the commit waits on both.
     assert order == ["analysis", "retrieval", "answer"]
