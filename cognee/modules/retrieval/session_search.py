@@ -127,16 +127,14 @@ def build_contextual_query(
             return raw
         return "\n\n".join([*history, f"Current user request: {raw}"])
 
-    for field_index in (1, 0):
-        for qa in qas:
-            over = len(render()) - max_chars
-            if over <= 0:
-                return render()
-            qa[field_index] = qa[field_index][: max(0, len(qa[field_index]) - over)]
-
     contextual = render()
-    if len(contextual) <= max_chars:
-        return contextual
+    for field_index in (1, 0):  # trim assistant answers before user questions, oldest first
+        for qa in qas:
+            if len(contextual) <= max_chars:
+                return contextual
+            over = len(contextual) - max_chars
+            qa[field_index] = qa[field_index][: max(0, len(qa[field_index]) - over)]
+            contextual = render()
     return contextual[:max_chars]
 
 
@@ -213,12 +211,13 @@ async def run_latency_session_search(
 ) -> LatencySearchResult | None:
     """Run the complete latency turn, or return None when policy selects accuracy."""
     cache_config = CacheConfig()
+    # Fast path: a deployment that never uses latency mode looks nothing up.
     if cache_config.session_search_mode != LATENCY_OPTIMIZED:
         return None
 
     user = session_user.get()
     user_id = getattr(user, "id", None)
-    if not user_id or type(retriever) not in _latency_retriever_types():
+    if not user_id:
         return None
 
     session_manager = get_session_manager()

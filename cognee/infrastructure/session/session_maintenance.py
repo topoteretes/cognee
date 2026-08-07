@@ -77,14 +77,12 @@ async def apply_maintenance_result(
         session_id=work_item.session_id,
         ratings=ratings,
     )
-    candidate_applied, candidate_skipped, candidate_errors = (
-        await apply_candidate_updates_strict(
-            session_manager=session_manager,
-            user_id=work_item.user_id,
-            session_id=work_item.session_id,
-            source_id=work_item.trace_id or evidence.id,
-            candidates=result.candidate_context_updates,
-        )
+    candidate_applied, candidate_skipped, candidate_errors = await apply_candidate_updates_strict(
+        session_manager=session_manager,
+        user_id=work_item.user_id,
+        session_id=work_item.session_id,
+        source_id=work_item.trace_id or evidence.id,
+        candidates=result.candidate_context_updates,
     )
     return MaintenanceApplyResult(
         applied_ids=tuple(rating_applied + candidate_applied),
@@ -108,21 +106,32 @@ async def _write_status(session_manager, work_item, status: str, error: str | No
         return False
 
 
+async def _load_unconsumed_evidence(
+    session_manager,
+    work_item: SessionMaintenanceWorkItem,
+) -> SessionTurnEvidence | None:
+    """Read the record, or None when it is gone, already applied, or already distilled."""
+    rows = await session_manager.get_session_context_entries_strict(
+        user_id=work_item.user_id,
+        session_id=work_item.session_id,
+    )
+    evidence = _find_evidence(rows, work_item.evidence_id)
+    if evidence is None or evidence.status == "completed" or evidence.distilled_at is not None:
+        return None
+    return evidence
+
+
 async def _process_with_manager(
     session_manager,
     work_item: SessionMaintenanceWorkItem,
 ) -> MaintenanceApplyResult | None:
     try:
-        rows = await session_manager.get_session_context_entries_strict(
-            user_id=work_item.user_id,
-            session_id=work_item.session_id,
-        )
-        evidence = _find_evidence(rows, work_item.evidence_id)
+        evidence = await _load_unconsumed_evidence(session_manager, work_item)
     except Exception as error:
         await _write_status(session_manager, work_item, "failed", str(error))
         return MaintenanceApplyResult(errors=(str(error),))
 
-    if evidence is None or evidence.status == "completed" or evidence.distilled_at is not None:
+    if evidence is None:
         return None
 
     try:
@@ -134,12 +143,9 @@ async def _process_with_manager(
             system_prompt=system_prompt,
             response_model=SessionMaintenanceResult,
         )
-        latest_rows = await session_manager.get_session_context_entries_strict(
-            user_id=work_item.user_id,
-            session_id=work_item.session_id,
-        )
-        evidence = _find_evidence(latest_rows, work_item.evidence_id)
-        if evidence is None or evidence.status == "completed" or evidence.distilled_at is not None:
+        # Distillation may have consumed this record while the call was in flight.
+        evidence = await _load_unconsumed_evidence(session_manager, work_item)
+        if evidence is None:
             return None
         apply_result = await apply_maintenance_result(
             session_manager,

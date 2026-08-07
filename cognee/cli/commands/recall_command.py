@@ -1,6 +1,7 @@
 import argparse
 import asyncio
 import json
+from contextlib import suppress
 
 from cognee.cli.reference import SupportsCliCommand
 from cognee.cli import DEFAULT_DOCS_URL
@@ -160,7 +161,10 @@ Otherwise, this is a memory-oriented alias for `cognee search`.
                 except Exception as e:
                     raise CliCommandInnerException(f"Failed to recall: {str(e)}") from e
                 finally:
-                    await cognee.drain_session_maintenance()
+                    # Results are already printed; slow background maintenance must not
+                    # fail the command. Undrained evidence stays recoverable.
+                    with suppress(asyncio.TimeoutError):
+                        await cognee.drain_session_maintenance()
 
             asyncio.run(run_recall())
 

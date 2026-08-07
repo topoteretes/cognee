@@ -8,11 +8,6 @@ RAW_WEIGHT = 2.0
 CONTEXTUAL_WEIGHT = 1.0
 
 
-def result_identity(result: Any) -> str | None:
-    """Return the stable result or payload ID used by vector result shapes."""
-    return result_id(result)
-
-
 def graph_identity(edge: Any) -> Hashable:
     """Return an edge object ID or a stable graph relationship identity."""
     if isinstance(edge, dict):
@@ -104,7 +99,7 @@ def fuse_vector_results(
     return fuse_ranked_results(
         raw_results,
         contextual_results,
-        identity=result_identity,
+        identity=result_id,
         limit=limit,
     )
 
@@ -208,7 +203,7 @@ def fuse_hybrid_results(
     fused["chunk_summaries"] = {
         chunk_id: raw_summaries.get(chunk_id) or contextual_summaries.get(chunk_id)
         for chunk in channels["chunks"]
-        if (chunk_id := result_identity(chunk))
+        if (chunk_id := result_id(chunk))
         and (raw_summaries.get(chunk_id) or contextual_summaries.get(chunk_id))
     }
 
@@ -217,7 +212,7 @@ def fuse_hybrid_results(
     attribution = [
         raw_attribution.get(chunk_id) or contextual_attribution.get(chunk_id)
         for chunk in channels["chunks"]
-        if (chunk_id := result_identity(chunk))
+        if (chunk_id := result_id(chunk))
         and (raw_attribution.get(chunk_id) or contextual_attribution.get(chunk_id))
     ]
     if attribution:

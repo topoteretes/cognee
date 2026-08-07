@@ -1,6 +1,7 @@
 import argparse
 import asyncio
 import json
+from contextlib import suppress
 from typing import Optional
 
 from cognee.cli.reference import SupportsCliCommand
@@ -143,7 +144,10 @@ Search Types & Use Cases:
                 except Exception as e:
                     raise CliCommandInnerException(f"Failed to search: {str(e)}") from e
                 finally:
-                    await cognee.drain_session_maintenance()
+                    # Results are already printed; slow background maintenance must not
+                    # fail the command. Undrained evidence stays recoverable.
+                    with suppress(asyncio.TimeoutError):
+                        await cognee.drain_session_maintenance()
 
             asyncio.run(run_search())
 
