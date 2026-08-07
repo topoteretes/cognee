@@ -34,6 +34,9 @@ from .serialize_data import serialize_data
 logger = get_logger("PGVectorAdapter")
 QUERY_BATCH_SIZE = 1000
 
+# pgvector's HNSW index type does not support vectors wider than this.
+_HNSW_MAX_DIMENSIONS = 2000
+
 # Default pool sizing for per-dataset PGVector engines when ENABLE_BACKEND_ACCESS_CONTROL=True.
 # Lean pool_size limits connection fan-out across datasets (only pool_size connections are
 # retained while idle); the large max_overflow keeps burst headroom, since overflow
@@ -90,6 +93,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         relational_db = get_relational_engine()
         relational_config = get_relational_config()
         vector_config = get_vectordb_config()
+        self._hnsw_index_enabled = vector_config.pgvector_hnsw_index_enabled
 
         # Resolve effective pool_args for any new PGVector engine we create:
         # 1. Explicit VECTOR_POOL_ARGS always wins.
@@ -221,7 +225,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         wait=wait_exponential(multiplier=2, min=1, max=6),
     )
     async def create_collection(self, collection_name: str, payload_schema=None):
-        """Create the pgvector table for `collection_name` if it does not already exist."""
+        """Create the pgvector table and HNSW index for `collection_name`, if not already present."""
         data_point_types = get_type_hints(DataPoint)
         vector_size = self.embedding_engine.get_vector_size()
 
@@ -262,11 +266,40 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                             await connection.run_sync(
                                 Base.metadata.create_all, tables=[PGVectorDataPoint.__table__]
                             )
+                            await self._create_hnsw_index(connection, collection_name, vector_size)
                     # Reflect AFTER the DDL transaction commits so
                     # _metadata is never populated for a table that
                     # might be rolled back.
                     async with self.engine.begin() as connection:
                         await connection.run_sync(self._metadata.reflect, only=[collection_name])
+
+    async def _create_hnsw_index(self, connection, collection_name: str, vector_size: int) -> None:
+        """Build the HNSW ANN index for a table just created in this same transaction.
+
+        The table is still empty here, so a plain (non-CONCURRENTLY) build is instant
+        and holds its lock for a negligible amount of time.
+        """
+        if not self._hnsw_index_enabled:
+            return
+
+        if vector_size > _HNSW_MAX_DIMENSIONS:
+            logger.warning(
+                "Skipping HNSW index for '%s': embedding dimension %d exceeds pgvector's "
+                "HNSW limit of %d",
+                collection_name,
+                vector_size,
+                _HNSW_MAX_DIMENSIONS,
+            )
+            return
+
+        quoted_table = f'"{collection_name}"'
+        quoted_index = f'"{collection_name}_vector_hnsw_idx"'
+        await connection.execute(
+            text(
+                f"CREATE INDEX IF NOT EXISTS {quoted_index} "
+                f"ON {quoted_table} USING hnsw (vector vector_cosine_ops)"
+            )
+        )
 
     @retry(
         retry=retry_if_exception_type((DeadlockDetectedError, DBAPIError)),
@@ -488,6 +521,8 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         # Get PGVectorDataPoint Table from database
         PGVectorDataPoint = await self.get_table(collection_name)
 
+        fetch_all = limit is None
+
         if limit is None:
             async with self.get_async_session() as session:
                 query = select(func.count()).select_from(PGVectorDataPoint)
@@ -509,6 +544,13 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         )
         # Use async session to connect to the database
         async with self.get_async_session() as session:
+            if fetch_all:
+                # An HNSW/ivfflat index turns "ORDER BY ... LIMIT <full count>" into an
+                # approximate, silently-truncated scan. Force an exact scan for this
+                # query so a caller that asked for every row actually gets every row.
+                await session.execute(text("SET LOCAL enable_indexscan = off"))
+                await session.execute(text("SET LOCAL enable_bitmapscan = off"))
+
             if node_name:
                 if node_name_filter_operator == "AND":
                     filter_operator = "?&"
@@ -756,5 +798,82 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         await self.delete_database()
 
     async def run_migrations(self):
-        """Run PGVector adapter migrations (currently no-op)."""
-        return None
+        """Backfill the HNSW index onto collections created before this adapter added it.
+
+        Existing collections may already hold data, so the build uses
+        CREATE INDEX CONCURRENTLY over an AUTOCOMMIT connection (it cannot run inside
+        a transaction) to avoid locking out writers while it runs.
+        """
+        if not self._hnsw_index_enabled:
+            return None
+
+        vector_size = self.embedding_engine.get_vector_size()
+        if vector_size > _HNSW_MAX_DIMENSIONS:
+            logger.warning(
+                "Skipping HNSW index migration: embedding dimension %d exceeds pgvector's "
+                "HNSW limit of %d",
+                vector_size,
+                _HNSW_MAX_DIMENSIONS,
+            )
+            return None
+
+        candidate_tables: list[str] = []
+        for name in await self.get_table_names():
+            if not name:
+                continue
+            table_only = name.rpartition(".")[2] if "." in name else name
+            if table_only and table_only[0].isupper():
+                candidate_tables.append(table_only)
+
+        indexed_tables = []
+        skipped_tables = []
+        for table_name in candidate_tables:
+            try:
+                table = await self.get_table(table_name)
+            except CollectionNotFoundError:
+                continue
+            if "vector" not in table.c.keys():
+                continue
+
+            quoted_table = f'"{table_name}"'
+            quoted_index = f'"{table_name}_vector_hnsw_idx"'
+            try:
+                connection = await self.engine.connect()
+                try:
+                    connection = await connection.execution_options(isolation_level="AUTOCOMMIT")
+                    await self._drop_invalid_hnsw_index(connection, f"{table_name}_vector_hnsw_idx")
+                    await connection.execute(
+                        text(
+                            f"CREATE INDEX CONCURRENTLY IF NOT EXISTS {quoted_index} "
+                            f"ON {quoted_table} USING hnsw (vector vector_cosine_ops)"
+                        )
+                    )
+                    indexed_tables.append(table_name)
+                finally:
+                    await connection.close()
+            except exc.SQLAlchemyError as e:
+                logger.debug("HNSW index migration skipped '%s': %s", table_name, e)
+                skipped_tables.append(table_name)
+
+        if not indexed_tables and not skipped_tables:
+            return None
+
+        return {"indexed_tables": indexed_tables, "skipped_tables": skipped_tables}
+
+    async def _drop_invalid_hnsw_index(self, connection, index_name: str) -> None:
+        """Clear a leftover invalid index from an interrupted CONCURRENTLY build.
+
+        Without this, ``CREATE INDEX CONCURRENTLY IF NOT EXISTS`` sees the invalid
+        index as "already there" and never retries it, leaving the collection
+        permanently unindexed after a crash mid-build.
+        """
+        result = await connection.execute(
+            text(
+                "SELECT 1 FROM pg_index i "
+                "JOIN pg_class c ON c.oid = i.indexrelid "
+                "WHERE c.relname = :index_name AND NOT i.indisvalid"
+            ),
+            {"index_name": index_name},
+        )
+        if result.scalar():
+            await connection.execute(text(f'DROP INDEX CONCURRENTLY IF EXISTS "{index_name}"'))
