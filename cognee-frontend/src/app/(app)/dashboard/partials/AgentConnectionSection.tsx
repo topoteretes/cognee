@@ -102,8 +102,6 @@ export function AgentConnectionSection({
       ? "/visuals/logos/claude.svg"
       : activeKey === "codex"
       ? "/visuals/logos/codex.svg"
-      : activeKey === "opencode"
-      ? "/visuals/logos/opencode.svg"
       : "/visuals/logos/openclaw.svg";
 
   const popupContent =

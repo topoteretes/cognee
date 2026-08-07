@@ -3,9 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --turbopack",
-    "build": "next build",
-    "start": "next start",
+    "dev": "NEXT_TELEMETRY_DISABLED=1 next dev --turbopack",
+    "build": "NEXT_TELEMETRY_DISABLED=1 next build",
+    "start": "NEXT_TELEMETRY_DISABLED=1 next start",
     "lint": "eslint .",
     "check:tracking-plan": "node scripts/check-tracking-plan.js"
   },
