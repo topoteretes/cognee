@@ -68,6 +68,7 @@ async def run_tasks(
     llm_config: Optional[LLMConfig] = None,
     embedding_config: Optional[EmbeddingConfig] = None,
     data_cache: bool = False,
+    cross_dataset_reuse: bool = False,
 ):
     if not user:
         user = await get_default_user()
@@ -127,6 +128,7 @@ async def run_tasks(
                         user,
                         incremental_loading,
                         data_cache,
+                        cross_dataset_reuse,
                     )
 
             gathered = await asyncio.gather(

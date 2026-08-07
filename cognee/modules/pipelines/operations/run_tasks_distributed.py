@@ -57,6 +57,7 @@ if modal:
         user: User,
         incremental_loading: bool,
         data_cache: bool,
+        cross_dataset_reuse: bool = False,
     ):
         """
         Wrapper that runs the run_tasks_data_item function.
@@ -81,6 +82,7 @@ if modal:
             user=user,
             incremental_loading=incremental_loading,
             data_cache=data_cache,
+            cross_dataset_reuse=cross_dataset_reuse,
         )
 
         return result
@@ -98,6 +100,7 @@ async def run_tasks_distributed(
     llm_config: Optional[LLMConfig] = None,
     embedding_config: Optional[EmbeddingConfig] = None,
     data_cache: bool = False,
+    cross_dataset_reuse: bool = False,
 ):
     if not user:
         user = await get_default_user()
@@ -143,6 +146,7 @@ async def run_tasks_distributed(
                 [user] * number_of_data_items,
                 [incremental_loading] * number_of_data_items,
                 [data_cache] * number_of_data_items,
+                [cross_dataset_reuse] * number_of_data_items,
             ]
 
             results = []
