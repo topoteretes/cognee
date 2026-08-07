@@ -1,19 +1,22 @@
+"""Session reads and writes for one latency-optimized turn.
+
+A latency turn does not chain analysis before retrieval the way the accuracy path does.
+It reads the session once, then runs the turn analysis and the answer concurrently, and
+applies the analysis after both land. These are the session-side pieces of that: the
+snapshot both lanes read from, the analysis lane, the answer call, and the commit.
+"""
+
 import asyncio
-from datetime import datetime, timezone
 from typing import Any
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from pydantic import BaseModel
 
-from cognee.infrastructure.llm.prompts import read_query_prompt
-from cognee.infrastructure.session.session_search_models import (
-    SessionMaintenanceWorkItem,
-    SessionSearchCompletion,
-    SessionTurnEvidence,
-    SessionTurnSnapshot,
-    get_session_search_completion_model,
-)
+from cognee.infrastructure.session.feedback_detection import analyze_turn_for_session_context
+from cognee.infrastructure.session.feedback_models import SessionTurnAnalysis
+from cognee.infrastructure.session.session_search_models import SessionTurnSnapshot
 from cognee.infrastructure.session.session_turn import (
+    apply_session_turn_analysis,
     build_active_context_block_safe,
     coerce_qa_entry,
     compose_session_prompt,
@@ -26,6 +29,10 @@ from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("session_latency_turn")
 
+# The analysis runs alongside the answer, so it normally finishes first. This only bounds
+# the pathological case where it would hold the turn open past its own answer.
+ANALYSIS_TIMEOUT_SECONDS = 30.0
+
 
 async def load_latency_turn_snapshot(
     session_manager,
@@ -34,7 +41,7 @@ async def load_latency_turn_snapshot(
     session_id: str,
     raw_message: str,
 ) -> SessionTurnSnapshot:
-    """Load the immutable session state used throughout one latency turn."""
+    """Read every piece of session state one latency turn needs, in one pass."""
     auto_feedback = session_manager.is_auto_feedback_enabled()
     loads = [
         session_manager.get_session(
@@ -61,7 +68,7 @@ async def load_latency_turn_snapshot(
         )
     loaded = await asyncio.gather(*loads)
     recent_entries, completion_history = loaded[:2]
-    active_context_result = loaded[2] if auto_feedback else ("", [])
+    active_context, active_context_ids = loaded[2] if auto_feedback else ("", [])
 
     recent_rows = [coerce_qa_entry(entry) for entry in recent_entries or []]
     recent_qas = tuple(
@@ -86,7 +93,6 @@ async def load_latency_turn_snapshot(
             served_ids=[str(entry_id) for entry_id in previous_served_ids],
         )
 
-    active_context, active_context_ids = active_context_result
     return SessionTurnSnapshot(
         raw_message=raw_message,
         recent_qas=recent_qas,
@@ -104,6 +110,30 @@ async def load_latency_turn_snapshot(
     )
 
 
+async def analyze_latency_turn(snapshot: SessionTurnSnapshot) -> SessionTurnAnalysis:
+    """Run the turn analysis alongside the answer. Fail open to no context updates.
+
+    Latency mode uses only the two context-maintenance outputs; the routing fields are
+    ignored because retrieval and the answer are already in flight by the time this lands.
+    """
+    try:
+        return await asyncio.wait_for(
+            analyze_turn_for_session_context(
+                snapshot.raw_message,
+                previous_question=snapshot.previous_question,
+                previous_answer=snapshot.previous_answer,
+                served_context=[
+                    {"id": entry_id, "content": content}
+                    for entry_id, content in snapshot.previous_served_context
+                ],
+            ),
+            timeout=ANALYSIS_TIMEOUT_SECONDS,
+        )
+    except Exception as error:
+        logger.warning("Latency turn analysis failed open: %s", error)
+        return SessionTurnAnalysis()
+
+
 async def complete_latency_turn(
     *,
     snapshot: SessionTurnSnapshot,
@@ -114,105 +144,52 @@ async def complete_latency_turn(
     system_prompt_path: str,
     system_prompt: str | None,
     response_model: type,
-    auto_feedback: bool,
-) -> SessionSearchCompletion:
-    """Generate and validate the single foreground completion for a latency turn."""
-    completion_model = get_session_search_completion_model(response_model)
-    resolved_system_prompt = system_prompt
-    if auto_feedback:
-        resolved_system_prompt = system_prompt or read_query_prompt(system_prompt_path) or ""
-        contract = read_query_prompt("session_search_completion_contract.txt") or ""
-        resolved_system_prompt = "\n\n".join(
-            part for part in (resolved_system_prompt, contract) if part
-        )
-
-    conversation_history = compose_session_prompt(
-        snapshot.active_context,
-        snapshot.completion_history,
-    )
+) -> Any:
+    """Generate the turn's answer with the caller's own prompts and response model."""
     completion_call = generate_completion(
         query=snapshot.raw_message,
         context=context,
         user_prompt_path=user_prompt_path,
         system_prompt_path=system_prompt_path,
-        system_prompt=resolved_system_prompt,
-        conversation_history=conversation_history,
-        response_model=completion_model if auto_feedback else response_model,
+        system_prompt=system_prompt,
+        conversation_history=compose_session_prompt(
+            snapshot.active_context,
+            snapshot.completion_history,
+        ),
+        response_model=response_model,
     )
     if isinstance(user_id, UUID):
         async with track_session_usage(session_id, user_id):
-            result = await completion_call
-    else:
-        result = await completion_call
-
-    if auto_feedback:
-        return completion_model.model_validate(result)
-    return completion_model(response=result)
-
-
-def _response_text(response: Any) -> str:
-    if isinstance(response, BaseModel):
-        return response.model_dump_json()
-    return str(response)
+            return await completion_call
+    return await completion_call
 
 
 async def commit_latency_turn(
     session_manager,
     *,
     snapshot: SessionTurnSnapshot,
-    completion: SessionSearchCompletion,
+    analysis: SessionTurnAnalysis,
+    answer: Any,
     user_id: str,
     session_id: str,
-    dataset_id: str | None,
     used_graph_element_ids: dict | None,
-    auto_feedback: bool,
-) -> SessionMaintenanceWorkItem | None:
-    """Persist QA then evidence, returning work only for durable evidence."""
-    response_text = _response_text(completion.response)
-    qa_id = None
-    if not completion.is_acknowledgement:
-        qa_id = await session_manager.add_qa(
-            user_id=user_id,
-            question=snapshot.raw_message,
-            context="",
-            answer=response_text,
-            session_id=session_id,
-            used_graph_element_ids=used_graph_element_ids,
-            used_session_context_ids=list(snapshot.active_context_ids) or None,
-        )
-        if qa_id is None:
-            logger.warning("Latency session turn: QA storage failed")
-            return None
-
-    if not auto_feedback:
-        return None
-
-    evidence = SessionTurnEvidence(
-        id=str(uuid4()),
-        created_at=datetime.now(timezone.utc).isoformat(),
-        dataset_id=dataset_id,
-        current_qa_id=qa_id,
-        current_raw_message=snapshot.raw_message,
-        current_response=response_text,
+) -> None:
+    """Apply the turn's context updates, then store the QA pair. Both fail open."""
+    await apply_session_turn_analysis(
+        session_manager,
+        user_id=user_id,
+        session_id=session_id,
+        query=snapshot.raw_message,
+        analysis=analysis,
         previous_qa_id=snapshot.previous_qa_id,
-        previous_question=snapshot.previous_question,
-        previous_answer=snapshot.previous_answer,
-        previous_served_context=snapshot.previous_served_context,
-        feedback_evidence=completion.feedback_evidence,
-        future_context_evidence=completion.future_context_evidence,
+        served_ids=[entry_id for entry_id, _content in snapshot.previous_served_context],
     )
-    stored = await session_manager.create_session_context_entry(
+    await session_manager.add_qa(
         user_id=user_id,
+        question=snapshot.raw_message,
+        context="",
+        answer=answer.model_dump_json() if isinstance(answer, BaseModel) else str(answer),
         session_id=session_id,
-        entry_dump=evidence.model_dump(mode="json"),
-    )
-    if not stored:
-        logger.warning("Latency session turn: evidence storage failed")
-        return None
-
-    return SessionMaintenanceWorkItem(
-        evidence_id=evidence.id,
-        user_id=user_id,
-        session_id=session_id,
-        dataset_id=dataset_id,
+        used_graph_element_ids=used_graph_element_ids,
+        used_session_context_ids=list(snapshot.active_context_ids) or None,
     )

@@ -2,15 +2,13 @@
 
 Flow (curator calls parallel by batch; accept/write calls parallel by lesson):
 
-1. LOAD    session QA turns + distillable session-context entries + recoverable evidence.
+1. LOAD    session QA turns + distillable session-context entries.
 2. CURATE  pack the session timeline into batches; one curator LLM call per batch.
 3. ACCEPT  per proposed lesson: search prior lessons/entities, then writer/rejecter LLM.
 4. PERSIST render accepted lessons as documents; add + cognify them in one pass.
 
 Everything is fail-open per unit: a failed curator batch or writer call drops only its own
-work, never the whole run. Evidence recovered from abandoned maintenance (see
-``evidence.py``) is the one exception: a batch built from it is consumed only when every
-call in that batch succeeded, so a partial failure leaves it retryable.
+work, never the whole run.
 """
 
 import asyncio
@@ -27,8 +25,6 @@ from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.infrastructure.session.get_session_manager import get_session_manager
 from cognee.infrastructure.session.session_context_builder import coerce_active_context_entries
 from cognee.infrastructure.session.session_context_models import SessionContextEntry
-from cognee.infrastructure.session.session_maintenance_worker import get_tracked_evidence_ids
-from cognee.infrastructure.session.session_search_models import SessionTurnEvidence
 from cognee.modules.data.models import Dataset
 from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.truth_subspace.constants import truth_session_node_set
@@ -37,11 +33,6 @@ from cognee.modules.users.models import User
 from cognee.shared.async_utils import gather_with_concurrency_limit
 from cognee.shared.logging_utils import get_logger
 
-from .evidence import (
-    build_evidence_batches,
-    load_eligible_evidence,
-    mark_evidence_distilled,
-)
 from .models import (
     CURATOR_BLOCKS_PER_BATCH,
     CURATOR_CONCURRENCY,
@@ -52,9 +43,7 @@ from .models import (
     MIN_GATE_CONFIDENCE,
     NOVELTY_LESSONS_PER_LESSON,
     WRITER_CONCURRENCY,
-    CuratorBatchOutcome,
     CuratorBatchOutput,
-    DistillationInputBatch,
     DistillationResult,
     ProposedLesson,
     WrittenLesson,
@@ -130,36 +119,30 @@ async def resolve_distillation_scope(
 
 async def load_distillable_session_inputs(
     scope: SessionDistillationScope,
-    tracked_evidence_ids: set[str],
-) -> tuple[List[dict], List[SessionContextEntry], List[SessionTurnEvidence]]:
-    """Load QA turns, context entries worth distilling, and recoverable turn evidence."""
+) -> tuple[List[dict], List[SessionContextEntry]]:
+    """Load QA turns and keep context entries worth distilling."""
     session_manager = get_session_manager()
     context_rows = await session_manager.get_session_context_entries(
         user_id=scope.user_id,
         session_id=scope.session_id,
-        strict=True,
     )
+
     raw_qa = await session_manager.get_session(
         user_id=scope.user_id,
         session_id=scope.session_id,
         formatted=False,
     )
-
     qa_rows = [
         entry.model_dump() if hasattr(entry, "model_dump") else dict(entry)
         for entry in (raw_qa if isinstance(raw_qa, list) else [])
     ]
+
     context_entries = [
         entry
         for entry in coerce_active_context_entries(context_rows)
         if entry.harmful_count == 0 and entry.confidence >= MIN_GATE_CONFIDENCE
     ]
-    evidence = load_eligible_evidence(
-        context_rows,
-        dataset_id=scope.dataset_id,
-        tracked_evidence_ids=tracked_evidence_ids,
-    )
-    return qa_rows, context_entries, evidence
+    return qa_rows, context_entries
 
 
 def build_curator_batches(
@@ -190,34 +173,38 @@ def build_curator_batches(
     ]
 
 
-async def curate_batch(batch: DistillationInputBatch) -> CuratorBatchOutcome:
-    """Run one curator call while preserving failure versus successful-empty output."""
+async def curate_batch(batch_text: str) -> List[ProposedLesson]:
+    """One curator call over one batch slice. Fail-open -> []."""
     system_prompt = read_query_prompt(CURATOR_PROMPT_FILE)
     if not system_prompt:
         logger.warning("Distillation curator prompt not found: %s", CURATOR_PROMPT_FILE)
-        return CuratorBatchOutcome(batch=batch, succeeded=False)
+        return []
     try:
         result = await LLMGateway.acreate_structured_output(
-            text_input=batch.text,
+            text_input=batch_text,
             system_prompt=system_prompt,
             response_model=CuratorBatchOutput,
         )
-        return CuratorBatchOutcome(
-            batch=batch,
-            succeeded=True,
-            lessons=tuple(result.lessons),
-        )
+        return list(result.lessons)
     except Exception as error:
         logger.warning("Distillation curator batch failed open: %s", error)
-        return CuratorBatchOutcome(batch=batch, succeeded=False)
+        return []
 
 
-async def propose_lesson_batches(
-    batches: List[DistillationInputBatch],
-) -> List[CuratorBatchOutcome]:
-    """Curate every batch concurrently, keeping each batch's outcome separate."""
+async def propose_lessons(
+    qa_rows: List[dict],
+    context_entries: List[SessionContextEntry],
+) -> List[ProposedLesson]:
+    """Pack session inputs into curator batches, then flatten proposed lessons."""
+    batches = build_curator_batches(qa_rows, context_entries)
+    if not batches:
+        return []
+
     curator_calls = [lambda batch=batch: curate_batch(batch) for batch in batches]
-    return await gather_with_concurrency_limit(curator_calls, CURATOR_CONCURRENCY)
+    per_batch = await gather_with_concurrency_limit(curator_calls, CURATOR_CONCURRENCY)
+
+    proposed = [lesson for batch_lessons in per_batch for lesson in batch_lessons]
+    return proposed
 
 
 async def search_payload_texts(
@@ -286,7 +273,7 @@ async def write_or_reject(
     prior_lessons: List[str],
     glossary: List[str],
 ) -> Optional[WrittenLesson]:
-    """One writer/rejecter call for one proposed lesson. A failed call returns None."""
+    """One writer/rejecter call for one proposed lesson. Fail-open -> None."""
     system_prompt = read_query_prompt(WRITER_PROMPT_FILE)
     if not system_prompt:
         logger.warning("Distillation writer prompt not found: %s", WRITER_PROMPT_FILE)
@@ -330,50 +317,31 @@ async def evaluate_proposed_lesson(
     return await write_or_reject(lesson, members, prior_lessons, glossary)
 
 
-async def decide_lesson_batches(
+async def accept_proposed_lessons(
     scope: SessionDistillationScope,
-    curated_batches: List[CuratorBatchOutcome],
+    proposed: List[ProposedLesson],
     context_entries: List[SessionContextEntry],
-) -> tuple[List[WrittenLesson], set[str]]:
-    """Judge every proposal, keeping only batches whose curator and writer calls all won.
-
-    A batch containing any failure is dropped whole — its accepted siblings included — so
-    its source evidence stays retryable instead of being half-consumed. Returns the
-    accepted lessons and the evidence IDs those fully decided batches consumed.
-    """
+) -> List[WrittenLesson]:
     entries_by_id = {entry.id: entry for entry in context_entries}
-    curated_batches = [curated for curated in curated_batches if curated.succeeded]
-    proposals = [lesson for curated in curated_batches for lesson in curated.lessons]
+    async with set_database_global_context_variables(scope.dataset.id, scope.dataset.owner_id):
+        vector_engine = await get_vector_engine_async()
 
-    decisions: List[Optional[WrittenLesson]] = []
-    if proposals:
-        async with set_database_global_context_variables(scope.dataset.id, scope.dataset.owner_id):
-            vector_engine = await get_vector_engine_async()
-            writer_calls = [
-                lambda lesson=lesson: evaluate_proposed_lesson(
-                    vector_engine,
-                    lesson,
-                    entries_by_id,
-                )
-                for lesson in proposals
-            ]
-            decisions = await gather_with_concurrency_limit(writer_calls, WRITER_CONCURRENCY)
+        def write_lesson(lesson: ProposedLesson):
+            return lambda: evaluate_proposed_lesson(
+                vector_engine,
+                lesson,
+                entries_by_id,
+            )
 
-    # Decisions come back in proposal order, so each batch takes its own slice back.
-    remaining = iter(decisions)
-    accepted: List[WrittenLesson] = []
-    consumed_evidence_ids: set[str] = set()
-    for curated in curated_batches:
-        batch_decisions = [next(remaining) for _lesson in curated.lessons]
-        if any(decision is None for decision in batch_decisions):
-            continue
-        accepted.extend(
-            decision
-            for decision in batch_decisions
-            if decision.accept and decision.statement.strip()
-        )
-        consumed_evidence_ids.update(curated.batch.source_evidence_ids)
-    return accepted, consumed_evidence_ids
+        writer_calls = [write_lesson(lesson) for lesson in proposed]
+        decisions = await gather_with_concurrency_limit(writer_calls, WRITER_CONCURRENCY)
+
+    accepted = [
+        lesson
+        for lesson in decisions
+        if lesson is not None and lesson.accept and lesson.statement.strip()
+    ]
+    return accepted
 
 
 def render_lesson_document(
@@ -421,35 +389,17 @@ async def distill_session(
     """Distill one finished session's distillable learnings into its dataset's knowledge graph."""
     scope = await resolve_distillation_scope(session_id=session_id, dataset=dataset, user=user)
 
-    qa_rows, context_entries, evidence = await load_distillable_session_inputs(
-        scope,
-        get_tracked_evidence_ids(),
-    )
-    if not context_entries and not evidence:
+    qa_rows, context_entries = await load_distillable_session_inputs(scope)
+    if not context_entries:
         return scope.result("no_gated_entries")
 
-    batches = [
-        DistillationInputBatch(text=text)
-        for text in build_curator_batches(qa_rows, context_entries)
-    ] + build_evidence_batches(evidence)
-    curated_batches = await propose_lesson_batches(batches)
-    accepted, consumed_evidence_ids = await decide_lesson_batches(
-        scope, curated_batches, context_entries
-    )
-
-    # Publish first: a publication failure must leave every source evidence retryable.
-    documents = await publish_distilled_lessons(scope, accepted) if accepted else []
-    if consumed_evidence_ids:
-        await mark_evidence_distilled(
-            get_session_manager(),
-            user_id=scope.user_id,
-            session_id=scope.session_id,
-            dataset_id=scope.dataset_id,
-            evidence_ids=consumed_evidence_ids,
-        )
-
-    if not any(curated.lessons for curated in curated_batches):
+    proposed = await propose_lessons(qa_rows, context_entries)
+    if not proposed:
         return scope.result("no_proposed_lessons")
+
+    accepted = await accept_proposed_lessons(scope, proposed, context_entries)
     if not accepted:
         return scope.result("no_accepted_lessons")
+
+    documents = await publish_distilled_lessons(scope, accepted)
     return scope.result("completed", documents=documents)

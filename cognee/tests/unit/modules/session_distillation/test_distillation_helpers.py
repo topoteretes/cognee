@@ -16,9 +16,6 @@ from cognee.modules.session_distillation.distill import render_lesson_document
 from cognee.modules.session_distillation.models import (
     BATCH_CHAR_BUDGET,
     CURATOR_BLOCKS_PER_BATCH,
-    CuratorBatchOutcome,
-    CuratorBatchOutput,
-    DistillationInputBatch,
     MAX_CANDIDATE_CHARS,
     MAX_QA_QUESTION_CHARS,
     ProposedLesson,
@@ -61,35 +58,6 @@ def _context_entry(**overrides):
     return distill_module.coerce_active_context_entries([_context_row(**overrides)])[0]
 
 
-def _turn_evidence(dataset_id: str, evidence_id: str = "e1", **overrides):
-    row = {
-        "id": evidence_id,
-        "kind": "turn_evidence",
-        "created_at": "2026-08-06T10:00:00+00:00",
-        "dataset_id": dataset_id,
-        "current_raw_message": "Remember concise answers.",
-        "current_response": "Okay.",
-        "feedback_evidence": [],
-        "future_context_evidence": ["Prefer concise answers."],
-        "status": "pending",
-        "distilled_at": None,
-    }
-    row.update(overrides)
-    return row
-
-
-def _load_scope():
-    return SimpleNamespace(user_id="u-1", session_id="s-1", dataset_id="d-1")
-
-
-def _distillation_scope():
-    return distill_module.SessionDistillationScope(
-        session_id="s-1",
-        user=SimpleNamespace(id=uuid4()),
-        dataset=SimpleNamespace(id=uuid4(), owner_id=uuid4()),
-    )
-
-
 class TestLoadDistillableSessionInputs:
     @pytest.mark.asyncio
     async def test_loads_qa_and_keeps_confident_unharmed_entries_from_all_sections(
@@ -108,18 +76,16 @@ class TestLoadDistillableSessionInputs:
         )
         monkeypatch.setattr(distill_module, "get_session_manager", lambda: session_manager)
 
-        qa_rows, context_entries, evidence = await distill_module.load_distillable_session_inputs(
-            _load_scope(), set()
+        qa_rows, context_entries = await distill_module.load_distillable_session_inputs(
+            SimpleNamespace(user_id="u-1", session_id="s-1")
         )
 
         assert len(qa_rows) == 1
         assert qa_rows[0]["question"] == "What changed?"
         assert len(context_entries) == 4
-        assert evidence == []
         session_manager.get_session_context_entries.assert_awaited_once_with(
             user_id="u-1",
             session_id="s-1",
-            strict=True,
         )
         session_manager.get_session.assert_awaited_once_with(
             user_id="u-1",
@@ -143,34 +109,12 @@ class TestLoadDistillableSessionInputs:
         )
         monkeypatch.setattr(distill_module, "get_session_manager", lambda: session_manager)
 
-        _qa_rows, context_entries, _evidence = await distill_module.load_distillable_session_inputs(
-            _load_scope(), set()
+        _qa_rows, context_entries = await distill_module.load_distillable_session_inputs(
+            SimpleNamespace(user_id="u-1", session_id="s-1")
         )
 
         assert len(context_entries) == 1
         assert context_entries[0].harmful_count == 0
-
-    @pytest.mark.asyncio
-    async def test_separates_recoverable_evidence_from_context_entries(self, monkeypatch):
-        session_manager = SimpleNamespace(
-            get_session_context_entries=AsyncMock(
-                return_value=[
-                    _context_row(),
-                    _turn_evidence("d-1", "e1"),
-                    _turn_evidence("d-1", "e2", status="completed"),
-                    _turn_evidence("other-dataset", "e3"),
-                ]
-            ),
-            get_session=AsyncMock(return_value=[]),
-        )
-        monkeypatch.setattr(distill_module, "get_session_manager", lambda: session_manager)
-
-        _qa_rows, context_entries, evidence = await distill_module.load_distillable_session_inputs(
-            _load_scope(), {"e4"}
-        )
-
-        assert len(context_entries) == 1
-        assert [entry.id for entry in evidence] == ["e1"]
 
 
 class TestBuildCuratorBatches:
@@ -243,7 +187,7 @@ class _SymmetryFakeSessionManager:
         self.store = [dict(row, last_served_at=None) for row in rows]
         self.updates = 0
 
-    async def get_session_context_entries(self, user_id, session_id, strict=False):
+    async def get_session_context_entries(self, user_id, session_id):
         return list(self.store)
 
     async def update_session_context_entry(self, **kwargs):
@@ -297,8 +241,8 @@ class TestProfileSymmetry:
 
         # (3) Distillation sees both profiles.
         monkeypatch.setattr(distill_module, "get_session_manager", lambda: sm)
-        _qa_rows, entries, _evidence = await distill_module.load_distillable_session_inputs(
-            _load_scope(), set()
+        _qa_rows, entries = await distill_module.load_distillable_session_inputs(
+            SimpleNamespace(user_id="u", session_id="s")
         )
         assert {entry.context_profile for entry in entries} == {"qa", "agent"}
 
@@ -390,35 +334,6 @@ class TestBuildWriterInput:
         assert text_input == "PROPOSED LESSON:\nA standalone lesson."
 
 
-class TestStructuredLlmOutcomes:
-    @pytest.mark.asyncio
-    async def test_curator_distinguishes_successful_empty_from_failure(self, monkeypatch):
-        batch = DistillationInputBatch(text="input", source_evidence_ids=("e1",))
-        llm = AsyncMock(side_effect=[CuratorBatchOutput(), RuntimeError("failed")])
-        monkeypatch.setattr(distill_module, "read_query_prompt", lambda _path: "prompt")
-        monkeypatch.setattr(distill_module.LLMGateway, "acreate_structured_output", llm)
-
-        empty = await distill_module.curate_batch(batch)
-        failed = await distill_module.curate_batch(batch)
-
-        assert empty.succeeded is True and empty.lessons == ()
-        assert failed.succeeded is False
-
-    @pytest.mark.asyncio
-    async def test_writer_distinguishes_rejection_from_failure(self, monkeypatch):
-        lesson = ProposedLesson(working_statement="Candidate.")
-        rejection = WrittenLesson(accept=False, reason="not_durable")
-        llm = AsyncMock(side_effect=[rejection, RuntimeError("failed")])
-        monkeypatch.setattr(distill_module, "read_query_prompt", lambda _path: "prompt")
-        monkeypatch.setattr(distill_module.LLMGateway, "acreate_structured_output", llm)
-
-        rejected = await distill_module.write_or_reject(lesson, [], [], [])
-        failed = await distill_module.write_or_reject(lesson, [], [], [])
-
-        assert rejected is rejection
-        assert failed is None
-
-
 class TestDistillSessionBoundary:
     @pytest.mark.asyncio
     async def test_requires_dataset(self):
@@ -456,7 +371,6 @@ class TestDistillSessionBoundary:
         session_manager.get_session_context_entries.assert_awaited_once_with(
             user_id=str(user.id),
             session_id="s-1",
-            strict=True,
         )
 
     @pytest.mark.asyncio
@@ -477,268 +391,3 @@ class TestDistillSessionBoundary:
 
         with pytest.raises(CogneeValidationError, match="not found or not writable"):
             await distill_module.distill_session("s-1", dataset="team", user=user)
-
-
-class _EvidenceSessionManager:
-    def __init__(self, rows):
-        self.rows = rows
-        self.updates = []
-
-    async def get_session_context_entries(self, **kwargs):
-        return list(self.rows)
-
-    async def get_session(self, **kwargs):
-        return []
-
-    async def update_session_context_entry(self, entry_id, merge, **kwargs):
-        self.updates.append((entry_id, merge))
-        for row in self.rows:
-            if row.get("id") == entry_id:
-                row.update(merge)
-                return True
-        return False
-
-
-def _patch_distillation(monkeypatch, scope, manager, *, tracked=frozenset()):
-    monkeypatch.setattr(distill_module, "resolve_distillation_scope", AsyncMock(return_value=scope))
-    monkeypatch.setattr(distill_module, "get_session_manager", lambda: manager)
-    monkeypatch.setattr(distill_module, "get_tracked_evidence_ids", lambda: set(tracked))
-
-
-class _DatabaseContext:
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, exc_type, exc, tb):
-        return None
-
-
-class TestEvidenceRecoveryOrchestration:
-    @pytest.mark.asyncio
-    async def test_evidence_storage_failure_is_not_reported_as_empty(self, monkeypatch):
-        scope = _distillation_scope()
-        manager = _EvidenceSessionManager([])
-
-        async def fail_read(**kwargs):
-            raise RuntimeError("cache unavailable")
-
-        manager.get_session_context_entries = fail_read
-        _patch_distillation(monkeypatch, scope, manager)
-
-        with pytest.raises(RuntimeError, match="cache unavailable"):
-            await distill_module.distill_session("s-1", dataset=scope.dataset.id)
-
-    @pytest.mark.asyncio
-    async def test_evidence_batches_follow_accuracy_batches_and_carry_source_ids(self, monkeypatch):
-        scope = _distillation_scope()
-        manager = _EvidenceSessionManager([_context_row(), _turn_evidence(scope.dataset_id, "e1")])
-        seen = []
-
-        async def capture(batches):
-            seen.extend(batches)
-            return [CuratorBatchOutcome(batch=batch, succeeded=False) for batch in batches]
-
-        _patch_distillation(monkeypatch, scope, manager)
-        monkeypatch.setattr(distill_module, "propose_lesson_batches", capture)
-
-        await distill_module.distill_session("s-1", dataset=scope.dataset.id)
-
-        assert len(seen) == 2
-        assert "Candidate " in seen[0].text and seen[0].source_evidence_ids == ()
-        assert "Prefer concise answers." in seen[1].text
-        assert seen[1].source_evidence_ids == ("e1",)
-
-    @pytest.mark.asyncio
-    async def test_successful_empty_evidence_batch_is_marked_without_active_context(
-        self, monkeypatch
-    ):
-        scope = _distillation_scope()
-        manager = _EvidenceSessionManager([_turn_evidence(scope.dataset_id)])
-
-        async def curate_empty(batches):
-            return [CuratorBatchOutcome(batch=batch, succeeded=True) for batch in batches]
-
-        _patch_distillation(monkeypatch, scope, manager)
-        monkeypatch.setattr(distill_module, "propose_lesson_batches", curate_empty)
-
-        result = await distill_module.distill_session("s-1", dataset=scope.dataset.id)
-
-        assert result.status == "no_proposed_lessons"
-        assert manager.rows[0]["distilled_at"] is not None
-
-    @pytest.mark.asyncio
-    async def test_curator_failure_leaves_evidence_retryable(self, monkeypatch):
-        scope = _distillation_scope()
-        manager = _EvidenceSessionManager([_turn_evidence(scope.dataset_id)])
-
-        async def curate_failed(batches):
-            return [CuratorBatchOutcome(batch=batch, succeeded=False) for batch in batches]
-
-        _patch_distillation(monkeypatch, scope, manager)
-        monkeypatch.setattr(distill_module, "propose_lesson_batches", curate_failed)
-
-        result = await distill_module.distill_session("s-1", dataset=scope.dataset.id)
-
-        assert result.status == "no_proposed_lessons"
-        assert manager.rows[0]["distilled_at"] is None
-        assert manager.updates == []
-
-    @pytest.mark.asyncio
-    async def test_tracked_evidence_is_not_distilled(self, monkeypatch):
-        scope = _distillation_scope()
-        manager = _EvidenceSessionManager([_turn_evidence(scope.dataset_id)])
-        curate = AsyncMock()
-        _patch_distillation(monkeypatch, scope, manager, tracked={"e1"})
-        monkeypatch.setattr(distill_module, "propose_lesson_batches", curate)
-
-        result = await distill_module.distill_session("s-1", dataset=scope.dataset.id)
-
-        assert result.status == "no_gated_entries"
-        curate.assert_not_awaited()
-        assert manager.rows[0]["distilled_at"] is None
-
-    @pytest.mark.asyncio
-    async def test_accepted_lesson_is_published_then_its_evidence_is_marked(self, monkeypatch):
-        scope = _distillation_scope()
-        manager = _EvidenceSessionManager([_turn_evidence(scope.dataset_id)])
-        lesson = WrittenLesson(accept=True, statement="Keep answers concise.")
-        publish = AsyncMock(return_value=["document"])
-
-        async def curate(batches):
-            return [
-                CuratorBatchOutcome(
-                    batch=batches[0],
-                    succeeded=True,
-                    lessons=(ProposedLesson(working_statement="Be concise."),),
-                )
-            ]
-
-        async def decide(_scope, curated, _entries):
-            return [lesson], set(curated[0].batch.source_evidence_ids)
-
-        _patch_distillation(monkeypatch, scope, manager)
-        monkeypatch.setattr(distill_module, "propose_lesson_batches", curate)
-        monkeypatch.setattr(distill_module, "decide_lesson_batches", decide)
-        monkeypatch.setattr(distill_module, "publish_distilled_lessons", publish)
-
-        result = await distill_module.distill_session("s-1", dataset=scope.dataset.id)
-
-        assert result.status == "completed"
-        assert result.documents == ["document"]
-        assert publish.await_args.args[1] == [lesson]
-        assert manager.rows[0]["distilled_at"] is not None
-
-    @pytest.mark.asyncio
-    async def test_publication_failure_leaves_evidence_retryable(self, monkeypatch):
-        scope = _distillation_scope()
-        manager = _EvidenceSessionManager([_turn_evidence(scope.dataset_id)])
-
-        async def curate(batches):
-            return [
-                CuratorBatchOutcome(
-                    batch=batches[0],
-                    succeeded=True,
-                    lessons=(ProposedLesson(working_statement="Be concise."),),
-                )
-            ]
-
-        async def decide(_scope, curated, _entries):
-            return (
-                [WrittenLesson(accept=True, statement="Keep answers concise.")],
-                set(curated[0].batch.source_evidence_ids),
-            )
-
-        _patch_distillation(monkeypatch, scope, manager)
-        monkeypatch.setattr(distill_module, "propose_lesson_batches", curate)
-        monkeypatch.setattr(distill_module, "decide_lesson_batches", decide)
-        monkeypatch.setattr(
-            distill_module,
-            "publish_distilled_lessons",
-            AsyncMock(side_effect=RuntimeError("publish failed")),
-        )
-
-        with pytest.raises(RuntimeError, match="publish failed"):
-            await distill_module.distill_session("s-1", dataset=scope.dataset.id)
-
-        assert manager.rows[0]["distilled_at"] is None
-        assert manager.updates == []
-
-
-class TestDecideLessonBatches:
-    @pytest.mark.asyncio
-    async def test_writer_failure_discards_accepted_sibling_and_source_evidence(self, monkeypatch):
-        curated = CuratorBatchOutcome(
-            batch=DistillationInputBatch(text="input", source_evidence_ids=("e1",)),
-            succeeded=True,
-            lessons=(
-                ProposedLesson(working_statement="First."),
-                ProposedLesson(working_statement="Second."),
-            ),
-        )
-        monkeypatch.setattr(
-            distill_module,
-            "set_database_global_context_variables",
-            lambda *args: _DatabaseContext(),
-        )
-        monkeypatch.setattr(
-            distill_module, "get_vector_engine_async", AsyncMock(return_value=object())
-        )
-        monkeypatch.setattr(
-            distill_module,
-            "evaluate_proposed_lesson",
-            AsyncMock(side_effect=[WrittenLesson(accept=True, statement="Accepted."), None]),
-        )
-
-        accepted, consumed = await distill_module.decide_lesson_batches(
-            _distillation_scope(), [curated], []
-        )
-
-        assert accepted == []
-        assert consumed == set()
-
-    @pytest.mark.asyncio
-    async def test_rejections_consume_their_evidence_without_publishing(self, monkeypatch):
-        curated = CuratorBatchOutcome(
-            batch=DistillationInputBatch(text="input", source_evidence_ids=("e1",)),
-            succeeded=True,
-            lessons=(ProposedLesson(working_statement="First."),),
-        )
-        monkeypatch.setattr(
-            distill_module,
-            "set_database_global_context_variables",
-            lambda *args: _DatabaseContext(),
-        )
-        monkeypatch.setattr(
-            distill_module, "get_vector_engine_async", AsyncMock(return_value=object())
-        )
-        monkeypatch.setattr(
-            distill_module,
-            "evaluate_proposed_lesson",
-            AsyncMock(return_value=WrittenLesson(accept=False, reason="not_durable")),
-        )
-
-        accepted, consumed = await distill_module.decide_lesson_batches(
-            _distillation_scope(), [curated], []
-        )
-
-        assert accepted == []
-        assert consumed == {"e1"}
-
-    @pytest.mark.asyncio
-    async def test_curator_failure_never_reaches_the_writer(self, monkeypatch):
-        writer = AsyncMock()
-        monkeypatch.setattr(distill_module, "evaluate_proposed_lesson", writer)
-
-        accepted, consumed = await distill_module.decide_lesson_batches(
-            _distillation_scope(),
-            [
-                CuratorBatchOutcome(
-                    batch=DistillationInputBatch(text="input", source_evidence_ids=("e1",)),
-                    succeeded=False,
-                )
-            ],
-            [],
-        )
-
-        assert (accepted, consumed) == ([], set())
-        writer.assert_not_awaited()

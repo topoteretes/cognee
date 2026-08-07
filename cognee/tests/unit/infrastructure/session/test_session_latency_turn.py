@@ -4,15 +4,14 @@ from uuid import uuid4
 import pytest
 from pydantic import BaseModel
 
+from cognee.infrastructure.session.feedback_models import SessionTurnAnalysis
 from cognee.infrastructure.session.session_latency_turn import (
+    analyze_latency_turn,
     commit_latency_turn,
     complete_latency_turn,
     load_latency_turn_snapshot,
 )
-from cognee.infrastructure.session.session_search_models import (
-    SessionTurnSnapshot,
-    get_session_search_completion_model,
-)
+from cognee.infrastructure.session.session_search_models import SessionTurnSnapshot
 
 
 @pytest.mark.asyncio
@@ -121,88 +120,84 @@ async def test_snapshot_skips_context_reads_when_auto_feedback_is_disabled():
 
 
 @pytest.mark.asyncio
-async def test_completion_appends_contract_and_uses_loaded_prompt_state():
+async def test_analysis_reads_the_user_turn_and_the_context_it_may_rate():
     snapshot = SessionTurnSnapshot(
-        raw_message="current question",
-        completion_history="history",
-        active_context="guidance",
+        raw_message="that was wrong",
+        previous_question="what is the limit?",
+        previous_answer="ten",
+        previous_served_context=(("ctx-1", "Be concise."),),
     )
-    completion_model = get_session_search_completion_model(str)
+    analysis = SessionTurnAnalysis(query_to_answer="restated")
 
-    with (
-        patch(
-            "cognee.infrastructure.session.session_latency_turn.read_query_prompt",
-            return_value="contract",
-        ),
-        patch(
-            "cognee.infrastructure.session.session_latency_turn.generate_completion",
-            new_callable=AsyncMock,
-            return_value=completion_model(
-                response="answer",
-                feedback_evidence=["correction"],
-            ),
-        ) as generate,
+    with patch(
+        "cognee.infrastructure.session.session_latency_turn.analyze_turn_for_session_context",
+        new_callable=AsyncMock,
+        return_value=analysis,
+    ) as analyze:
+        assert await analyze_latency_turn(snapshot) is analysis
+
+    analyze.assert_awaited_once_with(
+        "that was wrong",
+        previous_question="what is the limit?",
+        previous_answer="ten",
+        served_context=[{"id": "ctx-1", "content": "Be concise."}],
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", [RuntimeError("llm down"), TimeoutError()])
+async def test_analysis_fails_open_to_no_context_updates(failure):
+    with patch(
+        "cognee.infrastructure.session.session_latency_turn.analyze_turn_for_session_context",
+        new_callable=AsyncMock,
+        side_effect=failure,
     ):
-        completion = await complete_latency_turn(
+        analysis = await analyze_latency_turn(SessionTurnSnapshot(raw_message="question"))
+
+    assert analysis.candidate_context_updates == []
+    assert analysis.served_context_ratings == []
+
+
+@pytest.mark.asyncio
+async def test_answer_uses_the_callers_own_prompts_and_response_model():
+    class Answer(BaseModel):
+        text: str
+
+    snapshot = SessionTurnSnapshot(
+        raw_message="question",
+        active_context="active guidance",
+        completion_history="history",
+    )
+
+    with patch(
+        "cognee.infrastructure.session.session_latency_turn.generate_completion",
+        new_callable=AsyncMock,
+        return_value=Answer(text="structured"),
+    ) as generate:
+        answer = await complete_latency_turn(
             snapshot=snapshot,
-            context="retrieved context",
+            context="context",
             user_id="not-a-uuid",
             session_id="s1",
             user_prompt_path="user.txt",
             system_prompt_path="system.txt",
-            system_prompt="caller system",
-            response_model=str,
-            auto_feedback=True,
-        )
-
-    assert completion.response == "answer"
-    assert completion.feedback_evidence == ["correction"]
-    call = generate.await_args.kwargs
-    assert call["system_prompt"] == "caller system\n\ncontract"
-    assert call["conversation_history"] == "guidance\n\nhistory"
-    assert call["response_model"] is completion_model
-
-
-@pytest.mark.asyncio
-async def test_plain_completion_preserves_custom_response_without_evidence():
-    class Answer(BaseModel):
-        text: str
-
-    answer = Answer(text="answer")
-    with patch(
-        "cognee.infrastructure.session.session_latency_turn.generate_completion",
-        new_callable=AsyncMock,
-        return_value=answer,
-    ) as generate:
-        completion = await complete_latency_turn(
-            snapshot=SessionTurnSnapshot(raw_message="question", completion_history="history"),
-            context="context",
-            user_id="u1",
-            session_id="s1",
-            user_prompt_path="user.txt",
-            system_prompt_path="system.txt",
-            system_prompt=None,
+            system_prompt="caller system prompt",
             response_model=Answer,
-            auto_feedback=False,
         )
 
-    assert completion.response == answer
-    assert completion.feedback_evidence == []
-    assert generate.await_args.kwargs["response_model"] is Answer
+    assert answer == Answer(text="structured")
+    call = generate.await_args.kwargs
+    # No wrapper model and no appended contract: the caller's own contract, unchanged.
+    assert call["response_model"] is Answer
+    assert call["system_prompt"] == "caller system prompt"
+    assert call["conversation_history"] == "active guidance\n\nhistory"
 
 
 @pytest.mark.asyncio
-async def test_completion_tracks_only_uuid_users():
-    class UsageScope:
-        entered = False
+async def test_answer_tracks_usage_only_for_uuid_users():
+    snapshot = SessionTurnSnapshot(raw_message="question")
+    user_id = uuid4()
 
-        async def __aenter__(self):
-            self.entered = True
-
-        async def __aexit__(self, exc_type, exc, traceback):
-            return False
-
-    scope = UsageScope()
     with (
         patch(
             "cognee.infrastructure.session.session_latency_turn.generate_completion",
@@ -210,142 +205,87 @@ async def test_completion_tracks_only_uuid_users():
             return_value="answer",
         ),
         patch(
-            "cognee.infrastructure.session.session_latency_turn.track_session_usage",
-            return_value=scope,
-        ) as track,
+            "cognee.infrastructure.session.session_latency_turn.track_session_usage"
+        ) as track_usage,
     ):
         await complete_latency_turn(
-            snapshot=SessionTurnSnapshot(raw_message="question"),
+            snapshot=snapshot,
             context="context",
-            user_id=(user_id := uuid4()),
+            user_id=user_id,
             session_id="s1",
             user_prompt_path="user.txt",
             system_prompt_path="system.txt",
             system_prompt=None,
             response_model=str,
-            auto_feedback=False,
         )
 
-    track.assert_called_once_with("s1", user_id)
-    assert scope.entered is True
+    track_usage.assert_called_once_with("s1", user_id)
 
 
 @pytest.mark.asyncio
-async def test_commit_stores_qa_before_evidence_and_returns_work_item():
-    events = []
+async def test_commit_applies_the_analysis_then_stores_the_qa():
+    order = []
     manager = MagicMock()
-
-    async def add_qa(**kwargs):
-        events.append(("qa", kwargs))
-        return "qa-current"
-
-    async def create_evidence(**kwargs):
-        events.append(("evidence", kwargs))
-        return True
-
-    manager.add_qa = AsyncMock(side_effect=add_qa)
-    manager.create_session_context_entry = AsyncMock(side_effect=create_evidence)
-    completion = get_session_search_completion_model(str)(
-        response="answer",
-        feedback_evidence=["correction"],
-        future_context_evidence=["preference"],
-    )
+    manager.add_qa = AsyncMock(side_effect=lambda **kwargs: order.append("qa"))
     snapshot = SessionTurnSnapshot(
         raw_message="question",
-        active_context_ids=("ctx-1",),
-        previous_qa_id="qa-previous",
-        previous_question="previous",
-        previous_answer="old answer",
-        previous_served_context=(("ctx-old", "old guidance"),),
+        active_context_ids=("ctx-served-now",),
+        previous_qa_id="qa-1",
+        previous_served_context=(("ctx-rated", "Be concise."),),
+    )
+    analysis = SessionTurnAnalysis(
+        candidate_context_updates=[
+            {"section": "rules", "content": "Cite sources.", "confidence": 0.9}
+        ]
     )
 
-    work_item = await commit_latency_turn(
-        manager,
-        snapshot=snapshot,
-        completion=completion,
-        user_id="u1",
-        session_id="s1",
-        dataset_id="d1",
-        used_graph_element_ids={"node_ids": ["n1"]},
-        auto_feedback=True,
-    )
+    with patch(
+        "cognee.infrastructure.session.session_latency_turn.apply_session_turn_analysis",
+        new_callable=AsyncMock,
+        side_effect=lambda *args, **kwargs: order.append("analysis"),
+    ) as apply_analysis:
+        await commit_latency_turn(
+            manager,
+            snapshot=snapshot,
+            analysis=analysis,
+            answer="the answer",
+            user_id="u1",
+            session_id="s1",
+            used_graph_element_ids={"node_ids": ["n1"]},
+        )
 
-    assert [event[0] for event in events] == ["qa", "evidence"]
-    assert events[0][1]["used_session_context_ids"] == ["ctx-1"]
-    evidence = events[1][1]["entry_dump"]
-    assert evidence["current_qa_id"] == "qa-current"
-    assert evidence["previous_qa_id"] == "qa-previous"
-    assert evidence["status"] == "pending"
-    assert work_item.evidence_id == evidence["id"]
+    assert order == ["analysis", "qa"]
+    # Ratings target the context served to the *previous* answer.
+    assert apply_analysis.await_args.kwargs["served_ids"] == ["ctx-rated"]
+    assert apply_analysis.await_args.kwargs["previous_qa_id"] == "qa-1"
+    stored = manager.add_qa.await_args.kwargs
+    assert stored["question"] == "question"
+    assert stored["answer"] == "the answer"
+    # The QA records the context served to *this* answer.
+    assert stored["used_session_context_ids"] == ["ctx-served-now"]
+    assert stored["used_graph_element_ids"] == {"node_ids": ["n1"]}
 
 
 @pytest.mark.asyncio
-async def test_acknowledgement_skips_qa_but_persists_evidence():
+async def test_commit_serializes_a_custom_response_model_for_storage():
+    class Answer(BaseModel):
+        text: str
+
     manager = MagicMock()
     manager.add_qa = AsyncMock()
-    manager.create_session_context_entry = AsyncMock(return_value=True)
-    completion = get_session_search_completion_model(str)(
-        response="Understood.",
-        is_acknowledgement=True,
-    )
 
-    work_item = await commit_latency_turn(
-        manager,
-        snapshot=SessionTurnSnapshot(raw_message="Use concise answers."),
-        completion=completion,
-        user_id="u1",
-        session_id="s1",
-        dataset_id=None,
-        used_graph_element_ids=None,
-        auto_feedback=True,
-    )
+    with patch(
+        "cognee.infrastructure.session.session_latency_turn.apply_session_turn_analysis",
+        new_callable=AsyncMock,
+    ):
+        await commit_latency_turn(
+            manager,
+            snapshot=SessionTurnSnapshot(raw_message="question"),
+            analysis=SessionTurnAnalysis(),
+            answer=Answer(text="structured"),
+            user_id="u1",
+            session_id="s1",
+            used_graph_element_ids=None,
+        )
 
-    manager.add_qa.assert_not_awaited()
-    assert (
-        manager.create_session_context_entry.await_args.kwargs["entry_dump"]["current_qa_id"]
-        is None
-    )
-    assert work_item is not None
-
-
-@pytest.mark.asyncio
-async def test_evidence_storage_failure_returns_no_work_item_after_qa():
-    manager = MagicMock()
-    manager.add_qa = AsyncMock(return_value="qa-current")
-    manager.create_session_context_entry = AsyncMock(return_value=False)
-
-    work_item = await commit_latency_turn(
-        manager,
-        snapshot=SessionTurnSnapshot(raw_message="question"),
-        completion=get_session_search_completion_model(str)(response="answer"),
-        user_id="u1",
-        session_id="s1",
-        dataset_id=None,
-        used_graph_element_ids=None,
-        auto_feedback=True,
-    )
-
-    manager.add_qa.assert_awaited_once()
-    assert work_item is None
-
-
-@pytest.mark.asyncio
-async def test_commit_without_auto_feedback_stores_only_qa():
-    manager = MagicMock()
-    manager.add_qa = AsyncMock(return_value="qa-current")
-    manager.create_session_context_entry = AsyncMock()
-
-    work_item = await commit_latency_turn(
-        manager,
-        snapshot=SessionTurnSnapshot(raw_message="question"),
-        completion=get_session_search_completion_model(str)(response="answer"),
-        user_id="u1",
-        session_id="s1",
-        dataset_id=None,
-        used_graph_element_ids=None,
-        auto_feedback=False,
-    )
-
-    manager.add_qa.assert_awaited_once()
-    manager.create_session_context_entry.assert_not_awaited()
-    assert work_item is None
+    assert manager.add_qa.await_args.kwargs["answer"] == '{"text":"structured"}'

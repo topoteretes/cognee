@@ -351,7 +351,6 @@ async def _apply_single_candidate(
     existing = await session_manager.get_session_context_entries(
         user_id=user_id,
         session_id=session_id,
-        strict=True,
     )
     duplicate_row = None
     for raw in existing or []:
@@ -376,14 +375,12 @@ async def _apply_single_candidate(
         source_ids = list(duplicate_row.get(source_field) or [])
         if source_id and source_id not in source_ids:
             source_ids.append(source_id)
-            updated = await session_manager.update_session_context_entry(
+            await session_manager.update_session_context_entry(
                 user_id=user_id,
                 session_id=session_id,
                 entry_id=entry_id,
                 merge={source_field: source_ids},
             )
-            if not updated:
-                raise RuntimeError(f"context entry update failed: {entry_id}")
         return entry_id
 
     # Novel content: create a new active entry under this profile/section.
@@ -400,13 +397,11 @@ async def _apply_single_candidate(
         source_trace_ids=linked_ids if source_field == "source_trace_ids" else [],
         kind="context",
     )
-    created = await session_manager.create_session_context_entry(
+    await session_manager.create_session_context_entry(
         user_id=user_id,
         session_id=session_id,
         entry_dump=new_entry.model_dump(),
     )
-    if not created:
-        raise RuntimeError(f"context entry creation failed: {new_entry.id}")
     return new_entry.id
 
 
@@ -420,35 +415,6 @@ def _coerce_candidate_model(candidate) -> CandidateContextUpdate:
     ):
         return _AGENT_CANDIDATE_ADAPTER.validate_python(candidate)
     return CandidateContextUpdate.model_validate(candidate)
-
-
-async def apply_candidate_updates_strict(
-    *,
-    session_manager,
-    user_id,
-    session_id,
-    source_id,
-    candidates: list,
-) -> tuple[List[str], List[str]]:
-    """Apply candidates, returning the touched entry ids and one message per failure."""
-    applied: List[str] = []
-    errors: List[str] = []
-    for index, candidate in enumerate(candidates or []):
-        try:
-            model = _coerce_candidate_model(candidate)
-            entry_id = await _apply_single_candidate(
-                session_manager=session_manager,
-                user_id=user_id,
-                session_id=session_id,
-                source_id=source_id,
-                candidate=model,
-            )
-        except Exception as error:
-            errors.append(f"candidate:{index}: {error}")
-            continue
-        if entry_id:
-            applied.append(entry_id)
-    return applied, errors
 
 
 async def apply_candidate_updates(
@@ -470,14 +436,23 @@ async def apply_candidate_updates(
 
     Returns the list of touched/created entry ids.
     """
+    touched: List[str] = []
     try:
-        applied, _errors = await apply_candidate_updates_strict(
-            session_manager=session_manager,
-            user_id=user_id,
-            session_id=session_id,
-            source_id=source_id,
-            candidates=candidates,
-        )
-        return applied
+        for candidate in candidates or []:
+            try:
+                model = _coerce_candidate_model(candidate)
+                entry_id = await _apply_single_candidate(
+                    session_manager=session_manager,
+                    user_id=user_id,
+                    session_id=session_id,
+                    source_id=source_id,
+                    candidate=model,
+                )
+                if entry_id:
+                    touched.append(entry_id)
+            except Exception:
+                # Per-candidate fail-open: skip this candidate, keep going.
+                continue
+        return touched
     except Exception:
-        return []
+        return touched

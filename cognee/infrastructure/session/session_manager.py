@@ -788,25 +788,22 @@ class SessionManager:
         *,
         user_id: str,
         session_id: str | None = None,
-        strict: bool = False,
     ) -> list[dict]:
         """
         Return all stored session-context entries (both "context" and "feedback" kinds).
 
         Raises SessionParameterValidationError for invalid user_id/session_id.
-        Fail-open on infrastructure errors: returns [] when the cache is unavailable or
-        the cache operation fails. Pass ``strict=True`` to raise instead, for callers
-        that must tell an empty session apart from an unreachable one.
+        Fail-open on infrastructure errors: returns [] when the cache is
+        unavailable or the cache operation fails.
         """
         session_id = self.resolve_session_id(session_id)
         self._validate_session_params(user_id=user_id, session_id=session_id)
+        if not self.is_available:
+            logger.debug("SessionManager: cache unavailable, returning empty session context")
+            return []
         try:
-            if not self.is_available:
-                raise RuntimeError("session cache is unavailable")
             return await self._cache.get_session_context_entries(user_id, session_id)
         except Exception as e:
-            if strict:
-                raise
             logger.warning("SessionManager: get_session_context_entries failed: %s", e)
             return []
 

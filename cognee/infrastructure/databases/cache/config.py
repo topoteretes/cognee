@@ -38,9 +38,10 @@ class CacheConfig(BaseSettings):
       guidance on each query (default True). Adds one structured-output LLM call per answered
       turn; set AUTO_FEEDBACK=false to disable.
     - session_search_mode: Session-search execution mode (default "latency_optimized"):
-      one blocking answer call per turn, with feedback and context updates maintained in
-      the background. Set SESSION_SEARCH_MODE=accuracy_optimized to keep analyzing the
-      turn before retrieval and applying context updates before returning.
+      the turn analysis runs concurrently with retrieval and answering, so a turn costs
+      one answer call of wall-clock time. Set SESSION_SEARCH_MODE=accuracy_optimized to
+      analyze first and let that analysis rewrite the retrieval query and apply context
+      updates before the answer is generated.
     """
 
     cache_backend: Literal["redis", "fs", "tapes", "sqlite", "postgres"] = "sqlite"

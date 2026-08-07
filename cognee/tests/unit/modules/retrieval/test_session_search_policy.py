@@ -23,7 +23,6 @@ def resolve(retriever_type: type, **overrides):
         "session_available": True,
         "is_batch": False,
         "only_context": False,
-        "structured_output_supported": True,
     }
     inputs.update(overrides)
     return resolve_session_search_mode(**inputs)
@@ -51,7 +50,6 @@ def test_latency_mode_supports_only_designated_retrievers(retriever_type):
         {"session_available": False},
         {"is_batch": True},
         {"only_context": True},
-        {"structured_output_supported": False},
     ],
 )
 def test_latency_mode_falls_back_to_accuracy(overrides):

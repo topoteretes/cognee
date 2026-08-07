@@ -1,6 +1,5 @@
 """FastAPI server for the Cognee API."""
 
-import asyncio
 import os
 
 import uvicorn
@@ -91,15 +90,6 @@ async def lifespan(app: FastAPI):
     logger.info("Backend server has started")
 
     yield
-
-    from cognee.infrastructure.session.session_maintenance_worker import (
-        drain_session_maintenance,
-    )
-
-    try:
-        await drain_session_maintenance()
-    except asyncio.TimeoutError:
-        logger.warning("Timed out while draining session maintenance")
 
     # Flush and close all cached database adapters so Ladybug can
     # CHECKPOINT its WAL before the process exits.  Without this,

@@ -225,70 +225,6 @@ async def load_served_context_payload(
         return []
 
 
-async def apply_served_context_ratings_strict(
-    session_manager,
-    *,
-    user_id: str,
-    session_id: str,
-    ratings: list,
-) -> list[str]:
-    """Apply ratings, returning one message per entry that could not be updated.
-
-    A rating naming an unknown entry or an unknown verdict is not an error: there is
-    nothing to apply, so it is dropped.
-    """
-    if not ratings:
-        return []
-
-    entries = await session_manager.get_session_context_entries(
-        user_id=user_id,
-        session_id=session_id,
-        strict=True,
-    )
-    counts = {}
-    for raw in entries or []:
-        row = raw if isinstance(raw, dict) else getattr(raw, "__dict__", {})
-        if row.get("kind", "context") != "context":
-            continue
-        entry_id = row.get("id")
-        if entry_id is not None:
-            counts[str(entry_id)] = (
-                int(row.get("helpful_count", 0) or 0),
-                int(row.get("harmful_count", 0) or 0),
-            )
-
-    errors = []
-    for rating in ratings:
-        entry_id = str(getattr(rating, "entry_id", None) or "")
-        verdict = str(getattr(rating, "rating", "") or "").strip().lower()
-        if entry_id not in counts or verdict not in ("helpful", "harmful"):
-            continue
-
-        helpful, harmful = counts[entry_id]
-        if verdict == "helpful":
-            merge = {"helpful_count": helpful + 1}
-            next_counts = (helpful + 1, harmful)
-        else:
-            merge = {"harmful_count": harmful + 1}
-            next_counts = (helpful, harmful + 1)
-        try:
-            updated = await session_manager.update_session_context_entry(
-                user_id=user_id,
-                entry_id=entry_id,
-                merge=merge,
-                session_id=session_id,
-            )
-        except Exception as error:
-            errors.append(f"{entry_id}: {error}")
-            continue
-        if not updated:
-            errors.append(f"{entry_id}: update failed")
-            continue
-        counts[entry_id] = next_counts
-
-    return errors
-
-
 async def apply_served_context_ratings(
     session_manager,
     *,
@@ -296,14 +232,46 @@ async def apply_served_context_ratings(
     session_id: str,
     ratings: list,
 ) -> None:
-    """Increment helpful/harmful counts while preserving fail-open accuracy behavior."""
+    """Increment helpful_count / harmful_count for rated entries. Fail-open per rating."""
+    if not ratings:
+        return
     try:
-        await apply_served_context_ratings_strict(
-            session_manager,
-            user_id=user_id,
-            session_id=session_id,
-            ratings=ratings,
+        entries = await session_manager.get_session_context_entries(
+            user_id=user_id, session_id=session_id
         )
+        counts = {}
+        for raw in entries or []:
+            row = raw if isinstance(raw, dict) else getattr(raw, "__dict__", {})
+            if row.get("kind", "context") != "context":
+                continue
+            entry_id = row.get("id")
+            if entry_id is not None:
+                counts[str(entry_id)] = (
+                    int(row.get("helpful_count", 0) or 0),
+                    int(row.get("harmful_count", 0) or 0),
+                )
+        for rating in ratings:
+            try:
+                entry_id = str(getattr(rating, "entry_id", None) or "")
+                verdict = str(getattr(rating, "rating", "") or "").strip().lower()
+                if entry_id not in counts or verdict not in ("helpful", "harmful"):
+                    continue
+                helpful, harmful = counts[entry_id]
+                if verdict == "helpful":
+                    merge = {"helpful_count": helpful + 1}
+                    next_counts = (helpful + 1, harmful)
+                else:
+                    merge = {"harmful_count": harmful + 1}
+                    next_counts = (helpful, harmful + 1)
+                await session_manager.update_session_context_entry(
+                    user_id=user_id,
+                    entry_id=entry_id,
+                    merge=merge,
+                    session_id=session_id,
+                )
+                counts[entry_id] = next_counts
+            except Exception:
+                continue
     except Exception as e:
         logger.warning("Session turn: served-context rating update failed: %s", e)
 

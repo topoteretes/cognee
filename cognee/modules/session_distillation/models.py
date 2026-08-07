@@ -8,7 +8,6 @@ documents in the knowledge graph. The flow:
 Curator calls run in parallel by batch; judge/write calls run in parallel by lesson.
 """
 
-from dataclasses import dataclass
 from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field
@@ -80,29 +79,6 @@ class WrittenLesson(BaseModel):
         default="",
         description="One sentence naming the situation it was learned in.",
     )
-
-
-# -- Internal orchestration envelopes ----------------------------------------
-#
-# Not LLM contracts: they carry operational identity (which source evidence a batch came
-# from) and separate a failed call from a successful call that produced nothing.
-
-
-@dataclass(frozen=True, slots=True)
-class DistillationInputBatch:
-    """One curator input plus the evidence IDs it was built from, attached in Python."""
-
-    text: str
-    source_evidence_ids: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True, slots=True)
-class CuratorBatchOutcome:
-    """One curator call's result. ``succeeded=True`` with no lessons is a valid answer."""
-
-    batch: DistillationInputBatch
-    succeeded: bool
-    lessons: tuple[ProposedLesson, ...] = ()
 
 
 # -- Result ------------------------------------------------------------------

@@ -43,15 +43,6 @@ from cognee.modules.visualization.cognee_network_visualization import (
 from .api.v1.ui import start_ui
 from .api.v1.session import session
 
-
-async def drain_session_maintenance(timeout_seconds: float = 30.0) -> None:
-    """Drain process-local session maintenance on the current event loop."""
-    from .infrastructure.session.session_maintenance_worker import (
-        drain_session_maintenance as drain,
-    )
-
-    await drain(timeout_seconds=timeout_seconds)
-
 # Pipelines
 from .modules import pipelines
 from .pipelines import Drop

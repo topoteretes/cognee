@@ -24,11 +24,6 @@ def _user(id_: str):
     return SimpleNamespace(id=id_)
 
 
-@pytest.mark.asyncio
-async def test_public_maintenance_drain_is_a_noop_without_work():
-    await cognee.drain_session_maintenance()
-
-
 class _InMemoryRedisList:
     """Minimal in-memory Redis list emulation for Redis-backed session tests."""
 

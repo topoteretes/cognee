@@ -1,15 +1,14 @@
+import asyncio
+from contextlib import ExitStack, contextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
 
-from cognee.infrastructure.session.session_search_models import (
-    SessionMaintenanceWorkItem,
-    SessionTurnSnapshot,
-    get_session_search_completion_model,
-)
+from cognee.infrastructure.session.session_search_models import SessionTurnSnapshot
 from cognee.modules.retrieval.completion_retriever import CompletionRetriever
+from cognee.infrastructure.session.feedback_models import SessionTurnAnalysis
 from cognee.modules.retrieval.session_search import (
     MAX_CONTEXTUAL_QUERY_CHARS,
     build_contextual_query,
@@ -131,127 +130,110 @@ async def test_latency_retrieval_skips_duplicate_contextual_lane():
     retriever.get_retrieved_objects.assert_awaited_once_with(query="current")
 
 
-@pytest.mark.asyncio
-async def test_latency_orchestrator_commits_then_applies_retriever_references():
-    retriever = CompletionRetriever(session_id="s1", include_references=True)
-    retriever._extract_context_object_ids = lambda objects: {"node_ids": ["n1"]}
-    retriever._append_references = AsyncMock(return_value=["answer with references"])
-    manager = MagicMock()
-    manager.is_session_available_for_completion.return_value = True
-    manager.resolve_session_id.return_value = "s1"
-    manager.is_auto_feedback_enabled.return_value = True
-    manager.dataset_id = uuid4()
-    snapshot = SessionTurnSnapshot(raw_message="question")
-    completion = get_session_search_completion_model(str)(response="answer")
-    work_item = SessionMaintenanceWorkItem(
-        evidence_id="e1",
-        user_id=str(uuid4()),
-        session_id="s1",
-    )
+@contextmanager
+def _latency_environment(manager, *, analysis, order):
+    """Patch the orchestrator's collaborators, recording the order lanes complete in."""
 
-    with (
+    async def analyze(_snapshot):
+        await asyncio.sleep(0)
+        order.append("analysis")
+        return analysis
+
+    async def retrieve(_retriever, *, raw_query, snapshot):
+        await asyncio.sleep(0)
+        order.append("retrieval")
+        return [item("n1")], "context"
+
+    async def complete(**_kwargs):
+        order.append("answer")
+        return "answer"
+
+    patchers = (
         patch(
             "cognee.modules.retrieval.session_search.CacheConfig",
             return_value=SimpleNamespace(session_search_mode="latency_optimized"),
         ),
-        patch("cognee.modules.retrieval.session_search.session_user") as current_user,
+        patch(
+            "cognee.modules.retrieval.session_search.session_user",
+            SimpleNamespace(get=lambda: SimpleNamespace(id=uuid4())),
+        ),
         patch(
             "cognee.modules.retrieval.session_search.get_session_manager",
             return_value=manager,
-        ),
-        patch(
-            "cognee.modules.retrieval.session_search.LLMGateway.supports_structured_output_model",
-            return_value=True,
-        ),
-        patch(
-            "cognee.modules.retrieval.session_search.load_latency_turn_snapshot",
-            new_callable=AsyncMock,
-            return_value=snapshot,
-        ),
-        patch(
-            "cognee.modules.retrieval.session_search.retrieve_latency_context",
-            new_callable=AsyncMock,
-            return_value=([item("n1")], "context"),
-        ),
-        patch(
-            "cognee.modules.retrieval.session_search.complete_latency_turn",
-            new_callable=AsyncMock,
-            return_value=completion,
-        ),
-        patch(
-            "cognee.modules.retrieval.session_search.commit_latency_turn",
-            new_callable=AsyncMock,
-            return_value=work_item,
-        ) as commit,
-        patch(
-            "cognee.modules.retrieval.session_search.enqueue_session_maintenance",
-            new_callable=AsyncMock,
-        ) as enqueue,
-    ):
-        current_user.get.return_value = SimpleNamespace(id=uuid4())
-        result = await run_latency_session_search(retriever, raw_query="question")
-
-    assert result.completion == ["answer with references"]
-    commit.assert_awaited_once()
-    enqueue.assert_awaited_once_with(work_item, manager)
-    retriever._append_references.assert_awaited_once_with(
-        ["answer"],
-        [item("n1")],
-    )
-
-
-@pytest.mark.asyncio
-async def test_latency_orchestrator_skips_references_for_acknowledgement():
-    retriever = CompletionRetriever(session_id="s1", include_references=True)
-    retriever._extract_context_object_ids = lambda objects: None
-    retriever._append_references = AsyncMock()
-    manager = MagicMock()
-    manager.is_session_available_for_completion.return_value = True
-    manager.resolve_session_id.return_value = "s1"
-    manager.is_auto_feedback_enabled.return_value = True
-    manager.dataset_id = None
-    completion = get_session_search_completion_model(str)(
-        response="Understood.",
-        is_acknowledgement=True,
-    )
-
-    with (
-        patch(
-            "cognee.modules.retrieval.session_search.CacheConfig",
-            return_value=SimpleNamespace(session_search_mode="latency_optimized"),
-        ),
-        patch("cognee.modules.retrieval.session_search.session_user") as current_user,
-        patch(
-            "cognee.modules.retrieval.session_search.get_session_manager",
-            return_value=manager,
-        ),
-        patch(
-            "cognee.modules.retrieval.session_search.LLMGateway.supports_structured_output_model",
-            return_value=True,
         ),
         patch(
             "cognee.modules.retrieval.session_search.load_latency_turn_snapshot",
             new_callable=AsyncMock,
             return_value=SessionTurnSnapshot(raw_message="question"),
         ),
+        patch("cognee.modules.retrieval.session_search.analyze_latency_turn", analyze),
+        patch("cognee.modules.retrieval.session_search.retrieve_latency_context", retrieve),
+        patch("cognee.modules.retrieval.session_search.complete_latency_turn", complete),
+    )
+    with ExitStack() as stack:
+        for patcher in patchers:
+            stack.enter_context(patcher)
+        yield
+
+
+def _session_manager(*, auto_feedback=True):
+    manager = MagicMock()
+    manager.is_session_available_for_completion.return_value = True
+    manager.resolve_session_id.return_value = "s1"
+    manager.is_auto_feedback_enabled.return_value = auto_feedback
+    return manager
+
+
+@pytest.mark.asyncio
+async def test_analysis_runs_alongside_retrieval_and_commits_after_both():
+    retriever = CompletionRetriever(session_id="s1", include_references=True)
+    retriever._extract_context_object_ids = lambda objects: {"node_ids": ["n1"]}
+    retriever._append_references = AsyncMock(return_value=["answer with references"])
+    analysis = SessionTurnAnalysis(
+        candidate_context_updates=[
+            {"section": "rules", "content": "Cite sources.", "confidence": 0.9}
+        ]
+    )
+    order = []
+
+    with (
+        _latency_environment(_session_manager(), analysis=analysis, order=order),
         patch(
-            "cognee.modules.retrieval.session_search.retrieve_latency_context",
+            "cognee.modules.retrieval.session_search.commit_latency_turn",
             new_callable=AsyncMock,
-            return_value=([], "context"),
-        ),
-        patch(
-            "cognee.modules.retrieval.session_search.complete_latency_turn",
-            new_callable=AsyncMock,
-            return_value=completion,
+        ) as commit,
+    ):
+        result = await run_latency_session_search(retriever, raw_query="question")
+
+    # The analysis does not wait on retrieval, and the commit waits on both.
+    assert order == ["analysis", "retrieval", "answer"]
+    assert result.completion == ["answer with references"]
+    assert commit.await_args.kwargs["analysis"] is analysis
+    assert commit.await_args.kwargs["answer"] == "answer"
+    assert commit.await_args.kwargs["used_graph_element_ids"] == {"node_ids": ["n1"]}
+    retriever._append_references.assert_awaited_once_with(["answer"], [item("n1")])
+
+
+@pytest.mark.asyncio
+async def test_auto_feedback_off_answers_without_analyzing_the_turn():
+    retriever = CompletionRetriever(session_id="s1")
+    retriever._extract_context_object_ids = lambda objects: None
+    retriever._append_references = AsyncMock(side_effect=lambda answers, objects: answers)
+    order = []
+
+    with (
+        _latency_environment(
+            _session_manager(auto_feedback=False),
+            analysis=SessionTurnAnalysis(),
+            order=order,
         ),
         patch(
             "cognee.modules.retrieval.session_search.commit_latency_turn",
             new_callable=AsyncMock,
-            return_value=None,
-        ),
+        ) as commit,
     ):
-        current_user.get.return_value = SimpleNamespace(id=uuid4())
         result = await run_latency_session_search(retriever, raw_query="question")
 
-    assert result.completion == ["Understood."]
-    retriever._append_references.assert_not_awaited()
+    assert "analysis" not in order
+    assert result.completion == ["answer"]
+    assert commit.await_args.kwargs["analysis"].candidate_context_updates == []

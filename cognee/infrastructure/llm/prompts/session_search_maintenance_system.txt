@@ -1,6 +1,0 @@
-Convert persisted user evidence into session maintenance updates.
-
-Return only ratings and candidate context updates allowed by the response schema. Rate only
-provided served-context IDs. Derive candidates only from the current user's evidence, never from
-assistant responses or retrieved context. Skip ambiguous, one-off, or unsupported claims. Return
-empty lists when there is nothing safe to apply.

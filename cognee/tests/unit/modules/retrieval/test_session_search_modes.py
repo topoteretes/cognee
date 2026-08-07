@@ -5,7 +5,7 @@ Three guarantees are pinned here:
 * dispatch happens only at the complete-operation boundaries (``get_retriever_output``
   and ``get_completion``); partial retriever methods keep their current behavior,
 * every unsupported input falls back to the accuracy path before anything is written,
-* one latency turn blocks on exactly one LLM completion — maintenance is never awaited.
+* a turn costs one answer call, with the turn analysis running alongside it.
 """
 
 import asyncio
@@ -18,11 +18,8 @@ from uuid import uuid4
 import pytest
 
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
-from cognee.infrastructure.session import session_maintenance, session_maintenance_worker
-from cognee.infrastructure.session.session_search_models import (
-    SessionMaintenanceResult,
-    SessionTurnSnapshot,
-)
+from cognee.infrastructure.session.feedback_models import SessionTurnAnalysis
+from cognee.infrastructure.session.session_search_models import SessionTurnSnapshot
 from cognee.modules.retrieval import session_search
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.completion_retriever import CompletionRetriever
@@ -60,7 +57,7 @@ class FakeSessionManager:
         self.auto_feedback = auto_feedback
         self.dataset_id = None
         self.qas = []
-        self.entries = []
+        self.context_entries = []
         self.updates = []
 
     def is_session_available_for_completion(self, user_id):
@@ -85,7 +82,7 @@ class FakeSessionManager:
 
     async def update_session_context_entry(self, *, entry_id, merge, **kwargs):
         self.updates.append((entry_id, merge))
-        for entry in self.entries:
+        for entry in self.context_entries:
             if entry.get("id") == entry_id:
                 entry.update(merge)
                 return True
@@ -99,17 +96,16 @@ def latency(monkeypatch):
         manager=FakeSessionManager(),
         mode=session_search.LATENCY_OPTIMIZED,
         user=SimpleNamespace(id=uuid4()),
-        structured_output=True,
         llm_calls=[],
     )
 
     async def fake_llm(text_input, system_prompt, response_model, **kwargs):
         state.llm_calls.append(response_model)
-        if response_model is SessionMaintenanceResult:
-            return SessionMaintenanceResult()
+        if response_model is SessionTurnAnalysis:
+            return SessionTurnAnalysis()
         if response_model is str:
             return "answer"
-        return response_model(response="answer")
+        return response_model(text="answer")
 
     monkeypatch.setattr(
         session_search,
@@ -118,11 +114,6 @@ def latency(monkeypatch):
     )
     monkeypatch.setattr(session_search, "session_user", SimpleNamespace(get=lambda: state.user))
     monkeypatch.setattr(session_search, "get_session_manager", lambda: state.manager)
-    monkeypatch.setattr(
-        session_search.LLMGateway,
-        "supports_structured_output_model",
-        staticmethod(lambda model: state.structured_output),
-    )
     monkeypatch.setattr(
         session_search,
         "load_latency_turn_snapshot",
@@ -231,7 +222,7 @@ class TestUnsupportedInputsFallBack:
         )
 
     @pytest.mark.asyncio
-    async def test_missing_user_session_or_structured_output_support(self, latency):
+    async def test_missing_user_or_unavailable_session(self, latency):
         retriever = build_retriever(CompletionRetriever)
 
         latency.user = None
@@ -241,36 +232,34 @@ class TestUnsupportedInputsFallBack:
         latency.manager.available = False
         assert await run_latency_session_search(retriever, raw_query="question") is None
 
-        latency.manager.available = True
-        latency.structured_output = False
-        assert await run_latency_session_search(retriever, raw_query="question") is None
-
         assert latency.llm_calls == []
 
 
-class TestOneBlockingCompletion:
+class TestTurnCost:
     @pytest.mark.asyncio
-    async def test_turn_blocks_on_one_completion_and_defers_maintenance(self, latency, monkeypatch):
-        monkeypatch.setattr(
-            session_maintenance, "get_session_manager", lambda dataset_id: latency.manager
+    async def test_turn_costs_one_answer_call_plus_the_analysis(self, latency):
+        result = await run_latency_session_search(
+            build_retriever(CompletionRetriever), raw_query="question"
         )
-        retriever = build_retriever(CompletionRetriever)
 
-        result = await run_latency_session_search(retriever, raw_query="question")
-
-        # The answer is back after exactly one completion; evidence is durable and queued.
         assert result.completion == ["answer"]
-        assert latency.llm_calls == [session_search.get_session_search_completion_model(str)]
-        assert len(latency.manager.entries) == 1
-        assert latency.manager.entries[0]["status"] == "pending"
-        assert session_maintenance_worker.get_tracked_evidence_ids()
+        # Exactly two calls: the caller's own answer model, and the turn analysis.
+        # Order is not asserted — the lanes are concurrent, so either may land first.
+        assert len(latency.llm_calls) == 2
+        assert set(latency.llm_calls) == {str, SessionTurnAnalysis}
+        assert len(latency.manager.qas) == 1
 
-        await session_maintenance_worker.drain_session_maintenance(timeout_seconds=5)
+    @pytest.mark.asyncio
+    async def test_auto_feedback_off_answers_without_analyzing(self, latency):
+        latency.manager.auto_feedback = False
 
-        # Only now — after the caller opted into waiting — does maintenance run.
-        assert latency.llm_calls[-1] is SessionMaintenanceResult
-        assert latency.manager.entries[0]["status"] == "completed"
-        assert session_maintenance_worker.get_tracked_evidence_ids() == set()
+        result = await run_latency_session_search(
+            build_retriever(CompletionRetriever), raw_query="question"
+        )
+
+        assert result.completion == ["answer"]
+        assert latency.llm_calls == [str]
+        assert latency.manager.context_entries == []
 
     @pytest.mark.asyncio
     async def test_rapid_turns_in_one_session_are_serialized(self, latency):
@@ -301,33 +290,15 @@ class TestOneBlockingCompletion:
         assert peak == 1
         assert len(latency.manager.qas) == 2
 
-    @pytest.mark.asyncio
-    async def test_auto_feedback_off_answers_without_evidence_or_maintenance(self, latency):
-        latency.manager.auto_feedback = False
 
-        result = await run_latency_session_search(
-            build_retriever(CompletionRetriever), raw_query="question"
-        )
-
-        assert result.completion == ["answer"]
-        assert len(latency.manager.qas) == 1
-        assert latency.manager.entries == []
-        assert session_maintenance_worker.get_tracked_evidence_ids() == set()
-
-
-def test_session_facade_and_helpers_stay_free_of_search_mode_state():
-    """Ownership boundaries the plan requires: no mode, worker, or wrapper leakage."""
+def test_session_facade_stays_free_of_search_mode_state():
+    """Ownership boundaries: no search-mode state on the facade, no wrapper leakage."""
     from cognee.infrastructure.session import session_manager
     from cognee.modules.retrieval.utils import references
-    from cognee.modules.session_distillation import evidence
 
     session_manager_source = inspect.getsource(session_manager)
     assert "session_search_mode" not in session_manager_source
-    assert "session_maintenance_worker" not in session_manager_source
     assert "run_latency_session_search" not in session_manager_source
 
     # Generic reference helpers keep receiving plain strings and lists.
     assert "session_search_models" not in inspect.getsource(references)
-
-    # Distillation's evidence adapter owns lifecycle, never worker state.
-    assert "session_maintenance_worker" not in inspect.getsource(evidence)

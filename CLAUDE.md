@@ -298,41 +298,29 @@ SESSION_SEARCH_MODE=latency_optimized
 
 #### Session Search Modes
 
-A session search (a `search()` with an active session cache and `AUTO_FEEDBACK=true`) runs
-in one of two modes, chosen deployment-wide by `SESSION_SEARCH_MODE`. There is no
-per-request override.
+A session search (a `search()` with an active session cache) runs in one of two modes,
+chosen deployment-wide by `SESSION_SEARCH_MODE`. There is no per-request override.
 
-- **`latency_optimized`** (default) — one blocking LLM call per answered turn. The turn
-  retrieves twice (the raw question and a deterministic, LLM-free conversational rewrite),
-  fuses both lanes, answers once, stores the QA plus its evidence, and hands feedback and
-  context updates to a background maintenance worker.
-- **`accuracy_optimized`** — the older flow: analyze the turn before retrieval, retrieve
-  with the rewritten query, answer, then apply context updates before returning.
+Both modes make the same two LLM calls per turn — one to analyze the turn for session
+context, one to answer. They differ in how those calls are sequenced:
 
-Latency mode applies only to `GraphCompletionRetriever`, `HybridRetriever`,
-`CompletionRetriever` (`RAG_COMPLETION`), and `TripletRetriever` (`TRIPLET_COMPLETION`),
-and only at complete-operation boundaries (`search()` and `retriever.get_completion()`).
-Subclasses, batch queries, `only_context`, `FEELING_LUCKY`, sessionless calls, and
-structured-output backends that cannot carry the wrapper model all fall back to
-accuracy mode automatically. With `AUTO_FEEDBACK=false` there is no evidence and no
-maintenance in either mode.
+- **`latency_optimized`** (default) — analysis runs **concurrently** with retrieval and
+  answering, so a turn costs one answer call of wall-clock time. Retrieval compensates
+  for not having the analysis's rewritten query by running two lanes: the raw question,
+  and a deterministic (LLM-free) rewrite built from the last two turns. Their results are
+  merged by the retriever before context is formatted.
+- **`accuracy_optimized`** — analysis runs **first**, its rewritten query drives a single
+  retrieval, and its context updates are applied before the answer is generated.
 
-**Draining background maintenance.** Search never awaits maintenance. Long-running hosts
-drain at shutdown — the API server does it in its lifespan, the CLI does it after
-rendering — but a short-lived SDK script must drain in the *same coroutine* that ran the
-search, or the process can exit before maintenance completes:
+The practical difference: in accuracy mode, guidance the user states this turn can
+influence this turn's answer. In latency mode it applies from the next turn onward.
 
-```python
-async def main():
-    answer = await cognee.search("What did we decide?")
-    print(answer)
-    await cognee.drain_session_maintenance(timeout_seconds=30.0)
-
-asyncio.run(main())
-```
-
-Undrained work is not lost: its evidence stays persisted and is recovered on the next
-`distill_session()` / `improve()` run.
+Latency mode applies only to `GraphCompletionRetriever`, `GraphSummaryCompletionRetriever`,
+`HybridRetriever`, `CompletionRetriever` (`RAG_COMPLETION`), and `TripletRetriever`
+(`TRIPLET_COMPLETION`), and only at complete-operation boundaries (`search()` and
+`retriever.get_completion()`). Subclasses, batch queries, `only_context`, `FEELING_LUCKY`,
+and sessionless calls fall back to accuracy mode automatically. With `AUTO_FEEDBACK=false`
+neither mode analyzes the turn.
 
 ### LLM Provider Configuration
 

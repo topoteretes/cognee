@@ -1,59 +1,12 @@
 import argparse
 import asyncio
 import json
-from contextlib import suppress
 
 from cognee.cli.reference import SupportsCliCommand
 from cognee.cli import DEFAULT_DOCS_URL
 from cognee.cli.config import SEARCH_TYPE_CHOICES, OUTPUT_FORMAT_CHOICES
 import cognee.cli.echo as fmt
 from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
-
-
-def _render_recall_results(args: argparse.Namespace, results) -> None:
-    if args.output_format == "json":
-        fmt.echo(json.dumps(results, indent=2, default=str))
-    elif args.output_format == "simple":
-        for i, result in enumerate(results, 1):
-            fmt.echo(f"{i}. {result}")
-    else:
-        if not results:
-            fmt.warning("No results found for your query.")
-            return
-
-        is_session = isinstance(results[0], dict) and results[0].get("_source") == "session"
-        if is_session:
-            fmt.echo(f"\nFound {len(results)} session entry(ies):")
-            fmt.echo("=" * 60)
-            for i, entry in enumerate(results, 1):
-                q = entry.get("question", "")
-                a = entry.get("answer", "")
-                t = entry.get("time", "")
-                header = f"[{t}] " if t else ""
-                if q:
-                    fmt.echo(f"{fmt.bold(f'{header}Q:')} {q}")
-                if a:
-                    fmt.echo(f"{fmt.bold('A:')} {a}")
-                if i < len(results):
-                    fmt.echo("-" * 40)
-            return
-
-        query_type_label = args.query_type or "AUTO"
-        fmt.echo(f"\nFound {len(results)} result(s) using {query_type_label}:")
-        fmt.echo("=" * 60)
-        if args.query_type in [None, "HYBRID_COMPLETION", "GRAPH_COMPLETION", "RAG_COMPLETION"]:
-            for i, result in enumerate(results, 1):
-                fmt.echo(f"{fmt.bold('Response:')} {result}")
-                if i < len(results):
-                    fmt.echo("-" * 40)
-        elif args.query_type == "CHUNKS":
-            for i, result in enumerate(results, 1):
-                fmt.echo(f"{fmt.bold(f'Chunk {i}:')} {result}")
-                fmt.echo()
-        else:
-            for i, result in enumerate(results, 1):
-                fmt.echo(f"{fmt.bold(f'Result {i}:')} {result}")
-                fmt.echo()
 
 
 class RecallCommand(SupportsCliCommand):
@@ -157,16 +110,62 @@ Otherwise, this is a memory-oriented alias for `cognee search`.
                             **session_kwargs,
                         }
                         results = await cognee.recall(**recall_kwargs)
-                    _render_recall_results(args, results)
+                    return results
                 except Exception as e:
                     raise CliCommandInnerException(f"Failed to recall: {str(e)}") from e
-                finally:
-                    # Results are already printed; slow background maintenance must not
-                    # fail the command. Undrained evidence stays recoverable.
-                    with suppress(asyncio.TimeoutError):
-                        await cognee.drain_session_maintenance()
 
-            asyncio.run(run_recall())
+            results = asyncio.run(run_recall())
+
+            if args.output_format == "json":
+                fmt.echo(json.dumps(results, indent=2, default=str))
+            elif args.output_format == "simple":
+                for i, result in enumerate(results, 1):
+                    fmt.echo(f"{i}. {result}")
+            else:
+                if not results:
+                    fmt.warning("No results found for your query.")
+                    return
+
+                # Detect session results by _source tag
+                is_session = isinstance(results[0], dict) and results[0].get("_source") == "session"
+
+                if is_session:
+                    fmt.echo(f"\nFound {len(results)} session entry(ies):")
+                    fmt.echo("=" * 60)
+                    for i, entry in enumerate(results, 1):
+                        q = entry.get("question", "")
+                        a = entry.get("answer", "")
+                        t = entry.get("time", "")
+                        header = f"[{t}] " if t else ""
+                        if q:
+                            fmt.echo(f"{fmt.bold(f'{header}Q:')} {q}")
+                        if a:
+                            fmt.echo(f"{fmt.bold('A:')} {a}")
+                        if i < len(results):
+                            fmt.echo("-" * 40)
+                else:
+                    query_type_label = args.query_type or "AUTO"
+                    fmt.echo(f"\nFound {len(results)} result(s) using {query_type_label}:")
+                    fmt.echo("=" * 60)
+
+                    if args.query_type in [
+                        None,
+                        "HYBRID_COMPLETION",
+                        "GRAPH_COMPLETION",
+                        "RAG_COMPLETION",
+                    ]:
+                        for i, result in enumerate(results, 1):
+                            fmt.echo(f"{fmt.bold('Response:')} {result}")
+                            if i < len(results):
+                                fmt.echo("-" * 40)
+                    elif args.query_type == "CHUNKS":
+                        for i, result in enumerate(results, 1):
+                            fmt.echo(f"{fmt.bold(f'Chunk {i}:')} {result}")
+                            fmt.echo()
+                    else:
+                        for i, result in enumerate(results, 1):
+                            fmt.echo(f"{fmt.bold(f'Result {i}:')} {result}")
+                            fmt.echo()
 
         except Exception as e:
             if isinstance(e, CliCommandInnerException):
