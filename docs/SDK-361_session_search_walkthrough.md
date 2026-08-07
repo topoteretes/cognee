@@ -17,7 +17,7 @@ flow 2 is a mechanism both of them lean on; flow 5 is what happens after the ses
                         │
          ┌──────────────┴──────────────┐
          │                             │
-   accuracy mode                 latency mode  (default)
+   sequential mode                 concurrent mode  (default)
          │                             │
     ┌────┴────┐                   ┌────┴────┐
     │ FLOW 3  │                   │ FLOW 4  │──uses──►┌────────┐
@@ -45,15 +45,13 @@ Fixed meanings, used consistently throughout.
 | **answer call** | the LLM call that produces the text the user reads |
 | **QA store** | recorded turns — question, answer, which graph objects and context entries were used |
 | **context store** | durable session guidance ("prefer metric units", "I work on billing") |
-| **accuracy mode** | `SESSION_SEARCH_MODE=accuracy_optimized` — the pre-existing behaviour, still available |
-| **latency mode** | `SESSION_SEARCH_MODE=latency_optimized` — the new default |
-| **concurrent turn** | one turn executed the way latency mode executes them — analysis alongside the answer |
+| **sequential mode** | `SESSION_SEARCH_MODE=sequential` — the pre-existing behaviour, still available |
+| **concurrent mode** | `SESSION_SEARCH_MODE=concurrent` — the new default |
+| **concurrent turn** | one turn executed the way concurrent mode executes them — analysis alongside the answer |
 | **lane** | one of two things running at the same time under `asyncio.gather` |
 
-**Two words for nearly one thing, on purpose.** *Latency mode* is the deployment setting and
-names the goal — optimise for latency. *Concurrent turn* is the unit of execution and names
-the mechanism — the analysis runs alongside the answer instead of gating it. The setting is
-public (`.env.template`, CLAUDE.md) so it keeps its name; the code says what it actually does.
+*Concurrent mode* is the deployment setting; a *concurrent turn* is one turn executed that
+way. Same word on purpose — setting, code, and prose all name the same mechanism.
 
 Those two stores are the whole of session state. Both modes read and write both, through the
 same two functions. Hold onto that — it is why flow 5 needs only one version.
@@ -107,21 +105,21 @@ This one call is the entire integration surface. It returns one of two things:
 | `None` | not eligible | falls through to the code that was always there → **flow 3** |
 | `ConcurrentTurnResult` | the turn already ran | returns it → **flow 4** |
 
-Nothing else in the accuracy path was modified. That is the point of the `None`.
+Nothing else in the sequential path was modified. That is the point of the `None`.
 
 ### 6 — Inside the fork: four checks, cheapest first
 
 [`try_concurrent_turn` (L194)](../cognee/modules/retrieval/session_search.py)
 
 ```
-1. CacheConfig().session_search_mode != "latency_optimized"  →  None
-2. session_user.get() is None, or the user has no id         →  None
-3. can_run_as_concurrent_turn(...) is False                  →  None
-4. otherwise                                                 →  run the turn (flow 4)
+1. CacheConfig().session_search_mode != "concurrent"  →  None
+2. session_user.get() is None, or the user has no id  →  None
+3. can_run_as_concurrent_turn(...) is False           →  None
+4. otherwise                                          →  run the turn (flow 4)
 ```
 
 Check 1 is first deliberately — [L211](../cognee/modules/retrieval/session_search.py). A
-deployment on accuracy mode never builds a session manager and never reads the cache. The
+deployment on sequential mode never builds a session manager and never reads the cache. The
 feature costs it nothing.
 
 Check 3 is [`can_run_as_concurrent_turn` (L60)](../cognee/modules/retrieval/session_search.py),
@@ -146,7 +144,7 @@ Five classes are eligible — [L33](../cognee/modules/retrieval/session_search.p
 `HybridRetriever`, `TripletRetriever`.
 
 Subclasses are excluded on purpose. `GraphCompletionRetrieverCoT` and the context-extension
-variant run *extra* LLM rounds inside retrieval. Latency mode promises a turn costs one answer
+variant run *extra* LLM rounds inside retrieval. Concurrent mode promises a turn costs one answer
 call; those classes cannot keep that promise. An `isinstance` check would let them inherit
 their way onto the list silently. With `not in`, a new subclass is safe by default and has to
 be added deliberately.
@@ -166,7 +164,7 @@ The three *partial* methods — `get_retrieved_objects`, `get_context_from_objec
 `get_completion_from_context` — must never fork. A concurrent turn retrieves twice and answers
 once; a caller stepping through one method at a time is asking for something else. A test
 reads their source and asserts the call is absent:
-[`test_partial_operations_do_not_dispatch` (L182)](../cognee/tests/unit/modules/retrieval/test_session_search_modes.py).
+[`test_partial_operations_do_not_dispatch` (L184)](../cognee/tests/unit/modules/retrieval/test_session_search_modes.py).
 
 ---
 
@@ -179,7 +177,7 @@ Read this before flow 4 — it is called from the middle of it.
 
 ### 1 — Why there are two result sets at all
 
-Latency mode retrieves twice: once with the raw question, once with a rewrite that carries the
+Concurrent mode retrieves twice: once with the raw question, once with a rewrite that carries the
 recent conversation (flow 4, step 5). Both come back. Only one can be formatted into context.
 
 ### 2 — Ask the retriever to merge, because only it knows the shape
@@ -262,10 +260,10 @@ Its result is a dict of channels, not a list —
 
 ---
 
-# Flow 3 — One turn in accuracy mode
+# Flow 3 — One turn in sequential mode
 
 **Where it starts:** flow 1 step 5 returned `None`.
-**Setting:** `SESSION_SEARCH_MODE=accuracy_optimized`.
+**Setting:** `SESSION_SEARCH_MODE=sequential`.
 **Shape:** two LLM calls, strictly one after the other.
 
 ```
@@ -297,8 +295,8 @@ c. [`analyze_turn_for_session_context` (L45)](../cognee/infrastructure/session/f
 
    | Field | Purpose | Used by |
    | --- | --- | --- |
-   | `query_to_answer` | rewritten query for retrieval | accuracy mode only |
-   | `response_to_user` | a reply, when nothing needs looking up | accuracy mode only |
+   | `query_to_answer` | rewritten query for retrieval | sequential mode only |
+   | `response_to_user` | a reply, when nothing needs looking up | sequential mode only |
    | `candidate_context_updates` | new or revised durable guidance | both modes |
    | `served_context_ratings` | helpful/harmful verdicts on last turn's guidance | both modes |
 
@@ -351,7 +349,7 @@ needs the rewritten query.
 
 ---
 
-# Flow 4 — One turn in latency mode (the default)
+# Flow 4 — One turn in concurrent mode (the default)
 
 **Where it starts:** flow 1 step 6 passed all four checks.
 **Shape:** the same two LLM calls — running at the same time.
@@ -426,7 +424,7 @@ a. [`build_contextual_query` (L85)](../cognee/modules/retrieval/session_search.p
    Capped at 2000 characters, trimming assistant answers before user questions, oldest first.
 
    **Why it exists.** "And how long does it take?" on its own retrieves nothing useful. In
-   accuracy mode the analysis would have rewritten it. Here that rewrite has not arrived yet,
+   sequential mode the analysis would have rewritten it. Here that rewrite has not arrived yet,
    so this deterministic version stands in. It is worse than an LLM rewrite, and it is free.
 
 b. If the rewrite came back identical to the raw query — no history yet — only one lane runs.
@@ -454,7 +452,7 @@ uses the caller's own prompts and `response_model`, and appends one rule to the 
 > thanks, or a correction with nothing to look up. When it is, reply briefly in kind. Do not
 > answer from the retrieved context and do not report on whether that context was sufficient.
 
-Flow 3 catches "ok, thanks" at step 3 and never reaches an answer call. Latency mode has no
+Flow 3 catches "ok, thanks" at step 3 and never reaches an answer call. Concurrent mode has no
 such interception — the answer is already being generated when the analysis lands. Without
 this rule, a guarded prompt like `hybrid_answer_guarded.txt` replies to "ok, thanks" with
 *"the evidence is insufficient to answer."*
@@ -501,7 +499,7 @@ The session-search work did not touch it and did not need to.
 
 Distillation reads exactly two things, and both modes write both:
 
-| Distillation reads | Written by | Accuracy mode | Latency mode |
+| Distillation reads | Written by | Sequential mode | Concurrent mode |
 | --- | --- | --- | --- |
 | QA turns | `add_qa` | flow 3 step 6 | flow 4 step 7 |
 | context entries | `apply_session_turn_analysis` | flow 3 step 2d | flow 4 step 7 |
@@ -556,15 +554,15 @@ truth node set.
 
 Neither is structural. Both are one-turn offsets.
 
-**Rating lag.** Accuracy mode writes a new context entry *before* that turn's answer, so it can
-be served on turn N and rated on turn N+1. Latency mode writes it *after*, so it is served on
+**Rating lag.** Sequential mode writes a new context entry *before* that turn's answer, so it can
+be served on turn N and rated on turn N+1. Concurrent mode writes it *after*, so it is served on
 N+1 and rated on N+2. The `harmful_count == 0` gate in step 2 therefore sees one fewer round of
 evidence. Visible mainly on very short sessions, where a bad entry could reach distillation
 unrated.
 
-**Which ids the QA row records.** Accuracy mode stores the ids `build_active_context_block_safe`
-served during the answer. Latency mode stores the ids from the snapshot, read before the
-analysis ran. The two differ only when this turn's analysis created an entry that accuracy mode
+**Which ids the QA row records.** Sequential mode stores the ids `build_active_context_block_safe`
+served during the answer. Concurrent mode stores the ids from the snapshot, read before the
+analysis ran. The two differ only when this turn's analysis created an entry that sequential mode
 would have served immediately.
 
 Neither changes what distillation reads or how it decides.

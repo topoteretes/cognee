@@ -292,8 +292,8 @@ GRAPH_DATABASE_URL=postgresql+asyncpg://cognee:cognee@localhost:5432/cognee_db
 CACHE_BACKEND=sqlite
 # Optional explicit SQLAlchemy URL for sqlite/postgres cache backends (overrides defaults)
 CACHE_DB_URL=postgresql+asyncpg://cognee:cognee@localhost:5432/cognee_db
-# Session-search execution mode: latency_optimized (default) or accuracy_optimized
-SESSION_SEARCH_MODE=latency_optimized
+# Session-search execution mode: concurrent (default) or sequential
+SESSION_SEARCH_MODE=concurrent
 ```
 
 #### Session Search Modes
@@ -304,22 +304,22 @@ chosen deployment-wide by `SESSION_SEARCH_MODE`. There is no per-request overrid
 Both modes make the same two LLM calls per turn — one to analyze the turn for session
 context, one to answer. They differ in how those calls are sequenced:
 
-- **`latency_optimized`** (default) — analysis runs **concurrently** with retrieval and
+- **`concurrent`** (default) — analysis runs **concurrently** with retrieval and
   answering, so a turn costs one answer call of wall-clock time. Retrieval compensates
   for not having the analysis's rewritten query by running two lanes: the raw question,
   and a deterministic (LLM-free) rewrite built from the last two turns. Their results are
   merged by the retriever before context is formatted.
-- **`accuracy_optimized`** — analysis runs **first**, its rewritten query drives a single
+- **`sequential`** — analysis runs **first**, its rewritten query drives a single
   retrieval, and its context updates are applied before the answer is generated.
 
-The practical difference: in accuracy mode, guidance the user states this turn can
-influence this turn's answer. In latency mode it applies from the next turn onward.
+The practical difference: in sequential mode, guidance the user states this turn can
+influence this turn's answer. In concurrent mode it applies from the next turn onward.
 
-Latency mode applies only to `GraphCompletionRetriever`, `GraphSummaryCompletionRetriever`,
+Concurrent mode applies only to `GraphCompletionRetriever`, `GraphSummaryCompletionRetriever`,
 `HybridRetriever`, `CompletionRetriever` (`RAG_COMPLETION`), and `TripletRetriever`
 (`TRIPLET_COMPLETION`), and only at complete-operation boundaries (`search()` and
 `retriever.get_completion()`). Subclasses, batch queries, `only_context`, `FEELING_LUCKY`,
-and sessionless calls fall back to accuracy mode automatically. With `AUTO_FEEDBACK=false`
+and sessionless calls fall back to sequential mode automatically. With `AUTO_FEEDBACK=false`
 neither mode analyzes the turn.
 
 ### LLM Provider Configuration

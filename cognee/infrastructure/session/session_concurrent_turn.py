@@ -1,6 +1,6 @@
 """Session reads and writes for one concurrent turn.
 
-A concurrent turn does not chain analysis before retrieval the way the accuracy path does.
+A concurrent turn does not chain analysis before retrieval the way the sequential path does.
 It reads the session once, then runs the turn analysis and the answer concurrently, and
 applies the analysis after both land. These are the session-side pieces of that: the
 snapshot both lanes read from, the analysis lane, the answer call, and the commit.
@@ -34,8 +34,8 @@ logger = get_logger("session_concurrent_turn")
 # the pathological case where it would hold the turn open past its own answer.
 ANALYSIS_TIMEOUT_SECONDS = 30.0
 
-# Accuracy mode intercepts conversational turns before the answer call, using the
-# analysis's own reply. Latency mode has already started answering by the time the
+# Sequential mode intercepts conversational turns before the answer call, using the
+# analysis's own reply. Concurrent mode has already started answering by the time the
 # analysis lands, so the answer prompt has to handle them itself.
 CONVERSATIONAL_TURN_PROMPT = "session_conversational_turn.txt"
 
@@ -119,7 +119,7 @@ async def load_turn_snapshot(
 async def analyze_turn_concurrently(snapshot: SessionTurnSnapshot) -> SessionTurnAnalysis:
     """Run the turn analysis alongside the answer. Fail open to no context updates.
 
-    Latency mode uses only the two context-maintenance outputs; the routing fields are
+    Concurrent mode uses only the two context-maintenance outputs; the routing fields are
     ignored because retrieval and the answer are already in flight by the time this lands.
     """
     try:

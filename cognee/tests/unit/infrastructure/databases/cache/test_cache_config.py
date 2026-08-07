@@ -36,7 +36,7 @@ def test_cache_config_defaults(monkeypatch):
     assert config.cache_purge_interval_seconds == 900
     assert config.caching is True
     assert config.auto_feedback is True
-    assert config.session_search_mode == "latency_optimized"
+    assert config.session_search_mode == "concurrent"
     assert config.shared_ladybug_lock is False
     assert config.shared_kuzu_lock is False
     assert config.cache_host == "localhost"
@@ -53,7 +53,7 @@ def test_cache_config_custom_values():
     config = CacheConfig(
         cache_backend="redis",
         caching=True,
-        session_search_mode="latency_optimized",
+        session_search_mode="concurrent",
         shared_ladybug_lock=True,
         cache_host="redis.example.com",
         cache_port=6380,
@@ -64,7 +64,7 @@ def test_cache_config_custom_values():
 
     assert config.cache_backend == "redis"
     assert config.caching is True
-    assert config.session_search_mode == "latency_optimized"
+    assert config.session_search_mode == "concurrent"
     assert config.shared_ladybug_lock is True
     assert config.cache_host == "redis.example.com"
     assert config.cache_port == 6380
@@ -94,7 +94,7 @@ def test_cache_config_to_dict():
         "cache_purge_interval_seconds": 900,
         "caching": True,
         "auto_feedback": True,
-        "session_search_mode": "latency_optimized",
+        "session_search_mode": "concurrent",
         "shared_ladybug_lock": True,
         "shared_kuzu_lock": False,
         "cache_host": "test-host",
@@ -139,11 +139,11 @@ def test_cache_config_ssl_from_env(monkeypatch):
 
 
 def test_cache_config_session_search_mode_from_env(monkeypatch):
-    monkeypatch.setenv("SESSION_SEARCH_MODE", "accuracy_optimized")
+    monkeypatch.setenv("SESSION_SEARCH_MODE", "sequential")
 
     config = CacheConfig(_env_file=None)
 
-    assert config.session_search_mode == "accuracy_optimized"
+    assert config.session_search_mode == "sequential"
 
 
 def test_cache_config_rejects_invalid_session_search_mode():

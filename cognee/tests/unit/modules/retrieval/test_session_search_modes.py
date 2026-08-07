@@ -1,10 +1,10 @@
-"""Contract for where latency mode runs and what one turn costs.
+"""Contract for where concurrent mode runs and what one turn costs.
 
 Three guarantees are pinned here:
 
 * dispatch happens only at the complete-operation boundaries (``get_retriever_output``
   and ``get_completion``); partial retriever methods keep their current behavior,
-* every unsupported input falls back to the accuracy path before anything is written,
+* every unsupported input falls back to the sequential path before anything is written,
 * a turn costs one answer call, with the turn analysis running alongside it.
 """
 
@@ -90,11 +90,11 @@ class FakeSessionManager:
 
 
 @pytest.fixture
-def latency(monkeypatch):
-    """Latency mode with every collaborator faked except the completion path itself."""
+def concurrent_env(monkeypatch):
+    """Concurrent mode with every collaborator faked except the completion path itself."""
     state = SimpleNamespace(
         manager=FakeSessionManager(),
-        mode=session_search.LATENCY_OPTIMIZED,
+        mode=session_search.CONCURRENT_MODE,
         user=SimpleNamespace(id=uuid4()),
         llm_calls=[],
     )
@@ -141,25 +141,27 @@ def build_retriever(retriever_class, **kwargs):
 class TestModeBoundary:
     @pytest.mark.asyncio
     @pytest.mark.parametrize("retriever_class", SUPPORTED_RETRIEVERS)
-    async def test_get_completion_answers_from_the_latency_turn(self, retriever_class, latency):
+    async def test_get_completion_answers_from_the_concurrent_turn(
+        self, retriever_class, concurrent_env
+    ):
         completion = await build_retriever(retriever_class).get_completion(query="question")
 
         assert completion == ["answer"]
-        assert len(latency.manager.qas) == 1
+        assert len(concurrent_env.manager.qas) == 1
 
     @pytest.mark.asyncio
-    async def test_accuracy_mode_never_enters_the_latency_turn(self, latency):
-        latency.mode = "accuracy_optimized"
+    async def test_sequential_mode_never_enters_the_concurrent_turn(self, concurrent_env):
+        concurrent_env.mode = "sequential"
 
         assert (
             await try_concurrent_turn(build_retriever(CompletionRetriever), raw_query="question")
             is None
         )
-        assert latency.llm_calls == []
-        assert latency.manager.qas == []
+        assert concurrent_env.llm_calls == []
+        assert concurrent_env.manager.qas == []
 
     @pytest.mark.asyncio
-    async def test_get_retriever_output_maps_the_turn_result(self, latency, monkeypatch):
+    async def test_get_retriever_output_maps_the_turn_result(self, concurrent_env, monkeypatch):
         # The package re-exports the function under the module's own name.
         module = import_module("cognee.modules.search.methods.get_retriever_output")
 
@@ -200,16 +202,16 @@ class TestUnsupportedInputsFallBack:
             pytest.param({"original_search_type": SearchType.FEELING_LUCKY}, id="feeling_lucky"),
         ],
     )
-    async def test_unsupported_call_shapes(self, call_kwargs, latency):
+    async def test_unsupported_call_shapes(self, call_kwargs, concurrent_env):
         result = await try_concurrent_turn(
             build_retriever(CompletionRetriever), raw_query="question", **call_kwargs
         )
 
         assert result is None
-        assert latency.manager.qas == []
+        assert concurrent_env.manager.qas == []
 
     @pytest.mark.asyncio
-    async def test_retriever_subclasses_are_not_supported(self, latency):
+    async def test_retriever_subclasses_are_not_supported(self, concurrent_env):
         class CustomGraphRetriever(GraphCompletionRetriever):
             pass
 
@@ -219,22 +221,22 @@ class TestUnsupportedInputsFallBack:
         )
 
     @pytest.mark.asyncio
-    async def test_missing_user_or_unavailable_session(self, latency):
+    async def test_missing_user_or_unavailable_session(self, concurrent_env):
         retriever = build_retriever(CompletionRetriever)
 
-        latency.user = None
+        concurrent_env.user = None
         assert await try_concurrent_turn(retriever, raw_query="question") is None
 
-        latency.user = SimpleNamespace(id=uuid4())
-        latency.manager.available = False
+        concurrent_env.user = SimpleNamespace(id=uuid4())
+        concurrent_env.manager.available = False
         assert await try_concurrent_turn(retriever, raw_query="question") is None
 
-        assert latency.llm_calls == []
+        assert concurrent_env.llm_calls == []
 
 
 class TestTurnCost:
     @pytest.mark.asyncio
-    async def test_turn_costs_one_answer_call_plus_the_analysis(self, latency):
+    async def test_turn_costs_one_answer_call_plus_the_analysis(self, concurrent_env):
         result = await try_concurrent_turn(
             build_retriever(CompletionRetriever), raw_query="question"
         )
@@ -242,24 +244,24 @@ class TestTurnCost:
         assert result.completion == ["answer"]
         # Exactly two calls: the caller's own answer model, and the turn analysis.
         # Order is not asserted — the lanes are concurrent, so either may land first.
-        assert len(latency.llm_calls) == 2
-        assert set(latency.llm_calls) == {str, SessionTurnAnalysis}
-        assert len(latency.manager.qas) == 1
+        assert len(concurrent_env.llm_calls) == 2
+        assert set(concurrent_env.llm_calls) == {str, SessionTurnAnalysis}
+        assert len(concurrent_env.manager.qas) == 1
 
     @pytest.mark.asyncio
-    async def test_auto_feedback_off_answers_without_analyzing(self, latency):
-        latency.manager.auto_feedback = False
+    async def test_auto_feedback_off_answers_without_analyzing(self, concurrent_env):
+        concurrent_env.manager.auto_feedback = False
 
         result = await try_concurrent_turn(
             build_retriever(CompletionRetriever), raw_query="question"
         )
 
         assert result.completion == ["answer"]
-        assert latency.llm_calls == [str]
-        assert latency.manager.context_entries == []
+        assert concurrent_env.llm_calls == [str]
+        assert concurrent_env.manager.context_entries == []
 
     @pytest.mark.asyncio
-    async def test_rapid_turns_in_one_session_are_serialized(self, latency):
+    async def test_rapid_turns_in_one_session_are_serialized(self, concurrent_env):
         retriever = build_retriever(CompletionRetriever)
         peak = 0
         active = 0
@@ -285,7 +287,7 @@ class TestTurnCost:
             session_search.retrieve_turn_context = original
 
         assert peak == 1
-        assert len(latency.manager.qas) == 2
+        assert len(concurrent_env.manager.qas) == 2
 
 
 def test_session_facade_stays_free_of_search_mode_state():

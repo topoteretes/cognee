@@ -37,15 +37,14 @@ class CacheConfig(BaseSettings):
     - auto_feedback: When caching is True, run automatic feedback detection and session-context
       guidance on each query (default True). Adds one structured-output LLM call per answered
       turn; set AUTO_FEEDBACK=false to disable.
-    - session_search_mode: Session-search execution mode (default "latency_optimized"):
-      the turn analysis runs concurrently with retrieval and answering, so a turn costs
-      one answer call of wall-clock time. Set SESSION_SEARCH_MODE=accuracy_optimized to
-      analyze first and let that analysis rewrite the retrieval query and apply context
-      updates before the answer is generated.
-
-      Naming bridge: this setting names the goal (optimize for latency); the code names
-      the mechanism. One turn executed this way is a *concurrent turn* -- see
-      ``try_concurrent_turn`` in cognee/modules/retrieval/session_search.py.
+    - session_search_mode: How one session turn executes (default "concurrent"). Both
+      modes make the same two LLM calls; they differ in how those calls are sequenced,
+      and the trade is which turn the analysis can influence.
+      "concurrent" runs the turn analysis alongside retrieval and answering, so a turn
+      costs one answer call of wall-clock time -- but its context updates land after this
+      turn's answer and apply from the next one.
+      "sequential" runs the analysis first, so its rewritten query drives retrieval and
+      its context updates reach this turn's answer -- at the cost of two calls in a row.
     """
 
     cache_backend: Literal["redis", "fs", "tapes", "sqlite", "postgres"] = "sqlite"
@@ -53,7 +52,7 @@ class CacheConfig(BaseSettings):
     cache_purge_interval_seconds: int = 900
     caching: bool = True
     auto_feedback: bool = True
-    session_search_mode: Literal["accuracy_optimized", "latency_optimized"] = "latency_optimized"
+    session_search_mode: Literal["sequential", "concurrent"] = "concurrent"
     shared_ladybug_lock: bool = False
     shared_kuzu_lock: bool = False
     cache_host: str = "localhost"

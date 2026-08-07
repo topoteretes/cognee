@@ -33,7 +33,7 @@ def supports(retriever_type: type, **overrides):
         TripletRetriever,
     ],
 )
-def test_latency_mode_supports_only_designated_retrievers(retriever_type):
+def test_concurrent_mode_supports_only_designated_retrievers(retriever_type):
     assert supports(retriever_type) is True
 
 
@@ -46,15 +46,15 @@ def test_latency_mode_supports_only_designated_retrievers(retriever_type):
         {"only_context": True},
     ],
 )
-def test_latency_mode_falls_back_to_accuracy(overrides):
+def test_concurrent_mode_falls_back_to_sequential(overrides):
     assert supports(GraphCompletionRetriever, **overrides) is False
 
 
-def test_latency_mode_accepts_direct_retriever_calls_without_search_type():
+def test_concurrent_mode_accepts_direct_retriever_calls_without_search_type():
     assert supports(GraphCompletionRetriever, original_search_type=None) is True
 
 
-def test_latency_mode_rejects_subclasses_and_unrelated_retrievers():
+def test_concurrent_mode_rejects_subclasses_and_unrelated_retrievers():
     class ExtendedGraphRetriever(GraphCompletionRetriever):
         pass
 

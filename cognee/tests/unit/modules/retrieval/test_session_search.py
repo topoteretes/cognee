@@ -41,7 +41,7 @@ def test_contextual_query_without_history_normalizes_to_raw_query():
 
 
 @pytest.mark.asyncio
-async def test_latency_retrieval_fuses_lanes_formats_and_tracks_once():
+async def test_concurrent_retrieval_fuses_lanes_formats_and_tracks_once():
     retriever = CompletionRetriever(top_k=3)
     retriever.get_retrieved_objects = AsyncMock(side_effect=[[item("raw")], [item("contextual")]])
     retriever.get_context_from_objects = AsyncMock(return_value="formatted")
@@ -78,7 +78,7 @@ async def test_latency_retrieval_fuses_lanes_formats_and_tracks_once():
         ([[item("raw")], RuntimeError("contextual")], [item("raw")]),
     ],
 )
-async def test_latency_retrieval_uses_the_successful_lane(side_effect, expected):
+async def test_concurrent_retrieval_uses_the_successful_lane(side_effect, expected):
     retriever = CompletionRetriever(top_k=3)
     retriever.get_retrieved_objects = AsyncMock(side_effect=side_effect)
     retriever.get_context_from_objects = AsyncMock(return_value="formatted")
@@ -101,7 +101,7 @@ async def test_latency_retrieval_uses_the_successful_lane(side_effect, expected)
 
 
 @pytest.mark.asyncio
-async def test_latency_retrieval_reraises_raw_failure_when_both_lanes_fail():
+async def test_concurrent_retrieval_reraises_raw_failure_when_both_lanes_fail():
     retriever = CompletionRetriever(top_k=3)
     raw_error = RuntimeError("raw")
     retriever.get_retrieved_objects = AsyncMock(side_effect=[raw_error, RuntimeError("contextual")])
@@ -115,7 +115,7 @@ async def test_latency_retrieval_reraises_raw_failure_when_both_lanes_fail():
 
 
 @pytest.mark.asyncio
-async def test_latency_retrieval_skips_duplicate_contextual_lane():
+async def test_concurrent_retrieval_skips_duplicate_contextual_lane():
     retriever = CompletionRetriever(top_k=3)
     retriever.get_retrieved_objects = AsyncMock(return_value=[item("raw")])
     retriever.get_context_from_objects = AsyncMock(return_value="formatted")
@@ -131,7 +131,7 @@ async def test_latency_retrieval_skips_duplicate_contextual_lane():
 
 
 @contextmanager
-def _latency_environment(manager, *, analysis, order):
+def _concurrent_environment(manager, *, analysis, order):
     """Patch the orchestrator's collaborators, recording the order lanes complete in."""
 
     async def analyze(_snapshot):
@@ -151,7 +151,7 @@ def _latency_environment(manager, *, analysis, order):
     patchers = (
         patch(
             "cognee.modules.retrieval.session_search.CacheConfig",
-            return_value=SimpleNamespace(session_search_mode="latency_optimized"),
+            return_value=SimpleNamespace(session_search_mode="concurrent"),
         ),
         patch(
             "cognee.modules.retrieval.session_search.session_user",
@@ -197,7 +197,7 @@ async def test_analysis_runs_alongside_retrieval_and_commits_after_both():
     order = []
 
     with (
-        _latency_environment(_session_manager(), analysis=analysis, order=order),
+        _concurrent_environment(_session_manager(), analysis=analysis, order=order),
         patch(
             "cognee.modules.retrieval.session_search.commit_turn",
             new_callable=AsyncMock,

@@ -19,7 +19,7 @@ from cognee.infrastructure.session.session_search_models import SessionTurnSnaps
 from cognee.modules.retrieval.utils.access_tracking import update_node_access_timestamps
 from cognee.modules.search.types import SearchType
 
-LATENCY_OPTIMIZED = "latency_optimized"
+CONCURRENT_MODE = "concurrent"
 MAX_CONTEXTUAL_QUERY_CHARS = 2000
 
 
@@ -65,9 +65,9 @@ def can_run_as_concurrent_turn(
     is_batch: bool,
     only_context: bool,
 ) -> bool:
-    """Whether this call can run as one concurrent turn, given latency mode is configured.
+    """Whether this call can run as one concurrent turn, given concurrent mode is configured.
 
-    Everything else falls back to the accuracy path, which is unchanged.
+    Everything else falls back to the sequential path, which is unchanged.
     """
     return not (
         original_search_type is SearchType.FEELING_LUCKY
@@ -201,7 +201,7 @@ async def try_concurrent_turn(
 ) -> ConcurrentTurnResult | None:
     """Run this search as one concurrent turn, or return None if it does not qualify.
 
-    Returning None is the caller's signal to fall through to the accuracy path, which is
+    Returning None is the caller's signal to fall through to the sequential path, which is
     why this is the only integration point the rest of the search flow needs.
 
     The turn analysis and the answer are independent — the analysis reads the user's
@@ -209,8 +209,8 @@ async def try_concurrent_turn(
     concurrently and the turn costs one answer call of wall-clock time.
     """
     cache_config = CacheConfig()
-    # Fast path: a deployment that never uses latency mode looks nothing up.
-    if cache_config.session_search_mode != LATENCY_OPTIMIZED:
+    # Fast path: a deployment that never uses concurrent mode looks nothing up.
+    if cache_config.session_search_mode != CONCURRENT_MODE:
         return None
 
     user = session_user.get()

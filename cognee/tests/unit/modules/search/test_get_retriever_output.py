@@ -173,7 +173,7 @@ async def test_get_retriever_output_can_bypass_session_preparation_without_only_
 
 
 @pytest.mark.asyncio
-async def test_get_retriever_output_maps_turn_result_without_accuracy_preparation():
+async def test_get_retriever_output_maps_turn_result_without_sequential_preparation():
     retriever = _NoAnswerRetriever()
     turn_result = ConcurrentTurnResult(
         retrieved_objects=[{"id": "obj-1"}],
@@ -198,14 +198,14 @@ async def test_get_retriever_output_maps_turn_result_without_accuracy_preparatio
             "try_concurrent_turn",
             new_callable=AsyncMock,
             return_value=turn_result,
-        ) as run_latency,
+        ) as try_turn,
     ):
         result = await get_retriever_output(SearchType.RAG_COMPLETION, "question")
 
     assert result.result_object == turn_result.retrieved_objects
     assert result.context == "context"
     assert result.completion == ["answer"]
-    run_latency.assert_awaited_once_with(
+    try_turn.assert_awaited_once_with(
         retriever,
         raw_query="question",
         original_search_type=SearchType.RAG_COMPLETION,

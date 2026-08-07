@@ -195,7 +195,7 @@ async def test_answer_uses_the_callers_own_prompts_and_response_model():
 
 @pytest.mark.asyncio
 async def test_answer_prompt_carries_the_conversational_turn_rule():
-    """Latency mode answers acknowledgements itself, so the rule must reach the model."""
+    """Concurrent mode answers acknowledgements itself, so the rule must reach the model."""
     with patch(
         "cognee.infrastructure.session.session_concurrent_turn.generate_completion",
         new_callable=AsyncMock,
