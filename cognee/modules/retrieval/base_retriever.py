@@ -84,6 +84,16 @@ class BaseRetriever(ABC):
         """
         return None
 
+    def merge_retrieved_objects(self, primary: Any, secondary: Any) -> Any:
+        """Combine two retrievals of this retriever's own result shape.
+
+        Called when one turn retrieves twice — a session turn runs the raw question and a
+        conversational rewrite of it — so the retriever formats context from both at once.
+        Only the retriever knows its object shape, so only it can merge them. The default
+        keeps the primary retrieval, which is always a valid result of the right shape.
+        """
+        return primary
+
     async def _append_references(self, completions: list[Any], retrieved_objects: Any) -> list[Any]:
         """Apply retriever-owned references; unsupported retrievers leave answers unchanged."""
         return completions

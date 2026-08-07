@@ -21,11 +21,6 @@ from cognee.infrastructure.session.session_search_models import (
     SessionTurnSnapshot,
     get_session_search_completion_model,
 )
-from cognee.modules.retrieval.session_result_fusion import (
-    fuse_graph_results,
-    fuse_hybrid_results,
-    fuse_vector_results,
-)
 from cognee.modules.retrieval.utils.access_tracking import update_node_access_timestamps
 from cognee.modules.search.types import SearchType
 
@@ -45,8 +40,17 @@ class LatencySearchResult:
 
 @lru_cache(maxsize=1)
 def _latency_retriever_types() -> frozenset[type]:
+    """Exact concrete classes that support a latency turn.
+
+    Opt-in is by exact type, never by subclass: a variant that overrides retrieval or
+    runs its own LLM rounds (chain-of-thought, context extension) cannot honour the
+    one-blocking-completion contract, and inherits its way onto this list otherwise.
+    """
     from cognee.modules.retrieval.completion_retriever import CompletionRetriever
     from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
+    from cognee.modules.retrieval.graph_summary_completion_retriever import (
+        GraphSummaryCompletionRetriever,
+    )
     from cognee.modules.retrieval.hybrid_retriever import HybridRetriever
     from cognee.modules.retrieval.triplet_retriever import TripletRetriever
 
@@ -54,6 +58,7 @@ def _latency_retriever_types() -> frozenset[type]:
         {
             CompletionRetriever,
             GraphCompletionRetriever,
+            GraphSummaryCompletionRetriever,
             HybridRetriever,
             TripletRetriever,
         }
@@ -132,28 +137,6 @@ def build_contextual_query(
     return contextual[:max_chars]
 
 
-def _fuse_retriever_results(retriever, raw_result: Any, contextual_result: Any) -> Any:
-    from cognee.modules.retrieval.completion_retriever import CompletionRetriever
-    from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
-    from cognee.modules.retrieval.hybrid_retriever import HybridRetriever
-    from cognee.modules.retrieval.triplet_retriever import TripletRetriever
-
-    if type(retriever) in {CompletionRetriever, TripletRetriever}:
-        return fuse_vector_results(raw_result, contextual_result, limit=retriever.top_k)
-    if type(retriever) is GraphCompletionRetriever:
-        return fuse_graph_results(raw_result, contextual_result, limit=retriever.top_k)
-    if type(retriever) is HybridRetriever:
-        return fuse_hybrid_results(
-            raw_result,
-            contextual_result,
-            chunks_limit=retriever.chunks_top_k,
-            entities_limit=retriever.entities_top_k,
-            facts_limit=retriever.facts_top_k,
-            graph_limit=retriever._graph_fallback.top_k,
-        )
-    raise TypeError(f"Unsupported latency retriever: {type(retriever).__name__}")
-
-
 async def retrieve_latency_context(
     retriever,
     *,
@@ -188,7 +171,7 @@ async def retrieve_latency_context(
     if contextual_error is not None:
         contextual_result = None
 
-    retrieved_objects = _fuse_retriever_results(retriever, raw_result, contextual_result)
+    retrieved_objects = retriever.merge_retrieved_objects(raw_result, contextual_result)
     context = await retriever.get_context_from_objects(
         query=raw_query,
         retrieved_objects=retrieved_objects,

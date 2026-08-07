@@ -9,6 +9,7 @@ from cognee.modules.graph.utils import resolve_edges_to_text
 from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_force_triplet_search
+from cognee.modules.retrieval.utils.merge_results import edge_identity, merge_ranked
 from cognee.modules.retrieval.utils.global_context import (
     format_global_context_prelude,
     load_root_text,
@@ -274,6 +275,9 @@ class GraphCompletionRetriever(BaseRetriever):
             query, self.global_context_index_top_k, self._unified_engine.vector
         )
         return format_global_context_prelude(root_text, top_summaries)
+
+    def merge_retrieved_objects(self, primary: Any, secondary: Any) -> Any:
+        return merge_ranked(primary, secondary, identity=edge_identity, limit=self.top_k)
 
     def _extract_context_object_ids(self, retrieved_objects: Any) -> Optional[Dict[str, List[str]]]:
         """Extract node_ids and edge_ids from list of Edge. Only used for single-query session path."""

@@ -14,6 +14,7 @@ from cognee.modules.retrieval.hybrid.context import (
     format_hybrid_context,
 )
 from cognee.modules.retrieval.hybrid.entities import build_entities
+from cognee.modules.retrieval.hybrid.merge import merge_hybrid_results
 from cognee.modules.retrieval.hybrid.facts import (
     edge_rank_by_id,
     graph_evidence_by_edge_type_id,
@@ -481,6 +482,16 @@ class HybridRetriever(BaseRetriever):
             completions = [completion]
 
         return await self._append_references(completions, retrieved_objects)
+
+    def merge_retrieved_objects(self, primary: Any, secondary: Any) -> Any:
+        return merge_hybrid_results(
+            primary,
+            secondary,
+            chunks_limit=self.chunks_top_k,
+            entities_limit=self.entities_top_k,
+            facts_limit=self.facts_top_k,
+            graph_limit=self._graph_fallback.top_k,
+        )
 
     def _extract_context_object_ids(self, retrieved_objects: Any) -> Optional[Dict[str, List[str]]]:
         return extract_context_object_ids(retrieved_objects)

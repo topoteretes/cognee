@@ -2,6 +2,9 @@ import pytest
 
 from cognee.modules.retrieval.completion_retriever import CompletionRetriever
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
+from cognee.modules.retrieval.graph_summary_completion_retriever import (
+    GraphSummaryCompletionRetriever,
+)
 from cognee.modules.retrieval.hybrid_retriever import HybridRetriever
 from cognee.modules.retrieval.session_search import (
     ACCURACY_OPTIMIZED,
@@ -28,7 +31,13 @@ def resolve(retriever_type: type, **overrides):
 
 @pytest.mark.parametrize(
     "retriever_type",
-    [CompletionRetriever, GraphCompletionRetriever, HybridRetriever, TripletRetriever],
+    [
+        CompletionRetriever,
+        GraphCompletionRetriever,
+        GraphSummaryCompletionRetriever,
+        HybridRetriever,
+        TripletRetriever,
+    ],
 )
 def test_latency_mode_supports_only_designated_retrievers(retriever_type):
     assert resolve(retriever_type) == LATENCY_OPTIMIZED

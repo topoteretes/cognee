@@ -3,6 +3,7 @@ from typing import Any, Dict, List, Optional, Type
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.modules.retrieval.utils.completion import generate_completion
+from cognee.modules.retrieval.utils.merge_results import merge_ranked
 from cognee.infrastructure.session.get_session_manager import get_session_manager
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.utils.used_graph_elements import extract_from_scored_results
@@ -60,6 +61,9 @@ class CompletionRetriever(BaseRetriever):
         except CollectionNotFoundError as error:
             logger.error("DocumentChunk_text collection not found")
             raise NoDataError("No data found in the system, please add data first.") from error
+
+    def merge_retrieved_objects(self, primary: Any, secondary: Any) -> Any:
+        return merge_ranked(primary, secondary, limit=self.top_k)
 
     def _extract_context_object_ids(self, retrieved_objects: Any) -> Optional[Dict[str, List[str]]]:
         """Extract node_ids from ScoredResult-like list for session QA."""

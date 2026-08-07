@@ -27,6 +27,9 @@ from cognee.modules.retrieval import session_search
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.completion_retriever import CompletionRetriever
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
+from cognee.modules.retrieval.graph_summary_completion_retriever import (
+    GraphSummaryCompletionRetriever,
+)
 from cognee.modules.retrieval.hybrid_retriever import HybridRetriever
 from cognee.modules.retrieval.session_search import run_latency_session_search
 from cognee.modules.retrieval.triplet_retriever import TripletRetriever
@@ -35,6 +38,7 @@ from cognee.modules.search.types import SearchType
 SUPPORTED_RETRIEVERS = [
     CompletionRetriever,
     GraphCompletionRetriever,
+    GraphSummaryCompletionRetriever,
     HybridRetriever,
     TripletRetriever,
 ]
