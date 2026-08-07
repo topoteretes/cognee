@@ -1050,3 +1050,88 @@ class TestBackgroundTeardownLatch:
         # And the dataset is acquirable again.
         await asyncio.wait_for(queue.ensure_slot("ds-L"), timeout=1)
         await queue.release_slot_for("ds-L")
+
+
+class TestOrphanedCloseAdoption:
+    """A close whose event loop died is finished by the next acquirer."""
+
+    def test_two_loop_phases_adopt_and_close(self):
+        """The e2e script shape: asyncio.run() #1 schedules a close and dies
+        before it runs; asyncio.run() #2 must adopt it — closing the old
+        engines on the live loop — before proceeding."""
+        import asyncio
+
+        from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
+
+        queue = DatasetQueue(enabled=True, max_concurrent=5)
+        closed = []
+
+        class FakeEngine:
+            async def close(self):
+                closed.append(self)
+
+        engine = FakeEngine()
+        queue._detach_subprocess_engines = lambda: [engine]
+
+        async def never_finishes(engines):
+            await asyncio.Event().wait()
+
+        queue._close_engines = never_finishes
+
+        async def phase_one():
+            await queue.ensure_slot("ds-O")
+            await queue.release_slot_for("ds-O")
+            # Loop ends here with the close task pending -> cancelled.
+
+        asyncio.run(phase_one())
+        assert "ds:ds-O" in queue._pending_closes, "record must survive loop teardown"
+        assert closed == [], "close must not have completed on the dead loop"
+
+        async def phase_two():
+            await queue.ensure_slot("ds-O")
+            await queue.release_slot_for("ds-O")
+
+        asyncio.run(phase_two())
+        assert closed == [engine], "the next acquirer must adopt and finish the close"
+
+    def test_adoption_tolerates_already_closed_engines(self):
+        """After a mid-close cancellation some engines are already closed;
+        a double-close error must not block the adopting acquirer."""
+        import asyncio
+
+        from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
+
+        queue = DatasetQueue(enabled=True, max_concurrent=5)
+        closed = []
+
+        class BrokenEngine:
+            async def close(self):
+                raise RuntimeError("already closed")
+
+        class GoodEngine:
+            async def close(self):
+                closed.append("good")
+
+        queue._detach_subprocess_engines = lambda: [BrokenEngine(), GoodEngine()]
+
+        async def never_finishes(engines):
+            await asyncio.Event().wait()
+
+        queue._close_engines = never_finishes
+
+        async def phase_one():
+            await queue.ensure_slot("ds-P")
+            await queue.release_slot_for("ds-P")
+
+        asyncio.run(phase_one())
+
+        async def phase_two():
+            await queue.ensure_slot("ds-P")  # must not raise despite BrokenEngine
+            # Nothing new to detach: this release must not create a fresh
+            # pending record — we are asserting the adopted one was consumed.
+            queue._detach_subprocess_engines = lambda: []
+            await queue.release_slot_for("ds-P")
+
+        asyncio.run(phase_two())
+        assert closed == ["good"], "surviving engines still get closed"
+        assert "ds:ds-P" not in queue._pending_closes

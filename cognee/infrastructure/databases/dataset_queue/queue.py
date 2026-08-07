@@ -91,6 +91,23 @@ def _make_release(semaphore: asyncio.Semaphore) -> Callable[[], None]:
     return _release
 
 
+class PendingClose:
+    """A background engine close in flight (or orphaned by a dead loop).
+
+    Carries the detached engines so that a later acquirer on a *different*
+    event loop can adopt and finish the close when this one's loop died
+    before the close task ran to completion (multiple sequential
+    ``asyncio.run()`` phases in one process — the e2e script shape).
+    """
+
+    __slots__ = ("future", "engines", "loop")
+
+    def __init__(self, future, engines, loop) -> None:
+        self.future = future
+        self.engines = engines
+        self.loop = loop
+
+
 class SlotEntry:
     """A single acquired slot with a nesting depth counter."""
 
@@ -123,14 +140,16 @@ class DatasetQueue:
         # ``"acquire:<unique>"`` for ``acquire()``. A task may hold multiple
         # entries; all are released together when the task finishes.
         self._task_slots: Dict[int, Dict[str, SlotEntry]] = {}
-        # Pending-close latches — "who must wait, per dataset": ds_key -> future
-        # that resolves when a backgrounded engine teardown for that dataset has
-        # finished. The next acquirer of the same dataset awaits it before
-        # proceeding, so file locks are provably free before a fresh engine
-        # opens the same files. Created when a close is scheduled; resolved and
-        # removed in the close task's ``finally``, success or failure alike.
+        # Pending closes — "who must wait, per dataset": ds_key -> PendingClose
+        # whose future resolves when the backgrounded engine close for that
+        # dataset has finished. The next acquirer of the same dataset awaits it
+        # (same loop) or adopts and finishes the close itself (the scheduling
+        # loop died first), so file locks are provably free before a fresh
+        # engine opens the same files. Removed when the close completes or
+        # fails; deliberately KEPT when the close task is cancelled by loop
+        # teardown — the record is what adoption works from.
         # (Same pending-close idea closing_lru_cache uses internally.)
-        self._pending_closes: Dict[str, asyncio.Future] = {}
+        self._pending_closes: Dict[str, PendingClose] = {}
         # Live close tasks — "which closes are still running, so they can't be
         # lost". asyncio holds only weak references to tasks: a fire-and-forget
         # close with no strong reference can be garbage-collected mid-flight,
@@ -220,12 +239,18 @@ class DatasetQueue:
             entry.depth += 1
             return
 
-        # If a backgrounded teardown for this dataset is still closing its
-        # engines, wait for it: the whole point of the latch is that the
-        # response path no longer waits, so the (rare) next acquirer must.
+        # If a backgrounded close for this dataset is still in flight, wait
+        # for it: the whole point of the latch is that the response path no
+        # longer waits, so the (rare) next acquirer must. If the close's loop
+        # died before it finished (sequential asyncio.run() phases), its
+        # engines may still hold the database file locks — adopt the close
+        # and finish it here, on the live loop, before proceeding.
         pending = self._pending_closes.get(ds_key)
         if pending is not None:
-            await pending
+            if pending.loop is asyncio.get_running_loop():
+                await pending.future
+            else:
+                await self._adopt_orphaned_close(ds_key, pending)
 
         # Acquire a fresh slot for this (task, dataset).
         logger.debug("Task %d acquiring dataset queue slot for dataset_id=%s", task_id, dataset_id)
@@ -272,18 +297,34 @@ class DatasetQueue:
 
         loop = asyncio.get_running_loop()
         latch: asyncio.Future = loop.create_future()
-        self._pending_closes[ds_key] = latch
+        record = PendingClose(latch, engines, loop)
+        self._pending_closes[ds_key] = record
+
+        def _finish() -> None:
+            if not latch.done():
+                latch.set_result(None)
+            if self._pending_closes.get(ds_key) is record:
+                del self._pending_closes[ds_key]
 
         async def _close() -> None:
             # No exception is expected here, so none is caught: the latch must
-            # open either way (a failed close must not brick the dataset), and
-            # the failure itself is surfaced below with its full traceback.
+            # open on success or failure (a failed close must not brick the
+            # dataset), and failures are surfaced below with their traceback.
+            # CancelledError is the exception to the rule: loop teardown kills
+            # this task mid-close, the engines may still hold file locks, and
+            # the pending record must SURVIVE so the next acquirer (on a live
+            # loop) adopts and finishes the close. (Not a guarded ``finally``:
+            # inside a task that is being cancelled, ``task.cancelled()`` still
+            # reads False — explicit paths are the only reliable structure.)
             try:
                 await self._close_engines(engines)
-            finally:
-                latch.set_result(None)
-                if self._pending_closes.get(ds_key) is latch:
-                    del self._pending_closes[ds_key]
+            except asyncio.CancelledError:
+                raise
+            except BaseException:
+                _finish()
+                raise
+            else:
+                _finish()
 
         task = loop.create_task(_close())
         self._background_closes.add(task)
@@ -350,6 +391,40 @@ class DatasetQueue:
                 evict_vector_engine(**v_cfg)
 
         return detached
+
+    async def _adopt_orphaned_close(self, ds_key: str, pending: "PendingClose") -> None:
+        """Finish a close whose scheduling loop died before it completed.
+
+        ``engine.close()`` alone is not enough here: the engines are lease
+        proxies, and their *real* close can be parked in cache machinery bound
+        to the dead loop — observed as ``close()`` returning OK while the
+        worker process (and its database file lock) lives on. The worker's
+        session ``shutdown()`` is the unconditional path: synchronous, always
+        reaches terminate, and the OS releases the file locks when the process
+        dies. The proxy ``close()`` afterwards is cache/lease bookkeeping.
+
+        Per-engine failures are surfaced at ERROR and not raised: after a
+        mid-close cancellation, partially-closed state is *expected*, and the
+        definitive arbiter is the engine open that follows (it fails loudly if
+        a file lock genuinely remains).
+        """
+        if self._pending_closes.get(ds_key) is pending:
+            del self._pending_closes[ds_key]
+        for engine in pending.engines:
+            try:
+                session = getattr(engine, "_session", None)
+                if session is not None and hasattr(session, "shutdown"):
+                    # Synchronous by design; brief block on a recovery path is
+                    # the price of a guaranteed worker death + lock release.
+                    session.shutdown()
+                if hasattr(engine, "close"):
+                    await engine.close()
+            except Exception as error:
+                logger.error(
+                    "Adopted close of an orphaned engine failed for %s",
+                    ds_key,
+                    exc_info=(type(error), error, error.__traceback__),
+                )
 
     async def _close_engines(self, engines: list) -> None:
         """Close detached engines so their DB file locks are released."""
