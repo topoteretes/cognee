@@ -91,8 +91,8 @@ class _GraphEngineHandle:
     CI) — so a fresh engine relies on the worker's open-retry
     (``SUBPROCESS_OPEN_LOCK_RETRIES``) for the overlap. Once a close is
     actually in flight, creators wait for it deterministically; the primary
-    multi-tenant teardown path (``dataset_queue._teardown_subprocess_engines``)
-    also ``await``s ``engine.close()`` to completion before any re-creation.
+    multi-tenant teardown path (``dataset_queue._evict_subprocess_engines``)
+    routes through plain cache eviction, so its closes register here too.
     """
 
     __slots__ = ("_config", "_last_initialized_id", "_pinned")

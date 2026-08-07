@@ -11,9 +11,11 @@ bump a per-entry depth counter rather than re-acquiring the semaphore. The
 corresponding :meth:`DatasetQueue.release_slot_for` (async) decrements that
 counter; the underlying semaphore slot is freed only when the counter hits
 zero.  When the last holder across all tasks exits, subprocess engines are
-torn down via :meth:`DatasetQueue._teardown_subprocess_engines`.  This
-makes nested ``async with set_database_global_context_variables(D, u)`` scopes
-safe — an inner exit never steals an outer holder's slot.
+evicted from the engine caches via
+:meth:`DatasetQueue._evict_subprocess_engines`; the caches close them off the
+response path.  This makes nested
+``async with set_database_global_context_variables(D, u)`` scopes safe — an
+inner exit never steals an outer holder's slot.
 
 Task-end cleanup is a safety net: when the current task finishes, every entry
 still in ``_task_slots`` is force-released regardless of depth. This covers
@@ -91,23 +93,6 @@ def _make_release(semaphore: asyncio.Semaphore) -> Callable[[], None]:
     return _release
 
 
-class PendingClose:
-    """A background engine close in flight (or orphaned by a dead loop).
-
-    Carries the detached engines so that a later acquirer on a *different*
-    event loop can adopt and finish the close when this one's loop died
-    before the close task ran to completion (multiple sequential
-    ``asyncio.run()`` phases in one process — the e2e script shape).
-    """
-
-    __slots__ = ("future", "engines", "loop")
-
-    def __init__(self, future, engines, loop) -> None:
-        self.future = future
-        self.engines = engines
-        self.loop = loop
-
-
 class SlotEntry:
     """A single acquired slot with a nesting depth counter."""
 
@@ -140,23 +125,6 @@ class DatasetQueue:
         # ``"acquire:<unique>"`` for ``acquire()``. A task may hold multiple
         # entries; all are released together when the task finishes.
         self._task_slots: Dict[int, Dict[str, SlotEntry]] = {}
-        # Pending closes — "who must wait, per dataset": ds_key -> PendingClose
-        # whose future resolves when the backgrounded engine close for that
-        # dataset has finished. The next acquirer of the same dataset awaits it
-        # (same loop) or adopts and finishes the close itself (the scheduling
-        # loop died first), so file locks are provably free before a fresh
-        # engine opens the same files. Removed when the close completes or
-        # fails; deliberately KEPT when the close task is cancelled by loop
-        # teardown — the record is what adoption works from.
-        # (Same pending-close idea closing_lru_cache uses internally.)
-        self._pending_closes: Dict[str, PendingClose] = {}
-        # Live close tasks — "which closes are still running, so they can't be
-        # lost". asyncio holds only weak references to tasks: a fire-and-forget
-        # close with no strong reference can be garbage-collected mid-flight,
-        # never finishing the close and never opening its latch. Entries are
-        # removed by the task's done-callback (which also surfaces failures);
-        # tests and shutdown drain this set to wait for in-flight closes.
-        self._background_closes: Set[asyncio.Task] = set()
         # Track which tasks already have a done-callback registered so we
         # don't register multiple cleanup handlers for a single task.
         self._registered_tasks: Set[int] = set()
@@ -239,19 +207,6 @@ class DatasetQueue:
             entry.depth += 1
             return
 
-        # If a backgrounded close for this dataset is still in flight, wait
-        # for it: the whole point of the latch is that the response path no
-        # longer waits, so the (rare) next acquirer must. If the close's loop
-        # died before it finished (sequential asyncio.run() phases), its
-        # engines may still hold the database file locks — adopt the close
-        # and finish it here, on the live loop, before proceeding.
-        pending = self._pending_closes.get(ds_key)
-        if pending is not None:
-            if pending.loop is asyncio.get_running_loop():
-                await pending.future
-            else:
-                await self._adopt_orphaned_close(ds_key, pending)
-
         # Acquire a fresh slot for this (task, dataset).
         logger.debug("Task %d acquiring dataset queue slot for dataset_id=%s", task_id, dataset_id)
         await self._semaphore.acquire()
@@ -262,183 +217,58 @@ class DatasetQueue:
         self._task_slots[task_id][ds_key] = SlotEntry(release, depth=1)
 
     # ----------------------------------------- subprocess engine teardown
-    def _schedule_background_teardown(self, ds_key: str) -> None:
-        """Detach engines now; close them off the response path.
+    def _evict_subprocess_engines(self) -> None:
+        """Evict this context's subprocess-mode engines from their caches.
 
-        Why this exact split, and not something simpler:
+        Eviction is the queue's entire teardown responsibility — the engine
+        cache owns the close lifecycle, and it already gives the release path
+        everything it needs:
 
-        * **Why not await the whole teardown inline** (the original design):
-          ``engine.close()`` takes 1.5–2 s per query, and it ran while the
-          caller's response waited — measured as roughly half of every serial
-          recall's latency. The teardown only fires when *no other task holds
-          the dataset*, which is precisely when nobody benefits from waiting.
-        * **Why the eviction still happens synchronously here** and only the
-          close is backgrounded: while a dying engine is still in the LRU,
-          any caller — even the same task, one line after context exit — can
-          fetch it, and the background close then kills it mid-use
-          ("LadybugAdapter is closed; a new adapter must be created", which
-          broke nine e2e suites when the whole teardown was deferred).
-          Eviction is cheap and in-memory; after this line every caller
-          builds a fresh engine.
-        * **Why the pending-close latch**: a fresh engine must not open the
-          same database files while the old engine's close is still
-          releasing their locks. The next ``ensure_slot`` for this dataset
-          awaits the latch — moving the wait from the response (never
-          load-bearing there) to the only place it matters.
+        * a subprocess-backed adapter's close runs on the cache's dedicated
+          close threads, so it makes progress even while this loop's thread is
+          blocked. (An earlier revision scheduled the close as a task on this
+          loop; a synchronous engine spawn right after release then starved it
+          and exhausted the worker's bounded open-retry — the "Lock is held by
+          PID N" e2e failures.)
+        * the close is registered in the cache's pending-close registry, so
+          the next creation of the same engine — through the queue or a direct
+          ``get_graph_engine()`` — waits for the old worker to exit before
+          opening the same database files, with the worker's open-retry as the
+          backstop for the residual window.
+        * a close on those threads survives event-loop teardown, so
+          sequential ``asyncio.run()`` phases in one process are safe.
 
-        The latch always opens; a close failure is surfaced at ERROR with its
-        traceback from the task's done-callback (the request this close
-        belonged to has already returned, so there is no caller to raise
-        into).
-        """
-        engines = self._detach_subprocess_engines()
-        if not engines:
-            return
+        Closing engines here instead re-implements that machinery one level
+        up, loop-bound and invisible to the registry: fetching a lease proxy
+        in order to close it defers the real close behind the lease and hides
+        it from creators.
 
-        loop = asyncio.get_running_loop()
-        latch: asyncio.Future = loop.create_future()
-        record = PendingClose(latch, engines, loop)
-        self._pending_closes[ds_key] = record
-
-        def _finish() -> None:
-            if not latch.done():
-                latch.set_result(None)
-            if self._pending_closes.get(ds_key) is record:
-                del self._pending_closes[ds_key]
-
-        async def _close() -> None:
-            # No exception is expected here, so none is caught: the latch must
-            # open on success or failure (a failed close must not brick the
-            # dataset), and failures are surfaced below with their traceback.
-            # CancelledError is the exception to the rule: loop teardown kills
-            # this task mid-close, the engines may still hold file locks, and
-            # the pending record must SURVIVE so the next acquirer (on a live
-            # loop) adopts and finishes the close. (Not a guarded ``finally``:
-            # inside a task that is being cancelled, ``task.cancelled()`` still
-            # reads False — explicit paths are the only reliable structure.)
-            try:
-                await self._close_engines(engines)
-            except asyncio.CancelledError:
-                raise
-            except BaseException:
-                _finish()
-                raise
-            else:
-                _finish()
-
-        task = loop.create_task(_close())
-        self._background_closes.add(task)
-
-        def _surface(done: asyncio.Task) -> None:
-            self._background_closes.discard(done)
-            if not done.cancelled() and done.exception() is not None:
-                # The request this teardown belonged to has already returned,
-                # so there is no caller to raise into — ERROR with the stack is
-                # the loudest honest channel. If the close genuinely left file
-                # locks behind, the next engine open fails loudly in a real
-                # request; nothing is silently lost.
-                exc = done.exception()
-                logger.error(
-                    "Background engine teardown failed for %s",
-                    ds_key,
-                    # The structlog exception processor only unpacks a real
-                    # (type, value, traceback) tuple; anything else falls back
-                    # to sys.exc_info(), which is empty in a done-callback.
-                    exc_info=(type(exc), exc, exc.__traceback__),
-                )
-
-        task.add_done_callback(_surface)
-
-    def _detach_subprocess_engines(self) -> list:
-        """Synchronously evict subprocess-mode engines from their caches.
-
-        This MUST stay synchronous and run before the release returns: eviction
-        is what guarantees no later caller can fetch a dying engine from the
-        LRU (they build a fresh one instead). Only the expensive
-        ``engine.close()`` of the returned engines may be deferred.
+        Eviction runs synchronously on the release path on purpose: a dying
+        engine left in the LRU can be fetched by the very next caller and then
+        die mid-use ("LadybugAdapter is closed; a new adapter must be
+        created", which broke nine e2e suites when the whole teardown was
+        deferred). After eviction every caller builds a fresh engine.
 
         Reads the current task's ContextVar-based graph/vector config to
-        identify which cached engines to detach.  Lazy imports avoid circular
+        identify which cached engines to evict. Lazy imports avoid circular
         dependencies at module load time.
         """
         from cognee.infrastructure.databases.graph.config import get_graph_context_config
         from cognee.infrastructure.databases.vector.config import get_vectordb_context_config
 
-        detached = []
-
         g_cfg = get_graph_context_config()
         if g_cfg.get("graph_database_subprocess_enabled"):
-            from cognee.infrastructure.databases.graph.get_graph_engine import (
-                create_graph_engine,
-                evict_graph_engine,
-                is_graph_engine_cached,
-            )
+            from cognee.infrastructure.databases.graph.get_graph_engine import evict_graph_engine
 
-            if is_graph_engine_cached(**g_cfg):
-                detached.append(create_graph_engine(**g_cfg))
-                evict_graph_engine(**g_cfg)
+            evict_graph_engine(**g_cfg)
 
         v_cfg = get_vectordb_context_config()
         if v_cfg.get("vector_db_subprocess_enabled"):
             from cognee.infrastructure.databases.vector.create_vector_engine import (
-                create_vector_engine,
                 evict_vector_engine,
-                is_vector_engine_cached,
             )
 
-            if is_vector_engine_cached(**v_cfg):
-                detached.append(create_vector_engine(**v_cfg))
-                evict_vector_engine(**v_cfg)
-
-        return detached
-
-    async def _adopt_orphaned_close(self, ds_key: str, pending: "PendingClose") -> None:
-        """Finish a close whose scheduling loop died before it completed.
-
-        ``engine.close()`` alone is not enough here: the engines are lease
-        proxies, and their *real* close can be parked in cache machinery bound
-        to the dead loop — observed as ``close()`` returning OK while the
-        worker process (and its database file lock) lives on. The worker's
-        session ``shutdown()`` is the unconditional path: synchronous, always
-        reaches terminate, and the OS releases the file locks when the process
-        dies. The proxy ``close()`` afterwards is cache/lease bookkeeping.
-
-        Per-engine failures are surfaced at ERROR and not raised: after a
-        mid-close cancellation, partially-closed state is *expected*, and the
-        definitive arbiter is the engine open that follows (it fails loudly if
-        a file lock genuinely remains).
-        """
-        if self._pending_closes.get(ds_key) is pending:
-            del self._pending_closes[ds_key]
-        for engine in pending.engines:
-            try:
-                session = getattr(engine, "_session", None)
-                if session is not None and hasattr(session, "shutdown"):
-                    # Synchronous by design; brief block on a recovery path is
-                    # the price of a guaranteed worker death + lock release.
-                    session.shutdown()
-                if hasattr(engine, "close"):
-                    await engine.close()
-            except Exception as error:
-                logger.error(
-                    "Adopted close of an orphaned engine failed for %s",
-                    ds_key,
-                    exc_info=(type(error), error, error.__traceback__),
-                )
-
-    async def _close_engines(self, engines: list) -> None:
-        """Close detached engines so their DB file locks are released."""
-        for engine in engines:
-            if hasattr(engine, "close"):
-                await engine.close()
-
-    async def _teardown_subprocess_engines(self) -> None:
-        """Detach and close subprocess-mode engines in one awaited step.
-
-        Used where there is no task to background the close onto (and by
-        callers/tests that want the full synchronous-contract teardown).
-        """
-        await self._close_engines(self._detach_subprocess_engines())
+            evict_vector_engine(**v_cfg)
 
     # -------------------------------------------------------- release_slot_for
     async def release_slot_for(self, dataset_id: Any = None) -> None:
@@ -446,11 +276,11 @@ class DatasetQueue:
         the semaphore slot when the counter reaches zero.
 
         When this is the very last holder across all tasks for
-        ``dataset_id``, subprocess engines are torn down via
-        :meth:`_teardown_subprocess_engines` while the semaphore slot is
-        still held so that no new operation can observe a half-torn-down
-        resource.  The slot is freed afterwards regardless of whether the
-        teardown succeeds or raises.
+        ``dataset_id``, subprocess engines are evicted via
+        :meth:`_evict_subprocess_engines` while the semaphore slot is still
+        held, so no new operation can fetch a dying engine from the cache.
+        The slot is freed afterwards regardless of whether the eviction
+        succeeds or raises.
 
         No-op when the queue is disabled, there is no running task, or the
         current task does not hold a slot for ``dataset_id``.
@@ -460,7 +290,7 @@ class DatasetQueue:
 
         task = asyncio.current_task()
         if task is None:
-            await self._teardown_subprocess_engines()
+            self._evict_subprocess_engines()
             return
 
         task_id = id(task)
@@ -474,21 +304,17 @@ class DatasetQueue:
         if entry.depth > 0:
             return
 
-        # About to fully release.  Detach (evict) subprocess engines only when
-        # no other task holds the same dataset. The eviction itself is
-        # synchronous — after this line no caller can fetch the dying engines
-        # from the cache; they build fresh ones. Only the expensive
-        # ``engine.close()`` runs in the background: the caller's response
-        # must not wait on the close of engines it has already finished
-        # using. The pending-close latch makes the next ``ensure_slot`` for
-        # the same dataset wait for that close before spawning fresh engines
-        # against the same database files.
+        # About to fully release.  Evict subprocess engines only when no other
+        # task holds the same dataset; the engine cache closes them off the
+        # response path (see ``_evict_subprocess_engines`` for the full
+        # contract). The caller's response must not wait on the close of
+        # engines it has already finished using.
         try:
             other_holds = any(
                 ds_key in slots for tid, slots in self._task_slots.items() if tid != task_id
             )
             if not other_holds:
-                self._schedule_background_teardown(ds_key)
+                self._evict_subprocess_engines()
         finally:
             self._task_slots.get(task_id, {}).pop(ds_key, None)
             logger.debug(

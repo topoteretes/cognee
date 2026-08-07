@@ -404,9 +404,9 @@ class TestDatasetQueueEdgeCases:
 
 
 class TestReleaseSlotFor:
-    """Tests for release_slot_for — verifies that _teardown_subprocess_engines
+    """Tests for release_slot_for — verifies that _evict_subprocess_engines
     fires at the right time (last holder) and that the semaphore is always
-    released regardless of teardown outcome."""
+    released regardless of eviction outcome."""
 
     @pytest.fixture(autouse=True)
     def reset_queue_singleton(self):
@@ -419,34 +419,20 @@ class TestReleaseSlotFor:
         yield
 
     @staticmethod
-    async def _drain(queue):
-        """Wait for any backgrounded teardown tasks to finish.
+    def _mock_evict(queue):
+        """Count eviction firings via the synchronous eviction seam.
 
-        return_exceptions: a failing teardown propagates out of its task (it
-        is surfaced by the done-callback, not eaten) — draining must not
-        re-raise it into the test.
-        """
-        import asyncio
-
-        while queue._background_closes:
-            await asyncio.gather(*list(queue._background_closes), return_exceptions=True)
-
-    @staticmethod
-    def _mock_teardown(queue):
-        """Count teardown firings via the synchronous detach seam.
-
-        Detach is the part that must run inline at release (it evicts the
-        engines from the cache); returning no engines means nothing needs a
-        background close, which keeps these tests synchronous.
+        Eviction is the queue's entire teardown responsibility — the engine
+        cache closes evicted engines on its own threads, so there is nothing
+        asynchronous left to wait for at this layer.
         """
         call_count = 0
 
-        def fake_detach():
+        def fake_evict():
             nonlocal call_count
             call_count += 1
-            return []
 
-        queue._detach_subprocess_engines = fake_detach
+        queue._evict_subprocess_engines = fake_evict
 
         class Counter:
             @property
@@ -456,41 +442,38 @@ class TestReleaseSlotFor:
         return Counter()
 
     @pytest.mark.asyncio
-    async def test_teardown_fires_for_single_holder(self):
+    async def test_eviction_fires_for_single_holder(self):
         from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
 
         queue = DatasetQueue(enabled=True, max_concurrent=5)
-        counter = self._mock_teardown(queue)
+        counter = self._mock_evict(queue)
 
         await queue.ensure_slot("ds-A")
         await queue.release_slot_for("ds-A")
-        await self._drain(queue)
         assert counter.value == 1
 
     @pytest.mark.asyncio
-    async def test_teardown_skipped_for_nested_depth(self):
+    async def test_eviction_skipped_for_nested_depth(self):
         from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
 
         queue = DatasetQueue(enabled=True, max_concurrent=5)
-        counter = self._mock_teardown(queue)
+        counter = self._mock_evict(queue)
 
         await queue.ensure_slot("ds-B")
         await queue.ensure_slot("ds-B")  # depth = 2
 
         await queue.release_slot_for("ds-B")
-        await self._drain(queue)
         assert counter.value == 0  # inner exit — skipped
 
         await queue.release_slot_for("ds-B")
-        await self._drain(queue)
         assert counter.value == 1  # outer exit — fires
 
     @pytest.mark.asyncio
-    async def test_teardown_skipped_when_cross_task_holder_exists(self):
+    async def test_eviction_skipped_when_cross_task_holder_exists(self):
         from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
 
         queue = DatasetQueue(enabled=True, max_concurrent=5)
-        counter = self._mock_teardown(queue)
+        counter = self._mock_evict(queue)
         ds = "ds-C"
 
         other_ready = asyncio.Event()
@@ -507,20 +490,18 @@ class TestReleaseSlotFor:
 
         await queue.ensure_slot(ds)
         await queue.release_slot_for(ds)
-        await self._drain(queue)
         assert counter.value == 0  # other task still holds the dataset
 
         check_done.set()
         await task
-        await self._drain(queue)
         assert counter.value == 1  # other task was last
 
     @pytest.mark.asyncio
-    async def test_teardown_fires_after_last_cross_task_holder_releases(self):
+    async def test_eviction_fires_after_last_cross_task_holder_releases(self):
         from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
 
         queue = DatasetQueue(enabled=True, max_concurrent=5)
-        counter = self._mock_teardown(queue)
+        counter = self._mock_evict(queue)
         ds = "ds-D"
 
         other_ready = asyncio.Event()
@@ -537,20 +518,18 @@ class TestReleaseSlotFor:
 
         await queue.ensure_slot(ds)
         await queue.release_slot_for(ds)
-        await self._drain(queue)
         assert counter.value == 0  # not last
 
         main_released.set()
         await task
-        await self._drain(queue)
-        assert counter.value == 1  # other task was last, teardown fired
+        assert counter.value == 1  # other task was last, eviction fired
 
     @pytest.mark.asyncio
-    async def test_different_dataset_does_not_block_teardown(self):
+    async def test_different_dataset_does_not_block_eviction(self):
         from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
 
         queue = DatasetQueue(enabled=True, max_concurrent=5)
-        counter = self._mock_teardown(queue)
+        counter = self._mock_evict(queue)
 
         other_ready = asyncio.Event()
         check_done = asyncio.Event()
@@ -566,51 +545,44 @@ class TestReleaseSlotFor:
 
         await queue.ensure_slot("dataset-OURS")
         await queue.release_slot_for("dataset-OURS")
-        await self._drain(queue)
         assert counter.value == 1  # different dataset — we're last for ours
 
         check_done.set()
         await task
 
     @pytest.mark.asyncio
-    async def test_disabled_queue_skips_teardown(self):
+    async def test_disabled_queue_skips_eviction(self):
         from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
 
         queue = DatasetQueue(enabled=False, max_concurrent=5)
-        counter = self._mock_teardown(queue)
+        counter = self._mock_evict(queue)
 
         await queue.release_slot_for("any-dataset")
-        await self._drain(queue)
         assert counter.value == 0
 
     @pytest.mark.asyncio
-    async def test_teardown_exception_still_releases_slot(self):
-        """Slot must be freed even if _teardown_subprocess_engines raises."""
+    async def test_eviction_exception_still_releases_slot(self):
+        """Slot must be freed even if _evict_subprocess_engines raises; the
+        error propagates to the caller rather than being eaten."""
         from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
 
         queue = DatasetQueue(enabled=True, max_concurrent=1)
         ds = "ds-E"
 
-        queue._detach_subprocess_engines = lambda: [object()]
+        def failing_evict():
+            raise ValueError("eviction failed")
 
-        async def failing_close(engines):
-            raise ValueError("engine teardown failed")
-
-        queue._close_engines = failing_close
+        queue._evict_subprocess_engines = failing_evict
 
         await queue.ensure_slot(ds)
-
-        # The teardown runs in the background: its failure is logged, never
-        # raised into the caller (whose response has already returned).
-        await queue.release_slot_for(ds)
-        await self._drain(queue)
-        assert queue._pending_closes == {}
+        with pytest.raises(ValueError, match="eviction failed"):
+            await queue.release_slot_for(ds)
 
         # Replace the failing mock so the verification calls below don't blow up.
-        self._mock_teardown(queue)
+        self._mock_evict(queue)
 
         # Semaphore must have been released — acquiring again should not block.
-        await queue.ensure_slot(ds)
+        await asyncio.wait_for(queue.ensure_slot(ds), timeout=1)
         await queue.release_slot_for(ds)
 
     @pytest.mark.asyncio
@@ -619,11 +591,10 @@ class TestReleaseSlotFor:
         from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
 
         queue = DatasetQueue(enabled=True, max_concurrent=5)
-        counter = self._mock_teardown(queue)
+        counter = self._mock_evict(queue)
 
         await queue.release_slot_for("never-acquired")
-        await self._drain(queue)
-        assert counter.value == 0  # no entry — teardown not called
+        assert counter.value == 0  # no entry — eviction not called
         assert queue._semaphore._value == 5  # nothing consumed
 
     @pytest.mark.asyncio
@@ -632,7 +603,7 @@ class TestReleaseSlotFor:
         from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
 
         queue = DatasetQueue(enabled=True, max_concurrent=2)
-        counter = self._mock_teardown(queue)
+        counter = self._mock_evict(queue)
         ds = "ds-G"
 
         await queue.ensure_slot(ds)
@@ -640,13 +611,11 @@ class TestReleaseSlotFor:
 
         await queue.release_slot_for(ds)
         assert queue._semaphore._value == 2
-        await self._drain(queue)
         assert counter.value == 1
 
         # Second release — entry already popped, should be a no-op.
         await queue.release_slot_for(ds)
         assert queue._semaphore._value == 2  # not over-released
-        await self._drain(queue)
         assert counter.value == 1  # not called again
 
     @pytest.mark.asyncio
@@ -655,7 +624,7 @@ class TestReleaseSlotFor:
         from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
 
         queue = DatasetQueue(enabled=True, max_concurrent=3)
-        self._mock_teardown(queue)
+        self._mock_evict(queue)
 
         await queue.ensure_slot("ds1")
         await queue.ensure_slot("ds2")
@@ -674,12 +643,12 @@ class TestReleaseSlotFor:
         assert queue._semaphore._value == 3  # all back
 
     @pytest.mark.asyncio
-    async def test_three_tasks_teardown_fires_only_on_last(self):
-        """With three tasks on the same dataset, teardown fires once on the last exit."""
+    async def test_three_tasks_eviction_fires_only_on_last(self):
+        """With three tasks on the same dataset, eviction fires once on the last exit."""
         from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
 
         queue = DatasetQueue(enabled=True, max_concurrent=5)
-        counter = self._mock_teardown(queue)
+        counter = self._mock_evict(queue)
         ds = "shared-ds"
 
         gate_1 = asyncio.Event()
@@ -707,27 +676,24 @@ class TestReleaseSlotFor:
         await queue.ensure_slot(ds)
 
         await queue.release_slot_for(ds)
-        await self._drain(queue)
         assert counter.value == 0
 
         gate_1.set()
         await t1
-        await self._drain(queue)
         assert counter.value == 0
 
         gate_2.set()
         await t2
-        await self._drain(queue)
         assert counter.value == 1
 
     @pytest.mark.asyncio
-    async def test_teardown_fires_exactly_once_under_stress(self):
-        """Many tasks on the same dataset; teardown fires exactly once total."""
+    async def test_eviction_fires_exactly_once_under_stress(self):
+        """Many tasks on the same dataset; eviction fires exactly once total."""
         from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
 
         n_tasks = 20
         queue = DatasetQueue(enabled=True, max_concurrent=n_tasks + 1)
-        counter = self._mock_teardown(queue)
+        counter = self._mock_evict(queue)
         ds = "stress-ds"
 
         arrived = 0
@@ -744,17 +710,16 @@ class TestReleaseSlotFor:
             await queue.release_slot_for(ds)
 
         await asyncio.gather(*[asyncio.create_task(worker()) for _ in range(n_tasks)])
-        await self._drain(queue)
         assert counter.value == 1
 
     @pytest.mark.asyncio
-    async def test_backstop_frees_slot_then_remaining_task_fires_teardown(self):
-        """Task-end backstop releases a crashed task's slot without teardown.
-        The surviving task should then be the last holder and fire teardown."""
+    async def test_backstop_frees_slot_then_remaining_task_fires_eviction(self):
+        """Task-end backstop releases a crashed task's slot without eviction.
+        The surviving task should then be the last holder and fire eviction."""
         from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
 
         queue = DatasetQueue(enabled=True, max_concurrent=5)
-        counter = self._mock_teardown(queue)
+        counter = self._mock_evict(queue)
         ds = "backstop-ds"
 
         crashed_ready = asyncio.Event()
@@ -777,7 +742,6 @@ class TestReleaseSlotFor:
 
         await queue.ensure_slot(ds)
         await queue.release_slot_for(ds)
-        await self._drain(queue)
         assert counter.value == 1
 
     @pytest.mark.asyncio
@@ -787,7 +751,7 @@ class TestReleaseSlotFor:
         from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
 
         queue = DatasetQueue(enabled=True, max_concurrent=5)
-        counter = self._mock_teardown(queue)
+        counter = self._mock_evict(queue)
         ds = "combo-ds"
 
         other_ready = asyncio.Event()
@@ -806,16 +770,13 @@ class TestReleaseSlotFor:
         await queue.ensure_slot(ds)  # depth = 2
 
         await queue.release_slot_for(ds)
-        await self._drain(queue)
         assert counter.value == 0  # depth 2 → 1
 
         await queue.release_slot_for(ds)
-        await self._drain(queue)
         assert counter.value == 0  # depth 0, but other task holds it
 
         main_done.set()
         await task
-        await self._drain(queue)
         assert counter.value == 1  # other task was last
 
     @pytest.mark.asyncio
@@ -824,19 +785,17 @@ class TestReleaseSlotFor:
         from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
 
         queue = DatasetQueue(enabled=True, max_concurrent=5)
-        counter = self._mock_teardown(queue)
+        counter = self._mock_evict(queue)
 
         await queue.ensure_slot("ds-A")
         await queue.ensure_slot("ds-B")
         assert queue._semaphore._value == 3
 
         await queue.release_slot_for("ds-A")
-        await self._drain(queue)
         assert counter.value == 1
         assert queue._semaphore._value == 4
 
         await queue.release_slot_for("ds-B")
-        await self._drain(queue)
         assert counter.value == 2
         assert queue._semaphore._value == 5
 
@@ -846,48 +805,40 @@ class TestReleaseSlotFor:
         from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
 
         queue = DatasetQueue(enabled=True, max_concurrent=2)
-        counter = self._mock_teardown(queue)
+        counter = self._mock_evict(queue)
 
         await queue.ensure_slot(None)
         assert queue._semaphore._value == 1
 
         await queue.release_slot_for(None)
-        await self._drain(queue)
         assert counter.value == 1
         assert queue._semaphore._value == 2
 
     @pytest.mark.asyncio
-    async def test_teardown_exception_does_not_affect_other_datasets(self):
-        """If teardown raises for one dataset, another dataset's slot is unaffected."""
+    async def test_eviction_exception_does_not_affect_other_datasets(self):
+        """If eviction raises for one dataset, another dataset's slot is unaffected."""
         from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
 
         queue = DatasetQueue(enabled=True, max_concurrent=5)
         call_count = 0
 
-        queue._detach_subprocess_engines = lambda: [object()]
-
-        async def close_fails_once(engines):
+        def evict_fails_once():
             nonlocal call_count
             call_count += 1
             if call_count == 1:
                 raise RuntimeError("kaboom")
 
-        queue._close_engines = close_fails_once
+        queue._evict_subprocess_engines = evict_fails_once
 
         await queue.ensure_slot("ds-ok")
         await queue.ensure_slot("ds-fail")
 
-        # Background teardown failure for ds-fail is logged, not raised.
-        await queue.release_slot_for("ds-fail")
+        with pytest.raises(RuntimeError, match="kaboom"):
+            await queue.release_slot_for("ds-fail")
 
         # ds-ok is still held and can be released normally.
         await queue.release_slot_for("ds-ok")
-        while queue._background_closes:
-            import asyncio
-
-            await asyncio.gather(*list(queue._background_closes), return_exceptions=True)
         assert call_count == 2
-        assert queue._pending_closes == {}
         assert queue._semaphore._value == 5
 
 
@@ -939,199 +890,92 @@ class TestActiveDatasetIds:
         assert queue.active_dataset_ids() == set()
 
 
-class TestBackgroundTeardownLatch:
-    """The close runs off the response path; detach stays synchronous."""
+class TestEvictSubprocessEngines:
+    """The queue's teardown is eviction only — the engine cache owns the close."""
 
     @pytest.mark.asyncio
-    async def test_detach_is_synchronous_at_release(self):
+    async def test_evict_is_synchronous_at_release(self):
         """Eviction must complete before release returns — a caller on the
         very next line must never fetch a dying engine from the cache.
-        (Regression: deferring eviction into the background task let e2e
-        flows grab an engine the close then killed under them:
-        "LadybugAdapter is closed; a new adapter must be created".)"""
+        (Regression: deferring eviction let e2e flows grab an engine whose
+        close then killed it under them: "LadybugAdapter is closed; a new
+        adapter must be created".)"""
         from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
 
         queue = DatasetQueue(enabled=True, max_concurrent=5)
-        detached = False
+        evicted = False
 
-        def detach():
-            nonlocal detached
-            detached = True
-            return []
+        def evict():
+            nonlocal evicted
+            evicted = True
 
-        queue._detach_subprocess_engines = detach
+        queue._evict_subprocess_engines = evict
         await queue.ensure_slot("ds-S")
         await queue.release_slot_for("ds-S")
-        assert detached, "detach must run inline at release, not in the background task"
+        assert evicted, "eviction must run inline at release"
 
-    @pytest.mark.asyncio
-    async def test_release_returns_before_teardown_completes(self):
-        import asyncio
-
-        from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
-
-        queue = DatasetQueue(enabled=True, max_concurrent=5)
-        started = asyncio.Event()
-        finish = asyncio.Event()
-        done = False
-
-        queue._detach_subprocess_engines = lambda: [object()]
-
-        async def slow_close(engines):
-            nonlocal done
-            started.set()
-            await finish.wait()
-            done = True
-
-        queue._close_engines = slow_close
-
-        await queue.ensure_slot("ds-L")
-        await queue.release_slot_for("ds-L")  # must NOT wait for the close
-        assert not done, "release_slot_for waited on the teardown"
-
-        await started.wait()
-        finish.set()
-        while queue._background_closes:
-            await asyncio.gather(*list(queue._background_closes), return_exceptions=True)
-        assert done
-        assert queue._pending_closes == {}
-
-    @pytest.mark.asyncio
-    async def test_next_acquirer_waits_on_pending_close(self):
-        import asyncio
-
-        from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
-
-        queue = DatasetQueue(enabled=True, max_concurrent=5)
-        finish = asyncio.Event()
-
-        queue._detach_subprocess_engines = lambda: [object()]
-
-        async def slow_close(engines):
-            await finish.wait()
-
-        queue._close_engines = slow_close
-
-        await queue.ensure_slot("ds-L")
-        await queue.release_slot_for("ds-L")
-
-        async def reacquire():
-            await queue.ensure_slot("ds-L")
-            return True
-
-        acquirer = asyncio.create_task(reacquire())
-        await asyncio.sleep(0.05)
-        assert not acquirer.done(), "acquirer must wait for the in-flight close"
-
-        finish.set()
-        assert await asyncio.wait_for(acquirer, timeout=1)
-        await queue.release_slot_for("ds-L")
-
-    @pytest.mark.asyncio
-    async def test_failed_teardown_still_opens_the_latch(self):
-        import asyncio
-
+    def test_eviction_routes_through_cache_evict(self):
+        """_evict_subprocess_engines must evict via the cache helpers — it must
+        NOT fetch engines or close them itself: a fetched lease proxy defers
+        the real close behind the lease and hides it from the cache's
+        pending-close registry, and a loop-scheduled close starves when a
+        synchronous engine spawn blocks the loop (the "Lock is held by PID N"
+        e2e failures)."""
         from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
 
         queue = DatasetQueue(enabled=True, max_concurrent=5)
 
-        queue._detach_subprocess_engines = lambda: [object()]
+        g_cfg = {"graph_database_subprocess_enabled": True, "graph_database_name": "g"}
+        v_cfg = {"vector_db_subprocess_enabled": True, "vector_db_name": "v"}
 
-        async def broken_close(engines):
-            raise RuntimeError("boom")
+        with (
+            patch(
+                "cognee.infrastructure.databases.graph.config.get_graph_context_config",
+                return_value=g_cfg,
+            ),
+            patch(
+                "cognee.infrastructure.databases.vector.config.get_vectordb_context_config",
+                return_value=v_cfg,
+            ),
+            patch(
+                "cognee.infrastructure.databases.graph.get_graph_engine.evict_graph_engine"
+            ) as evict_graph,
+            patch(
+                "cognee.infrastructure.databases.vector.create_vector_engine.evict_vector_engine"
+            ) as evict_vector,
+            patch(
+                "cognee.infrastructure.databases.graph.get_graph_engine.create_graph_engine"
+            ) as create_graph,
+        ):
+            queue._evict_subprocess_engines()
 
-        queue._close_engines = broken_close
+        evict_graph.assert_called_once_with(**g_cfg)
+        evict_vector.assert_called_once_with(**v_cfg)
+        create_graph.assert_not_called()
 
-        await queue.ensure_slot("ds-L")
-        await queue.release_slot_for("ds-L")
-        while queue._background_closes:
-            await asyncio.gather(*list(queue._background_closes), return_exceptions=True)
-        assert queue._pending_closes == {}
-        # And the dataset is acquirable again.
-        await asyncio.wait_for(queue.ensure_slot("ds-L"), timeout=1)
-        await queue.release_slot_for("ds-L")
-
-
-class TestOrphanedCloseAdoption:
-    """A close whose event loop died is finished by the next acquirer."""
-
-    def test_two_loop_phases_adopt_and_close(self):
-        """The e2e script shape: asyncio.run() #1 schedules a close and dies
-        before it runs; asyncio.run() #2 must adopt it — closing the old
-        engines on the live loop — before proceeding."""
-        import asyncio
-
+    def test_eviction_skips_non_subprocess_engines(self):
+        """Engines running in-process are not evicted at release."""
         from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
 
         queue = DatasetQueue(enabled=True, max_concurrent=5)
-        closed = []
 
-        class FakeEngine:
-            async def close(self):
-                closed.append(self)
+        with (
+            patch(
+                "cognee.infrastructure.databases.graph.config.get_graph_context_config",
+                return_value={"graph_database_subprocess_enabled": False},
+            ),
+            patch(
+                "cognee.infrastructure.databases.vector.config.get_vectordb_context_config",
+                return_value={"vector_db_subprocess_enabled": False},
+            ),
+            patch(
+                "cognee.infrastructure.databases.graph.get_graph_engine.evict_graph_engine"
+            ) as evict_graph,
+            patch(
+                "cognee.infrastructure.databases.vector.create_vector_engine.evict_vector_engine"
+            ) as evict_vector,
+        ):
+            queue._evict_subprocess_engines()
 
-        engine = FakeEngine()
-        queue._detach_subprocess_engines = lambda: [engine]
-
-        async def never_finishes(engines):
-            await asyncio.Event().wait()
-
-        queue._close_engines = never_finishes
-
-        async def phase_one():
-            await queue.ensure_slot("ds-O")
-            await queue.release_slot_for("ds-O")
-            # Loop ends here with the close task pending -> cancelled.
-
-        asyncio.run(phase_one())
-        assert "ds:ds-O" in queue._pending_closes, "record must survive loop teardown"
-        assert closed == [], "close must not have completed on the dead loop"
-
-        async def phase_two():
-            await queue.ensure_slot("ds-O")
-            await queue.release_slot_for("ds-O")
-
-        asyncio.run(phase_two())
-        assert closed == [engine], "the next acquirer must adopt and finish the close"
-
-    def test_adoption_tolerates_already_closed_engines(self):
-        """After a mid-close cancellation some engines are already closed;
-        a double-close error must not block the adopting acquirer."""
-        import asyncio
-
-        from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
-
-        queue = DatasetQueue(enabled=True, max_concurrent=5)
-        closed = []
-
-        class BrokenEngine:
-            async def close(self):
-                raise RuntimeError("already closed")
-
-        class GoodEngine:
-            async def close(self):
-                closed.append("good")
-
-        queue._detach_subprocess_engines = lambda: [BrokenEngine(), GoodEngine()]
-
-        async def never_finishes(engines):
-            await asyncio.Event().wait()
-
-        queue._close_engines = never_finishes
-
-        async def phase_one():
-            await queue.ensure_slot("ds-P")
-            await queue.release_slot_for("ds-P")
-
-        asyncio.run(phase_one())
-
-        async def phase_two():
-            await queue.ensure_slot("ds-P")  # must not raise despite BrokenEngine
-            # Nothing new to detach: this release must not create a fresh
-            # pending record — we are asserting the adopted one was consumed.
-            queue._detach_subprocess_engines = lambda: []
-            await queue.release_slot_for("ds-P")
-
-        asyncio.run(phase_two())
-        assert closed == ["good"], "surviving engines still get closed"
-        assert "ds:ds-P" not in queue._pending_closes
+        evict_graph.assert_not_called()
+        evict_vector.assert_not_called()
