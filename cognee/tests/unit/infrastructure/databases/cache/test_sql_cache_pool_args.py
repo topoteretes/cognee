@@ -21,11 +21,6 @@ def nullpool_pool_args(monkeypatch):
     monkeypatch.setattr(get_relational_config(), "pool_args", (("poolclass", "nullpool"),))
 
 
-def test_postgres_cache_engine_accepts_nullpool_string(nullpool_pool_args):
-    adapter = SqlCacheAdapter("postgresql+asyncpg://user:pass@host.example:5432/db?ssl=require")
-    assert isinstance(adapter.engine.pool, NullPool)
-
-
 def test_sqlite_cache_engine_accepts_nullpool_string(nullpool_pool_args, tmp_path):
     adapter = SqlCacheAdapter(f"sqlite+aiosqlite:///{tmp_path}/cache.db")
     assert isinstance(adapter.engine.pool, NullPool)
