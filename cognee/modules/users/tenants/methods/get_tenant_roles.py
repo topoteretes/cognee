@@ -28,8 +28,8 @@ async def get_tenant_roles(tenant_id: UUID, user):
         query = select(Role).options(selectinload(Role.users)).where(Role.tenant_id == tenant_id)
 
         if not can_manage_users:
-            query = query.join(UserRole, Role.id == UserRole.role_id).where(
-                UserRole.user_id == user.id
+            query = query.where(
+                Role.id.in_(select(UserRole.role_id).where(UserRole.user_id == user.id))
             )
 
         roles_result = await session.execute(query)
