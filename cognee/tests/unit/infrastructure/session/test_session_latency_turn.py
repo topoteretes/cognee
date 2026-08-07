@@ -187,10 +187,35 @@ async def test_answer_uses_the_callers_own_prompts_and_response_model():
 
     assert answer == Answer(text="structured")
     call = generate.await_args.kwargs
-    # No wrapper model and no appended contract: the caller's own contract, unchanged.
+    # No wrapper model: the caller's own response contract, unchanged.
     assert call["response_model"] is Answer
-    assert call["system_prompt"] == "caller system prompt"
+    assert call["system_prompt"].startswith("caller system prompt")
     assert call["conversation_history"] == "active guidance\n\nhistory"
+
+
+@pytest.mark.asyncio
+async def test_answer_prompt_carries_the_conversational_turn_rule():
+    """Latency mode answers acknowledgements itself, so the rule must reach the model."""
+    with patch(
+        "cognee.infrastructure.session.session_latency_turn.generate_completion",
+        new_callable=AsyncMock,
+        return_value="Got it.",
+    ) as generate:
+        await complete_latency_turn(
+            snapshot=SessionTurnSnapshot(raw_message="ok thanks"),
+            context="unrelated context",
+            user_id="not-a-uuid",
+            session_id="s1",
+            user_prompt_path="context_for_question.txt",
+            system_prompt_path="hybrid_answer_guarded.txt",
+            system_prompt=None,
+            response_model=str,
+        )
+
+    system_prompt = generate.await_args.kwargs["system_prompt"]
+    # The caller's guarded prompt is kept whole, with the rule appended after it.
+    assert system_prompt.startswith("Answer only from the retrieved evidence")
+    assert "reply briefly in kind" in system_prompt
 
 
 @pytest.mark.asyncio

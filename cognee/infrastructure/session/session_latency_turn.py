@@ -12,6 +12,7 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
+from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.infrastructure.session.feedback_detection import analyze_turn_for_session_context
 from cognee.infrastructure.session.feedback_models import SessionTurnAnalysis
 from cognee.infrastructure.session.session_search_models import SessionTurnSnapshot
@@ -32,6 +33,11 @@ logger = get_logger("session_latency_turn")
 # The analysis runs alongside the answer, so it normally finishes first. This only bounds
 # the pathological case where it would hold the turn open past its own answer.
 ANALYSIS_TIMEOUT_SECONDS = 30.0
+
+# Accuracy mode intercepts conversational turns before the answer call, using the
+# analysis's own reply. Latency mode has already started answering by the time the
+# analysis lands, so the answer prompt has to handle them itself.
+CONVERSATIONAL_TURN_PROMPT = "session_conversational_turn.txt"
 
 
 async def load_latency_turn_snapshot(
@@ -145,13 +151,23 @@ async def complete_latency_turn(
     system_prompt: str | None,
     response_model: type,
 ) -> Any:
-    """Generate the turn's answer with the caller's own prompts and response model."""
+    """Generate the turn's answer with the caller's own prompts and response model.
+
+    The caller's system prompt is used as-is, with one appended rule for conversational
+    turns; the guarded answer prompts would otherwise report insufficient evidence when
+    the user only said "thanks".
+    """
+    resolved_system_prompt = system_prompt or read_query_prompt(system_prompt_path) or ""
     completion_call = generate_completion(
         query=snapshot.raw_message,
         context=context,
         user_prompt_path=user_prompt_path,
         system_prompt_path=system_prompt_path,
-        system_prompt=system_prompt,
+        system_prompt="\n".join(
+            part
+            for part in (resolved_system_prompt, read_query_prompt(CONVERSATIONAL_TURN_PROMPT))
+            if part
+        ),
         conversation_history=compose_session_prompt(
             snapshot.active_context,
             snapshot.completion_history,
