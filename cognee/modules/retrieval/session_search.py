@@ -2,7 +2,7 @@ import asyncio
 import re
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Any, Literal
+from typing import Any
 
 from cognee.context_global_variables import session_user
 from cognee.infrastructure.databases.cache.config import CacheConfig
@@ -19,10 +19,7 @@ from cognee.infrastructure.session.session_search_models import SessionTurnSnaps
 from cognee.modules.retrieval.utils.access_tracking import update_node_access_timestamps
 from cognee.modules.search.types import SearchType
 
-SessionSearchMode = Literal["accuracy_optimized", "latency_optimized"]
-
-ACCURACY_OPTIMIZED: SessionSearchMode = "accuracy_optimized"
-LATENCY_OPTIMIZED: SessionSearchMode = "latency_optimized"
+LATENCY_OPTIMIZED = "latency_optimized"
 MAX_CONTEXTUAL_QUERY_CHARS = 2000
 
 
@@ -60,29 +57,25 @@ def _latency_retriever_types() -> frozenset[type]:
     )
 
 
-def resolve_session_search_mode(
-    configured_mode: SessionSearchMode,
+def supports_latency_turn(
     *,
     original_search_type: SearchType | None,
     retriever_type: type,
     session_available: bool,
     is_batch: bool,
     only_context: bool,
-) -> SessionSearchMode:
-    """Resolve the effective session-search mode without changing runtime state."""
-    if configured_mode != LATENCY_OPTIMIZED:
-        return ACCURACY_OPTIMIZED
+) -> bool:
+    """Whether this call can run as one latency turn, given latency mode is configured.
 
-    if (
+    Everything else falls back to the accuracy path, which is unchanged.
+    """
+    return not (
         original_search_type is SearchType.FEELING_LUCKY
         or not session_available
         or is_batch
         or only_context
         or retriever_type not in _latency_retriever_types()
-    ):
-        return ACCURACY_OPTIMIZED
-
-    return LATENCY_OPTIMIZED
+    )
 
 
 def _normalize_query(value: str) -> str:
@@ -141,9 +134,8 @@ async def retrieve_latency_context(
     Returns ``(retrieved_objects, context)``.
     """
     contextual_query = build_contextual_query(raw_query, snapshot.recent_qas)
-    use_contextual_lane = bool(contextual_query) and _normalize_query(
-        contextual_query
-    ) != _normalize_query(raw_query)
+    # With no prior turns the builder returns the raw query itself, so there is one lane.
+    use_contextual_lane = bool(contextual_query) and contextual_query != _normalize_query(raw_query)
 
     if use_contextual_lane:
         raw_result, contextual_result = await asyncio.gather(
@@ -155,13 +147,11 @@ async def retrieve_latency_context(
         raw_result = await retriever.get_retrieved_objects(query=raw_query)
         contextual_result = None
 
-    raw_error = raw_result if isinstance(raw_result, Exception) else None
-    contextual_error = contextual_result if isinstance(contextual_result, Exception) else None
-    if raw_error is not None and (not use_contextual_lane or contextual_error is not None):
-        raise raw_error
-    if raw_error is not None:
+    if isinstance(raw_result, Exception):
+        if not use_contextual_lane or isinstance(contextual_result, Exception):
+            raise raw_result
         raw_result = None
-    if contextual_error is not None:
+    if isinstance(contextual_result, Exception):
         contextual_result = None
 
     retrieved_objects = retriever.merge_retrieved_objects(raw_result, contextual_result)
@@ -196,7 +186,7 @@ async def _retrieve_and_answer(
         user_prompt_path=retriever.user_prompt_path,
         system_prompt_path=retriever.system_prompt_path,
         system_prompt=retriever.system_prompt,
-        response_model=getattr(retriever, "response_model", str),
+        response_model=retriever.response_model,
     )
     return retrieved_objects, context, answer
 
@@ -226,19 +216,17 @@ async def run_latency_session_search(
         return None
 
     session_manager = get_session_manager()
-    mode = resolve_session_search_mode(
-        cache_config.session_search_mode,
+    if not supports_latency_turn(
         original_search_type=original_search_type,
         retriever_type=type(retriever),
         session_available=session_manager.is_session_available_for_completion(user_id),
         is_batch=is_batch,
         only_context=only_context,
-    )
-    if mode != LATENCY_OPTIMIZED:
+    ):
         return None
 
     resolved_user_id = str(user_id)
-    resolved_session_id = session_manager.resolve_session_id(getattr(retriever, "session_id", None))
+    resolved_session_id = session_manager.resolve_session_id(retriever.session_id)
     async with session_turn_lock(resolved_user_id, resolved_session_id):
         snapshot = await load_latency_turn_snapshot(
             session_manager,
@@ -259,7 +247,8 @@ async def run_latency_session_search(
                 answer_lane,
             )
         else:
-            analysis, answered = SessionTurnAnalysis(), await answer_lane
+            analysis = SessionTurnAnalysis()
+            answered = await answer_lane
         retrieved_objects, context, answer = answered
 
         await commit_latency_turn(

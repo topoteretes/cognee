@@ -33,6 +33,16 @@ async def _effective_search_type(query_type: SearchType, query_text: str) -> Sea
     return query_type
 
 
+def _dataset_fields(kwargs: dict) -> dict:
+    """The dataset identity every SearchResultPayload carries, absent when unscoped."""
+    dataset = kwargs.get("dataset")
+    return {
+        "dataset_name": dataset.name if dataset else None,
+        "dataset_id": dataset.id if dataset else None,
+        "dataset_tenant_id": dataset.tenant_id if dataset else None,
+    }
+
+
 def _method_accepts_kwarg(method, name: str) -> bool:
     parameters = signature(method).parameters.values()
     return any(
@@ -71,9 +81,7 @@ async def get_retriever_output(
             completion=latency_result.completion,
             search_type=effective_query_type,
             only_context=False,
-            dataset_name=kwargs.get("dataset").name if kwargs.get("dataset") else None,
-            dataset_id=kwargs.get("dataset").id if kwargs.get("dataset") else None,
-            dataset_tenant_id=kwargs.get("dataset").tenant_id if kwargs.get("dataset") else None,
+            **_dataset_fields(kwargs),
         )
 
     effective_query = query_text
@@ -88,11 +96,7 @@ async def get_retriever_output(
                 completion=[turn_preparation.response_to_user or "Got it."],
                 search_type=effective_query_type,
                 only_context=False,
-                dataset_name=kwargs.get("dataset").name if kwargs.get("dataset") else None,
-                dataset_id=kwargs.get("dataset").id if kwargs.get("dataset") else None,
-                dataset_tenant_id=kwargs.get("dataset").tenant_id
-                if kwargs.get("dataset")
-                else None,
+                **_dataset_fields(kwargs),
             )
         effective_query = turn_preparation.effective_query or query_text
 
@@ -152,9 +156,7 @@ async def get_retriever_output(
         completion=completion,
         search_type=effective_query_type,
         only_context=only_context,
-        dataset_name=kwargs.get("dataset").name if kwargs.get("dataset") else None,
-        dataset_id=kwargs.get("dataset").id if kwargs.get("dataset") else None,
-        dataset_tenant_id=kwargs.get("dataset").tenant_id if kwargs.get("dataset") else None,
+        **_dataset_fields(kwargs),
     )
 
     return search_result

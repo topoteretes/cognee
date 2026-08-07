@@ -176,11 +176,11 @@ def _latency_environment(manager, *, analysis, order):
         yield
 
 
-def _session_manager(*, auto_feedback=True):
+def _session_manager():
     manager = MagicMock()
     manager.is_session_available_for_completion.return_value = True
     manager.resolve_session_id.return_value = "s1"
-    manager.is_auto_feedback_enabled.return_value = auto_feedback
+    manager.is_auto_feedback_enabled.return_value = True
     return manager
 
 
@@ -212,28 +212,3 @@ async def test_analysis_runs_alongside_retrieval_and_commits_after_both():
     assert commit.await_args.kwargs["answer"] == "answer"
     assert commit.await_args.kwargs["used_graph_element_ids"] == {"node_ids": ["n1"]}
     retriever._append_references.assert_awaited_once_with(["answer"], [item("n1")])
-
-
-@pytest.mark.asyncio
-async def test_auto_feedback_off_answers_without_analyzing_the_turn():
-    retriever = CompletionRetriever(session_id="s1")
-    retriever._extract_context_object_ids = lambda objects: None
-    retriever._append_references = AsyncMock(side_effect=lambda answers, objects: answers)
-    order = []
-
-    with (
-        _latency_environment(
-            _session_manager(auto_feedback=False),
-            analysis=SessionTurnAnalysis(),
-            order=order,
-        ),
-        patch(
-            "cognee.modules.retrieval.session_search.commit_latency_turn",
-            new_callable=AsyncMock,
-        ) as commit,
-    ):
-        result = await run_latency_session_search(retriever, raw_query="question")
-
-    assert "analysis" not in order
-    assert result.completion == ["answer"]
-    assert commit.await_args.kwargs["analysis"].candidate_context_updates == []

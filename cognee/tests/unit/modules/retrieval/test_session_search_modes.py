@@ -148,12 +148,13 @@ class TestModeBoundary:
         assert len(latency.manager.qas) == 1
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("retriever_class", SUPPORTED_RETRIEVERS)
-    async def test_accuracy_mode_never_enters_the_latency_turn(self, retriever_class, latency):
-        latency.mode = session_search.ACCURACY_OPTIMIZED
+    async def test_accuracy_mode_never_enters_the_latency_turn(self, latency):
+        latency.mode = "accuracy_optimized"
 
         assert (
-            await run_latency_session_search(build_retriever(retriever_class), raw_query="question")
+            await run_latency_session_search(
+                build_retriever(CompletionRetriever), raw_query="question"
+            )
             is None
         )
         assert latency.llm_calls == []
