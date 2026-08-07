@@ -223,13 +223,13 @@ e. `should_answer` and `effective_query` are decided from those fields
 ### 3 — Short-circuit a conversational turn
 
 If `should_answer` is `False`,
-[get_retriever_output L92](../cognee/modules/search/methods/get_retriever_output.py) returns the
+[`should_answer` (L97)](../cognee/modules/search/methods/get_retriever_output.py) returns the
 acknowledgement immediately. No retrieval. No second LLM call. "ok, thanks" costs one call.
 
 ### 4 — Retrieve once
 
-[line 107](../cognee/modules/search/methods/get_retriever_output.py) —
-`get_retrieved_objects(query=effective_query)`, using the **rewritten** query from step 2. Then
+[`get_retrieved_objects` (L112)](../cognee/modules/search/methods/get_retriever_output.py)
+is called with the **rewritten** query from step 2. Then
 `update_node_access_timestamps`, then `get_context_from_objects`.
 
 One retrieval, one result set. Nothing to merge — that is what makes flow 4 concurrent-only.
@@ -389,7 +389,7 @@ Ratings target `snapshot.previous_served_context`; the QA row records
 
 ### 8 — Release and return
 
-Lock released, `_append_references` applied for string answers, `ConcurrentTurnResult` returned
+Lock released, `append_references` applied for string answers, `ConcurrentTurnResult` returned
 to whichever door in flow 1 asked.
 
 ### What this mode buys and costs

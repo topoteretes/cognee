@@ -10,7 +10,7 @@ from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.hybrid.chunks import retrieve_hybrid_chunks, search_collection
 from cognee.modules.retrieval.hybrid.context import (
-    extract_context_object_ids,
+    extract_context_object_ids as extract_hybrid_object_ids,
     format_hybrid_context,
 )
 from cognee.modules.retrieval.hybrid.entities import build_entities
@@ -464,7 +464,7 @@ class HybridRetriever(BaseRetriever):
                 system_prompt=self.system_prompt,
                 response_model=self.response_model,
                 summarize_context=False,
-                used_graph_element_ids=extract_context_object_ids(retrieved_objects),
+                used_graph_element_ids=extract_hybrid_object_ids(retrieved_objects),
                 max_context_chars=getattr(self, "max_context_chars", None),
                 effective_query=effective_query,
                 turn_preparation=turn_preparation,
@@ -481,7 +481,7 @@ class HybridRetriever(BaseRetriever):
             )
             completions = [completion]
 
-        return await self._append_references(completions, retrieved_objects)
+        return await self.append_references(completions, retrieved_objects)
 
     def merge_retrieved_objects(self, primary: Any, secondary: Any) -> Any:
         return merge_hybrid_results(
@@ -493,10 +493,10 @@ class HybridRetriever(BaseRetriever):
             graph_limit=self._graph_fallback.top_k,
         )
 
-    def _extract_context_object_ids(self, retrieved_objects: Any) -> Optional[Dict[str, List[str]]]:
-        return extract_context_object_ids(retrieved_objects)
+    def extract_context_object_ids(self, retrieved_objects: Any) -> Optional[Dict[str, List[str]]]:
+        return extract_hybrid_object_ids(retrieved_objects)
 
-    async def _append_references(self, completions: List[Any], retrieved_objects: Any) -> List[Any]:
+    async def append_references(self, completions: List[Any], retrieved_objects: Any) -> List[Any]:
         return self._append_chunk_references(completions, retrieved_objects)
 
     def _append_chunk_references(self, completions: List[Any], retrieved_objects: Any) -> List[Any]:

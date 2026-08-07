@@ -134,7 +134,7 @@ def build_retriever(retriever_class, **kwargs):
         results = {"chunks": results, "entities": [], "facts": []}
     retriever.get_retrieved_objects = AsyncMock(return_value=results)
     retriever.get_context_from_objects = AsyncMock(return_value="context")
-    retriever._append_references = AsyncMock(side_effect=lambda answers, objects: answers)
+    retriever.append_references = AsyncMock(side_effect=lambda answers, objects: answers)
     return retriever
 
 

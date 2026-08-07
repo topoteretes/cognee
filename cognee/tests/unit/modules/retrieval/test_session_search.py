@@ -187,8 +187,8 @@ def _session_manager():
 @pytest.mark.asyncio
 async def test_analysis_runs_alongside_retrieval_and_commits_after_both():
     retriever = CompletionRetriever(session_id="s1", include_references=True)
-    retriever._extract_context_object_ids = lambda objects: {"node_ids": ["n1"]}
-    retriever._append_references = AsyncMock(return_value=["answer with references"])
+    retriever.extract_context_object_ids = lambda objects: {"node_ids": ["n1"]}
+    retriever.append_references = AsyncMock(return_value=["answer with references"])
     analysis = SessionTurnAnalysis(
         candidate_context_updates=[
             {"section": "rules", "content": "Cite sources.", "confidence": 0.9}
@@ -211,4 +211,4 @@ async def test_analysis_runs_alongside_retrieval_and_commits_after_both():
     assert commit.await_args.kwargs["analysis"] is analysis
     assert commit.await_args.kwargs["answer"] == "answer"
     assert commit.await_args.kwargs["used_graph_element_ids"] == {"node_ids": ["n1"]}
-    retriever._append_references.assert_awaited_once_with(["answer"], [item("n1")])
+    retriever.append_references.assert_awaited_once_with(["answer"], [item("n1")])

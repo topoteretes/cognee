@@ -261,12 +261,12 @@ async def try_concurrent_turn(
             answer=answer,
             user_id=resolved_user_id,
             session_id=resolved_session_id,
-            used_graph_element_ids=retriever._extract_context_object_ids(retrieved_objects),
+            used_graph_element_ids=retriever.extract_context_object_ids(retrieved_objects),
         )
 
     completions = [answer]
     if isinstance(answer, str):
-        completions = await retriever._append_references(completions, retrieved_objects)
+        completions = await retriever.append_references(completions, retrieved_objects)
     return ConcurrentTurnResult(
         retrieved_objects=retrieved_objects,
         context=context,

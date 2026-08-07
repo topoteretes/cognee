@@ -70,7 +70,7 @@ class TemporalRetriever(GraphCompletionRetriever):
         self.node_type = node_type
         self.node_name = node_name
 
-    def _extract_context_object_ids(self, retrieved_objects: Any) -> Optional[Dict[str, List[str]]]:
+    def extract_context_object_ids(self, retrieved_objects: Any) -> Optional[Dict[str, List[str]]]:
         """Extract node_ids/edge_ids from temporal dict (triplets or relevant_events)."""
         if isinstance(retrieved_objects, dict):
             return extract_from_temporal_dict(retrieved_objects)

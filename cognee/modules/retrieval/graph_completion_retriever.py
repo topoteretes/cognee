@@ -279,7 +279,7 @@ class GraphCompletionRetriever(BaseRetriever):
     def merge_retrieved_objects(self, primary: Any, secondary: Any) -> Any:
         return merge_ranked(primary, secondary, identity=edge_identity, limit=self.top_k)
 
-    def _extract_context_object_ids(self, retrieved_objects: Any) -> Optional[Dict[str, List[str]]]:
+    def extract_context_object_ids(self, retrieved_objects: Any) -> Optional[Dict[str, List[str]]]:
         """Extract node_ids and edge_ids from list of Edge. Only used for single-query session path."""
         if not isinstance(retrieved_objects, list) or not retrieved_objects:
             return None
@@ -325,7 +325,7 @@ class GraphCompletionRetriever(BaseRetriever):
             enabled=self.include_references and self.response_model is str,
         )
 
-    async def _append_references(self, completions: List[Any], retrieved_objects: Any) -> List[Any]:
+    async def append_references(self, completions: List[Any], retrieved_objects: Any) -> List[Any]:
         return await self._append_graph_evidence(completions)
 
     async def get_completion_from_context(
@@ -358,7 +358,7 @@ class GraphCompletionRetriever(BaseRetriever):
         use_session = self._use_session_cache() and not query_batch
         if use_session:
             sm = get_session_manager()
-            used_graph_element_ids = self._extract_context_object_ids(retrieved_objects)
+            used_graph_element_ids = self.extract_context_object_ids(retrieved_objects)
             completion = await sm.generate_completion_with_session(
                 session_id=self.session_id,
                 query=query,
@@ -383,7 +383,7 @@ class GraphCompletionRetriever(BaseRetriever):
         # this method (including via super()) appends references once. Evidence is
         # grounded in each completion's own text, so a cache-hit answer never
         # cites chunks that share nothing with it.
-        return await self._append_references(completions, retrieved_objects)
+        return await self.append_references(completions, retrieved_objects)
 
     async def get_completion(
         self, query: Optional[str] = None, query_batch: Optional[List[str]] = None

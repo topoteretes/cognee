@@ -84,6 +84,11 @@ async def get_retriever_output(
             **_dataset_fields(kwargs),
         )
 
+    # --- sequential path -------------------------------------------------------------
+    # Reached whenever try_concurrent_turn declines: analyze the turn, retrieve once with
+    # the analysis's rewritten query, then answer. This is the general path -- it handles
+    # every retriever, batches, only_context and FEELING_LUCKY -- and concurrent mode does
+    # not change a line of it.
     effective_query = query_text
     turn_preparation = None
 

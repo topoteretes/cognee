@@ -76,7 +76,7 @@ class BaseRetriever(ABC):
         """
         pass
 
-    def _extract_context_object_ids(self, retrieved_objects: Any) -> Optional[Dict[str, List[str]]]:
+    def extract_context_object_ids(self, retrieved_objects: Any) -> Optional[Dict[str, List[str]]]:
         """
         Extract node_ids and edge_ids from retrieved_objects for session QA.
         Override in retrievers that use session and have graph elements to store.
@@ -94,7 +94,7 @@ class BaseRetriever(ABC):
         """
         return primary
 
-    async def _append_references(self, completions: list[Any], retrieved_objects: Any) -> list[Any]:
+    async def append_references(self, completions: list[Any], retrieved_objects: Any) -> list[Any]:
         """Apply retriever-owned references; unsupported retrievers leave answers unchanged."""
         return completions
 

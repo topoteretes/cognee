@@ -65,7 +65,7 @@ class CompletionRetriever(BaseRetriever):
     def merge_retrieved_objects(self, primary: Any, secondary: Any) -> Any:
         return merge_ranked(primary, secondary, limit=self.top_k)
 
-    def _extract_context_object_ids(self, retrieved_objects: Any) -> Optional[Dict[str, List[str]]]:
+    def extract_context_object_ids(self, retrieved_objects: Any) -> Optional[Dict[str, List[str]]]:
         """Extract node_ids from ScoredResult-like list for session QA."""
         if isinstance(retrieved_objects, list) and retrieved_objects:
             return extract_from_scored_results(retrieved_objects)
@@ -113,7 +113,7 @@ class CompletionRetriever(BaseRetriever):
         completion = await generate_completion(query=query, **kwargs)
         return [completion]
 
-    async def _append_references(self, completions: List[Any], retrieved_objects: Any) -> List[Any]:
+    async def append_references(self, completions: List[Any], retrieved_objects: Any) -> List[Any]:
         return append_chunk_evidence(
             completions,
             retrieved_objects,
@@ -156,7 +156,7 @@ class CompletionRetriever(BaseRetriever):
 
         if use_session:
             sm = get_session_manager()
-            used_graph_element_ids = self._extract_context_object_ids(retrieved_objects)
+            used_graph_element_ids = self.extract_context_object_ids(retrieved_objects)
             completion = await sm.generate_completion_with_session(
                 session_id=self.session_id,
                 query=query,
@@ -179,4 +179,4 @@ class CompletionRetriever(BaseRetriever):
         # logged-in/cached calls also receive references. Evidence is grounded in
         # each completion's own text, so a cache-hit answer never cites chunks
         # that share nothing with it.
-        return await self._append_references(completions, retrieved_objects)
+        return await self.append_references(completions, retrieved_objects)

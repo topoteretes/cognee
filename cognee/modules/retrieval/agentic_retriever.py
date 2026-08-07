@@ -447,7 +447,7 @@ class AgenticRetriever(GraphCompletionRetriever):
             if not session_manager.is_available:
                 return
 
-            used_graph_element_ids = self._extract_context_object_ids(triplets)
+            used_graph_element_ids = self.extract_context_object_ids(triplets)
             served_ids = getattr(self, "_active_context_served_ids", None) or None
             await session_manager.add_qa(
                 user_id=str(user_id),
