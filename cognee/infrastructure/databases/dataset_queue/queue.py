@@ -240,15 +240,31 @@ class DatasetQueue:
     def _schedule_background_teardown(self, ds_key: str) -> None:
         """Detach engines now; close them off the response path.
 
-        The eviction happens synchronously right here — callers arriving after
-        this line build fresh engines, never the dying ones. Only the
-        expensive ``engine.close()`` is backgrounded, behind a pending-close
-        latch for ``ds_key`` so a subsequent acquirer of the same dataset
-        waits for the close instead of racing a fresh engine against
-        still-locked database files. The latch always opens; a close failure
-        is surfaced at ERROR with its traceback from the task's done-callback
-        (the request this close belonged to has already returned, so there is
-        no caller to raise into).
+        Why this exact split, and not something simpler:
+
+        * **Why not await the whole teardown inline** (the original design):
+          ``engine.close()`` takes 1.5–2 s per query, and it ran while the
+          caller's response waited — measured as roughly half of every serial
+          recall's latency. The teardown only fires when *no other task holds
+          the dataset*, which is precisely when nobody benefits from waiting.
+        * **Why the eviction still happens synchronously here** and only the
+          close is backgrounded: while a dying engine is still in the LRU,
+          any caller — even the same task, one line after context exit — can
+          fetch it, and the background close then kills it mid-use
+          ("LadybugAdapter is closed; a new adapter must be created", which
+          broke nine e2e suites when the whole teardown was deferred).
+          Eviction is cheap and in-memory; after this line every caller
+          builds a fresh engine.
+        * **Why the pending-close latch**: a fresh engine must not open the
+          same database files while the old engine's close is still
+          releasing their locks. The next ``ensure_slot`` for this dataset
+          awaits the latch — moving the wait from the response (never
+          load-bearing there) to the only place it matters.
+
+        The latch always opens; a close failure is surfaced at ERROR with its
+        traceback from the task's done-callback (the request this close
+        belonged to has already returned, so there is no caller to raise
+        into).
         """
         engines = self._detach_subprocess_engines()
         if not engines:
