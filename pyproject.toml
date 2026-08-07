@@ -1,7 +1,7 @@
 [project]
 name = "cognee"
 
-version = "1.4.0.dev4"
+version = "1.4.1.dev1"
 description = "Cognee - is a library for enriching LLM context with a semantic layer for better understanding and reasoning."
 authors = [
     { name = "Vasilije Markovic" },
@@ -153,14 +153,6 @@ evals = [
     "matplotlib>=3.8.3,<4",
     "scikit-learn>=1.6.1,<2",
     "locust>=2.0.0,<3",
-]
-
-# Umbrella extra for the evaluation harness: pulls in the analysis/dashboard
-# dependencies (evals) plus the DeepEval engine. Core cognee never imports these;
-# they are lazily loaded only when the harness or DeepEval engine is used.
-# One-liner install:  pip install "cognee[eval]"
-eval = [
-    "cognee[evals,deepeval]",
 ]
 
 graphiti = ["graphiti-core>=0.28.0"]

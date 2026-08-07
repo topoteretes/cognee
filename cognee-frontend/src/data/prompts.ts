@@ -456,6 +456,10 @@ export const CODEX_HOOKS_ENABLE = "codex features enable hooks";
 export const CODEX_MARKETPLACE_ADD = "codex plugin marketplace add topoteretes/cognee-integrations --ref main";
 export const CODEX_PLUGIN_INSTALL = "codex plugin add cognee@cognee";
 
+// OpenCode's native Cognee plugin installs and configures itself through its
+// package setup command. Credentials are supplied in the preceding dashboard step.
+export const OPENCODE_PLUGIN_SETUP = "npx @cognee/cognee-opencode setup";
+
 // Onboarding: a ready-to-paste prompt telling the connected agent to push the
 // user's existing context into Cognee as long-term memory.
 //
