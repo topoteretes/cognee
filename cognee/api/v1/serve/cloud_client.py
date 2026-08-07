@@ -7,9 +7,22 @@ from uuid import UUID
 
 import aiohttp
 
+from cognee.modules.ingestion.data_types.TextData import create_text_data
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("serve.cloud_client")
+
+
+def _text_upload_filename(text: str) -> str:
+    """Content-hash filename for raw-text uploads, via local ingestion's namer.
+
+    Delegates to ``TextData`` — the same source ``save_data_to_file`` uses for
+    nameless text (``text_<md5>.txt``). A fixed placeholder here instead makes
+    every text upload for a tenant collide on one remote object, racing
+    concurrent adds against the server's content-hash read-back
+    (FileContentHashingError 409s).
+    """
+    return create_text_data(text).get_metadata()["name"]
 
 
 class CloudClient:
@@ -109,7 +122,7 @@ class CloudClient:
             form.add_field(
                 "data",
                 io.BytesIO(data.encode("utf-8")),
-                filename="data.txt",
+                filename=_text_upload_filename(data),
                 content_type="text/plain",
             )
         elif isinstance(data, list):
@@ -118,7 +131,7 @@ class CloudClient:
                     form.add_field(
                         "data",
                         io.BytesIO(item.encode("utf-8")),
-                        filename="data.txt",
+                        filename=_text_upload_filename(item),
                         content_type="text/plain",
                     )
                 elif hasattr(item, "read"):
@@ -248,7 +261,7 @@ class CloudClient:
             form.add_field(
                 "data",
                 io.BytesIO(data.encode("utf-8")),
-                filename="data.txt",
+                filename=_text_upload_filename(data),
                 content_type="text/plain",
             )
         elif isinstance(data, list):
@@ -257,7 +270,7 @@ class CloudClient:
                     form.add_field(
                         "data",
                         io.BytesIO(item.encode("utf-8")),
-                        filename="data.txt",
+                        filename=_text_upload_filename(item),
                         content_type="text/plain",
                     )
                 elif hasattr(item, "read"):
