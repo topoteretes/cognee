@@ -37,8 +37,10 @@ class CacheConfig(BaseSettings):
     - auto_feedback: When caching is True, run automatic feedback detection and session-context
       guidance on each query (default True). Adds one structured-output LLM call per answered
       turn; set AUTO_FEEDBACK=false to disable.
-    - session_search_mode: Session-search execution mode. Defaults to the established
-      accuracy-optimized path.
+    - session_search_mode: Session-search execution mode (default "latency_optimized"):
+      one blocking answer call per turn, with feedback and context updates maintained in
+      the background. Set SESSION_SEARCH_MODE=accuracy_optimized to keep analyzing the
+      turn before retrieval and applying context updates before returning.
     """
 
     cache_backend: Literal["redis", "fs", "tapes", "sqlite", "postgres"] = "sqlite"
@@ -46,7 +48,7 @@ class CacheConfig(BaseSettings):
     cache_purge_interval_seconds: int = 900
     caching: bool = True
     auto_feedback: bool = True
-    session_search_mode: Literal["accuracy_optimized", "latency_optimized"] = "accuracy_optimized"
+    session_search_mode: Literal["accuracy_optimized", "latency_optimized"] = "latency_optimized"
     shared_ladybug_lock: bool = False
     shared_kuzu_lock: bool = False
     cache_host: str = "localhost"

@@ -292,7 +292,47 @@ GRAPH_DATABASE_URL=postgresql+asyncpg://cognee:cognee@localhost:5432/cognee_db
 CACHE_BACKEND=sqlite
 # Optional explicit SQLAlchemy URL for sqlite/postgres cache backends (overrides defaults)
 CACHE_DB_URL=postgresql+asyncpg://cognee:cognee@localhost:5432/cognee_db
+# Session-search execution mode: latency_optimized (default) or accuracy_optimized
+SESSION_SEARCH_MODE=latency_optimized
 ```
+
+#### Session Search Modes
+
+A session search (a `search()` with an active session cache and `AUTO_FEEDBACK=true`) runs
+in one of two modes, chosen deployment-wide by `SESSION_SEARCH_MODE`. There is no
+per-request override.
+
+- **`latency_optimized`** (default) — one blocking LLM call per answered turn. The turn
+  retrieves twice (the raw question and a deterministic, LLM-free conversational rewrite),
+  fuses both lanes, answers once, stores the QA plus its evidence, and hands feedback and
+  context updates to a background maintenance worker.
+- **`accuracy_optimized`** — the older flow: analyze the turn before retrieval, retrieve
+  with the rewritten query, answer, then apply context updates before returning.
+
+Latency mode applies only to `GraphCompletionRetriever`, `HybridRetriever`,
+`CompletionRetriever` (`RAG_COMPLETION`), and `TripletRetriever` (`TRIPLET_COMPLETION`),
+and only at complete-operation boundaries (`search()` and `retriever.get_completion()`).
+Subclasses, batch queries, `only_context`, `FEELING_LUCKY`, sessionless calls, and
+structured-output backends that cannot carry the wrapper model all fall back to
+accuracy mode automatically. With `AUTO_FEEDBACK=false` there is no evidence and no
+maintenance in either mode.
+
+**Draining background maintenance.** Search never awaits maintenance. Long-running hosts
+drain at shutdown — the API server does it in its lifespan, the CLI does it after
+rendering — but a short-lived SDK script must drain in the *same coroutine* that ran the
+search, or the process can exit before maintenance completes:
+
+```python
+async def main():
+    answer = await cognee.search("What did we decide?")
+    print(answer)
+    await cognee.drain_session_maintenance(timeout_seconds=30.0)
+
+asyncio.run(main())
+```
+
+Undrained work is not lost: its evidence stays persisted and is recovered on the next
+`distill_session()` / `improve()` run.
 
 ### LLM Provider Configuration
 

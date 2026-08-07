@@ -36,7 +36,7 @@ def test_cache_config_defaults(monkeypatch):
     assert config.cache_purge_interval_seconds == 900
     assert config.caching is True
     assert config.auto_feedback is True
-    assert config.session_search_mode == "accuracy_optimized"
+    assert config.session_search_mode == "latency_optimized"
     assert config.shared_ladybug_lock is False
     assert config.shared_kuzu_lock is False
     assert config.cache_host == "localhost"
@@ -94,7 +94,7 @@ def test_cache_config_to_dict():
         "cache_purge_interval_seconds": 900,
         "caching": True,
         "auto_feedback": True,
-        "session_search_mode": "accuracy_optimized",
+        "session_search_mode": "latency_optimized",
         "shared_ladybug_lock": True,
         "shared_kuzu_lock": False,
         "cache_host": "test-host",
@@ -139,11 +139,11 @@ def test_cache_config_ssl_from_env(monkeypatch):
 
 
 def test_cache_config_session_search_mode_from_env(monkeypatch):
-    monkeypatch.setenv("SESSION_SEARCH_MODE", "latency_optimized")
+    monkeypatch.setenv("SESSION_SEARCH_MODE", "accuracy_optimized")
 
     config = CacheConfig(_env_file=None)
 
-    assert config.session_search_mode == "latency_optimized"
+    assert config.session_search_mode == "accuracy_optimized"
 
 
 def test_cache_config_rejects_invalid_session_search_mode():
