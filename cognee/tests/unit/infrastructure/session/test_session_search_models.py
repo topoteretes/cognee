@@ -5,7 +5,6 @@ from pydantic import BaseModel, ValidationError
 
 from cognee.infrastructure.session.session_context_models import MAX_CONTEXT_CONTENT_CHARS
 from cognee.infrastructure.session.session_search_models import (
-    MaintenanceApplyResult,
     SessionMaintenanceResult,
     SessionMaintenanceWorkItem,
     SessionSearchCompletion,
@@ -105,7 +104,7 @@ def test_turn_evidence_has_storage_defaults_and_bounds_untrusted_fields():
     assert len(evidence.error) == MAX_CONTEXT_CONTENT_CHARS
 
 
-def test_maintenance_contracts_cap_results_and_errors():
+def test_maintenance_result_caps_ratings_and_candidates():
     result = SessionMaintenanceResult(
         served_context_ratings=[
             {"entry_id": f"ctx-{index}", "rating": "helpful"} for index in range(5)
@@ -115,9 +114,5 @@ def test_maintenance_contracts_cap_results_and_errors():
             for index in range(5)
         ],
     )
-    apply_result = MaintenanceApplyResult(errors=["x" * 500, "two", "three", "four"])
-
     assert len(result.served_context_ratings) == 3
     assert len(result.candidate_context_updates) == 3
-    assert len(apply_result.errors) == 3
-    assert len(apply_result.errors[0]) == MAX_CONTEXT_CONTENT_CHARS

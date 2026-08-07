@@ -140,20 +140,3 @@ class SessionMaintenanceResult(BaseModel):
     @classmethod
     def cap_three(cls, value: list) -> list:
         return value[:3]
-
-
-class MaintenanceApplyResult(BaseModel):
-    """Outcome of applying one maintenance result."""
-
-    model_config = ConfigDict(frozen=True)
-
-    applied_ids: tuple[str, ...] = ()
-    skipped_ids: tuple[str, ...] = ()
-    errors: tuple[str, ...] = ()
-
-    @field_validator("errors", mode="before")
-    @classmethod
-    def bound_errors(cls, value: Any) -> tuple[str, ...]:
-        if not isinstance(value, (list, tuple)):
-            return ()
-        return tuple(str(error).strip()[:MAX_CONTEXT_CONTENT_CHARS] for error in value[:3])

@@ -96,7 +96,7 @@ class TestLoadDistillableSessionInputs:
         self, monkeypatch
     ):
         session_manager = SimpleNamespace(
-            get_session_context_entries_strict=AsyncMock(
+            get_session_context_entries=AsyncMock(
                 return_value=[
                     _context_row(section="rules"),
                     _context_row(section="goals"),
@@ -116,9 +116,10 @@ class TestLoadDistillableSessionInputs:
         assert qa_rows[0]["question"] == "What changed?"
         assert len(context_entries) == 4
         assert evidence == []
-        session_manager.get_session_context_entries_strict.assert_awaited_once_with(
+        session_manager.get_session_context_entries.assert_awaited_once_with(
             user_id="u-1",
             session_id="s-1",
+            strict=True,
         )
         session_manager.get_session.assert_awaited_once_with(
             user_id="u-1",
@@ -129,7 +130,7 @@ class TestLoadDistillableSessionInputs:
     @pytest.mark.asyncio
     async def test_drops_harmful_low_confidence_feedback_and_garbage(self, monkeypatch):
         session_manager = SimpleNamespace(
-            get_session_context_entries_strict=AsyncMock(
+            get_session_context_entries=AsyncMock(
                 return_value=[
                     _context_row(harmful_count=1),
                     _context_row(confidence=0.5),
@@ -152,7 +153,7 @@ class TestLoadDistillableSessionInputs:
     @pytest.mark.asyncio
     async def test_separates_recoverable_evidence_from_context_entries(self, monkeypatch):
         session_manager = SimpleNamespace(
-            get_session_context_entries_strict=AsyncMock(
+            get_session_context_entries=AsyncMock(
                 return_value=[
                     _context_row(),
                     _turn_evidence("d-1", "e1"),
@@ -242,10 +243,7 @@ class _SymmetryFakeSessionManager:
         self.store = [dict(row, last_served_at=None) for row in rows]
         self.updates = 0
 
-    async def get_session_context_entries(self, user_id, session_id):
-        return list(self.store)
-
-    async def get_session_context_entries_strict(self, user_id, session_id):
+    async def get_session_context_entries(self, user_id, session_id, strict=False):
         return list(self.store)
 
     async def update_session_context_entry(self, **kwargs):
@@ -434,7 +432,7 @@ class TestDistillSessionBoundary:
         user = SimpleNamespace(id=uuid4())
         dataset = SimpleNamespace(id=uuid4(), name="team", owner_id=uuid4())
         session_manager = SimpleNamespace(
-            get_session_context_entries_strict=AsyncMock(return_value=[]),
+            get_session_context_entries=AsyncMock(return_value=[]),
             get_session=AsyncMock(return_value=[]),
         )
         calls = []
@@ -455,9 +453,10 @@ class TestDistillSessionBoundary:
         assert result.status == "no_gated_entries"
         assert result.dataset_id == str(dataset.id)
         assert calls == [(["team"], "write", user)]
-        session_manager.get_session_context_entries_strict.assert_awaited_once_with(
+        session_manager.get_session_context_entries.assert_awaited_once_with(
             user_id=str(user.id),
             session_id="s-1",
+            strict=True,
         )
 
     @pytest.mark.asyncio
@@ -486,9 +485,6 @@ class _EvidenceSessionManager:
         self.updates = []
 
     async def get_session_context_entries(self, **kwargs):
-        return list(self.rows)
-
-    async def get_session_context_entries_strict(self, **kwargs):
         return list(self.rows)
 
     async def get_session(self, **kwargs):
@@ -526,7 +522,7 @@ class TestEvidenceRecoveryOrchestration:
         async def fail_read(**kwargs):
             raise RuntimeError("cache unavailable")
 
-        manager.get_session_context_entries_strict = fail_read
+        manager.get_session_context_entries = fail_read
         _patch_distillation(monkeypatch, scope, manager)
 
         with pytest.raises(RuntimeError, match="cache unavailable"):

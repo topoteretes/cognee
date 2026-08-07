@@ -33,7 +33,7 @@ class FakeSessionManager:
         self.rows = list(rows)
         self.failed_updates = set(failed_updates or [])
 
-    async def get_session_context_entries_strict(self, user_id, session_id):
+    async def get_session_context_entries(self, user_id, session_id, strict=False):
         return list(self.rows)
 
     async def update_session_context_entry(self, user_id, session_id, entry_id, merge):
@@ -146,13 +146,16 @@ async def test_mark_fails_open_when_the_cache_read_raises():
     async def fail_read(**kwargs):
         raise RuntimeError("cache unavailable")
 
-    manager.get_session_context_entries_strict = fail_read
+    manager.get_session_context_entries = fail_read
 
-    assert await mark_evidence_distilled(
-        manager,
-        user_id="user",
-        session_id="session",
-        dataset_id="dataset-1",
-        evidence_ids={"e1"},
-    ) == set()
+    assert (
+        await mark_evidence_distilled(
+            manager,
+            user_id="user",
+            session_id="session",
+            dataset_id="dataset-1",
+            evidence_ids={"e1"},
+        )
+        == set()
+    )
     assert manager.rows[0]["distilled_at"] is None

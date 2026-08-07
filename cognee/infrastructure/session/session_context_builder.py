@@ -348,9 +348,10 @@ async def _apply_single_candidate(
     )
 
     # Look for an existing entry in the same (profile, section) with identical normalized content.
-    existing = await session_manager.get_session_context_entries_strict(
+    existing = await session_manager.get_session_context_entries(
         user_id=user_id,
         session_id=session_id,
+        strict=True,
     )
     duplicate_row = None
     for raw in existing or []:
@@ -428,13 +429,11 @@ async def apply_candidate_updates_strict(
     session_id,
     source_id,
     candidates: list,
-) -> tuple[List[str], List[str], List[str]]:
-    """Apply candidates while reporting every applied, skipped, and failed item."""
+) -> tuple[List[str], List[str]]:
+    """Apply candidates, returning the touched entry ids and one message per failure."""
     applied: List[str] = []
-    skipped: List[str] = []
     errors: List[str] = []
     for index, candidate in enumerate(candidates or []):
-        result_id = f"candidate:{index}"
         try:
             model = _coerce_candidate_model(candidate)
             entry_id = await _apply_single_candidate(
@@ -445,13 +444,11 @@ async def apply_candidate_updates_strict(
                 candidate=model,
             )
         except Exception as error:
-            errors.append(f"{result_id}: {error}")
+            errors.append(f"candidate:{index}: {error}")
             continue
         if entry_id:
             applied.append(entry_id)
-        else:
-            skipped.append(result_id)
-    return applied, skipped, errors
+    return applied, errors
 
 
 async def apply_candidate_updates(
@@ -474,7 +471,7 @@ async def apply_candidate_updates(
     Returns the list of touched/created entry ids.
     """
     try:
-        applied, _, _ = await apply_candidate_updates_strict(
+        applied, _errors = await apply_candidate_updates_strict(
             session_manager=session_manager,
             user_id=user_id,
             session_id=session_id,

@@ -11,7 +11,6 @@ from cognee.infrastructure.session.session_search_models import (
 )
 from cognee.modules.retrieval.completion_retriever import CompletionRetriever
 from cognee.modules.retrieval.session_search import (
-    LatencyRetrievalResult,
     MAX_CONTEXTUAL_QUERY_CHARS,
     build_contextual_query,
     retrieve_latency_context,
@@ -56,20 +55,20 @@ async def test_latency_retrieval_fuses_lanes_formats_and_tracks_once():
         "cognee.modules.retrieval.session_search.update_node_access_timestamps",
         new_callable=AsyncMock,
     ) as track_access:
-        result = await retrieve_latency_context(
+        retrieved_objects, context = await retrieve_latency_context(
             retriever,
             raw_query="current",
             snapshot=snapshot,
         )
 
-    assert result.retrieved_objects == [item("raw"), item("contextual")]
-    assert result.context == "formatted"
+    assert retrieved_objects == [item("raw"), item("contextual")]
+    assert context == "formatted"
     assert retriever.get_retrieved_objects.await_count == 2
     retriever.get_context_from_objects.assert_awaited_once_with(
         query="current",
-        retrieved_objects=result.retrieved_objects,
+        retrieved_objects=retrieved_objects,
     )
-    track_access.assert_awaited_once_with(result.retrieved_objects)
+    track_access.assert_awaited_once_with(retrieved_objects)
 
 
 @pytest.mark.asyncio
@@ -93,13 +92,13 @@ async def test_latency_retrieval_uses_the_successful_lane(side_effect, expected)
         "cognee.modules.retrieval.session_search.update_node_access_timestamps",
         new_callable=AsyncMock,
     ):
-        result = await retrieve_latency_context(
+        retrieved_objects, _context = await retrieve_latency_context(
             retriever,
             raw_query="current",
             snapshot=snapshot,
         )
 
-    assert result.retrieved_objects == expected
+    assert retrieved_objects == expected
 
 
 @pytest.mark.asyncio
@@ -172,7 +171,7 @@ async def test_latency_orchestrator_commits_then_applies_retriever_references():
         patch(
             "cognee.modules.retrieval.session_search.retrieve_latency_context",
             new_callable=AsyncMock,
-            return_value=LatencyRetrievalResult([item("n1")], "context"),
+            return_value=([item("n1")], "context"),
         ),
         patch(
             "cognee.modules.retrieval.session_search.complete_latency_turn",
@@ -238,7 +237,7 @@ async def test_latency_orchestrator_skips_references_for_acknowledgement():
         patch(
             "cognee.modules.retrieval.session_search.retrieve_latency_context",
             new_callable=AsyncMock,
-            return_value=LatencyRetrievalResult([], "context"),
+            return_value=([], "context"),
         ),
         patch(
             "cognee.modules.retrieval.session_search.complete_latency_turn",

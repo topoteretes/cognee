@@ -91,22 +91,6 @@ def build_evidence_batches(evidence: List[SessionTurnEvidence]) -> List[Distilla
     ]
 
 
-async def _eligible_evidence_ids(
-    session_manager,
-    *,
-    user_id: str,
-    session_id: str,
-    dataset_id: str,
-    evidence_ids: set[str],
-) -> set[str]:
-    rows = await session_manager.get_session_context_entries_strict(
-        user_id=user_id,
-        session_id=session_id,
-    )
-    current = load_eligible_evidence(rows, dataset_id=dataset_id, tracked_evidence_ids=set())
-    return {entry.id for entry in current if entry.id in evidence_ids}
-
-
 async def mark_evidence_distilled(
     session_manager,
     *,
@@ -115,18 +99,23 @@ async def mark_evidence_distilled(
     dataset_id: str,
     evidence_ids: set[str],
 ) -> set[str]:
-    """Mark still-eligible evidence consumed. Anything left unmarked stays retryable."""
+    """Mark still-eligible evidence consumed. Anything left unmarked stays retryable.
+
+    The eligibility re-read is the last-moment guard against marking evidence that
+    concurrent maintenance or another distillation run already consumed.
+    """
     distilled_at = datetime.now(timezone.utc).isoformat()
     marked = set()
     try:
-        eligible_ids = await _eligible_evidence_ids(
-            session_manager,
+        rows = await session_manager.get_session_context_entries(
             user_id=user_id,
             session_id=session_id,
-            dataset_id=dataset_id,
-            evidence_ids=evidence_ids,
+            strict=True,
         )
-        for evidence_id in eligible_ids:
+        still_eligible = load_eligible_evidence(
+            rows, dataset_id=dataset_id, tracked_evidence_ids=set()
+        )
+        for evidence_id in {entry.id for entry in still_eligible} & evidence_ids:
             if await session_manager.update_session_context_entry(
                 user_id=user_id,
                 session_id=session_id,

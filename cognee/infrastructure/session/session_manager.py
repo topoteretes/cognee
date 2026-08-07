@@ -788,40 +788,27 @@ class SessionManager:
         *,
         user_id: str,
         session_id: str | None = None,
+        strict: bool = False,
     ) -> list[dict]:
         """
         Return all stored session-context entries (both "context" and "feedback" kinds).
 
         Raises SessionParameterValidationError for invalid user_id/session_id.
-        Fail-open on infrastructure errors: returns [] when the cache is
-        unavailable or the cache operation fails.
+        Fail-open on infrastructure errors: returns [] when the cache is unavailable or
+        the cache operation fails. Pass ``strict=True`` to raise instead, for callers
+        that must tell an empty session apart from an unreachable one.
         """
         session_id = self.resolve_session_id(session_id)
         self._validate_session_params(user_id=user_id, session_id=session_id)
-        if not self.is_available:
-            logger.debug("SessionManager: cache unavailable, returning empty session context")
-            return []
         try:
-            return await self.get_session_context_entries_strict(
-                user_id=user_id,
-                session_id=session_id,
-            )
+            if not self.is_available:
+                raise RuntimeError("session cache is unavailable")
+            return await self._cache.get_session_context_entries(user_id, session_id)
         except Exception as e:
+            if strict:
+                raise
             logger.warning("SessionManager: get_session_context_entries failed: %s", e)
             return []
-
-    async def get_session_context_entries_strict(
-        self,
-        *,
-        user_id: str,
-        session_id: str | None = None,
-    ) -> list[dict]:
-        """Return stored context entries and propagate storage failures."""
-        session_id = self.resolve_session_id(session_id)
-        self._validate_session_params(user_id=user_id, session_id=session_id)
-        if not self.is_available:
-            raise RuntimeError("session cache is unavailable")
-        return await self._cache.get_session_context_entries(user_id, session_id)
 
     async def update_session_context_entry(
         self,

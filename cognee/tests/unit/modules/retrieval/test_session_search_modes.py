@@ -76,7 +76,7 @@ class FakeSessionManager:
         self.entries.append(entry_dump)
         return True
 
-    async def get_session_context_entries_strict(self, **kwargs):
+    async def get_session_context_entries(self, strict=False, **kwargs):
         return list(self.entries)
 
     async def update_session_context_entry(self, *, entry_id, merge, **kwargs):

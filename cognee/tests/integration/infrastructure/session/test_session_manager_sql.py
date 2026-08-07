@@ -97,7 +97,7 @@ async def test_turn_evidence_round_trips_through_session_context_storage(session
         session_id="s1",
         entry_dump=evidence.model_dump(),
     )
-    entries = await session_manager.get_session_context_entries_strict(
+    entries = await session_manager.get_session_context_entries(
         user_id="u1",
         session_id="s1",
     )

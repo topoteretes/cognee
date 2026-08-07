@@ -231,14 +231,19 @@ async def apply_served_context_ratings_strict(
     user_id: str,
     session_id: str,
     ratings: list,
-) -> tuple[list[str], list[str], list[str]]:
-    """Apply ratings while reporting every applied, skipped, and failed entry."""
-    if not ratings:
-        return [], [], []
+) -> list[str]:
+    """Apply ratings, returning one message per entry that could not be updated.
 
-    entries = await session_manager.get_session_context_entries_strict(
+    A rating naming an unknown entry or an unknown verdict is not an error: there is
+    nothing to apply, so it is dropped.
+    """
+    if not ratings:
+        return []
+
+    entries = await session_manager.get_session_context_entries(
         user_id=user_id,
         session_id=session_id,
+        strict=True,
     )
     counts = {}
     for raw in entries or []:
@@ -252,15 +257,11 @@ async def apply_served_context_ratings_strict(
                 int(row.get("harmful_count", 0) or 0),
             )
 
-    applied = []
-    skipped = []
     errors = []
-    for index, rating in enumerate(ratings):
+    for rating in ratings:
         entry_id = str(getattr(rating, "entry_id", None) or "")
         verdict = str(getattr(rating, "rating", "") or "").strip().lower()
-        result_id = entry_id or f"rating:{index}"
         if entry_id not in counts or verdict not in ("helpful", "harmful"):
-            skipped.append(result_id)
             continue
 
         helpful, harmful = counts[entry_id]
@@ -278,15 +279,14 @@ async def apply_served_context_ratings_strict(
                 session_id=session_id,
             )
         except Exception as error:
-            errors.append(f"{result_id}: {error}")
+            errors.append(f"{entry_id}: {error}")
             continue
         if not updated:
-            errors.append(f"{result_id}: update failed")
+            errors.append(f"{entry_id}: update failed")
             continue
         counts[entry_id] = next_counts
-        applied.append(entry_id)
 
-    return applied, skipped, errors
+    return errors
 
 
 async def apply_served_context_ratings(

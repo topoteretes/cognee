@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from cognee.infrastructure.session.session_search_models import SessionMaintenanceWorkItem
+import cognee.infrastructure.session.session_maintenance as maintenance
 import cognee.infrastructure.session.session_maintenance_worker as worker
 
 
@@ -25,7 +26,7 @@ async def test_enqueue_returns_before_blocked_work_and_drain_finishes(monkeypatc
         started.set()
         await release.wait()
 
-    monkeypatch.setattr(worker, "_process_work_item", blocked)
+    monkeypatch.setattr(maintenance, "process_session_maintenance", blocked)
     manager = AsyncMock()
 
     assert await worker.enqueue_session_maintenance(_work("e1"), manager)
@@ -50,7 +51,7 @@ async def test_worker_processes_serially_and_restarts_after_drain(monkeypatch):
         processed.append(work_item.evidence_id)
         active -= 1
 
-    monkeypatch.setattr(worker, "_process_work_item", process)
+    monkeypatch.setattr(maintenance, "process_session_maintenance", process)
     manager = AsyncMock()
     await worker.enqueue_session_maintenance(_work("e1"), manager)
     await worker.enqueue_session_maintenance(_work("e2"), manager)
@@ -88,7 +89,7 @@ async def test_timeout_clears_state_and_next_enqueue_restarts(monkeypatch):
     async def blocked(_work_item):
         await release.wait()
 
-    monkeypatch.setattr(worker, "_process_work_item", blocked)
+    monkeypatch.setattr(maintenance, "process_session_maintenance", blocked)
     manager = AsyncMock()
     await worker.enqueue_session_maintenance(_work("e1"), manager)
     with pytest.raises(TimeoutError):
@@ -96,7 +97,7 @@ async def test_timeout_clears_state_and_next_enqueue_restarts(monkeypatch):
     assert worker.get_tracked_evidence_ids() == set()
 
     processed = AsyncMock()
-    monkeypatch.setattr(worker, "_process_work_item", processed)
+    monkeypatch.setattr(maintenance, "process_session_maintenance", processed)
     await worker.enqueue_session_maintenance(_work("e2"), manager)
     await worker.drain_session_maintenance()
     processed.assert_awaited_once()
@@ -110,7 +111,7 @@ async def test_worker_does_not_copy_request_context(monkeypatch):
     async def process(_work_item):
         observed.append(request_value.get())
 
-    monkeypatch.setattr(worker, "_process_work_item", process)
+    monkeypatch.setattr(maintenance, "process_session_maintenance", process)
     token = request_value.set("secret request state")
     try:
         await worker.enqueue_session_maintenance(_work("e1"), AsyncMock())
@@ -128,7 +129,7 @@ async def test_drain_from_another_loop_raises(monkeypatch):
     async def blocked(_work_item):
         await release.wait()
 
-    monkeypatch.setattr(worker, "_process_work_item", blocked)
+    monkeypatch.setattr(maintenance, "process_session_maintenance", blocked)
     await worker.enqueue_session_maintenance(_work("e1"), AsyncMock())
 
     with pytest.raises(RuntimeError, match="originating event loop"):

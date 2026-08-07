@@ -43,10 +43,7 @@ class FakeSessionManager:
             e.model_dump() if isinstance(e, SessionContextEntry) else e for e in (entries or [])
         ]
 
-    async def get_session_context_entries(self, user_id, session_id):
-        return list(self.store)
-
-    async def get_session_context_entries_strict(self, user_id, session_id):
+    async def get_session_context_entries(self, user_id, session_id, strict=False):
         return list(self.store)
 
     async def create_session_context_entry(self, user_id, session_id, entry_dump):
@@ -64,10 +61,7 @@ class FakeSessionManager:
 class RaisingSessionManager:
     """Every call raises, to exercise the fail-open paths."""
 
-    async def get_session_context_entries(self, user_id, session_id):
-        raise RuntimeError("boom")
-
-    async def get_session_context_entries_strict(self, user_id, session_id):
+    async def get_session_context_entries(self, user_id, session_id, strict=False):
         raise RuntimeError("boom")
 
     async def create_session_context_entry(self, user_id, session_id, entry_dump):
@@ -341,7 +335,7 @@ async def test_apply_fail_open_on_raising_manager():
 
 @pytest.mark.asyncio
 async def test_apply_strict_reports_store_failure():
-    applied, skipped, errors = await apply_candidate_updates_strict(
+    applied, errors = await apply_candidate_updates_strict(
         session_manager=RaisingSessionManager(),
         user_id="u",
         session_id="s",
@@ -350,7 +344,6 @@ async def test_apply_strict_reports_store_failure():
     )
 
     assert applied == []
-    assert skipped == []
     assert len(errors) == 1
 
 

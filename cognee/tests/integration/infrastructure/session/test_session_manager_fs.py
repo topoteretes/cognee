@@ -80,7 +80,7 @@ async def test_strict_session_context_read_distinguishes_storage_failure(
     )
 
     with pytest.raises(RuntimeError, match="storage failed"):
-        await session_manager.get_session_context_entries_strict(user_id="u1", session_id="s1")
+        await session_manager.get_session_context_entries(user_id="u1", session_id="s1")
     assert await session_manager.get_session_context_entries(user_id="u1", session_id="s1") == []
 
 

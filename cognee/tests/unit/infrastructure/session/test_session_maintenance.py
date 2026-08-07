@@ -21,7 +21,7 @@ class FakeSessionManager:
         self.fail_evidence_update = fail_evidence_update
         self.updates = []
 
-    async def get_session_context_entries_strict(self, user_id, session_id):
+    async def get_session_context_entries(self, user_id, session_id, strict=False):
         if self.fail_read:
             raise RuntimeError("read failed")
         return list(self.rows)
@@ -78,9 +78,8 @@ async def test_valid_empty_maintenance_completes_without_leaking_current_respons
     )
     prior_user = session_user.get()
 
-    result = await process_session_maintenance(_work_item())
+    await process_session_maintenance(_work_item())
 
-    assert result is not None and result.errors == ()
     assert manager.rows[0]["status"] == "completed"
     llm_input = llm.await_args.kwargs["text_input"]
     assert "current_assistant" not in llm_input
@@ -124,12 +123,10 @@ async def test_maintenance_applies_only_served_ratings_and_candidates(monkeypatc
         AsyncMock(return_value=maintenance),
     )
 
-    result = await process_session_maintenance(_work_item())
+    await process_session_maintenance(_work_item())
 
-    assert result is not None and result.errors == ()
-    assert "ctx1" in result.applied_ids
-    assert "not-served" in result.skipped_ids
     assert manager.rows[1]["helpful_count"] == 1
+    assert not any(entry_id == "not-served" for entry_id, _merge in manager.updates)
     assert any(row.get("content") == "Prefer short answers." for row in manager.rows)
     assert manager.rows[0]["status"] == "completed"
 
@@ -147,7 +144,8 @@ async def test_missing_evidence_does_no_work(monkeypatch):
         llm,
     )
 
-    assert await process_session_maintenance(_work_item()) is None
+    await process_session_maintenance(_work_item())
+
     llm.assert_not_awaited()
     assert manager.updates == []
 
@@ -165,11 +163,11 @@ async def test_read_failure_attempts_failed_status_without_calling_llm(monkeypat
         llm,
     )
 
-    result = await process_session_maintenance(_work_item())
+    await process_session_maintenance(_work_item())
 
-    assert result is not None and result.errors
     llm.assert_not_awaited()
     assert manager.updates[0][1]["status"] == "failed"
+    assert manager.updates[0][1]["error"]
 
 
 @pytest.mark.asyncio
@@ -189,10 +187,10 @@ async def test_apply_failure_marks_evidence_failed(monkeypatch):
         AsyncMock(return_value=maintenance),
     )
 
-    result = await process_session_maintenance(_work_item())
+    await process_session_maintenance(_work_item())
 
-    assert result is not None and result.errors
     assert manager.rows[0]["status"] == "failed"
+    assert manager.updates[-1][1]["error"]
 
 
 @pytest.mark.asyncio
@@ -207,9 +205,10 @@ async def test_failed_completion_status_write_leaves_evidence_pending(monkeypatc
         AsyncMock(return_value=SessionMaintenanceResult()),
     )
 
-    result = await process_session_maintenance(_work_item())
+    await process_session_maintenance(_work_item())
 
-    assert result is not None and result.errors == ("evidence completion status update failed",)
+    # The completed write was attempted and rejected, so the record stays recoverable.
+    assert manager.updates == [("e1", {"status": "completed", "error": None})]
     assert manager.rows[0]["status"] == "pending"
 
 
@@ -234,6 +233,7 @@ async def test_worker_skips_apply_when_evidence_was_distilled_during_llm(monkeyp
         distill_during_call,
     )
 
-    assert await process_session_maintenance(_work_item()) is None
+    await process_session_maintenance(_work_item())
+
     assert len(manager.rows) == 1
     assert manager.updates == []

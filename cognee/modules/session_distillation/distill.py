@@ -134,9 +134,10 @@ async def load_distillable_session_inputs(
 ) -> tuple[List[dict], List[SessionContextEntry], List[SessionTurnEvidence]]:
     """Load QA turns, context entries worth distilling, and recoverable turn evidence."""
     session_manager = get_session_manager()
-    context_rows = await session_manager.get_session_context_entries_strict(
+    context_rows = await session_manager.get_session_context_entries(
         user_id=scope.user_id,
         session_id=scope.session_id,
+        strict=True,
     )
     raw_qa = await session_manager.get_session(
         user_id=scope.user_id,

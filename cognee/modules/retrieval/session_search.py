@@ -37,12 +37,6 @@ MAX_CONTEXTUAL_QUERY_CHARS = 2000
 
 
 @dataclass(frozen=True, slots=True)
-class LatencyRetrievalResult:
-    retrieved_objects: Any
-    context: Any
-
-
-@dataclass(frozen=True, slots=True)
 class LatencySearchResult:
     retrieved_objects: Any
     context: Any
@@ -165,8 +159,11 @@ async def retrieve_latency_context(
     *,
     raw_query: str,
     snapshot: SessionTurnSnapshot,
-) -> LatencyRetrievalResult:
-    """Retrieve raw and conversational lanes, fuse them, and format context once."""
+) -> tuple[Any, Any]:
+    """Retrieve raw and conversational lanes, fuse them, and format context once.
+
+    Returns ``(retrieved_objects, context)``.
+    """
     contextual_query = build_contextual_query(raw_query, snapshot.recent_qas)
     use_contextual_lane = bool(contextual_query) and _normalize_query(
         contextual_query
@@ -198,7 +195,7 @@ async def retrieve_latency_context(
     )
     if retrieved_objects:
         await update_node_access_timestamps(retrieved_objects)
-    return LatencyRetrievalResult(retrieved_objects=retrieved_objects, context=context)
+    return retrieved_objects, context
 
 
 async def run_latency_session_search(
@@ -249,7 +246,7 @@ async def run_latency_session_search(
             session_id=resolved_session_id,
             raw_message=raw_query,
         )
-        retrieval = await retrieve_latency_context(
+        retrieved_objects, context = await retrieve_latency_context(
             retriever,
             raw_query=raw_query,
             snapshot=snapshot,
@@ -257,7 +254,7 @@ async def run_latency_session_search(
         auto_feedback = session_manager.is_auto_feedback_enabled()
         completion = await complete_latency_turn(
             snapshot=snapshot,
-            context=retrieval.context,
+            context=context,
             user_id=user_id,
             session_id=resolved_session_id,
             user_prompt_path=retriever.user_prompt_path,
@@ -266,7 +263,7 @@ async def run_latency_session_search(
             response_model=response_model,
             auto_feedback=auto_feedback,
         )
-        used_graph_element_ids = retriever._extract_context_object_ids(retrieval.retrieved_objects)
+        used_graph_element_ids = retriever._extract_context_object_ids(retrieved_objects)
         work_item = await commit_latency_turn(
             session_manager,
             snapshot=snapshot,
@@ -282,12 +279,9 @@ async def run_latency_session_search(
 
     completions = [completion.response]
     if not completion.is_acknowledgement and isinstance(completion.response, str):
-        completions = await retriever._append_references(
-            completions,
-            retrieval.retrieved_objects,
-        )
+        completions = await retriever._append_references(completions, retrieved_objects)
     return LatencySearchResult(
-        retrieved_objects=retrieval.retrieved_objects,
-        context=retrieval.context,
+        retrieved_objects=retrieved_objects,
+        context=context,
         completion=completions,
     )

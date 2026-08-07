@@ -18,32 +18,26 @@ class _WorkerState:
         default_factory=lambda: asyncio.Queue(maxsize=MAX_QUEUED_MAINTENANCE)
     )
     task: asyncio.Task | None = None
-    queued_ids: set[str] = field(default_factory=set)
-    in_flight_ids: set[str] = field(default_factory=set)
+    # Evidence this worker owns, queued or in flight. Distillation must not touch it.
+    tracked_ids: set[str] = field(default_factory=set)
 
 
 _states: dict[asyncio.AbstractEventLoop, _WorkerState] = {}
 
 
-async def _process_work_item(work_item: SessionMaintenanceWorkItem) -> None:
+async def _run_worker(state: _WorkerState) -> None:
     from cognee.infrastructure.session.session_maintenance import process_session_maintenance
 
-    await process_session_maintenance(work_item)
-
-
-async def _run_worker(state: _WorkerState) -> None:
     while True:
         work_item = await state.queue.get()
-        state.queued_ids.discard(work_item.evidence_id)
-        state.in_flight_ids.add(work_item.evidence_id)
         try:
-            await _process_work_item(work_item)
+            await process_session_maintenance(work_item)
         except asyncio.CancelledError:
             raise
         except Exception as error:
             logger.warning("Session maintenance failed: %s", error)
         finally:
-            state.in_flight_ids.discard(work_item.evidence_id)
+            state.tracked_ids.discard(work_item.evidence_id)
             state.queue.task_done()
 
 
@@ -61,7 +55,7 @@ async def enqueue_session_maintenance(
     """Queue durable evidence without waiting for its maintenance operation."""
     loop = asyncio.get_running_loop()
     state = _states.setdefault(loop, _WorkerState())
-    if work_item.evidence_id in state.queued_ids | state.in_flight_ids:
+    if work_item.evidence_id in state.tracked_ids:
         return False
 
     try:
@@ -80,7 +74,7 @@ async def enqueue_session_maintenance(
             logger.warning("Could not defer session evidence: %s", work_item.evidence_id)
         return False
 
-    state.queued_ids.add(work_item.evidence_id)
+    state.tracked_ids.add(work_item.evidence_id)
     _start_worker(state)
     return True
 
@@ -96,8 +90,7 @@ def get_tracked_evidence_ids() -> set[str]:
     for loop, state in list(_states.items()):
         if loop.is_closed():
             continue
-        tracked.update(state.queued_ids)
-        tracked.update(state.in_flight_ids)
+        tracked.update(state.tracked_ids)
     return tracked
 
 
@@ -131,7 +124,7 @@ async def drain_session_maintenance(timeout_seconds: float = 30.0) -> None:
                 queued = state.queue.get_nowait()
             except asyncio.QueueEmpty:
                 break
-            state.queued_ids.discard(queued.evidence_id)
+            state.tracked_ids.discard(queued.evidence_id)
             state.queue.task_done()
         _states.pop(loop, None)
         raise
