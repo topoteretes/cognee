@@ -4,6 +4,23 @@ import { CogneeInstance } from "../instances/types";
 // user search conversations are told apart from agent sessions everywhere.
 export const SEARCH_SESSION_PREFIX = "search-ui-";
 
+// The pod reports cost_usd/total_spend_usd as 0: it can't price the LiteLLM
+// gateway alias ("litellm") so its per-call estimate always falls through to
+// $0. Cost is a cloud-only concern, so we derive it here from the token counts
+// the pod *does* report, using the gateway's flat billing rate — the same
+// $2.50 / 1M tokens (in and out) that LiteLLM actually charges per token
+// (see cloud-backend litellm-gateway input/output_cost_per_token). Overridable
+// per-deploy so it can track a rate change without a code release.
+export const LLM_COST_PER_1M_TOKENS = Number(
+  process.env.NEXT_PUBLIC_LLM_COST_PER_1M_TOKENS ?? 2.5,
+);
+
+// Estimated USD cost for a session from its token usage. Both in/out bill at the
+// same flat rate, so total tokens is enough.
+export function estimateCostUsd(tokensIn: number, tokensOut: number): number {
+  return ((tokensIn + tokensOut) / 1_000_000) * LLM_COST_PER_1M_TOKENS;
+}
+
 export interface SessionRow {
   session_id: string;
   user_id: string;

@@ -104,12 +104,6 @@ function buildLogoNode(key: AciAgentKey, name: string): React.ReactElement {
       </svg>
     );
   }
-  const src = key === "claude-code"
-    ? "/visuals/logos/claude.svg"
-    : key === "codex"
-      ? "/visuals/logos/codex.svg"
-      : key === "opencode"
-        ? "/visuals/logos/opencode.svg"
-        : "/visuals/logos/openclaw.svg";
+  const src = key === "claude-code" ? "/visuals/logos/claude.svg" : key === "codex" ? "/visuals/logos/codex.svg" : "/visuals/logos/openclaw.svg";
   return <img src={src} alt={name} style={{ height: 110, width: "auto" }} />;
 }

@@ -3,35 +3,46 @@
 import { useEffect, useState, useRef } from "react";
 import Link from "next/link";
 import { useCogniInstance } from "@/modules/tenant/TenantProvider";
-import { useFilter } from "@/ui/layout/FilterContext";
+import { useFilter, useRefreshDatasetsOnMount } from "@/ui/layout/FilterContext";
 import BrainSelector from "@/ui/elements/BrainSelector";
 import PageLoading from "@/ui/elements/PageLoading";
 import { TrackPageView } from "@/modules/analytics";
 import type { DatasetProcessingStatus } from "@/modules/datasets/pollDatasetStatus";
 import { useDatasetStatuses } from "@/modules/datasets/useDatasetStatuses";
+import { INSUFFICIENT_CREDITS_REASON } from "@/modules/datasets/datasetStatusDetail";
 
-type DisplayStatus = "pending" | "running" | "completed" | "failed" | "empty";
+// Visualize renders the full graph synchronously with no caching, so large
+// graphs can take well past the default 10s GET timeout.
+const VISUALIZE_TIMEOUT_MS = 90_000;
 
-function mapStatus(raw: DatasetProcessingStatus | undefined): DisplayStatus {
+type DisplayStatus = "pending" | "running" | "completed" | "failed" | "failed_insufficient_credits" | "empty";
+
+function mapStatus(raw: DatasetProcessingStatus | undefined, reason: string | null): DisplayStatus {
   if (!raw) return "empty";
   if (raw === "DATASET_PROCESSING_COMPLETED") return "completed";
-  if (raw === "DATASET_PROCESSING_ERRORED") return "failed";
+  if (raw === "DATASET_PROCESSING_ERRORED") {
+    return reason === INSUFFICIENT_CREDITS_REASON ? "failed_insufficient_credits" : "failed";
+  }
   if (raw === "DATASET_PROCESSING_STARTED") return "running";
   if (raw === "DATASET_PROCESSING_INITIATED") return "pending";
   return "empty";
 }
 
-const STATUS_CFG: Record<DisplayStatus, { label: string; color: string; dotBg: string }> = {
+const STATUS_CFG: Record<DisplayStatus, { label: string; color: string; dotBg: string; href?: string }> = {
   pending:   { label: "Pending",    color: "#F59E0B", dotBg: "rgba(245,158,11,0.15)" },
   running:   { label: "Processing", color: "#F59E0B", dotBg: "rgba(245,158,11,0.15)" },
   completed: { label: "Ready",      color: "#22C55E", dotBg: "rgba(34,197,94,0.15)" },
   failed:    { label: "Failed",     color: "#EF4444", dotBg: "rgba(239,68,68,0.15)" },
+  failed_insufficient_credits: {
+    label: "Failed — insufficient credits", color: "#BC9BFF", dotBg: "rgba(188,155,255,0.15)", href: "/billing",
+  },
   empty:     { label: "Empty",      color: "rgba(237,236,234,0.35)", dotBg: "rgba(255,255,255,0.06)" },
 };
 
 export default function KnowledgeGraphPage() {
   const { cogniInstance, isInitializing } = useCogniInstance();
   const { datasets, selectedDataset, refreshDatasets } = useFilter();
+  useRefreshDatasetsOnMount();
 
   const [iframeSrc, setIframeSrc] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -46,8 +57,9 @@ export default function KnowledgeGraphPage() {
   const activeDataset = selectedDataset ?? datasets[0] ?? null;
   const datasetId = activeDataset?.id ?? null;
 
-  const { statuses } = useDatasetStatuses(!!datasetId);
-  const datasetStatus = datasetId ? mapStatus(statuses[datasetId]) : "empty";
+  const { statusDetails } = useDatasetStatuses(!!datasetId);
+  const activeDetail = datasetId ? statusDetails[datasetId] : undefined;
+  const datasetStatus = datasetId ? mapStatus(activeDetail?.status, activeDetail?.reason ?? null) : "empty";
 
   // Reset transition tracking on dataset change so switching brains doesn't
   // spuriously trigger a viz-refresh based on the previous brain's status.
@@ -68,6 +80,11 @@ export default function KnowledgeGraphPage() {
   // Fetch visualization
   useEffect(() => {
     if (!datasetId || isInitializing) { setLoading(false); return; }
+    // Guards against a stale in-flight fetch: if the brain is switched while a
+    // viz is still loading, the previous request must not overwrite the new
+    // brain's state — otherwise the header shows the new name while the old
+    // graph loads in.
+    let cancelled = false;
     setLoading(true);
     setIframeSrc(null);
     setError(null);
@@ -75,12 +92,13 @@ export default function KnowledgeGraphPage() {
     if (blobRef.current) { URL.revokeObjectURL(blobRef.current); blobRef.current = null; }
 
     const fetchViz = cogniInstance
-      ? cogniInstance.fetch(`/v1/visualize?dataset_id=${datasetId}`)
+      ? cogniInstance.fetch(`/v1/visualize?dataset_id=${datasetId}`, { timeoutMs: VISUALIZE_TIMEOUT_MS })
       : global.fetch(`/api/visualize?dataset_id=${datasetId}`, { credentials: "include" });
 
     fetchViz
       .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.text(); })
       .then((html) => {
+        if (cancelled) return;
         if (html && html.length > 100 && (html.includes("<!DOCTYPE") || html.includes("<html"))) {
           const closeScript = "<" + "/script>";
           // Dark background CSS beats the first paint (no white flash) and
@@ -100,10 +118,10 @@ export default function KnowledgeGraphPage() {
           setError("No graph data in this brain yet.");
         }
       })
-      .catch((err) => setError(err.message || "Failed to load visualization"))
-      .finally(() => setLoading(false));
+      .catch((err) => { if (cancelled) return; setError(err.message || "Failed to load visualization"); })
+      .finally(() => { if (cancelled) return; setLoading(false); });
 
-    return () => { if (blobRef.current) { URL.revokeObjectURL(blobRef.current); blobRef.current = null; } };
+    return () => { cancelled = true; if (blobRef.current) { URL.revokeObjectURL(blobRef.current); blobRef.current = null; } };
   }, [datasetId, isInitializing, vizRefreshKey]);
 
   if (isInitializing) {
@@ -136,7 +154,11 @@ export default function KnowledgeGraphPage() {
           {activeDataset && (
             <div style={{ display: "flex", alignItems: "center", gap: 5, background: cfg.dotBg, border: `1px solid ${cfg.color}30`, borderRadius: 6, padding: "3px 8px" }}>
               <div style={{ width: 6, height: 6, borderRadius: "50%", background: cfg.color, ...(datasetStatus === "running" || datasetStatus === "pending" ? { animation: "pulse-dot 1.5s ease-in-out infinite" } : {}) }} />
-              <span style={{ fontSize: 12, fontWeight: 500, color: cfg.color }}>{cfg.label}</span>
+              {cfg.href ? (
+                <Link href={cfg.href} style={{ fontSize: 12, fontWeight: 500, color: cfg.color, textDecoration: "underline", textUnderlineOffset: 2 }}>{cfg.label}</Link>
+              ) : (
+                <span style={{ fontSize: 12, fontWeight: 500, color: cfg.color }}>{cfg.label}</span>
+              )}
             </div>
           )}
           {(datasetStatus === "running" || datasetStatus === "pending") && (
