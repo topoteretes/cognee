@@ -23,7 +23,7 @@
 
 
   [![GitHub forks](https://img.shields.io/github/forks/topoteretes/cognee.svg?style=social&label=Fork&maxAge=2592000)](https://GitHub.com/topoteretes/cognee/network/)
-  [![GitHub stars](https://img.shields.io/github/stars/topoteretes/cognee.svg?style=social&label=Star&maxAge=2592000)](https://GitHub.com/topoteretes/cognee/stargazers/)
+  [![GitHub stars](https://img.shields.io/github/stars/topoteretes/cognee.svg?style=social&label=Star&maxAge=2592000)](https://github.com/topoteretes/cognee)
   [![GitHub commits](https://badgen.net/github/commits/topoteretes/cognee)](https://GitHub.com/topoteretes/cognee/commit/)
   [![GitHub tag](https://badgen.net/github/tag/topoteretes/cognee)](https://github.com/topoteretes/cognee/tags/)
   [![Downloads](https://static.pepy.tech/badge/cognee)](https://pepy.tech/project/cognee)
@@ -186,6 +186,10 @@ cognee-cli -ui
 Prefer containers? Cognee publishes prebuilt images to Docker Hub on every push to `main`:
 [`cognee/cognee`](https://hub.docker.com/r/cognee/cognee) (the API server) and
 [`cognee/cognee-mcp`](https://hub.docker.com/r/cognee/cognee-mcp) (the MCP server).
+
+> **Just want to try it?** Follow the
+> [minimal docker-compose try-out](docs/minimal-docker-compose.md) — a single
+> copy-pasteable compose file that runs the prebuilt image, no clone or build needed.
 
 ### Option A — Docker Compose (build from source)
 

@@ -12,6 +12,7 @@ from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.memify.apply_feedback_weights import apply_feedback_weights
 from cognee.tasks.memify.extract_feedback_qas import extract_feedback_qas
+from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 
 logger = get_logger("apply_feedback_weights_pipeline")
 
@@ -19,7 +20,7 @@ logger = get_logger("apply_feedback_weights_pipeline")
 async def apply_feedback_weights_pipeline(
     user: User,
     session_ids: List[str],
-    dataset: str = "main_dataset",
+    dataset: str = DEFAULT_DATASET_NAME,
     alpha: float = 0.1,
     batch_size: int = 100,
     run_in_background: bool = False,

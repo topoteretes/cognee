@@ -23,6 +23,15 @@ from cognee.modules.observability import (
     COGNEE_SEARCH_TYPE,
     COGNEE_RESULT_SUMMARY,
     COGNEE_RESULT_COUNT,
+    MEMORY_SYSTEM,
+    MEMORY_OPERATION,
+    MEMORY_QUERY_TEXT,
+    MEMORY_QUERY_TYPE,
+    MEMORY_RESULT_COUNT,
+    record_operation_duration,
+    record_query_results,
+    increment_items_retrieved,
+    increment_vector_searches,
 )
 
 logger = get_logger()
@@ -256,10 +265,16 @@ async def search(
             **{key: value for key, value in agentic_overrides.items() if value is not None},
         )
 
-    with new_span("cognee.api.search") as span:
+    with new_span("memory.retrieve") as span:
+        span.set_attribute(MEMORY_SYSTEM, "cognee")
+        span.set_attribute(MEMORY_OPERATION, "retrieve")
+        span.set_attribute(MEMORY_QUERY_TEXT, query_text[:500])
+        span.set_attribute(MEMORY_QUERY_TYPE, str(query_type.value))
+        # legacy cognee attributes for backward compat
         span.set_attribute(COGNEE_SEARCH_QUERY, query_text[:500])
         span.set_attribute(COGNEE_SEARCH_TYPE, str(query_type.value))
         span.set_attribute("cognee.search.top_k", top_k)
+        _search_start_ns = __import__("time").monotonic_ns()
 
         # We use lists from now on for datasets
         if isinstance(datasets, UUID) or isinstance(datasets, str):
@@ -351,9 +366,20 @@ async def search(
 
         n = len(filtered_search_results) if filtered_search_results else 0
         span.set_attribute(COGNEE_RESULT_COUNT, n)
+        span.set_attribute(MEMORY_RESULT_COUNT, n)
         span.set_attribute(
             COGNEE_RESULT_SUMMARY,
             f"Found {n} result(s) via {query_type.value}",
         )
+        _duration_ms = (__import__("time").monotonic_ns() - _search_start_ns) / 1_000_000
+        _attrs = {
+            "memory.system": "cognee",
+            "memory.operation": "retrieve",
+            "memory.query.type": str(query_type.value),
+        }
+        record_operation_duration(_duration_ms, _attrs)
+        record_query_results(n, _attrs)
+        increment_items_retrieved(n, _attrs)
+        increment_vector_searches(_attrs)
 
         return filtered_search_results

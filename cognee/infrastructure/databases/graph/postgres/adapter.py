@@ -123,6 +123,9 @@ class PostgresAdapter(GraphDBInterface):
     # ``query()`` executes SQL against the graph tables, not Cypher.
     supports_cypher_queries = False
 
+    # ``query()`` executes SQL against the graph tables, not Cypher.
+    supports_cypher_queries = False
+
     _ALLOWED_FILTER_ATTRS = {"id", "name", "type"}
 
     def __init__(self, connection_string: str) -> None:

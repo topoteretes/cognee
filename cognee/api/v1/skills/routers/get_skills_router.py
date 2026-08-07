@@ -19,6 +19,7 @@ from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.utils import send_telemetry
+from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 
 logger = get_logger()
 
@@ -119,7 +120,7 @@ def get_skills_router() -> APIRouter:
         try:
             result = await cognee_remember(
                 "",
-                dataset_name=payload.dataset_name or "main_dataset",
+                dataset_name=payload.dataset_name or DEFAULT_DATASET_NAME,
                 content_type="skills",
                 skills_text=payload.skills_text,
                 skill_name=payload.skill_name,

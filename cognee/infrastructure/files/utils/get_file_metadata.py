@@ -1,7 +1,8 @@
 import io
 import os.path
-from pathlib import Path
-from typing import BinaryIO, TypedDict
+from pathlib import PureWindowsPath
+from typing import BinaryIO, Optional, TypedDict
+from urllib.parse import unquote, urlparse
 
 from cognee.infrastructure.files.utils.get_file_content_hash import get_file_content_hash
 from cognee.shared.logging_utils import get_logger
@@ -9,6 +10,34 @@ from cognee.shared.logging_utils import get_logger
 from .guess_file_type import guess_file_type
 
 logger = get_logger("FileMetadata")
+
+
+def _derive_basename(file_path: str) -> Optional[str]:
+    """Derive a clean, extension-less document name from a path or file:// URI.
+
+    In the ingestion pipeline ``file.name`` is a percent-encoded ``file://`` URI
+    (LocalFileStorage wraps every opened file in a FileBufferedReader whose name is
+    ``Path(full_path).as_uri()``), but other callers may pass a raw filesystem path.
+    ``Path(file_path).stem`` alone mishandles both: it leaves ``%20`` and other
+    percent-escapes in the name, and it is not OS-agnostic (POSIX ``Path`` does not
+    treat "\\" as a separator, so a Windows-style path yields the whole path as the
+    "stem", and vice versa). This normalizes both cases:
+
+    * percent-decodes ``file://`` URIs (so "Report%20Q1.pdf" -> "Report Q1"),
+    * resolves the basename + stem with ``PureWindowsPath``, which treats both "/"
+      and "\\" as separators on every host OS (so it is OS-agnostic),
+    * strips a single trailing extension, preserving the prior ``Path(...).stem``
+      semantics (the extension is stored separately in ``FileMetadata["extension"]``).
+    """
+    candidate = file_path
+    if candidate.startswith("file://"):
+        candidate = unquote(urlparse(candidate).path)
+
+    # ``PureWindowsPath`` treats both "/" and "\\" as separators regardless of host
+    # OS, so basename + stem resolution is OS-independent (a plain ``Path`` /
+    # ``PurePosixPath`` would not split "\\"). Percent-decoding above is URL work
+    # that pathlib cannot do.
+    return PureWindowsPath(candidate).stem or None
 
 
 class FileMetadata(TypedDict):
@@ -60,7 +89,7 @@ async def get_file_metadata(file: BinaryIO, name: str | None = None) -> FileMeta
     file_path = getattr(file, "name", None) or getattr(file, "full_name", None)
 
     if isinstance(file_path, str):
-        file_name = Path(file_path).stem if file_path else None
+        file_name = _derive_basename(file_path)
     else:
         # In case file_path does not exist or is a integer return None
         file_name = None
