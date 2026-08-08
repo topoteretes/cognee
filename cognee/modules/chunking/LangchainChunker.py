@@ -1,10 +1,11 @@
 from cognee.shared.logging_utils import get_logger
+from os.path import basename
 from uuid import NAMESPACE_OID, uuid5
 
 from cognee.modules.chunking.Chunker import Chunker
 from .models.DocumentChunk import DocumentChunk
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.infrastructure.databases.vector import get_vector_engine_async
 
 logger = get_logger()
 
@@ -34,9 +35,13 @@ class LangchainChunker(Chunker):
         )
 
     async def read(self):
+        document_id = str(self.document.id)
+        document_name = self.document.name or basename(self.document.raw_data_location)
+        # Resolve the embedding engine once — it's the same for every chunk, so
+        # resolving it per chunk inside the loops just adds await/lookup overhead.
+        embedding_engine = (await get_vector_engine_async()).embedding_engine
         async for content_text in self.get_text():
             for chunk in self.splitter.split_text(content_text):
-                embedding_engine = get_vector_engine().embedding_engine
                 token_count = embedding_engine.tokenizer.count_tokens(chunk)
                 if token_count <= self.max_chunk_tokens:
                     yield DocumentChunk(
@@ -48,6 +53,8 @@ class LangchainChunker(Chunker):
                         chunk_index=self.chunk_index,
                         cut_type="missing",
                         contains=[],
+                        document_id=document_id,
+                        document_name=document_name,
                         metadata={
                             "index_fields": ["text"],
                         },

@@ -4,6 +4,7 @@ from cognee.shared.logging_utils import get_logger
 from collections import deque
 from typing import List, Tuple, Dict, Optional, Any, Union, IO
 from rdflib import Graph, URIRef, RDF, RDFS, OWL
+from rdflib.util import guess_format
 
 from cognee.modules.ontology.exceptions import (
     OntologyInitializationError,
@@ -15,6 +16,21 @@ from cognee.modules.ontology.models import AttachedOntologyNode
 from cognee.modules.ontology.matching_strategies import MatchingStrategy, FuzzyMatchingStrategy
 
 logger = get_logger("OntologyAdapter")
+
+CONTENT_TYPE_FORMATS = {
+    "application/rdf+xml": "xml",
+    "application/xml": "xml",
+    "text/xml": "xml",
+    "text/turtle": "turtle",
+    "application/x-turtle": "turtle",
+    "text/n3": "n3",
+    "application/n-triples": "nt",
+    "application/n-quads": "nquads",
+    "application/trig": "trig",
+    "application/ld+json": "json-ld",
+}
+
+FALLBACK_FORMATS = ("xml", "turtle", "n3", "nt", "json-ld", "trig", "nquads")
 
 
 class RDFLibOntologyResolver(BaseOntologyResolver):
@@ -56,18 +72,25 @@ class RDFLibOntologyResolver(BaseOntologyResolver):
                     loaded_objects = []
                     for file_obj in file_objects:
                         try:
-                            content = file_obj.read()
-                            self.graph.parse(data=content, format="xml")
+                            parsed_format = self._parse_file_object(file_obj, self.graph)
                             loaded_objects.append(file_obj)
-                            logger.info("Ontology loaded successfully from file object")
+                            logger.info(
+                                "Ontology loaded successfully from file object '%s' as %s",
+                                self._get_file_object_name(file_obj),
+                                parsed_format,
+                            )
                         except Exception as e:
-                            logger.warning("Failed to parse ontology file object: %s", str(e))
+                            logger.warning(
+                                "Failed to parse ontology file object '%s': %s",
+                                self._get_file_object_name(file_obj),
+                                str(e),
+                            )
 
                     if not loaded_objects:
-                        logger.info(
-                            "No valid ontology file objects found. No owl ontology will be attached to the graph."
+                        raise ValueError(
+                            "No valid ontology file objects could be parsed. "
+                            "No owl ontology will be attached to the graph."
                         )
-                        self.graph = None
                     else:
                         logger.info("Total ontology file objects loaded: %d", len(loaded_objects))
 
@@ -104,8 +127,8 @@ class RDFLibOntologyResolver(BaseOntologyResolver):
 
             self.build_lookup()
         except Exception as e:
-            logger.error("Failed to load ontology", exc_info=e)
-            raise OntologyInitializationError() from e
+            logger.error("Failed to load ontology", exc_info=True)
+            raise OntologyInitializationError(f"Failed to load ontology: {e}") from e
 
     def _uri_to_key(self, uri: URIRef) -> str:
         uri_str = str(uri)
@@ -114,6 +137,74 @@ class RDFLibOntologyResolver(BaseOntologyResolver):
         else:
             name = uri_str.rstrip("/").split("/")[-1]
         return name.lower().replace(" ", "_").strip()
+
+    def _get_file_object_name(self, file_obj: IO) -> str:
+        return str(
+            getattr(file_obj, "filename", None)
+            or getattr(file_obj, "name", None)
+            or file_obj.__class__.__name__
+        )
+
+    def _get_content_type_format(self, file_obj: IO) -> Optional[str]:
+        content_type = getattr(file_obj, "content_type", None)
+        if not content_type:
+            return None
+
+        content_type = str(content_type).split(";", maxsplit=1)[0].strip().lower()
+        return CONTENT_TYPE_FORMATS.get(content_type)
+
+    def _get_candidate_formats(self, file_obj: IO) -> List[str]:
+        formats = []
+
+        filename = getattr(file_obj, "filename", None) or getattr(file_obj, "name", None)
+        if filename:
+            guessed_format = guess_format(str(filename))
+            if guessed_format:
+                formats.append(guessed_format)
+
+        content_type_format = self._get_content_type_format(file_obj)
+        if content_type_format:
+            formats.append(content_type_format)
+
+        formats.extend(FALLBACK_FORMATS)
+        return list(dict.fromkeys(formats))
+
+    def _parse_file_object(self, file_obj: IO, target_graph: Graph) -> str:
+        try:
+            file_obj.seek(0)
+        except (AttributeError, OSError):
+            pass
+
+        content = file_obj.read()
+        if not isinstance(content, (str, bytes)):
+            raise TypeError(
+                f"Ontology file object returned unsupported content type: {type(content)}"
+            )
+
+        candidate_formats = self._get_candidate_formats(file_obj)
+        parse_errors = []
+
+        for rdf_format in candidate_formats:
+            parsed_graph = Graph()
+            try:
+                parsed_graph.parse(data=content, format=rdf_format)
+            except Exception as error:
+                parse_errors.append(f"{rdf_format}: {error}")
+                continue
+
+            for prefix, namespace in parsed_graph.namespaces():
+                target_graph.bind(prefix, namespace, override=False)
+
+            for triple in parsed_graph:
+                target_graph.add(triple)
+
+            return rdf_format
+
+        raise ValueError(
+            f"Unable to parse ontology file object '{self._get_file_object_name(file_obj)}'. "
+            f"Tried formats: {', '.join(candidate_formats)}. "
+            f"Last error: {parse_errors[-1] if parse_errors else 'unknown error'}"
+        )
 
     def build_lookup(self) -> None:
         try:

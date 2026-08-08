@@ -4,12 +4,27 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from cognee.exceptions import CogneeSystemError
+from cognee.infrastructure.databases.cache.models import SessionAgentTraceEntry
 from cognee.modules.users.models import User
 from cognee.tasks.memify.extract_agent_trace_feedbacks import extract_agent_trace_feedbacks
 
 extract_agent_trace_feedbacks_module = sys.modules[
     "cognee.tasks.memify.extract_agent_trace_feedbacks"
 ]
+
+
+def _trace_entry(method_return_value):
+    """Build a SessionAgentTraceEntry as get_agent_trace_session returns in production.
+
+    Only method_return_value matters for raw-content extraction; the required
+    identity fields are filled with placeholders.
+    """
+    return SessionAgentTraceEntry(
+        trace_id="t1",
+        origin_function="traced_agent",
+        status="success",
+        method_return_value=method_return_value,
+    )
 
 
 @pytest.fixture
@@ -188,10 +203,10 @@ async def test_extract_agent_trace_feedbacks_continues_when_one_session_fails(mo
 async def test_extract_agent_trace_feedbacks_can_extract_raw_return_values(mock_user):
     mock_session_manager = _make_mock_session_manager([])
     mock_session_manager.get_agent_trace_session.return_value = [
-        {"method_return_value": "draft ready"},
-        {"method_return_value": {"summary": "done", "steps": 2}},
-        {"method_return_value": "   "},
-        {"method_return_value": None},
+        _trace_entry("draft ready"),
+        _trace_entry({"summary": "done", "steps": 2}),
+        _trace_entry("   "),
+        _trace_entry(None),
     ]
 
     with (
@@ -227,8 +242,8 @@ async def test_extract_agent_trace_feedbacks_can_extract_raw_return_values(mock_
 async def test_extract_agent_trace_feedbacks_skips_empty_raw_return_values(mock_user):
     mock_session_manager = _make_mock_session_manager([])
     mock_session_manager.get_agent_trace_session.return_value = [
-        {"method_return_value": "   "},
-        {"method_return_value": None},
+        _trace_entry("   "),
+        _trace_entry(None),
     ]
 
     with (
@@ -317,9 +332,9 @@ async def test_extract_agent_trace_feedbacks_limits_to_last_n_steps(mock_user):
 async def test_extract_agent_trace_feedbacks_limits_raw_return_values_to_last_n_steps(mock_user):
     mock_session_manager = _make_mock_session_manager([])
     trace_entries = [
-        {"method_return_value": "first return"},
-        {"method_return_value": "second return"},
-        {"method_return_value": "third return"},
+        _trace_entry("first return"),
+        _trace_entry("second return"),
+        _trace_entry("third return"),
     ]
 
     async def _get_agent_trace_session(*, user_id, session_id, last_n=None):
@@ -356,8 +371,8 @@ async def test_extract_agent_trace_feedbacks_limits_raw_return_values_to_last_n_
 async def test_extract_agent_trace_feedbacks_passes_last_n_to_raw_trace_lookup(mock_user):
     mock_session_manager = _make_mock_session_manager([])
     mock_session_manager.get_agent_trace_session.return_value = [
-        {"method_return_value": "second return"},
-        {"method_return_value": "third return"},
+        _trace_entry("second return"),
+        _trace_entry("third return"),
     ]
 
     with (

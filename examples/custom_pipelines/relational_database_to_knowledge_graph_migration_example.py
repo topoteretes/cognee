@@ -1,18 +1,34 @@
-from pathlib import Path
+# ruff: noqa: E402
 import asyncio
 import os
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+load_dotenv(override=True)
+
+# Set os.environ before importing Cognee: Cognee reads env-backed settings at import time, so values
+# assigned later may not override defaults or `.env`. See https://docs.cognee.ai/setup-configuration/overview#using-os-environ
+os.environ["ENABLE_BACKEND_ACCESS_CONTROL"] = "False"
+
+# In case environment variables are not set use the example database from the Cognee repo.
+MIGRATION_DB_PROVIDER = os.environ.get("MIGRATION_DB_PROVIDER", "sqlite")
+MIGRATION_DB_PATH = os.environ.get(
+    "MIGRATION_DB_PATH",
+    os.path.join(Path(__file__).resolve().parent.parent.parent, "cognee/tests/test_data"),
+)
+MIGRATION_DB_NAME = os.environ.get("MIGRATION_DB_NAME", "migration_database.sqlite")
 
 import cognee
-from cognee.infrastructure.databases.relational.config import get_migration_config
+from cognee import SearchType, visualize_graph
 from cognee.infrastructure.databases.graph import get_graph_engine
-from cognee.api.v1.visualize.visualize import visualize_graph
-from cognee.infrastructure.databases.relational import (
-    get_migration_relational_engine,
-)
-from cognee.modules.search.types import SearchType
 from cognee.infrastructure.databases.relational import (
     create_db_and_tables as create_relational_db_and_tables,
 )
+from cognee.infrastructure.databases.relational import (
+    get_migration_relational_engine,
+)
+from cognee.infrastructure.databases.relational.config import get_migration_config
 from cognee.infrastructure.databases.vector.pgvector import (
     create_db_and_tables as create_vector_db_and_tables,
 )
@@ -31,29 +47,17 @@ from cognee.infrastructure.databases.vector.pgvector import (
 
 
 async def main():
-    # Disable backend access control to avoid dataset handler mismatch
-    os.environ["ENABLE_BACKEND_ACCESS_CONTROL"] = "False"
-
     # Clean all data stored in Cognee
-    await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata=True)
+    await cognee.forget(everything=True)
 
     # Needed to create appropriate database tables only on the Cognee side
     await create_relational_db_and_tables()
     await create_vector_db_and_tables()
 
-    # In case environment variables are not set use the example database from the Cognee repo
-    migration_db_provider = os.environ.get("MIGRATION_DB_PROVIDER", "sqlite")
-    migration_db_path = os.environ.get(
-        "MIGRATION_DB_PATH",
-        os.path.join(Path(__file__).resolve().parent.parent.parent, "cognee/tests/test_data"),
-    )
-    migration_db_name = os.environ.get("MIGRATION_DB_NAME", "migration_database.sqlite")
-
     migration_config = get_migration_config()
-    migration_config.migration_db_provider = migration_db_provider
-    migration_config.migration_db_path = migration_db_path
-    migration_config.migration_db_name = migration_db_name
+    migration_config.migration_db_provider = MIGRATION_DB_PROVIDER
+    migration_config.migration_db_path = MIGRATION_DB_PATH
+    migration_config.migration_db_name = MIGRATION_DB_NAME
 
     engine = get_migration_relational_engine()
 
@@ -68,9 +72,9 @@ async def main():
     await migrate_relational_database(graph, schema=schema)
     print("Relational database migration complete.")
 
-    # Make sure to set top_k at a high value for a broader search, the default value is only 10!
+    # Make sure to set top_k at a high value for a broader search, the default value is only 15!
     # top_k represent the number of graph tripplets to supply to the LLM to answer your question
-    search_results = await cognee.search(
+    search_results = await cognee.recall(
         query_type=SearchType.GRAPH_COMPLETION,
         query_text="What kind of data do you contain?",
         top_k=200,
@@ -79,14 +83,14 @@ async def main():
 
     # Having a top_k value set to too high might overwhelm the LLM context when specific questions need to be answered.
     # For this kind of question we've set the top_k to 50
-    search_results = await cognee.search(
+    search_results = await cognee.recall(
         query_type=SearchType.GRAPH_COMPLETION,
         query_text="What invoices are related to Leonie Köhler?",
         top_k=50,
     )
     print(f"Search results: {search_results}")
 
-    search_results = await cognee.search(
+    search_results = await cognee.recall(
         query_type=SearchType.GRAPH_COMPLETION,
         query_text="What invoices are related to Luís Gonçalves?",
         top_k=50,

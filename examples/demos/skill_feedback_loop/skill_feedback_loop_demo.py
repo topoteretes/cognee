@@ -21,6 +21,8 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
+# Set os.environ before importing Cognee: Cognee reads env-backed settings at import time, so values
+# assigned later may not override defaults or `.env`. See https://docs.cognee.ai/setup-configuration/overview#using-os-environ
 os.environ["LOG_LEVEL"] = "ERROR"
 os.environ["COGNEE_LOG_FILE"] = "false"
 os.environ["COGNEE_CLI_MODE"] = "true"
@@ -30,13 +32,13 @@ import cognee
 from cognee import SearchType
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.memory import SkillRunEntry
+from cognee.modules.recall.types.RecallResponse import ResponseGraphEntry
 from cognee.modules.engine.operations.setup import setup
 from cognee.modules.memify.skill_improvement import improve_skill
 from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
     resolve_authorized_user_datasets,
 )
 from cognee.modules.tools.resolve_skills import find_skill_by_name
-
 
 DATASET_NAME = "toy-skill-feedback-loop"
 SESSION_ID = "toy-skill-feedback-loop-session"
@@ -72,6 +74,8 @@ Reviewer comment:
 def _unwrap_answer(answer: Any) -> Any:
     if isinstance(answer, list) and answer:
         return _unwrap_answer(answer[0])
+    if isinstance(answer, ResponseGraphEntry) and answer:
+        return _unwrap_answer(answer.text)
     if isinstance(answer, dict) and "search_result" in answer:
         return _unwrap_answer(answer["search_result"])
     return answer
@@ -121,8 +125,7 @@ async def skill_body(skill_name: str, dataset, user) -> str:
 
 
 async def main() -> None:
-    await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata=True)
+    await cognee.forget(everything=True)
     await setup()
 
     remembered = await cognee.remember(
@@ -138,12 +141,14 @@ async def main() -> None:
         diff_text=(DATA_ROOT / "tiny_diff.patch").read_text(encoding="utf-8"),
         comment_text=(DATA_ROOT / "bad_pr_comment.txt").read_text(encoding="utf-8"),
     )
-    answer = await cognee.search(
+    answer = await cognee.recall(
         task,
         query_type=SearchType.AGENTIC_COMPLETION,
         datasets=DATASET_NAME,
-        skills=SKILL_NAMES,
-        max_iter=6,
+        retriever_specific_config={
+            "skills": SKILL_NAMES,
+            "max_iter": 6,
+        },
         session_id=SESSION_ID,
     )
     feedback = parse_json_answer(answer)

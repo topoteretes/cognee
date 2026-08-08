@@ -1,11 +1,14 @@
 from uuid import UUID
-from typing import Union, Optional, List, Type
+from typing import Any, Union, Optional, List, Type
 
 from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.engine.models import Skill
 from cognee.modules.users.models import User
+from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
+from cognee.infrastructure.llm.config import LLMConfig
 from cognee.modules.search.types import SearchResult, SearchType
 from cognee.modules.users.methods import get_default_user
+from cognee.base_config import get_base_config
 from cognee.modules.search.methods import search as search_function
 from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.data.exceptions import DatasetNotFoundError
@@ -33,7 +36,7 @@ async def search(
     dataset_ids: Optional[Union[list[UUID], UUID]] = None,
     system_prompt_path: str = "answer_simple_question.txt",
     system_prompt: Optional[str] = None,
-    top_k: int = 10,
+    top_k: int = 15,
     node_type: Optional[Type] = NodeSet,
     node_name: Optional[List[str]] = None,
     node_name_filter_operator: str = "OR",
@@ -41,7 +44,7 @@ async def search(
     session_id: Optional[str] = None,
     wide_search_top_k: Optional[int] = 100,
     triplet_distance_penalty: Optional[float] = 6.5,
-    feedback_influence: float = 0.0,
+    feedback_influence: float = get_base_config().default_feedback_influence,
     verbose: bool = False,
     retriever_specific_config: Optional[dict] = None,
     neighborhood_depth: Optional[int] = None,
@@ -50,6 +53,10 @@ async def search(
     skills: Optional[List[Union[str, Skill]]] = None,
     tools: Optional[List[str]] = None,
     max_iter: Optional[int] = None,
+    include_references: bool = False,
+    llm_config: Optional[LLMConfig] = None,
+    embedding_config: Optional[EmbeddingConfig] = None,
+    code_query: Optional[dict[str, Any]] = None,
 ) -> List[SearchResult]:
     if neighborhood_depth is not None and (
         not isinstance(neighborhood_depth, int) or neighborhood_depth < 1
@@ -69,6 +76,11 @@ async def search(
         raise CogneeValidationError(
             message="max_iter must be a positive integer.",
             name="InvalidMaxIter",
+        )
+    if code_query is not None and query_type is not SearchType.CODE:
+        raise CogneeValidationError(
+            message="code_query requires query_type=SearchType.CODE.",
+            name="InvalidCodeSearchConfig",
         )
     """
     Search and query the knowledge graph for insights, information, and connections.
@@ -107,9 +119,10 @@ async def search(
             Returns: Generated content summaries.
 
         **CODE**:
-            Code-specific search with syntax and semantic understanding.
-            Best for: Finding functions, classes, implementation patterns.
-            Returns: Structured code information with context and relationships.
+            Deterministic indexed queries and graph traversal over an Enola code graph.
+            Best for: Exact fact filtering, symbol exploration, dependency paths,
+            traversal, and reverse impact analysis without an LLM.
+            Returns: Structured facts, nodes, edges, paths, and traversal statistics.
 
         **CYPHER**:
             Direct graph database queries using Cypher syntax.
@@ -122,7 +135,7 @@ async def search(
             Returns: The results from the automatically selected search type.
 
         **CHUNKS_LEXICAL**:
-            Token-based lexical chunk search (e.g., Jaccard). Best for: exact-term matching, stopword-aware lookups.
+            Token-based lexical chunk search (BM25-style lexical ranking). Best for: exact-term matching, stopword-aware lookups.
             Returns: Ranked text chunks (optionally with scores).
 
     Args:
@@ -163,6 +176,9 @@ async def search(
         verbose: If True, returns detailed result information including graph representation (when possible).
 
         retriever_specific_config: Optional dictionary of additional configuration parameters specific to the retriever being used.
+        code_query: Structured deterministic CODE operation and arguments. Supported
+                    operations are query_facts, explore, traverse, find_path, and
+                    impact_analysis.
         skills: Explicit skill names or Skill objects to load into the agentic retriever.
         tools: Optional whitelist of tool names available to the agentic retriever.
         max_iter: Maximum number of agentic tool-call iterations before forcing a final answer.
@@ -194,9 +210,9 @@ async def search(
         - **RAG_COMPLETION**: Medium speed, uses LLM + document chunks (no graph traversal)
         - **CHUNKS**: Fastest, pure vector similarity search without LLM
         - **SUMMARIES**: Fast, returns pre-computed summaries
-        - **CODE**: Medium speed, specialized for code understanding
+        - **CODE**: Deterministic and model-free; request cost scales with the selected code graph
         - **FEELING_LUCKY**: Variable speed, uses LLM + search type selection intelligently
-        - **top_k**: Start with 10, increase for comprehensive analysis (max 100)
+        - **top_k**: Start with 15, increase for comprehensive analysis (max 100)
         - **datasets**: Specify datasets to improve speed and relevance
 
     Next Steps After Search:
@@ -236,6 +252,8 @@ async def search(
             node_name=node_name,
             only_context=only_context,
             verbose=verbose,
+            include_references=include_references,
+            code_query=code_query,
             **{key: value for key, value in agentic_overrides.items() if value is not None},
         )
 
@@ -281,7 +299,7 @@ async def search(
         await set_session_user_context_variable(user)
 
         # Transform string based datasets to UUID - String based datasets can only be found for current user
-        if datasets is not None and [all(isinstance(dataset, str) for dataset in datasets)]:
+        if datasets is not None and all(isinstance(dataset, str) for dataset in datasets):
             datasets = await get_authorized_existing_datasets(datasets, "read", user)
             datasets = [dataset.id for dataset in datasets]
             if not datasets:
@@ -302,6 +320,10 @@ async def search(
             for key, value in agentic_overrides.items():
                 if value is not None:
                     retriever_specific_config[key] = value
+
+        if code_query is not None:
+            retriever_specific_config = dict(retriever_specific_config or {})
+            retriever_specific_config.update(code_query)
 
         filtered_search_results = await search_function(
             query_text=query_text,
@@ -324,6 +346,9 @@ async def search(
             neighborhood_depth=neighborhood_depth,
             neighborhood_seed_top_k=neighborhood_seed_top_k,
             wide_search_max_distance=wide_search_max_distance,
+            include_references=include_references,
+            llm_config=llm_config,
+            embedding_config=embedding_config,
         )
 
         n = len(filtered_search_results) if filtered_search_results else 0

@@ -11,9 +11,8 @@ Requires:
 import asyncio
 
 import cognee
-from cognee.modules.search.types import SearchType
+from cognee import SearchType
 from cognee.shared.logging_utils import ERROR, setup_logging
-
 
 DATASET = "global_context_index_smoke_demo"
 
@@ -44,7 +43,7 @@ RELEVANT_AREAS_HEADER = "Relevant areas:"
 
 
 async def _search_context(query: str, include_global_context: bool) -> str:
-    results = await cognee.search(
+    results = await cognee.recall(
         query_text=query,
         query_type=SearchType.GRAPH_COMPLETION,
         datasets=[DATASET],
@@ -63,7 +62,7 @@ async def _search_context(query: str, include_global_context: bool) -> str:
 async def _ask_meeting_questions() -> None:
     print("\nMeeting question answers")
     for index, query in enumerate(SMOKE_QUERIES, start=1):
-        results = await cognee.search(
+        results = await cognee.recall(
             query_text=query,
             query_type=SearchType.GRAPH_COMPLETION,
             datasets=[DATASET],

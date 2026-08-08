@@ -1,3 +1,4 @@
+# ruff: noqa: E402
 """
 V2 Memory-Oriented API: remember, recall, improve, forget, status.
 
@@ -19,6 +20,14 @@ Requires:
 """
 
 import asyncio
+import os
+
+# Enable filesystem-based session caching (required for session_id and improve)
+# Set os.environ before importing Cognee: Cognee reads env-backed settings at import time, so values
+# assigned later may not override defaults or `.env`. See https://docs.cognee.ai/setup-configuration/overview#using-os-environ
+os.environ["CACHING"] = "true"
+os.environ["CACHE_BACKEND"] = "fs"
+
 import cognee
 
 PERMANENT_TEXT = (
@@ -51,12 +60,6 @@ async def main():
     )
 
     await create_db_and_tables()
-
-    # Enable filesystem-based session caching (required for session_id and improve)
-    import os
-
-    os.environ["CACHING"] = "true"
-    os.environ["CACHE_BACKEND"] = "fs"
 
     from cognee.infrastructure.databases.cache.config import get_cache_config
 

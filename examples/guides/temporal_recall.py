@@ -1,4 +1,5 @@
 import asyncio
+
 import cognee
 
 
@@ -16,24 +17,24 @@ async def main():
         self_improvement=False,
     )
 
-    from cognee.api.v1.search import SearchType
+    from cognee import SearchType
 
     # Before / after queries
     result = await cognee.recall(
-        query_type=SearchType.TEMPORAL, query_text="What happened before 2000?", top_k=10
+        query_type=SearchType.TEMPORAL, query_text="What happened before 2000?", top_k=15
     )
 
     assert result != []
 
     result = await cognee.recall(
-        query_type=SearchType.TEMPORAL, query_text="What happened after 2010?", top_k=10
+        query_type=SearchType.TEMPORAL, query_text="What happened after 2010?", top_k=15
     )
 
     assert result != []
 
     # Between queries
     result = await cognee.recall(
-        query_type=SearchType.TEMPORAL, query_text="Events between 2001 and 2004", top_k=10
+        query_type=SearchType.TEMPORAL, query_text="Events between 2001 and 2004", top_k=15
     )
 
     assert result != []
@@ -42,7 +43,7 @@ async def main():
     result = await cognee.recall(
         query_type=SearchType.TEMPORAL,
         query_text="Key project milestones between 1998 and 2010",
-        top_k=10,
+        top_k=15,
     )
 
     assert result != []
@@ -51,7 +52,7 @@ async def main():
         query_type=SearchType.TEMPORAL,
         query_text="What happened after 2004?",
         datasets=["timeline_demo"],
-        top_k=10,
+        top_k=15,
     )
 
     assert result != []

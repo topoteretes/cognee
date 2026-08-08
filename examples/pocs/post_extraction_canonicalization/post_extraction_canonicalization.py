@@ -9,7 +9,7 @@ from pandas import DataFrame
 from pydantic import BaseModel
 
 from cognee.infrastructure.databases.graph import get_graph_engine
-from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.llm.extraction import extract_content_graph
 from cognee.modules.chunking.models import DocumentChunk
 
@@ -83,7 +83,7 @@ async def cache_and_replace_nodes(graphs, **kwargs):
     similarity_threshold = kwargs.get("similarity_threshold", 1.0)
     stats = kwargs.get("stats", None)
 
-    vector_engine = get_vector_engine()
+    vector_engine = await get_vector_engine_async()
     df_new = pd.DataFrame()
     for graph in graphs:
         await asyncio.gather(

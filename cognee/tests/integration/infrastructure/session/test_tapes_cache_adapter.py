@@ -48,8 +48,8 @@ async def test_create_qa_entry_writes_fs_and_mirrors_to_tapes(tapes_adapter):
 
     entries = await tapes_adapter.get_all_qa_entries("u1", "s1")
     assert len(entries) == 1
-    assert entries[0]["qa_id"] == "qa-1"
-    assert entries[0]["answer"] == "An AI memory platform."
+    assert entries[0].qa_id == "qa-1"
+    assert entries[0].answer == "An AI memory platform."
 
     assert mock_post.await_count == 1
     call = mock_post.await_args
@@ -81,7 +81,7 @@ async def test_ingest_failure_does_not_break_fs_write(tapes_adapter):
 
     entries = await tapes_adapter.get_all_qa_entries("u1", "s1")
     assert len(entries) == 1
-    assert entries[0]["qa_id"] == "qa-2"
+    assert entries[0].qa_id == "qa-2"
 
 
 @pytest.mark.asyncio

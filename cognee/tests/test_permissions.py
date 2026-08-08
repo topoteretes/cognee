@@ -2,6 +2,7 @@ import asyncio
 import os
 import pathlib
 from unittest.mock import AsyncMock, patch
+from uuid import UUID
 
 import pytest
 import pytest_asyncio
@@ -26,19 +27,17 @@ from cognee.modules.users.tenants.methods import (
 pytestmark = pytest.mark.asyncio
 
 
-def _extract_dataset_id_from_cognify(cognify_result: dict):
-    """Extract dataset_id from cognify output dictionary."""
-    for dataset_id, _pipeline_result in cognify_result.items():
-        return dataset_id
-    return None
+def _extract_dataset_id_from_remember(remember_result):
+    """Extract dataset_id from remember output."""
+    return UUID(remember_result.dataset_id)
 
 
 async def _reset_engines_and_prune() -> None:
     """Reset db engine caches and prune data/system."""
     try:
-        from cognee.infrastructure.databases.vector import get_vector_engine
+        from cognee.infrastructure.databases.vector import get_vector_engine_async
 
-        vector_engine = get_vector_engine()
+        vector_engine = await get_vector_engine_async()
         if hasattr(vector_engine, "engine") and hasattr(vector_engine.engine, "dispose"):
             await vector_engine.engine.dispose(close=True)
     except Exception:
@@ -113,119 +112,137 @@ async def test_permissions_example_flow(permissions_example_env):
     preparation and manipulation of quantum states.
     """
 
-    # Create user_1, add AI dataset.
+    # Create user_1, remember AI dataset.
     user_1 = await create_user("user_1@example.com", "example")
-    await cognee.add([explanation_file_path], dataset_name="AI", user=user_1)
+    ai_remember_result = await cognee.remember(
+        [explanation_file_path],
+        dataset_name="AI",
+        user=user_1,
+        self_improvement=False,
+    )
 
-    # Create user_2, add QUANTUM dataset.
+    # Create user_2, remember QUANTUM dataset.
     user_2 = await create_user("user_2@example.com", "example")
-    await cognee.add([text], dataset_name="QUANTUM", user=user_2)
+    quantum_remember_result = await cognee.remember(
+        [text],
+        dataset_name="QUANTUM",
+        user=user_2,
+        self_improvement=False,
+    )
 
-    ai_cognify_result = await cognee.cognify(["AI"], user=user_1)
-    quantum_cognify_result = await cognee.cognify(["QUANTUM"], user=user_2)
-
-    ai_dataset_id = _extract_dataset_id_from_cognify(ai_cognify_result)
-    quantum_dataset_id = _extract_dataset_id_from_cognify(quantum_cognify_result)
+    ai_dataset_id = _extract_dataset_id_from_remember(ai_remember_result)
+    quantum_dataset_id = _extract_dataset_id_from_remember(quantum_remember_result)
     assert ai_dataset_id is not None
     assert quantum_dataset_id is not None
 
     with llm_patch:
         # user_1 can read own dataset.
-        search_results = await cognee.search(
+        recall_results = await cognee.recall(
             query_type=SearchType.GRAPH_COMPLETION,
             query_text="What is in the document?",
             user=user_1,
-            datasets=[ai_dataset_id],
+            dataset_ids=[ai_dataset_id],
         )
-    assert isinstance(search_results, list) and len(search_results) == 1
-    assert search_results[0]["dataset_name"] == "AI"
-    assert search_results[0]["search_result"] == ["MOCK_ANSWER"]
+    assert isinstance(recall_results, list) and len(recall_results) == 1
+    assert recall_results[0].dataset_name == "AI"
+    # GRAPH_COMPLETION appends an "Evidence:" section when include_references is
+    # enabled (off by default), so match the mocked completion as a prefix.
+    assert recall_results[0].text.startswith("MOCK_ANSWER")
 
     # user_1 can't read dataset owned by user_2.
     with pytest.raises(PermissionDeniedError):
-        await cognee.search(
+        await cognee.recall(
             query_type=SearchType.GRAPH_COMPLETION,
             query_text="What is in the document?",
             user=user_1,
-            datasets=[quantum_dataset_id],
+            dataset_ids=[quantum_dataset_id],
         )
 
-    # user_1 can't add to user_2's dataset.
+    # user_1 can't remember to user_2's dataset.
     with pytest.raises(PermissionDeniedError):
-        await cognee.add([explanation_file_path], dataset_id=quantum_dataset_id, user=user_1)
+        await cognee.remember(
+            [explanation_file_path],
+            dataset_id=quantum_dataset_id,
+            user=user_1,
+            self_improvement=False,
+        )
 
-        # user_2 grants read permission to user_1 for QUANTUM dataset.
+    # user_2 grants read permission to user_1 for QUANTUM dataset.
+    await authorized_give_permission_on_datasets(user_1.id, [quantum_dataset_id], "read", user_2.id)
+
+    with llm_patch:
+        # Now user_1 can read QUANTUM dataset via dataset_id.
+        recall_results = await cognee.recall(
+            query_type=SearchType.GRAPH_COMPLETION,
+            query_text="What is in the document?",
+            user=user_1,
+            dataset_ids=[quantum_dataset_id],
+        )
+    assert isinstance(recall_results, list) and len(recall_results) == 1
+    assert recall_results[0].dataset_name == "QUANTUM"
+    # GRAPH_COMPLETION appends an "Evidence:" section when include_references is
+    # enabled (off by default), so match the mocked completion as a prefix.
+    assert recall_results[0].text.startswith("MOCK_ANSWER")
+
+    # Tenant + role scenario.
+    tenant_id = await create_tenant("CogneeLab", user_2.id)
+    await select_tenant(user_id=user_2.id, tenant_id=tenant_id)
+    role_id = await create_role(role_name="Researcher", owner_id=user_2.id)
+
+    user_3 = await create_user("user_3@example.com", "example")
+    await add_user_to_tenant(user_id=user_3.id, tenant_id=tenant_id, owner_id=user_2.id)
+    await add_user_to_role(user_id=user_3.id, role_id=role_id, owner_id=user_2.id)
+    await select_tenant(user_id=user_3.id, tenant_id=tenant_id)
+
+    # Can't grant role permission on a dataset that isn't part of the active tenant.
+    with pytest.raises(PermissionDeniedError):
         await authorized_give_permission_on_datasets(
-            user_1.id, [quantum_dataset_id], "read", user_2.id
+            role_id, [quantum_dataset_id], "read", user_2.id
         )
 
+    # Re-create QUANTUM dataset in CogneeLab tenant so role permissions can be assigned.
+    user_2 = await get_user(user_2.id)  # refresh tenant context
+    quantum_cognee_lab_remember_result = await cognee.remember(
+        [text],
+        dataset_name="QUANTUM_COGNEE_LAB",
+        user=user_2,
+        self_improvement=False,
+    )
+    quantum_cognee_lab_dataset_id = _extract_dataset_id_from_remember(
+        quantum_cognee_lab_remember_result
+    )
+    assert quantum_cognee_lab_dataset_id is not None
+
+    await authorized_give_permission_on_datasets(
+        role_id, [quantum_cognee_lab_dataset_id], "read", user_2.id
+    )
+
+    with llm_patch:
+        # user_3 can read via role permission.
+        recall_results = await cognee.recall(
+            query_type=SearchType.GRAPH_COMPLETION,
+            query_text="What is in the document?",
+            user=user_3,
+            dataset_ids=[quantum_cognee_lab_dataset_id],
+        )
+    assert isinstance(recall_results, list) and len(recall_results) == 1
+    assert recall_results[0].dataset_name == "QUANTUM_COGNEE_LAB"
+    # GRAPH_COMPLETION appends an "Evidence:" section when include_references is
+    # enabled (off by default), so match the mocked completion as a prefix.
+    assert recall_results[0].text.startswith("MOCK_ANSWER")
+
+    # Remove user_3 from tenant (tenant owner user_2 removes user_3).
+    await remove_user_from_tenant(user_id=user_3.id, tenant_id=tenant_id, owner_id=user_2.id)
+
+    # user_3 can no longer read the tenant dataset after being removed.
+    with pytest.raises(PermissionDeniedError):
         with llm_patch:
-            # Now user_1 can read QUANTUM dataset via dataset_id.
-            search_results = await cognee.search(
-                query_type=SearchType.GRAPH_COMPLETION,
-                query_text="What is in the document?",
-                user=user_1,
-                dataset_ids=[quantum_dataset_id],
-            )
-        assert isinstance(search_results, list) and len(search_results) == 1
-        assert search_results[0]["dataset_name"] == "QUANTUM"
-        assert search_results[0]["search_result"] == ["MOCK_ANSWER"]
-
-        # Tenant + role scenario.
-        tenant_id = await create_tenant("CogneeLab", user_2.id)
-        await select_tenant(user_id=user_2.id, tenant_id=tenant_id)
-        role_id = await create_role(role_name="Researcher", owner_id=user_2.id)
-
-        user_3 = await create_user("user_3@example.com", "example")
-        await add_user_to_tenant(user_id=user_3.id, tenant_id=tenant_id, owner_id=user_2.id)
-        await add_user_to_role(user_id=user_3.id, role_id=role_id, owner_id=user_2.id)
-        await select_tenant(user_id=user_3.id, tenant_id=tenant_id)
-
-        # Can't grant role permission on a dataset that isn't part of the active tenant.
-        with pytest.raises(PermissionDeniedError):
-            await authorized_give_permission_on_datasets(
-                role_id, [quantum_dataset_id], "read", user_2.id
-            )
-
-        # Re-create QUANTUM dataset in CogneeLab tenant so role permissions can be assigned.
-        user_2 = await get_user(user_2.id)  # refresh tenant context
-        await cognee.add([text], dataset_name="QUANTUM_COGNEE_LAB", user=user_2)
-        quantum_cognee_lab_cognify_result = await cognee.cognify(
-            ["QUANTUM_COGNEE_LAB"], user=user_2
-        )
-        quantum_cognee_lab_dataset_id = _extract_dataset_id_from_cognify(
-            quantum_cognee_lab_cognify_result
-        )
-        assert quantum_cognee_lab_dataset_id is not None
-
-        await authorized_give_permission_on_datasets(
-            role_id, [quantum_cognee_lab_dataset_id], "read", user_2.id
-        )
-
-        with llm_patch:
-            # user_3 can read via role permission.
-            search_results = await cognee.search(
+            await cognee.recall(
                 query_type=SearchType.GRAPH_COMPLETION,
                 query_text="What is in the document?",
                 user=user_3,
                 dataset_ids=[quantum_cognee_lab_dataset_id],
             )
-        assert isinstance(search_results, list) and len(search_results) == 1
-        assert search_results[0]["dataset_name"] == "QUANTUM_COGNEE_LAB"
-        assert search_results[0]["search_result"] == ["MOCK_ANSWER"]
-
-        # Remove user_3 from tenant (tenant owner user_2 removes user_3).
-        await remove_user_from_tenant(user_id=user_3.id, tenant_id=tenant_id, owner_id=user_2.id)
-
-        # user_3 can no longer read the tenant dataset after being removed.
-        with pytest.raises(PermissionDeniedError):
-            with llm_patch:
-                await cognee.search(
-                    query_type=SearchType.GRAPH_COMPLETION,
-                    query_text="What is in the document?",
-                    user=user_3,
-                    dataset_ids=[quantum_cognee_lab_dataset_id],
-                )
 
 
 async def test_remove_user_from_tenant_non_owner_gets_403(permissions_example_env):
@@ -263,3 +280,79 @@ async def test_remove_user_from_tenant_user_not_in_tenant_404(permissions_exampl
         await remove_user_from_tenant(user_id=other_user.id, tenant_id=tenant_id, owner_id=owner.id)
 
     assert "User not found in this tenant" in exc_info.value.message
+
+
+async def test_improve_permission_matrix(permissions_example_env):
+    """Write-side pipelines (improve + its memify engine) enforce dataset permissions.
+
+    improve() mutates the dataset in every stage, so it requires *write*
+    permission. The matrix, with real users and ACLs:
+
+    1. no grant, by UUID        -> PermissionDeniedError (403)
+    1b. nonexistent UUID        -> PermissionDeniedError too — existence is
+                                   never confirmed to an unauthorized caller
+    2. read grant only, by UUID -> PermissionDeniedError (read is not enough)
+    3. write grant, by UUID     -> allowed, and the stage receives exactly the
+                                   authorized dataset (no retargeting)
+    4. by another owner's NAME  -> never touches their dataset (names are
+                                   owner-scoped; shared datasets are only
+                                   addressable by UUID)
+    5. memify directly          -> same write requirement as improve
+
+    No LLM involved: denials raise before any stage runs, and the success
+    paths patch the memify engine.
+    """
+    from importlib import import_module
+
+    from uuid import uuid4
+
+    from cognee.modules.data.methods import get_datasets_by_name
+
+    import_module("cognee.api.v1.improve.improve")
+
+    owner = await create_user("improve_owner@example.com", "example")
+    other = await create_user("improve_other@example.com", "example")
+
+    # add() creates the dataset and the owner's ACLs without any LLM work.
+    await cognee.add(["improve permission fixture text"], dataset_name="IMPROVE_PERMS", user=owner)
+    dataset_id = (await get_datasets_by_name(["IMPROVE_PERMS"], owner.id))[0].id
+
+    def memify_patch():
+        return patch("cognee.modules.memify.memify", new_callable=AsyncMock, return_value={})
+
+    # 1. No grant on an existing dataset: refused with 403.
+    with pytest.raises(PermissionDeniedError):
+        await cognee.improve(dataset=dataset_id, user=other)
+
+    # 1b. A UUID that exists nowhere gets the same 403 — the permission layer
+    #     never confirms dataset existence to an unauthorized caller.
+    with pytest.raises(PermissionDeniedError):
+        await cognee.improve(dataset=uuid4(), user=other)
+
+    # 2. Read grant is not enough — every improve stage writes.
+    await authorized_give_permission_on_datasets(other.id, [dataset_id], "read", owner.id)
+    with pytest.raises(PermissionDeniedError):
+        await cognee.improve(dataset=dataset_id, user=other)
+
+    # 3. Write grant allows it, and the engine receives the authorized dataset.
+    await authorized_give_permission_on_datasets(other.id, [dataset_id], "write", owner.id)
+    with memify_patch() as memify_mock:
+        await cognee.improve(dataset=dataset_id, user=other)
+    memify_mock.assert_awaited_once()
+    assert memify_mock.await_args.kwargs["dataset"] == dataset_id
+
+    # 4. Names are owner-scoped: improving the owner's dataset *name* as another
+    #    user creates that user's own dataset and never touches the owner's.
+    with memify_patch():
+        await cognee.improve(dataset="IMPROVE_PERMS", user=other)
+    others_datasets = await get_datasets_by_name(["IMPROVE_PERMS"], other.id)
+    assert len(others_datasets) == 1
+    assert others_datasets[0].id != dataset_id
+
+    # 5. memify (improve's engine) enforces the same write requirement directly.
+    from cognee.modules.memify import memify as real_memify
+
+    await cognee.add(["second fixture"], dataset_name="IMPROVE_PERMS_2", user=owner)
+    dataset_2_id = (await get_datasets_by_name(["IMPROVE_PERMS_2"], owner.id))[0].id
+    with pytest.raises(PermissionDeniedError):
+        await real_memify(dataset=dataset_2_id, user=other)

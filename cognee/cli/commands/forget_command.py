@@ -15,7 +15,7 @@ class ForgetCommand(SupportsCliCommand):
     description = """
 Remove data from the knowledge graph.
 
-Use --everything to delete all user data, --dataset/--dataset-id
+Use --everything (alias --all) to delete all user data, --dataset/--dataset-id
 to delete a dataset, or dataset + --data-id to delete a single item.
     """
 
@@ -31,6 +31,7 @@ to delete a dataset, or dataset + --data-id to delete a single item.
         )
         parser.add_argument(
             "--everything",
+            "--all",
             action="store_true",
             default=False,
             help="Delete all datasets and data",
@@ -50,7 +51,7 @@ to delete a dataset, or dataset + --data-id to delete a single item.
 
             if not args.everything and not dataset and not dataset_id and not data_id:
                 fmt.error(
-                    "Specify --dataset or --dataset-id, --data-id with dataset, or --everything."
+                    "Specify --dataset or --dataset-id, --data-id with dataset, or --everything/--all."
                 )
                 return
 

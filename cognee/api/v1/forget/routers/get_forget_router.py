@@ -1,6 +1,6 @@
 from uuid import UUID
 from typing import Optional, Union, Literal
-from pydantic import Field
+from pydantic import ConfigDict, Field
 from fastapi import Depends, APIRouter
 from fastapi.responses import JSONResponse
 
@@ -14,10 +14,34 @@ from cognee.shared.logging_utils import get_logger
 
 
 class ForgetPayloadDTO(InDTO):
-    data_id: Optional[UUID] = Field(default=None)
-    dataset: Optional[str] = Field(default=None, examples=[""])
-    dataset_id: Optional[UUID] = Field(default=None, examples=[""])
-    everything: bool = Field(default=False)
+    model_config = ConfigDict(
+        json_schema_extra={"examples": [{"dataset": "main_dataset", "memoryOnly": True}]},
+    )
+
+    data_id: Optional[UUID] = Field(
+        default=None,
+        examples=[""],
+        description="UUID of a single data item to remove. "
+        "Requires `dataset` or `datasetId` to also be set.",
+    )
+    dataset: Optional[str] = Field(
+        default=None,
+        examples=["default_dataset"],
+        description="Dataset name to delete (or clear with memoryOnly). "
+        "Provide either `dataset` or `datasetId`, not both.",
+    )
+    dataset_id: Optional[UUID] = Field(
+        default=None,
+        examples=[""],
+        description="Dataset UUID, alternative to `dataset`. "
+        "Provide either `dataset` or `datasetId`, not both.",
+    )
+    everything: bool = Field(
+        default=False,
+        description="DANGER: when true, permanently deletes ALL datasets and data the user "
+        "owns (relational records, graph, vector embeddings, session cache). "
+        "Ignores dataId/dataset/datasetId.",
+    )
     memory_only: bool = Field(
         default=False,
         description="When True with a dataset, delete only memory (graph nodes/edges and vector embeddings) "
@@ -37,12 +61,31 @@ def get_forget_router() -> APIRouter:
         """Remove data from the knowledge graph.
 
         - Set `everything: true` to delete all user data.
-        - Set `dataset` or `dataset_id` alone to delete an entire dataset.
-        - Set `dataset`/`dataset_id` + `data_id` to delete a single item.
-        - Set `dataset`/`dataset_id` + `memory_only: true` to clear memory
+        - Set `dataset` or `datasetId` alone to delete an entire dataset.
+        - Set `dataset`/`datasetId` + `dataId` to delete a single item.
+        - Set `dataset`/`datasetId` + `memoryOnly: true` to clear memory
           (graph + vector), preserving raw files so the dataset can be re-cognified.
-        - Set `dataset`/`dataset_id` + `data_id` + `memory_only: true` to clear memory
+        - Set `dataset`/`datasetId` + `dataId` + `memoryOnly: true` to clear memory
           for a single file only.
+
+        ## Request Parameters
+        - **dataId** (Optional[UUID]): UUID of a single data item to remove. Requires
+          `dataset` or `datasetId` to also be set.
+        - **dataset** (Optional[str]): Name of the dataset to delete or clear.
+        - **datasetId** (Optional[UUID]): UUID of the dataset, alternative to `dataset`.
+        - **everything** (bool): When true, permanently deletes ALL datasets and data the
+          user owns (default: false).
+        - **memoryOnly** (bool): When true, delete only memory (graph + vector embeddings),
+          preserving raw files and data records (default: false).
+
+        Provide either `dataset` or `datasetId`, not both. Field names are shown camelCased
+        in the schema; snake_case aliases (`data_id`, `dataset_id`, `memory_only`) are also
+        accepted.
+
+        ## Error Codes
+        - **422 Unprocessable Entity**: Invalid parameter combination (e.g. both `dataset`
+          and `datasetId`, `dataId` without a dataset, or `memoryOnly` without a dataset)
+        - **500 Internal Server Error**: Error during deletion
         """
         send_telemetry(
             "Forget API Endpoint Invoked",

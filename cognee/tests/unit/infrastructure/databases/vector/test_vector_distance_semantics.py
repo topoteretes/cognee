@@ -20,13 +20,6 @@ try:
 except ModuleNotFoundError:
     HAS_PGVECTOR = False
 
-try:
-    from cognee.infrastructure.databases.vector.chromadb.ChromaDBAdapter import ChromaDBAdapter
-
-    HAS_CHROMADB = True
-except ModuleNotFoundError:
-    HAS_CHROMADB = False
-
 
 class _DummyEmbeddingEngine:
     def get_vector_size(self):
@@ -154,47 +147,6 @@ async def test_lancedb_search_with_nodeset_filter_uses_cosine():
     assert [result.score for result in results] == [1.11]
     assert collection.queries[0].distance_type_value == "cosine"
     assert "array_has_any" in collection.queries[0].where_value
-
-
-@pytest.mark.asyncio
-@pytest.mark.skipif(not HAS_CHROMADB, reason="chromadb extra is not installed")
-async def test_chromadb_search_and_batch_return_raw_distance():
-    adapter = ChromaDBAdapter(
-        url="http://unused", api_key=None, embedding_engine=_DummyEmbeddingEngine()
-    )
-
-    ids = [str(uuid4()), str(uuid4())]
-    collection = SimpleNamespace()
-    collection.query = AsyncMock(
-        side_effect=[
-            {
-                "ids": [[ids[0]]],
-                "metadatas": [[{"text": "a"}]],
-                "distances": [[1.31]],
-            },
-            {
-                "ids": [[ids[0], ids[1]], [ids[1]]],
-                "metadatas": [[{"text": "a"}, {"text": "b"}], [{"text": "c"}]],
-                "distances": [[1.7, 0.2], [1.4]],
-            },
-        ]
-    )
-    adapter.get_collection = AsyncMock(return_value=collection)
-    adapter.embed_data = AsyncMock(return_value=[[0.1], [0.2]])
-
-    single = await adapter.search(
-        collection_name="Entity_name",
-        query_vector=[0.1, 0.2, 0.3],
-    )
-    batch = await adapter.batch_search(
-        collection_name="Entity_name",
-        query_texts=["a", "b"],
-        limit=2,
-    )
-
-    assert [r.score for r in single] == [1.31]
-    assert [r.score for r in batch[0]] == [1.7, 0.2]
-    assert any(r.score > 1.0 for r in single + batch[0] + batch[1])
 
 
 @pytest.mark.asyncio

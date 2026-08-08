@@ -1,7 +1,8 @@
 import asyncio
-import cognee
 import os
-from cognee.api.v1.visualize.visualize import visualize_graph
+
+import cognee
+from cognee import visualize_graph
 
 
 async def main():

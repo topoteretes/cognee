@@ -1,3 +1,4 @@
+import asyncio
 import tempfile
 from unittest.mock import MagicMock, patch
 
@@ -77,7 +78,7 @@ class InMemoryGraphWithWeights:
         return result
 
 
-@pytest.fixture(params=["fs", "redis"])
+@pytest.fixture(params=["fs", "redis", "sqlite"])
 def session_manager_with_backend(request):
     backend = request.param
     if backend == "fs":
@@ -94,7 +95,7 @@ def session_manager_with_backend(request):
                 sm = SessionManager(cache_engine=adapter)
                 yield sm
                 adapter.cache.close()
-    else:
+    elif backend == "redis":
         store = _InMemoryRedisList()
         patch_mod = "cognee.infrastructure.databases.cache.redis.RedisAdapter"
         with (
@@ -106,6 +107,16 @@ def session_manager_with_backend(request):
             adapter = RedisAdapter(host="localhost", port=6379)
             sm = SessionManager(cache_engine=adapter)
             yield sm
+    else:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            from cognee.infrastructure.databases.cache.sql.SqlCacheAdapter import (
+                SqlCacheAdapter,
+            )
+
+            adapter = SqlCacheAdapter(f"sqlite+aiosqlite:///{tmpdir}/cache.db")
+            sm = SessionManager(cache_engine=adapter)
+            yield sm
+            asyncio.run(adapter.close())
 
 
 def _make_user():
@@ -196,4 +207,4 @@ async def test_feedback_weights_mixed_success_keeps_false(session_manager_with_b
     assert result["applied"] == 0
 
     entries = await sm.get_session(user_id="u1", session_id="s1", formatted=False)
-    assert entries[0]["memify_metadata"][MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY] is False
+    assert entries[0].memify_metadata[MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY] is False

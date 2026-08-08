@@ -35,7 +35,6 @@ class LLMConfigInputDTO(InDTO):
 class VectorDBConfigInputDTO(InDTO):
     provider: Union[
         Literal["lancedb"],
-        Literal["chromadb"],
         Literal["pgvector"],
     ]
     url: str

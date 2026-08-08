@@ -9,6 +9,7 @@ from cognee.shared.logging_utils import get_logger
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from cognee.tasks.web_scraper.utils import fetch_page_content
+from cognee.tasks.web_scraper.ssrf_protection import validate_outbound_url
 from cognee.tasks.ingestion.data_item import DataItem
 
 
@@ -59,6 +60,9 @@ async def save_data_item_to_storage(data_item: Union[BinaryIO, str, Any]) -> str
         if parsed_url.scheme == "s3":
             return data_item
         elif parsed_url.scheme == "http" or parsed_url.scheme == "https":
+            # Guard against SSRF: reject disabled outbound HTTP, non-http(s) schemes,
+            # and hosts that resolve to internal/reserved addresses before fetching.
+            await validate_outbound_url(data_item)
             urls_to_page_contents = await fetch_page_content(data_item)
             return await save_data_to_file(urls_to_page_contents[data_item], file_extension="html")
         # data is local file path

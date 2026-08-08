@@ -1,6 +1,6 @@
 import time
 from cognee.shared.logging_utils import get_logger
-from cognee.modules.engine.utils.generate_edge_id import generate_edge_id
+from cognee.modules.graph.models.EdgeType import EdgeType
 from typing import List, Dict, Union, Optional, Type, Iterable, Tuple, Callable, Any
 
 from cognee.modules.graph.exceptions import (
@@ -10,6 +10,7 @@ from cognee.modules.graph.exceptions import (
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Node, Edge
 from cognee.modules.graph.cognee_graph.CogneeAbstractGraph import CogneeAbstractGraph
+from cognee.base_config import get_base_config
 import heapq
 
 logger = get_logger("CogneeGraph")
@@ -36,7 +37,7 @@ class CogneeGraph(CogneeAbstractGraph):
         self.edges_by_distance_key = {}
         self.directed = directed
         self.triplet_distance_penalty = 6.5
-        self.feedback_influence = 0.0
+        self.feedback_influence = get_base_config().default_feedback_influence
 
     def add_node(self, node: Node) -> None:
         if node.id in self.nodes:
@@ -52,7 +53,7 @@ class CogneeGraph(CogneeAbstractGraph):
 
         edge_text = edge.attributes.get("edge_text") or edge.attributes.get("relationship_type")
         edge.attributes["edge_type_id"] = (
-            generate_edge_id(edge_id=edge_text) if edge_text else None
+            EdgeType.id_for(edge_text) if edge_text else None
         )  # Update edge with generated edge_type_id
 
         edge.node1.add_skeleton_edge(edge)
@@ -236,7 +237,7 @@ class CogneeGraph(CogneeAbstractGraph):
         node_name_filter_operator: str = "OR",
         relevant_ids_to_filter: Optional[List[str]] = None,
         triplet_distance_penalty: float = 6.5,
-        feedback_influence: float = 0.0,
+        feedback_influence: float = get_base_config().default_feedback_influence,
     ) -> None:
         if node_dimension < 1 or edge_dimension < 1:
             raise InvalidDimensionsError()
@@ -322,7 +323,7 @@ class CogneeGraph(CogneeAbstractGraph):
         node_dimension: int = 1,
         edge_dimension: int = 1,
         triplet_distance_penalty: float = 6.5,
-        feedback_influence: float = 0.0,
+        feedback_influence: float = get_base_config().default_feedback_influence,
     ) -> None:
         """
         Project a neighborhood subgraph from the database around seed nodes.

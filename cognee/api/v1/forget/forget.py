@@ -1,7 +1,8 @@
 from uuid import UUID
-from typing import Optional, Union
+from typing import Optional, Union, Any
 
 from cognee.context_global_variables import set_database_global_context_variables
+from cognee.infrastructure.locks import dataset_lock
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.observability import (
     new_span,
@@ -20,7 +21,7 @@ async def forget(
     dataset_id: Optional[UUID] = None,
     everything: bool = False,
     memory_only: bool = False,
-    user=None,
+    user: Any = None,
 ) -> dict:
     """Remove data from the knowledge graph.
 
@@ -127,32 +128,43 @@ async def forget(
         if user is None:
             user = await get_default_user()
 
-        async with set_database_global_context_variables(dataset_ref, user.id):
-            if everything:
-                result = await _forget_everything(user)
-                span.set_attribute(COGNEE_RESULT_COUNT, result.get("datasets_removed", 0))
-                return result
+        # `everything` deletes across all datasets; the per-dataset DB context is
+        # established per-dataset inside datasets.delete_all -> empty_dataset, so we
+        # must NOT enter a single-dataset context here (dataset_ref is None, which
+        # would try to create a dataset_database row for a non-existent dataset).
+        if everything:
+            result = await _forget_everything(user)
+            span.set_attribute(COGNEE_RESULT_COUNT, result.get("datasets_removed", 0))
+            return result
 
+        # All remaining operations are scoped to a single dataset.
+        if dataset_ref is None:
             if memory_only:
-                if dataset_ref is None:
-                    raise ValueError("memory_only requires dataset or dataset_id.")
+                raise ValueError("memory_only requires dataset or dataset_id.")
+            if data_id is not None:
+                raise ValueError("data_id requires dataset or dataset_id.")
+            raise ValueError("Specify dataset, dataset_id, data_id+dataset, or everything=True.")
+
+        # Authorize before entering the dataset's database context: context
+        # entry provisions per-dataset database registry rows, a write that
+        # must never happen for a caller without delete permission (an
+        # unauthorized caller used to surface as a UniqueViolation 500 — or,
+        # for an unprovisioned dataset, actually created rows).
+        resolved_dataset_id = await _resolve_dataset_id(dataset_ref, user)
+
+        async with set_database_global_context_variables(resolved_dataset_id, user.id):
+            if memory_only:
                 if data_id is not None:
                     return await _forget_data_memory(data_id, dataset_ref, user)
                 return await _forget_dataset_memory(dataset_ref, user)
 
-            if dataset_ref is not None and data_id is not None:
+            if data_id is not None:
                 return await _forget_data_item(data_id, dataset_ref, user)
 
-            if dataset_ref is not None:
-                return await _forget_dataset(dataset_ref, user)
-
-            if data_id is not None:
-                raise ValueError("data_id requires dataset or dataset_id.")
-
-            raise ValueError("Specify dataset, dataset_id, data_id+dataset, or everything=True.")
+            return await _forget_dataset(dataset_ref, user)
 
 
-async def _forget_everything(user) -> dict:
+async def _forget_everything(user: Any) -> dict:
     """Delete all datasets, data, and session cache owned by the user.
 
     Cleanup scope:
@@ -185,7 +197,7 @@ async def _forget_everything(user) -> dict:
     return {"datasets_removed": count, "status": "success"}
 
 
-async def _forget_dataset(dataset_ref: Union[str, UUID], user) -> dict:
+async def _forget_dataset(dataset_ref: Union[str, UUID], user: Any) -> dict:
     """Delete an entire dataset by name or UUID.
 
     Cleanup scope:
@@ -206,7 +218,7 @@ async def _forget_dataset(dataset_ref: Union[str, UUID], user) -> dict:
     return {"dataset_id": str(dataset_id), "status": "success"}
 
 
-async def _forget_data_item(data_id: UUID, dataset_ref: Union[str, UUID], user) -> dict:
+async def _forget_data_item(data_id: UUID, dataset_ref: Union[str, UUID], user: Any) -> dict:
     """Delete a single data item from a dataset."""
     from cognee.api.v1.datasets.datasets import datasets
 
@@ -228,7 +240,7 @@ async def _forget_data_item(data_id: UUID, dataset_ref: Union[str, UUID], user) 
     return {"data_id": str(data_id), "dataset_id": str(dataset_id), "status": "success"}
 
 
-async def _forget_dataset_memory(dataset_ref: Union[str, UUID], user) -> dict:
+async def _forget_dataset_memory(dataset_ref: Union[str, UUID], user: Any) -> dict:
     """Delete only memory (graph + vector) for a dataset, preserving raw files.
 
     This allows re-cognifying the dataset with different settings
@@ -256,37 +268,42 @@ async def _forget_dataset_memory(dataset_ref: Union[str, UUID], user) -> dict:
 
     dataset_id = await _resolve_dataset_id(dataset_ref, user)
 
-    # 1. Delete graph nodes/edges and vector embeddings
-    await delete_dataset_nodes_and_edges(dataset_id, user.id)
+    # Same per-dataset lock as pipeline runs: wait for any in-flight pipeline
+    # on this dataset and exclude concurrent deletes.
+    async with dataset_lock(dataset_id):
+        # 1. Delete graph nodes/edges and vector embeddings
+        await delete_dataset_nodes_and_edges(dataset_id, user.id)
 
-    # 2. Reset pipeline_status on all data records in this dataset
-    db_engine = get_relational_engine()
-    async with db_engine.get_async_session() as session:
-        data_ids_query = select(DatasetData.data_id).where(DatasetData.dataset_id == dataset_id)
-        data_records = (
-            (await session.execute(select(Data).where(Data.id.in_(data_ids_query)))).scalars().all()
+        # 2. Reset pipeline_status on all data records in this dataset
+        db_engine = get_relational_engine()
+        async with db_engine.get_async_session() as session:
+            data_ids_query = select(DatasetData.data_id).where(DatasetData.dataset_id == dataset_id)
+            data_records = (
+                (await session.execute(select(Data).where(Data.id.in_(data_ids_query))))
+                .scalars()
+                .all()
+            )
+
+            dataset_id_str = str(dataset_id)
+            for data_record in data_records:
+                if not data_record.pipeline_status:
+                    continue
+                updated = False
+                for pipeline_name in list(data_record.pipeline_status.keys()):
+                    if dataset_id_str in data_record.pipeline_status[pipeline_name]:
+                        del data_record.pipeline_status[pipeline_name][dataset_id_str]
+                        updated = True
+                if updated:
+                    orm_attributes.flag_modified(data_record, "pipeline_status")
+
+            await session.commit()
+
+        # 3. Reset dataset-level pipeline run status so cached cognify runs can execute again.
+        await reset_dataset_pipeline_run_status(
+            dataset_id=dataset_id,
+            user=user,
+            pipeline_names=["cognify_pipeline"],
         )
-
-        dataset_id_str = str(dataset_id)
-        for data_record in data_records:
-            if not data_record.pipeline_status:
-                continue
-            updated = False
-            for pipeline_name in list(data_record.pipeline_status.keys()):
-                if dataset_id_str in data_record.pipeline_status[pipeline_name]:
-                    del data_record.pipeline_status[pipeline_name][dataset_id_str]
-                    updated = True
-            if updated:
-                orm_attributes.flag_modified(data_record, "pipeline_status")
-
-        await session.commit()
-
-    # 3. Reset dataset-level pipeline run status so cached cognify runs can execute again.
-    await reset_dataset_pipeline_run_status(
-        dataset_id=dataset_id,
-        user=user,
-        pipeline_names=["cognify_pipeline"],
-    )
 
     logger.info(
         "forget: cleared memory for dataset=%s, user=%s (%d data records reset)",
@@ -301,7 +318,7 @@ async def _forget_dataset_memory(dataset_ref: Union[str, UUID], user) -> dict:
     }
 
 
-async def _forget_data_memory(data_id: UUID, dataset_ref: Union[str, UUID], user) -> dict:
+async def _forget_data_memory(data_id: UUID, dataset_ref: Union[str, UUID], user: Any) -> dict:
     """Delete only memory (graph + vector) for a single data item, preserving the raw file.
 
     This allows re-cognifying a specific file with different settings
@@ -325,30 +342,33 @@ async def _forget_data_memory(data_id: UUID, dataset_ref: Union[str, UUID], user
 
     dataset_id = await _resolve_dataset_id(dataset_ref, user)
 
-    # 1. Delete graph nodes/edges and vector embeddings for this data item
-    await delete_data_nodes_and_edges(dataset_id, data_id, user.id)
+    # Same per-dataset lock as pipeline runs: wait for any in-flight pipeline
+    # on this dataset and exclude concurrent deletes.
+    async with dataset_lock(dataset_id):
+        # 1. Delete graph nodes/edges and vector embeddings for this data item
+        await delete_data_nodes_and_edges(dataset_id, data_id, user.id)
 
-    # 2. Reset pipeline_status for this data record
-    db_engine = get_relational_engine()
-    async with db_engine.get_async_session() as session:
-        data_record = (
-            (await session.execute(select(Data).where(Data.id == data_id))).scalars().first()
-        )
+        # 2. Reset pipeline_status for this data record
+        db_engine = get_relational_engine()
+        async with db_engine.get_async_session() as session:
+            data_record = (
+                (await session.execute(select(Data).where(Data.id == data_id))).scalars().first()
+            )
 
-        if data_record and data_record.pipeline_status:
-            dataset_id_str = str(dataset_id)
-            updated = False
-            # Memory-only forget removes cognify artifacts (graph/vector), so only
-            # cognify_pipeline status should be reset. Keep add status intact.
-            if (
-                "cognify_pipeline" in data_record.pipeline_status
-                and dataset_id_str in data_record.pipeline_status["cognify_pipeline"]
-            ):
-                del data_record.pipeline_status["cognify_pipeline"][dataset_id_str]
-                updated = True
-            if updated:
-                orm_attributes.flag_modified(data_record, "pipeline_status")
-            await session.commit()
+            if data_record and data_record.pipeline_status:
+                dataset_id_str = str(dataset_id)
+                updated = False
+                # Memory-only forget removes cognify artifacts (graph/vector), so only
+                # cognify_pipeline status should be reset. Keep add status intact.
+                if (
+                    "cognify_pipeline" in data_record.pipeline_status
+                    and dataset_id_str in data_record.pipeline_status["cognify_pipeline"]
+                ):
+                    del data_record.pipeline_status["cognify_pipeline"][dataset_id_str]
+                    updated = True
+                if updated:
+                    orm_attributes.flag_modified(data_record, "pipeline_status")
+                await session.commit()
 
     logger.info(
         "forget: cleared memory for data_id=%s in dataset=%s, user=%s",
@@ -363,7 +383,7 @@ async def _forget_data_memory(data_id: UUID, dataset_ref: Union[str, UUID], user
     }
 
 
-async def _resolve_dataset_id(dataset_ref: Union[str, UUID], user) -> UUID:
+async def _resolve_dataset_id(dataset_ref: Union[str, UUID], user: Any) -> UUID:
     """Resolve a dataset name or UUID to a UUID, with permission check."""
     if isinstance(dataset_ref, UUID):
         from cognee.modules.data.methods.get_authorized_dataset import get_authorized_dataset

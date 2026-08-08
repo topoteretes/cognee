@@ -60,6 +60,8 @@ def test_all_view_modules_contribute(tmp_path):
     # story_view.js: canvas renderer + label budget
     assert "computeRankedLayout" in html
     assert "labelBudget" in html
+    # memory_map.js: lazy-render entry point for the Memory tab
+    assert "_renderMemoryView" in html
 
 
 def test_data_tokens_substituted_as_json(tmp_path):
@@ -72,6 +74,58 @@ def test_data_tokens_substituted_as_json(tmp_path):
     assert '"name": "hi"' in html or '"name": "b"' in html
     # color maps default to empty dicts {} when no provenance is set
     assert "taskColors" in html
+
+
+def test_memory_view_scaffolding_wired(tmp_path):
+    """The Memory tab needs its button, container and data payloads."""
+    html = _render(tmp_path)
+    assert 'data-view="memory"' in html
+    assert 'id="memory-view"' in html
+    # __MEMORY_DATA__ resolves to the memory_map JSON object…
+    assert "const memoryMap = {" in html
+    # …and __SEARCH_EVENTS__ falls back to an empty JSON array.
+    assert "const searchEvents = []" in html
+
+
+def test_memory_view_renderer_wired(tmp_path):
+    """STEP 2: the real renderer needs its containers (SVG, zoom pill,
+    timeline rail, side panel) and the story-view data globals it reads."""
+    html = _render(tmp_path)
+    # Containers in template.html
+    assert 'id="memory-svg"' in html
+    assert 'id="memory-timeline"' in html
+    assert 'id="memory-side-panel"' in html
+    assert 'id="memory-zoom-fit"' in html
+    assert 'id="memory-empty"' in html
+    # story_view.js shares node/link details with the memory view
+    assert "window._vizNodeById" in html
+    assert "window._vizLinks" in html
+    # memory_map.js: deterministic layout + overlay machinery present
+    assert "computeLayout" in html
+    assert "mm-searching" in html
+
+
+def test_search_events_kwarg_is_embedded(tmp_path):
+    """``search_events=`` is the documented injection hook for retrieval
+    events on the Memory timeline."""
+    events = [
+        {
+            "time": "2026-06-10T10:31:02",
+            "qa_id": "qa-1",
+            "question": "Who knows Bob?",
+            "answer": "Alice.",
+            "node_ids": ["a"],
+            "edge_ids": [],
+        }
+    ]
+    html = asyncio.run(
+        cognee_network_visualization(
+            _minimal_graph(), str(tmp_path / "out.html"), search_events=events
+        )
+    )
+    assert "const searchEvents = [{" in html
+    assert '"qa_id": "qa-1"' in html
+    assert '"question": "Who knows Bob?"' in html
 
 
 def test_schema_data_is_null_when_omitted(tmp_path):

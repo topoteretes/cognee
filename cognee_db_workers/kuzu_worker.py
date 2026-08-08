@@ -29,6 +29,45 @@ from .kuzu_protocol import (
 )
 
 
+_LOCK_HELD_MARKER = "could not set lock on file"
+
+
+def _retry_open_locked(ladybug, kwargs, original_exc):
+    """Re-attempt ``ladybug.Database(**kwargs)`` after an initial lock-held
+    failure, with bounded exponential backoff.
+
+    This is a backstop for the brief window where another worker for the same
+    DB path is still releasing its on-disk file lock (e.g. a cache eviction
+    whose close is driven by a GC finalizer and so can't be cleanly awaited by
+    the creator). The OS frees a dead process's file locks immediately, so once
+    the previous worker exits the next attempt succeeds. Only the lock-held
+    error is retried; any other ``RuntimeError`` propagates unchanged.
+
+    ``original_exc`` is the first lock-held failure the caller already saw and
+    seeds ``last_exc``. When every retry still hits the lock the *last* lock
+    error is raised (``last_exc``, updated each attempt); when retries are
+    disabled (``SUBPROCESS_OPEN_LOCK_RETRIES <= 0``) the loop never runs so
+    ``original_exc`` is raised immediately — either way a real lock error
+    surfaces rather than a spurious ``TypeError`` from ``raise None``.
+    """
+    import time
+
+    from .harness import OPEN_LOCK_BACKOFF, OPEN_LOCK_RETRIES
+
+    last_exc = original_exc
+    for attempt in range(OPEN_LOCK_RETRIES):
+        # Backoff first — the caller already saw one failure. Cap per-attempt so
+        # exponential growth stays bounded (≈ a few seconds total by default).
+        time.sleep(min(OPEN_LOCK_BACKOFF * (2**attempt), 0.5))
+        try:
+            return ladybug.Database(**kwargs)
+        except RuntimeError as e:
+            if _LOCK_HELD_MARKER not in str(e).lower():
+                raise
+            last_exc = e
+    raise last_exc
+
+
 def _open_database(registry: HandleRegistry, req: Request) -> HandleResult:
     import ladybug
 
@@ -36,29 +75,36 @@ def _open_database(registry: HandleRegistry, req: Request) -> HandleResult:
         db = ladybug.Database(**req.kwargs)
     except RuntimeError as e:
         db_path = req.kwargs.get("database_path", "")
+        message = str(e).lower()
 
-        if "wal" in str(e).lower():
-            # In case of corrupted WAL file preventing database opening, remove the WAL file and try again
-            wal_path = db_path + ".wal"
-            try:
-                import os
-
-                os.remove(wal_path)
-            except FileNotFoundError:
-                pass
+        if _LOCK_HELD_MARKER in message:
+            # Transient inter-process lock contention with another worker that
+            # is still shutting down for the same path — retry with backoff
+            # rather than treating it as corruption/migration.
+            db = _retry_open_locked(ladybug, req.kwargs, e)
         else:
-            from .ladybug_migrate import needs_migration, ladybug_migration
+            if "wal" in message:
+                # In case of corrupted WAL file preventing database opening, remove the WAL file and try again
+                wal_path = db_path + ".wal"
+                try:
+                    import os
 
-            should_migrate, old_version = needs_migration(db_path, ladybug.__version__)
-            if should_migrate:
-                ladybug_migration(
-                    new_db=db_path + "_new",
-                    old_db=db_path,
-                    new_version=ladybug.__version__,
-                    old_version=old_version,
-                    overwrite=True,
-                )
-        db = ladybug.Database(**req.kwargs)
+                    os.remove(wal_path)
+                except FileNotFoundError:
+                    pass
+            else:
+                from .ladybug_migrate import needs_migration, ladybug_migration
+
+                should_migrate, old_version = needs_migration(db_path, ladybug.__version__)
+                if should_migrate:
+                    ladybug_migration(
+                        new_db=db_path + "_new",
+                        old_db=db_path,
+                        new_version=ladybug.__version__,
+                        old_version=old_version,
+                        overwrite=True,
+                    )
+            db = ladybug.Database(**req.kwargs)
 
     return HandleResult(value=None, handle_id=registry.register(db))
 
@@ -139,7 +185,17 @@ def _install_json(registry: HandleRegistry, req: Request) -> None:
 def _load_extension(registry: HandleRegistry, req: Request) -> None:
     conn = registry.get(req.handle_id)
     extension_name = req.args[0]
-    conn.execute(f"LOAD EXTENSION {extension_name};")
+    try:
+        conn.execute(f"LOAD EXTENSION {extension_name};")
+    except RuntimeError as error:
+        if "not been installed" not in str(error):
+            raise
+        # The warm-up INSTALL on the throwaway database is best-effort and
+        # can fail silently (e.g. a transient network error downloading the
+        # extension on a fresh machine). Install on the live connection and
+        # retry once; if INSTALL fails here it raises with the real cause.
+        conn.execute(f"INSTALL {extension_name};")
+        conn.execute(f"LOAD EXTENSION {extension_name};")
     return None
 
 

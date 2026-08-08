@@ -5,8 +5,11 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
 
+from cognee.base_config import get_base_config
 from cognee.context_global_variables import set_session_user_context_variable
 from cognee.exceptions import CogneeValidationError
+from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
+from cognee.infrastructure.llm.config import LLMConfig
 from cognee.infrastructure.databases.cache import SessionAgentTraceEntry, SessionQAEntry
 from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
 from cognee.memory.entries import normalize_scope
@@ -25,9 +28,9 @@ from cognee.modules.observability import (
 from cognee.modules.recall.types.RecallResponse import (
     RecallResponse,
     ResponseAgentTraceEntry,
-    ResponseGraphContextEntry,
     ResponseGraphEntry,
     ResponseQAEntry,
+    ResponseSessionContextEntry,
 )
 from cognee.modules.recall.types.SearchResultItem import SearchResultItem
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
@@ -155,7 +158,7 @@ async def _resolve_session_cache_user_id(session_id: str, caller_user_id: str | 
 async def _search_session(
     query_text: str,
     session_id: str,
-    top_k: int = 10,
+    top_k: int = 15,
     user: str | None = None,
     _parent_span=None,
 ) -> list[ResponseQAEntry]:
@@ -213,7 +216,7 @@ async def _search_session(
 async def _search_trace(
     query_text: str,
     session_id: str,
-    top_k: int = 10,
+    top_k: int = 15,
     user: str | None = None,
 ) -> list[ResponseAgentTraceEntry]:
     """Search session-cache agent trace steps by keyword matching.
@@ -281,17 +284,19 @@ async def _search_trace(
     return results
 
 
-async def _fetch_graph_context(
-    session_id: str, user: str | None = None
-) -> list[ResponseGraphContextEntry]:
-    """Return the graph-context snapshot for the session as a one-item list.
+async def _fetch_session_context(
+    query_text: str,
+    session_id: str,
+    context_profile: str,
+    user: str | None = None,
+) -> list[ResponseSessionContextEntry]:
+    """Render active session-context lessons for one profile as a one-item list.
 
-    ``improve()`` writes a distilled summary of graph knowledge into
-    ``graph_knowledge:{user}:{session}`` — this surfaces it as a recall
-    result tagged with ``_source: "graph_context"`` (or an empty list
-    when nothing has been synced yet).
+    Read-only: uses the deterministic builder with ``stamp_served=False`` so it never updates
+    served metadata. Returns an empty list when no lessons match the profile.
     """
     from cognee.infrastructure.session.get_session_manager import get_session_manager
+    from cognee.infrastructure.session.session_context_builder import build_active_context_block
 
     caller_user_id = await _resolve_user_id(user)
     if not caller_user_id:
@@ -304,11 +309,28 @@ async def _fetch_graph_context(
     if not sm.is_available:
         return []
 
-    snapshot = await sm.get_graph_context(user_id=cache_user_id, session_id=session_id)
-    if not snapshot:
+    block, _served = await build_active_context_block(
+        session_manager=sm,
+        user_id=cache_user_id,
+        session_id=session_id,
+        query=query_text,
+        context_profile=context_profile,
+        stamp_served=False,
+    )
+    if not block:
         return []
 
-    return [ResponseGraphContextEntry(content=snapshot, source="graph_context")]
+    return [
+        ResponseSessionContextEntry(
+            content=block, context_profile=context_profile, source="session_context"
+        )
+    ]
+
+
+def _scope_should_forward_resolved(scope: str | list[str] | None) -> bool:
+    if isinstance(scope, str):
+        return scope in {"all", "graph_context"}
+    return bool(scope and {"all", "graph_context"}.intersection(scope))
 
 
 async def recall(
@@ -317,7 +339,7 @@ async def recall(
     *,
     datasets: list[str] | None = None,
     dataset_ids: list[UUID] | None = None,
-    top_k: int = 10,
+    top_k: int = 15,
     auto_route: bool = True,
     scope: str | list[str] | None = None,
     system_prompt: str | None = None,
@@ -326,14 +348,18 @@ async def recall(
     node_name_filter_operator: str = "OR",
     only_context: bool = False,
     session_id: str | None = None,
+    context_profile: str = "qa",
     wide_search_top_k: int | None = 100,
     triplet_distance_penalty: float | None = 6.5,
-    feedback_influence: float = 0.0,
+    feedback_influence: float = get_base_config().default_feedback_influence,
     verbose: bool = False,
     retriever_specific_config: dict | None = None,
     neighborhood_depth: int | None = None,
     neighborhood_seed_top_k: int | None = None,
+    include_references: bool = False,
     user: object | None = None,
+    llm_config: LLMConfig | None = None,
+    embedding_config: EmbeddingConfig | None = None,
 ) -> list[RecallResponse]:
     """Search the knowledge graph for relevant information.
 
@@ -356,7 +382,7 @@ async def recall(
         query_type: Search strategy. When provided, the router is bypassed.
         datasets: Dataset names to search within.
         dataset_ids: Dataset UUIDs to search within. Takes precedence over datasets.
-        top_k: Maximum results to return (default *10*).
+        top_k: Maximum results to return (default *15*).
         auto_route: If True and query_type is None, classify the query
             automatically. If False, fall back to GRAPH_COMPLETION.
 
@@ -410,6 +436,7 @@ async def recall(
             "session_id": session_id or "",
             "datasets": ",".join(datasets) if datasets else "",
             "dataset_ids": ",".join(str(dataset_id) for dataset_id in dataset_ids or []),
+            "include_references": include_references,
             "cognee_version": cognee_version,
         },
     )
@@ -423,6 +450,8 @@ async def recall(
 
         from cognee.api.v1.serve.state import get_remote_client
 
+        forward_scope = sources if _scope_should_forward_resolved(scope) else scope
+
         client = get_remote_client()
         if client is not None:
             results = await client.recall(
@@ -431,12 +460,14 @@ async def recall(
                 datasets=datasets,
                 dataset_ids=dataset_ids,
                 top_k=top_k,
-                scope=scope,
+                scope=forward_scope,
                 system_prompt=system_prompt,
                 node_name=node_name,
                 only_context=only_context,
                 session_id=session_id,
+                context_profile=context_profile,
                 verbose=verbose,
+                include_references=include_references,
             )
             span.set_attribute(COGNEE_RECALL_SOURCE, "cloud")
             span.set_attribute(COGNEE_RESULT_COUNT, len(results) if results else 0)
@@ -468,10 +499,17 @@ async def recall(
                 )
             )
 
-        async def _run_graph_context() -> list[RecallResponse]:
+        async def _run_session_context() -> list[RecallResponse]:
             if not session_id:
                 return []
-            return list(await _fetch_graph_context(session_id=session_id, user=user))
+            return list(
+                await _fetch_session_context(
+                    query_text=query_text,
+                    session_id=session_id,
+                    context_profile=context_profile,
+                    user=user,
+                )
+            )
 
         async def _run_graph() -> list[RecallResponse]:
             nonlocal user, dataset_ids
@@ -546,6 +584,9 @@ async def recall(
                 retriever_specific_config=retriever_specific_config,
                 neighborhood_depth=neighborhood_depth,
                 neighborhood_seed_top_k=neighborhood_seed_top_k,
+                include_references=include_references,
+                llm_config=llm_config,
+                embedding_config=embedding_config,
             )
 
             tagged = []
@@ -559,7 +600,7 @@ async def recall(
         runners = {
             "session": _run_session,
             "trace": _run_trace,
-            "graph_context": _run_graph_context,
+            "session_context": _run_session_context,
             "graph": _run_graph,
         }
 

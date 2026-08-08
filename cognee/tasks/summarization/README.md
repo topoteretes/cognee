@@ -87,7 +87,7 @@ Default summarization model is `SummarizedContent` from `cognee.modules.cognify.
 |----------|-------------|
 | `LLM_API_KEY` | API key for LLM provider (required) |
 | `LLM_PROVIDER` | Provider name (default: openai) |
-| `LLM_MODEL` | Model name (default: gpt-4o-mini) |
+| `LLM_MODEL` | Model name (default: openai/gpt-5-mini) |
 | `MOCK_CODE_SUMMARY` | Use mock summaries for testing (true/false) |
 
 

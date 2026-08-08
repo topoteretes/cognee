@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from cognee.modules.engine.models import Entity
 from cognee.modules.engine.utils import generate_edge_name, generate_node_id
 from cognee.modules.graph.utils.expand_with_nodes_and_edges import _create_edge_key
 from cognee.shared.data_models import Edge as KGEdge
@@ -49,13 +50,13 @@ async def test_retrieve_existing_edges_queries_graph_edges_from_all_chunks(mock_
     queried_edges = graph_engine.has_edges.await_args.args[0]
 
     assert (
-        generate_node_id("Source 1"),
-        generate_node_id("Target 1"),
+        Entity.id_for("Source 1"),
+        Entity.id_for("Target 1"),
         generate_edge_name("Knows"),
     ) in queried_edges
     assert (
-        generate_node_id("Source 2"),
-        generate_node_id("Target 2"),
+        Entity.id_for("Source 2"),
+        Entity.id_for("Target 2"),
         generate_edge_name("Works With"),
     ) in queried_edges
 

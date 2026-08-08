@@ -28,6 +28,7 @@ async def search_top_global_context_summaries(
     query: str,
     top_k: int,
     vector_engine: Any,
+    query_vector: Optional[list[float]] = None,
 ) -> list[str]:
     """Return up to top_k non-root GlobalContextSummary texts ranked by similarity."""
     if top_k <= 0:
@@ -35,7 +36,8 @@ async def search_top_global_context_summaries(
     try:
         results = await vector_engine.search(
             GLOBAL_CONTEXT_SUMMARY_COLLECTION,
-            query,
+            None if query_vector is not None else query,
+            query_vector=query_vector,
             limit=top_k + 1,  # +1 in case the root is in the top results
             include_payload=True,
         )

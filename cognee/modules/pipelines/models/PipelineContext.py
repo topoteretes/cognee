@@ -23,6 +23,7 @@ class PipelineContext:
     user: Any = None
     data_item: Any = None
     dataset: Any = None
+    pipeline_run_id: Any = None
     pipeline_name: Optional[str] = None
     extras: Dict[str, Any] = field(default_factory=dict)
 

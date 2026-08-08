@@ -1,14 +1,28 @@
 """Remote HTTP client that proxies V2 operations to a Cognee Cloud instance."""
 
 import io
+from pathlib import Path
 from typing import Any, Optional
 from uuid import UUID
 
 import aiohttp
 
+from cognee.modules.ingestion.data_types.TextData import create_text_data
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("serve.cloud_client")
+
+
+def _text_upload_filename(text: str) -> str:
+    """Content-hash filename for raw-text uploads, via local ingestion's namer.
+
+    Delegates to ``TextData`` — the same source ``save_data_to_file`` uses for
+    nameless text (``text_<md5>.txt``). A fixed placeholder here instead makes
+    every text upload for a tenant collide on one remote object, racing
+    concurrent adds against the server's content-hash read-back
+    (FileContentHashingError 409s).
+    """
+    return create_text_data(text).get_metadata()["name"]
 
 
 class CloudClient:
@@ -23,10 +37,21 @@ class CloudClient:
         self.api_key = api_key
         self._session: Optional[aiohttp.ClientSession] = None
 
+    # Default for ordinary API calls: aiohttp's standard 5-minute total,
+    # with connect failures surfacing quickly.
+    # 600s: long-running blocking operations (e.g. cognify over a large
+    # dataset) can legitimately take many minutes server-side
+    DEFAULT_TIMEOUT = aiohttp.ClientTimeout(total=600, sock_connect=30)
+    # Archive uploads (cognee.push) plus the synchronous server-side import
+    # can legitimately exceed any fixed total; per-read inactivity stays
+    # bounded instead. Applied per-request, only to archive uploads.
+    UPLOAD_TIMEOUT = aiohttp.ClientTimeout(total=None, sock_connect=30, sock_read=600)
+
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
             self._session = aiohttp.ClientSession(
                 headers={"X-Api-Key": self.api_key},
+                timeout=self.DEFAULT_TIMEOUT,
             )
         return self._session
 
@@ -53,6 +78,8 @@ class CloudClient:
         form = aiohttp.FormData()
         form.add_field("datasetName", dataset_name)
 
+        if kwargs.get("dataset_id"):
+            form.add_field("datasetId", str(kwargs["dataset_id"]))
         if kwargs.get("session_id"):
             form.add_field("session_id", kwargs["session_id"])
         if kwargs.get("run_in_background"):
@@ -63,15 +90,39 @@ class CloudClient:
             form.add_field("chunk_size", str(kwargs["chunk_size"]))
         if kwargs.get("chunks_per_batch") is not None:
             form.add_field("chunks_per_batch", str(kwargs["chunks_per_batch"]))
-        if kwargs.get("content_type") is not None:
-            form.add_field("content_type", str(kwargs["content_type"]))
+        content_type_kw = kwargs.get("content_type")
+        if content_type_kw is not None:
+            form.add_field("content_type", str(content_type_kw))
+        if kwargs.get("import_mode") is not None:
+            form.add_field("import_mode", str(kwargs["import_mode"]))
 
+        # Skills are local SKILL.md files. The server's add_skills() reads
+        # paths from its own filesystem — sending the path string verbatim
+        # would have the server look for that path on the POD, not the
+        # caller. For content_type="skills", read each SKILL.md and upload
+        # its bytes so the server can write them to a tempdir.
+        if content_type_kw == "skills" and isinstance(data, (str, Path)):
+            source = Path(data).expanduser()
+            if source.is_file():
+                skill_files = [source] if source.name == "SKILL.md" else []
+            elif source.is_dir():
+                skill_files = sorted(source.rglob("SKILL.md"))
+            else:
+                raise FileNotFoundError(f"Skills source not found: {data}")
+            if not skill_files:
+                raise ValueError(f"No SKILL.md files under {data}")
+            base = source if source.is_dir() else source.parent
+            for skill_path in skill_files:
+                # Preserve relative structure so the server can reconstruct
+                # the SKILL.md layout when writing to its tempdir.
+                rel = skill_path.relative_to(base).as_posix()
+                form.add_field("data", skill_path.open("rb"), filename=rel)
         # Handle data — string or file-like objects
-        if isinstance(data, str):
+        elif isinstance(data, str):
             form.add_field(
                 "data",
                 io.BytesIO(data.encode("utf-8")),
-                filename="data.txt",
+                filename=_text_upload_filename(data),
                 content_type="text/plain",
             )
         elif isinstance(data, list):
@@ -80,7 +131,7 @@ class CloudClient:
                     form.add_field(
                         "data",
                         io.BytesIO(item.encode("utf-8")),
-                        filename="data.txt",
+                        filename=_text_upload_filename(item),
                         content_type="text/plain",
                     )
                 elif hasattr(item, "read"):
@@ -90,7 +141,14 @@ class CloudClient:
             name = getattr(data, "name", "upload")
             form.add_field("data", data, filename=name)
 
-        async with session.post(f"{self.service_url}/api/v1/remember", data=form) as resp:
+        timeout = (
+            self.UPLOAD_TIMEOUT
+            if kwargs.get("content_type") == "cogx-archive"
+            else self.DEFAULT_TIMEOUT
+        )
+        async with session.post(
+            f"{self.service_url}/api/v1/remember", data=form, timeout=timeout
+        ) as resp:
             if resp.status >= 400:
                 body = await resp.text()
                 raise RuntimeError(f"Remote remember failed ({resp.status}): {body}")
@@ -153,6 +211,10 @@ class CloudClient:
             payload["session_id"] = kwargs["session_id"]
         if kwargs.get("scope") is not None:
             payload["scope"] = kwargs["scope"]
+        if kwargs.get("context_profile") is not None:
+            payload["context_profile"] = kwargs["context_profile"]
+        if kwargs.get("include_references") is not None:
+            payload["include_references"] = kwargs["include_references"]
 
         async with session.post(
             f"{self.service_url}/api/v1/recall",
@@ -199,7 +261,7 @@ class CloudClient:
             form.add_field(
                 "data",
                 io.BytesIO(data.encode("utf-8")),
-                filename="data.txt",
+                filename=_text_upload_filename(data),
                 content_type="text/plain",
             )
         elif isinstance(data, list):
@@ -208,7 +270,7 @@ class CloudClient:
                     form.add_field(
                         "data",
                         io.BytesIO(item.encode("utf-8")),
-                        filename="data.txt",
+                        filename=_text_upload_filename(item),
                         content_type="text/plain",
                     )
                 elif hasattr(item, "read"):
@@ -284,6 +346,10 @@ class CloudClient:
             payload["tools"] = kwargs["tools"]
         if kwargs.get("max_iter") is not None:
             payload["maxIter"] = kwargs["max_iter"]
+        if kwargs.get("include_references") is not None:
+            payload["includeReferences"] = kwargs["include_references"]
+        if kwargs.get("code_query") is not None:
+            payload["codeQuery"] = kwargs["code_query"]
 
         async with session.post(
             f"{self.service_url}/api/v1/search",

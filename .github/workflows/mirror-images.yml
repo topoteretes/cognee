@@ -1,0 +1,54 @@
+name: Mirror external images to GHCR
+
+# Copies the pinned third-party images CI depends on (pgvector) into GHCR, so the
+# PR / test hot path never pulls from Docker Hub — which is rate-limited and flaky
+# from GitHub Actions (intermittent `registry-1.docker.io ... timeout` on service
+# container setup). The test workflows reference ghcr.io/<owner>/pgvector:pg17.
+#
+# Runs weekly for freshness and on-demand. IMPORTANT: run this once (Actions ->
+# "Mirror external images to GHCR" -> Run workflow) BEFORE the GHCR references go
+# live, so the image exists. Ensure the resulting GHCR package is accessible to
+# this repo (public, or repo-linked) so service pulls with GITHUB_TOKEN succeed.
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"   # Mondays 06:00 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - pgvector/pgvector:pg17
+    steps:
+      - name: Log in to Docker Hub (authenticated source pulls)
+        uses: docker/login-action@v3
+        continue-on-error: true   # best-effort: fall back to anonymous if unset
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Mirror ${{ matrix.image }} -> GHCR
+        run: |
+          set -euo pipefail
+          SRC="${{ matrix.image }}"
+          DST="ghcr.io/${{ github.repository_owner }}/${SRC##*/}"
+          echo "Mirroring $SRC -> $DST"
+          docker pull "$SRC"
+          docker tag  "$SRC" "$DST"
+          docker push "$DST"
+          echo "Done: $DST"

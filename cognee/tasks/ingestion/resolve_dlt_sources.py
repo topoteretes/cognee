@@ -5,7 +5,7 @@ One-to-many expansion (one DLT source → many rows) happens here; the
 per-item pipeline model downstream stays unchanged.
 """
 
-from typing import Any, List, Optional, Set
+from typing import Any, Callable, List, Optional, Set
 from uuid import UUID
 
 from cognee.modules.data.methods.get_unique_data_id import get_unique_data_id
@@ -21,6 +21,7 @@ from .create_dlt_source import (
 from .data_item import DataItem
 from .dlt_row_data import DltRowData
 from .ingest_dlt_source import ingest_dlt_source
+from .dlt_utils import document_source_tag
 
 logger = get_logger("resolve_dlt_sources")
 
@@ -37,8 +38,11 @@ async def resolve_dlt_sources(
     ``ingest_dlt_source`` and each resulting row is wrapped in a ``DataItem``
     with stable ``data_id``, enriched text, and ``external_metadata``.
 
-    Returns the (possibly expanded) data — either a single item, a list, or
-    unchanged if nothing was DLT.
+    Returns a ``(data, orphan_cleanup)`` tuple. ``data`` is the (possibly
+    expanded) data — a single item, a list, or unchanged if nothing was DLT.
+    ``orphan_cleanup`` is an async callable that deletes dlt rows no longer in
+    the source, or ``None`` when there is nothing to clean up; the caller must
+    await it *after* the fresh rows are committed (see Phase 3).
     """
     # Lazy-import DLT types so the dlt package is not a hard dependency
     try:
@@ -46,7 +50,7 @@ async def resolve_dlt_sources(
         from dlt.extract.source import DltSource
     except ImportError:
         # dlt not installed — nothing to resolve
-        return data
+        return data, None
 
     primary_key = kwargs["primary_key"] if "primary_key" in kwargs else None
     write_disposition = kwargs["write_disposition"] if "write_disposition" in kwargs else "replace"
@@ -74,11 +78,17 @@ async def resolve_dlt_sources(
 
     if not dlt_items:
         # Nothing to expand — return original data unchanged
-        return data
+        return data, None
+
+    # A dlt source may opt into the document path (each row → a text document
+    # that goes through normal cognify) by declaring a document-source tag;
+    # every other dlt source takes the relational schema-context path below.
+    document_items = [i for i in dlt_items if document_source_tag(i)]
+    relational_items = [i for i in dlt_items if not document_source_tag(i)]
 
     # --- Run DLT pipelines and collect rows ---------------------------------
     all_rows: List[DltRowData] = []
-    for dlt_item in dlt_items:
+    for dlt_item in relational_items:
         rows = await ingest_dlt_source(
             dlt_item,
             dataset_name,
@@ -88,6 +98,32 @@ async def resolve_dlt_sources(
         )
         all_rows.extend(rows)
 
+    # Document sources honour the caller's write_disposition so both sync models
+    # work: "replace" for delete-feed-less snapshot sources (Notion/Slack — each
+    # run rewrites staging with exactly the rows currently visible) and "merge"
+    # (+ a hard_delete tombstone column) for incremental sources with a real
+    # delete feed (Google Drive's Changes API). Either way the whole set is read
+    # back (max_rows_per_table=0) so orphan cleanup can forget rows that dropped
+    # out of the current corpus. write_disposition/primary_key default to
+    # "replace"/"id" (see the kwargs resolution above).
+    document_data_items: list[DataItem] = []
+    document_fresh_ids: Set[UUID] = set()
+    document_source_tags: set[str] = set()
+    for dlt_item in document_items:
+        source_tag = document_source_tag(dlt_item)
+        document_source_tags.add(source_tag)
+        rows = await ingest_dlt_source(
+            dlt_item,
+            dataset_name,
+            primary_key=primary_key or "id",
+            write_disposition=write_disposition,
+            max_rows_per_table=0,
+        )
+        for row in rows:
+            data_id = await get_unique_data_id(_dlt_row_identifier(row), user)
+            document_fresh_ids.add(data_id)
+            document_data_items.append(_build_document_data_item(row, data_id, source_tag))
+
     # --- Phase 1: compute stable data_ids for all rows (for FK resolution) --
     # Primary lookup uses content_hash for uniqueness (handles tables with
     # non-unique fallback PKs like junction tables).
@@ -96,10 +132,27 @@ async def resolve_dlt_sources(
     # When multiple rows share a PK value, the last one wins (best-effort).
     fk_lookup: dict[tuple[str, str], UUID] = {}
     for row in all_rows:
-        row_identifier = f"dlt:{row.table_name}:{row.primary_key_value}:{row.content_hash}"
-        data_id = await get_unique_data_id(row_identifier, user)
+        data_id = await get_unique_data_id(_dlt_row_identifier(row), user)
         row_id_lookup[(row.table_name, row.primary_key_value, row.content_hash)] = data_id
-        fk_lookup[(row.table_name, row.primary_key_value)] = data_id
+
+        fk_key = (row.table_name, row.primary_key_value)
+        existing = fk_lookup.get(fk_key)
+        if existing is not None and existing != data_id:
+            # Duplicate primary key within a table: row_id_lookup keeps both
+            # rows (it is keyed by content_hash too), but fk_lookup can only
+            # hold one target per (table, pk). FK edges pointing at this key
+            # will resolve to the last row seen; earlier rows are shadowed.
+            # ingest_dlt_source already warns on duplicate PKs at load time;
+            # warn here too so the ambiguity is visible at FK-resolution time.
+            logger.warning(
+                "Duplicate primary key during FK resolution: table=%s pk=%s. "
+                "FK edges targeting this key resolve to the last row "
+                "(content_hash=%s); earlier rows with this key are shadowed.",
+                row.table_name,
+                row.primary_key_value,
+                row.content_hash,
+            )
+        fk_lookup[fk_key] = data_id
 
     # --- Phase 2: create DataItems ------------------------------------------
     # Build table-level metadata once per table so all rows share the same
@@ -117,11 +170,14 @@ async def resolve_dlt_sources(
         return _table_meta_cache[row.table_name]
 
     expanded_items: list[DataItem] = []
+    # (source_table, fk_column, ref_table, fk_value) for FKs whose target row
+    # was not loaded — collected here and reported once after the loop.
+    missing_fk_targets: list[tuple[str, str, str, str]] = []
     for row in all_rows:
         data_id = row_id_lookup[(row.table_name, row.primary_key_value, row.content_hash)]
 
         enriched_text = _build_schema_context_text(row)
-        fk_references = _resolve_fk_references(row, fk_lookup)
+        fk_references = _resolve_fk_references(row, fk_lookup, missing_fk_targets)
         table_meta = _get_table_meta(row)
 
         ext_metadata = {
@@ -147,20 +203,105 @@ async def resolve_dlt_sources(
 
     logger.info("Resolved %d DLT source(s) into %d DataItems.", len(dlt_items), len(expanded_items))
 
-    # --- Phase 3: delete orphaned dlt rows no longer in the source ----------
-    # Skip orphan deletion for "append" disposition — each run intentionally
-    # adds new rows, so prior batches should not be treated as orphans.
-    if write_disposition != "append":
-        fresh_data_ids: Set[UUID] = set(row_id_lookup.values())
-        await _delete_dlt_orphans(dataset_name, user, fresh_data_ids)
+    if missing_fk_targets:
+        sample = ", ".join(
+            f"{src}.{col} -> {ref}:{val}" for src, col, ref, val in missing_fk_targets[:5]
+        )
+        logger.warning(
+            "%d foreign key reference(s) could not be resolved to a loaded row "
+            "and were dropped (no edge created). The target row was likely not "
+            "ingested (e.g. it is beyond max_rows_per_table). "
+            "Sample (source_table.column -> ref_table:value): %s",
+            len(missing_fk_targets),
+            sample,
+        )
+
+    # Document rows (built above) skip the schema-context treatment: each is a
+    # text document (source == its document tag) that flows through normal cognify.
+    expanded_items.extend(document_data_items)
+
+    # --- Phase 3: prepare deferred orphan cleanup ---------------------------
+    # Deletion of orphaned dlt rows is deferred to *after* the fresh rows are
+    # committed by the add pipeline, to avoid a data-loss window: if ingestion
+    # failed between deletion and commit, the orphans would be gone and the
+    # replacements never stored. We return a cleanup coroutine for the caller
+    # to await post-commit instead of deleting here.
+    #
+    # Relational sources skip cleanup for "append" (each run intentionally adds
+    # new rows). Document sources reconcile the full current snapshot, so rows
+    # missing from it (deleted/unshared) must be forgotten. The two paths are
+    # cleaned separately so an append relational run never treats document rows
+    # as orphans, or vice versa.
+    #
+    # Both paths skip cleanup when their fresh set is empty: an empty read-back
+    # cannot be distinguished from a failed/misconfigured sync, and treating it
+    # as "everything is an orphan" would wipe the whole corpus. Leaving stale
+    # rows for one cycle is the safe failure mode.
+    relational_fresh: Set[UUID] = set(row_id_lookup.values())
+    do_relational_cleanup = write_disposition != "append" and bool(relational_fresh)
+    do_document_cleanup = bool(document_fresh_ids)
+
+    orphan_cleanup: Optional[Callable[[], Any]] = None
+    if do_relational_cleanup or do_document_cleanup:
+
+        async def _cleanup() -> None:
+            if do_relational_cleanup:
+                await _delete_dlt_orphans(dataset_name, user, relational_fresh, sources=("dlt",))
+            if do_document_cleanup:
+                await _delete_dlt_orphans(
+                    dataset_name, user, document_fresh_ids, sources=tuple(document_source_tags)
+                )
+
+        orphan_cleanup = _cleanup
 
     result = non_dlt_items + expanded_items
-    return result
+    return result, orphan_cleanup
 
 
 # ---------------------------------------------------------------------------
 # Helpers (moved from ingest_data.py)
 # ---------------------------------------------------------------------------
+
+
+def _dlt_row_identifier(row: DltRowData) -> str:
+    """Stable identifier for a dlt row, used to derive a deterministic data_id.
+
+    Includes ``content_hash`` so that unchanged rows keep the same data_id
+    across runs (no re-ingest/re-cognify) while edited rows get a fresh one.
+    """
+    return f"dlt:{row.table_name}:{row.primary_key_value}:{row.content_hash}"
+
+
+def _build_document_data_item(row: DltRowData, data_id: UUID, source_tag: str) -> DataItem:
+    """Build a text-document DataItem from a document-source dlt row.
+
+    The row is expected to carry ``title``/``content`` columns (and optionally
+    ``url``/``id``). Tagging ``external_metadata["source"] = source_tag`` (not
+    ``"dlt"``) routes the document through normal cognify entity extraction
+    rather than the deterministic dlt-row path (see ``is_dlt_sourced``).
+    """
+    row_data = row.row_data
+    title = _clean(row_data.get("title"))
+    content = _clean(row_data.get("content"))
+    text = f"# {title}\n\n{content}".strip() if title else content
+
+    external_metadata = {"source": source_tag, "title": title or None}
+    if row_data.get("url"):
+        external_metadata["url"] = row_data["url"]
+    if row_data.get("id"):
+        external_metadata["external_id"] = str(row_data["id"])
+
+    return DataItem(
+        data=text,
+        label=title or str(row_data.get("id")),
+        external_metadata=external_metadata,
+        data_id=data_id,
+    )
+
+
+def _clean(value: Any) -> str:
+    """Coerce a possibly-None cell value to a stripped string."""
+    return str(value).strip() if value is not None else ""
 
 
 def _build_schema_context_text(dlt_row: DltRowData) -> str:
@@ -213,12 +354,20 @@ def _build_schema_context_text(dlt_row: DltRowData) -> str:
     return "\n".join(lines)
 
 
-def _resolve_fk_references(dlt_row: DltRowData, row_id_lookup: dict) -> list:
+def _resolve_fk_references(
+    dlt_row: DltRowData,
+    row_id_lookup: dict,
+    missing_targets: Optional[list] = None,
+) -> list:
     """Resolve foreign key columns to target data_ids for graph edge creation.
 
     Returns a list of dicts:
     [{"column": "dept_id", "target_table": "departments", "target_pk_value": "10",
       "target_data_id": "uuid-string", "relationship_name": "dept_id_references_departments"}]
+
+    When ``missing_targets`` is provided, FK references whose target row was not
+    loaded are appended to it as ``(source_table, column, ref_table, value)`` so
+    the caller can report the dropped edges instead of silently losing them.
     """
     references = []
     for fk in dlt_row.foreign_keys:
@@ -250,6 +399,8 @@ def _resolve_fk_references(dlt_row: DltRowData, row_id_lookup: dict) -> list:
                     "relationship_name": relationship_name,
                 }
             )
+        elif missing_targets is not None:
+            missing_targets.append((dlt_row.table_name, fk_column, ref_table, fk_value_str))
 
     return references
 
@@ -258,6 +409,7 @@ async def _delete_dlt_orphans(
     dataset_name: str,
     user: User,
     fresh_data_ids: Set[UUID],
+    sources: tuple[str, ...] = ("dlt",),
 ) -> None:
     """Delete dlt-sourced Data records (and their graph/vector artifacts) that
     are no longer present in the freshly-ingested dlt source.
@@ -265,14 +417,19 @@ async def _delete_dlt_orphans(
     This handles the case where rows are deleted from the upstream database
     and the user re-ingests.  dlt cleans its own staging DB, but cognee's
     relational, graph, and vector stores still hold stale data.
+
+    ``sources`` restricts cleanup to Data whose ``external_metadata["source"]``
+    is one of the given tags (e.g. ``("dlt",)`` for relational rows or
+    ``("notion",)`` for Notion pages), so reconciling one source never removes
+    the other's records.
     """
     from cognee.modules.data.methods.get_dataset_data import get_dataset_data
     from cognee.modules.data.methods import get_authorized_existing_datasets
     from cognee.modules.data.methods.delete_data import delete_data
-    from cognee.modules.graph.methods.has_data_related_nodes import has_data_related_nodes
     from cognee.modules.graph.methods.delete_data_nodes_and_edges import (
         delete_data_nodes_and_edges,
     )
+    from cognee.context_global_variables import set_database_global_context_variables
 
     # Find the dataset — if it doesn't exist yet this is a first ingestion,
     # so there can be no orphans.
@@ -288,7 +445,7 @@ async def _delete_dlt_orphans(
     orphans = []
     for data_item in all_data:
         ext = data_item.external_metadata
-        if not isinstance(ext, dict) or ext.get("source") != "dlt":
+        if not isinstance(ext, dict) or ext.get("source") not in sources:
             continue
         if data_item.id not in fresh_data_ids:
             orphans.append(data_item)
@@ -302,14 +459,44 @@ async def _delete_dlt_orphans(
         dataset_name,
     )
 
-    for orphan in orphans:
-        try:
-            if await has_data_related_nodes(dataset.id, orphan.id):
+    failed: list = []
+    # The graph + vector engines are dataset-scoped under access control, so run
+    # the per-orphan delete inside the dataset DB context (mirrors the canonical
+    # datasets.delete_data routing). Without it, cleanup resolves the *default*
+    # engines — the background-ingest path invokes orphan_cleanup before any
+    # pipeline establishes the context — so the graph + vector purge silently
+    # targets the wrong DB and leaves the forgotten row's chunks/entities
+    # searchable under ENABLE_BACKEND_ACCESS_CONTROL.
+    async with set_database_global_context_variables(dataset.id, dataset.owner_id):
+        for orphan in orphans:
+            try:
+                # Always attempt graph+vector cleanup. delete_data_nodes_and_edges
+                # handles both provenance modes and no-ops when there is nothing to
+                # remove; gating on has_data_related_nodes (a relational-ledger-only
+                # check) wrongly skipped cleanup for graph-provenance graphs (the
+                # default), leaving a forgotten row's chunks/entities in the graph +
+                # vector stores and still retrievable.
                 await delete_data_nodes_and_edges(dataset.id, orphan.id, user.id)
-            await delete_data(orphan, dataset.id)
-        except Exception:
-            logger.warning(
-                "Failed to delete orphaned dlt row data_id=%s, skipping.",
-                orphan.id,
-                exc_info=True,
-            )
+                await delete_data(orphan, dataset.id)
+            except Exception:
+                failed.append(orphan.id)
+                logger.warning(
+                    "Failed to delete orphaned dlt row data_id=%s, skipping.",
+                    orphan.id,
+                    exc_info=True,
+                )
+
+    if failed:
+        # Surface partial-cleanup failures loudly: the stale rows remain across
+        # the relational, graph, and vector stores and will be retried on the
+        # next ingest. We log rather than raise — the fresh rows are already
+        # committed by this point and best-effort cleanup should not fail an
+        # otherwise-successful add.
+        logger.error(
+            "Failed to delete %d of %d orphaned dlt row(s) from dataset '%s'. "
+            "Stale data remains and will be retried on the next ingest. data_ids=%s",
+            len(failed),
+            len(orphans),
+            dataset_name,
+            ", ".join(str(i) for i in failed),
+        )

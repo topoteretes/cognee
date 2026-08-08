@@ -27,6 +27,17 @@ class DatasetDatabase(Base):
     vector_database_key = Column(String, unique=False, nullable=True)
     graph_database_key = Column(String, unique=False, nullable=True)
 
+    # Cognee release that last touched these databases (informational/audit only).
+    cognee_version = Column(String, unique=False, nullable=True)
+
+    # Last-applied data-migration revision for this dataset's database pair
+    # (one Alembic-style chain covers graph + vector + relational-ledger
+    # changes). NULL means "no recorded revision" -> all migrations run.
+    migration_revision = Column(String, unique=False, nullable=True)
+    # Why the last migration attempt failed (NULL when healthy). Written by the
+    # runner on failure, cleared on success; surfaced by `cognee-cli current`.
+    migration_last_error = Column(String, unique=False, nullable=True)
+
     # configuration details for different database types. This would make it more flexible to add new database types
     # without changing the database schema.
     graph_database_connection_info = Column(

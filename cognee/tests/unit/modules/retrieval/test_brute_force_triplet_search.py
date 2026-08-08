@@ -7,7 +7,7 @@ from cognee.modules.retrieval.utils.brute_force_triplet_search import (
     get_memory_fragment,
     format_triplets,
 )
-from cognee.modules.engine.utils.generate_edge_id import generate_edge_id
+from cognee.modules.graph.models.EdgeType import EdgeType
 from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
 from cognee.modules.graph.exceptions.exceptions import EntityNotFoundError
 from cognee.infrastructure.databases.vector.exceptions.exceptions import CollectionNotFoundError
@@ -59,7 +59,7 @@ async def test_brute_force_triplet_search_wide_search_limit_global_search():
     mock_vector_engine.search = AsyncMock(return_value=[])
 
     with patch(
-        "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine",
+        "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine_async",
         return_value=mock_vector_engine,
     ):
         await brute_force_triplet_search(
@@ -81,7 +81,7 @@ async def test_brute_force_triplet_search_wide_search_limit_filtered_search():
     mock_vector_engine.search = AsyncMock(return_value=[])
 
     with patch(
-        "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine",
+        "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine_async",
         return_value=mock_vector_engine,
     ):
         await brute_force_triplet_search(
@@ -103,7 +103,7 @@ async def test_brute_force_triplet_search_wide_search_default():
     mock_vector_engine.search = AsyncMock(return_value=[])
 
     with patch(
-        "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine",
+        "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine_async",
         return_value=mock_vector_engine,
     ):
         await brute_force_triplet_search(query="test", node_name=None)
@@ -121,7 +121,7 @@ async def test_brute_force_triplet_search_default_collections():
     mock_vector_engine.search = AsyncMock(return_value=[])
 
     with patch(
-        "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine",
+        "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine_async",
         return_value=mock_vector_engine,
     ):
         await brute_force_triplet_search(query="test")
@@ -151,7 +151,7 @@ async def test_brute_force_triplet_search_custom_collections():
     custom_collections = ["CustomCol1", "CustomCol2"]
 
     with patch(
-        "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine",
+        "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine_async",
         return_value=mock_vector_engine,
     ):
         await brute_force_triplet_search(query="test", collections=custom_collections)
@@ -173,7 +173,7 @@ async def test_brute_force_triplet_search_always_includes_edge_collection():
     collections_without_edge = ["Entity_name", "TextSummary_text"]
 
     with patch(
-        "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine",
+        "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine_async",
         return_value=mock_vector_engine,
     ):
         await brute_force_triplet_search(query="test", collections=collections_without_edge)
@@ -196,7 +196,7 @@ async def test_brute_force_triplet_search_all_collections_empty():
     mock_vector_engine.search = AsyncMock(return_value=[])
 
     with patch(
-        "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine",
+        "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine_async",
         return_value=mock_vector_engine,
     ):
         results = await brute_force_triplet_search(query="test")
@@ -218,7 +218,7 @@ async def test_brute_force_triplet_search_embeds_query():
     mock_vector_engine.search = AsyncMock(return_value=[])
 
     with patch(
-        "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine",
+        "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine_async",
         return_value=mock_vector_engine,
     ):
         await brute_force_triplet_search(query=query_text)
@@ -251,7 +251,7 @@ async def test_brute_force_triplet_search_extracts_node_ids_global_search():
 
     with (
         patch(
-            "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine",
+            "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine_async",
             return_value=mock_vector_engine,
         ),
         patch(
@@ -281,7 +281,7 @@ async def test_brute_force_triplet_search_reuses_provided_fragment():
 
     with (
         patch(
-            "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine",
+            "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine_async",
             return_value=mock_vector_engine,
         ),
         patch(
@@ -313,7 +313,7 @@ async def test_brute_force_triplet_search_creates_fragment_when_not_provided():
 
     with (
         patch(
-            "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine",
+            "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine_async",
             return_value=mock_vector_engine,
         ),
         patch(
@@ -342,7 +342,7 @@ async def test_brute_force_triplet_search_passes_top_k_to_importance_calculation
 
     with (
         patch(
-            "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine",
+            "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine_async",
             return_value=mock_vector_engine,
         ),
         patch(
@@ -481,7 +481,7 @@ async def test_brute_force_triplet_search_deduplicates_node_ids():
 
     with (
         patch(
-            "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine",
+            "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine_async",
             return_value=mock_vector_engine,
         ),
         patch(
@@ -522,7 +522,7 @@ async def test_brute_force_triplet_search_excludes_edge_collection():
 
     with (
         patch(
-            "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine",
+            "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine_async",
             return_value=mock_vector_engine,
         ),
         patch(
@@ -574,7 +574,7 @@ async def test_brute_force_triplet_search_skips_nodes_without_ids():
 
     with (
         patch(
-            "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine",
+            "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine_async",
             return_value=mock_vector_engine,
         ),
         patch(
@@ -615,7 +615,7 @@ async def test_brute_force_triplet_search_handles_tuple_results():
 
     with (
         patch(
-            "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine",
+            "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine_async",
             return_value=mock_vector_engine,
         ),
         patch(
@@ -657,7 +657,7 @@ async def test_brute_force_triplet_search_mixed_empty_collections():
 
     with (
         patch(
-            "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine",
+            "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine_async",
             return_value=mock_vector_engine,
         ),
         patch(
@@ -740,7 +740,7 @@ async def test_brute_force_triplet_search_vector_engine_init_error():
     """Test brute_force_triplet_search handles vector engine initialization error (lines 145-147)."""
     with (
         patch(
-            "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine"
+            "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine_async"
         ) as mock_get_vector_engine,
     ):
         mock_get_vector_engine.side_effect = Exception("Initialization error")
@@ -767,7 +767,7 @@ async def test_brute_force_triplet_search_collection_not_found_error():
 
     with (
         patch(
-            "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine",
+            "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine_async",
             return_value=mock_vector_engine,
         ),
         patch(
@@ -794,7 +794,7 @@ async def test_brute_force_triplet_search_generic_exception():
 
     with (
         patch(
-            "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine",
+            "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine_async",
             return_value=mock_vector_engine,
         ),
     ):
@@ -820,7 +820,7 @@ async def test_brute_force_triplet_search_with_node_name_sets_relevant_ids_to_no
 
     with (
         patch(
-            "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine",
+            "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine_async",
             return_value=mock_vector_engine,
         ),
         patch(
@@ -855,7 +855,7 @@ async def test_brute_force_triplet_search_collection_not_found_at_top_level():
 
     with (
         patch(
-            "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine",
+            "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine_async",
             return_value=mock_vector_engine,
         ),
         patch(
@@ -884,7 +884,7 @@ async def test_brute_force_triplet_search_single_query_regression():
 
     with (
         patch(
-            "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine",
+            "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine_async",
             return_value=mock_vector_engine,
         ),
         patch(
@@ -923,7 +923,7 @@ async def test_brute_force_triplet_search_batch_wiring_happy_path():
 
     with (
         patch(
-            "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine",
+            "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine_async",
             return_value=mock_vector_engine,
         ),
         patch(
@@ -962,7 +962,7 @@ async def test_brute_force_triplet_search_shape_propagation_to_graph():
 
     with (
         patch(
-            "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine",
+            "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine_async",
             return_value=mock_vector_engine,
         ),
         patch(
@@ -1018,7 +1018,7 @@ async def test_brute_force_triplet_search_batch_path_comprehensive():
 
     with (
         patch(
-            "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine",
+            "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine_async",
             return_value=mock_vector_engine,
         ),
         patch(
@@ -1055,7 +1055,7 @@ async def test_brute_force_triplet_search_batch_error_fallback():
     )
 
     with patch(
-        "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine",
+        "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine_async",
         return_value=mock_vector_engine,
     ):
         result = await brute_force_triplet_search(query_batch=["q1", "q2"])
@@ -1088,8 +1088,8 @@ async def test_cognee_graph_mapping_batch_shapes():
     edge_1_text = "relates_to"
     edge_2_text = "relates_to"
     edge_distances_batch = [
-        [MockScoredResult(generate_edge_id(edge_1_text), 0.92, payload={"text": edge_1_text})],
-        [MockScoredResult(generate_edge_id(edge_2_text), 0.88, payload={"text": edge_2_text})],
+        [MockScoredResult(EdgeType.id_for(edge_1_text), 0.92, payload={"text": edge_1_text})],
+        [MockScoredResult(EdgeType.id_for(edge_2_text), 0.88, payload={"text": edge_2_text})],
     ]
 
     await graph.map_vector_distances_to_graph_nodes(

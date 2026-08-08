@@ -96,7 +96,7 @@ async def extract_agent_trace_feedbacks(
                             session_id=session_id,
                             last_n=last_n_steps,
                         )
-                        trace_values = [entry.get("method_return_value") for entry in trace_session]
+                        trace_values = [entry.method_return_value for entry in trace_session]
 
                     normalized_trace_values = [
                         normalized

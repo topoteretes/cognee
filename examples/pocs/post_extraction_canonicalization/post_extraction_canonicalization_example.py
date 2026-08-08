@@ -1,11 +1,11 @@
 import asyncio
-import time
-import cognee
 import os
-
-from typing import Optional, Callable, Awaitable, Any
-from cognee.api.v1.visualize.visualize import visualize_graph
+import time
 from pathlib import Path
+from typing import Any, Awaitable, Callable, Optional
+
+import cognee
+from cognee import visualize_graph
 from examples.pocs.post_extraction_canonicalization.post_extraction_canonicalization import (
     post_extraction_canonicalization,
 )

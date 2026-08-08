@@ -1,5 +1,6 @@
 """End-to-end tests for the public cognee.agent_memory feature."""
 
+import os
 from pathlib import Path
 from uuid import uuid4
 
@@ -19,9 +20,9 @@ from cognee.modules.users.permissions.methods import authorized_give_permission_
 async def _reset_engines_and_prune() -> None:
     """Reset cached engines and clear persisted test state."""
     try:
-        from cognee.infrastructure.databases.vector import get_vector_engine
+        from cognee.infrastructure.databases.vector import get_vector_engine_async
 
-        vector_engine = get_vector_engine()
+        vector_engine = await get_vector_engine_async()
         if hasattr(vector_engine, "engine") and hasattr(vector_engine.engine, "dispose"):
             await vector_engine.engine.dispose(close=True)
     except Exception:
@@ -48,12 +49,25 @@ async def agent_memory_e2e_env(tmp_path):
     cognee.config.data_root_directory(str(root / "data"))
     cognee.config.system_root_directory(str(root / "system"))
 
+    # Disable session-turn gating (auto_feedback). Memory retrieval runs with
+    # memory_only_context=False, so the turn analysis would otherwise intercept the retrieval
+    # query with a clarifying acknowledgement instead of returning the memory answer. The
+    # turn-gating layer has dedicated coverage (e.g. test_session_context_turn_flow.py).
+    prev_auto_feedback = os.environ.get("AUTO_FEEDBACK")
+    os.environ["AUTO_FEEDBACK"] = "False"
+
     await _reset_engines_and_prune()
     await engine_setup()
 
-    yield
+    try:
+        yield
+    finally:
+        if prev_auto_feedback is None:
+            os.environ.pop("AUTO_FEEDBACK", None)
+        else:
+            os.environ["AUTO_FEEDBACK"] = prev_auto_feedback
 
-    await _reset_engines_and_prune()
+        await _reset_engines_and_prune()
 
 
 @pytest.mark.asyncio

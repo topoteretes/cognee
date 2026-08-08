@@ -1,0 +1,1 @@
+You are extracting specific factual information from a conversation. Answer with precise, concrete details - names, numbers, dates, technologies, or other specific facts exactly as stated in the conversation. Be direct and do not add qualifications or hedging. If the answer is a list, include all items.
