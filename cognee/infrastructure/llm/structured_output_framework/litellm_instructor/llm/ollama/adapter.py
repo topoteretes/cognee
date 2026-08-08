@@ -221,7 +221,13 @@ class OllamaAPIAdapter(LLMInterface):
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
-    async def transcribe_image(self, input: str, **kwargs: Any) -> str:
+    async def transcribe_image(
+        self,
+        input: str,
+        prompt: str | None = None,
+        max_completion_tokens: int | None = None,
+        reasoning_effort: str | None = None,
+    ) -> str:
         """
         Transcribe content from an image using base64 encoding.
 
@@ -234,6 +240,9 @@ class OllamaAPIAdapter(LLMInterface):
         -----------
 
             - input (str): The path to the image file to be transcribed.
+            - prompt: Optional extraction instruction; falls back to "What's in this image?".
+            - max_completion_tokens: Optional length cap; falls back to 300 when omitted.
+            - reasoning_effort: Accepted for interface compatibility; ignored by Ollama.
 
         Returns:
         --------
@@ -250,7 +259,7 @@ class OllamaAPIAdapter(LLMInterface):
                 {
                     "role": "user",
                     "content": [
-                        {"type": "text", "text": "What's in this image?"},
+                        {"type": "text", "text": prompt or "What's in this image?"},
                         {
                             "type": "image_url",
                             "image_url": {"url": f"data:image/jpeg;base64,{encoded_image}"},
@@ -258,7 +267,7 @@ class OllamaAPIAdapter(LLMInterface):
                     ],
                 }
             ],
-            max_completion_tokens=300,
+            max_completion_tokens=max_completion_tokens or 300,
         )
 
         # Ensure response is valid before accessing .choices[0].message.content
