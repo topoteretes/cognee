@@ -63,7 +63,7 @@ class DatasetQueueSettings:
 
     __slots__ = ("enabled", "max_concurrent", "idle_ttl_seconds")
 
-    def __init__(self, enabled: bool, max_concurrent: int, idle_ttl_seconds: float = 0.0) -> None:
+    def __init__(self, enabled: bool, max_concurrent: int, idle_ttl_seconds: float = 900.0) -> None:
         self.enabled = enabled
         self.max_concurrent = max_concurrent
         self.idle_ttl_seconds = idle_ttl_seconds
@@ -121,8 +121,9 @@ class DatasetQueue:
     When ``enabled`` is ``False`` all methods are pass-throughs.
     """
 
-    def __init__(self, enabled: bool, max_concurrent: int, idle_ttl_seconds: float = 0.0) -> None:
-        # Idle keep-alive TTL for subprocess engines. 0 = off (engines are
+    def __init__(self, enabled: bool, max_concurrent: int, idle_ttl_seconds: float = 900.0) -> None:
+        # Idle keep-alive TTL for subprocess engines; the default matches the
+        # SUBPROCESS_IDLE_TTL_SECONDS default. 0 = off (engines are
         # force-closed at last release). Set before the disabled early-return
         # so the attribute always exists.
         self._idle_ttl_seconds: float = max(0.0, float(idle_ttl_seconds))
