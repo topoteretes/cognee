@@ -1,0 +1,48 @@
+name: Catalog
+
+permissions:
+  contents: read
+
+on:
+  pull_request:
+    paths:
+      - "catalog/**"
+      - ".github/workflows/catalog.yml"
+      - "docs/contributing/add-catalog-entry.md"
+  push:
+    branches: [dev, main]
+    paths:
+      - "catalog/**"
+      - ".github/workflows/catalog.yml"
+      - "docs/contributing/add-catalog-entry.md"
+  workflow_dispatch:
+
+jobs:
+  validate:
+    name: Validate catalog entries
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: "3.11.x"
+          # pyyaml + jsonschema (the only catalog tooling deps) are already
+          # present transitively in a standard cognee install; no extra needed.
+
+      - name: Load and validate catalog entries
+        run: uv run python -m catalog.loader
+
+      - name: Run catalog loader tests
+        run: uv run python -m pytest catalog/tests -q
+
+      # Advisory only: this hits the GitHub API and depends on another repo's
+      # inventory.yml, so a transient failure or an upstream reshape must not
+      # fail an unrelated catalog PR. Stale references still surface in the log.
+      - name: Check drift against cognee-integrations/inventory.yml
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: uv run python -m catalog.inventory_sync

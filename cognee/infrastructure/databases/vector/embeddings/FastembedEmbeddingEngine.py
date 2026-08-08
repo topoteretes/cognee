@@ -24,10 +24,11 @@ from tenacity import (
 
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
-from cognee.infrastructure.databases.exceptions import EmbeddingException
-from cognee.infrastructure.llm.tokenizer.TikToken import (
-    TikTokenTokenizer,
+from cognee.infrastructure.databases.exceptions import (
+    EmbeddingContextWindowTooSmallError,
+    EmbeddingException,
 )
+from cognee.infrastructure.llm.tokenizer.resolver import resolve_embedding_tokenizer
 from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager
 from cognee.infrastructure.databases.vector.embeddings.utils import (
     sanitize_embedding_text_inputs,
@@ -86,7 +87,11 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
         stop=stop_after_delay(128),
         wait=wait_exponential_jitter(8, 128),
         retry=retry_if_not_exception_type(
-            (litellm.exceptions.NotFoundError, asyncio.CancelledError)
+            (
+                EmbeddingContextWindowTooSmallError,
+                litellm.exceptions.NotFoundError,
+                asyncio.CancelledError,
+            )
         ),
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
@@ -151,9 +156,7 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
                     s = original_texts[0]
                     third = len(s) // 3
                     if third == 0:
-                        raise EmbeddingException(
-                            "Text is too short to split further but exceeds context window."
-                        ) from error
+                        raise EmbeddingContextWindowTooSmallError from error
                     left_part, right_part = s[: third * 2], s[third:]
                     (left_vec,), (right_vec,) = await asyncio.gather(
                         self.embed_text([left_part]),
@@ -196,16 +199,19 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
         """
         Instantiate and return the tokenizer used for preparing text for embedding.
 
+        Resolves the fastembed model's own tokenizer (BGE/MiniLM are wordpiece)
+        instead of the OpenAI BPE tokenizer, which mis-counted them (issue #3646).
+
         Returns:
         --------
 
             A tokenizer object configured for the specified model and maximum token size.
         """
         logger.debug("Loading tokenizer for FastembedEmbeddingEngine...")
-
-        tokenizer = TikTokenTokenizer(
-            model="gpt-4o", max_completion_tokens=self.max_completion_tokens
+        tokenizer = resolve_embedding_tokenizer(
+            provider="fastembed",
+            model=self.model,
+            max_completion_tokens=self.max_completion_tokens,
         )
-
-        logger.debug("Tokenizer loaded for for FastembedEmbeddingEngine")
+        logger.debug("Tokenizer loaded for FastembedEmbeddingEngine")
         return tokenizer

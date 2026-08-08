@@ -1,7 +1,7 @@
 from typing import Dict, List
 
 from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
-from cognee.infrastructure.databases.vector.get_vector_engine import get_vector_engine
+from cognee.infrastructure.databases.vector.get_vector_engine import get_vector_engine_async
 from cognee.modules.graph.legacy.mark_ledger_as_deleted import (
     mark_ledger_edges_as_deleted,
     mark_ledger_nodes_as_deleted,
@@ -76,7 +76,7 @@ async def delete_from_graph_and_vector(
             collection_name = f"{node.type}_{indexed_field}"
             affected_vector_collections.setdefault(collection_name, []).append(node)
 
-    vector_engine = get_vector_engine()
+    vector_engine = await get_vector_engine_async()
     for collection, nodes in affected_vector_collections.items():
         await vector_engine.delete_data_points(collection, [str(node.slug) for node in nodes])
 

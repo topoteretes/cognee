@@ -23,6 +23,7 @@ You can contribute to **cognee** in many ways:
 - 🔍 Reviewing pull requests
 - 🛠️ Contributing code or tests
 - 🌐 Helping other users
+- 📇 Adding an entry to the [Integrations Hub or Use-Case Gallery](docs/contributing/add-catalog-entry.md)
 
 ## 📫 Get in Touch
 
@@ -112,7 +113,7 @@ Copy `.env.template` to `.env` and provide your OPENAI_API_KEY as LLM_API_KEY
 Make sure to run ```shell uv sync ``` in the root cloned folder or set up a virtual environment to run cognee
 
 ```shell
-uv run python examples/demos/simple_cognee_example.py
+uv run python examples/guides/simple_cognee_example.py
 ```
 
 ## 4. 📤 Submitting Changes
@@ -130,6 +131,23 @@ git push origin feature/your-feature-name
    - Click "Compare & Pull Request" and open a PR against dev branch
    - Fill in the PR template with details about your changes
    - You MUST provide screenshots of unit and integration tests passing on your machine. We can't merge PRs otherwise
+
+### Changelog Entries
+
+If maintainers ask for a changelog entry, add it under the `Unreleased` section of `CHANGELOG.md`.
+
+- Use `Added` for new capabilities
+- Use `Changed` for behavior or documentation updates
+- Use `Fixed` for bug fixes
+
+Example entry:
+
+```markdown
+## Unreleased
+
+### Fixed
+- Clarify the minimal Docker Compose setup for first-time contributors.
+```
 
 > **Reviewers are auto-routed.** Cognee uses a [`CODEOWNERS`](.github/CODEOWNERS)
 > file to request reviews automatically based on the directories your PR touches.

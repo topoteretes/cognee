@@ -9,7 +9,7 @@ export default function Select({ children, className, disabled, ...props }: Sele
           "block w-full appearance-none rounded-lg bg-white pl-3.5 pr-8 h-10 text-sm text-cognee-body",
           "border border-cognee-border",
           "hover:bg-cognee-hover",
-          "focus:border-cognee-purple focus:border-2 focus:shadow-[0_0_0_3px_rgba(101,16,244,0.1)] focus:outline-none",
+          "focus:border-[#6510F4] focus:border-2 focus:shadow-[0_0_0_3px_rgba(188,155,255,0.10)] focus:outline-none",
           "disabled:bg-cognee-disabled disabled:text-cognee-placeholder disabled:cursor-not-allowed",
           className,
         )}

@@ -15,7 +15,7 @@ const CustomTextInput = forwardRef<HTMLInputElement, InputProps>(
           ref={ref}
           label={label}
           classNames={{
-            input: "!h-[40px] !rounded-lg !border-[#E4E4E7] focus:!border-[#6510F4] focus:!border-2 focus:!shadow-[0_0_0_3px_rgba(101,16,244,0.1)]",
+            input: "!h-[40px] !rounded-lg !border-[#E4E4E7] focus:!border-[#6510F4] focus:!border-2 focus:!shadow-[0_0_0_3px_rgba(188,155,255,0.10)]",
             label: "!text-sm mb-[8px] !font-normal !text-[#3F3F46]",
           }}
           placeholder={placeholder ?? label}

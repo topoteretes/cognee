@@ -18,6 +18,16 @@ from cognee.tasks.ingestion.data_item import DataItem
 from cognee.tasks.ingestion.resolve_dlt_sources import resolve_dlt_sources
 from cognee.tasks.ingestion.utils import materialize_stream_for_background
 from cognee.shared.logging_utils import get_logger
+from cognee.modules.data.constants import DEFAULT_DATASET_NAME
+from cognee.modules.observability import (
+    new_span,
+    MEMORY_SYSTEM,
+    MEMORY_OPERATION,
+    MEMORY_COLLECTION,
+    COGNEE_DATASET_NAME,
+    record_operation_duration,
+    increment_items_stored,
+)
 
 logger = get_logger()
 
@@ -32,7 +42,7 @@ async def add(
         list[DataItem],
         Any,  # DltResource, SourceFactory, or other dlt types
     ],
-    dataset_name: str = "main_dataset",
+    dataset_name: str = DEFAULT_DATASET_NAME,
     user: User = None,
     node_set: Optional[List[str]] = None,
     vector_db_config: dict = None,
@@ -45,6 +55,7 @@ async def add(
     run_in_background: bool = False,
     llm_config: Optional[LLMConfig] = None,
     embedding_config: Optional[EmbeddingConfig] = None,
+    data_cache: bool = True,
     **kwargs,
 ):
     """
@@ -221,6 +232,16 @@ async def add(
 
     await setup()
 
+    import time as _time
+
+    _add_start_ns = _time.monotonic_ns()
+
+    with new_span("memory.store") as _span:
+        _span.set_attribute(MEMORY_SYSTEM, "cognee")
+        _span.set_attribute(MEMORY_OPERATION, "store")
+        _span.set_attribute(MEMORY_COLLECTION, dataset_name or "main_dataset")
+        _span.set_attribute(COGNEE_DATASET_NAME, dataset_name or "main_dataset")
+
     user, authorized_dataset = await resolve_authorized_user_dataset(
         dataset_name=dataset_name, dataset_id=dataset_id, user=user
     )
@@ -268,11 +289,28 @@ async def add(
         data_per_batch=data_per_batch,
         llm_config=llm_config,
         embedding_config=embedding_config,
+        data_cache=data_cache,
     )
+
+    # Foreground runs: the fresh rows are committed by pipeline_executor_func
+    # above, so it's now safe to clean up orphans. (Background runs already ran
+    # this up front and set orphan_cleanup to None.)
+    if orphan_cleanup is not None:
+        await orphan_cleanup()
 
     # run_pipeline_blocking returns {dataset_id: PipelineRunInfo} but callers
     # expect a single PipelineRunInfo (add always processes one dataset).
     if isinstance(result, dict) and len(result) == 1:
-        return next(iter(result.values()))
+        result = next(iter(result.values()))
+
+    _duration_ms = (_time.monotonic_ns() - _add_start_ns) / 1_000_000
+    _attrs = {
+        "memory.system": "cognee",
+        "memory.operation": "store",
+        "memory.collection": dataset_name or "main_dataset",
+    }
+    record_operation_duration(_duration_ms, _attrs)
+    item_count = len(data) if hasattr(data, "__len__") else 1
+    increment_items_stored(item_count, _attrs)
 
     return result
