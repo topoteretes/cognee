@@ -102,11 +102,16 @@ ty check .
 # Using Python SDK
 uv run python examples/guides/simple_cognee_example.py
 
-# Using CLI
-cognee-cli add "Your text here"
-cognee-cli cognify
+# Using CLI (memory API — the primary surface)
+cognee-cli remember "Your text here"   # also accepts file paths / URLs
+cognee-cli recall "Your question"
+cognee-cli improve -d my_project       # enrich/index the graph
+cognee-cli forget --all                # NOTE: no confirmation prompt
+
+# Low level operations (still ship; what the memory commands call underneath)
+cognee-cli add "Your text here" && cognee-cli cognify
 cognee-cli search "Your query"
-cognee-cli delete --all
+cognee-cli delete --all                # prompts before deleting
 
 # Launch full stack with UI
 cognee-cli -ui
@@ -114,12 +119,38 @@ cognee-cli -ui
 
 ## Architecture Overview
 
-### Core Workflow: add → cognify → search/memify
+### Core Workflow: remember → recall (+ improve / forget)
+
+As of cognee 1.x the memory API is the primary surface. All functions are async.
+
+1. **remember()** - Store data in memory. Without `session_id` it runs `add()` + `cognify()` and then `improve()` (`self_improvement=True` by default); with `session_id` it writes to the fast session cache and bridges into the graph in the background.
+2. **recall()** - Query memory. Auto-routes to a search strategy unless `query_type` is passed (`auto_route=False` falls back to `GRAPH_COMPLETION`). A `session_id` reads the session cache first and falls through to the graph.
+3. **improve()** - Enrich/index the graph: triplet embeddings, feedback weights, and (with `session_ids`) bridging session Q&A and distilled learnings into the permanent graph.
+4. **forget()** - Unified deletion (`data_id` / `dataset` / `dataset_id` / `everything=True`, plus `memory_only=True` to drop graph+vectors but keep raw files).
+
+#### Low level operations: add → cognify → search/memify
+
+These still ship and are what the memory API calls underneath. Reach for them to drive one stage in isolation (custom pipeline tasks, stage-level debugging), not for ordinary ingestion or retrieval.
 
 1. **add()** - Ingest data (files, URLs, text) into datasets
 2. **cognify()** - Extract entities/relationships and build knowledge graph
 3. **search()** - Query knowledge using various retrieval strategies
 4. **memify()** - Enrich graph with additional context and rules
+
+Note: Using Low level operations over core is useful in the following contexts.
+1) functional_relationships= is completely unreachable from remember(). So Only cognify can constrain single-target relationships.
+2) remember() hardcodes datasets_arg = [dataset_name]: always exactly one. Use cognify for this: cognify(datasets=["a","b","c"]) or datasets=None (every dataset the user owns.)
+3) remember() always runs add() first. To rebuild a graph over data already in the DB — after forget(memory_only=True), or with a new graph_model/ontology, cognify() is the only path.
+4) add() is like a staging area for cognify(). But remember automatically adds every time.
+5) search() packs skills/tools/max_iter/code_query into retriever_specific_config for you. Using recall() you hand-build that dict yourself.
+6) prune.prune_system(metadata=True) drops the relational DB (users, tenants, ACLs, the dataset_database registry, pipeline runs, search history.) forget() touches none of that. Full test teardown is prune's job.
+Improve & Memify are virtually the same, though. So no reason not to use improve.
+
+`cognee.delete` is deprecated (since 0.3.9, in favor of `datasets.delete_data`); `forget()` is the v1 replacement that unifies the old delete/prune/empty_dataset paths.
+
+#### recall() vs search()
+
+`recall()` wraps `search()` — its graph path calls the same authorized search — and adds three things: rule-based query routing when `query_type` is omitted (regex scoring, no LLM call, so auto-routing is free), session memory as a searchable source (`scope` = `graph` / `session` / `trace` / `session_context`; with a bare `session_id` a session hit short-circuits the graph search), and normalized results tagged with a `_source` key. Use `recall()` for ordinary retrieval. Drop to `search()` when you need the agentic extras as first-class parameters (`skills`, `tools`, `max_iter`, `code_query`, `node_type`), raw `SearchResult` objects instead of tagged entries, or a pinned `query_type` with no router in the path. Note `search(session_id=...)` only adds session history to the retrieval context — it never searches the session cache as a source; that is `recall()`-only. Full guide: `docs/recall-vs-search.md`.
 
 ### Key Architectural Patterns
 
@@ -137,14 +168,37 @@ Key files:
 - `cognee/infrastructure/databases/vector/vector_db_interface.py`
 
 #### 3. Multi-Tenant Access Control
-User → Dataset → Data hierarchy with permission-based filtering. Enable with `ENABLE_BACKEND_ACCESS_CONTROL=True`. Each user+dataset combination can have isolated graph/vector databases (when using supported backends: Ladybug, LanceDB, SQLite, Postgres).
+User → Dataset → Data hierarchy with permission-based filtering. Enable with `ENABLE_BACKEND_ACCESS_CONTROL=True`. Each user+dataset combination can have isolated graph/vector databases — but only on backends with a dataset-database handler.
+
+**Multi-tenancy support matrix** (source of truth: `cognee/infrastructure/databases/dataset_database_handler/supported_dataset_database_handlers.py`):
+
+| Layer | Backend | Isolated per user+dataset? | Notes |
+|---|---|---|---|
+| Graph | Ladybug/Kuzu (default) | ✅ | embedded, one database per dataset |
+| Graph | Neo4j | ✅ | one Neo4j database per dataset inside the DBMS — requires an edition with multi-database support (Enterprise/Aura). A second handler, `neo4j_aura_dev`, provisions a whole Aura instance per dataset; dev/PoC only, not production-ready |
+| Graph | Postgres | ✅ | graph-on-Postgres is itself a demo feature (see warning above) |
+| Graph | Turso | ✅ | |
+| Graph | Neptune, ladybug-remote | ❌ | requires `ENABLE_BACKEND_ACCESS_CONTROL=false` |
+| Vector | LanceDB (default) | ✅ | |
+| Vector | PGVector | ✅ | |
+| Vector | Turso | ✅ | |
+| Vector | Neptune Analytics | ❌ | requires `ENABLE_BACKEND_ACCESS_CONTROL=false` |
+| Vector | Community adapters (ChromaDB, Qdrant, …) | ❌ | unless the adapter registers a handler via `use_dataset_database_handler()` |
+| Relational | SQLite / Postgres | n/a — always shared | one relational DB holds users, ACLs, and the dataset-database registry; it is never isolated per dataset |
+
+How it works:
+- The handler is selected automatically from the configured provider (`GraphConfig.fill_derived` and the vector-config equivalent) — you never set it by hand for in-tree backends.
+- **Both** the graph and vector backends must support isolation. If either doesn't, cognee raises an `EnvironmentError` naming the unsupported handler — with the flag on (its default), an unsupported backend is a hard error, not a silent fallback to shared databases. The fix is switching backends or setting `ENABLE_BACKEND_ACCESS_CONTROL=false`.
+- New backends gain multi-tenancy by registering a `DatasetDatabaseHandlerInterface` implementation in the registry (or at runtime via `use_dataset_database_handler()`).
 
 ### Layer Structure
 
 ```
 API Layer (cognee/api/v1/)
     ↓
-Main Functions (add, cognify, search, memify)
+Memory API (remember, recall, improve, forget)
+    ↓
+Low level operations (add, cognify, search, memify)
     ↓
 Pipeline Orchestrator (cognee/modules/pipelines/)
     ↓
@@ -158,6 +212,16 @@ External Services (OpenAI, Ladybug, LanceDB, etc.)
 ```
 
 ### Critical Data Flow Paths
+
+#### REMEMBER / RECALL: Memory API
+NOTE: This is how the memory API flow works under the hood; it's read as a flow of data. So remember calls add(), cognify(), and improve().
+`remember(data)` → `add()` → `cognify()` → `improve()` (when `self_improvement=True`)
+`remember(data, session_id=...)` → session cache → background `improve()` bridge
+`recall(query)` → auto-route to a `SearchType` → `search()` → permission filter → results
+
+Key files: `cognee/api/v1/remember/remember.py`, `cognee/api/v1/recall/recall.py`, `cognee/api/v1/improve/improve.py`, `cognee/api/v1/forget/forget.py`
+
+The stages below are the Low level operations these call underneath.
 
 #### ADD: Data Ingestion
 `add()` → `resolve_data_directories` → `ingest_data` → `save_data_item_to_storage` → Create Dataset + Data records in relational DB
@@ -175,7 +239,7 @@ Key files:
 #### SEARCH: Retrieval
 `search(query_text, query_type)` → route to retriever type → filter by permissions → return results
 
-Available search types (from `cognee/modules/search/types/SearchType.py`):
+Available search types (from `cognee/modules/search/types/SearchType.py`), passed as `query_type` to `recall()` or `search()`:
 - **GRAPH_COMPLETION** (default) - Graph traversal + LLM completion
 - **GRAPH_SUMMARY_COMPLETION** - Uses pre-computed summaries with graph context
 - **GRAPH_COMPLETION_COT** - Chain-of-thought reasoning over graph
@@ -190,6 +254,8 @@ Available search types (from `cognee/modules/search/types/SearchType.py`):
 - **TEMPORAL** - Time-aware graph search
 - **FEELING_LUCKY** - Automatic search type selection
 - **CODING_RULES** - Code-specific search rules
+
+`recall()` picks one of these automatically when `query_type` is omitted. The CLI is narrower: `cognee-cli recall --query-type` accepts only the 7 choices in `cognee/cli/config.py:SEARCH_TYPE_CHOICES` and defaults to `GRAPH_COMPLETION`; the rest are SDK-only.
 
 Key files:
 - `cognee/api/v1/search/search.py`
@@ -302,6 +368,18 @@ CACHE_BACKEND=sqlite
 # Optional explicit SQLAlchemy URL for sqlite/postgres cache backends (overrides defaults)
 CACHE_DB_URL=postgresql+asyncpg://cognee:cognee@localhost:5432/cognee_db
 ```
+
+### Memory & Performance Tuning Flags
+
+Three flags trade memory features for speed. Know what each turns off before flipping it:
+
+| Flag (default) | Turns off when disabled | Cost of disabling |
+|---|---|---|
+| `CACHING=true` | The entire session-memory layer: `remember(session_id=...)` raises, `recall()` loses session history and the session-cache short-circuit, `agent_memory` session options error, and `AUTO_FEEDBACK` becomes moot | You lose the fast session write path and self-improving memory — only the slower add+cognify path remains. Do not benchmark cognee with this off; that measures cognee with its memory layer removed |
+| `AUTO_FEEDBACK=true` | The automatic per-turn analysis: one structured-output LLM call after each answered query that detects implicit feedback, guides later retrievals, and feeds `improve()`'s agent-context lessons | Memory stops self-tuning from conversation signals. Session store/recall itself keeps working — this is the flag to disable for low-latency reads, since the per-turn LLM call dominates default read latency |
+| `DATASET_QUEUE_ENABLED=true` | The per-process cap on concurrent datasets (`DATASET_QUEUE_MAX_CONCURRENT`, default 6), subprocess-engine teardown on scope exit, and pinning of in-use engines against cache eviction | Saves minor per-operation overhead, but embedded engines become unbounded: file-lock leaks and mid-use engine eviction under parallel multi-dataset load. Safe only for single-dataset scripts |
+
+`AUTO_FEEDBACK` is only consulted when `CACHING=true`. If reads feel slow on defaults, set `AUTO_FEEDBACK=false` and keep `CACHING=true` — that keeps session memory while removing the per-turn LLM call.
 
 ### LLM Provider Configuration
 
@@ -479,31 +557,45 @@ Tests are organized in `cognee/tests/`:
 - `cli_tests/` - CLI command tests
 - `tasks/` - Task-specific tests
 
-When adding features, add corresponding tests. Integration tests should cover the full add → cognify → search flow.
+When adding features, add corresponding tests. Integration tests should cover the full remember → recall flow (or add → cognify → search when the feature lives in one of those stages).
 
 ## API Structure
 
-FastAPI application with versioned routes under `cognee/api/v1/`:
-- `/add` - Data ingestion
-- `/cognify` - Knowledge graph processing
-- `/search` - Query interface
-- `/memify` - Graph enrichment
+FastAPI application with versioned routes under `/api/v1/` (routers registered in `cognee/api/client.py`):
+- `/remember` - Store data in memory
+- `/recall` - Query memory
+- `/improve` - Graph enrichment/indexing
+- `/forget` - Unified deletion
+- `/add`, `/cognify`, `/search`, `/memify`, `/delete` - Low level operations
 - `/datasets` - Dataset management
 - `/users` - Authentication (when `REQUIRE_AUTHENTICATION` is effectively true; see auth posture below)
 - `/visualize` - Graph visualization server
 
+Request bodies accept both snake_case and camelCase (`cognee/api/DTO.py` sets `alias_generator=to_camel` with `populate_by_name=True`). There is no `/feedback` route — feedback is CLI- and SDK-only.
+
 ## Python SDK Entry Points
 
-Main functions exported from `cognee/__init__.py`:
+Main functions exported from `cognee/__init__.py`.
+
+Memory API (primary):
+- `remember(data, dataset_name="main_dataset", session_id=..., self_improvement=True)` - Store data
+- `recall(query_text, query_type=None, datasets=..., top_k=15, session_id=...)` - Query memory
+- `improve(dataset="main_dataset", session_ids=..., node_name=...)` - Enrich/index the graph
+- `forget(data_id=..., dataset=..., dataset_id=..., everything=False, memory_only=False)` - Remove data
+
+Low level operations:
 - `add(data, dataset_name)` - Ingest data
 - `cognify(datasets)` - Build knowledge graph
 - `search(query_text, query_type)` - Query knowledge
 - `memify(extraction_tasks, enrichment_tasks)` - Enrich graph
-- `delete(data_id)` - Remove data
+- `delete(data_id)` - Remove data (deprecated since 0.3.9)
+
+Supporting:
 - `config()` - Configuration management
 - `datasets()` - Dataset operations
+- `serve(url)` / `disconnect()` - Point the SDK at a running instance
 
-All functions are async - use `await` or `asyncio.run()`.
+All functions are async - use `await` or `asyncio.run()`. See `examples/demos/remember_recall_improve_example.py` for permanent memory, session memory, and the sync between them.
 
 ## Security Considerations
 
@@ -559,9 +651,11 @@ Datasets are project-level containers that support organization, permissions, an
 
 ```python
 # Create/use a dataset
-await cognee.add(data, dataset_name="my_project")
-await cognee.cognify(datasets=["my_project"])
+await cognee.remember(data, dataset_name="my_project")
+await cognee.recall("my question", datasets=["my_project"])
 ```
+
+`remember()`/`add()` without `dataset_name` target the default dataset `main_dataset`; `recall()`/`search()` span all accessible datasets unless one is given.
 
 ### DataPoints
 Atomic knowledge units that form the foundation of graph structures. All graph nodes extend the `DataPoint` base class with versioning and metadata support.
@@ -578,7 +672,7 @@ Opt-in LLM check that runs as the last `cognify()` task (default **off**). After
 Multi-tenant architecture with users, roles, and Access Control Lists (ACLs):
 - Read, write, delete, and share permissions per dataset
 - Enable with `ENABLE_BACKEND_ACCESS_CONTROL=True`
-- Supports isolated databases per user+dataset (Ladybug, LanceDB, SQLite, Postgres)
+- Supports isolated graph/vector databases per user+dataset — backend support varies; see the multi-tenancy support matrix under "Multi-Tenant Access Control" above
 
 ### Graph Visualization
 Launch visualization server:
@@ -601,6 +695,10 @@ shutdown = visualization_server(port=8080)  # synchronous; returns a shutdown ca
 - Use `debugpy` optional dependency for debugging: `pip install cognee[debug]`
 
 ### Common Issues
+
+**Slow search/recall on default settings**
+- Issue: Each answered query on the session path makes one structured-output LLM call for automatic feedback analysis
+- Solution: Set `AUTO_FEEDBACK=false` (keep `CACHING=true` so session memory stays on); see "Memory & Performance Tuning Flags"
 
 **Ollama + OpenAI Embeddings NoDataError**
 - Issue: Mixing Ollama with OpenAI embeddings can cause errors
