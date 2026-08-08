@@ -302,28 +302,26 @@ class DatasetQueue:
     def _reap_loop(self) -> None:
         """Daemon loop: force-close engines idle for more than the TTL.
 
-        Runs off the event loop (the closes it triggers run on the cache's
-        close threads and register in the pending-close registry, same as a
-        release-time force-close). Active datasets are skipped via the
-        cache's pinned predicate, so a query outliving the TTL never has its
-        engine closed underneath it. A sweep failure is surfaced at ERROR and
+        One sweep call covers every engine cache: the caches register
+        themselves at decoration time, and the sweep itself skips active
+        datasets (the pinned predicate) and non-subprocess values — so this
+        loop needs no knowledge of which engine modules exist. It runs off
+        the event loop; the closes it triggers run on the cache's close
+        threads and register in the pending-close registry, same as a
+        release-time force-close. A sweep failure is surfaced at ERROR and
         the loop continues — a broken sweep must not silently end reaping.
         """
         import time
 
-        from cognee.infrastructure.databases.graph.get_graph_engine import (
-            reap_idle_graph_engines,
-        )
-        from cognee.infrastructure.databases.vector.create_vector_engine import (
-            reap_idle_vector_engines,
+        from cognee.infrastructure.databases.utils.closing_lru_cache import (
+            evict_and_close_idle_all,
         )
 
         interval = max(5.0, min(60.0, self._idle_ttl_seconds / 4))
         while True:
             time.sleep(interval)
             try:
-                reaped = reap_idle_graph_engines(self._idle_ttl_seconds)
-                reaped += reap_idle_vector_engines(self._idle_ttl_seconds)
+                reaped = evict_and_close_idle_all(self._idle_ttl_seconds)
                 if reaped:
                     logger.debug("Idle reaper closed %d subprocess engine(s)", reaped)
             except Exception:

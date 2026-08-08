@@ -158,18 +158,6 @@ def touch_vector_engine(**kwargs) -> bool:
     return _create_vector_engine.cache_touch(*_vector_engine_key_args(kwargs))
 
 
-def reap_idle_vector_engines(idle_seconds: float) -> int:
-    """Force-close cached subprocess-backed vector engines idle for more
-    than *idle_seconds*.
-
-    Skips engines whose dataset currently holds a queue slot (the cache's
-    pinned predicate) and in-process/remote adapters (no worker process, no
-    file locks — the keep-alive lifecycle does not apply to them). Returns
-    the number of engines closed.
-    """
-    return _create_vector_engine.cache_evict_and_close_idle(idle_seconds)
-
-
 def evict_vector_engines_for_database(vector_db_name: str) -> int:
     """Evict every cached vector engine bound to *vector_db_name*.
 

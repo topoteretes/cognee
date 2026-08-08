@@ -342,18 +342,6 @@ def touch_graph_engine(**kwargs) -> bool:
     return _create_graph_engine.cache_touch(*_graph_engine_key_args(kwargs))
 
 
-def reap_idle_graph_engines(idle_seconds: float) -> int:
-    """Force-close cached subprocess-backed graph engines idle for more
-    than *idle_seconds*.
-
-    Skips engines whose dataset currently holds a queue slot (the cache's
-    pinned predicate) and in-process/remote adapters (no worker process, no
-    file locks — the keep-alive lifecycle does not apply to them). Returns
-    the number of engines closed.
-    """
-    return _create_graph_engine.cache_evict_and_close_idle(idle_seconds)
-
-
 def evict_graph_engines_for_database(graph_database_name: str) -> int:
     """Evict every cached graph engine bound to *graph_database_name*.
 

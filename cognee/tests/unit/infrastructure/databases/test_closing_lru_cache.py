@@ -1580,3 +1580,38 @@ def test_cache_hit_refreshes_idle_timestamp():
     import time
 
     assert time.monotonic() - cache._cache["k"].last_touched < 5
+
+
+def test_evict_and_close_idle_all_sweeps_decorated_caches():
+    """The reaper's single entry point: decorated caches register themselves,
+    and one sweep covers them all — closing only idle subprocess-backed
+    values, leaving remote adapters and fresh entries alone."""
+    from cognee.infrastructure.databases.utils.closing_lru_cache import (
+        evict_and_close_idle_all,
+    )
+
+    @closing_lru_cache(maxsize=4, lease=True)
+    def graph_like(name):
+        return _SubprocessCloseable(name)
+
+    @closing_lru_cache(maxsize=4, lease=True)
+    def remote_like(name):
+        return _Closeable(name)
+
+    stale = graph_like("stale").__wrapped__
+    fresh = graph_like("fresh").__wrapped__
+    remote = remote_like("remote").__wrapped__
+
+    # Back-date the idle candidates through the registry itself.
+    import cognee.infrastructure.databases.utils.closing_lru_cache as clc
+
+    for cache in list(clc._DECORATED_CACHES):
+        for entry in cache._cache.values():
+            if entry.value in (stale, remote):
+                entry.last_touched -= 1000
+
+    closed = evict_and_close_idle_all(900)
+    assert closed >= 1
+    assert stale.closed is True, "idle subprocess value must be reaped"
+    assert fresh.closed is False, "fresh value must survive"
+    assert remote.closed is False, "non-subprocess value must never be reaped"

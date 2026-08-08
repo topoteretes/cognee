@@ -96,6 +96,26 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+# Every cache created by the ``closing_lru_cache`` decorator registers here so
+# the idle-TTL reaper can sweep them all through one entry point
+# (``evict_and_close_idle_all``) without knowing which engine modules exist.
+# Weak references: a decorated factory that goes out of scope (tests) drops
+# its cache from the registry automatically.
+_DECORATED_CACHES: "weakref.WeakSet[ClosingLRUCache]" = weakref.WeakSet()
+
+
+def evict_and_close_idle_all(idle_seconds: float) -> int:
+    """Force-close idle subprocess-backed entries across every decorated cache.
+
+    The idle-TTL reaper's single entry point: sweeps each registered cache via
+    :meth:`ClosingLRUCache.evict_and_close_idle`, which skips pinned (active)
+    keys and any value without ``_subprocess_mode`` — so caches holding
+    in-process or remote adapters contribute nothing, and a future
+    subprocess-backed engine cache is covered without anyone registering it by
+    hand. Returns the total number of entries closed.
+    """
+    return sum(cache.evict_and_close_idle(idle_seconds) for cache in list(_DECORATED_CACHES))
+
 
 class CacheInfo(dict):
     """Cache info mapping with functools.lru_cache-style attributes."""
@@ -944,6 +964,7 @@ def closing_lru_cache(maxsize: Optional[int] = 128, lease: bool = True, pinned_p
             bind_signature(_param_positions)
 
         cache = ClosingLRUCache(maxsize=maxsize, lease=lease, pinned_predicate=pinned_predicate)
+        _DECORATED_CACHES.add(cache)
 
         def _key(args, kwargs):
             # ``_KW_MARK`` separates positional from keyword args so
@@ -1061,7 +1082,6 @@ def closing_lru_cache(maxsize: Optional[int] = 128, lease: bool = True, pinned_p
         wrapper.cache_evict = cache_evict
         wrapper.cache_evict_and_close = cache_evict_and_close
         wrapper.cache_touch = cache_touch
-        wrapper.cache_evict_and_close_idle = cache.evict_and_close_idle
         wrapper.cache_evict_where = cache_evict_where
         wrapper.cache_evict_matching = cache_evict_matching
         wrapper.cache_await_closed = cache_await_closed
