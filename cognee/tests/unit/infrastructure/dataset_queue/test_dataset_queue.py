@@ -445,7 +445,7 @@ class TestReleaseSlotFor:
     async def test_eviction_fires_for_single_holder(self):
         from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
 
-        queue = DatasetQueue(enabled=True, max_concurrent=5)
+        queue = DatasetQueue(enabled=True, max_concurrent=5, idle_ttl_seconds=0)
         counter = self._mock_evict(queue)
 
         await queue.ensure_slot("ds-A")
@@ -456,7 +456,7 @@ class TestReleaseSlotFor:
     async def test_eviction_skipped_for_nested_depth(self):
         from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
 
-        queue = DatasetQueue(enabled=True, max_concurrent=5)
+        queue = DatasetQueue(enabled=True, max_concurrent=5, idle_ttl_seconds=0)
         counter = self._mock_evict(queue)
 
         await queue.ensure_slot("ds-B")
@@ -472,7 +472,7 @@ class TestReleaseSlotFor:
     async def test_eviction_skipped_when_cross_task_holder_exists(self):
         from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
 
-        queue = DatasetQueue(enabled=True, max_concurrent=5)
+        queue = DatasetQueue(enabled=True, max_concurrent=5, idle_ttl_seconds=0)
         counter = self._mock_evict(queue)
         ds = "ds-C"
 
@@ -500,7 +500,7 @@ class TestReleaseSlotFor:
     async def test_eviction_fires_after_last_cross_task_holder_releases(self):
         from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
 
-        queue = DatasetQueue(enabled=True, max_concurrent=5)
+        queue = DatasetQueue(enabled=True, max_concurrent=5, idle_ttl_seconds=0)
         counter = self._mock_evict(queue)
         ds = "ds-D"
 
@@ -528,7 +528,7 @@ class TestReleaseSlotFor:
     async def test_different_dataset_does_not_block_eviction(self):
         from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
 
-        queue = DatasetQueue(enabled=True, max_concurrent=5)
+        queue = DatasetQueue(enabled=True, max_concurrent=5, idle_ttl_seconds=0)
         counter = self._mock_evict(queue)
 
         other_ready = asyncio.Event()
@@ -554,7 +554,7 @@ class TestReleaseSlotFor:
     async def test_disabled_queue_skips_eviction(self):
         from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
 
-        queue = DatasetQueue(enabled=False, max_concurrent=5)
+        queue = DatasetQueue(enabled=False, max_concurrent=5, idle_ttl_seconds=0)
         counter = self._mock_evict(queue)
 
         await queue.release_slot_for("any-dataset")
@@ -566,7 +566,7 @@ class TestReleaseSlotFor:
         error propagates to the caller rather than being eaten."""
         from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
 
-        queue = DatasetQueue(enabled=True, max_concurrent=1)
+        queue = DatasetQueue(enabled=True, max_concurrent=1, idle_ttl_seconds=0)
         ds = "ds-E"
 
         def failing_evict():
@@ -590,7 +590,7 @@ class TestReleaseSlotFor:
         """Releasing a slot that was never acquired must not crash."""
         from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
 
-        queue = DatasetQueue(enabled=True, max_concurrent=5)
+        queue = DatasetQueue(enabled=True, max_concurrent=5, idle_ttl_seconds=0)
         counter = self._mock_evict(queue)
 
         await queue.release_slot_for("never-acquired")
@@ -602,7 +602,7 @@ class TestReleaseSlotFor:
         """Calling release twice for the same slot must not crash or over-release."""
         from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
 
-        queue = DatasetQueue(enabled=True, max_concurrent=2)
+        queue = DatasetQueue(enabled=True, max_concurrent=2, idle_ttl_seconds=0)
         counter = self._mock_evict(queue)
         ds = "ds-G"
 
@@ -623,7 +623,7 @@ class TestReleaseSlotFor:
         """Semaphore value must be exactly right after acquires and releases."""
         from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
 
-        queue = DatasetQueue(enabled=True, max_concurrent=3)
+        queue = DatasetQueue(enabled=True, max_concurrent=3, idle_ttl_seconds=0)
         self._mock_evict(queue)
 
         await queue.ensure_slot("ds1")
@@ -647,7 +647,7 @@ class TestReleaseSlotFor:
         """With three tasks on the same dataset, eviction fires once on the last exit."""
         from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
 
-        queue = DatasetQueue(enabled=True, max_concurrent=5)
+        queue = DatasetQueue(enabled=True, max_concurrent=5, idle_ttl_seconds=0)
         counter = self._mock_evict(queue)
         ds = "shared-ds"
 
@@ -692,7 +692,7 @@ class TestReleaseSlotFor:
         from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
 
         n_tasks = 20
-        queue = DatasetQueue(enabled=True, max_concurrent=n_tasks + 1)
+        queue = DatasetQueue(enabled=True, max_concurrent=n_tasks + 1, idle_ttl_seconds=0)
         counter = self._mock_evict(queue)
         ds = "stress-ds"
 
@@ -718,7 +718,7 @@ class TestReleaseSlotFor:
         The surviving task should then be the last holder and fire eviction."""
         from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
 
-        queue = DatasetQueue(enabled=True, max_concurrent=5)
+        queue = DatasetQueue(enabled=True, max_concurrent=5, idle_ttl_seconds=0)
         counter = self._mock_evict(queue)
         ds = "backstop-ds"
 
@@ -750,7 +750,7 @@ class TestReleaseSlotFor:
         outer exit skips (other task present), other task fires."""
         from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
 
-        queue = DatasetQueue(enabled=True, max_concurrent=5)
+        queue = DatasetQueue(enabled=True, max_concurrent=5, idle_ttl_seconds=0)
         counter = self._mock_evict(queue)
         ds = "combo-ds"
 
@@ -784,7 +784,7 @@ class TestReleaseSlotFor:
         """Releasing one dataset doesn't affect a slot held for another."""
         from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
 
-        queue = DatasetQueue(enabled=True, max_concurrent=5)
+        queue = DatasetQueue(enabled=True, max_concurrent=5, idle_ttl_seconds=0)
         counter = self._mock_evict(queue)
 
         await queue.ensure_slot("ds-A")
@@ -804,7 +804,7 @@ class TestReleaseSlotFor:
         """dataset_id=None uses the ds:<none> key and works correctly."""
         from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
 
-        queue = DatasetQueue(enabled=True, max_concurrent=2)
+        queue = DatasetQueue(enabled=True, max_concurrent=2, idle_ttl_seconds=0)
         counter = self._mock_evict(queue)
 
         await queue.ensure_slot(None)
@@ -819,7 +819,7 @@ class TestReleaseSlotFor:
         """If eviction raises for one dataset, another dataset's slot is unaffected."""
         from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
 
-        queue = DatasetQueue(enabled=True, max_concurrent=5)
+        queue = DatasetQueue(enabled=True, max_concurrent=5, idle_ttl_seconds=0)
         call_count = 0
 
         def evict_fails_once():
@@ -849,7 +849,7 @@ class TestActiveDatasetIds:
     async def test_tracks_slots_and_excludes_sentinels(self):
         from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
 
-        queue = DatasetQueue(enabled=True, max_concurrent=4)
+        queue = DatasetQueue(enabled=True, max_concurrent=4, idle_ttl_seconds=0)
         assert queue.active_dataset_ids() == set()
 
         await queue.ensure_slot("dataset-1")
@@ -865,21 +865,21 @@ class TestActiveDatasetIds:
     async def test_acquire_only_slots_are_not_dataset_ids(self):
         from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
 
-        queue = DatasetQueue(enabled=True, max_concurrent=4)
+        queue = DatasetQueue(enabled=True, max_concurrent=4, idle_ttl_seconds=0)
         async with queue.acquire():  # scoped slot without a dataset id
             assert queue.active_dataset_ids() == set()
 
     def test_disabled_queue_reports_no_active_datasets(self):
         from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
 
-        queue = DatasetQueue(enabled=False, max_concurrent=4)
+        queue = DatasetQueue(enabled=False, max_concurrent=4, idle_ttl_seconds=0)
         assert queue.active_dataset_ids() == set()
 
     @pytest.mark.asyncio
     async def test_depth_does_not_duplicate_and_survives_until_last_release(self):
         from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
 
-        queue = DatasetQueue(enabled=True, max_concurrent=4)
+        queue = DatasetQueue(enabled=True, max_concurrent=4, idle_ttl_seconds=0)
         await queue.ensure_slot("dataset-1")
         await queue.ensure_slot("dataset-1")  # re-entrant: depth bump, same slot
         assert queue.active_dataset_ids() == {"dataset-1"}
@@ -902,7 +902,7 @@ class TestEvictSubprocessEngines:
         adapter must be created".)"""
         from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
 
-        queue = DatasetQueue(enabled=True, max_concurrent=5)
+        queue = DatasetQueue(enabled=True, max_concurrent=5, idle_ttl_seconds=0)
         evicted = False
 
         def evict():
@@ -938,7 +938,7 @@ class TestEvictSubprocessEngines:
         e2e failures)."""
         from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
 
-        queue = DatasetQueue(enabled=True, max_concurrent=5)
+        queue = DatasetQueue(enabled=True, max_concurrent=5, idle_ttl_seconds=0)
         g_conf_mod, v_conf_mod, g_engine_mod, v_engine_mod = self._modules()
 
         g_cfg = {"graph_database_subprocess_enabled": True, "graph_database_name": "g"}
@@ -964,7 +964,7 @@ class TestEvictSubprocessEngines:
         """Engines running in-process are not evicted at release."""
         from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
 
-        queue = DatasetQueue(enabled=True, max_concurrent=5)
+        queue = DatasetQueue(enabled=True, max_concurrent=5, idle_ttl_seconds=0)
         g_conf_mod, v_conf_mod, g_engine_mod, v_engine_mod = self._modules()
 
         with (
@@ -985,3 +985,65 @@ class TestEvictSubprocessEngines:
 
         evict_graph.assert_not_called()
         evict_vector.assert_not_called()
+
+
+class TestIdleKeepAlive:
+    """SUBPROCESS_IDLE_TTL_SECONDS keeps engines warm across releases."""
+
+    def _counting_queue(self, ttl):
+        from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
+
+        queue = DatasetQueue(enabled=True, max_concurrent=5, idle_ttl_seconds=ttl)
+        calls = {"touch": 0, "evict": 0, "reaper": 0}
+        queue._touch_subprocess_engines = lambda: calls.__setitem__("touch", calls["touch"] + 1)
+        queue._evict_subprocess_engines = lambda: calls.__setitem__("evict", calls["evict"] + 1)
+        queue._ensure_reaper = lambda: calls.__setitem__("reaper", calls["reaper"] + 1)
+        return queue, calls
+
+    @pytest.mark.asyncio
+    async def test_ttl_release_touches_instead_of_evicting(self):
+        queue, calls = self._counting_queue(ttl=900)
+
+        await queue.ensure_slot("ds-K")
+        await queue.release_slot_for("ds-K")
+        assert calls == {"touch": 1, "evict": 0, "reaper": 1}
+
+    @pytest.mark.asyncio
+    async def test_zero_ttl_evicts_at_release(self):
+        queue, calls = self._counting_queue(ttl=0)
+
+        await queue.ensure_slot("ds-K")
+        await queue.release_slot_for("ds-K")
+        assert calls == {"touch": 0, "evict": 1, "reaper": 0}
+
+    def test_reaper_starts_exactly_once(self):
+        from unittest.mock import MagicMock
+
+        from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
+
+        queue = DatasetQueue(enabled=True, max_concurrent=5, idle_ttl_seconds=900)
+        thread = MagicMock()
+        with patch(
+            "cognee.infrastructure.databases.dataset_queue.queue.threading.Thread",
+            return_value=thread,
+        ) as thread_cls:
+            queue._ensure_reaper()
+            queue._ensure_reaper()
+        thread_cls.assert_called_once()
+        thread.start.assert_called_once()
+
+    def test_settings_read_ttl_from_env(self):
+        import os
+        from unittest.mock import patch as env_patch
+
+        from cognee.infrastructure.databases.dataset_queue.queue import (
+            get_dataset_queue_settings,
+        )
+
+        with env_patch.dict(os.environ, {"SUBPROCESS_IDLE_TTL_SECONDS": "42.5"}):
+            assert get_dataset_queue_settings().idle_ttl_seconds == 42.5
+        with env_patch.dict(os.environ, {"SUBPROCESS_IDLE_TTL_SECONDS": "-3"}):
+            assert get_dataset_queue_settings().idle_ttl_seconds == 0.0
+        with env_patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("SUBPROCESS_IDLE_TTL_SECONDS", None)
+            assert get_dataset_queue_settings().idle_ttl_seconds == 600.0
