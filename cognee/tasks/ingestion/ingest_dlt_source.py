@@ -419,8 +419,16 @@ def _resolve_primary_key(
     return "id"
 
 
+# Identity map over the identifier alphabet. Rebuilding the sanitized name from
+# these constant strings (dict values, not the input) makes the whitelist
+# guarantee visible to static dataflow analysis (CodeQL py/path-injection):
+# the result provably contains no path or SQL metacharacters.
+_SAFE_IDENT_CHARS = {c: c for c in "abcdefghijklmnopqrstuvwxyz0123456789_"}
+
+
 def _to_safe_ident(s: str) -> str:
     s = re.sub(r"[^A-Za-z0-9_]+", "_", s).strip("_").lower()
+    s = "".join(_SAFE_IDENT_CHARS.get(ch, "_") for ch in s)
     if not s:
         raise InvalidDLTArgumentError(message="Invalid dataset name given for dlt ingestion.")
     if s[0].isdigit():

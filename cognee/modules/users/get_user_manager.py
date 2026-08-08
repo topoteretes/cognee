@@ -74,15 +74,24 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
         relational_engine = get_relational_engine()
         prepared_api_key = prepare_api_key(token)
 
+        # Resolve the API key AND the user in a single short-lived session, then
+        # release the connection. The previous code called self.get() while this
+        # session was open; self.get() borrows the request-scoped user_db session,
+        # which then holds its own connection "idle in transaction" for the whole
+        # request (across the slow completion call). Every concurrent authenticated
+        # request therefore pinned two pooled connections at once, a circular wait
+        # that deadlocks the pool once concurrency reaches its size and strands
+        # backends "idle in transaction" (issue #4197). Using one session, released
+        # immediately, keeps auth to a single connection held only for the lookup.
         async with relational_engine.get_async_session() as session:
             user_api_key = (
                 await session.execute(select(UserApiKey).filter_by(api_key=prepared_api_key))
             ).scalar()
 
-            if user_api_key:
-                user = await self.get(user_api_key.user_id)
+            if user_api_key is None:
+                return None
 
-                return user
+            return (await session.execute(select(User).filter_by(id=user_api_key.user_id))).scalar()
 
 
 async def get_user_manager(user_db: SQLAlchemyUserDatabase = Depends(get_user_db)):
