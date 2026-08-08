@@ -224,10 +224,6 @@ class Neo4jAdapter(GraphDBInterface):
         async with self.driver.session(database=self.graph_database_name) as session:
             yield session
 
-    async def close(self) -> None:
-        """Close the underlying Neo4j driver and its connection pool."""
-        await self.driver.close()
-
     async def is_empty(self) -> bool:
         """Return True if the graph contains no data nodes.
 

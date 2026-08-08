@@ -110,7 +110,7 @@ def test_datapoint_model_to_basemodel_simplifies_single_class(programming_langua
 
     assert issubclass(simplified, BaseModel)
     assert not issubclass(simplified, DataPoint)
-    assert set(simplified.model_fields) == {"name", "is_type", "metadata"}
+    assert set(simplified.model_fields) == {"name", "is_type"}
     assert DATAPOINT_INFRA_FIELDS.isdisjoint(simplified.model_fields)
 
     field_type = simplified.model_fields["is_type"].annotation
@@ -128,13 +128,13 @@ def test_datapoint_model_to_basemodel_recurses_nested_types(programming_language
     field_model = get_args(simplified.model_fields["used_in"].annotation)[0]
     nested_field_type = field_model.model_fields["is_type"].annotation
 
-    assert set(simplified.model_fields) == {"name", "used_in", "is_type", "metadata"}
+    assert set(simplified.model_fields) == {"name", "used_in", "is_type"}
     assert not issubclass(field_model, DataPoint)
-    assert set(field_model.model_fields) == {"name", "is_type", "metadata"}
+    assert set(field_model.model_fields) == {"name", "is_type"}
     assert not issubclass(field_type, DataPoint)
     assert set(field_type.model_fields) == {"name"}
     assert not issubclass(nested_field_type, DataPoint)
-    assert set(nested_field_type.model_fields) == {"name", "metadata"}
+    assert set(nested_field_type.model_fields) == {"name"}
 
     instance = simplified(
         name="Python",
@@ -159,8 +159,9 @@ def test_strip_metadata_flag(programming_language_models):
     Field = programming_language_models["Field"]
     ProgrammingLanguage = programming_language_models["ProgrammingLanguage"]
 
+    # DataPoint.metadata is infrastructure, so it is already excluded by default.
     default_simplified = datapoint_model_to_basemodel(Field)
-    assert "metadata" in default_simplified.model_fields
+    assert "metadata" not in default_simplified.model_fields
 
     stripped = datapoint_model_to_basemodel(ProgrammingLanguage, strip_metadata=True)
     field_model = get_args(stripped.model_fields["used_in"].annotation)[0]
@@ -196,3 +197,76 @@ def test_rehydration_with_strip_metadata(programming_language_models):
     assert rehydrated.used_in[0].name == "data analysis"
     assert rehydrated.metadata["index_fields"] == ["name"]
     assert rehydrated.used_in[0].metadata["index_fields"] == ["name"]
+
+
+def test_preserves_required_inherited_fields():
+    class Animal(DataPoint):
+        species: str
+
+    class Dog(Animal):
+        breed: str
+
+    simplified = datapoint_model_to_basemodel(Dog, strip_metadata=True)
+
+    assert set(simplified.model_fields) == {"species", "breed"}
+    assert DATAPOINT_INFRA_FIELDS.isdisjoint(simplified.model_fields)
+
+
+def test_preserves_defaulted_inherited_fields():
+    class Animal(DataPoint):
+        species: str
+        age: int = 0
+
+    class Dog(Animal):
+        breed: str
+
+    simplified = datapoint_model_to_basemodel(Dog, strip_metadata=True)
+
+    assert set(simplified.model_fields) == {"species", "age", "breed"}
+    assert simplified.model_fields["age"].default == 0
+
+
+def test_preserves_inherited_nested_datapoint_fields():
+    class Habitat(DataPoint):
+        climate: str
+
+    class Animal(DataPoint):
+        species: str
+        habitat: Habitat
+
+    class Dog(Animal):
+        breed: str
+
+    simplified = datapoint_model_to_basemodel(Dog, strip_metadata=True)
+    habitat_model = simplified.model_fields["habitat"].annotation
+
+    assert set(simplified.model_fields) == {"species", "habitat", "breed"}
+    assert set(habitat_model.model_fields) == {"climate"}
+    assert DATAPOINT_INFRA_FIELDS.isdisjoint(simplified.model_fields)
+    assert DATAPOINT_INFRA_FIELDS.isdisjoint(habitat_model.model_fields)
+    assert "metadata" not in simplified.model_fields
+    assert "metadata" not in habitat_model.model_fields
+
+
+def test_preserves_inherited_fields_in_cyclic_models():
+    class LinkedNode(DataPoint):
+        label: str
+
+    class NodeA(LinkedNode):
+        other: "NodeB | None" = None
+
+    class NodeB(LinkedNode):
+        other: NodeA | None = None
+
+    NodeA.model_rebuild()
+
+    simplified_a = datapoint_model_to_basemodel(NodeA, strip_metadata=True)
+    nested_b = simplified_a.model_fields["other"].annotation
+    # Optional[NodeB] → get the non-None arm
+    nested_b_model = next(arg for arg in get_args(nested_b) if arg is not type(None))
+
+    assert "label" in simplified_a.model_fields
+    assert "other" in simplified_a.model_fields
+    assert "label" in nested_b_model.model_fields
+    assert DATAPOINT_INFRA_FIELDS.isdisjoint(simplified_a.model_fields)
+    assert DATAPOINT_INFRA_FIELDS.isdisjoint(nested_b_model.model_fields)

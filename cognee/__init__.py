@@ -13,6 +13,7 @@ Common entrypoints include:
     recall: Retrieve information from memory-oriented entries.
     delete: Remove data from Cognee-managed storage.
 """
+
 # ruff: noqa: E402
 from cognee.version import get_cognee_version
 
@@ -101,6 +102,10 @@ from cognee.modules.observability.trace_context import (
 # Agent memory
 from cognee.modules.agent_memory import agent_memory
 
+# Tool connections (authorized external databases for recall's "tools" scope)
+from .api.v1.tools import tools
+
 # Relational DB models
 from cognee.modules.session_lifecycle.models import SessionModelUsage, SessionRecord
 import cognee.modules.migrations.models  # noqa: F401  (registers global_database_version)
+import cognee.modules.tools.models  # noqa: F401  (registers tool_connections)

@@ -80,8 +80,25 @@ class RecallPayloadDTO(InDTO):
         examples=[None],
         description=(
             "Which memory sources to include: 'graph', 'session', 'trace', "
-            "'session_context', 'all', 'auto', or a list of these. Defaults to "
-            "'auto' (session first when session_id is set, else graph)."
+            "'session_context', 'tools', 'all', 'auto', or a list of these. Defaults to "
+            "'auto' (session first when session_id is set, else graph). 'tools' is "
+            "explicit opt-in only — never implied by 'auto' or 'all' — and requires "
+            "TOOL_CALLS_ENABLED on the server."
+        ),
+    )
+    tool_connections: Optional[list[str]] = Field(
+        default=None,
+        examples=[None],
+        description=(
+            "Names of authorized external database connections for the 'tools' scope. "
+            "Omit to use every connection visible to the caller."
+        ),
+    )
+    tools_trigger: str = Field(
+        default="always",
+        description=(
+            "When the 'tools' scope runs: 'always', or 'on_empty' to query the "
+            "external database only when every other requested source returned nothing."
         ),
     )
     context_profile: str = Field(
@@ -188,12 +205,18 @@ def get_recall_router() -> APIRouter:
                 scope=payload.scope,
                 context_profile=payload.context_profile,
                 include_references=payload.include_references,
+                tool_connections=payload.tool_connections,
+                tools_trigger=payload.tools_trigger,
             )
             return jsonable_encoder(results)
         except CogneeApiError:
             # Cognee errors carry their own status code and actionable message;
             # the global handler in cognee/api/client.py returns them.
             raise
+        except ValueError as error:
+            # normalize_scope rejects unknown scope names with ValueError;
+            # surface it as a 422 with the valid values instead of an opaque 409.
+            return JSONResponse(status_code=422, content={"error": str(error)})
         except Exception as error:
             logger = get_logger()
             logger.error("Recall endpoint error: %s", error, exc_info=True)
