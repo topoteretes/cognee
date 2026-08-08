@@ -5,6 +5,7 @@ from typing import BinaryIO, Union
 
 from ..exceptions import FileContentHashingError
 from ..storage import get_file_storage
+from .local_path_safety import resolve_local_path
 
 
 async def get_file_content_hash(file_obj: str | BinaryIO) -> str:
@@ -12,8 +13,14 @@ async def get_file_content_hash(file_obj: str | BinaryIO) -> str:
 
     try:
         if isinstance(file_obj, str):
-            # Normalize path separators to handle mixed separators on Windows
-            normalized_path = os.path.normpath(file_obj)
+            # Normalize path separators (mixed separators on Windows) and go
+            # through the same local-file allowlist as ingestion.
+            try:
+                normalized_path = os.fspath(resolve_local_path(file_obj))
+            except ValueError as error:
+                raise FileContentHashingError(
+                    message=f"Failed to hash data from {file_obj}: path outside allowed roots."
+                ) from error
 
             file_dir_path = path.dirname(normalized_path)
             file_name = path.basename(normalized_path)

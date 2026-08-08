@@ -14,6 +14,8 @@ from uuid import uuid4
 import pytest
 from pydantic import BaseModel
 
+import importlib
+
 from cognee.api.v1.validate.validate import (
     IssueSeverity,
     IssueType,
@@ -24,6 +26,13 @@ from cognee.api.v1.validate.validate import (
     validate,
 )
 from cognee.modules.engine.models import Entity
+
+# Patch targets use the module object rather than the dotted string: the
+# package __init__ re-exports the ``validate`` function under the same name as
+# the submodule, so both mock's getattr-based path resolution (Python 3.10)
+# and ``import ... as`` land on the function instead of the module.
+# importlib.import_module returns the real submodule from sys.modules.
+validate_module = importlib.import_module("cognee.api.v1.validate.validate")
 
 
 # ---------------------------------------------------------------------------
@@ -270,24 +279,29 @@ async def test_validate_reports_healthy_and_scopes_to_dataset():
     ]
 
     with (
-        patch(
-            "cognee.api.v1.validate.validate.get_graph_engine",
+        patch.object(
+            validate_module,
+            "get_graph_engine",
             return_value=mock_graph_engine,
         ),
-        patch(
-            "cognee.api.v1.validate.validate.get_vector_engine_async",
+        patch.object(
+            validate_module,
+            "get_vector_engine_async",
             return_value=mock_vector_engine,
         ),
-        patch(
-            "cognee.api.v1.validate.validate.get_authorized_existing_datasets",
+        patch.object(
+            validate_module,
+            "get_authorized_existing_datasets",
             return_value=[_mock_dataset()],
         ),
-        patch(
-            "cognee.api.v1.validate.validate.get_default_user",
+        patch.object(
+            validate_module,
+            "get_default_user",
             return_value=object(),
         ),
-        patch(
-            "cognee.api.v1.validate.validate.set_database_global_context_variables",
+        patch.object(
+            validate_module,
+            "set_database_global_context_variables",
             _noop_context,
         ),
     ):
@@ -315,24 +329,29 @@ async def test_validate_reports_unhealthy_when_an_error_issue_exists():
     mock_vector_engine.retrieve.return_value = [type("Point", (), {"id": node_id})()]
 
     with (
-        patch(
-            "cognee.api.v1.validate.validate.get_graph_engine",
+        patch.object(
+            validate_module,
+            "get_graph_engine",
             return_value=mock_graph_engine,
         ),
-        patch(
-            "cognee.api.v1.validate.validate.get_vector_engine_async",
+        patch.object(
+            validate_module,
+            "get_vector_engine_async",
             return_value=mock_vector_engine,
         ),
-        patch(
-            "cognee.api.v1.validate.validate.get_authorized_existing_datasets",
+        patch.object(
+            validate_module,
+            "get_authorized_existing_datasets",
             return_value=[_mock_dataset()],
         ),
-        patch(
-            "cognee.api.v1.validate.validate.get_default_user",
+        patch.object(
+            validate_module,
+            "get_default_user",
             return_value=object(),
         ),
-        patch(
-            "cognee.api.v1.validate.validate.set_database_global_context_variables",
+        patch.object(
+            validate_module,
+            "set_database_global_context_variables",
             _noop_context,
         ),
     ):
@@ -354,24 +373,29 @@ async def test_validate_reports_degraded_when_only_warning_issues_exist():
     mock_vector_engine.retrieve.return_value = [type("Point", (), {"id": stale_id})()]
 
     with (
-        patch(
-            "cognee.api.v1.validate.validate.get_graph_engine",
+        patch.object(
+            validate_module,
+            "get_graph_engine",
             return_value=mock_graph_engine,
         ),
-        patch(
-            "cognee.api.v1.validate.validate.get_vector_engine_async",
+        patch.object(
+            validate_module,
+            "get_vector_engine_async",
             return_value=mock_vector_engine,
         ),
-        patch(
-            "cognee.api.v1.validate.validate.get_authorized_existing_datasets",
+        patch.object(
+            validate_module,
+            "get_authorized_existing_datasets",
             return_value=[_mock_dataset()],
         ),
-        patch(
-            "cognee.api.v1.validate.validate.get_default_user",
+        patch.object(
+            validate_module,
+            "get_default_user",
             return_value=object(),
         ),
-        patch(
-            "cognee.api.v1.validate.validate.set_database_global_context_variables",
+        patch.object(
+            validate_module,
+            "set_database_global_context_variables",
             _noop_context,
         ),
     ):
