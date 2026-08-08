@@ -179,10 +179,9 @@ class CacheDBInterface(ABC):
         """
         Retrieve a raw string value stored under the given key, or None if absent/expired.
 
-        Used for session-scoped key/value payloads such as graph context snapshots
-        (``graph_knowledge:{user_id}:{session_id}``) and graph sync checkpoints
-        (``graph_sync_checkpoint:...``). Adapters that do not support generic
-        key/value storage may leave this unimplemented.
+        Used for session-scoped key/value payloads and other small cache values.
+        Adapters that do not support generic key/value storage may leave this
+        unimplemented.
         """
         raise NotImplementedError("This cache adapter does not support key/value storage.")
 
@@ -190,10 +189,9 @@ class CacheDBInterface(ABC):
         """
         Store a raw string value under the given key, optionally expiring after ttl seconds.
 
-        Used for session-scoped key/value payloads such as graph context snapshots
-        (``graph_knowledge:{user_id}:{session_id}``) and graph sync checkpoints
-        (``graph_sync_checkpoint:...``). Adapters that do not support generic
-        key/value storage may leave this unimplemented.
+        Used for session-scoped key/value payloads and other small cache values.
+        Adapters that do not support generic key/value storage may leave this
+        unimplemented.
         """
         raise NotImplementedError("This cache adapter does not support key/value storage.")
 
@@ -201,10 +199,9 @@ class CacheDBInterface(ABC):
         """
         Delete the value stored under the given key, if present.
 
-        Used for session-scoped key/value payloads such as graph context snapshots
-        (``graph_knowledge:{user_id}:{session_id}``) and graph sync checkpoints
-        (``graph_sync_checkpoint:...``). Adapters that do not support generic
-        key/value storage may leave this unimplemented.
+        Used for session-scoped key/value payloads and other small cache values.
+        Adapters that do not support generic key/value storage may leave this
+        unimplemented.
         """
         raise NotImplementedError("This cache adapter does not support key/value storage.")
 

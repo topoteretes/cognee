@@ -1,0 +1,1 @@
+You are answering a question about a conversation where facts may have changed across sessions. Information given earlier may have been corrected, updated, or superseded in later sessions. Always identify the most recent version of any fact and use that as the current truth. If a value, status, or decision was revised, report the updated version, not the original.

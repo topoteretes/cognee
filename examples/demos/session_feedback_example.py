@@ -1,6 +1,9 @@
-import asyncio
+# ruff: noqa: E402
 import os
+import asyncio
 
+# Set os.environ before importing Cognee: Cognee reads env-backed settings at import time, so values
+# assigned later may not override defaults or `.env`. See https://docs.cognee.ai/setup-configuration/overview#using-os-environ
 os.environ.setdefault("CACHING", "true")
 os.environ.setdefault("CACHE_BACKEND", "redis")
 

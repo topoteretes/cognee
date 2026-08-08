@@ -34,15 +34,24 @@ class Mem0Source(MemorySource):
         if isinstance(data, (str, Path)):
             data = json.loads(Path(data).read_text(encoding="utf-8"))
         if isinstance(data, dict):
+            recognized = False
             for key in ("results", "memories", "items"):
-                if isinstance(data.get(key), list):
-                    data = data[key]
-                    break
-            else:
+                value = data.get(key)
+                if not isinstance(value, list):
+                    continue
+                recognized = True
+                # An accepted alias that is present but empty must not shadow a
+                # populated one later in the list -- unwrapping on it imports
+                # nothing at all. Same rule as sources/zep.py's _first_list.
+                records = [item for item in value if isinstance(item, dict)]
+                if records:
+                    return records
+            if not recognized:
                 raise ValueError(
                     "Unrecognized Mem0 export shape: expected a list or a dict "
                     "with a 'results'/'memories' key."
                 )
+            return []
         if not isinstance(data, list):
             raise ValueError("Unrecognized Mem0 export shape: expected a list of memories.")
         return [item for item in data if isinstance(item, dict)]
