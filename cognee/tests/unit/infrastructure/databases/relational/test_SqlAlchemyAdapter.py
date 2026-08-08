@@ -3,7 +3,6 @@ import asyncio
 import pytest
 from unittest.mock import patch, MagicMock
 
-import pytest
 from sqlalchemy import text, NullPool
 from sqlalchemy.ext.asyncio import AsyncSession
 

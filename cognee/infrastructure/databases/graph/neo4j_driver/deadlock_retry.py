@@ -10,7 +10,7 @@ logger = get_logger("deadlock_retry")
 
 def deadlock_retry(max_retries=10):
     """
-    Decorator that automatically retries an asynchronous function when Neo4j deadlocks, 
+    Decorator that automatically retries an asynchronous function when Neo4j deadlocks,
     transient errors, or database unavailability occur.
 
     This decorator implements an exponential backoff strategy with jitter
