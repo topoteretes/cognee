@@ -243,6 +243,14 @@ async def improve(
 
                 kwargs["node_type"] = NodeSet
 
+            # The default memify tasks never read the projected graph: they
+            # stream triplets straight from the graph DB (or no-op). Pass the
+            # non-empty sentinel the other improve stages already use so
+            # memify skips the full-graph projection. Custom tasks/data keep
+            # the projection, since a caller-supplied task may consume it.
+            if not any(kwargs.get(key) for key in ("extraction_tasks", "enrichment_tasks", "data")):
+                kwargs["data"] = [{}]
+
             result = await memify(
                 dataset=dataset,
                 node_name=node_name,

@@ -5,7 +5,6 @@ from uuid import UUID
 
 from cognee.modules.cognify.config import get_cognify_config
 from cognee.modules.cognify.rollback import cognify_rollback_handler
-from cognee.modules.ontology.ontology_env_config import get_ontology_env_config
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.infrastructure.llm import get_max_chunk_tokens
@@ -16,10 +15,7 @@ from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingCo
 from cognee.infrastructure.llm.config import LLMConfig
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.ontology.ontology_config import Config
-from cognee.modules.ontology.get_default_ontology_resolver import (
-    get_default_ontology_resolver,
-    get_ontology_resolver_from_env,
-)
+from cognee.modules.ontology.get_default_ontology_resolver import get_configured_ontology_resolver
 from cognee.modules.users.models import User
 
 from cognee.tasks.documents import (
@@ -254,24 +250,8 @@ async def cognify(
 
         await run_migrations_and_block(datasets, user)
 
-        if config is None:
-            ontology_config = get_ontology_env_config()
-            if (
-                ontology_config.ontology_file_path
-                and ontology_config.ontology_resolver
-                and ontology_config.matching_strategy
-            ):
-                config: Config = {
-                    "ontology_config": {
-                        "ontology_resolver": get_ontology_resolver_from_env(
-                            **ontology_config.to_dict()
-                        )
-                    }
-                }
-            else:
-                config: Config = {
-                    "ontology_config": {"ontology_resolver": get_default_ontology_resolver()}
-                }
+        resolved_resolver = get_configured_ontology_resolver(config)
+        config = {"ontology_config": {"ontology_resolver": resolved_resolver}}
 
         if dry_run:
             if temporal_cognify:
@@ -352,23 +332,6 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
     functional_relationships: Optional[Collection[str]] = None,
     **kwargs,
 ) -> list[Task]:
-    if config is None:
-        ontology_config = get_ontology_env_config()
-        if (
-            ontology_config.ontology_file_path
-            and ontology_config.ontology_resolver
-            and ontology_config.matching_strategy
-        ):
-            config: Config = {
-                "ontology_config": {
-                    "ontology_resolver": get_ontology_resolver_from_env(**ontology_config.to_dict())
-                }
-            }
-        else:
-            config: Config = {
-                "ontology_config": {"ontology_resolver": get_default_ontology_resolver()}
-            }
-
     cognify_config = get_cognify_config()
     embed_triplets = cognify_config.triplet_embedding
     check_contradictions = cognify_config.contradiction_detection
