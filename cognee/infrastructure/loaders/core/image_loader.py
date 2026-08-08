@@ -206,7 +206,7 @@ class ImageLoader(LoaderInterface):
     def _get_ocr_engine() -> Any:
         """Build the RapidOCR engine once (cached). Requires the rapidocr-onnxruntime dependency."""
         try:
-            from rapidocr_onnxruntime import RapidOCR
+            from rapidocr_onnxruntime import RapidOCR  # ty: ignore[unresolved-import]
         except ImportError as e:
             raise ImportError(
                 "rapidocr-onnxruntime is required for image OCR. "
