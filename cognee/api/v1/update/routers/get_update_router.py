@@ -50,7 +50,7 @@ def get_update_router() -> APIRouter:
             examples=["a1b2c3d4-e5f6-7890-abcd-ef1234567890"],
         ),
         data: List[UploadFile] = File(
-            default=None,
+            ...,
             description=(
                 "New version of the document that replaces the existing one. The existing "
                 "document is deleted before the replacement is ingested, so always provide "
