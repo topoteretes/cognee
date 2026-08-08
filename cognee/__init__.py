@@ -13,6 +13,7 @@ Common entrypoints include:
     recall: Retrieve information from memory-oriented entries.
     delete: Remove data from Cognee-managed storage.
 """
+
 # ruff: noqa: E402
 from cognee.version import get_cognee_version
 

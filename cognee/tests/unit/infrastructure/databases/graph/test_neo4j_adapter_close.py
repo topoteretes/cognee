@@ -14,6 +14,7 @@ except ModuleNotFoundError:
 from cognee.infrastructure.databases.graph.neo4j_driver.adapter import Neo4jAdapter
 from cognee.infrastructure.databases.utils.closing_lru_cache import ClosingLRUCache
 
+
 @pytest.mark.asyncio
 async def test_neo4j_adapter_close():
     # Arrange: Create a mock driver with an async close method
@@ -34,13 +35,16 @@ async def test_neo4j_adapter_close():
     # Assert: Verify that self.driver.close was called and awaited
     mock_driver.close.assert_awaited_once()
 
+
 @pytest.mark.asyncio
 async def test_neo4j_adapter_close_none_driver():
     # Arrange: Instantiate with no driver (it would normally call AsyncGraphDatabase.driver)
     mock_driver = MagicMock()
     mock_driver.close = AsyncMock()
 
-    with patch("cognee.infrastructure.databases.graph.neo4j_driver.adapter.AsyncGraphDatabase") as mock_db:
+    with patch(
+        "cognee.infrastructure.databases.graph.neo4j_driver.adapter.AsyncGraphDatabase"
+    ) as mock_db:
         mock_db.driver.return_value = mock_driver
         adapter = Neo4jAdapter(
             graph_database_url="bolt://localhost:7687",
@@ -53,6 +57,7 @@ async def test_neo4j_adapter_close_none_driver():
 
         # Assert: Verify that driver.close was called and awaited
         mock_driver.close.assert_awaited_once()
+
 
 @pytest.mark.asyncio
 async def test_closing_lru_cache_evicts_neo4j_adapter():
@@ -70,13 +75,13 @@ async def test_closing_lru_cache_evicts_neo4j_adapter():
 
     # Put the adapter in cache
     proxy = cache.get_or_create("neo4j_key", lambda: adapter)
-    
+
     # Verify the proxy wraps our adapter
     assert proxy.__wrapped__ is adapter
-    
+
     # Act: evict by putting a new item in the cache
     cache.get_or_create("another_key", lambda: MagicMock())
-    
+
     # At this point, the proxy is still held in 'proxy' variable, so it shouldn't close yet
     assert mock_driver.close.call_count == 0
 
