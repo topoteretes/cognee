@@ -273,6 +273,7 @@ ignore = ["F401"]
 [tool.ty.src]
 # TODO: Gradually add more directories to include until we have type hints for all modules
 include = [
+    "cognee/exceptions",
     "cognee/infrastructure/context",
     "cognee/infrastructure/data",
     "cognee/infrastructure/engine",
@@ -283,6 +284,9 @@ include = [
     "cognee/infrastructure/locks",
     "cognee/infrastructure/session",
     "cognee/infrastructure/utils",
+    "cognee/memory",
+    "cognee/migration",
+    "cognee/pipelines",
     "cognee/shared"
 ]
 # Exclude generated files
