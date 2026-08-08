@@ -11,6 +11,15 @@ from cognee.shared.logging_utils import get_logger
 
 logger = get_logger(__name__)
 
+# ML-stack packages the slim docling profile deliberately leaves out. Which one
+# a conversion trips over first shifts between docling-slim releases (2.115
+# failed on docling_ibm_models, 2.118 on torch), so match the whole set.
+_SLIM_OMITTED_ML_MODULES = ("docling_ibm_models", "torch", "torchvision", "transformers")
+
+
+def _is_slim_omitted_module(error: ModuleNotFoundError) -> bool:
+    return (error.name or "").split(".")[0] in _SLIM_OMITTED_ML_MODULES
+
 
 def _install_docling_ibm_models_stubs() -> None:
     """Make ``docling.document_converter`` importable on docling-slim installs.
@@ -131,7 +140,7 @@ class DoclingLoader(LoaderInterface):
             try:
                 conv_result = converter.convert(file_path)
             except ModuleNotFoundError as e:
-                if not (e.name or "").startswith("docling_ibm_models"):
+                if not _is_slim_omitted_module(e):
                     raise
                 raise ImportError(
                     f"Converting '{file_path}' with docling requires its torch-based models, "
