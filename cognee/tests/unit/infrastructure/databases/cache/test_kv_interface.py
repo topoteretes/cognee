@@ -1,21 +1,15 @@
 """Regression tests for the formalized KV methods on CacheDBInterface.
 
 Covers:
-- FsCacheAdapter get_value/set_value/delete_value round-trip (this was the live
-  bug where graph snapshots silently no-op'd on fs: consumers fell back to a
-  non-existent ``adapter._cache`` attribute — the real attribute is ``cache``).
+- FsCacheAdapter get_value/set_value/delete_value round-trip.
 - RedisAdapter KV methods producing byte-identical keys/values to the legacy
   ``adapter.async_redis`` duck-typed path.
-- SessionManager graph-context consumers using the interface methods with
-  verbatim legacy key strings.
 """
 
 import tempfile
 
 import pytest
 from unittest.mock import MagicMock, patch
-
-from cognee.infrastructure.session.session_manager import SessionManager
 
 
 # --------------------------------------------------------------------------- #
@@ -85,22 +79,22 @@ def redis_adapter(redis_store):
 @pytest.mark.asyncio
 async def test_fs_kv_set_get_round_trip(fs_adapter):
     """set_value/get_value round-trips a raw string on the fs backend."""
-    await fs_adapter.set_value("graph_knowledge:u1:s1", "graph snapshot")
-    assert await fs_adapter.get_value("graph_knowledge:u1:s1") == "graph snapshot"
+    await fs_adapter.set_value("session_note:u1:s1", "session note")
+    assert await fs_adapter.get_value("session_note:u1:s1") == "session note"
 
 
 @pytest.mark.asyncio
 async def test_fs_kv_get_returns_none_for_missing_key(fs_adapter):
-    assert await fs_adapter.get_value("graph_knowledge:u1:missing") is None
+    assert await fs_adapter.get_value("session_note:u1:missing") is None
 
 
 @pytest.mark.asyncio
 async def test_fs_kv_delete_value(fs_adapter):
-    await fs_adapter.set_value("graph_knowledge:u1:s1", "snapshot")
-    await fs_adapter.delete_value("graph_knowledge:u1:s1")
-    assert await fs_adapter.get_value("graph_knowledge:u1:s1") is None
+    await fs_adapter.set_value("session_note:u1:s1", "note")
+    await fs_adapter.delete_value("session_note:u1:s1")
+    assert await fs_adapter.get_value("session_note:u1:s1") is None
     # Deleting a missing key is a no-op, not an error.
-    await fs_adapter.delete_value("graph_knowledge:u1:s1")
+    await fs_adapter.delete_value("session_note:u1:s1")
 
 
 @pytest.mark.asyncio
@@ -112,21 +106,6 @@ async def test_fs_kv_set_with_ttl_overwrites_and_round_trips(fs_adapter):
     assert await fs_adapter.get_value("k1") == "v2"
 
 
-@pytest.mark.asyncio
-async def test_fs_graph_context_round_trip_through_session_manager(fs_adapter):
-    """SessionManager graph snapshots now actually persist on fs (previously no-op'd)."""
-    session_manager = SessionManager(cache_engine=fs_adapter)
-
-    await session_manager.set_graph_context(user_id="u1", session_id="s1", context="fs snapshot")
-
-    assert await session_manager.get_graph_context(user_id="u1", session_id="s1") == "fs snapshot"
-    # Stored under the verbatim legacy key in the diskcache (attribute is `cache`).
-    assert fs_adapter.cache.get("graph_knowledge:u1:s1") == "fs snapshot"
-
-    await session_manager.delete_session(user_id="u1", session_id="s1")
-    assert await session_manager.get_graph_context(user_id="u1", session_id="s1") == ""
-
-
 # --------------------------------------------------------------------------- #
 # RedisAdapter KV byte-parity with the legacy async_redis duck-typed path
 # --------------------------------------------------------------------------- #
@@ -135,8 +114,8 @@ async def test_fs_graph_context_round_trip_through_session_manager(fs_adapter):
 @pytest.mark.asyncio
 async def test_redis_set_value_byte_identical_to_legacy_async_redis_set(redis_adapter, redis_store):
     """set_value stores exactly the key/value bytes the legacy async_redis path stored."""
-    key = "graph_knowledge:u1:s1"
-    value = "graph snapshot text"
+    key = "session_note:u1:s1"
+    value = "session note text"
 
     # Legacy duck-typed path (what session_manager used to call directly).
     await redis_adapter.async_redis.set(key, value)
@@ -184,21 +163,6 @@ async def test_redis_set_value_without_ttl_does_not_expire(redis_adapter, redis_
 @pytest.mark.asyncio
 async def test_redis_delete_value_removes_legacy_written_key(redis_adapter, redis_store):
     """delete_value targets the byte-identical key written by the legacy path."""
-    await redis_adapter.async_redis.set("graph_knowledge:u1:s1", "snapshot")
-    await redis_adapter.delete_value("graph_knowledge:u1:s1")
-    assert "graph_knowledge:u1:s1" not in redis_store.kv
-
-
-@pytest.mark.asyncio
-async def test_redis_graph_context_key_string_unchanged(redis_adapter, redis_store):
-    """SessionManager writes the verbatim legacy key graph_knowledge:{user}:{session}."""
-    session_manager = SessionManager(cache_engine=redis_adapter)
-
-    await session_manager.set_graph_context(user_id="u1", session_id="s1", context="ctx")
-
-    assert list(redis_store.kv.keys()) == ["graph_knowledge:u1:s1"]
-    assert redis_store.kv["graph_knowledge:u1:s1"] == b"ctx"
-    # TTL applied from adapter.session_ttl_seconds, exactly like the legacy path.
-    assert redis_store.expire_calls == [("graph_knowledge:u1:s1", 604800)]
-
-    assert await session_manager.get_graph_context(user_id="u1", session_id="s1") == "ctx"
+    await redis_adapter.async_redis.set("session_note:u1:s1", "note")
+    await redis_adapter.delete_value("session_note:u1:s1")
+    assert "session_note:u1:s1" not in redis_store.kv

@@ -10,11 +10,9 @@ from pydantic import Field
 from cognee import __version__ as cognee_version
 from cognee.api.DTO import InDTO, OutDTO
 from cognee.api.v1.recall.recall import RecallResponse
-from cognee.exceptions import CogneeValidationError
-from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
+from cognee.exceptions import CogneeApiError
 from cognee.modules.search.operations import get_history
 from cognee.modules.search.types import SearchResult, SearchType
-from cognee.modules.users.exceptions.exceptions import PermissionDeniedError, UserNotFoundError
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
@@ -82,8 +80,32 @@ class RecallPayloadDTO(InDTO):
         examples=[None],
         description=(
             "Which memory sources to include: 'graph', 'session', 'trace', "
-            "'graph_context', 'all', 'auto', or a list of these. Defaults to "
-            "'auto' (session first when session_id is set, else graph)."
+            "'session_context', 'tools', 'all', 'auto', or a list of these. Defaults to "
+            "'auto' (session first when session_id is set, else graph). 'tools' is "
+            "explicit opt-in only — never implied by 'auto' or 'all' — and requires "
+            "TOOL_CALLS_ENABLED on the server."
+        ),
+    )
+    tool_connections: Optional[list[str]] = Field(
+        default=None,
+        examples=[None],
+        description=(
+            "Names of authorized external database connections for the 'tools' scope. "
+            "Omit to use every connection visible to the caller."
+        ),
+    )
+    tools_trigger: str = Field(
+        default="always",
+        description=(
+            "When the 'tools' scope runs: 'always', or 'on_empty' to query the "
+            "external database only when every other requested source returned nothing."
+        ),
+    )
+    context_profile: str = Field(
+        default="qa",
+        description=(
+            "Profile to render for the 'session_context' scope: 'qa' (conversational) or "
+            "'agent' (tool/workflow). Ignored by other scopes."
         ),
     )
 
@@ -146,14 +168,14 @@ def get_recall_router() -> APIRouter:
         - **session_id** (Optional[str]): Session whose cached QA and trace entries
           should be searched
         - **scope** (Optional[str | List[str]]): Memory sources to include: "graph",
-          "session", "trace", "graph_context", "all", "auto", or a list of these
+          "session", "trace", "session_context", "all", "auto", or a list of these
           (default: "auto" — session first when session_id is set, else graph)
 
         ## Error Codes
-        - **409 Conflict**: Error during recall
-        - **403 Forbidden**: Permission denied (returns empty list)
-        - **422 Unprocessable Entity**: Recall prerequisites not met — ingest data
-          first (POST /v1/remember or /v1/add followed by /v1/cognify)
+        - **402/403/404/409/422**: Cognee errors (payment required, permission
+          denied, missing user, session-dataset conflict, prerequisites not met) return their own
+          status code and message via the global error handler
+        - **409 Conflict**: Unexpected non-Cognee error during recall
         """
         send_telemetry(
             "Recall API Endpoint Invoked",
@@ -181,22 +203,20 @@ def get_recall_router() -> APIRouter:
                 only_context=payload.only_context,
                 session_id=payload.session_id,
                 scope=payload.scope,
+                context_profile=payload.context_profile,
                 include_references=payload.include_references,
+                tool_connections=payload.tool_connections,
+                tools_trigger=payload.tools_trigger,
             )
             return jsonable_encoder(results)
-        except (DatabaseNotCreatedError, UserNotFoundError, CogneeValidationError) as e:
-            logger = get_logger()
-            logger.error("Recall prerequisites error: %s", e, exc_info=True)
-            status_code = getattr(e, "status_code", 422)
-            return JSONResponse(
-                status_code=status_code,
-                content={
-                    "error": "Recall prerequisites not met",
-                    "hint": "Run `await cognee.remember(...)` or `await cognee.add(...)` then `await cognee.cognify()` before recalling.",
-                },
-            )
-        except PermissionDeniedError:
-            return []
+        except CogneeApiError:
+            # Cognee errors carry their own status code and actionable message;
+            # the global handler in cognee/api/client.py returns them.
+            raise
+        except ValueError as error:
+            # normalize_scope rejects unknown scope names with ValueError;
+            # surface it as a 422 with the valid values instead of an opaque 409.
+            return JSONResponse(status_code=422, content={"error": str(error)})
         except Exception as error:
             logger = get_logger()
             logger.error("Recall endpoint error: %s", error, exc_info=True)

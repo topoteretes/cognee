@@ -8,7 +8,7 @@ from cognee.infrastructure.databases.exceptions import DatabaseCredentialsError
 from cognee.infrastructure.databases.graph import get_graph_config
 from cognee.infrastructure.databases.graph.get_graph_engine import (
     create_graph_engine,
-    evict_graph_engine,
+    graph_engine_cache,
 )
 from cognee.infrastructure.databases.dataset_database_handler import (
     DatasetDatabaseHandlerInterface,
@@ -82,7 +82,7 @@ class Neo4jDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
         graph_database_password = info.get("graph_database_password", "")
         graph_database_allow_anonymous = info.get("graph_database_allow_anonymous", False)
 
-        evict_graph_engine(
+        graph_engine_cache.evict(
             graph_database_provider="neo4j",
             graph_file_path="",
             graph_database_url=graph_database_url,

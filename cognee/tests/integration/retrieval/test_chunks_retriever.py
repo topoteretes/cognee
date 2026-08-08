@@ -7,7 +7,7 @@ import cognee
 
 from cognee.low_level import setup
 from cognee.tasks.storage import add_data_points
-from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.modules.chunking.models import DocumentChunk
 from cognee.modules.data.processing.document_types import TextDocument
 from cognee.modules.retrieval.chunks_retriever import ChunksRetriever
@@ -320,7 +320,7 @@ async def test_chunks_retriever_on_empty_graph(setup_test_environment_empty):
     retriever = ChunksRetriever()
     query = "Christina Mayer"
 
-    vector_engine = get_vector_engine()
+    vector_engine = await get_vector_engine_async()
     await vector_engine.create_collection(
         "DocumentChunk_text", payload_schema=DocumentChunkWithEntities
     )
@@ -341,7 +341,7 @@ async def test_chunks_retriever_context_on_empty_graph(setup_test_environment_em
     retriever = ChunksRetriever()
     query = "Christina Mayer"
 
-    vector_engine = get_vector_engine()
+    vector_engine = await get_vector_engine_async()
     await vector_engine.create_collection(
         "DocumentChunk_text", payload_schema=DocumentChunkWithEntities
     )

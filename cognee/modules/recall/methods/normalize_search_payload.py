@@ -31,9 +31,11 @@ _KIND_BY_SEARCH_TYPE: dict[SearchType, SearchResultKind] = {
     SearchType.NATURAL_LANGUAGE: SearchResultKind.NATURAL_LANGUAGE,
     SearchType.TEMPORAL: SearchResultKind.TEMPORAL,
     SearchType.CODING_RULES: SearchResultKind.CODING_RULE,
+    SearchType.CODE: SearchResultKind.CODE,
     SearchType.CHUNKS: SearchResultKind.CHUNK,
     SearchType.CHUNKS_LEXICAL: SearchResultKind.CHUNK,
     SearchType.SUMMARIES: SearchResultKind.SUMMARY,
+    SearchType.AGENTIC_COMPLETION: SearchResultKind.GRAPH_COMPLETION,
 }
 
 
@@ -73,17 +75,45 @@ def _score_from(value: Any) -> Optional[float]:
     return None
 
 
+def _provenance_metadata(raw: dict) -> dict:
+    """Surface stable source identifiers from a chunk/summary payload.
+
+    Lets callers map a result back to the data they ingested and inspect the
+    cited chunk. ``document_id`` is the ingested Data item's id (cognify sets
+    ``Document.id = data.id``), exposed here as ``data_id``; ``id`` is the
+    chunk's own node id. Only keys actually present are included.
+    """
+    metadata: dict[str, Any] = {}
+    data_id = raw.get("document_id")
+    if data_id is not None:
+        metadata["data_id"] = str(data_id)
+    chunk_id = raw.get("id")
+    if chunk_id is not None:
+        metadata["chunk_id"] = str(chunk_id)
+    chunk_index = raw.get("chunk_index")
+    if isinstance(chunk_index, int) and not isinstance(chunk_index, bool):
+        metadata["chunk_index"] = chunk_index
+    document_name = raw.get("document_name")
+    if document_name is not None:
+        metadata["document_name"] = str(document_name)
+    return metadata
+
+
 def _build_item(
     entry: Any,
     payload: SearchResultPayload,
     kind: SearchResultKind,
 ) -> SearchResultItem:
     """Build a single SearchResultItem from one retriever output element."""
+    structured: Any | None = None
+
     if isinstance(entry, str):
         text = entry
         raw: dict = {"value": entry}
     elif isinstance(entry, BaseModel):
         raw = entry.model_dump(mode="json")
+        structured = raw
+        kind = SearchResultKind.STRUCTURED
         text = _text_from_dict(raw)
     elif isinstance(entry, dict):
         raw = entry
@@ -102,7 +132,9 @@ def _build_item(
         score=_score_from(entry),
         dataset_id=str(payload.dataset_id) if payload.dataset_id else None,
         dataset_name=payload.dataset_name,
+        metadata=_provenance_metadata(raw),
         raw=raw,
+        structured=structured,
     )
 
 

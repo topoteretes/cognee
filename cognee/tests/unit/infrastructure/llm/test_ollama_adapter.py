@@ -31,6 +31,25 @@ async def _null_rate_limiter():
     yield
 
 
+@pytest.mark.parametrize(
+    ("configured_model", "expected_model"),
+    [
+        ("llama3.1:8b", "llama3.1:8b"),
+        ("ollama/llama3.1:8b", "llama3.1:8b"),
+    ],
+)
+def test_adapter_uses_bare_ollama_model_name(configured_model, expected_model):
+    adapter = OllamaAPIAdapter(
+        endpoint="http://localhost:11434/v1",
+        api_key="ollama",
+        model=configured_model,
+        name="ollama",
+        max_completion_tokens=128,
+    )
+
+    assert adapter.model == expected_model
+
+
 @pytest.mark.asyncio
 async def test_acreate_structured_output_awaits_async_client():
     adapter = OllamaAPIAdapter(

@@ -1,10 +1,13 @@
 import sys
 import os
 import argparse
+import logging
 import signal
 import subprocess
+import warnings
 from typing import Any, Sequence, Dict, Type, cast, List
 import click
+
 
 try:
     import rich_argparse
@@ -19,6 +22,7 @@ from cognee.cli.config import CLI_DESCRIPTION
 from cognee.cli import debug
 import cognee.cli.echo as fmt
 from cognee.cli.exceptions import CliCommandException
+from cognee.cli.remediation import find_remediation
 
 
 ACTION_EXECUTED = False
@@ -102,12 +106,14 @@ def _discover_commands() -> List[Type[SupportsCliCommand]]:
         ("cognee.cli.commands.improve_command", "ImproveCommand"),
         ("cognee.cli.commands.forget_command", "ForgetCommand"),
         ("cognee.cli.commands.serve_command", "ServeCommand"),
+        ("cognee.cli.commands.eval_command", "EvalCommand"),
         ("cognee.cli.commands.migrate_command", "UpgradeCommand"),
         ("cognee.cli.commands.migrate_command", "DowngradeCommand"),
         ("cognee.cli.commands.migrate_command", "HistoryCommand"),
         ("cognee.cli.commands.migrate_command", "CurrentCommand"),
         ("cognee.cli.commands.migrate_command", "StampCommand"),
         ("cognee.cli.commands.push_command", "PushCommand"),
+        ("cognee.cli.commands.report_command", "ReportCommand"),
     ]
 
     for module_path, class_name in command_modules:
@@ -205,10 +211,41 @@ def _create_parser() -> tuple[argparse.ArgumentParser, Dict[str, SupportsCliComm
     return parser, installed_commands
 
 
+class _DropUnclosedFilter(logging.Filter):
+    """Drop aiohttp's shutdown-time ``Unclosed ...`` records (keep the rest)."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return not record.getMessage().startswith("Unclosed ")
+
+
+def _silence_teardown_warnings() -> None:
+    """Hide aiohttp's shutdown-time "Unclosed ..." noise from the CLI.
+
+    aiohttp finalises its ClientSession / connector / connection in
+    ``__del__`` during interpreter shutdown and reports the leak through two
+    channels: a ``ResourceWarning`` (usually hidden) and the asyncio event
+    loop's exception handler, which logs an ERROR on the ``asyncio`` logger —
+    that second one is the two-line "Unclosed client session ..." noise a
+    first-time user actually sees. Neither is actionable in the CLI, so
+    silence both, surgically (only the "Unclosed" records, so genuine asyncio
+    errors still surface). Installed only for a real CLI run (not as an import
+    side effect) and skipped in debug mode so contributors still see them.
+    """
+    warnings.filterwarnings(
+        "ignore",
+        message="Unclosed (client session|connector|connection)",
+        category=ResourceWarning,
+    )
+    logging.getLogger("asyncio").addFilter(_DropUnclosedFilter())
+
+
 def main() -> int:
     """Main CLI entry point"""
     parser, installed_commands = _create_parser()
     args = parser.parse_args()
+
+    if not debug.is_debug_enabled():
+        _silence_teardown_warnings()
 
     # Handle UI flag
     if hasattr(args, "start_ui") and args.start_ui:
@@ -379,8 +416,14 @@ def main() -> int:
                 raiseable_exception = ex.raiseable_exception
 
             # Print exception
-            if raiseable_exception:
-                fmt.error(str(ex))
+            fmt.error(str(ex))
+
+            # Surface a prescriptive next step for known first-run failure
+            # modes between the error line and the generic docs pointer, so
+            # the actionable fix sits directly under the error it addresses.
+            hint = find_remediation(str(ex))
+            if hint:
+                fmt.note(hint)
 
             fmt.note(f"Please refer to our docs at '{docs_url}' for further assistance.")
 

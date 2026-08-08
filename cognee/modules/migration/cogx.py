@@ -21,11 +21,19 @@ COGX_VERSION = "0.1"
 
 
 def parse_timestamp(value: Any) -> Optional[datetime]:
-    """Parse a timestamp from ISO strings or epoch seconds/milli/micro/nanoseconds."""
+    """Parse a timestamp from ISO strings or epoch seconds/milli/micro/nanoseconds.
+
+    Always returns a timezone-aware UTC datetime, or None. Inputs that carry no
+    offset — ``"2026-01-01T10:00:00"``, a bare date, a naive ``datetime`` — are
+    read as UTC, which is what the exporting systems store. Returning them naive
+    mixes naive and aware values across a single import: comparing two of them
+    raises TypeError, and sorting them applies the importing machine's local
+    offset instead of the real instant.
+    """
     if value is None or value == "":
         return None
     if isinstance(value, datetime):
-        return value
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
     if isinstance(value, (int, float)):
         # Heuristic: values past the year ~2603 in seconds are a finer epoch
         # unit (milli/micro/nanoseconds); scale down until plausible.
@@ -40,9 +48,10 @@ def parse_timestamp(value: Any) -> Optional[datetime]:
             return None
     if isinstance(value, str):
         try:
-            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
         except ValueError:
             return None
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
     return None
 
 
@@ -169,6 +178,7 @@ RECORD_FILES: Dict[str, str] = {
 
 MANIFEST_FILE = "manifest.json"
 RAW_NODES_FILE = "nodes.jsonl"
+PERMISSIONS_FILE = "permissions.json"
 
 
 class COGXManifest(BaseModel):
@@ -177,6 +187,11 @@ class COGXManifest(BaseModel):
     exported_at: Optional[datetime] = None
     counts: Dict[str, int] = Field(default_factory=dict)
     embedding_model: Optional[str] = None
+    # Cognee-origin archives only: the source store's stamped data-migration
+    # revision at export time. Raw nodes keep their source-store ids, so the
+    # importing store must not claim a newer revision than the exported data
+    # actually has (None = unknown; the import keeps its own stamp).
+    migration_revision: Optional[str] = None
     notes: List[str] = Field(default_factory=list)
 
 
@@ -209,12 +224,13 @@ class COGXArchiveWriter:
     def __init__(self, directory: Union[str, Path], source_system: str = "cognee"):
         self.directory = Path(directory)
         self.directory.mkdir(parents=True, exist_ok=True)
-        for file_name in (*RECORD_FILES.values(), RAW_NODES_FILE, MANIFEST_FILE):
+        for file_name in (*RECORD_FILES.values(), RAW_NODES_FILE, MANIFEST_FILE, PERMISSIONS_FILE):
             (self.directory / file_name).unlink(missing_ok=True)
         self.source_system = source_system
         self.counts: Dict[str, int] = {}
         self.notes: List[str] = []
         self.embedding_model: Optional[str] = None
+        self.migration_revision: Optional[str] = None
         self._handles: Dict[str, Any] = {}
 
     def __enter__(self) -> "COGXArchiveWriter":
@@ -254,6 +270,7 @@ class COGXArchiveWriter:
                 exported_at=datetime.now(timezone.utc),
                 counts=self.counts,
                 embedding_model=self.embedding_model,
+                migration_revision=self.migration_revision,
                 notes=self.notes,
             )
             manifest_path = self.directory / MANIFEST_FILE
@@ -267,6 +284,25 @@ def read_manifest(directory: Union[str, Path]) -> Optional[COGXManifest]:
     manifest = COGXManifest.model_validate_json(manifest_path.read_text(encoding="utf-8"))
     validate_cogx_version(manifest.cogx_version)
     return manifest
+
+
+def write_social_layer(directory: Union[str, Path], payload: Dict[str, Any]) -> None:
+    """Persist the dataset's social layer (owner + grants, WITH credentials).
+
+    Written only on explicit request (``export(include_permissions=True)``):
+    the payload carries user emails, password HASHES, and account flags, so an
+    archive containing this file must be handled as a secret, not just data.
+    """
+    (Path(directory) / PERMISSIONS_FILE).write_text(
+        json.dumps(payload, indent=2, default=str), encoding="utf-8"
+    )
+
+
+def read_social_layer(directory: Union[str, Path]) -> Optional[Dict[str, Any]]:
+    permissions_path = Path(directory) / PERMISSIONS_FILE
+    if not permissions_path.exists():
+        return None
+    return json.loads(permissions_path.read_text(encoding="utf-8"))
 
 
 def _archive_file(base: Path, file_name: str) -> Optional[Path]:

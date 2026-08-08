@@ -15,7 +15,16 @@ from tenacity import (
     wait_exponential_jitter,
 )
 
+from cognee.infrastructure.llm.retry_config import (
+    llm_retry_condition,
+    llm_retry_stop_condition,
+)
+
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.instructor_modes import (
+    get_instructor_mode,
+)
+from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError, is_budget_exhausted_error
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.llm_interface import (
     LLMInterface,
 )
@@ -51,7 +60,7 @@ class OllamaAPIAdapter(LLMInterface):
     - aclient
     """
 
-    default_instructor_mode = "json_mode"
+    default_instructor_mode = get_instructor_mode("ollama")
 
     def __init__(
         self,
@@ -64,7 +73,7 @@ class OllamaAPIAdapter(LLMInterface):
         llm_args: dict[str, Any] | None = None,
     ) -> None:
         self.name = name
-        self.model = model
+        self.model = model.removeprefix("ollama/") if model.startswith("ollama/") else model
         self.api_key = api_key
         self.endpoint = endpoint
         self.max_completion_tokens = max_completion_tokens
@@ -83,15 +92,9 @@ class OllamaAPIAdapter(LLMInterface):
 
     @observe(as_type="generation")
     @retry(
-        stop=stop_after_attempt(3),
+        stop=llm_retry_stop_condition,
         wait=wait_exponential_jitter(8, 128),
-        retry=retry_if_not_exception_type(
-            (
-                litellm.exceptions.NotFoundError,
-                litellm.exceptions.AuthenticationError,
-                asyncio.CancelledError,
-            )
-        ),
+        retry=llm_retry_condition,
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
@@ -134,25 +137,30 @@ class OllamaAPIAdapter(LLMInterface):
                 )
             return response.choices[0].message.content or ""
 
-        async with llm_rate_limiter_context_manager():
-            response = await self.aclient.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": system_prompt,
-                    },
-                    {
-                        "role": "user",
-                        "content": f"{text_input}",
-                    },
-                ],
-                max_retries=2,
-                response_model=response_model,
-                **merged_kwargs,
-            )
+        try:
+            async with llm_rate_limiter_context_manager():
+                response = await self.aclient.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": system_prompt,
+                        },
+                        {
+                            "role": "user",
+                            "content": f"{text_input}",
+                        },
+                    ],
+                    max_retries=2,
+                    response_model=response_model,
+                    **merged_kwargs,
+                )
 
-        return response
+            return response
+        except Exception as e:
+            if is_budget_exhausted_error(e):
+                raise LLMPaymentRequiredError() from e
+            raise
 
     @observe(as_type="transcription")
     @retry(
@@ -213,7 +221,13 @@ class OllamaAPIAdapter(LLMInterface):
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
-    async def transcribe_image(self, input: str, **kwargs: Any) -> str:
+    async def transcribe_image(
+        self,
+        input: str,
+        prompt: str | None = None,
+        max_completion_tokens: int | None = None,
+        reasoning_effort: str | None = None,
+    ) -> str:
         """
         Transcribe content from an image using base64 encoding.
 
@@ -226,6 +240,9 @@ class OllamaAPIAdapter(LLMInterface):
         -----------
 
             - input (str): The path to the image file to be transcribed.
+            - prompt: Optional extraction instruction; falls back to "What's in this image?".
+            - max_completion_tokens: Optional length cap; falls back to 300 when omitted.
+            - reasoning_effort: Accepted for interface compatibility; ignored by Ollama.
 
         Returns:
         --------
@@ -242,7 +259,7 @@ class OllamaAPIAdapter(LLMInterface):
                 {
                     "role": "user",
                     "content": [
-                        {"type": "text", "text": "What's in this image?"},
+                        {"type": "text", "text": prompt or "What's in this image?"},
                         {
                             "type": "image_url",
                             "image_url": {"url": f"data:image/jpeg;base64,{encoded_image}"},
@@ -250,8 +267,8 @@ class OllamaAPIAdapter(LLMInterface):
                     ],
                 }
             ],
-            max_completion_tokens=300,
-        )  # ty:ignore[no-matching-overload]
+            max_completion_tokens=max_completion_tokens or 300,
+        )
 
         # Ensure response is valid before accessing .choices[0].message.content
         if (
@@ -261,4 +278,8 @@ class OllamaAPIAdapter(LLMInterface):
         ):
             raise ValueError("Image transcription failed. No response received.")
 
-        return response.choices[0].message.content
+        content = response.choices[0].message.content
+        if content is None:
+            raise ValueError("Image transcription failed. No content returned.")
+
+        return content

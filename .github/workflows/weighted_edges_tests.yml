@@ -22,6 +22,9 @@ env:
   RUNTIME__LOG_LEVEL: ERROR
   ENV: 'dev'
 
+permissions:
+  contents: read
+
 jobs:
   test-weighted-edges-functionality:
     name: Test Weighted Edges Core Functionality
@@ -158,12 +161,26 @@ jobs:
         with:
           python-version: '3.11'
 
+      # Pin ruff to the version locked in uv.lock and scope src to the weighted
+      # edges files: ruff-action appends `src` (default ".") to the command, so
+      # without it the whole repo gets linted with whatever ruff was released
+      # last, and unrelated files fail this job.
       - name: Run Linting on Weighted Edges Files
         uses: astral-sh/ruff-action@v3
         with:
-          args: "check cognee/modules/graph/utils/get_graph_from_model.py cognee/tests/unit/interfaces/graph/test_weighted_edges.py examples/demos/dynamic_multiple_weighted_edges_example.py"
+          version: "0.15.17"
+          args: "check"
+          src: >-
+            cognee/modules/graph/utils/get_graph_from_model.py
+            cognee/tests/unit/interfaces/graph/test_weighted_edges.py
+            examples/demos/dynamic_multiple_weighted_edges_example.py
 
       - name: Run Formatting Check on Weighted Edges Files
         uses: astral-sh/ruff-action@v3
         with:
-          args: "format --check cognee/modules/graph/utils/get_graph_from_model.py cognee/tests/unit/interfaces/graph/test_weighted_edges.py examples/demos/dynamic_multiple_weighted_edges_example.py"
+          version: "0.15.17"
+          args: "format --check"
+          src: >-
+            cognee/modules/graph/utils/get_graph_from_model.py
+            cognee/tests/unit/interfaces/graph/test_weighted_edges.py
+            examples/demos/dynamic_multiple_weighted_edges_example.py

@@ -11,9 +11,11 @@ bump a per-entry depth counter rather than re-acquiring the semaphore. The
 corresponding :meth:`DatasetQueue.release_slot_for` (async) decrements that
 counter; the underlying semaphore slot is freed only when the counter hits
 zero.  When the last holder across all tasks exits, subprocess engines are
-torn down via :meth:`DatasetQueue._teardown_subprocess_engines`.  This
-makes nested ``async with set_database_global_context_variables(D, u)`` scopes
-safe — an inner exit never steals an outer holder's slot.
+either kept warm for the idle TTL or evicted from the engine caches via
+:meth:`DatasetQueue._release_subprocess_engines`; the caches close them off
+the response path.  This makes nested
+``async with set_database_global_context_variables(D, u)`` scopes safe — an
+inner exit never steals an outer holder's slot.
 
 Task-end cleanup is a safety net: when the current task finishes, every entry
 still in ``_task_slots`` is force-released regardless of depth. This covers
@@ -31,12 +33,18 @@ Configuration:
 
 * ``DATASET_QUEUE_ENABLED`` — env var. Truthy values enable the queue.
 * ``DATASET_QUEUE_MAX_CONCURRENT`` — env var. Defaults to ``DATABASE_MAX_LRU_CACHE_SIZE`` for a safe baseline
+* ``SUBPROCESS_IDLE_TTL_SECONDS`` — env var. Idle keep-alive for subprocess
+  engines: at release they are *touched* instead of closed, and a reaper
+  closes them only after this many seconds without use (default 600).
+  ``0`` disables keep-alive: engines are force-closed at last release, the
+  pre-keep-alive behavior.
 """
 
 from __future__ import annotations
 
 import asyncio
 import os
+import threading
 from contextlib import asynccontextmanager
 from typing import Any, Callable, Dict, Set
 
@@ -53,11 +61,12 @@ TRUE_VALUES = frozenset({"1", "true", "yes", "on", "y", "t"})
 class DatasetQueueSettings:
     """Effective runtime settings for the dataset queue."""
 
-    __slots__ = ("enabled", "max_concurrent")
+    __slots__ = ("enabled", "max_concurrent", "idle_ttl_seconds")
 
-    def __init__(self, enabled: bool, max_concurrent: int) -> None:
+    def __init__(self, enabled: bool, max_concurrent: int, idle_ttl_seconds: float = 600.0) -> None:
         self.enabled = enabled
         self.max_concurrent = max_concurrent
+        self.idle_ttl_seconds = idle_ttl_seconds
 
 
 def get_dataset_queue_settings() -> DatasetQueueSettings:
@@ -70,7 +79,12 @@ def get_dataset_queue_settings() -> DatasetQueueSettings:
         # Default to the same max concurrency as the LRU cache size, which is a reasonable baseline for a shared resource limit.
         max_concurrent = int(DATABASE_MAX_LRU_CACHE_SIZE)
 
-    return DatasetQueueSettings(enabled=enabled, max_concurrent=max_concurrent)
+    # Negative values make no sense as a TTL; clamp to 0 (= keep-alive off).
+    idle_ttl_seconds = max(0.0, float(os.getenv("SUBPROCESS_IDLE_TTL_SECONDS", "600")))
+
+    return DatasetQueueSettings(
+        enabled=enabled, max_concurrent=max_concurrent, idle_ttl_seconds=idle_ttl_seconds
+    )
 
 
 def _make_release(semaphore: asyncio.Semaphore) -> Callable[[], None]:
@@ -107,7 +121,17 @@ class DatasetQueue:
     When ``enabled`` is ``False`` all methods are pass-throughs.
     """
 
-    def __init__(self, enabled: bool, max_concurrent: int) -> None:
+    def __init__(self, enabled: bool, max_concurrent: int, idle_ttl_seconds: float = 600.0) -> None:
+        # Idle keep-alive TTL for subprocess engines; the default matches the
+        # SUBPROCESS_IDLE_TTL_SECONDS default. 0 = off (engines are
+        # force-closed at last release). Set before the disabled early-return
+        # so the attribute always exists.
+        self._idle_ttl_seconds: float = max(0.0, float(idle_ttl_seconds))
+        # Reaper thread state — started lazily on the first kept-alive
+        # release, exactly once per queue instance.
+        self._reaper_started: bool = False
+        self._reaper_lock = threading.Lock()
+
         safe_max = int(max_concurrent)
         if safe_max < 1:
             self._enabled: bool = False
@@ -126,6 +150,27 @@ class DatasetQueue:
         # Track which tasks already have a done-callback registered so we
         # don't register multiple cleanup handlers for a single task.
         self._registered_tasks: Set[int] = set()
+
+    # ------------------------------------------------------ active datasets
+    def active_dataset_ids(self) -> set:
+        """Dataset ids (as strings) currently holding at least one slot.
+
+        Read-only snapshot for engine-cache pinning: capacity eviction must
+        not close an engine whose dataset an admitted pipeline is still
+        using. Safe to call from any thread — iterates over ``list()``
+        snapshots, so concurrent slot changes on the event loop can't break
+        the iteration; the result is advisory-fresh by nature.
+        """
+        if not self._enabled:
+            return set()
+        active = set()
+        for slots in list(self._task_slots.values()):
+            for slot_key in list(slots):
+                # "ds:<none>" tracks dataset-less operations; it can never
+                # correspond to a database name, so don't report it.
+                if slot_key.startswith("ds:") and slot_key != "ds:<none>":
+                    active.add(slot_key[3:])
+        return active
 
     # ---------------------------------------------------- task cleanup setup
     def _ensure_task_cleanup_registered(self, task: asyncio.Task, task_id: int) -> None:
@@ -194,43 +239,155 @@ class DatasetQueue:
         self._task_slots[task_id][ds_key] = SlotEntry(release, depth=1)
 
     # ----------------------------------------- subprocess engine teardown
-    async def _teardown_subprocess_engines(self) -> None:
-        """Evict and close subprocess-mode engines so DB file locks are released.
+    def _release_subprocess_engines(self) -> None:
+        """Last-holder release: keep the engines warm or tear them down.
 
-        Reads the current task's ContextVar-based graph/vector config to
-        identify which cached engines to tear down.  Lazy imports avoid
-        circular dependencies at module load time.
+        With the idle-TTL keep-alive on (``SUBPROCESS_IDLE_TTL_SECONDS`` > 0),
+        the engines stay cached — their idle timestamps are refreshed and the
+        reaper closes them only after a full TTL without use, so a request
+        arriving inside the window skips both the close and the respawn.
+        With the TTL at 0 this is exactly the pre-keep-alive behavior:
+        force-close eviction at last release.
+
+        Queue/cache synchronization needs no new state: the queue keeps only
+        concurrency permits, the cache keeps the engines and their idle
+        timestamps, and the single shared fact — which datasets are active
+        right now — is computed live from the slot table by
+        ``active_dataset_ids()`` and read by the reaper through the cache's
+        pinned predicate. Nothing is duplicated, so nothing can drift.
+        """
+        if self._idle_ttl_seconds > 0:
+            self._touch_subprocess_engines()
+            self._ensure_reaper()
+        else:
+            self._evict_subprocess_engines()
+
+    def _touch_subprocess_engines(self) -> None:
+        """Refresh idle timestamps for this context's subprocess engines.
+
+        Pinned engine handles bypass cache lookups, so hit-time refreshes
+        under-count usage; release is the one moment that reliably means
+        "a request just finished with these engines".
         """
         from cognee.infrastructure.databases.graph.config import get_graph_context_config
         from cognee.infrastructure.databases.vector.config import get_vectordb_context_config
 
         g_cfg = get_graph_context_config()
         if g_cfg.get("graph_database_subprocess_enabled"):
-            from cognee.infrastructure.databases.graph.get_graph_engine import (
-                create_graph_engine,
-                evict_graph_engine,
-                is_graph_engine_cached,
-            )
+            from cognee.infrastructure.databases.graph.get_graph_engine import graph_engine_cache
 
-            if is_graph_engine_cached(**g_cfg):
-                engine = create_graph_engine(**g_cfg)
-                evict_graph_engine(**g_cfg)
-                if hasattr(engine, "close"):
-                    await engine.close()
+            graph_engine_cache.touch(**g_cfg)
 
         v_cfg = get_vectordb_context_config()
         if v_cfg.get("vector_db_subprocess_enabled"):
             from cognee.infrastructure.databases.vector.create_vector_engine import (
-                create_vector_engine,
-                evict_vector_engine,
-                is_vector_engine_cached,
+                vector_engine_cache,
             )
 
-            if is_vector_engine_cached(**v_cfg):
-                engine = create_vector_engine(**v_cfg)
-                evict_vector_engine(**v_cfg)
-                if hasattr(engine, "close"):
-                    await engine.close()
+            vector_engine_cache.touch(**v_cfg)
+
+    def _ensure_reaper(self) -> None:
+        """Start the idle reaper thread, exactly once."""
+        if self._reaper_started:
+            return
+        with self._reaper_lock:
+            if self._reaper_started:
+                return
+            thread = threading.Thread(
+                target=self._reap_loop, name="subprocess-idle-reaper", daemon=True
+            )
+            thread.start()
+            self._reaper_started = True
+
+    def _reap_loop(self) -> None:
+        """Daemon loop: force-close engines idle for more than the TTL.
+
+        One sweep call covers every engine cache: the caches register
+        themselves at decoration time, and the sweep itself skips active
+        datasets (the pinned predicate) and non-subprocess values — so this
+        loop needs no knowledge of which engine modules exist. It runs off
+        the event loop; the closes it triggers run on the cache's close
+        threads and register in the pending-close registry, same as a
+        release-time force-close. A sweep failure is surfaced at ERROR and
+        the loop continues — a broken sweep must not silently end reaping.
+        """
+        import time
+
+        from cognee.infrastructure.databases.utils.closing_lru_cache import (
+            evict_and_close_idle_all,
+        )
+
+        interval = max(5.0, min(60.0, self._idle_ttl_seconds / 4))
+        while True:
+            time.sleep(interval)
+            try:
+                reaped = evict_and_close_idle_all(self._idle_ttl_seconds)
+                if reaped:
+                    logger.debug("Idle reaper closed %d subprocess engine(s)", reaped)
+            except Exception:
+                logger.error("Idle reaper sweep failed", exc_info=True)
+
+    def _evict_subprocess_engines(self) -> None:
+        """Evict this context's subprocess-mode engines from their caches.
+
+        Eviction is the queue's entire teardown responsibility — the engine
+        cache owns the close lifecycle, and it already gives the release path
+        everything it needs:
+
+        * a subprocess-backed adapter's close runs on the cache's dedicated
+          close threads, so it makes progress even while this loop's thread is
+          blocked. (An earlier revision scheduled the close as a task on this
+          loop; a synchronous engine spawn right after release then starved it
+          and exhausted the worker's bounded open-retry — the "Lock is held by
+          PID N" e2e failures.)
+        * the close is registered in the cache's pending-close registry, so
+          the next creation of the same engine — through the queue or a direct
+          ``get_graph_engine()`` — waits for the old worker to exit before
+          opening the same database files, with the worker's open-retry as the
+          backstop for the residual window.
+        * a close on those threads survives event-loop teardown, so
+          sequential ``asyncio.run()`` phases in one process are safe.
+
+        The eviction is ``force_close=True``: the adapter closes now even if
+        an idle holder still pins its lease proxy (e.g. a test keeping a
+        ``get_graph_engine()`` handle across pipeline calls). A deferred
+        lease-close would keep the worker — and its file locks — alive
+        indefinitely, and the next engine open for the dataset would exhaust
+        its retries against a lock that never frees. Holders re-resolve on
+        next use; nothing is mid-query here because teardown only fires when
+        no other task holds the dataset.
+
+        Closing engines here instead re-implements that machinery one level
+        up, loop-bound and invisible to the registry: fetching a lease proxy
+        in order to close it defers the real close behind the lease and hides
+        it from creators.
+
+        Eviction runs synchronously on the release path on purpose: a dying
+        engine left in the LRU can be fetched by the very next caller and then
+        die mid-use ("LadybugAdapter is closed; a new adapter must be
+        created", which broke nine e2e suites when the whole teardown was
+        deferred). After eviction every caller builds a fresh engine.
+
+        Reads the current task's ContextVar-based graph/vector config to
+        identify which cached engines to evict. Lazy imports avoid circular
+        dependencies at module load time.
+        """
+        from cognee.infrastructure.databases.graph.config import get_graph_context_config
+        from cognee.infrastructure.databases.vector.config import get_vectordb_context_config
+
+        g_cfg = get_graph_context_config()
+        if g_cfg.get("graph_database_subprocess_enabled"):
+            from cognee.infrastructure.databases.graph.get_graph_engine import graph_engine_cache
+
+            graph_engine_cache.evict(force_close=True, **g_cfg)
+
+        v_cfg = get_vectordb_context_config()
+        if v_cfg.get("vector_db_subprocess_enabled"):
+            from cognee.infrastructure.databases.vector.create_vector_engine import (
+                vector_engine_cache,
+            )
+
+            vector_engine_cache.evict(force_close=True, **v_cfg)
 
     # -------------------------------------------------------- release_slot_for
     async def release_slot_for(self, dataset_id: Any = None) -> None:
@@ -238,11 +395,11 @@ class DatasetQueue:
         the semaphore slot when the counter reaches zero.
 
         When this is the very last holder across all tasks for
-        ``dataset_id``, subprocess engines are torn down via
-        :meth:`_teardown_subprocess_engines` while the semaphore slot is
-        still held so that no new operation can observe a half-torn-down
-        resource.  The slot is freed afterwards regardless of whether the
-        teardown succeeds or raises.
+        ``dataset_id``, subprocess engines are released via
+        :meth:`_release_subprocess_engines` (kept warm under the idle TTL,
+        force-close evicted otherwise) while the semaphore slot is still
+        held. The slot is freed afterwards regardless of whether the release
+        succeeds or raises.
 
         No-op when the queue is disabled, there is no running task, or the
         current task does not hold a slot for ``dataset_id``.
@@ -252,7 +409,7 @@ class DatasetQueue:
 
         task = asyncio.current_task()
         if task is None:
-            await self._teardown_subprocess_engines()
+            self._release_subprocess_engines()
             return
 
         task_id = id(task)
@@ -266,18 +423,17 @@ class DatasetQueue:
         if entry.depth > 0:
             return
 
-        # About to fully release.  Tear down subprocess engines only when
-        # no other task holds the same dataset.  The cross-task scan and
-        # the cache eviction are both synchronous, so no other task can
-        # interleave between the check and the eviction.  The subsequent
-        # ``await engine.close()`` happens after eviction, so new callers
-        # already get a fresh engine by that point.
+        # About to fully release.  Release subprocess engines only when no
+        # other task holds the same dataset: kept warm under the idle TTL,
+        # force-close evicted otherwise (see ``_release_subprocess_engines``).
+        # The caller's response must not wait on the close of engines it has
+        # already finished using.
         try:
             other_holds = any(
                 ds_key in slots for tid, slots in self._task_slots.items() if tid != task_id
             )
             if not other_holds:
-                await self._teardown_subprocess_engines()
+                self._release_subprocess_engines()
         finally:
             self._task_slots.get(task_id, {}).pop(ds_key, None)
             logger.debug(
@@ -349,6 +505,7 @@ def dataset_queue() -> DatasetQueue:
     instance = DatasetQueue(
         enabled=settings.enabled,
         max_concurrent=settings.max_concurrent,
+        idle_ttl_seconds=settings.idle_ttl_seconds,
     )
     dataset_queue._instance = instance  # type: ignore[attr-defined]
     return instance

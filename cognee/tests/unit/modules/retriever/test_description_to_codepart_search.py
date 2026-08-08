@@ -13,7 +13,7 @@ async def test_code_description_to_code_part_no_results():
 
     with (
         patch(
-            "cognee.modules.retrieval.utils.description_to_codepart_search.get_vector_engine",
+            "cognee.modules.retrieval.utils.description_to_codepart_search.get_vector_engine_async",
             return_value=mock_vector_engine,
         ),
         patch(
@@ -70,7 +70,7 @@ async def test_code_description_to_code_part_initialization_error():
 
     with (
         patch(
-            "cognee.modules.retrieval.utils.description_to_codepart_search.get_vector_engine",
+            "cognee.modules.retrieval.utils.description_to_codepart_search.get_vector_engine_async",
             side_effect=Exception("Engine init failed"),
         ),
         patch(
@@ -99,7 +99,7 @@ async def test_code_description_to_code_part_execution_error():
 
     with (
         patch(
-            "cognee.modules.retrieval.utils.description_to_codepart_search.get_vector_engine",
+            "cognee.modules.retrieval.utils.description_to_codepart_search.get_vector_engine_async",
             return_value=mock_vector_engine,
         ),
         patch(

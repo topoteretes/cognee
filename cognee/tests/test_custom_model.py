@@ -64,7 +64,7 @@ async def main():
             )
         ).resolve()
     )
-    await cognee.visualize_graph(graph_file_path)
+    await cognee.visualize_graph(graph_file_path, full=True)
 
     # Completion query that uses graph data to form context.
     completion = await cognee.search("What is python?", SearchType.GRAPH_COMPLETION)

@@ -15,6 +15,12 @@ ENV UV_LINK_MODE=copy
 # Set build argument
 ARG DEBUG
 
+# Additional optional-dependency groups to install, separated by spaces.
+# Example: docker build --build-arg COGNEE_EXTRAS="aws langchain" .
+# Keep this applied to both sync steps: the second exact sync would otherwise
+# remove extras installed only in the dependency-cache layer.
+ARG COGNEE_EXTRAS=""
+
 # Set environment variable based on the build argument
 ENV DEBUG=${DEBUG}
 
@@ -34,19 +40,30 @@ COPY README.md pyproject.toml uv.lock entrypoint.sh ./
 
 # Install the project's dependencies using the lockfile and settings
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --extra debug --extra api --extra postgres --extra neo4j --extra llama-index --extra ollama --extra mistral --extra groq --extra anthropic --frozen --no-install-project --no-dev --no-editable
+    set -eu; \
+    set -f; \
+    set --; \
+    for extra in ${COGNEE_EXTRAS}; do \
+        set -- "$@" --extra "$extra"; \
+    done; \
+    uv sync "$@" --extra debug --extra api --extra postgres --extra neo4j --extra llama-index --extra aws --extra ollama --extra mistral --extra groq --extra anthropic --frozen --no-install-project --no-dev --no-editable
 
 # Then, add the rest of the project source code and install it
 # Installing separately from its dependencies allows optimal layer caching
 COPY ./cognee /app/cognee
-COPY ./distributed /app/distributed
 COPY ./cognee_db_workers /app/cognee_db_workers
 # Compatibility shim that re-exports ladybug under the legacy `kuzu`
 # module name. Listed in [tool.hatch.build.targets.wheel] packages, and
 # imported at module load by alembic/versions/b9274c27a25a_kuzu_11_migration.py.
 COPY ./kuzu /app/kuzu
 RUN --mount=type=cache,target=/root/.cache/uv \
-uv sync --extra debug --extra api --extra postgres --extra neo4j --extra llama-index --extra ollama --extra mistral --extra groq --extra anthropic --frozen --no-dev --no-editable
+    set -eu; \
+    set -f; \
+    set --; \
+    for extra in ${COGNEE_EXTRAS}; do \
+        set -- "$@" --extra "$extra"; \
+    done; \
+    uv sync "$@" --extra debug --extra aws --extra api --extra postgres --extra neo4j --extra llama-index --extra ollama --extra mistral --extra groq --extra anthropic --frozen --no-dev --no-editable
 
 FROM python:3.12-slim-bookworm
 
@@ -72,3 +89,6 @@ ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
 
 ENTRYPOINT ["/app/entrypoint.sh"]
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+  CMD curl -f http://localhost:8000/health || exit 1

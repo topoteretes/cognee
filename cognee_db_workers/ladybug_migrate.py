@@ -20,7 +20,8 @@ import warnings
 # release that can open that format. The code is shared across patch/minor
 # releases that keep the same on-disk format, so there is one entry per format,
 # not per release: 0.16.0 and 0.16.1 both write code 40; 0.17.0 and 0.17.1 both
-# write code 41. Used by needs_migration() to detect legacy (<0.15.0) databases.
+# write code 41; 0.18.0 through 0.18.2 all write code 42. Used by
+# needs_migration() to detect legacy (<0.15.0) databases.
 ladybug_version_mapping: dict[int, str] = {
     34: "0.7.0",
     35: "0.7.1",
@@ -30,6 +31,7 @@ ladybug_version_mapping: dict[int, str] = {
     39: "0.11.3",
     40: "0.16.0",
     41: "0.17.1",
+    42: "0.18.2",
 }
 
 
@@ -52,7 +54,8 @@ def read_ladybug_storage_version(ladybug_db_path: str) -> str:
         version_file_path = ladybug_db_path
 
     with open(version_file_path, "rb") as f:
-        # Skip the 3-byte magic "KUZ" and one byte of padding
+        # Skip the 4-byte magic ("KUZ" + padding on kuzu-era files, "LBUG" on
+        # ladybug >= 0.18)
         f.seek(4)
         # Read the next 8 bytes as a little-endian unsigned 64-bit integer
         data = f.read(8)
