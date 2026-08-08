@@ -55,7 +55,6 @@ pre-commit install
 - **deepeval** - DeepEval testing framework
 - **posthog** - PostHog analytics
 - **tracing** - OpenTelemetry tracing
-- **distributed** - Modal distributed execution
 - **dev** - All development tools (pytest, ty, ruff, etc.)
 - **debug** - Debugpy for debugging
 

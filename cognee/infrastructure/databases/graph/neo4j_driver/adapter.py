@@ -34,9 +34,6 @@ from cognee.infrastructure.databases.provenance.source_ref_state import (
     provenance_attach_inputs,
 )
 
-from distributed.utils import override_distributed
-from distributed.tasks.queued_add_nodes import queued_add_nodes
-from distributed.tasks.queued_add_edges import queued_add_edges
 
 from .neo4j_metrics_utils import (
     get_avg_clustering,
@@ -204,6 +201,13 @@ class Neo4jAdapter(GraphDBInterface):
         # add_nodes/add_edges does not need it).
         self._source_ref_change_lock = asyncio.Lock()
 
+    async def close(self) -> None:
+        """
+        Close the underlying Neo4j driver connection pool.
+        """
+        if hasattr(self, "driver") and self.driver is not None:
+            await self.driver.close()
+
     async def initialize(self) -> None:
         """
         Initializes the database: adds uniqueness constraint on id and performs indexing
@@ -342,7 +346,6 @@ class Neo4jAdapter(GraphDBInterface):
 
         return await self.query(query, params)
 
-    @override_distributed(queued_add_nodes)
     async def add_nodes(
         self,
         nodes: list[DataPoint],
@@ -1165,7 +1168,6 @@ class Neo4jAdapter(GraphDBInterface):
 
         return flattened
 
-    @override_distributed(queued_add_edges)
     async def add_edges(
         self,
         edges: list[tuple[str, str, str, dict[str, Any]]],

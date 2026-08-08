@@ -307,9 +307,7 @@ class BeautifulSoupLoader(LoaderInterface):
             pieces = []
             used_nodes = []
             for el in nodes:
-                if any(
-                    ancestor in extracted_elements for ancestor in (id(p) for p in el.parents)
-                ):
+                if any(ancestor in extracted_elements for ancestor in (id(p) for p in el.parents)):
                     continue
                 if rule.attr:
                     val = el.get(rule.attr)

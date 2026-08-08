@@ -17,8 +17,6 @@ from cognee.infrastructure.engine.utils import parse_id
 from cognee.infrastructure.databases.relational import get_relational_engine, get_relational_config
 from cognee.infrastructure.databases.vector.config import get_vectordb_config
 
-from distributed.utils import override_distributed
-from distributed.tasks.queued_add_data_points import queued_add_data_points
 from cognee.infrastructure.databases.exceptions import MissingQueryParameterError
 from cognee.context_global_variables import backend_access_control_enabled
 from cognee.modules.graph.methods.sanitize_relational_payload import sanitize_relational_payload
@@ -341,7 +339,6 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=2, min=1, max=6),
     )
-    @override_distributed(queued_add_data_points)
     async def create_data_points(self, collection_name: str, data_points: List[DataPoint]):
         """Upsert DataPoints into `collection_name`, merging belongs_to_set on conflict."""
         data_point_types = get_type_hints(DataPoint)
