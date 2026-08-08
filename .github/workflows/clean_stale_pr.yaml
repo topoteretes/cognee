@@ -9,6 +9,10 @@ on:
   # pull_request:
   #   types: [labeled, unlabeled, synchronize, reopened]
 
+permissions:
+  contents: read
+  pull-requests: write
+
 jobs:
   stale:
     runs-on: ubuntu-latest
