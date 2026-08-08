@@ -1519,9 +1519,15 @@ def test_touch_refreshes_idle_timestamp():
     assert cache.touch("absent") is False
 
 
+class _SubprocessCloseable(_Closeable):
+    """Stub for a subprocess-backed adapter as the idle sweep sees it."""
+
+    _subprocess_mode = True
+
+
 def test_evict_and_close_idle_closes_only_expired():
     cache = ClosingLRUCache(maxsize=8, lease=True)
-    stale, fresh = _Closeable("stale"), _Closeable("fresh")
+    stale, fresh = _SubprocessCloseable("stale"), _SubprocessCloseable("fresh")
     cache.get_or_create("stale", lambda: stale)
     cache.get_or_create("fresh", lambda: fresh)
     cache._cache["stale"].last_touched -= 1000
@@ -1536,7 +1542,7 @@ def test_evict_and_close_idle_skips_pinned():
     """An active dataset's engine must never be reaped, no matter how old its
     timestamp (a query can outlive the TTL)."""
     cache = ClosingLRUCache(maxsize=8, lease=True, pinned_predicate=lambda key: key == "active")
-    active, idle = _Closeable("active"), _Closeable("idle")
+    active, idle = _SubprocessCloseable("active"), _SubprocessCloseable("idle")
     cache.get_or_create("active", lambda: active)
     cache.get_or_create("idle", lambda: idle)
     cache._cache["active"].last_touched -= 1000
@@ -1545,6 +1551,24 @@ def test_evict_and_close_idle_skips_pinned():
     assert cache.evict_and_close_idle(900) == 1
     assert active.closed is False
     assert idle.closed is True
+
+
+def test_evict_and_close_idle_skips_non_subprocess_values():
+    """Remote/in-process adapters (no ``_subprocess_mode``) are never reaped:
+    the keep-alive lifecycle only governs worker-backed engines. They stay
+    cached under LRU capacity rules, and their loop-bound close (e.g. a
+    SQLAlchemy pool dispose) is never run from the reaper thread."""
+    cache = ClosingLRUCache(maxsize=8, lease=True)
+    worker, remote = _SubprocessCloseable("worker"), _Closeable("remote")
+    cache.get_or_create("worker", lambda: worker)
+    cache.get_or_create("remote", lambda: remote)
+    cache._cache["worker"].last_touched -= 1000
+    cache._cache["remote"].last_touched -= 1000
+
+    assert cache.evict_and_close_idle(900) == 1
+    assert worker.closed is True
+    assert remote.closed is False
+    assert cache.contains("remote"), "remote adapter must stay cached"
 
 
 def test_cache_hit_refreshes_idle_timestamp():

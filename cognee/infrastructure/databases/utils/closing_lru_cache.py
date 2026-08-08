@@ -849,16 +849,25 @@ class ClosingLRUCache:
             return True
 
     def evict_and_close_idle(self, idle_seconds: float) -> int:
-        """Force-close every entry idle for more than *idle_seconds*.
+        """Force-close every subprocess-backed entry idle for more than
+        *idle_seconds*.
 
-        The idle-TTL reaper's sweep. Keys matching the pinned predicate are
-        skipped — the same live "this dataset holds an active queue slot"
-        check that protects entries from capacity eviction; a query running
-        longer than the TTL must not have its engine closed underneath it.
+        The idle-TTL reaper's sweep. Two kinds of entries are skipped:
+
+        * Keys matching the pinned predicate — the same live "this dataset
+          holds an active queue slot" check that protects entries from
+          capacity eviction; a query running longer than the TTL must not
+          have its engine closed underneath it.
+        * Values without ``_subprocess_mode`` — remote adapters (Postgres,
+          Neo4j, ...) hold no worker process and no file locks, so the
+          keep-alive lifecycle does not apply to them; they stay cached
+          under the LRU capacity rules exactly as before the TTL existed.
+          Closing them here would also dispose loop-bound resources (e.g.
+          SQLAlchemy pools) from the reaper thread's foreign event loop.
 
         Each expired entry goes through :meth:`evict_and_close` (immediate
         close despite idle proxy holders, registered in the pending-close
-        registry, off-loop for subprocess adapters). A request racing the
+        registry, off-loop on the close threads). A request racing the
         sweep at the exact expiry instant is absorbed by the registry wait,
         the worker open-retry, and handle re-resolution. Returns the number
         of entries closed.
@@ -869,6 +878,7 @@ class ClosingLRUCache:
                 key
                 for key, entry in self._cache.items()
                 if entry.last_touched < deadline
+                and getattr(entry.value, "_subprocess_mode", False)
                 and (self._pinned_predicate is None or not self._pinned_predicate(key))
             ]
         closed = 0
