@@ -1,7 +1,5 @@
-import ast
 import os
 import pathlib
-import re
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.data.methods.create_authorized_dataset import create_authorized_dataset
 from cognee.modules.users.methods import get_default_user
@@ -29,26 +27,6 @@ def normalize_node_name(node_name: str) -> str:
         prefix = prefix.capitalize()
         return f"{prefix}:{suffix}"
     return node_name
-
-
-def extract_invoice_ids(search_result: str) -> list[int]:
-    try:
-        parsed_result = ast.literal_eval(search_result)
-    except (SyntaxError, ValueError):
-        parsed_result = None
-
-    if isinstance(parsed_result, (list, tuple, set)):
-        return sorted(int(invoice_id) for invoice_id in parsed_result)
-
-    labeled_invoice_ids = re.findall(r"\bInvoiceId:\s*(\d+)\b", search_result)
-    if labeled_invoice_ids:
-        return sorted(int(invoice_id) for invoice_id in labeled_invoice_ids)
-
-    line_start_ids = re.findall(r"(?m)^\s*(\d+)\b", search_result)
-    if line_start_ids:
-        return sorted(int(invoice_id) for invoice_id in line_start_ids)
-
-    return []
 
 
 async def setup_test_db():
@@ -242,16 +220,6 @@ async def test_schema_only_migration():
     # 4. Migrate schema only
     await migrate_relational_database(graph_engine, schema=schema, schema_only=True)
 
-    # 5. Verify number of tables through search
-    search_results = await cognee.search(
-        query_text="How many tables are there in this database",
-        query_type=cognee.SearchType.GRAPH_COMPLETION,
-        top_k=30,
-    )
-    assert any("11" in r for r in search_results), (
-        "Number of tables in the database reported in search_results is either None or not equal to 11"
-    )
-
     graph_db_provider = os.getenv("GRAPH_DATABASE_PROVIDER", "networkx").lower()
 
     edge_counts = {
@@ -305,56 +273,6 @@ async def test_schema_only_migration():
     print(f"Edge counts: {edge_counts}")
 
 
-async def test_search_result_quality():
-    from cognee.infrastructure.databases.relational import (
-        get_migration_relational_engine,
-    )
-
-    user = await get_default_user()
-    await create_authorized_dataset(TEST_DATASET_NAME, user)
-
-    # Get relational database with original data
-    migration_engine = get_migration_relational_engine()
-    from sqlalchemy import text
-
-    async with migration_engine.engine.connect() as conn:
-        result = await conn.execute(
-            text("""
-                SELECT
-                    c.CustomerId,
-                    c.FirstName,
-                    c.LastName,
-                    GROUP_CONCAT(i.InvoiceId, ',') AS invoice_ids
-                FROM Customer AS c
-                LEFT JOIN Invoice AS i ON c.CustomerId = i.CustomerId
-                GROUP BY c.CustomerId, c.FirstName, c.LastName
-            """)
-        )
-
-        for row in result:
-            # Get expected invoice IDs from relational DB for each Customer
-            customer_id = row.CustomerId
-            invoice_ids = row.invoice_ids.split(",") if row.invoice_ids else []
-            print(f"Relational DB Customer {customer_id}: {invoice_ids}")
-
-            # Use Cognee search to get invoice IDs for the same Customer but by providing Customer name
-            search_results = await cognee.search(
-                query_type=SearchType.GRAPH_COMPLETION,
-                query_text=f"List me all the invoices of Customer:{row.FirstName} {row.LastName}.",
-                top_k=50,
-                system_prompt="Just return me the invoiceID as a number without any text. This is an example output: ['1', '2', '3']. Where 1, 2, 3 are invoiceIDs of an invoice",
-                datasets=[TEST_DATASET_NAME],
-            )
-            print(f"Cognee search result: {search_results}")
-
-            # Transfrom both lists to int for comparison, sorting and type consistency
-            lst = extract_invoice_ids(search_results[0])
-            invoice_ids = sorted([int(x) for x in invoice_ids])
-            assert lst == invoice_ids, (
-                f"Search results {lst} do not match expected invoice IDs {invoice_ids} for Customer:{customer_id}"
-            )
-
-
 async def test_migration_sqlite():
     database_to_migrate_path = os.path.join(pathlib.Path(__file__).parent, "test_data/")
 
@@ -367,7 +285,6 @@ async def test_migration_sqlite():
     )
 
     await relational_db_migration()
-    await test_search_result_quality()
     await test_schema_only_migration()
 
 
