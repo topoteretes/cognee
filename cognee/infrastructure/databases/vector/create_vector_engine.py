@@ -118,7 +118,7 @@ def _vector_engine_key_args(kwargs) -> tuple:
     """Positional cache-key args for a ``create_vector_engine`` config dict,
     normalized the way ``create_vector_engine`` normalizes them so the key
     matches. The single place this knowledge lives — every cache operation
-    in ``_vector_engine_cache_ops`` routes through it."""
+    on ``vector_engine_cache`` routes through it."""
     normalized = _normalize_optional_create_vector_engine_params(kwargs)
     return (
         kwargs.get("vector_db_provider", ""),
