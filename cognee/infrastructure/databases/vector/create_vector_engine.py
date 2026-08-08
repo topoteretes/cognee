@@ -328,8 +328,15 @@ def _create_vector_engine(
 
 # Public cache-management API for vector engines: ``vector_engine_cache.evict``
 # / ``.touch`` / ``.is_cached`` / ``.evict_for_database`` /
-# ``.aevict_for_database``. Mechanics are shared with the graph engine via
-# EngineCacheOps; only the key knowledge above is vector-specific.
+# ``.aevict_for_database``.
+#
+# Dependency injection: EngineCacheOps holds the shared procedure (which cache
+# method implements which operation), and this call supplies the three
+# vector-specific dependencies — which cache to operate on (the decorated
+# factory), how a config dict becomes that cache's exact key (the key
+# builder), and which key field holds the per-dataset database name (for the
+# by-database evictions). The graph module builds its own instance from the
+# same class, so the procedure exists once and cannot drift between engines.
 vector_engine_cache = EngineCacheOps(
     _create_vector_engine, _vector_engine_key_args, "vector_db_name"
 )
