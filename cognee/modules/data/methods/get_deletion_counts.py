@@ -26,6 +26,17 @@ async def get_deletion_counts(
     """
     counts = DeletionCountsPreview()
     relational_engine = get_relational_engine()
+
+    # Resolve the user (opens its own session) BEFORE opening ours so we don't
+    # hold a pooled connection across get_user — that overlap deadlocks the pool
+    # under concurrency (issue #4197 class).
+    user = None
+    if user_id and not dataset_name and not all_data:
+        try:
+            user = await get_user(user_id)
+        except (ValueError, EntityNotFoundError):
+            raise CliCommandException(f"No User exists with ID {user_id}", error_code=1)
+
     async with relational_engine.get_async_session() as session:
         if dataset_name:
             # Find the dataset by name
@@ -66,11 +77,6 @@ async def get_deletion_counts(
 
         # Placeholder for user_id logic
         elif user_id:
-            user = None
-            try:
-                user = await get_user(user_id)
-            except (ValueError, EntityNotFoundError):
-                raise CliCommandException(f"No User exists with ID {user_id}", error_code=1)
             counts.users = 1
             # Find all datasets owned by this user
             datasets_query = select(Dataset).where(Dataset.owner_id == user.id)
