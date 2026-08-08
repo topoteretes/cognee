@@ -1,11 +1,11 @@
 from uuid import UUID
 from typing import Dict, List, Tuple
-from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.modules.graph.models.EdgeType import EdgeType
 
 
 async def assert_edges_vector_index_not_present(relationships: List[Tuple[UUID, UUID, str, Dict]]):
-    vector_engine = get_vector_engine()
+    vector_engine = await get_vector_engine_async()
 
     query_edge_ids = {
         str(EdgeType.id_for(relationship[2])): relationship[2] for relationship in relationships

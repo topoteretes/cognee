@@ -1,6 +1,7 @@
 import os
 from typing import Callable, List, Optional, Type, Tuple
 
+from cognee.base_config import get_base_config
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 
 from cognee.modules.engine.models.node_set import NodeSet
@@ -31,6 +32,8 @@ from cognee.modules.retrieval.graph_completion_context_extension_retriever impor
 from cognee.modules.retrieval.cypher_search_retriever import CypherSearchRetriever
 from cognee.modules.retrieval.natural_language_retriever import NaturalLanguageRetriever
 from cognee.modules.retrieval.agentic_retriever import AgenticRetriever
+from cognee.modules.retrieval.code_retriever import CodeRetriever
+from cognee.modules.retrieval.graph_report_retriever import GraphReportRetriever
 from cognee.context_global_variables import session_user
 
 
@@ -65,7 +68,9 @@ async def get_search_type_retriever_instance(
     node_name_filter_operator = kwargs.get("node_name_filter_operator", "OR")
     wide_search_top_k = kwargs.get("wide_search_top_k", 100)
     triplet_distance_penalty = kwargs.get("triplet_distance_penalty", 6.5)
-    feedback_influence = kwargs.get("feedback_influence", 0.0)
+    feedback_influence = kwargs.get(
+        "feedback_influence", get_base_config().default_feedback_influence
+    )
     session_id = kwargs.get("session_id")
     neighborhood_depth = kwargs.get("neighborhood_depth")
     neighborhood_seed_top_k = kwargs.get("neighborhood_seed_top_k")
@@ -73,6 +78,10 @@ async def get_search_type_retriever_instance(
 
     # Registry mapping search types to their corresponding retriever classes and input parameters
     search_core_registry: dict[SearchType, Tuple[BaseRetriever, dict]] = {
+        SearchType.CODE: (
+            CodeRetriever,
+            {"config": retriever_specific_config},
+        ),
         SearchType.SUMMARIES: (SummariesRetriever, {"top_k": top_k, "session_id": session_id}),
         SearchType.CHUNKS: (
             ChunksRetriever,
@@ -91,6 +100,8 @@ async def get_search_type_retriever_instance(
                 "session_id": session_id,
                 "response_model": retriever_specific_config.get("response_model", str),
                 "include_references": include_references,
+                "node_name": node_name,
+                "node_name_filter_operator": node_name_filter_operator,
             },
         ),
         SearchType.HYBRID_COMPLETION: (
@@ -115,6 +126,7 @@ async def get_search_type_retriever_instance(
                 "use_importance_weight": retriever_specific_config.get(
                     "use_importance_weight", True
                 ),
+                "use_truth_weight": retriever_specific_config.get("use_truth_weight", False),
                 "facts_top_k": retriever_specific_config.get("facts_top_k", top_k),
             },
         ),
@@ -127,6 +139,8 @@ async def get_search_type_retriever_instance(
                 "session_id": session_id,
                 "response_model": retriever_specific_config.get("response_model", str),
                 "include_references": include_references,
+                "node_name": node_name,
+                "node_name_filter_operator": node_name_filter_operator,
             },
         ),
         SearchType.GRAPH_COMPLETION: (
@@ -296,6 +310,7 @@ async def get_search_type_retriever_instance(
             },
         ),
         SearchType.CHUNKS_LEXICAL: (BM25ChunksRetriever, {"top_k": top_k}),
+        SearchType.GRAPH_REPORT: (GraphReportRetriever, {"top_n": top_k}),
         SearchType.CODING_RULES: (
             CodingRulesRetriever,
             {"rules_nodeset_name": node_name},

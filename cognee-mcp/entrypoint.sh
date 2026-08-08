@@ -1,7 +1,10 @@
 #!/bin/bash
 
 set -e  # Exit on error
-echo "Environment: $ENVIRONMENT"
+# ENV is the canonical environment variable (matches what the app reads).
+# ENVIRONMENT is accepted as a deprecated fallback for older deployments.
+ENV="${ENV:-${ENVIRONMENT:-}}"
+echo "Environment: $ENV"
 
 # Install optional dependencies if EXTRAS is set
 if [ -n "$EXTRAS" ]; then
@@ -127,12 +130,12 @@ fi
 
 echo "calling cognee-mcp" "${ARGS[@]}"
 
-if [ "$DEBUG" = "true" ] && { [ "$ENVIRONMENT" = "dev" ] || [ "$ENVIRONMENT" = "local" ]; }; then
+if [ "$DEBUG" = "true" ] && { [ "$ENV" = "dev" ] || [ "$ENV" = "local" ]; }; then
     DEBUG_PORT=${DEBUG_PORT:-5678}
     echo "Running in debug mode"
     echo "Debug port: $DEBUG_PORT"
     echo "Waiting for the debugger to attach..."
-    exec python -m debugpy --wait-for-client --listen 0.0.0.0:"$DEBUG_PORT" -m cognee-mcp "${ARGS[@]}"
+    exec python -m debugpy --wait-for-client --listen 0.0.0.0:"$DEBUG_PORT" "$(command -v cognee-mcp)" "${ARGS[@]}"
 else
     exec cognee-mcp "${ARGS[@]}"
 fi

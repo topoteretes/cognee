@@ -33,6 +33,7 @@ from cognee.api.v1.responses.routers import get_responses_router
 from cognee.api.v1.llm.routers import get_llm_router
 from cognee.api.v1.sync.routers import get_sync_router
 from cognee.api.v1.health.routers import get_health_router
+from cognee.api.v1.validate.routers import get_validate_router
 from cognee.api.v1.update.routers import get_update_router
 from cognee.api.v1.users.routers import (
     get_auth_router,
@@ -51,26 +52,13 @@ from cognee.api.v1.skills.routers import get_skills_router
 from cognee.api.v1.proposals.routers import get_proposals_router
 from cognee.api.v1.activity.routers import get_activity_router
 from cognee.api.v1.sessions import get_sessions_router
+from cognee.api.v1.slack.routers import get_slack_channels_router, get_slack_router
+from cognee.api.v1.integrations.routers import get_integrations_router
 from cognee.modules.users.methods.get_authenticated_user import REQUIRE_AUTHENTICATION
 
 # Ensure application logging is configured for container stdout/stderr
 setup_logging()
 logger = get_logger()
-
-if os.getenv("ENV", "prod") == "prod":
-    try:
-        import sentry_sdk
-
-        sentry_sdk.init(
-            dsn=os.getenv("SENTRY_REPORTING_URL"),
-            traces_sample_rate=1.0,
-            profiles_sample_rate=1.0,
-        )
-    except ImportError:
-        logger.info(
-            "Sentry SDK not available. Install with 'pip install cognee\"[monitoring]\"' to enable error monitoring."
-        )
-
 
 app_environment = os.getenv("ENV", "prod")
 
@@ -272,6 +260,8 @@ app.include_router(
 
 app.include_router(get_delete_router(), prefix="/api/v1/delete", tags=["delete"])
 
+app.include_router(get_validate_router(), prefix="/api/v1/validate", tags=["validate"])
+
 app.include_router(get_update_router(), prefix="/api/v1/update", tags=["update"])
 
 app.include_router(get_responses_router(), prefix="/api/v1/responses", tags=["responses"])
@@ -324,6 +314,10 @@ app.include_router(get_remember_router(), prefix="/api/v1/remember", tags=["reme
 app.include_router(get_recall_router(), prefix="/api/v1/recall", tags=["recall"])
 app.include_router(get_improve_router(), prefix="/api/v1/improve", tags=["improve"])
 app.include_router(get_forget_router(), prefix="/api/v1/forget", tags=["forget"])
+
+app.include_router(get_slack_router(), prefix="/api/v1/slack", tags=["slack"])
+app.include_router(get_slack_channels_router(), prefix="/api/v1/slack", tags=["slack"])
+app.include_router(get_integrations_router(), prefix="/api/v1/integrations", tags=["integrations"])
 
 
 @app.get("/")

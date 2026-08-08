@@ -5,6 +5,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
 
+from cognee.base_config import get_base_config
 from cognee.context_global_variables import set_session_user_context_variable
 from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
@@ -27,9 +28,9 @@ from cognee.modules.observability import (
 from cognee.modules.recall.types.RecallResponse import (
     RecallResponse,
     ResponseAgentTraceEntry,
-    ResponseGraphContextEntry,
     ResponseGraphEntry,
     ResponseQAEntry,
+    ResponseSessionContextEntry,
 )
 from cognee.modules.recall.types.SearchResultItem import SearchResultItem
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
@@ -283,17 +284,19 @@ async def _search_trace(
     return results
 
 
-async def _fetch_graph_context(
-    session_id: str, user: str | None = None
-) -> list[ResponseGraphContextEntry]:
-    """Return the graph-context snapshot for the session as a one-item list.
+async def _fetch_session_context(
+    query_text: str,
+    session_id: str,
+    context_profile: str,
+    user: str | None = None,
+) -> list[ResponseSessionContextEntry]:
+    """Render active session-context lessons for one profile as a one-item list.
 
-    ``improve()`` writes a distilled summary of graph knowledge into
-    ``graph_knowledge:{user}:{session}`` — this surfaces it as a recall
-    result tagged with ``_source: "graph_context"`` (or an empty list
-    when nothing has been synced yet).
+    Read-only: uses the deterministic builder with ``stamp_served=False`` so it never updates
+    served metadata. Returns an empty list when no lessons match the profile.
     """
     from cognee.infrastructure.session.get_session_manager import get_session_manager
+    from cognee.infrastructure.session.session_context_builder import build_active_context_block
 
     caller_user_id = await _resolve_user_id(user)
     if not caller_user_id:
@@ -306,11 +309,28 @@ async def _fetch_graph_context(
     if not sm.is_available:
         return []
 
-    snapshot = await sm.get_graph_context(user_id=cache_user_id, session_id=session_id)
-    if not snapshot:
+    block, _served = await build_active_context_block(
+        session_manager=sm,
+        user_id=cache_user_id,
+        session_id=session_id,
+        query=query_text,
+        context_profile=context_profile,
+        stamp_served=False,
+    )
+    if not block:
         return []
 
-    return [ResponseGraphContextEntry(content=snapshot, source="graph_context")]
+    return [
+        ResponseSessionContextEntry(
+            content=block, context_profile=context_profile, source="session_context"
+        )
+    ]
+
+
+def _scope_should_forward_resolved(scope: str | list[str] | None) -> bool:
+    if isinstance(scope, str):
+        return scope in {"all", "graph_context"}
+    return bool(scope and {"all", "graph_context"}.intersection(scope))
 
 
 async def recall(
@@ -328,9 +348,10 @@ async def recall(
     node_name_filter_operator: str = "OR",
     only_context: bool = False,
     session_id: str | None = None,
+    context_profile: str = "qa",
     wide_search_top_k: int | None = 100,
     triplet_distance_penalty: float | None = 6.5,
-    feedback_influence: float = 0.0,
+    feedback_influence: float = get_base_config().default_feedback_influence,
     verbose: bool = False,
     retriever_specific_config: dict | None = None,
     neighborhood_depth: int | None = None,
@@ -429,6 +450,8 @@ async def recall(
 
         from cognee.api.v1.serve.state import get_remote_client
 
+        forward_scope = sources if _scope_should_forward_resolved(scope) else scope
+
         client = get_remote_client()
         if client is not None:
             results = await client.recall(
@@ -437,11 +460,12 @@ async def recall(
                 datasets=datasets,
                 dataset_ids=dataset_ids,
                 top_k=top_k,
-                scope=scope,
+                scope=forward_scope,
                 system_prompt=system_prompt,
                 node_name=node_name,
                 only_context=only_context,
                 session_id=session_id,
+                context_profile=context_profile,
                 verbose=verbose,
                 include_references=include_references,
             )
@@ -475,10 +499,17 @@ async def recall(
                 )
             )
 
-        async def _run_graph_context() -> list[RecallResponse]:
+        async def _run_session_context() -> list[RecallResponse]:
             if not session_id:
                 return []
-            return list(await _fetch_graph_context(session_id=session_id, user=user))
+            return list(
+                await _fetch_session_context(
+                    query_text=query_text,
+                    session_id=session_id,
+                    context_profile=context_profile,
+                    user=user,
+                )
+            )
 
         async def _run_graph() -> list[RecallResponse]:
             nonlocal user, dataset_ids
@@ -569,7 +600,7 @@ async def recall(
         runners = {
             "session": _run_session,
             "trace": _run_trace,
-            "graph_context": _run_graph_context,
+            "session_context": _run_session_context,
             "graph": _run_graph,
         }
 

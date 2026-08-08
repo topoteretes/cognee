@@ -1,6 +1,7 @@
 import asyncio
 from typing import Any, Dict, List, Optional, Type, Union
 
+from cognee.base_config import get_base_config
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.modules.retrieval.utils.validate_queries import validate_retriever_input
@@ -51,7 +52,7 @@ class GraphCompletionRetriever(BaseRetriever):
         node_name_filter_operator: str = "OR",
         wide_search_top_k: Optional[int] = 100,
         triplet_distance_penalty: Optional[float] = 6.5,
-        feedback_influence: float = 0.0,
+        feedback_influence: float = get_base_config().default_feedback_influence,
         session_id: Optional[str] = None,
         response_model: Type = str,
         neighborhood_depth: Optional[int] = None,

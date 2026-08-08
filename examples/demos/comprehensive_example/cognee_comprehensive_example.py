@@ -1,8 +1,11 @@
-import asyncio
+# ruff: noqa: E402
 import os
+import asyncio
 from pathlib import Path
 
 # provide your OpenAI key here
+# Set os.environ before importing Cognee: Cognee reads env-backed settings at import time, so values
+# assigned later may not override defaults or `.env`. See https://docs.cognee.ai/setup-configuration/overview#using-os-environ
 os.environ["LLM_API_KEY"] = "your_api_key"
 
 # create artifacts directory for storing visualization outputs
@@ -26,6 +29,8 @@ python_zen_principles = asset_paths["python_zen_principles"]
 ontology_path = asset_paths["ontology"]
 
 # configure ontology file path for structured data processing
+# Set os.environ before importing Cognee: Cognee reads env-backed settings at import time, so values
+# assigned later may not override defaults or `.env`. See https://docs.cognee.ai/setup-configuration/overview#using-os-environ
 os.environ["ONTOLOGY_FILE_PATH"] = ontology_path
 
 import cognee  # noqa: E402

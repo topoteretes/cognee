@@ -1,6 +1,6 @@
 [project]
 name = "cognee-mcp"
-version = "0.5.4"
+version = "0.5.5"
 description = "Cognee MCP server"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -9,7 +9,11 @@ dependencies = [
     # For local cognee repo usage remove comment below and add absolute path to cognee. Then run `uv sync --reinstall` in the mcp folder on local cognee changes.
     #"cognee[postgres,docs,neo4j] @ file:/Users/igorilic/Desktop/cognee",
     "cognee[postgres-binary,docs,neo4j]>=1.1.0,<2.0.0",
-    "mcp>=1.12.0,<2.0.0",
+    # FastMCP 3 ships tag-based visibility and the tool-search transform this
+    # server relies on; the FastMCP vendored in the `mcp` SDK is an older fork
+    # that has neither. `mcp` is still a direct dependency for its wire types.
+    "fastmcp>=3.4.0,<4.0.0",
+    "mcp>=1.24.0,<2.0.0",
     "uv>=0.6.3,<1.0.0",
     "httpx>=0.27.0,<1.0.0",
 ]

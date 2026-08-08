@@ -59,7 +59,16 @@ def test_format_chunk_references_reads_scored_result_like_objects():
     objs = [FakeScored(_payload(), "id-1")]
     result = format_chunk_references(objs)
 
-    assert "- chunk 5 of document annual_report.pdf:" in result
+    assert "- chunk 5 of document annual_report.pdf (chunk_id: id-1):" in result
+
+
+def test_format_chunk_references_includes_data_id_and_chunk_id():
+    """document_id (== ingested data id) and chunk id are surfaced in the bullet."""
+    result = format_chunk_references([_payload(document_id="data-123", id="chunk-9")])
+
+    assert (
+        "- chunk 5 of document annual_report.pdf (data_id: data-123, chunk_id: chunk-9):" in result
+    )
 
 
 def test_format_chunk_references_empty_when_document_name_missing():
@@ -110,7 +119,7 @@ def test_format_chunk_references_dedups_by_id():
     ]
     result = format_chunk_references(objs)
 
-    assert result.count("- chunk 5 of document annual_report.pdf:") == 1
+    assert result.count("- chunk 5 of document annual_report.pdf (chunk_id: same-id):") == 1
 
 
 def test_format_chunk_references_caps_and_clamps_limit():
@@ -216,7 +225,7 @@ async def test_answer_grounded_references_query_chunk_index_with_answer():
     result = await build_answer_grounded_chunk_references("Revenue grew 12 percent.", engine)
 
     assert result.startswith(EVIDENCE_HEADER + "\n")
-    assert "- chunk 3 of document report.pdf:" in result
+    assert "- chunk 3 of document report.pdf (chunk_id: chunk-1):" in result
     engine.search.assert_awaited_once()
     assert engine.search.await_args.args[0] == "DocumentChunk_text"
     assert engine.search.await_args.args[1] == "Revenue grew 12 percent."

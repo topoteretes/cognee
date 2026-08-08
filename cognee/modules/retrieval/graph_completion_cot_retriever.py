@@ -4,6 +4,7 @@ from typing import Optional, List, Type, Any, Union
 
 from pydantic import BaseModel
 
+from cognee.base_config import get_base_config
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.modules.retrieval.utils.query_state import QueryState
 from cognee.modules.retrieval.utils.validate_queries import validate_retriever_input
@@ -64,7 +65,7 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
         node_name_filter_operator: str = "OR",
         wide_search_top_k: Optional[int] = 100,
         triplet_distance_penalty: Optional[float] = 6.5,
-        feedback_influence: float = 0.0,
+        feedback_influence: float = get_base_config().default_feedback_influence,
         max_iter: int = 4,
         session_id: Optional[str] = None,
         response_model: Type = str,
@@ -167,7 +168,7 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
             block, _served_ids = await build_active_context_block(
                 session_manager=sm,
                 user_id=user_id,
-                session_id=sm._resolve_session_id(self.session_id),
+                session_id=sm.resolve_session_id(self.session_id),
                 query=query or "",
             )
             return block or ""

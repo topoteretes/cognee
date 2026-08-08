@@ -14,9 +14,9 @@ from cognee.modules.users.methods import get_default_user, get_authenticated_use
 async def _reset_engines_and_prune():
     """Reset db engine caches and prune data/system."""
     try:
-        from cognee.infrastructure.databases.vector import get_vector_engine
+        from cognee.infrastructure.databases.vector import get_vector_engine_async
 
-        vector_engine = get_vector_engine()
+        vector_engine = await get_vector_engine_async()
         if hasattr(vector_engine, "engine") and hasattr(vector_engine.engine, "dispose"):
             await vector_engine.engine.dispose(close=True)
     except Exception:

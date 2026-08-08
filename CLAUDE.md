@@ -22,7 +22,7 @@ uv pip install -e .
 uv pip install -e ".[dev]"
 
 # Install with specific extras
-uv pip install -e ".[postgres,neo4j,docs,chromadb]"
+uv pip install -e ".[postgres,neo4j,docs]"
 
 # Set up pre-commit hooks
 pre-commit install
@@ -32,13 +32,12 @@ pre-commit install
 - **postgres** / **postgres-binary** - PostgreSQL + PGVector support (also enables the Postgres session-cache backend, `CACHE_BACKEND=postgres`)
 - **neo4j** - Neo4j graph database support
 - **neptune** - AWS Neptune support
-- **chromadb** - ChromaDB vector database
+- **turso** - Turso vector database support
 - **docs** - Document processing (unstructured library)
 - **scraping** - Web scraping (Tavily, BeautifulSoup, Playwright)
 - **langchain** - LangChain integration
 - **llama-index** - LlamaIndex integration
 - **anthropic** - Anthropic Claude models
-- **gemini** - Google Gemini models
 - **ollama** - Ollama local models
 - **mistral** - Mistral AI models
 - **groq** - Groq API support
@@ -49,12 +48,13 @@ pre-commit install
 - **graphiti** - Graphiti-core integration
 - **baml** - BAML structured output
 - **dlt** - Data load tool (dlt) integration
-- **docling** - Docling document processing
+- **docling** - Docling document processing, slim profile without torch (office/HTML/email/markdown/LaTeX formats)
+- **docling-full** - Full docling install with torch-based ML models (adds PDF/image conversion through docling; conflicts with **codegraph** due to tree-sitter pins)
 - **codegraph** - Code graph extraction
 - **evals** - Evaluation tools
 - **deepeval** - DeepEval testing framework
 - **posthog** - PostHog analytics
-- **monitoring** - Sentry + Langfuse observability
+- **tracing** - OpenTelemetry tracing
 - **distributed** - Modal distributed execution
 - **dev** - All development tools (pytest, ty, ruff, etc.)
 - **debug** - Debugpy for debugging
@@ -101,7 +101,7 @@ ty check .
 ### Running Cognee
 ```bash
 # Using Python SDK
-python examples/python/simple_example.py
+uv run python examples/guides/simple_cognee_example.py
 
 # Using CLI
 cognee-cli add "Your text here"
@@ -129,8 +129,8 @@ All data flows through task-based pipelines (`cognee/modules/pipelines/`). Tasks
 
 #### 2. Interface-Based Database Adapters
 Multiple backends are supported through adapter interfaces:
-- **Graph**: Ladybug (default), Neo4j, Neptune, Postgres via `GraphDBInterface`
-- **Vector**: LanceDB (default), ChromaDB, PGVector via `VectorDBInterface`
+- **Graph**: Ladybug (default), Neo4j, Neptune, Postgres (demo) via `GraphDBInterface`
+- **Vector**: LanceDB (default), PGVector, Neptune Analytics, Turso via `VectorDBInterface` (ChromaDB/Qdrant/Weaviate/Milvus via community adapters)
 - **Relational**: SQLite (default), PostgreSQL
 
 Key files:
@@ -228,7 +228,7 @@ Copy `.env.template` to `.env` and configure:
 ```bash
 # Minimal setup (defaults to OpenAI + local file-based databases)
 LLM_API_KEY="your_openai_api_key"
-LLM_MODEL="openai/gpt-4o-mini"  # Default model
+LLM_MODEL="openai/gpt-5-mini"  # Default model
 ```
 
 **Important**: If you configure only LLM or only embeddings, the other defaults to OpenAI. Ensure you have a working OpenAI API key, or configure both to avoid unexpected defaults.
@@ -254,18 +254,19 @@ DB_NAME=cognee_db
 ```
 
 #### Vector Databases
-Supported: lancedb (default), pgvector, chromadb, qdrant, weaviate, milvus
+Supported in-tree: lancedb (default), pgvector, neptune_analytics, turso.
+Others (ChromaDB, Qdrant, Weaviate, Milvus, …) are community adapters — install from
+https://github.com/topoteretes/cognee-community and register via `use_vector_adapter`
+before setting `VECTOR_DB_PROVIDER`, otherwise cognee raises
+"Unsupported vector database provider".
 ```bash
-# ChromaDB (requires chromadb extra)
-VECTOR_DB_PROVIDER=chromadb
-
 # PGVector (requires postgres extra)
 VECTOR_DB_PROVIDER=pgvector
 VECTOR_DB_URL=postgresql://cognee:cognee@localhost:5432/cognee_db
 ```
 
 #### Graph Databases
-Supported: ladybug (default), neo4j, neptune, ladybug-remote, postgres
+Supported: ladybug (default), neo4j, neptune, ladybug-remote, postgres (demo)
 ```bash
 # Neo4j (requires neo4j extra: pip install cognee[neo4j])
 GRAPH_DATABASE_PROVIDER=neo4j
@@ -281,10 +282,19 @@ GRAPH_DATABASE_USERNAME=your_username
 GRAPH_DATABASE_PASSWORD=your_password
 
 # Postgres (requires postgres extra: pip install cognee[postgres])
+# DEMO, not production-ready — see the warning below.
 # Does not support raw Cypher queries, natural language search, or Graphiti.
 GRAPH_DATABASE_PROVIDER=postgres
 GRAPH_DATABASE_URL=postgresql+asyncpg://cognee:cognee@localhost:5432/cognee_db
 ```
+
+> **⚠️ Warning:** Using Postgres as a graph store is currently a demo feature and is not
+> production-ready. Use it to demo keeping relational metadata, PGVector, and graph
+> state in a single Postgres service, but rely on a graph-native backend such as Kuzu or Neo4j
+> for production workloads.
+>
+> Interested in further development or production use of Postgres as a graph database? Write to
+> us at social@cognee.ai to explore the options.
 
 #### Session Cache
 ```bash
@@ -301,7 +311,7 @@ Supported providers: OpenAI (default), Azure OpenAI, Google Gemini, Anthropic, A
 #### OpenAI (Recommended - Minimal Setup)
 ```bash
 LLM_API_KEY="your_openai_api_key"
-LLM_MODEL="openai/gpt-4o-mini"  # or gpt-4o, gpt-4-turbo, etc.
+LLM_MODEL="openai/gpt-5-mini"  # default; or gpt-5, gpt-4o, gpt-4o-mini, etc.
 LLM_PROVIDER="openai"
 ```
 
@@ -314,7 +324,7 @@ LLM_API_KEY="your_azure_api_key"
 LLM_API_VERSION="2024-12-01-preview"
 ```
 
-#### Google Gemini (requires gemini extra)
+#### Google Gemini (no extra required)
 ```bash
 LLM_PROVIDER="gemini"
 LLM_MODEL="gemini/gemini-2.0-flash-exp"
@@ -434,6 +444,12 @@ git pull origin dev
 git checkout -b feature/your-feature-name
 ```
 
+**Core-team PRs must reference a Linear issue.** Put the issue key (e.g. `COG-123`)
+in the PR title or the branch name so Linear links the PR to its ticket. This is
+enforced by the `Require Linear issue` workflow (`linear-issue-check`), a required
+status check. Fork / external-contributor PRs are exempt (the check skips them), so
+this rule applies only to internal PRs.
+
 ## Code Style
 
 - **Formatter**: Ruff (configured in `pyproject.toml`)
@@ -442,6 +458,19 @@ git checkout -b feature/your-feature-name
 - **Pre-commit hooks**: Run ruff linting and formatting automatically
 - **Type hints**: Encouraged (ty checks enabled)
 - **Important**: Always run `pre-commit run --all-files` before committing to catch formatting issues
+
+## Commit & PR Title Style
+- **Subject line (required):**
+  - The format is (type): (short summary)
+  - Write summary as if it is giving an instruction (e.g., "Fix bug" instead of "Fixed bug")
+  - 50 chars or less
+  - Capitalize first char of summary
+  - Do NOT end with a period
+- **Body (optional):**
+  - **Description:** Explain the motivation behind the change, what problem it solves, and any relevant background.
+  - **Use the body to explain what and why, not how.** The body of the commit message should explain why the change was made and what problem it solves. You don't need to explain how the code works, as the code itself should be clear enough for that.
+- **Include issue tracking numbers where applicable.** Reference an issue in at least the subject line (e.g., Fixes COG-24), making it easier to trace changes to their corresponding issue.
+- **Separate the subject line from the body with a blank line.** This helps differentiate the short description from the detailed explanation. Generally, all commits should have separate subject and body.
 
 ## Testing Strategy
 
@@ -506,10 +535,10 @@ task = Task(my_custom_task)
 ### Accessing Databases Directly
 ```python
 from cognee.infrastructure.databases.graph import get_graph_engine
-from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.infrastructure.databases.vector import get_vector_engine_async
 
 graph_engine = await get_graph_engine()
-vector_engine = await get_vector_engine()
+vector_engine = await get_vector_engine_async()
 ```
 
 ### Using LLM Gateway
@@ -538,6 +567,14 @@ await cognee.cognify(datasets=["my_project"])
 ### DataPoints
 Atomic knowledge units that form the foundation of graph structures. All graph nodes extend the `DataPoint` base class with versioning and metadata support.
 
+### Contradiction Detection
+Opt-in LLM check that runs as the last `cognify()` task (default **off**). After the graph is stored, it gathers the facts one hop from the entities this ingestion touched — new and pre-existing alike — asks an LLM which pairs cannot both be true, and records each confident conflict as a `contradicts` edge carrying both fact texts, the reason, and the confidence. It only adds edges (never rewrites or deletes) and swallows its own errors, so it can never break ingestion.
+
+- **Enable**: set `CONTRADICTION_DETECTION=true`. When off, the cognify pipeline is unchanged.
+- **Tuning** (env): `CONTRADICTION_CONFIDENCE_THRESHOLD` (default 0.5, minimum confidence to flag), `CONTRADICTION_MAX_FACTS` (default 500, cap on facts per LLM call).
+- **Applies to `remember()` too** — and to session memory bridged back by `improve()` — since those build their graphs through `cognify()`. The exception is `remember(content_type="code")`, which runs the separate code-graph pipeline.
+- **Scope / limitations**: only the 1-hop neighbourhood of the touched entities is compared; structural edges (`contains`, `is_part_of`, `made_from`, `exists_in`, `contradicts`) and edges with an unnamed endpoint are skipped; the temporal cognify path is not covered.
+
 ### Permissions System
 Multi-tenant architecture with users, roles, and Access Control Lists (ACLs):
 - Read, write, delete, and share permissions per dataset
@@ -551,8 +588,8 @@ Launch visualization server:
 cognee-cli -ui  # Launches full stack with UI at http://localhost:3000
 
 # Via Python
-from cognee.api.v1.visualize import start_visualization_server
-await start_visualization_server(port=8080)
+from cognee.api.v1.visualize import visualization_server
+shutdown = visualization_server(port=8080)  # synchronous; returns a shutdown callable
 ```
 
 ## Debugging & Troubleshooting

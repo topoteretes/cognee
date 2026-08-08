@@ -29,15 +29,32 @@ from cognee.modules.migration.sources.base import MemorySource
 
 
 def _first_list(container: Dict[str, Any], *keys: str) -> List[Dict[str, Any]]:
+    """Return the records under the first alias that carries any.
+
+    An agent file may emit several aliases for the same collection and fill
+    only one, so an empty alias must not shadow a populated one later in the
+    list -- returning on it imports nothing at all.
+    """
     for key in keys:
         value = container.get(key)
         if isinstance(value, list):
-            return [item for item in value if isinstance(item, dict)]
+            records = [item for item in value if isinstance(item, dict)]
+            if records:
+                return records
     return []
 
 
 def _message_text(message: Dict[str, Any]) -> str:
-    content = message.get("content", message.get("text"))
+    """Return the text of a message, from ``content`` or the ``text`` alias.
+
+    ``content`` is optional in the message schema, and a serializer that keeps
+    unset fields writes it as null instead of omitting it. ``dict.get``'s
+    default only fires on a missing key, so the fallback has to be explicit or
+    a null content silently yields no text and the message is dropped.
+    """
+    content = message.get("content")
+    if content is None:
+        content = message.get("text")
     if isinstance(content, str):
         return content
     if isinstance(content, list):
