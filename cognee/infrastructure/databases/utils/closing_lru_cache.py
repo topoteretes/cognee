@@ -87,6 +87,7 @@ import asyncio
 import concurrent.futures
 import inspect
 import logging
+import time
 import weakref
 from collections import OrderedDict
 from functools import wraps
@@ -94,6 +95,26 @@ from threading import Lock
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+# Every cache created by the ``closing_lru_cache`` decorator registers here so
+# the idle-TTL reaper can sweep them all through one entry point
+# (``evict_and_close_idle_all``) without knowing which engine modules exist.
+# Weak references: a decorated factory that goes out of scope (tests) drops
+# its cache from the registry automatically.
+_DECORATED_CACHES: "weakref.WeakSet[ClosingLRUCache]" = weakref.WeakSet()
+
+
+def evict_and_close_idle_all(idle_seconds: float) -> int:
+    """Force-close idle subprocess-backed entries across every decorated cache.
+
+    The idle-TTL reaper's single entry point: sweeps each registered cache via
+    :meth:`ClosingLRUCache.evict_and_close_idle`, which skips pinned (active)
+    keys and any value without ``_subprocess_mode`` — so caches holding
+    in-process or remote adapters contribute nothing, and a future
+    subprocess-backed engine cache is covered without anyone registering it by
+    hand. Returns the total number of entries closed.
+    """
+    return sum(cache.evict_and_close_idle(idle_seconds) for cache in list(_DECORATED_CACHES))
 
 
 class CacheInfo(dict):
@@ -300,6 +321,11 @@ class _LeasedCacheEntry:
         self.in_cache = True
         self.close_requested = False
         self.closed = False
+        # Last time this entry was used or released, ``time.monotonic()``
+        # based. Read by the idle sweep (``evict_and_close_idle``); refreshed
+        # on cache hits and via ``touch`` at dataset-queue release, so idle
+        # time measures "since the last request finished with it".
+        self.last_touched = time.monotonic()
         self._lock = Lock()
 
     def _close(self, value):
@@ -659,6 +685,7 @@ class ClosingLRUCache:
         with self._lock:
             if key in self._cache:
                 self._cache.move_to_end(key)
+                self._cache[key].last_touched = time.monotonic()
                 return self._wrap_cached_value(self._cache[key])
             pending_closes = self._snapshot_pending_closes(key)
 
@@ -743,6 +770,7 @@ class ClosingLRUCache:
         with self._lock:
             if key in self._cache:
                 self._cache.move_to_end(key)
+                self._cache[key].last_touched = time.monotonic()
                 return self._wrap_cached_value(self._cache[key])
             pending_closes = self._snapshot_pending_closes(key)
 
@@ -778,6 +806,106 @@ class ClosingLRUCache:
             return False
         self._detach_entry(entry)
         return True
+
+    def evict_and_close(self, key) -> bool:
+        """Remove *key* and close its value NOW, even while callers still hold
+        proxies.
+
+        For deliberate teardown (the dataset-queue release path): the worker
+        process must exit and release its on-disk file locks promptly, and an
+        idle holder — e.g. a test keeping an engine handle across pipeline
+        calls — would otherwise defer the close indefinitely, so the next
+        creation for the same database exhausts the worker's open-retry
+        against a lock that is never released. Holders of the now-dead value
+        re-resolve on next use (the engine handles' re-resolution path).
+
+        Capacity eviction must NOT use this — it would close a value that is
+        actively in use mid-call; plain :meth:`evict` defers for those.
+
+        The close is tracked in the pending-close registry (creators for the
+        same key wait for it) and, for subprocess-backed values, runs on the
+        dedicated close threads. Returns True if the entry was present.
+        """
+        with self._lock:
+            entry = self._cache.pop(key, None)
+        if entry is None:
+            return False
+
+        value_to_close = None
+        with entry._lock:
+            entry.in_cache = False
+            entry.close_requested = True
+            # Marking the entry closed under the lock makes a stray proxy
+            # finalizer firing later a no-op (no double close). The proxy ref
+            # itself must be held past the lock: if it is the last reference,
+            # dropping it runs the weakref finalizer, which re-enters
+            # ``proxy_released`` and deadlocks on ``entry._lock`` (same hazard
+            # as ``detach_from_cache``).
+            proxy_to_drop = entry.proxy
+            entry.proxy = None
+            if not entry.closed:
+                entry.closed = True
+                value_to_close = entry.value
+
+        # Outside the locks — close code can log or re-enter cache paths.
+        if value_to_close is not None:
+            self._track_close(entry.key, value_to_close)
+        del proxy_to_drop
+        return True
+
+    def touch(self, key) -> bool:
+        """Refresh *key*'s idle timestamp without creating or returning it.
+
+        Called at dataset-queue release when the idle-TTL keep-alive is on:
+        pinned engine handles bypass cache lookups entirely, so hit-time
+        refreshes alone would under-count usage. Returns True if the entry
+        exists.
+        """
+        with self._lock:
+            entry = self._cache.get(key)
+            if entry is None:
+                return False
+            entry.last_touched = time.monotonic()
+            return True
+
+    def evict_and_close_idle(self, idle_seconds: float) -> int:
+        """Force-close every subprocess-backed entry idle for more than
+        *idle_seconds*.
+
+        The idle-TTL reaper's sweep. Two kinds of entries are skipped:
+
+        * Keys matching the pinned predicate — the same live "this dataset
+          holds an active queue slot" check that protects entries from
+          capacity eviction; a query running longer than the TTL must not
+          have its engine closed underneath it.
+        * Values without ``_subprocess_mode`` — remote adapters (Postgres,
+          Neo4j, ...) hold no worker process and no file locks, so the
+          keep-alive lifecycle does not apply to them; they stay cached
+          under the LRU capacity rules exactly as before the TTL existed.
+          Closing them here would also dispose loop-bound resources (e.g.
+          SQLAlchemy pools) from the reaper thread's foreign event loop.
+
+        Each expired entry goes through :meth:`evict_and_close` (immediate
+        close despite idle proxy holders, registered in the pending-close
+        registry, off-loop on the close threads). A request racing the
+        sweep at the exact expiry instant is absorbed by the registry wait,
+        the worker open-retry, and handle re-resolution. Returns the number
+        of entries closed.
+        """
+        deadline = time.monotonic() - idle_seconds
+        with self._lock:
+            expired = [
+                key
+                for key, entry in self._cache.items()
+                if entry.last_touched < deadline
+                and getattr(entry.value, "_subprocess_mode", False)
+                and (self._pinned_predicate is None or not self._pinned_predicate(key))
+            ]
+        closed = 0
+        for key in expired:
+            if self.evict_and_close(key):
+                closed += 1
+        return closed
 
     def evict_where(self, predicate) -> int:
         """Remove every entry whose key satisfies *predicate* and request close.
@@ -836,6 +964,7 @@ def closing_lru_cache(maxsize: Optional[int] = 128, lease: bool = True, pinned_p
             bind_signature(_param_positions)
 
         cache = ClosingLRUCache(maxsize=maxsize, lease=lease, pinned_predicate=pinned_predicate)
+        _DECORATED_CACHES.add(cache)
 
         def _key(args, kwargs):
             # ``_KW_MARK`` separates positional from keyword args so
@@ -863,6 +992,20 @@ def closing_lru_cache(maxsize: Optional[int] = 128, lease: bool = True, pinned_p
             if the entry was present.
             """
             return cache.evict(_key(args, kwargs))
+
+        def cache_evict_and_close(*args, **kwargs) -> bool:
+            """Evict a single entry and close its value immediately, even if
+            callers still hold proxies — see ``ClosingLRUCache.evict_and_close``
+            for when this is (and is not) appropriate. Key scheme matches
+            ``cache_evict``. Returns True if the entry was present.
+            """
+            return cache.evict_and_close(_key(args, kwargs))
+
+        def cache_touch(*args, **kwargs) -> bool:
+            """Refresh the idle timestamp of the entry matching the given
+            args (key scheme matches ``cache_evict``). Returns True if the
+            entry exists."""
+            return cache.touch(_key(args, kwargs))
 
         def cache_evict_where(predicate) -> int:
             """Evict every cached entry whose key satisfies *predicate*.
@@ -937,6 +1080,8 @@ def closing_lru_cache(maxsize: Optional[int] = 128, lease: bool = True, pinned_p
 
         wrapper.cache_clear = cache.cache_clear
         wrapper.cache_evict = cache_evict
+        wrapper.cache_evict_and_close = cache_evict_and_close
+        wrapper.cache_touch = cache_touch
         wrapper.cache_evict_where = cache_evict_where
         wrapper.cache_evict_matching = cache_evict_matching
         wrapper.cache_await_closed = cache_await_closed

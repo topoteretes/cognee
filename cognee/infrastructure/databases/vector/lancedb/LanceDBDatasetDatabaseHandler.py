@@ -3,7 +3,7 @@ from uuid import UUID
 from typing import Optional
 
 from cognee.infrastructure.databases.vector.create_vector_engine import (
-    aevict_vector_engines_for_database,
+    vector_engine_cache,
 )
 from cognee.modules.users.models import User
 from cognee.modules.users.models import DatasetDatabase
@@ -50,12 +50,12 @@ class LanceDBDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
         # (in subprocess mode, a worker) that races the just-torn-down one.
         # Evict every cached engine for this database, wait for their
         # in-flight closes to finish (a close deferred behind an idle holder
-        # is not waited on; see aevict_vector_engines_for_database), then
+        # is not waited on; see vector_engine_cache.aevict_for_database), then
         # remove the on-disk store directly.
         # Server-backed handlers (e.g. PGVector) are different on purpose:
         # they drop the per-dataset database over a connection, so no file
         # handling applies there.
-        await aevict_vector_engines_for_database(dataset_database.vector_database_name)
+        await vector_engine_cache.aevict_for_database(dataset_database.vector_database_name)
 
         databases_directory_path = os.path.dirname(dataset_database.vector_database_url)
         file_storage = get_file_storage(databases_directory_path)

@@ -93,17 +93,19 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
         # Resolve effective pool_args for any new PGVector engine we create:
         # 1. Explicit VECTOR_POOL_ARGS always wins.
-        # 2. When access control is on, each dataset gets its own engine — use a small default
-        #    to avoid connection fan-out (N datasets × pool_size).
-        # 3. Otherwise inherit the relational pool config.
+        # 2. Then the relational POOL_ARGS, when configured — an operator who
+        #    sized the pool explicitly outranks our built-in default.
+        # 3. Otherwise, when access control is on, each dataset gets its own
+        #    engine — use a small default to avoid connection fan-out
+        #    (N datasets × pool_size).
         if vector_config.vector_pool_args is not None:
             effective_pool_args = dict(vector_config.vector_pool_args)
+        elif relational_config.pool_args:
+            effective_pool_args = dict(relational_config.pool_args)
         elif backend_access_control_enabled():
             effective_pool_args = _ACCESS_CONTROL_DEFAULT_POOL_ARGS
         else:
-            effective_pool_args = (
-                dict(relational_config.pool_args) if relational_config.pool_args else {}
-            )
+            effective_pool_args = {}
 
         # A per-dataset PGVector engine may connect to managed
         # Postgres (Neon) which requires SSL. Reuse the relational connect_args
@@ -605,9 +607,12 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             return None
 
         async with self._get_write_lock(collection_name):
+            # Resolve the table BEFORE opening the session. get_table() checks out
+            # its own connection; doing it inside the session would hold two pooled
+            # connections at once and deadlock the pool under concurrency (same
+            # class as #4197). Mirrors retrieve()/search().
+            PGVectorDataPoint = await self.get_table(collection_name)
             async with self.get_async_session() as session:
-                PGVectorDataPoint = await self.get_table(collection_name)
-
                 results = None
                 if not data_point_ids:
                     results = await session.execute(

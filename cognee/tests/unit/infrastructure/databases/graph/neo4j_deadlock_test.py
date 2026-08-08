@@ -59,9 +59,7 @@ async def test_database_unavailable_retry_succeeds():
 @pytest.mark.asyncio
 async def test_database_unavailable_exhausts_retries():
     """DatabaseUnavailable should re-raise once max_retries is exhausted."""
-    mock_function = AsyncMock(
-        side_effect=[DatabaseUnavailable(), DatabaseUnavailable()]
-    )
+    mock_function = AsyncMock(side_effect=[DatabaseUnavailable(), DatabaseUnavailable()])
 
     wrapped_function = deadlock_retry(max_retries=1)(mock_function)
 
@@ -78,9 +76,7 @@ async def test_database_unavailable_retries_match_neo4j_error():
     while Neo4jError used > max_retries. Both now use > max_retries.
     """
     # With max_retries=2, we should be able to fail twice and succeed on the 3rd attempt.
-    mock_function = AsyncMock(
-        side_effect=[DatabaseUnavailable(), DatabaseUnavailable(), True]
-    )
+    mock_function = AsyncMock(side_effect=[DatabaseUnavailable(), DatabaseUnavailable(), True])
 
     wrapped_function = deadlock_retry(max_retries=2)(mock_function)
 
