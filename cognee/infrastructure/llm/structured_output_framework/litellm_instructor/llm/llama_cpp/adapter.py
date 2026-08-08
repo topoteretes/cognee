@@ -225,5 +225,11 @@ class LlamaCppAPIAdapter(LLMInterface):
     async def create_transcript(self, input: str, **kwargs: Any) -> TranscriptionReturnType:
         raise NotImplementedError
 
-    async def transcribe_image(self, input: str, **kwargs: Any) -> str:
+    async def transcribe_image(
+        self,
+        input: str,
+        prompt: str | None = None,
+        max_completion_tokens: int | None = None,
+        reasoning_effort: str | None = None,
+    ) -> str:
         raise NotImplementedError
