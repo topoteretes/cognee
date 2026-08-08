@@ -27,12 +27,15 @@ STATUS_REVOKED = "revoked"
 
 
 class CrossUserConflictError(Exception):
-    """A different user already holds an active connection for this external account.
+    """A different owner already holds an active connection for this external account.
 
-    A workspace maps to exactly one user (UNIQUE(provider,
+    An external account maps to exactly one owner (UNIQUE(provider,
     provider_account_id)). Silently reassigning it on reconnect would let one
-    user take over another's connection with no trace — so we refuse and let
+    owner take over another's connection with no trace — so we refuse and let
     the original owner disconnect first.
+
+    "Owner" is ``workspace_id`` when the caller passes one to
+    :func:`upsert_credential`, otherwise ``user_id`` — see that function.
     """
 
 
@@ -42,6 +45,7 @@ async def upsert_credential(
     user_id: UUID,
     provider_account_id: str,
     token_payload: dict[str, Any],
+    workspace_id: Optional[UUID] = None,
     account_label: Optional[str] = None,
     auth_type: str = "oauth2",
     scopes: Optional[str] = None,
@@ -50,13 +54,20 @@ async def upsert_credential(
 ) -> IntegrationCredential:
     """Insert or replace the credential for a ``(provider, provider_account_id)``.
 
-    Keyed on the external account, not the user. A reconnect by the **same**
-    user takes the existing row over (a token refresh, matching the
+    Keyed on the external account, not the owner. A reconnect by the **same**
+    owner takes the existing row over (a token refresh, matching the
     providers' invalidate-on-reinstall behavior). A reconnect by a **different**
-    user while the current one is still active raises
+    owner while the current one is still active raises
     :class:`CrossUserConflictError` rather than silently stealing the
-    workspace — the original owner must disconnect (or the account be revoked)
-    first.
+    connection — the original owner must disconnect (or the account be
+    revoked) first.
+
+    ``workspace_id`` is optional and defaults to ``None``, which reproduces
+    the original single-user contract exactly: ``user_id`` is the owner, and
+    conflicts are compared on it. Pass ``workspace_id`` when several users
+    share one connection (a cognee-hosted multi-user workspace, or a
+    downstream layer's own tenant concept) — it then becomes the owner/
+    conflict key instead, while ``user_id`` still records who connected it.
     """
     ciphertext, nonce, encryption_version, key_id = encrypt_credentials(token_payload)
 
@@ -70,19 +81,20 @@ async def upsert_credential(
         )
         credential = result.scalar_one_or_none()
 
-        if (
-            credential is not None
-            and credential.status == STATUS_ACTIVE
-            and credential.user_id != user_id
-        ):
-            logger.warning(
-                "Refused %s reconnect: account %s already active for user %s, not %s",
-                provider,
-                provider_account_id,
-                credential.user_id,
-                user_id,
+        if credential is not None and credential.status == STATUS_ACTIVE:
+            existing_owner = (
+                credential.workspace_id if workspace_id is not None else credential.user_id
             )
-            raise CrossUserConflictError(provider_account_id)
+            new_owner = workspace_id if workspace_id is not None else user_id
+            if existing_owner != new_owner:
+                logger.warning(
+                    "Refused %s reconnect: account %s already active for owner %s, not %s",
+                    provider,
+                    provider_account_id,
+                    existing_owner,
+                    new_owner,
+                )
+                raise CrossUserConflictError(provider_account_id)
 
         if credential is None:
             credential = IntegrationCredential(
@@ -91,6 +103,7 @@ async def upsert_credential(
             db.add(credential)
 
         credential.user_id = user_id
+        credential.workspace_id = workspace_id
         credential.account_label = account_label
         credential.auth_type = auth_type
         credential.scopes = scopes
@@ -139,6 +152,30 @@ async def get_active_credential_for_user(
             select(IntegrationCredential)
             .where(
                 IntegrationCredential.user_id == user_id,
+                IntegrationCredential.provider == provider,
+                IntegrationCredential.status == STATUS_ACTIVE,
+            )
+            .order_by(IntegrationCredential.created_at.desc())
+        )
+        return result.scalars().first()
+
+
+async def get_active_credential_for_workspace(
+    workspace_id: UUID, provider: str
+) -> Optional[IntegrationCredential]:
+    """The workspace's active connection for a provider.
+
+    Mirrors :func:`get_active_credential_for_user` for the ``workspace_id``
+    owner dimension — use this instead when the connection was upserted with
+    a ``workspace_id`` (several users sharing one connection), since
+    ``user_id`` on that row is only who connected it, not the owner.
+    """
+    engine = get_relational_engine()
+    async with engine.get_async_session() as db:
+        result = await db.execute(
+            select(IntegrationCredential)
+            .where(
+                IntegrationCredential.workspace_id == workspace_id,
                 IntegrationCredential.provider == provider,
                 IntegrationCredential.status == STATUS_ACTIVE,
             )

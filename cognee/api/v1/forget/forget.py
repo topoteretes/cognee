@@ -9,6 +9,10 @@ from cognee.modules.observability import (
     COGNEE_DATASET_NAME,
     COGNEE_FORGET_TARGET,
     COGNEE_RESULT_COUNT,
+    MEMORY_SYSTEM,
+    MEMORY_OPERATION,
+    record_operation_duration,
+    increment_items_deleted,
 )
 
 logger = get_logger("forget")
@@ -96,7 +100,13 @@ async def forget(
         },
     )
 
-    with new_span("cognee.api.forget") as span:
+    import time as _time
+
+    _forget_start_ns = _time.monotonic_ns()
+
+    with new_span("memory.delete") as span:
+        span.set_attribute(MEMORY_SYSTEM, "cognee")
+        span.set_attribute(MEMORY_OPERATION, "delete")
         span.set_attribute(COGNEE_FORGET_TARGET, target)
         if dataset_ref:
             span.set_attribute(COGNEE_DATASET_NAME, str(dataset_ref))
@@ -134,7 +144,12 @@ async def forget(
         # would try to create a dataset_database row for a non-existent dataset).
         if everything:
             result = await _forget_everything(user)
-            span.set_attribute(COGNEE_RESULT_COUNT, result.get("datasets_removed", 0))
+            _removed = result.get("datasets_removed", 0)
+            span.set_attribute(COGNEE_RESULT_COUNT, _removed)
+            _duration_ms = (_time.monotonic_ns() - _forget_start_ns) / 1_000_000
+            _attrs = {"memory.system": "cognee", "memory.operation": "delete"}
+            record_operation_duration(_duration_ms, _attrs)
+            increment_items_deleted(_removed, _attrs)
             return result
 
         # All remaining operations are scoped to a single dataset.

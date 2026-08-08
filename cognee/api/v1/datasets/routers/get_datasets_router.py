@@ -118,7 +118,7 @@ def get_datasets_router() -> APIRouter:
         - **owner_id**: ID of the dataset owner
 
         ## Error Codes
-        - **418 I'm a teapot**: Error retrieving datasets
+        - **500 Internal Server Error**: Error retrieving datasets
         """
         send_telemetry(
             "Datasets API Endpoint Invoked",
@@ -136,7 +136,7 @@ def get_datasets_router() -> APIRouter:
         except Exception as error:
             logger.error(f"Error retrieving datasets: {str(error)}")
             raise HTTPException(
-                status_code=status.HTTP_418_IM_A_TEAPOT,
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Error retrieving datasets: {str(error)}",
             ) from error
 
@@ -166,7 +166,7 @@ def get_datasets_router() -> APIRouter:
         - **owner_id**: ID of the dataset owner
 
         ## Error Codes
-        - **418 I'm a teapot**: Error creating dataset
+        - **500 Internal Server Error**: Error creating dataset
         """
         send_telemetry(
             "Datasets API Endpoint Invoked",
@@ -189,7 +189,7 @@ def get_datasets_router() -> APIRouter:
         except Exception as error:
             logger.error(f"Error creating dataset: {str(error)}")
             raise HTTPException(
-                status_code=status.HTTP_418_IM_A_TEAPOT,
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Error creating dataset: {str(error)}",
             ) from error
 
@@ -380,10 +380,12 @@ def get_datasets_router() -> APIRouter:
         # Verify user has permission to read dataset
         dataset = await get_authorized_existing_datasets([dataset_id], "read", user)
 
-        if dataset is None:
+        if not dataset:
             return JSONResponse(
                 status_code=404,
-                content=ErrorResponseDTO(f"Dataset ({str(dataset_id)}) not found."),
+                content=ErrorResponseDTO(
+                    message=f"Dataset ({str(dataset_id)}) not found."
+                ).model_dump(),
             )
 
         dataset_id = dataset[0].id
@@ -485,7 +487,11 @@ def get_datasets_router() -> APIRouter:
 
             return datasets_statuses
         except Exception as error:
-            return JSONResponse(status_code=409, content={"error": str(error)})
+            logger.error("Error retrieving dataset statuses: %s", error)
+            return JSONResponse(
+                status_code=409,
+                content={"error": "Unable to retrieve dataset statuses."},
+            )
 
     @router.get("/graph-summary", response_model=List[DatasetGraphSummaryDTO])
     async def get_datasets_graph_summary(
@@ -691,7 +697,7 @@ def get_datasets_router() -> APIRouter:
         # Verify user has permission to read dataset
         dataset = await get_authorized_existing_datasets([dataset_id], "read", user)
 
-        if dataset is None:
+        if not dataset:
             return JSONResponse(
                 status_code=404, content={"detail": f"Dataset ({dataset_id}) not found."}
             )

@@ -470,19 +470,17 @@ def get_permissions_router() -> APIRouter:
         user: User = Depends(get_authenticated_user),
     ):
         """
-        List all roles in a tenant.
+        List roles in a tenant.
 
-        The authenticated user must be the tenant owner or have user-management
-        permission (e.g. Admin role) in the tenant.
+        Callers who are the tenant owner or have user-management permission (e.g.
+        Admin role) see every role in the tenant. Other callers see only the roles
+        they are a member of.
 
         ## Path Parameters
         - **tenant_id** (UUID): The UUID of the tenant (find yours via GET /api/v1/permissions/tenants/me)
 
         ## Response
         Returns a JSON list of roles: [{"id", "name", "description", "user_count"}].
-
-        ## Error Codes
-        - **403 Forbidden**: Caller lacks user-management permission in the tenant
         """
         role_list = await method_get_tenant_roles(tenant_id=tenant_id, user=user)
 
@@ -497,7 +495,8 @@ def get_permissions_router() -> APIRouter:
         """
         List the users assigned to a role.
 
-        The authenticated user must have user-management permission in the tenant.
+        Visible to members of the role itself, and to callers with user-management
+        permission in the tenant.
 
         ## Path Parameters
         - **tenant_id** (UUID): The UUID of the tenant
@@ -507,7 +506,8 @@ def get_permissions_router() -> APIRouter:
         Returns a JSON list of users: [{"id", "name"}] (name is the user's email).
 
         ## Error Codes
-        - **403 Forbidden**: Caller lacks user-management permission in the tenant
+        - **403 Forbidden**: Caller is not a member of the role and lacks user-management permission
+        - **404 Not Found**: The role does not exist in this tenant
         """
         user_list = await method_get_users_in_roles(tenant_id=tenant_id, role_id=role_id, user=user)
         return JSONResponse(status_code=200, content=user_list)

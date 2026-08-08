@@ -91,8 +91,8 @@ class _GraphEngineHandle:
     CI) — so a fresh engine relies on the worker's open-retry
     (``SUBPROCESS_OPEN_LOCK_RETRIES``) for the overlap. Once a close is
     actually in flight, creators wait for it deterministically; the primary
-    multi-tenant teardown path (``dataset_queue._teardown_subprocess_engines``)
-    also ``await``s ``engine.close()`` to completion before any re-creation.
+    multi-tenant teardown path (``dataset_queue._evict_subprocess_engines``)
+    routes through plain cache eviction, so its closes register here too.
     """
 
     __slots__ = ("_config", "_last_initialized_id", "_pinned")
@@ -282,7 +282,7 @@ async def acreate_graph_engine(**kwargs):
     return await _create_graph_engine.acall(*_resolve_graph_engine_args(kwargs))
 
 
-def evict_graph_engine(**kwargs) -> bool:
+def evict_graph_engine(force_close: bool = False, **kwargs) -> bool:
     """Evict a cached graph engine entry created via ``create_graph_engine``.
 
     Mirrors ``create_graph_engine``'s normalization so the cache key
@@ -290,11 +290,22 @@ def evict_graph_engine(**kwargs) -> bool:
     adapter (and trigger its ``close()``) without disturbing the rest
     of the cache.
 
+    ``force_close=True`` closes the adapter immediately even while idle
+    holders still pin its proxy (they re-resolve on next use) — the
+    dataset-queue teardown path, where the worker must exit and release
+    its file locks promptly. Default keeps lease semantics: the close
+    waits for the last holder.
+
     Returns True if the entry existed.
     """
     normalized = _normalize_optional_create_graph_engine_params(kwargs)
     provider = _normalize_graph_database_provider(kwargs.get("graph_database_provider"))
-    return _create_graph_engine.cache_evict(
+    evict = (
+        _create_graph_engine.cache_evict_and_close
+        if force_close
+        else _create_graph_engine.cache_evict
+    )
+    return evict(
         provider,
         kwargs.get("graph_file_path"),
         normalized["graph_database_url"],
@@ -448,6 +459,8 @@ def _create_graph_engine(
             graph_database_allow_anonymous=graph_database_allow_anonymous,
         )
 
+    # DEMO: Postgres as a graph store is not production-ready — use a graph-native
+    # backend (Kuzu, Neo4j) for production. See PostgresAdapter's docstring for details.
     elif graph_database_provider == "postgres":
         from cognee.context_global_variables import backend_access_control_enabled
 

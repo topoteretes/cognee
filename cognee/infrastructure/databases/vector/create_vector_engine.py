@@ -113,14 +113,22 @@ def create_vector_engine(
     )
 
 
-def evict_vector_engine(**kwargs) -> bool:
+def evict_vector_engine(force_close: bool = False, **kwargs) -> bool:
     """Evict a cached vector engine entry created via ``create_vector_engine``.
 
     Mirrors ``create_vector_engine``'s normalization so the cache key
-    matches. Returns True if the entry existed.
+    matches. ``force_close=True`` closes the adapter immediately even while
+    idle holders still pin its proxy (they re-resolve on next use) — the
+    dataset-queue teardown path, where the worker must exit and release its
+    file locks promptly. Returns True if the entry existed.
     """
     normalized = _normalize_optional_create_vector_engine_params(kwargs)
-    return _create_vector_engine.cache_evict(
+    evict = (
+        _create_vector_engine.cache_evict_and_close
+        if force_close
+        else _create_vector_engine.cache_evict
+    )
+    return evict(
         kwargs.get("vector_db_provider", ""),
         kwargs.get("vector_db_url", ""),
         kwargs.get("vector_db_name", ""),
