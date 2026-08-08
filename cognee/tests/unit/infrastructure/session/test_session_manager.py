@@ -16,31 +16,20 @@ class TestComposeSessionPrompt:
     inner completion method. These must stay byte-identical to the pre-extraction
     behavior, so changing them means deliberately changing every session prompt."""
 
-    GRAPH_PREFIX = "Background knowledge from the knowledge graph:\n"
-
-    def test_all_three_layers_order_and_joiners(self):
-        result = compose_session_prompt("BLOCK", "GRAPH", "HISTORY")
-        assert result == "BLOCK\n\n" + self.GRAPH_PREFIX + "GRAPH\n\nHISTORY"
+    def test_block_precedes_history(self):
+        result = compose_session_prompt("BLOCK", "HISTORY")
+        assert result == "BLOCK\n\nHISTORY"
 
     def test_history_only(self):
-        assert compose_session_prompt("", "", "HISTORY") == "HISTORY"
-
-    def test_graph_and_history(self):
-        assert compose_session_prompt("", "GRAPH", "HISTORY") == (
-            self.GRAPH_PREFIX + "GRAPH\n\nHISTORY"
-        )
-
-    def test_block_and_history(self):
-        assert compose_session_prompt("BLOCK", "", "HISTORY") == "BLOCK\n\nHISTORY"
+        assert compose_session_prompt("", "HISTORY") == "HISTORY"
 
     def test_empty_history_keeps_trailing_separators(self):
         # Pre-extraction behavior prepended onto a possibly-empty history, leaving a
         # trailing "\n\n" when history is empty. Preserved exactly.
-        assert compose_session_prompt("BLOCK", "", "") == "BLOCK\n\n"
-        assert compose_session_prompt("", "GRAPH", "") == self.GRAPH_PREFIX + "GRAPH\n\n"
+        assert compose_session_prompt("BLOCK", "") == "BLOCK\n\n"
 
     def test_all_empty(self):
-        assert compose_session_prompt("", "", "") == ""
+        assert compose_session_prompt("", "") == ""
 
 
 class TestValidateSessionParams:
@@ -1201,3 +1190,136 @@ class TestSessionManager:
         qa_kw = mock_cache.create_qa_entry.call_args.kwargs
         assert qa_kw["feedback_text"] is None
         assert qa_kw["feedback_score"] is None
+
+
+class TestSessionContextEntryValidation:
+    """Validation and fail-open behavior of the session-context entry methods.
+
+    Invalid parameters raise SessionParameterValidationError, in parity with
+    add_qa and the rest of SessionManager; infrastructure/cache failures stay
+    fail-open (False / [])."""
+
+    @pytest.fixture
+    def mock_cache(self):
+        """Mock cache engine for the session-context entry methods."""
+        cache = MagicMock()
+        cache.create_session_context_entry = AsyncMock(return_value=True)
+        cache.get_session_context_entries = AsyncMock(return_value=[])
+        cache.update_session_context_entry = AsyncMock(return_value=True)
+        cache.delete_session_context = AsyncMock(return_value=True)
+        return cache
+
+    @pytest.fixture
+    def sm(self, mock_cache):
+        """SessionManager with mocked cache."""
+        return SessionManager(cache_engine=mock_cache)
+
+    @pytest.fixture
+    def sm_failing_cache(self, mock_cache):
+        """SessionManager whose cache raises a runtime error on every context call."""
+        mock_cache.create_session_context_entry.side_effect = RuntimeError("cache down")
+        mock_cache.get_session_context_entries.side_effect = RuntimeError("cache down")
+        mock_cache.update_session_context_entry.side_effect = RuntimeError("cache down")
+        mock_cache.delete_session_context.side_effect = RuntimeError("cache down")
+        return SessionManager(cache_engine=mock_cache)
+
+    @pytest.mark.asyncio
+    async def test_create_session_context_entry_invalid_params_raises(self, sm, mock_cache):
+        """create_session_context_entry raises on invalid user_id or session_id."""
+        with pytest.raises(SessionParameterValidationError):
+            await sm.create_session_context_entry(
+                user_id="", entry_dump={"kind": "context"}, session_id="s1"
+            )
+        with pytest.raises(SessionParameterValidationError):
+            await sm.create_session_context_entry(
+                user_id="u1", entry_dump={"kind": "context"}, session_id="  "
+            )
+        mock_cache.create_session_context_entry.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_get_session_context_entries_invalid_params_raises(self, sm, mock_cache):
+        """get_session_context_entries raises on invalid user_id or session_id."""
+        with pytest.raises(SessionParameterValidationError):
+            await sm.get_session_context_entries(user_id="", session_id="s1")
+        with pytest.raises(SessionParameterValidationError):
+            await sm.get_session_context_entries(user_id="u1", session_id="  ")
+        mock_cache.get_session_context_entries.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_update_session_context_entry_invalid_params_raises(self, sm, mock_cache):
+        """update_session_context_entry raises on invalid user_id or session_id."""
+        with pytest.raises(SessionParameterValidationError):
+            await sm.update_session_context_entry(
+                user_id="", entry_id="e1", merge={}, session_id="s1"
+            )
+        with pytest.raises(SessionParameterValidationError):
+            await sm.update_session_context_entry(
+                user_id="u1", entry_id="e1", merge={}, session_id="  "
+            )
+        mock_cache.update_session_context_entry.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_delete_session_context_invalid_params_raises(self, sm, mock_cache):
+        """delete_session_context raises on invalid user_id or session_id."""
+        with pytest.raises(SessionParameterValidationError):
+            await sm.delete_session_context(user_id="", session_id="s1")
+        with pytest.raises(SessionParameterValidationError):
+            await sm.delete_session_context(user_id="u1", session_id="  ")
+        mock_cache.delete_session_context.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_invalid_params_raise_even_when_cache_unavailable(self):
+        """Validation runs before the availability check, matching add_qa's ordering."""
+        sm_unavailable = SessionManager(cache_engine=None)
+        with pytest.raises(SessionParameterValidationError):
+            await sm_unavailable.create_session_context_entry(
+                user_id="", entry_dump={"kind": "context"}, session_id="s1"
+            )
+        with pytest.raises(SessionParameterValidationError):
+            await sm_unavailable.get_session_context_entries(user_id="", session_id="s1")
+
+    @pytest.mark.asyncio
+    async def test_create_session_context_entry_fail_open_on_cache_error(self, sm_failing_cache):
+        """Cache runtime failures stay fail-open: returns False, never raises."""
+        result = await sm_failing_cache.create_session_context_entry(
+            user_id="u1", entry_dump={"kind": "context"}, session_id="s1"
+        )
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_get_session_context_entries_fail_open_on_cache_error(self, sm_failing_cache):
+        """Cache runtime failures stay fail-open: returns [], never raises."""
+        result = await sm_failing_cache.get_session_context_entries(user_id="u1", session_id="s1")
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_update_session_context_entry_fail_open_on_cache_error(self, sm_failing_cache):
+        """Cache runtime failures stay fail-open: returns False, never raises."""
+        result = await sm_failing_cache.update_session_context_entry(
+            user_id="u1", entry_id="e1", merge={"content": "x"}, session_id="s1"
+        )
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_delete_session_context_fail_open_on_cache_error(self, sm_failing_cache):
+        """Cache runtime failures stay fail-open: returns False, never raises."""
+        result = await sm_failing_cache.delete_session_context(user_id="u1", session_id="s1")
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_validation_error_parity_with_add_qa(self, sm):
+        """The context methods raise the same error add_qa raises for the same bad params."""
+        with pytest.raises(SessionParameterValidationError):
+            await sm.add_qa(user_id=" ", question="Q", context="C", answer="A", session_id="s1")
+        with pytest.raises(SessionParameterValidationError):
+            await sm.create_session_context_entry(
+                user_id=" ", entry_dump={"kind": "context"}, session_id="s1"
+            )
+        with pytest.raises(SessionParameterValidationError):
+            await sm.get_session_context_entries(user_id=" ", session_id="s1")
+        with pytest.raises(SessionParameterValidationError):
+            await sm.update_session_context_entry(
+                user_id=" ", entry_id="e1", merge={}, session_id="s1"
+            )
+        with pytest.raises(SessionParameterValidationError):
+            await sm.delete_session_context(user_id=" ", session_id="s1")

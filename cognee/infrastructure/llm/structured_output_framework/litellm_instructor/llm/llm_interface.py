@@ -44,7 +44,7 @@ class LLMInterface(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    async def create_transcript(self, input: str) -> TranscriptionReturnType | None:
+    async def create_transcript(self, input: str, **kwargs: Any) -> TranscriptionReturnType | None:
         """
         Generate an audio transcript from a user query.
 
@@ -55,6 +55,9 @@ class LLMInterface(ABC):
         Parameters:
         -----------
             - input: The path to the audio file that needs to be transcribed.
+            - kwargs: Optional provider-specific transcription options (e.g. response
+              format or timestamp granularities). Implementations that do not support
+              them should accept and ignore them rather than raise.
 
         Returns:
         --------

@@ -7,6 +7,7 @@ from cognee.modules.pipelines import run_pipeline
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.users.models import User
 from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
+from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 
 logger = get_logger()
 
@@ -14,7 +15,7 @@ logger = get_logger()
 async def run_custom_pipeline(
     tasks: Union[List[Task], List[str]] = None,
     data: Any = None,
-    dataset: Union[str, UUID] = "main_dataset",
+    dataset: Union[str, UUID] = DEFAULT_DATASET_NAME,
     user: User = None,
     vector_db_config: Optional[dict] = None,
     graph_db_config: Optional[dict] = None,
@@ -24,6 +25,7 @@ async def run_custom_pipeline(
     run_in_background: bool = False,
     pipeline_name: str = "custom_pipeline",
     data_cache: bool = False,
+    skip_connection_test: bool = False,
 ):
     """
     Custom pipeline in Cognee, can work with already built graphs. Data needs to be provided which can be processed
@@ -54,6 +56,9 @@ async def run_custom_pipeline(
                           If False, waits for completion before returning.
                           Background mode recommended for large datasets (>100MB).
                           Use pipeline_run_id from return value to monitor progress.
+        skip_connection_test: If True, skip the first-run LLM/embedding connection checks
+                          for this pipeline. Use for pipelines whose tasks perform no LLM
+                          or embedding calls (e.g. the deterministic code graph pipeline).
     """
 
     custom_tasks = [
@@ -77,4 +82,5 @@ async def run_custom_pipeline(
         data_per_batch=data_per_batch,
         pipeline_name=pipeline_name,
         data_cache=data_cache,
+        skip_connection_test=skip_connection_test,
     )

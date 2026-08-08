@@ -1,3 +1,4 @@
+import types
 from datetime import datetime
 from enum import Enum
 from typing import Union, get_args, get_origin
@@ -25,7 +26,9 @@ def create_dynamic_baml_type(tb, baml_model, pydantic_model):
         # ------------------------------------------------------------------
         # 1. Optional / Union  ------------------------------------------------
         # ------------------------------------------------------------------
-        if origin is Union:
+        # `typing.Union[...]` has origin `typing.Union`, but PEP 604 syntax
+        # (`X | None`) has origin `types.UnionType` — handle both.
+        if origin is Union or origin is types.UnionType:
             non_none_args = [t for t in args if t is not type(None)]
 
             # Optional[T]  ⇢  exactly (T, NoneType)

@@ -1,4 +1,6 @@
-# Long-running, heavy and resource-consuming tests for release validation
+# Long-running, heavy and resource-consuming tests for release validation.
+# Runs automatically on PRs targeting main (the dev -> main promotion) and manually
+# via workflow_dispatch. Fork PRs are skipped (no access to secrets).
 name: Release Test Workflow
 
 permissions:
@@ -13,25 +15,35 @@ on:
         default: local
         type: string
         description: "Pypi-compatible version of cognee to use. For example, 0.5.2.dev0. `local` (default) - Installing Cognee from local source"
+  pull_request:
+    branches:
+      - main
+
+concurrency:
+  group: release-tests-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
 
   mcp-test:
     name: MCP Tests
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository }}
     uses: ./.github/workflows/test_mcp.yml
     secrets: inherit
     with:
-      cognee_version: ${{ inputs.cognee_version }}
+      cognee_version: ${{ inputs.cognee_version || 'local' }}
 
   cli-test:
     name: CLI Tests
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository }}
     uses: ./.github/workflows/cli_tests.yml
     secrets: inherit
     with:
-      cognee_version: ${{ inputs.cognee_version }}
+      cognee_version: ${{ inputs.cognee_version || 'local' }}
 
   cot-retriever-test:
     name: COT Retriever Test
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out code
@@ -58,6 +70,122 @@ jobs:
           LLM_ARGS: ${{ secrets.LLM_ARGS }}
         run: |
           uv run pytest cognee/tests/integration/retrieval/test_graph_completion_retriever_cot.py -v --timeout=300
+
+  # 10 parallel users against a live HTTP server with access control enabled:
+  # per-user dataset isolation, add/cognify/search verification via sentinel chunks
+  # (LLM-free CHUNKS search), delete + recreate, forget + recreate-same-name.
+  multi-user-e2e-default:
+    name: Multi-User Release E2E (default file-based DBs)
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Install Python
+        run: uv python install
+
+      - name: Install dependencies
+        run: |
+          if [ "${{ inputs.cognee_version }}" = "local" ] || [ -z "${{ inputs.cognee_version }}" ]; then
+            uv sync --locked --all-extras
+          else
+            uv sync --locked --all-extras
+            uv pip install cognee==${{ inputs.cognee_version }}
+          fi
+
+      - name: Run multi-user release E2E test
+        env:
+          ENV: 'dev'
+          COGNEE_SKIP_CONNECTION_TEST: 'true'
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_ARGS: ${{ secrets.LLM_ARGS }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_DIMENSIONS: 300
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+        run: uv run python ./cognee/tests/test_release_multi_user_e2e.py
+
+  multi-user-e2e-postgres:
+    name: Multi-User Release E2E (Postgres graph + PGVector + Postgres)
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    services:
+      postgres:
+        image: ghcr.io/topoteretes/pgvector:pg17
+        credentials:
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+        env:
+          POSTGRES_USER: cognee
+          POSTGRES_PASSWORD: cognee
+          POSTGRES_DB: cognee_db
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Install Python
+        run: uv python install
+
+      - name: Install dependencies
+        run: |
+          if [ "${{ inputs.cognee_version }}" = "local" ] || [ -z "${{ inputs.cognee_version }}" ]; then
+            uv sync --locked --all-extras
+          else
+            uv sync --locked --all-extras
+            uv pip install cognee==${{ inputs.cognee_version }}
+          fi
+
+      - name: Run multi-user release E2E test
+        env:
+          ENV: 'dev'
+          COGNEE_SKIP_CONNECTION_TEST: 'true'
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_ARGS: ${{ secrets.LLM_ARGS }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_DIMENSIONS: 300
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          DB_PROVIDER: 'postgres'
+          DB_NAME: 'cognee_db'
+          DB_HOST: '127.0.0.1'
+          DB_PORT: 5432
+          DB_USERNAME: cognee
+          DB_PASSWORD: cognee
+          VECTOR_DB_PROVIDER: 'pgvector'
+          VECTOR_DB_NAME: 'cognee_db'
+          VECTOR_DB_HOST: '127.0.0.1'
+          VECTOR_DB_PORT: 5432
+          VECTOR_DB_USERNAME: cognee
+          VECTOR_DB_PASSWORD: cognee
+          VECTOR_DATASET_DATABASE_HANDLER: 'pgvector'
+          GRAPH_DATABASE_PROVIDER: 'postgres'
+          GRAPH_DATABASE_NAME: 'cognee_db'
+          GRAPH_DATABASE_HOST: '127.0.0.1'
+          GRAPH_DATABASE_PORT: 5432
+          GRAPH_DATABASE_USERNAME: cognee
+          GRAPH_DATABASE_PASSWORD: cognee
+          GRAPH_DATASET_DATABASE_HANDLER: 'postgres_graph'
+        run: uv run python ./cognee/tests/test_release_multi_user_e2e.py
 
   load-tests:
     if: false

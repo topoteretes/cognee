@@ -289,6 +289,7 @@ class TestCognifyCommandEdgeCases:
             chunker=TextChunker,
             run_in_background=False,
             chunks_per_batch=None,
+            dry_run=False,
         )
 
     @patch("cognee.cli.commands.cognify_command.asyncio.run", side_effect=_mock_run)
@@ -393,6 +394,7 @@ class TestCognifyCommandEdgeCases:
             chunker=TextChunker,
             run_in_background=False,
             chunks_per_batch=None,
+            dry_run=False,
         )
 
 
@@ -509,7 +511,7 @@ class TestConfigCommandEdgeCases:
 
         # Should handle the exception gracefully
         command.execute(args)
-        mock_cognee.config.get.assert_called_once_with("nonexistent_key")
+        mock_cognee.config.get.assert_called_once_with("nonexistent_key", reveal_secrets=False)
 
     @patch("builtins.__import__")
     def test_config_set_complex_json_value(self, mock_import):
@@ -526,7 +528,7 @@ class TestConfigCommandEdgeCases:
 
         command.execute(args)
         mock_cognee.config.set.assert_called_once_with(
-            "complex_config", complex_json_expected_value
+            "complex_config", complex_json_expected_value, persist=True
         )
 
     @patch("builtins.__import__")
@@ -542,7 +544,7 @@ class TestConfigCommandEdgeCases:
         args = argparse.Namespace(config_action="set", key="test_key", value=invalid_json)
 
         command.execute(args)
-        mock_cognee.config.set.assert_called_once_with("test_key", invalid_json)
+        mock_cognee.config.set.assert_called_once_with("test_key", invalid_json, persist=True)
 
     @patch("cognee.cli.commands.config_command.fmt.confirm")
     def test_config_unset_unknown_key(self, mock_confirm):

@@ -12,6 +12,11 @@ class BaseRetriever(ABC):
     3. get_completion: Generate a final response with the help of an LLM using the context and original query.
     """
 
+    # Deterministic retrievers can opt out of conversational session analysis.
+    # That analysis may call an LLM before retrieval, which is not appropriate
+    # for search types whose contract is explicitly non-generative.
+    supports_session_turn_preparation = True
+
     @abstractmethod
     async def get_retrieved_objects(self, query: Optional[str], query_batch: Optional[str]) -> Any:
         """

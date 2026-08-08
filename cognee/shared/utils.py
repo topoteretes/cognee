@@ -27,6 +27,19 @@ _DEFAULT_TELEMETRY_API_KEY_TRACKING_SALT = b"cognee.telemetry.api-key-tracking.v
 _TELEMETRY_API_KEY_TRACKING_ITERATIONS = 100_000
 
 
+def as_uuid(value) -> UUID | None:
+    """Coerce ``value`` to a UUID, or return None when it is not one.
+
+    The tolerant counterpart to ``UUID(str(value))`` for identifiers that
+    arrive as UUIDs, strings, or context values that may legitimately hold
+    something else (e.g. a dataset *name* in ``current_dataset_id``).
+    """
+    try:
+        return UUID(str(value))
+    except (ValueError, TypeError, AttributeError):
+        return None
+
+
 def create_secure_ssl_context() -> ssl.SSLContext:
     """
     Create a secure SSL context.
@@ -269,8 +282,13 @@ def send_telemetry(event_name: str, user_id: str | UUID, additional_properties: 
         },
     }
 
-    loop = asyncio.get_running_loop()
-    loop.create_task(_send_telemetry_request(payload))
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(_send_telemetry_request(payload))
+    except RuntimeError:
+        # No running event loop (shutdown, sync context, etc.) — telemetry is
+        # best-effort; dropping the event is better than crashing the caller.
+        pass
 
 
 def embed_logo(p: Any, layout_scale: float, logo_alpha: float, position: str):

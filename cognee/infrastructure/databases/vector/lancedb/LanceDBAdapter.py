@@ -1115,16 +1115,33 @@ class LanceDBAdapter(VectorDBInterface):
             ]
         )
 
+    # Ids per `IN (...)` delete predicate. Each `collection.delete` is a
+    # LanceDB commit that appends a table version, and manifest listing slows
+    # down as versions accumulate — a delete per id turns a 13k-id wipe into
+    # 13k increasingly slow commits (observed as a multi-hour "hang" during
+    # `forget(everything=True)`). Batching bounds both the commit count and
+    # the predicate size.
+    DELETE_PREDICATE_BATCH_SIZE = 1000
+
     async def delete_data_points(self, collection_name: str, data_point_ids: list[UUID]):
-        # Skip deletion if collection doesn't exist
+        # Idempotent: a missing collection (or empty id list) is a no-op.
         if not await self.has_collection(collection_name):
+            return
+        if not data_point_ids:
             return
 
         collection = await self.get_collection(collection_name)
 
-        # Delete one at a time to avoid commit conflicts
-        for data_point_id in data_point_ids:
-            await collection.delete(f"id = '{data_point_id}'")
+        # ids may be UUIDs or graph-computed deterministic strings; the stored
+        # `id` column is a str, so match by string and escape single quotes to
+        # keep the predicate injection-safe (mirrors create_data_points). The
+        # sequential batches cannot commit-conflict with each other, and a
+        # non-existent id no-ops.
+        for start in range(0, len(data_point_ids), self.DELETE_PREDICATE_BATCH_SIZE):
+            batch = data_point_ids[start : start + self.DELETE_PREDICATE_BATCH_SIZE]
+            escaped_ids = [str(data_point_id).replace("'", "''") for data_point_id in batch]
+            id_list = ", ".join(f"'{escaped_id}'" for escaped_id in escaped_ids)
+            await collection.delete(f"id IN ({id_list})")
 
     async def remove_belongs_to_set_tags(
         self,
