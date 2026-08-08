@@ -1468,3 +1468,40 @@ def test_proxied_method_exceptions_always_propagate_to_the_caller():
     engine = cache.get_or_create("k", _EngineWithBadMethod)
     with pytest.raises(RuntimeError, match="boom in engine usage"):
         engine.query()
+
+
+def test_evict_and_close_closes_despite_outstanding_proxy():
+    """evict_and_close is deliberate teardown: an idle holder pinning the
+    lease proxy must not defer the close (a deferred close keeps a worker
+    process — and its file locks — alive indefinitely)."""
+    cache = ClosingLRUCache(maxsize=8, lease=True)
+    value = _Closeable("held")
+    proxy = cache.get_or_create("k", lambda: value)
+
+    assert cache.evict_and_close("k") is True
+    assert value.closed is True, "close must not be deferred behind the live proxy"
+    assert cache.cache_info().currsize == 0
+
+    # The stray holder's proxy finalizer must not double-close.
+    value.closed = "closed-once"
+    del proxy
+    gc.collect()
+    assert value.closed == "closed-once"
+
+
+def test_evict_and_close_missing_key_returns_false():
+    cache = ClosingLRUCache(maxsize=8, lease=True)
+    assert cache.evict_and_close("absent") is False
+
+
+def test_decorator_cache_evict_and_close():
+    """Decorator exposure: key scheme matches cache_evict."""
+
+    @closing_lru_cache(maxsize=4, lease=True)
+    def create(name):
+        return _Closeable(name)
+
+    proxy = create("a")
+    assert create.cache_evict_and_close("a") is True
+    assert proxy.__wrapped__.closed is True
+    assert create.cache_evict_and_close("a") is False

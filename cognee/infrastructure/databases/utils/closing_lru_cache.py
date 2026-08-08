@@ -779,6 +779,52 @@ class ClosingLRUCache:
         self._detach_entry(entry)
         return True
 
+    def evict_and_close(self, key) -> bool:
+        """Remove *key* and close its value NOW, even while callers still hold
+        proxies.
+
+        For deliberate teardown (the dataset-queue release path): the worker
+        process must exit and release its on-disk file locks promptly, and an
+        idle holder — e.g. a test keeping an engine handle across pipeline
+        calls — would otherwise defer the close indefinitely, so the next
+        creation for the same database exhausts the worker's open-retry
+        against a lock that is never released. Holders of the now-dead value
+        re-resolve on next use (the engine handles' re-resolution path).
+
+        Capacity eviction must NOT use this — it would close a value that is
+        actively in use mid-call; plain :meth:`evict` defers for those.
+
+        The close is tracked in the pending-close registry (creators for the
+        same key wait for it) and, for subprocess-backed values, runs on the
+        dedicated close threads. Returns True if the entry was present.
+        """
+        with self._lock:
+            entry = self._cache.pop(key, None)
+        if entry is None:
+            return False
+
+        value_to_close = None
+        with entry._lock:
+            entry.in_cache = False
+            entry.close_requested = True
+            # Marking the entry closed under the lock makes a stray proxy
+            # finalizer firing later a no-op (no double close). The proxy ref
+            # itself must be held past the lock: if it is the last reference,
+            # dropping it runs the weakref finalizer, which re-enters
+            # ``proxy_released`` and deadlocks on ``entry._lock`` (same hazard
+            # as ``detach_from_cache``).
+            proxy_to_drop = entry.proxy
+            entry.proxy = None
+            if not entry.closed:
+                entry.closed = True
+                value_to_close = entry.value
+
+        # Outside the locks — close code can log or re-enter cache paths.
+        if value_to_close is not None:
+            self._track_close(entry.key, value_to_close)
+        del proxy_to_drop
+        return True
+
     def evict_where(self, predicate) -> int:
         """Remove every entry whose key satisfies *predicate* and request close.
 
@@ -864,6 +910,14 @@ def closing_lru_cache(maxsize: Optional[int] = 128, lease: bool = True, pinned_p
             """
             return cache.evict(_key(args, kwargs))
 
+        def cache_evict_and_close(*args, **kwargs) -> bool:
+            """Evict a single entry and close its value immediately, even if
+            callers still hold proxies — see ``ClosingLRUCache.evict_and_close``
+            for when this is (and is not) appropriate. Key scheme matches
+            ``cache_evict``. Returns True if the entry was present.
+            """
+            return cache.evict_and_close(_key(args, kwargs))
+
         def cache_evict_where(predicate) -> int:
             """Evict every cached entry whose key satisfies *predicate*.
 
@@ -937,6 +991,7 @@ def closing_lru_cache(maxsize: Optional[int] = 128, lease: bool = True, pinned_p
 
         wrapper.cache_clear = cache.cache_clear
         wrapper.cache_evict = cache_evict
+        wrapper.cache_evict_and_close = cache_evict_and_close
         wrapper.cache_evict_where = cache_evict_where
         wrapper.cache_evict_matching = cache_evict_matching
         wrapper.cache_await_closed = cache_await_closed
