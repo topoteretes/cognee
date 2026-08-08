@@ -31,7 +31,7 @@ class ImageLoader(LoaderInterface):
 
     @property
     def supported_extensions(self) -> list[str]:
-        """Supported text file extensions."""
+        """Supported image file extensions."""
         return [
             "png",
             "dwg",
@@ -56,7 +56,7 @@ class ImageLoader(LoaderInterface):
 
     @property
     def supported_mime_types(self) -> list[str]:
-        """Supported MIME types for text content."""
+        """Supported MIME types for image content."""
         return [
             "image/png",
             "image/vnd.dwg",
