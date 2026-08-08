@@ -326,13 +326,10 @@ def _create_vector_engine(
         )
 
 
-# Cache-management operations — mechanics shared with the graph engine via
+# Public cache-management API for vector engines: ``vector_engine_cache.evict``
+# / ``.touch`` / ``.is_cached`` / ``.evict_for_database`` /
+# ``.aevict_for_database``. Mechanics are shared with the graph engine via
 # EngineCacheOps; only the key knowledge above is vector-specific.
-_vector_engine_cache_ops = EngineCacheOps(
+vector_engine_cache = EngineCacheOps(
     _create_vector_engine, _vector_engine_key_args, "vector_db_name"
 )
-evict_vector_engine = _vector_engine_cache_ops.evict
-touch_vector_engine = _vector_engine_cache_ops.touch
-is_vector_engine_cached = _vector_engine_cache_ops.is_cached
-evict_vector_engines_for_database = _vector_engine_cache_ops.evict_for_database
-aevict_vector_engines_for_database = _vector_engine_cache_ops.aevict_for_database

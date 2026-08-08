@@ -219,7 +219,7 @@ def _resolve_graph_engine_args(params: dict) -> tuple:
     Shared by the sync (:func:`create_graph_engine`) and async
     (:func:`acreate_graph_engine`) entry points so both produce the *identical*
     cache key (the positional tuple) — and so it matches the key built by
-    ``evict_graph_engine`` / ``is_graph_engine_cached``.
+    ``graph_engine_cache`` (evict / is_cached / ...).
     """
     normalized = _normalize_optional_create_graph_engine_params(params)
     return (
@@ -286,7 +286,8 @@ async def acreate_graph_engine(**kwargs):
 def _graph_engine_key_args(kwargs) -> tuple:
     """Positional cache-key args for a ``create_graph_engine`` config dict,
     normalized exactly the way ``create_graph_engine`` normalizes them so the
-    key matches. Shared by ``evict_graph_engine`` / ``touch_graph_engine``."""
+    key matches. The single place this knowledge lives — every operation on
+    ``graph_engine_cache`` routes through it."""
     normalized = _normalize_optional_create_graph_engine_params(kwargs)
     provider = _normalize_graph_database_provider(kwargs.get("graph_database_provider"))
     return (
@@ -569,14 +570,10 @@ def _create_graph_engine(
     )
 
 
-# Cache-management operations (evict / touch / is-cached / by-database
-# evictions) — mechanics shared with the vector engine via EngineCacheOps;
-# only the key knowledge above is graph-specific.
-_graph_engine_cache_ops = EngineCacheOps(
+# Public cache-management API for graph engines: ``graph_engine_cache.evict``
+# / ``.touch`` / ``.is_cached`` / ``.evict_for_database`` /
+# ``.aevict_for_database``. Mechanics are shared with the vector engine via
+# EngineCacheOps; only the key knowledge above is graph-specific.
+graph_engine_cache = EngineCacheOps(
     _create_graph_engine, _graph_engine_key_args, "graph_database_name"
 )
-evict_graph_engine = _graph_engine_cache_ops.evict
-touch_graph_engine = _graph_engine_cache_ops.touch
-is_graph_engine_cached = _graph_engine_cache_ops.is_cached
-evict_graph_engines_for_database = _graph_engine_cache_ops.evict_for_database
-aevict_graph_engines_for_database = _graph_engine_cache_ops.aevict_for_database

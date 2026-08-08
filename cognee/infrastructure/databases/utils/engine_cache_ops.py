@@ -1,7 +1,10 @@
 """Shared cache-management facade for the decorated engine factories.
 
 Graph and vector engines expose the same five cache operations — evict,
-touch, is-cached, evict-by-database, and its async variant. Before this
+touch, is-cached, evict-by-database, and its async variant — through one
+public instance per engine module: ``graph_engine_cache`` in
+``get_graph_engine`` and ``vector_engine_cache`` in ``create_vector_engine``
+(e.g. ``graph_engine_cache.evict(force_close=True, **cfg)``). Before this
 module each engine file carried its own copy of the plumbing. The split of
 responsibilities is deliberate:
 

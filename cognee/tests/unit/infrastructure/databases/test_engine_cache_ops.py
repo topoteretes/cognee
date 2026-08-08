@@ -1,7 +1,7 @@
 """Tests for EngineCacheOps — the shared cache-management facade.
 
-The engine modules bind the public helpers (evict_graph_engine, ...) to an
-instance of this class; these tests pin the routing contract against a fake
+Each engine module exposes one public instance of this class
+(graph_engine_cache / vector_engine_cache); these tests pin the routing contract against a fake
 decorated factory.
 """
 

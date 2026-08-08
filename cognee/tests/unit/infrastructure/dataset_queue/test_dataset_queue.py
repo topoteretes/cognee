@@ -947,8 +947,8 @@ class TestEvictSubprocessEngines:
         with (
             patch.object(g_conf_mod, "get_graph_context_config", return_value=g_cfg),
             patch.object(v_conf_mod, "get_vectordb_context_config", return_value=v_cfg),
-            patch.object(g_engine_mod, "evict_graph_engine") as evict_graph,
-            patch.object(v_engine_mod, "evict_vector_engine") as evict_vector,
+            patch.object(g_engine_mod, "graph_engine_cache") as graph_cache,
+            patch.object(v_engine_mod, "vector_engine_cache") as vector_cache,
             patch.object(g_engine_mod, "create_graph_engine") as create_graph,
         ):
             queue._evict_subprocess_engines()
@@ -956,8 +956,8 @@ class TestEvictSubprocessEngines:
         # force_close: an idle holder pinning the lease proxy (e.g. a test
         # keeping a get_graph_engine() handle) must not defer the close and
         # keep the worker's file locks alive indefinitely.
-        evict_graph.assert_called_once_with(force_close=True, **g_cfg)
-        evict_vector.assert_called_once_with(force_close=True, **v_cfg)
+        graph_cache.evict.assert_called_once_with(force_close=True, **g_cfg)
+        vector_cache.evict.assert_called_once_with(force_close=True, **v_cfg)
         create_graph.assert_not_called()
 
     def test_eviction_skips_non_subprocess_engines(self):
@@ -978,13 +978,13 @@ class TestEvictSubprocessEngines:
                 "get_vectordb_context_config",
                 return_value={"vector_db_subprocess_enabled": False},
             ),
-            patch.object(g_engine_mod, "evict_graph_engine") as evict_graph,
-            patch.object(v_engine_mod, "evict_vector_engine") as evict_vector,
+            patch.object(g_engine_mod, "graph_engine_cache") as graph_cache,
+            patch.object(v_engine_mod, "vector_engine_cache") as vector_cache,
         ):
             queue._evict_subprocess_engines()
 
-        evict_graph.assert_not_called()
-        evict_vector.assert_not_called()
+        graph_cache.evict.assert_not_called()
+        vector_cache.evict.assert_not_called()
 
 
 class TestIdleKeepAlive:

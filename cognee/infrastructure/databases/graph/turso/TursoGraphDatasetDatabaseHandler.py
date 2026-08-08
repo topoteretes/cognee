@@ -6,7 +6,7 @@ from cognee.base_config import get_base_config
 from cognee.infrastructure.databases.graph.config import get_graph_config
 from cognee.infrastructure.databases.graph.get_graph_engine import (
     create_graph_engine,
-    evict_graph_engine,
+    graph_engine_cache,
 )
 from cognee.modules.users.models import User, DatasetDatabase
 
@@ -64,7 +64,7 @@ class TursoGraphDatasetDatabaseHandler:
     async def delete_dataset(cls, dataset_database: DatasetDatabase) -> None:
         dataset_url = str(dataset_database.graph_database_url or "")
 
-        evict_graph_engine(
+        graph_engine_cache.evict(
             graph_database_provider="turso",
             graph_file_path="",
             graph_database_url=dataset_url,
