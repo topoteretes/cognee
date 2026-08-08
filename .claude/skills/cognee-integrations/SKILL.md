@@ -65,5 +65,9 @@ to match the main service so both see the same data.
 ## After changing providers mid-project
 
 Embeddings from different models are not comparable — after switching the
-embedding provider or model, reset local state (`cognee-cli delete --all` or
-`cognee.prune`) and re-cognify.
+embedding provider or model, reset local state (`cognee-cli forget --all` or
+`await cognee.forget(everything=True)`) and re-ingest with `remember()`.
+
+To drop just the graph and vectors while keeping the ingested files, use
+`await cognee.forget(dataset="my_project", memory_only=True)` — the dataset can
+then be rebuilt under the new embedding model without re-uploading anything.
