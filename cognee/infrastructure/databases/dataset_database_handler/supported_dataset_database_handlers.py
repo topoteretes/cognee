@@ -14,7 +14,8 @@ from cognee.infrastructure.databases.vector.pgvector.PGVectorDatasetDatabaseHand
     PGVectorDatasetDatabaseHandler,
 )
 from cognee.infrastructure.databases.vector.pgvector.PGVectorSharedDatasetDatabaseHandler import (
-    PGVectorSharedDatasetDatabaseHandler,)
+    PGVectorSharedDatasetDatabaseHandler,
+)
 from cognee.infrastructure.databases.vector.turso.TursoVectorDatasetDatabaseHandler import (
     TursoVectorDatasetDatabaseHandler,
 )
@@ -22,7 +23,8 @@ from cognee.infrastructure.databases.graph.postgres.PostgresGraphDatasetDatabase
     PostgresGraphDatasetDatabaseHandler,
 )
 from cognee.infrastructure.databases.graph.postgres.PostgresGraphSharedDatasetDatabaseHandler import (
-    PostgresGraphSharedDatasetDatabaseHandler,)
+    PostgresGraphSharedDatasetDatabaseHandler,
+)
 from cognee.infrastructure.databases.graph.turso.TursoGraphDatasetDatabaseHandler import (
     TursoGraphDatasetDatabaseHandler,
 )
@@ -46,7 +48,8 @@ supported_dataset_database_handlers = {
     "pgvector_shared": {
         "handler_instance": PGVectorSharedDatasetDatabaseHandler,
         "handler_provider": "pgvector",
-    "turso": {
+    },
+    "turso_vector": {
         "handler_instance": TursoVectorDatasetDatabaseHandler,
         "handler_provider": "turso",
     },
