@@ -1,6 +1,9 @@
 from typing import Optional, List
 from cognee.infrastructure.engine import DataPoint
-from cognee.modules.chunking.Chunker import Chunker
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from cognee.modules.chunking.Chunker import Chunker
 
 
 class Document(DataPoint):
