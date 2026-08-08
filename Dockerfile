@@ -81,10 +81,15 @@ WORKDIR /app
 # separate `chown -R /app` would copy the whole tree up into a second layer.
 # /cognee-storage is baked into the image cognee-owned so a fresh named
 # volume mounted there initializes with the right ownership.
+# ``chown cognee /app`` (the directory inode only): WORKDIR created /app as
+# root, and ``COPY --chown`` sets ownership on the copied content, not the
+# pre-existing target dir — without this the non-root user cannot create
+# ``$HOME/.lbdb`` and the build-time extension pre-install silently fails.
 RUN groupadd --system --gid 1000 cognee \
     && useradd --system --uid 1000 --gid cognee --no-create-home --shell /usr/sbin/nologin cognee \
     && mkdir -p /cognee-storage/system /cognee-storage/data \
-    && chown -R cognee:cognee /cognee-storage
+    && chown -R cognee:cognee /cognee-storage \
+    && chown cognee:cognee /app
 
 COPY --from=uv --chown=cognee:cognee /app /app
 
@@ -107,6 +112,15 @@ ENV SYSTEM_ROOT_DIRECTORY=/cognee-storage/system
 ENV DATA_ROOT_DIRECTORY=/cognee-storage/data
 
 USER cognee
+
+# Pre-install Kuzu/Ladybug's JSON extension at build time (network is available
+# here) so it is baked into the image — same mechanism as the cognee-mcp
+# image. As root the server used to INSTALL it at runtime into /root/.lbdb on
+# every boot; as the non-root user that runtime install races between graph
+# workers and fails ("Directory ... cannot be created"). Best-effort: a failed
+# download must not break the image build.
+RUN python -c "from cognee_db_workers._kuzu_helpers import install_json_extension_local; install_json_extension_local(buffer_pool_size=268435456)" \
+    || echo "WARNING: JSON extension pre-install skipped (no network at build time); it will be installed on first run if the container has network access."
 
 ENTRYPOINT ["/app/entrypoint.sh"]
 

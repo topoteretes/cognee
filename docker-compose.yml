@@ -29,8 +29,8 @@ services:
       - DB_HOST=${DB_HOST:-host.docker.internal}
       - DB_PORT=${DB_PORT:-5432}
       - DB_NAME=${DB_NAME:-cognee_db}
-      - DB_USERNAME=${DB_USERNAME}
-      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_USERNAME=${DB_USERNAME:-}
+      - DB_PASSWORD=${DB_PASSWORD:-}
       # CAUTION: Default '*' allows all origins. Override with specific domains in production.
       - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-*}
     extra_hosts:
@@ -83,8 +83,8 @@ services:
       - DB_HOST=${DB_HOST:-host.docker.internal}
       - DB_PORT=${DB_PORT:-5432}
       - DB_NAME=${DB_NAME:-cognee_db}
-      - DB_USERNAME=${DB_USERNAME}
-      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_USERNAME=${DB_USERNAME:-}
+      - DB_PASSWORD=${DB_PASSWORD:-}
       # MCP specific configuration
       - PYTHONUNBUFFERED=1
     extra_hosts:
