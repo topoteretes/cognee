@@ -35,7 +35,7 @@ Configuration:
 * ``DATASET_QUEUE_MAX_CONCURRENT`` — env var. Defaults to ``DATABASE_MAX_LRU_CACHE_SIZE`` for a safe baseline
 * ``SUBPROCESS_IDLE_TTL_SECONDS`` — env var. Idle keep-alive for subprocess
   engines: at release they are *touched* instead of closed, and a reaper
-  closes them only after this many seconds without use (default 900).
+  closes them only after this many seconds without use (default 600).
   ``0`` disables keep-alive: engines are force-closed at last release, the
   pre-keep-alive behavior.
 """
@@ -63,7 +63,7 @@ class DatasetQueueSettings:
 
     __slots__ = ("enabled", "max_concurrent", "idle_ttl_seconds")
 
-    def __init__(self, enabled: bool, max_concurrent: int, idle_ttl_seconds: float = 900.0) -> None:
+    def __init__(self, enabled: bool, max_concurrent: int, idle_ttl_seconds: float = 600.0) -> None:
         self.enabled = enabled
         self.max_concurrent = max_concurrent
         self.idle_ttl_seconds = idle_ttl_seconds
@@ -80,7 +80,7 @@ def get_dataset_queue_settings() -> DatasetQueueSettings:
         max_concurrent = int(DATABASE_MAX_LRU_CACHE_SIZE)
 
     # Negative values make no sense as a TTL; clamp to 0 (= keep-alive off).
-    idle_ttl_seconds = max(0.0, float(os.getenv("SUBPROCESS_IDLE_TTL_SECONDS", "900")))
+    idle_ttl_seconds = max(0.0, float(os.getenv("SUBPROCESS_IDLE_TTL_SECONDS", "600")))
 
     return DatasetQueueSettings(
         enabled=enabled, max_concurrent=max_concurrent, idle_ttl_seconds=idle_ttl_seconds
@@ -121,7 +121,7 @@ class DatasetQueue:
     When ``enabled`` is ``False`` all methods are pass-throughs.
     """
 
-    def __init__(self, enabled: bool, max_concurrent: int, idle_ttl_seconds: float = 900.0) -> None:
+    def __init__(self, enabled: bool, max_concurrent: int, idle_ttl_seconds: float = 600.0) -> None:
         # Idle keep-alive TTL for subprocess engines; the default matches the
         # SUBPROCESS_IDLE_TTL_SECONDS default. 0 = off (engines are
         # force-closed at last release). Set before the disabled early-return

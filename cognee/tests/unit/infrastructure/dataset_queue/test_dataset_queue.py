@@ -1046,4 +1046,4 @@ class TestIdleKeepAlive:
             assert get_dataset_queue_settings().idle_ttl_seconds == 0.0
         with env_patch.dict(os.environ, {}, clear=False):
             os.environ.pop("SUBPROCESS_IDLE_TTL_SECONDS", None)
-            assert get_dataset_queue_settings().idle_ttl_seconds == 900.0
+            assert get_dataset_queue_settings().idle_ttl_seconds == 600.0
