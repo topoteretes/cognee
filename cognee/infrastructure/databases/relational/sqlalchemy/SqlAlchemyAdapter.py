@@ -53,9 +53,10 @@ class SQLAlchemyAdapter:
                 RelationalConfig.pool_args, which reads from the POOL_ARGS environment
                 variable.
 
-                For SQLite, only the pool-sizing keys (pool_size, max_overflow,
-                pool_recycle, pool_timeout, pool_pre_ping) are applied; setting any of
-                them switches the engine from its NullPool default to a bounded pool.
+                For SQLite, the pool-sizing keys (pool_size, max_overflow,
+                pool_recycle, pool_timeout, pool_pre_ping) and poolclass are applied:
+                sizing keys switch the engine from its NullPool default to a bounded
+                pool, and poolclass "nullpool" is normalized to the NullPool class.
                 For other databases every key is forwarded, with QueuePool defaults
                 filled in when no poolclass is given.
 
@@ -86,16 +87,25 @@ class SQLAlchemyAdapter:
 
         if "sqlite" in connection_string:
             # Pool-sizing keys opt into a bounded pool; without them the engine
-            # uses NullPool (no connection reuse). ``poolclass`` itself is not
-            # accepted here: pool_args is shared configuration also consumed
-            # unfiltered by the cache engine, where a string value like
-            # "nullpool" is not a valid pool class.
+            # uses NullPool (no connection reuse). ``poolclass: "nullpool"`` is
+            # normalized to the class, exactly as on the server-database branch
+            # below. Other engine kwargs stay excluded so they cannot collide
+            # with the sqlite-specific connect_args assembled here.
             sqlite_pool_args = {
                 key: value
                 for key, value in (pool_args or {}).items()
                 if key
-                in ("pool_size", "max_overflow", "pool_recycle", "pool_timeout", "pool_pre_ping")
+                in (
+                    "pool_size",
+                    "max_overflow",
+                    "pool_recycle",
+                    "pool_timeout",
+                    "pool_pre_ping",
+                    "poolclass",
+                )
             }
+            if sqlite_pool_args.get("poolclass", "").lower() == "nullpool":
+                sqlite_pool_args["poolclass"] = NullPool
             self.engine = create_async_engine(
                 connection_string,
                 **(sqlite_pool_args or {"poolclass": NullPool}),
