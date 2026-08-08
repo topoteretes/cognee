@@ -1505,3 +1505,54 @@ def test_decorator_cache_evict_and_close():
     assert create.cache_evict_and_close("a") is True
     assert proxy.__wrapped__.closed is True
     assert create.cache_evict_and_close("a") is False
+
+
+def test_touch_refreshes_idle_timestamp():
+    cache = ClosingLRUCache(maxsize=8, lease=True)
+    cache.get_or_create("k", lambda: _Closeable("v"))
+
+    cache._cache["k"].last_touched -= 1000
+    assert cache.touch("k") is True
+    import time
+
+    assert time.monotonic() - cache._cache["k"].last_touched < 5
+    assert cache.touch("absent") is False
+
+
+def test_evict_and_close_idle_closes_only_expired():
+    cache = ClosingLRUCache(maxsize=8, lease=True)
+    stale, fresh = _Closeable("stale"), _Closeable("fresh")
+    cache.get_or_create("stale", lambda: stale)
+    cache.get_or_create("fresh", lambda: fresh)
+    cache._cache["stale"].last_touched -= 1000
+
+    assert cache.evict_and_close_idle(900) == 1
+    assert stale.closed is True
+    assert fresh.closed is False
+    assert cache.cache_info().currsize == 1
+
+
+def test_evict_and_close_idle_skips_pinned():
+    """An active dataset's engine must never be reaped, no matter how old its
+    timestamp (a query can outlive the TTL)."""
+    cache = ClosingLRUCache(maxsize=8, lease=True, pinned_predicate=lambda key: key == "active")
+    active, idle = _Closeable("active"), _Closeable("idle")
+    cache.get_or_create("active", lambda: active)
+    cache.get_or_create("idle", lambda: idle)
+    cache._cache["active"].last_touched -= 1000
+    cache._cache["idle"].last_touched -= 1000
+
+    assert cache.evict_and_close_idle(900) == 1
+    assert active.closed is False
+    assert idle.closed is True
+
+
+def test_cache_hit_refreshes_idle_timestamp():
+    cache = ClosingLRUCache(maxsize=8, lease=True)
+    cache.get_or_create("k", lambda: _Closeable("v"))
+    cache._cache["k"].last_touched -= 1000
+
+    cache.get_or_create("k", lambda: _Closeable("never"))
+    import time
+
+    assert time.monotonic() - cache._cache["k"].last_touched < 5

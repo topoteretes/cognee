@@ -87,6 +87,7 @@ import asyncio
 import concurrent.futures
 import inspect
 import logging
+import time
 import weakref
 from collections import OrderedDict
 from functools import wraps
@@ -300,6 +301,11 @@ class _LeasedCacheEntry:
         self.in_cache = True
         self.close_requested = False
         self.closed = False
+        # Last time this entry was used or released, ``time.monotonic()``
+        # based. Read by the idle sweep (``evict_and_close_idle``); refreshed
+        # on cache hits and via ``touch`` at dataset-queue release, so idle
+        # time measures "since the last request finished with it".
+        self.last_touched = time.monotonic()
         self._lock = Lock()
 
     def _close(self, value):
@@ -659,6 +665,7 @@ class ClosingLRUCache:
         with self._lock:
             if key in self._cache:
                 self._cache.move_to_end(key)
+                self._cache[key].last_touched = time.monotonic()
                 return self._wrap_cached_value(self._cache[key])
             pending_closes = self._snapshot_pending_closes(key)
 
@@ -743,6 +750,7 @@ class ClosingLRUCache:
         with self._lock:
             if key in self._cache:
                 self._cache.move_to_end(key)
+                self._cache[key].last_touched = time.monotonic()
                 return self._wrap_cached_value(self._cache[key])
             pending_closes = self._snapshot_pending_closes(key)
 
@@ -824,6 +832,50 @@ class ClosingLRUCache:
             self._track_close(entry.key, value_to_close)
         del proxy_to_drop
         return True
+
+    def touch(self, key) -> bool:
+        """Refresh *key*'s idle timestamp without creating or returning it.
+
+        Called at dataset-queue release when the idle-TTL keep-alive is on:
+        pinned engine handles bypass cache lookups entirely, so hit-time
+        refreshes alone would under-count usage. Returns True if the entry
+        exists.
+        """
+        with self._lock:
+            entry = self._cache.get(key)
+            if entry is None:
+                return False
+            entry.last_touched = time.monotonic()
+            return True
+
+    def evict_and_close_idle(self, idle_seconds: float) -> int:
+        """Force-close every entry idle for more than *idle_seconds*.
+
+        The idle-TTL reaper's sweep. Keys matching the pinned predicate are
+        skipped — the same live "this dataset holds an active queue slot"
+        check that protects entries from capacity eviction; a query running
+        longer than the TTL must not have its engine closed underneath it.
+
+        Each expired entry goes through :meth:`evict_and_close` (immediate
+        close despite idle proxy holders, registered in the pending-close
+        registry, off-loop for subprocess adapters). A request racing the
+        sweep at the exact expiry instant is absorbed by the registry wait,
+        the worker open-retry, and handle re-resolution. Returns the number
+        of entries closed.
+        """
+        deadline = time.monotonic() - idle_seconds
+        with self._lock:
+            expired = [
+                key
+                for key, entry in self._cache.items()
+                if entry.last_touched < deadline
+                and (self._pinned_predicate is None or not self._pinned_predicate(key))
+            ]
+        closed = 0
+        for key in expired:
+            if self.evict_and_close(key):
+                closed += 1
+        return closed
 
     def evict_where(self, predicate) -> int:
         """Remove every entry whose key satisfies *predicate* and request close.
@@ -918,6 +970,12 @@ def closing_lru_cache(maxsize: Optional[int] = 128, lease: bool = True, pinned_p
             """
             return cache.evict_and_close(_key(args, kwargs))
 
+        def cache_touch(*args, **kwargs) -> bool:
+            """Refresh the idle timestamp of the entry matching the given
+            args (key scheme matches ``cache_evict``). Returns True if the
+            entry exists."""
+            return cache.touch(_key(args, kwargs))
+
         def cache_evict_where(predicate) -> int:
             """Evict every cached entry whose key satisfies *predicate*.
 
@@ -992,6 +1050,8 @@ def closing_lru_cache(maxsize: Optional[int] = 128, lease: bool = True, pinned_p
         wrapper.cache_clear = cache.cache_clear
         wrapper.cache_evict = cache_evict
         wrapper.cache_evict_and_close = cache_evict_and_close
+        wrapper.cache_touch = cache_touch
+        wrapper.cache_evict_and_close_idle = cache.evict_and_close_idle
         wrapper.cache_evict_where = cache_evict_where
         wrapper.cache_evict_matching = cache_evict_matching
         wrapper.cache_await_closed = cache_await_closed

@@ -298,14 +298,21 @@ def evict_graph_engine(force_close: bool = False, **kwargs) -> bool:
 
     Returns True if the entry existed.
     """
-    normalized = _normalize_optional_create_graph_engine_params(kwargs)
-    provider = _normalize_graph_database_provider(kwargs.get("graph_database_provider"))
     evict = (
         _create_graph_engine.cache_evict_and_close
         if force_close
         else _create_graph_engine.cache_evict
     )
-    return evict(
+    return evict(*_graph_engine_key_args(kwargs))
+
+
+def _graph_engine_key_args(kwargs) -> tuple:
+    """Positional cache-key args for a ``create_graph_engine`` config dict,
+    normalized exactly the way ``create_graph_engine`` normalizes them so the
+    key matches. Shared by ``evict_graph_engine`` / ``touch_graph_engine``."""
+    normalized = _normalize_optional_create_graph_engine_params(kwargs)
+    provider = _normalize_graph_database_provider(kwargs.get("graph_database_provider"))
+    return (
         provider,
         kwargs.get("graph_file_path"),
         normalized["graph_database_url"],
@@ -322,6 +329,26 @@ def evict_graph_engine(force_close: bool = False, **kwargs) -> bool:
         normalized["kuzu_buffer_pool_size"],
         normalized["kuzu_max_db_size"],
     )
+
+
+def touch_graph_engine(**kwargs) -> bool:
+    """Refresh the idle timestamp of the cached graph engine for this config.
+
+    The dataset-queue release path calls this when the idle-TTL keep-alive is
+    enabled, instead of evicting: the engine stays cached (and its worker
+    alive) until it has been idle for the TTL. Returns True if the entry
+    exists.
+    """
+    return _create_graph_engine.cache_touch(*_graph_engine_key_args(kwargs))
+
+
+def reap_idle_graph_engines(idle_seconds: float) -> int:
+    """Force-close cached graph engines idle for more than *idle_seconds*.
+
+    Skips engines whose dataset currently holds a queue slot (the cache's
+    pinned predicate). Returns the number of engines closed.
+    """
+    return _create_graph_engine.cache_evict_and_close_idle(idle_seconds)
 
 
 def evict_graph_engines_for_database(graph_database_name: str) -> int:

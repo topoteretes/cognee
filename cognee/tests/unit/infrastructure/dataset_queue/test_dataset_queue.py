@@ -985,3 +985,65 @@ class TestEvictSubprocessEngines:
 
         evict_graph.assert_not_called()
         evict_vector.assert_not_called()
+
+
+class TestIdleKeepAlive:
+    """SUBPROCESS_IDLE_TTL_SECONDS keeps engines warm across releases."""
+
+    def _counting_queue(self, ttl):
+        from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
+
+        queue = DatasetQueue(enabled=True, max_concurrent=5, idle_ttl_seconds=ttl)
+        calls = {"touch": 0, "evict": 0, "reaper": 0}
+        queue._touch_subprocess_engines = lambda: calls.__setitem__("touch", calls["touch"] + 1)
+        queue._evict_subprocess_engines = lambda: calls.__setitem__("evict", calls["evict"] + 1)
+        queue._ensure_reaper = lambda: calls.__setitem__("reaper", calls["reaper"] + 1)
+        return queue, calls
+
+    @pytest.mark.asyncio
+    async def test_ttl_release_touches_instead_of_evicting(self):
+        queue, calls = self._counting_queue(ttl=900)
+
+        await queue.ensure_slot("ds-K")
+        await queue.release_slot_for("ds-K")
+        assert calls == {"touch": 1, "evict": 0, "reaper": 1}
+
+    @pytest.mark.asyncio
+    async def test_zero_ttl_evicts_at_release(self):
+        queue, calls = self._counting_queue(ttl=0)
+
+        await queue.ensure_slot("ds-K")
+        await queue.release_slot_for("ds-K")
+        assert calls == {"touch": 0, "evict": 1, "reaper": 0}
+
+    def test_reaper_starts_exactly_once(self):
+        from unittest.mock import MagicMock
+
+        from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
+
+        queue = DatasetQueue(enabled=True, max_concurrent=5, idle_ttl_seconds=900)
+        thread = MagicMock()
+        with patch(
+            "cognee.infrastructure.databases.dataset_queue.queue.threading.Thread",
+            return_value=thread,
+        ) as thread_cls:
+            queue._ensure_reaper()
+            queue._ensure_reaper()
+        thread_cls.assert_called_once()
+        thread.start.assert_called_once()
+
+    def test_settings_read_ttl_from_env(self):
+        import os
+        from unittest.mock import patch as env_patch
+
+        from cognee.infrastructure.databases.dataset_queue.queue import (
+            get_dataset_queue_settings,
+        )
+
+        with env_patch.dict(os.environ, {"SUBPROCESS_IDLE_TTL_SECONDS": "42.5"}):
+            assert get_dataset_queue_settings().idle_ttl_seconds == 42.5
+        with env_patch.dict(os.environ, {"SUBPROCESS_IDLE_TTL_SECONDS": "-3"}):
+            assert get_dataset_queue_settings().idle_ttl_seconds == 0.0
+        with env_patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("SUBPROCESS_IDLE_TTL_SECONDS", None)
+            assert get_dataset_queue_settings().idle_ttl_seconds == 900.0

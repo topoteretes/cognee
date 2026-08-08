@@ -122,13 +122,20 @@ def evict_vector_engine(force_close: bool = False, **kwargs) -> bool:
     dataset-queue teardown path, where the worker must exit and release its
     file locks promptly. Returns True if the entry existed.
     """
-    normalized = _normalize_optional_create_vector_engine_params(kwargs)
     evict = (
         _create_vector_engine.cache_evict_and_close
         if force_close
         else _create_vector_engine.cache_evict
     )
-    return evict(
+    return evict(*_vector_engine_key_args(kwargs))
+
+
+def _vector_engine_key_args(kwargs) -> tuple:
+    """Positional cache-key args for a ``create_vector_engine`` config dict,
+    normalized the way ``create_vector_engine`` normalizes them so the key
+    matches. Shared by ``evict_vector_engine`` / ``touch_vector_engine``."""
+    normalized = _normalize_optional_create_vector_engine_params(kwargs)
+    return (
         kwargs.get("vector_db_provider", ""),
         kwargs.get("vector_db_url", ""),
         kwargs.get("vector_db_name", ""),
@@ -140,6 +147,24 @@ def evict_vector_engine(force_close: bool = False, **kwargs) -> bool:
         normalized["vector_db_host"],
         normalized["vector_db_subprocess_enabled"],
     )
+
+
+def touch_vector_engine(**kwargs) -> bool:
+    """Refresh the idle timestamp of the cached vector engine for this config.
+
+    Dataset-queue release path under the idle-TTL keep-alive; see
+    ``touch_graph_engine``. Returns True if the entry exists.
+    """
+    return _create_vector_engine.cache_touch(*_vector_engine_key_args(kwargs))
+
+
+def reap_idle_vector_engines(idle_seconds: float) -> int:
+    """Force-close cached vector engines idle for more than *idle_seconds*.
+
+    Skips engines whose dataset currently holds a queue slot (the cache's
+    pinned predicate). Returns the number of engines closed.
+    """
+    return _create_vector_engine.cache_evict_and_close_idle(idle_seconds)
 
 
 def evict_vector_engines_for_database(vector_db_name: str) -> int:
