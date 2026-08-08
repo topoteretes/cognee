@@ -2138,19 +2138,21 @@ class Neo4jAdapter(GraphDBInterface):
         query_edges = f"""
         MATCH (n)-[r]->(m)
         WHERE {where_clause} AND {where_clause.replace("n.", "m.")}
-        RETURN n.id AS source, n.id AS target, TYPE(r) AS type, properties(r) AS properties
+        RETURN n.id AS source, m.id AS target, TYPE(r) AS type, properties(r) AS properties
         """
         result_edges = await self.query(query_edges)
 
-        edges = [
-            (
-                record["properties"]["source_node_id"],
-                record["properties"]["target_node_id"],
-                record["type"],
-                _strip_provenance(record["properties"]),
+        edges = []
+        for record in result_edges:
+            properties = _strip_provenance(record["properties"] or {})
+            edges.append(
+                (
+                    properties.get("source_node_id", record["source"]),
+                    properties.get("target_node_id", record["target"]),
+                    record["type"],
+                    properties,
+                )
             )
-            for record in result_edges
-        ]
 
         return (nodes, edges)
 
@@ -2486,8 +2488,10 @@ class Neo4jAdapter(GraphDBInterface):
         """
         query = f"""
         MATCH (start_node:`{BASE_LABEL}`)-[relationship]->(end_node:`{BASE_LABEL}`)
-        RETURN start_node, properties(relationship) AS relationship_properties, end_node
+        WITH start_node, relationship, end_node
+        ORDER BY start_node.id, end_node.id, type(relationship)
         SKIP $offset LIMIT $limit
+        RETURN start_node, properties(relationship) AS relationship_properties, end_node
         """
         results = await self.query(query, {"offset": offset, "limit": limit})
 

@@ -78,6 +78,42 @@ def adapter(redis_store):
         yield RedisAdapter(host="localhost", port=6379)
 
 
+def test_ssl_disabled_by_default(redis_store):
+    """Without ssl, clients connect in plaintext (no TLS handshake)."""
+    patch_mod = "cognee.infrastructure.databases.cache.redis.RedisAdapter"
+    sync_redis = MagicMock(return_value=MagicMock(ping=MagicMock()))
+    async_redis = MagicMock(return_value=redis_store)
+    with (
+        patch(f"{patch_mod}.redis.Redis", sync_redis),
+        patch(f"{patch_mod}.aioredis.Redis", async_redis),
+    ):
+        from cognee.infrastructure.databases.cache.redis.RedisAdapter import RedisAdapter
+
+        RedisAdapter(host="localhost", port=6379)
+
+    assert sync_redis.call_args.kwargs["ssl"] is False
+    assert async_redis.call_args.kwargs["ssl"] is False
+
+
+def test_ssl_forwarded_to_both_clients(redis_store):
+    """ssl / ssl_cert_reqs must reach both the sync and async redis clients so
+    the adapter can connect to a TLS-only managed Redis (ElastiCache etc.)."""
+    patch_mod = "cognee.infrastructure.databases.cache.redis.RedisAdapter"
+    sync_redis = MagicMock(return_value=MagicMock(ping=MagicMock()))
+    async_redis = MagicMock(return_value=redis_store)
+    with (
+        patch(f"{patch_mod}.redis.Redis", sync_redis),
+        patch(f"{patch_mod}.aioredis.Redis", async_redis),
+    ):
+        from cognee.infrastructure.databases.cache.redis.RedisAdapter import RedisAdapter
+
+        RedisAdapter(host="localhost", port=6379, ssl=True, ssl_cert_reqs="none")
+
+    for client in (sync_redis, async_redis):
+        assert client.call_args.kwargs["ssl"] is True
+        assert client.call_args.kwargs["ssl_cert_reqs"] == "none"
+
+
 class _FakeRedisLock:
     def __init__(self):
         self.acquired = False
@@ -584,3 +620,11 @@ async def test_get_qa_entries_by_ids_returns_matching_rows_in_chronological_orde
     entries = await adapter.get_qa_entries_by_ids("u1", "s1", ["id3", "missing", "id1"])
 
     assert [entry.qa_id for entry in entries] == ["id1", "id3"]
+
+
+@pytest.mark.asyncio
+async def test_empty_session_returns_empty_list_for_all_last_n(adapter):
+    """[] on empty for every last_n value, including last_n=1 (matches SQL/FS, not a None quirk)."""
+    assert await adapter.get_latest_qa_entries("u1", "missing", last_n=1) == []
+    assert await adapter.get_latest_qa_entries("u1", "missing", last_n=5) == []
+    assert await adapter.get_all_qa_entries("u1", "missing") == []

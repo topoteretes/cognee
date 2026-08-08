@@ -38,6 +38,107 @@ def _extract_answer(question_dict: dict) -> str:
     return ""
 
 
+def _load_beam_dataset(split: str):
+    try:
+        import datasets as _datasets_lib
+
+        load_dataset = _datasets_lib.load_dataset
+    except ImportError:
+        raise ImportError(
+            "The 'datasets' package is required for BEAM. Install it with: pip install datasets"
+        )
+
+    return load_dataset("Mohammadta/BEAM", split=split)
+
+
+def load_beam_row(split: str, conversation_index: int) -> dict[str, Any]:
+    ds = _load_beam_dataset(split)
+    if conversation_index >= len(ds):
+        raise IndexError(
+            f"conversation_index={conversation_index} out of range "
+            f"(split '{split}' has {len(ds)} conversations)"
+        )
+    return ds[conversation_index]
+
+
+def truncate_beam_chat_batches(chat_batches: list, max_batches: Optional[int]) -> list:
+    if max_batches is not None and len(chat_batches) > max_batches:
+        logger.info(
+            "Truncating conversation from %s batches to %s (max_batches)",
+            len(chat_batches),
+            max_batches,
+        )
+        return chat_batches[:max_batches]
+    return chat_batches
+
+
+def parse_beam_probing_questions(
+    row: dict[str, Any],
+    chat_batches: list,
+    *,
+    limit: Optional[int] = None,
+    load_golden_context: bool = False,
+    instance_filter: Optional[Union[str, List[str], List[int]]] = None,
+    filter_instances_fn=None,
+    conversation_index: int = 0,
+) -> list[dict[str, Any]]:
+    probing_raw = row.get("probing_questions", "")
+    if isinstance(probing_raw, str):
+        try:
+            probing_data = ast.literal_eval(probing_raw)
+        except (ValueError, SyntaxError):
+            try:
+                probing_data = json.loads(probing_raw)
+            except json.JSONDecodeError:
+                logger.error("Failed to parse probing_questions field")
+                probing_data = {}
+    else:
+        probing_data = probing_raw if isinstance(probing_raw, dict) else {}
+
+    question_answer_pairs = []
+
+    for question_type, questions in probing_data.items():
+        if not isinstance(questions, list):
+            continue
+        for q in questions:
+            if not isinstance(q, dict) or "question" not in q:
+                continue
+
+            answer_text = _extract_answer(q)
+            rubric = q.get("rubric", [])
+            if isinstance(rubric, str):
+                rubric = [rubric]
+
+            qa_pair: Dict[str, Any] = {
+                "question": q["question"],
+                "answer": answer_text,
+                "question_type": question_type,
+                "rubric": rubric,
+                "difficulty": q.get("difficulty", "unknown"),
+                "conversation_id": row.get("conversation_id", str(conversation_index)),
+            }
+
+            source_ids = q.get("source_chat_ids")
+            if source_ids and load_golden_context:
+                golden = BEAMAdapter._extract_golden_context(chat_batches, source_ids)
+                if golden:
+                    qa_pair["golden_context"] = golden
+
+            question_answer_pairs.append(qa_pair)
+
+    if instance_filter is not None:
+        if filter_instances_fn is None:
+            raise ValueError("filter_instances_fn must be provided when instance_filter is used")
+        question_answer_pairs = filter_instances_fn(
+            question_answer_pairs, instance_filter, id_key="question"
+        )
+
+    if limit is not None and limit < len(question_answer_pairs):
+        question_answer_pairs = question_answer_pairs[:limit]
+
+    return question_answer_pairs
+
+
 def _flatten_chat(chat_batches: list) -> str:
     """Flatten the nested chat structure into a single text corpus.
 
@@ -92,93 +193,26 @@ class BEAMAdapter(BaseBenchmarkAdapter):
             question_answer_pairs: List of dicts with question, answer, rubric,
                 question_type, and optional source_chat_ids.
         """
-        try:
-            import datasets as _datasets_lib
-
-            load_dataset = _datasets_lib.load_dataset
-        except ImportError:
-            raise ImportError(
-                "The 'datasets' package is required for BEAM. Install it with: pip install datasets"
-            )
-
         logger.info(
             f"Loading BEAM dataset split={self.split}, conversation_index={self.conversation_index}"
         )
 
-        ds = load_dataset("Mohammadta/BEAM", split=self.split)
-        if self.conversation_index >= len(ds):
-            raise IndexError(
-                f"conversation_index={self.conversation_index} out of range "
-                f"(split '{self.split}' has {len(ds)} conversations)"
-            )
-
-        row = ds[self.conversation_index]
+        row = load_beam_row(self.split, self.conversation_index)
 
         # Build corpus — optionally truncate to first N batches for faster local runs
-        chat_batches = row["chat"]
-        if self.max_batches is not None and len(chat_batches) > self.max_batches:
-            logger.info(
-                f"Truncating conversation from {len(chat_batches)} batches "
-                f"to {self.max_batches} (max_batches)"
-            )
-            chat_batches = chat_batches[: self.max_batches]
+        chat_batches = truncate_beam_chat_batches(row["chat"], self.max_batches)
         corpus_text = _flatten_chat(chat_batches)
         corpus_list = [corpus_text]
 
-        # Parse probing questions
-        probing_raw = row.get("probing_questions", "")
-        if isinstance(probing_raw, str):
-            try:
-                probing_data = ast.literal_eval(probing_raw)
-            except (ValueError, SyntaxError):
-                try:
-                    probing_data = json.loads(probing_raw)
-                except json.JSONDecodeError:
-                    logger.error("Failed to parse probing_questions field")
-                    probing_data = {}
-        else:
-            probing_data = probing_raw if isinstance(probing_raw, dict) else {}
-
-        question_answer_pairs = []
-
-        for question_type, questions in probing_data.items():
-            if not isinstance(questions, list):
-                continue
-            for q in questions:
-                if not isinstance(q, dict) or "question" not in q:
-                    continue
-
-                answer_text = _extract_answer(q)
-                rubric = q.get("rubric", [])
-                if isinstance(rubric, str):
-                    rubric = [rubric]
-
-                qa_pair: Dict[str, Any] = {
-                    "question": q["question"],
-                    "answer": answer_text,
-                    "question_type": question_type,
-                    "rubric": rubric,
-                    "difficulty": q.get("difficulty", "unknown"),
-                    "conversation_id": row.get("conversation_id", str(self.conversation_index)),
-                }
-
-                source_ids = q.get("source_chat_ids")
-                if source_ids and load_golden_context:
-                    golden = self._extract_golden_context(chat_batches, source_ids)
-                    if golden:
-                        qa_pair["golden_context"] = golden
-
-                question_answer_pairs.append(qa_pair)
-
-        # Apply instance filter if provided
-        if instance_filter is not None:
-            question_answer_pairs = self._filter_instances(
-                question_answer_pairs, instance_filter, id_key="question"
-            )
-
-        # Apply limit
-        if limit is not None and limit < len(question_answer_pairs):
-            question_answer_pairs = question_answer_pairs[:limit]
+        question_answer_pairs = parse_beam_probing_questions(
+            row,
+            chat_batches,
+            limit=limit,
+            load_golden_context=load_golden_context,
+            instance_filter=instance_filter,
+            filter_instances_fn=self._filter_instances,
+            conversation_index=self.conversation_index,
+        )
 
         logger.info(
             f"Loaded BEAM conversation {self.conversation_index}: "

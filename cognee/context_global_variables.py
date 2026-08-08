@@ -1,7 +1,7 @@
 import os
 import warnings
 from contextvars import ContextVar
-from typing import Optional, Union
+from typing import Optional
 from uuid import UUID
 
 from cognee.base_config import get_base_config
@@ -27,7 +27,7 @@ from cognee.infrastructure.databases.utils.resolve_dataset_database_connection_i
 #       for different async tasks, threads and processes
 vector_db_config = ContextVar("vector_db_config", default=None)
 graph_db_config = ContextVar("graph_db_config", default=None)
-current_dataset_id = ContextVar("current_dataset_id", default=None)
+current_dataset_id: ContextVar[Optional[UUID]] = ContextVar("current_dataset_id", default=None)
 # Note: same mechanism for LLM and embedding configs so that the LiteLLM client
 #       and the embedding engine can use per-context (e.g. per-request) configs.
 llm_config: ContextVar[Optional[LLMConfig]] = ContextVar("llm_config", default=None)
@@ -68,10 +68,14 @@ def multi_user_support_possible():
             f"Supported dataset to database handlers: {list(supported_dataset_database_handlers.keys())}\n"
         )
 
-    if (
-        supported_dataset_database_handlers[graph_handler]["handler_provider"]
-        != graph_db_config.graph_database_provider
-    ):
+    def compatible_providers(handler_name):
+        # handler_provider is a plain string, or a tuple when a handler works
+        # with multiple providers (e.g. ladybug/kuzu). Normalize the string so
+        # membership below never falls into substring matching.
+        providers = supported_dataset_database_handlers[handler_name]["handler_provider"]
+        return (providers,) if isinstance(providers, str) else providers
+
+    if graph_db_config.graph_database_provider not in compatible_providers(graph_handler):
         raise EnvironmentError(
             "The selected graph dataset to database handler does not work with the configured graph database provider. Cannot add support for multi-user access control mode. Please use a supported graph dataset to database handler or set the environment variables ENABLE_BACKEND_ACCESS_CONTROL to false to switch off multi-user access control mode.\n"
             f"Selected graph database provider: {graph_db_config.graph_database_provider}\n"
@@ -79,10 +83,7 @@ def multi_user_support_possible():
             f"Supported dataset to database handlers: {list(supported_dataset_database_handlers.keys())}\n"
         )
 
-    if (
-        supported_dataset_database_handlers[vector_handler]["handler_provider"]
-        != vector_db_config.vector_db_provider
-    ):
+    if vector_db_config.vector_db_provider not in compatible_providers(vector_handler):
         raise EnvironmentError(
             "The selected vector dataset to database handler does not work with the configured vector database provider. Cannot add support for multi-user access control mode. Please use a supported vector dataset to database handler or set the environment variables ENABLE_BACKEND_ACCESS_CONTROL to false to switch off multi-user access control mode.\n"
             f"Selected vector database provider: {vector_db_config.vector_db_provider}\n"
@@ -130,7 +131,7 @@ class DatabaseContextManager:
 
     def __init__(
         self,
-        dataset: Union[str, UUID],
+        dataset: Optional[UUID],
         user_id: UUID,
         llm_config: Optional[LLMConfig] = None,
         embedding_config: Optional[EmbeddingConfig] = None,
@@ -145,9 +146,19 @@ class DatabaseContextManager:
         self._embedding_token = None
 
     async def apply_database_context_variables(
-        self, dataset: Union[str, UUID], user_id: UUID
+        self, dataset: Optional[UUID], user_id: UUID
     ) -> None:
-        self._dataset_token = current_dataset_id.set(str(dataset) if dataset is not None else None)
+        # current_dataset_id always carries a dataset *id* (a UUID object) or
+        # None. Exactly one input type: callers resolve names/strings to a UUID
+        # (get_unique_dataset_id, resolve_authorized_user_datasets) before
+        # entering, so a context is never entered for a dataset the caller did
+        # not explicitly identify.
+        if dataset is not None and not isinstance(dataset, UUID):
+            raise CogneeValidationError(
+                message=f"dataset must be a dataset id (UUID), got {dataset!r}. "
+                "Resolve dataset names to ids before entering the database context."
+            )
+        self._dataset_token = current_dataset_id.set(dataset)
 
         # LLM and embedding configs are an explicit, caller-provided override and
         # are intentionally applied regardless of backend access control: callers
@@ -311,7 +322,7 @@ class DatabaseContextManager:
 
 
 def set_database_global_context_variables(
-    dataset: Union[str, UUID],
+    dataset: Optional[UUID],
     user_id: UUID,
     llm_config: Optional[LLMConfig] = None,
     embedding_config: Optional[EmbeddingConfig] = None,

@@ -7,7 +7,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 
 
-AgentConnectionType = Literal["sdk", "api", "mcp", "claude_code", "workflow", "unknown"]
+AgentConnectionType = Literal["sdk", "api", "mcp", "claude_code", "opencode", "workflow", "unknown"]
 AgentMemoryMode = Literal["session", "cognee", "hybrid", "none", "unknown"]
 AgentStatus = Literal["active", "inactive", "unknown"]
 AgentSource = Literal["agent_memory", "session_trace", "serve", "api_key", "mcp", "api"]

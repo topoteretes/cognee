@@ -108,12 +108,12 @@ class NeptuneGraphDB(GraphDBInterface):
         )
 
         # Initialize Neptune Analytics client using langchain_aws
-        self._client: NeptuneAnalyticsGraph = self._initialize_client()
+        self._client: Any = self._initialize_client()
         logger.info(
             f'Initialized Neptune Analytics adapter for graph: "{graph_id}" in region: "{self.region}"'
         )
 
-    def _initialize_client(self) -> Optional[NeptuneAnalyticsGraph]:
+    def _initialize_client(self) -> Optional[Any]:
         """
         Initialize the Neptune Analytics client using langchain_aws.
 
@@ -145,6 +145,21 @@ class NeptuneGraphDB(GraphDBInterface):
             raise NeptuneAnalyticsConfigurationError(
                 message=f"Failed to initialize Neptune Analytics client: {format_neptune_error(e)}"
             ) from e
+
+    async def close(self) -> None:
+        """
+        Release resources held by the Neptune Analytics client.
+
+        Called automatically by ``closing_lru_cache`` when this adapter is
+        evicted from ``_create_graph_engine``'s cache. The underlying boto3
+        client is cleaned up if present.
+        """
+        if hasattr(self, "_client") and self._client is not None:
+            # NeptuneAnalyticsGraph wraps a boto3 client; close it if available
+            underlying = getattr(self._client, "client", None)
+            if underlying is not None and hasattr(underlying, "close"):
+                underlying.close()
+            self._client = None
 
     @staticmethod
     def _serialize_properties(properties: Dict[str, Any]) -> Dict[str, Any]:
@@ -645,6 +660,18 @@ class NeptuneGraphDB(GraphDBInterface):
             logger.error(f"Failed to delete graph: {error_msg}")
             raise Exception(f"Failed to delete graph: {error_msg}") from e
 
+    async def is_empty(self) -> bool:
+        """
+        Check if the graph is empty.
+        """
+        query = """
+        MATCH (n)
+        RETURN true
+        LIMIT 1;
+        """
+        query_result = await self.query(query)
+        return len(query_result) == 0
+
     async def get_graph_data(self) -> Tuple[List[Node], List[EdgeData]]:
         """
         Retrieve all nodes and edges within the graph.
@@ -761,6 +788,20 @@ class NeptuneGraphDB(GraphDBInterface):
             logger.error(f"Failed to get neighborhood: {error_msg}")
             raise Exception(f"Failed to get neighborhood: {error_msg}") from e
 
+    async def is_empty(self) -> bool:
+        """Return True if the graph contains no nodes."""
+        query = f"""
+            MATCH (n:{self._GRAPH_NODE_LABEL})
+            RETURN count(n) AS node_count
+        """
+        try:
+            result = await self.query(query)
+            return not result or result[0]["node_count"] == 0
+        except Exception as e:
+            error_msg = format_neptune_error(e)
+            logger.error(f"Failed to check if graph is empty: {error_msg}")
+            raise Exception(f"Failed to check if graph is empty: {error_msg}") from e
+
     async def get_graph_metrics(self, include_optional: bool = False) -> Dict[str, Any]:
         """
         Fetch metrics and statistics of the graph, possibly including optional details.
@@ -774,7 +815,7 @@ class NeptuneGraphDB(GraphDBInterface):
             - Dict[str, Any]: A dictionary containing graph metrics and statistics.
         """
         num_nodes, num_edges = await self._get_model_independent_graph_data()
-        num_cluster, list_clsuter_size = await self._get_connected_components_stat()
+        list_clsuter_size, num_cluster = await self._get_connected_components_stat()
 
         mandatory_metrics = {
             "num_nodes": num_nodes,
@@ -950,7 +991,7 @@ class NeptuneGraphDB(GraphDBInterface):
         results = await self.query(query)
         return results[0]["ids"] if len(results) > 0 else []
 
-    async def get_predecessors(self, node_id: str, edge_label: str = "") -> list[str]:
+    async def get_predecessors(self, node_id: str, edge_label: str = None) -> list[str]:
         """
         Retrieve the predecessor nodes of a specified node based on an optional edge label.
 
@@ -977,7 +1018,7 @@ class NeptuneGraphDB(GraphDBInterface):
 
         return [result["predecessor"] for result in results]
 
-    async def get_successors(self, node_id: str, edge_label: str = "") -> list[str]:
+    async def get_successors(self, node_id: str, edge_label: str = None) -> list[str]:
         """
         Retrieve the successor nodes of a specified node based on an optional edge label.
 
@@ -995,7 +1036,7 @@ class NeptuneGraphDB(GraphDBInterface):
 
         edge_label = f" :{edge_label}" if edge_label is not None else ""
         query = f"""
-        MATCH (node)-[r {edge_label}]->(successor)
+        MATCH (node)-[r{edge_label}]->(successor)
         WHERE node.id = $node_id
         RETURN successor
         """

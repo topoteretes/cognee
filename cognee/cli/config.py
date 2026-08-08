@@ -23,12 +23,14 @@ COMMAND_DESCRIPTIONS = {
     "improve": "Enrich an existing knowledge graph with additional context and rules",
     "forget": "Remove data from the knowledge graph",
     "serve": "Connect to a Cognee instance (cloud or local)",
+    "eval": "Run a memory-quality benchmark end to end (corpus, answer, evaluate)",
     "upgrade": "Apply pending relational + data migrations (alembic-style; head or a revision)",
     "downgrade": "Revert data migrations to a revision ('base' or a slug); rewrites data",
     "stamp": "Set the stored migration revision WITHOUT running migrations (bookkeeping repair)",
     "history": "List the data-migration chain, newest first",
     "current": "Show each database's stamped migration revision (and last failure, if any)",
     "push": "Upload a local dataset's knowledge graph to Cognee Cloud",
+    "report": "Generate a Graph Insight Report (hub nodes, surprising links, confidence tags, suggested questions)",
 }
 
 # Search type choices
@@ -39,6 +41,7 @@ SEARCH_TYPE_CHOICES = [
     "SUMMARIES",
     "CODE",
     "CYPHER",
+    "GRAPH_REPORT",
 ]
 
 # Chunker choices
