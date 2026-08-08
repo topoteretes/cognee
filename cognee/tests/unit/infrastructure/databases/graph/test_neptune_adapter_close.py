@@ -1,6 +1,7 @@
 import sys
 import gc
 import asyncio
+import importlib.util
 from unittest.mock import MagicMock, patch
 import pytest
 
@@ -9,10 +10,9 @@ if "langchain_aws" not in sys.modules:
     mock_lc = MagicMock()
     sys.modules["langchain_aws"] = mock_lc
 
-# Mock botocore if not installed (the adapter imports botocore.config at module level)
-try:
-    import botocore  # noqa: F401
-except ImportError:
+# The adapter imports botocore.config at module level; stub it out when the
+# real package is not installed so this module stays importable.
+if "botocore" not in sys.modules and importlib.util.find_spec("botocore") is None:
     mock_botocore = MagicMock()
     sys.modules["botocore"] = mock_botocore
     sys.modules["botocore.config"] = mock_botocore.config
@@ -31,9 +31,17 @@ async def test_neptune_adapter_close():
     mock_neptune_graph = MagicMock()
     mock_neptune_graph.client = mock_boto3_client
 
-    with patch(
-        "cognee.infrastructure.databases.graph.neptune_driver.adapter.NeptuneGraphDB._initialize_client",
-        return_value=mock_neptune_graph,
+    with (
+        patch(
+            "cognee.infrastructure.databases.graph.neptune_driver.adapter.NeptuneGraphDB._initialize_client",
+            return_value=mock_neptune_graph,
+        ),
+        # The adapter caches langchain_aws availability at import time; force it on
+        # so __init__ is reachable in environments without langchain_aws installed.
+        patch(
+            "cognee.infrastructure.databases.graph.neptune_driver.adapter.LANGCHAIN_AWS_AVAILABLE",
+            True,
+        ),
     ):
         adapter = NeptuneGraphDB(
             graph_id="g-1234",
@@ -93,9 +101,15 @@ async def test_closing_lru_cache_evicts_neptune_adapter():
     mock_neptune_graph = MagicMock()
     mock_neptune_graph.client = mock_boto3_client
 
-    with patch(
-        "cognee.infrastructure.databases.graph.neptune_driver.adapter.NeptuneGraphDB._initialize_client",
-        return_value=mock_neptune_graph,
+    with (
+        patch(
+            "cognee.infrastructure.databases.graph.neptune_driver.adapter.NeptuneGraphDB._initialize_client",
+            return_value=mock_neptune_graph,
+        ),
+        patch(
+            "cognee.infrastructure.databases.graph.neptune_driver.adapter.LANGCHAIN_AWS_AVAILABLE",
+            True,
+        ),
     ):
         adapter = NeptuneGraphDB(
             graph_id="g-1234",
