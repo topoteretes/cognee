@@ -11,6 +11,7 @@ from cognee.shared.logging_utils import get_logger
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from cognee.tasks.web_scraper.utils import fetch_page_content
+from cognee.tasks.web_scraper.ssrf_protection import validate_outbound_url
 from cognee.tasks.ingestion.data_item import DataItem
 
 
@@ -64,6 +65,9 @@ async def save_data_item_to_storage(data_item: Union[BinaryIO, str, Any]) -> str
         if parsed_url.scheme == "s3":
             return data_item
         elif parsed_url.scheme == "http" or parsed_url.scheme == "https":
+            # Guard against SSRF: reject disabled outbound HTTP, non-http(s) schemes,
+            # and hosts that resolve to internal/reserved addresses before fetching.
+            await validate_outbound_url(data_item)
             urls_to_page_contents = await fetch_page_content(data_item)
             return await save_data_to_file(urls_to_page_contents[data_item], file_extension="html")
         # data is local file path
@@ -76,11 +80,27 @@ async def save_data_item_to_storage(data_item: Union[BinaryIO, str, Any]) -> str
             else:
                 raise IngestionError(message="Local files are not accepted.")
 
-        # data is an absolute file path
-        elif data_item.startswith("/") or (
-            os.name == "nt" and len(data_item) > 1 and data_item[1] == ":"
+        # data is an absolute file path that points at an existing file
+        elif (
+            (
+                data_item.startswith("/")
+                or (os.name == "nt" and len(data_item) > 1 and data_item[1] == ":")
+            )
+            and Path(os.path.normpath(data_item)).is_absolute()
+            and abs_path.is_file()
         ):
-            # Handle both Unix absolute paths (/path) and Windows absolute paths (C:\path)
+            # Handle both Unix absolute paths (/path) and Windows absolute paths (C:\path).
+            #
+            # is_absolute() guard: on Windows a POSIX-style "/path" (or a drive-relative
+            # "C:path") normalizes to a *drive-relative* WindowsPath, and Path.as_uri()
+            # raises ValueError for it. Such strings are not usable file paths on this
+            # platform and continue to the relative-path/text handling below.
+            #
+            # abs_path.is_file() guard: only convert an absolute-looking string to a
+            # file:// URI when it actually points at an existing file, mirroring the
+            # relative-path branch below. A "/"-prefixed string that is not an existing
+            # file (e.g. a plain text note such as "/remember to call Bob") falls through
+            # to text ingestion on every platform instead of becoming a broken file:// URI.
             if settings.accept_local_file_path:
                 local_uri = _resolve_local_file_uri(data_item)
                 if local_uri:

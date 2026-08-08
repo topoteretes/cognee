@@ -2,6 +2,7 @@ from typing import Union, Optional, List, Type, Any
 from uuid import UUID
 
 from cognee.shared.logging_utils import get_logger
+from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 
 from cognee.modules.retrieval.utils.brute_force_triplet_search import get_memory_fragment
 from cognee.context_global_variables import set_database_global_context_variables
@@ -26,7 +27,7 @@ async def memify(
     extraction_tasks: Union[List[Task], List[str]] = None,
     enrichment_tasks: Union[List[Task], List[str]] = None,
     data: Optional[Any] = None,
-    dataset: Union[str, UUID] = "main_dataset",
+    dataset: Union[str, UUID] = DEFAULT_DATASET_NAME,
     user: User = None,
     node_type: Optional[Type] = NodeSet,
     node_name: Optional[List[str]] = None,
@@ -124,5 +125,6 @@ async def memify(
         graph_db_config=graph_db_config,
         use_pipeline_cache=False,
         incremental_loading=False,
+        data_cache=False,
         pipeline_name="memify_pipeline",
     )

@@ -1,0 +1,40 @@
+name: Require Linear issue
+
+# Every INTERNAL PR must reference a Linear issue (e.g. COG-123) in its title or
+# branch name — that is how Linear links a PR to a ticket. Since Linear does not
+# gate merges, enforcement is a required GitHub status check: this job fails when a
+# PR has no Linear key, and branch protection blocks the merge until it passes.
+#
+# Fork / external-contributor PRs are intentionally SKIPPED: they have no Linear
+# access, and a skipped required check counts as passing, so this never blocks the
+# community. Mark the `linear-issue-check` job as a required status check on
+# `main` and `dev` in branch protection.
+
+on:
+  pull_request:
+    # `synchronize` matters: a required check must re-run on the latest commit.
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  linear-issue-check: # this job name is what you mark "required" in branch protection
+    # Enforce for internal PRs only. Fork PRs (head repo != base repo) skip this job;
+    # a skipped required check is treated as passing, so external PRs are not blocked.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: PR title or branch must reference a Linear issue
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          # List ALL your Linear team prefixes — verify against Linear ▸ Settings ▸ Teams.
+          KEYS='COG|SDK|CLO|COM|ENG'
+          if echo "$PR_TITLE $HEAD_REF" | grep -Eiq "\b(${KEYS})-[0-9]+\b"; then
+            echo "Linear issue reference found."
+          else
+            echo "::error::PR title or branch must reference a Linear issue, e.g. COG-123."
+            exit 1
+          fi

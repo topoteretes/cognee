@@ -38,4 +38,8 @@ class DocumentChunk(DataPoint):
     importance_weight: Optional[float] = 0.5
     document_id: Optional[str] = None
     document_name: Optional[str] = None
+    # Optional truth-alignment fields; never embedded (kept out of index_fields)
+    # and not part of id/dedup.
+    truth_alignment: Optional[list[float]] = None
+    truth_epoch: Optional[int] = None
     metadata: dict = {"index_fields": ["text"]}

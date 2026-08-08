@@ -78,7 +78,8 @@ async def run_pipeline_as_background_process(
 
     if not datasets:
         # If no datasets are provided, get all datasets user has write access to and run pipelines for all of them
-        if not params.get("user", None):
+        user = params.get("user", None)
+        if user is None:
             user = await get_default_user()
         dataset_objects = await get_authorized_existing_datasets(None, "write", user)
         datasets = [dataset.id for dataset in dataset_objects]

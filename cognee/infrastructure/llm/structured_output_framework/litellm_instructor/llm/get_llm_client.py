@@ -90,6 +90,8 @@ class LLMProvider(Enum):
     AZURE = "azure"
     BEDROCK = "bedrock"
     LLAMA_CPP = "llama_cpp"
+    # Delegates completions to the host harness via MCP sampling (no API key).
+    MCP_SAMPLING = "mcp-sampling"
 
 
 _API_KEY_REQUIRED_PROVIDERS = {
@@ -353,6 +355,18 @@ def _get_llm_client_cached(cache_key: _LLMClientCacheKey) -> LLMInterface:
             n_gpu_layers=cache_key.llama_cpp_n_gpu_layers,
             chat_format=cache_key.llama_cpp_chat_format,
             llm_args=llm_args,
+        )
+
+    elif provider == LLMProvider.MCP_SAMPLING:
+        from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.mcp_sampling.adapter import (
+            MCPSamplingAdapter,
+        )
+
+        # No API key / endpoint: completions are delegated to the host MCP
+        # session. `model` is only a preference hint.
+        return MCPSamplingAdapter(
+            model=cache_key.model,
+            max_completion_tokens=max_completion_tokens,
         )
     else:
         raise UnsupportedLLMProviderError(provider)

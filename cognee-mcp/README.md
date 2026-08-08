@@ -95,6 +95,12 @@ Please refer to our documentation [here](https://docs.cognee.ai/how-to-guides/de
 You can do more advanced configurations by creating .env file using our <a href="https://github.com/topoteretes/cognee/blob/main/.env.template">template.</a>
 To use different LLM providers / database configurations, and for more info check out our <a href="https://docs.cognee.ai">documentation</a>.
 
+> **No API key?** If your MCP host grants the `sampling` capability, `LLM_PROVIDER="mcp-sampling"`
+> delegates completions to the host's own model, so no `LLM_API_KEY` is needed (embeddings still
+> need a provider). Host support varies — as of early 2026 Claude Code does not yet grant sampling
+> ([anthropics/claude-code#1785](https://github.com/anthropics/claude-code/issues/1785)). See the
+> "MCP sampling" section of the .env template.
+
 
 ## 🐳 Docker Usage
 
@@ -154,7 +160,7 @@ If you'd rather run cognee-mcp in a container, you have two options:
       - `ollama` / `huggingface` - Local model support
       - `docs` - Document processing
       - `codegraph` - Code analysis
-      - `monitoring` - Sentry & Langfuse monitoring
+      - `tracing` - OpenTelemetry tracing
       - `redis` - Redis support
       - And more (see [pyproject.toml](https://github.com/topoteretes/cognee/blob/main/pyproject.toml) for full list)
 2. **Pull from Docker Hub** (no build required):
@@ -488,7 +494,7 @@ The MCP server exposes its functionality through tools. Call them from any MCP c
 
 The MCP server exposes three tools:
 
-- **remember**: Store data in memory. With `session_id`: fast session cache. Without `session_id`: permanent graph memory
+- **remember**: Store data in memory. Pass `data` for text, or `filename` + `content_base64` to ingest an uploaded file (up to 10 MB). With `session_id`: fast session cache (text only). Without `session_id`: permanent graph memory
 - **recall**: Search memory with auto-routing. Searches session cache first when `session_id` is provided, then falls through to the permanent graph
 - **forget**: Delete memory by dataset name, or delete all owned memory with `everything=True`
 
@@ -497,10 +503,38 @@ The MCP server exposes three tools:
 - **visualize_graph_ui**: Open the workspace and render the current knowledge graph
 - **upload_file_ui**: Open the workspace for file upload
 - **open_cognee_workspace**: Generic "open the cognee UI" entry point
-- **cognify_file**: Ingest an uploaded file (used by the workspace; accepts base64 content)
 - **list_datasets_json / list_dataset_data_json / create_dataset_json / get_client_info_json**: Structured-JSON helpers powering the workspace dropdown
 
 The workspace lets you create/switch/delete datasets, upload files, add text, search, and view the graph from one inline panel.
+
+### Tool surface (`COGNEE_MCP_TOOL_MODE`)
+
+Advertising every tool up front costs agent context and hurts tool-selection accuracy, so by default the server pins a small set in `tools/list` and makes the rest discoverable through FastMCP's built-in `search_tools`. **Unadvertised tools stay callable by name**, so the workspace UI (which calls its internals directly) is unaffected.
+
+```bash
+COGNEE_MCP_TOOL_MODE=default   # pinned: remember, recall, forget + the 3 workspace UI entry tools
+COGNEE_MCP_TOOL_MODE=minimal   # pinned: remember, recall, forget
+COGNEE_MCP_TOOL_MODE=all       # no search transform; advertise all 11 tools
+```
+
+Also settable per-process with `--tool-mode`. In `default`/`minimal` an agent calls `search_tools(query=...)` to find a tool and either calls it by name or goes through the `call_tool` proxy. Tiers are declared per tool via `@registry.tool(tags={...})` in `src/server.py`, so the pinned set is derived from the decorators rather than a separate list.
+
+`search_tools` returns up to `TOOL_SEARCH_MAX_RESULTS` (10) tools, sized for a catalog that will grow. The window only costs context on turns that actually call search; `tools/list` stays constant either way. See `tests/test_tool_search_benchmark.py` for the recall sweep behind the number.
+
+#### Writing a tool so search can find it
+
+Search works well on natural-language queries. Every phrasing below returns its target ranked first (covered by `tests/test_tool_search.py`):
+
+| query | returns |
+|---|---|
+| "what datasets do I have?" | `list_datasets_json` |
+| "show the data inside a dataset" | `list_dataset_data_json` |
+| "make a new dataset" | `create_dataset_json` |
+| "which client am I connected as" | `get_client_info_json` |
+
+The one thing to know when **adding** a tool: matching is purely lexical. FastMCP's BM25 tokenizer does no stemming and drops tools that score zero, so a query shares no credit with a word it doesn't literally contain — the bare query `dataset` matches `create_dataset_json` but *not* `list_datasets_json`, whose token is `datasets`. Multi-word queries paper over this (they usually contain some matching token), which is why the table above passes, but terse queries won't.
+
+So: **write descriptions in the words an agent would use, including both singular and plural.** Recall is bounded by vocabulary, not by `TOOL_SEARCH_MAX_RESULTS`. If lexical matching ever stops being enough, `BaseSearchTransform` leaves `_search()` abstract — a semantic ranker over cognee's own embeddings can be dropped in without touching the rest of the plumbing.
 
 The bundle that powers the workspace lives at `cognee-mcp/src/app_bundles/visualize-graph.html`. It is built from `cognee-mcp/apps-src/` via `npm run build` and is gitignored. The Docker image builds it as part of the image; PyPI wheels carry it (the maintainer runs `npm run build` before `uv build`); from-source users build it manually (see [Quick Start](#-quick-start) step 7). If the bundle is missing at runtime, the workspace tools raise a `FileNotFoundError` pointing back to the build command.
 
@@ -508,7 +542,7 @@ The bundle that powers the workspace lives at `cognee-mcp/src/app_bundles/visual
 
 By default, each MCP client gets its own auto-named dataset (e.g. Cursor → `cursor_vscode_memory`, Claude Code → `claude_code_memory`) so different agents don't share memory unintentionally. The dataset is created on demand the first time a client calls a workspace tool.
 
-LLM-direct calls to `cognify`, `remember`, `improve`, `cognify_status`, and `cognify_file` route to the agent-scoped dataset when `dataset_name` is omitted. Pass `dataset_name` explicitly to override (e.g. `dataset_name="main_dataset"` still works).
+LLM-direct calls to `cognify`, `remember`, `improve`, and `cognify_status` route to the agent-scoped dataset when `dataset_name` is omitted. Pass `dataset_name` explicitly to override (e.g. `dataset_name="main_dataset"` still works).
 
 To disable agent scoping and have all clients share `main_dataset` as the default, set in `.env`:
 

@@ -23,6 +23,10 @@ from cognee.modules.migrations.versions.namespace_edge_type_point_ids import (
     downgrade as namespace_edge_type_point_ids_down,
     migrate as namespace_edge_type_point_ids,
 )
+from cognee.modules.migrations.versions.postgres_graph_provenance_columns import (
+    downgrade as postgres_graph_provenance_columns_down,
+    migrate as postgres_graph_provenance_columns,
+)
 
 # The vector adapter's storage-schema sync (e.g. LanceDB adding columns) is NOT
 # in this chain: a chain entry runs once per database, but that sync must run on
@@ -50,6 +54,18 @@ MIGRATIONS: list[Migration] = [
         up=namespace_edge_type_point_ids,
         down_revision="namespace_entity_type_node_ids",
         down=namespace_edge_type_point_ids_down,
+    ),
+    # COG-5522: the Postgres graph adapter gained four varchar[] provenance columns
+    # (+ GIN indexes) on graph_node/graph_edge for graph-native delete/rollback.
+    # Fresh graphs get them from create_all; this backfills graph_node/graph_edge
+    # tables left over from a pre-provenance release. No-op on every non-Postgres
+    # graph backend.
+    Migration(
+        slug="postgres_graph_provenance_columns",
+        cognee_version="1.2.2",
+        up=postgres_graph_provenance_columns,
+        down_revision="namespace_edge_type_point_ids",
+        down=postgres_graph_provenance_columns_down,
     ),
 ]
 

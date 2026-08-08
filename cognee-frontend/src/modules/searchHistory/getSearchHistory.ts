@@ -10,8 +10,9 @@ export interface SearchHistoryEntry {
 }
 
 /**
- * Fetch search history from GET /v1/search.
- * Returns entries sorted by most recent first.
+ * Legacy search history from GET /v1/search — single Q&A pairs recorded
+ * before search conversations became sessions. Kept as a read-only,
+ * supplementary sidebar source until these entries age out of Redis.
  */
 export default async function getSearchHistory(
   instance: CogneeInstance,
