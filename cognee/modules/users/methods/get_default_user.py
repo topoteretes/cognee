@@ -25,16 +25,19 @@ async def get_default_user() -> User:
 
             result = await session.execute(query)
             user = result.scalars().first()
+
+        # Our session is closed here (the `async with` has exited), so
+        # create_default_user — which opens its own session — no longer runs
+        # nested inside it: we never hold two pooled connections at once (#4197
+        # class). It stays inside this `try` so a missing-database error still
+        # maps to DatabaseNotCreatedError.
+        if user is None:
+            return await create_default_user()
+
+        return user
     except Exception as error:
         if "principals" in str(error.args):
             raise DatabaseNotCreatedError() from error
         if isinstance(error, NoResultFound):
             raise UserNotFoundError(f"Failed to retrieve default user: {default_email}") from error
         raise
-
-    # create_default_user opens its own session; call it only after ours is
-    # closed so we never hold two pooled connections at once (#4197 class).
-    if user is None:
-        return await create_default_user()
-
-    return user
