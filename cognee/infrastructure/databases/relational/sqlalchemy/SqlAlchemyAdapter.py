@@ -49,6 +49,19 @@ class SQLAlchemyAdapter:
 
                     SQLite with custom timeout:
                         DATABASE_CONNECT_ARGS='{"timeout": 60}'
+            pool_args (dict, optional): SQLAlchemy connection-pool settings, loaded from
+                RelationalConfig.pool_args, which reads from the POOL_ARGS environment
+                variable.
+
+                For SQLite, the pool-sizing keys (pool_size, max_overflow,
+                pool_recycle, pool_timeout, pool_pre_ping) and poolclass are applied:
+                sizing keys switch the engine from its NullPool default to a bounded
+                pool, and poolclass "nullpool" is normalized to the NullPool class.
+                For other databases every key is forwarded, with QueuePool defaults
+                filled in when no poolclass is given.
+
+                Example:
+                    POOL_ARGS='{"pool_size": 5, "max_overflow": 10}'
         """
         self.db_path: str = None
         self.db_uri: str = connection_string
@@ -73,9 +86,29 @@ class SQLAlchemyAdapter:
                 run_sync(self.pull_from_s3())
 
         if "sqlite" in connection_string:
+            # Pool-sizing keys opt into a bounded pool; without them the engine
+            # uses NullPool (no connection reuse). ``poolclass: "nullpool"`` is
+            # normalized to the class, exactly as on the server-database branch
+            # below. Other engine kwargs stay excluded so they cannot collide
+            # with the sqlite-specific connect_args assembled here.
+            sqlite_pool_args = {
+                key: value
+                for key, value in (pool_args or {}).items()
+                if key
+                in (
+                    "pool_size",
+                    "max_overflow",
+                    "pool_recycle",
+                    "pool_timeout",
+                    "pool_pre_ping",
+                    "poolclass",
+                )
+            }
+            if sqlite_pool_args.get("poolclass", "").lower() == "nullpool":
+                sqlite_pool_args["poolclass"] = NullPool
             self.engine = create_async_engine(
                 connection_string,
-                poolclass=NullPool,
+                **(sqlite_pool_args or {"poolclass": NullPool}),
                 connect_args={**{"timeout": 120}, **final_connect_args},
             )
 
@@ -83,7 +116,7 @@ class SQLAlchemyAdapter:
             # holds a read lock and then tries to upgrade to a write lock can
             # deadlock against another reader's lock. Because cognify() fans
             # work out to parallel greenlets that each open their own connection
-            # (NullPool), those read-then-write transactions race and surface as
+            # (NullPool by default), those read-then-write transactions race and surface as
             # "sqlite3.OperationalError: database is locked" (see issue #2717).
             #
             # Enabling WAL serializes writers on a single write lock while
@@ -155,8 +188,25 @@ class SQLAlchemyAdapter:
         async with async_session_maker() as session:
             try:
                 yield session
-            finally:
-                await session.close()  # Ensure the session is closed
+            except asyncio.CancelledError:
+                # A cancelled request can leave the connection in an open
+                # transaction; returning it to the pool leaks an "idle in
+                # transaction" backend. Invalidate (drop) it instead, shielded
+                # so the cleanup is not cut short by the same cancellation.
+                await asyncio.shield(self._discard_cancelled_session(session))
+                raise
+            # Happy path and ordinary exceptions: the sessionmaker context
+            # manager closes and rolls back, so no explicit close is needed.
+
+    @staticmethod
+    async def _discard_cancelled_session(session: AsyncSession) -> None:
+        # A graceful close needs a ROLLBACK round-trip that the cancellation
+        # keeps interrupting; invalidate() drops the DBAPI connection without
+        # it, so the connection is never reused dirty.
+        try:
+            await session.invalidate()
+        except Exception:
+            logger.exception("Failed to invalidate session on cancellation")
 
     def get_session(self):
         """

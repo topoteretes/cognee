@@ -762,9 +762,9 @@ async def _migrate_graph(graph_engine, id_map: dict, properties_by_id: dict, edg
         new_target = id_map.get(target_id, target_id)
         if new_source != source_id or new_target != target_id:
             new_properties = dict(edge_properties or {})
-            # cognify embeds the endpoint ids INSIDE edge properties
-            # (expand_with_nodes_and_edges), and retrieval prefers those over
-            # the actual topology — they must move with the endpoints.
+            # Graph serialization also embeds endpoint IDs in edge properties.
+            # Retrieval prefers those properties over the stored topology, so
+            # they must move with the endpoints.
             if "source_node_id" in new_properties:
                 new_properties["source_node_id"] = new_source
             if "target_node_id" in new_properties:

@@ -11,6 +11,7 @@ from cognee.shared.logging_utils import get_logger
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.users.models import User
 from cognee.tasks.memify import extract_user_sessions, cognify_session
+from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 
 
 logger = get_logger("persist_sessions_in_knowledge_graph")
@@ -19,7 +20,7 @@ logger = get_logger("persist_sessions_in_knowledge_graph")
 async def persist_sessions_in_knowledge_graph_pipeline(
     user: User,
     session_ids: Optional[List[str]] = None,
-    dataset: str = "main_dataset",
+    dataset: str = DEFAULT_DATASET_NAME,
     run_in_background: bool = False,
 ):
     """

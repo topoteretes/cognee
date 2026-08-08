@@ -34,9 +34,6 @@ from cognee.infrastructure.databases.provenance.source_ref_state import (
     provenance_attach_inputs,
 )
 
-from distributed.utils import override_distributed
-from distributed.tasks.queued_add_nodes import queued_add_nodes
-from distributed.tasks.queued_add_edges import queued_add_edges
 
 from .neo4j_metrics_utils import (
     get_avg_clustering,
@@ -342,7 +339,6 @@ class Neo4jAdapter(GraphDBInterface):
 
         return await self.query(query, params)
 
-    @override_distributed(queued_add_nodes)
     async def add_nodes(
         self,
         nodes: list[DataPoint],
@@ -1165,7 +1161,6 @@ class Neo4jAdapter(GraphDBInterface):
 
         return flattened
 
-    @override_distributed(queued_add_edges)
     async def add_edges(
         self,
         edges: list[tuple[str, str, str, dict[str, Any]]],
@@ -2488,8 +2483,10 @@ class Neo4jAdapter(GraphDBInterface):
         """
         query = f"""
         MATCH (start_node:`{BASE_LABEL}`)-[relationship]->(end_node:`{BASE_LABEL}`)
-        RETURN start_node, properties(relationship) AS relationship_properties, end_node
+        WITH start_node, relationship, end_node
+        ORDER BY start_node.id, end_node.id, type(relationship)
         SKIP $offset LIMIT $limit
+        RETURN start_node, properties(relationship) AS relationship_properties, end_node
         """
         results = await self.query(query, {"offset": offset, "limit": limit})
 

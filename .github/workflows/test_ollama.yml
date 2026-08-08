@@ -108,4 +108,4 @@ jobs:
           HUGGINGFACE_TOKENIZER: "${{ github.workspace }}/qwen3-embedding-tokenizer"
           HF_HUB_OFFLINE: "1"
           TRANSFORMERS_OFFLINE: "1"
-        run: uv run python ./examples/demos/simple_cognee_example.py
+        run: uv run python ./examples/guides/simple_cognee_example.py
