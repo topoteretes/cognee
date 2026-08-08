@@ -19,7 +19,12 @@ from sqlalchemy.schema import DDLElement
 
 
 _MAINTENANCE_DB_NAME = "postgres"
-_POSTGRES_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_$]{0,62}$")
+# Dataset databases are named after dataset UUIDs (hyphens, leading digits), so
+# this is looser than an unquoted Postgres identifier; the compiled DDL below
+# always quotes the name via compiler.preparer.quote, which is what actually
+# prevents injection. The regex still rejects quotes, whitespace, and other
+# metacharacters as defense in depth, and enforces the 63-byte name limit.
+_POSTGRES_IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_$-]{0,62}$")
 
 
 def _validate_database_identifier(db_name: str) -> str:

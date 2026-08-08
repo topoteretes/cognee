@@ -27,7 +27,9 @@ class SaveDataSettings(BaseSettings):
 settings = SaveDataSettings()
 
 
-def _resolve_local_file_uri(data_item: str | Path, *, must_exist: bool = True) -> str | None:
+def _resolve_local_file_uri(
+    data_item: str | Path, *, must_exist: bool = True, strict: bool = False
+) -> str | None:
     try:
         local_path = resolve_local_path(data_item, must_exist=must_exist)
     except FileNotFoundError:
@@ -36,7 +38,11 @@ def _resolve_local_file_uri(data_item: str | Path, *, must_exist: bool = True) -
         logger.debug("Data item could not be evaluated as a local file path.")
         return None
     except ValueError as error:
-        raise IngestionError(message="Local file path is outside allowed roots.") from error
+        if strict:
+            raise IngestionError(message="Local file path is outside allowed roots.") from error
+        # A path-looking string outside the allowed roots is never read as a file;
+        # non-strict callers fall through to plain-text ingestion instead.
+        return None
 
     return local_path.as_uri() if local_path.is_file() else None
 
@@ -73,7 +79,7 @@ async def save_data_item_to_storage(data_item: Union[BinaryIO, str, Any]) -> str
         # data is local file path
         elif parsed_url.scheme == "file":
             if settings.accept_local_file_path:
-                local_uri = _resolve_local_file_uri(url2pathname(parsed_url.path))
+                local_uri = _resolve_local_file_uri(url2pathname(parsed_url.path), strict=True)
                 if local_uri:
                     return local_uri
                 raise IngestionError(message="Local file does not exist or is not a file.")
@@ -82,13 +88,9 @@ async def save_data_item_to_storage(data_item: Union[BinaryIO, str, Any]) -> str
 
         # data is an absolute file path that points at an existing file
         elif (
-            (
-                data_item.startswith("/")
-                or (os.name == "nt" and len(data_item) > 1 and data_item[1] == ":")
-            )
-            and Path(os.path.normpath(data_item)).is_absolute()
-            and abs_path.is_file()
-        ):
+            data_item.startswith("/")
+            or (os.name == "nt" and len(data_item) > 1 and data_item[1] == ":")
+        ) and Path(os.path.normpath(data_item)).is_absolute():
             # Handle both Unix absolute paths (/path) and Windows absolute paths (C:\path).
             #
             # is_absolute() guard: on Windows a POSIX-style "/path" (or a drive-relative
@@ -96,17 +98,15 @@ async def save_data_item_to_storage(data_item: Union[BinaryIO, str, Any]) -> str
             # raises ValueError for it. Such strings are not usable file paths on this
             # platform and continue to the relative-path/text handling below.
             #
-            # abs_path.is_file() guard: only convert an absolute-looking string to a
-            # file:// URI when it actually points at an existing file, mirroring the
-            # relative-path branch below. A "/"-prefixed string that is not an existing
-            # file (e.g. a plain text note such as "/remember to call Bob") falls through
-            # to text ingestion on every platform instead of becoming a broken file:// URI.
-            if settings.accept_local_file_path:
-                local_uri = _resolve_local_file_uri(data_item)
-                if local_uri:
+            # _resolve_local_file_uri returns a URI only for an existing allowed file,
+            # mirroring the relative-path branch below. A "/"-prefixed string that is
+            # not an existing allowed file (e.g. a plain text note such as "/remember
+            # to call Bob") falls through to text ingestion on every platform instead
+            # of becoming a broken file:// URI.
+            local_uri = _resolve_local_file_uri(data_item)
+            if local_uri:
+                if settings.accept_local_file_path:
                     return local_uri
-                raise IngestionError(message="Local file does not exist or is not a file.")
-            else:
                 raise IngestionError(message="Local files are not accepted.")
         # Data is a relative file path
         local_uri = _resolve_local_file_uri(data_item)

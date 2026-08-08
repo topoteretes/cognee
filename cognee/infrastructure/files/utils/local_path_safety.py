@@ -24,28 +24,27 @@ def get_allowed_local_file_roots() -> tuple[Path, ...]:
             ]
         )
 
-    # resolve(strict=False) canonicalizes symlinks (and e.g. macOS /tmp -> /private/tmp)
-    # without requiring the path to exist, so containment checks below are symlink-safe.
-    return tuple(Path(os.path.expanduser(root)).resolve(strict=False) for root in root_values)
-
-
-def _is_path_under_root(path: Path, root: Path) -> bool:
-    try:
-        path.relative_to(root)
-        return True
-    except ValueError:
-        return False
+    # realpath canonicalizes symlinks (and e.g. macOS /tmp -> /private/tmp) without
+    # requiring the path to exist, so containment checks below are symlink-safe.
+    return tuple(Path(os.path.realpath(os.path.expanduser(root))) for root in root_values)
 
 
 def resolve_local_path(path: str | Path, *, must_exist: bool = False) -> Path:
-    # resolve(strict=False) follows symlinks, so a path cannot escape an allowed
-    # root through a symlink that points outside it (a lexical abspath check would
-    # accept such a path).
-    resolved_path = Path(os.path.expanduser(os.fspath(path))).resolve(strict=False)
+    # realpath follows symlinks, so a path cannot escape an allowed root through a
+    # symlink that points outside it (a lexical abspath check would accept such a
+    # path). The realpath + startswith containment check below is the idiom static
+    # analyzers (CodeQL py/path-injection) recognize as a path sanitizer.
+    resolved = os.path.realpath(os.path.expanduser(os.fspath(path)))
     for root in get_allowed_local_file_roots():
-        if _is_path_under_root(resolved_path, root):
-            if must_exist and not resolved_path.exists():
-                raise FileNotFoundError(path)
-            return resolved_path
+        root_str = os.fspath(root)
+        if resolved == root_str:
+            resolved_path = Path(root_str)
+        elif resolved.startswith(root_str.rstrip(os.sep) + os.sep):
+            resolved_path = Path(resolved)
+        else:
+            continue
+        if must_exist and not resolved_path.exists():
+            raise FileNotFoundError(path)
+        return resolved_path
 
     raise ValueError("Local file path is outside allowed roots.")

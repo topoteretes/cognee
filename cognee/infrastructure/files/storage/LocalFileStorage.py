@@ -72,30 +72,30 @@ class LocalFileStorage(Storage):
         # LocalFileStorage is also used internally with trusted storage roots and to
         # open arbitrary user-referenced file:// paths, so applying the allowlist to
         # every storage root breaks those legitimate uses. Intra-root traversal is
-        # still blocked by _resolve_storage_path below. resolve(strict=False)
-        # canonicalizes symlinks without requiring the path to exist.
-        return os.fspath(
-            Path(os.path.expanduser(get_parsed_path(self.storage_path))).resolve(strict=False)
-        )
+        # still blocked by _resolve_storage_path below. realpath canonicalizes
+        # symlinks without requiring the path to exist.
+        return os.path.realpath(os.path.expanduser(get_parsed_path(self.storage_path)))
 
     def _resolve_storage_path(self, file_path: str | Path | None = "") -> Path:
-        root_path = Path(self._storage_root())
+        root_path = self._storage_root()
         if file_path is None or not str(file_path).strip():
-            return root_path
+            return Path(root_path)
 
         parsed_path = os.path.expanduser(get_parsed_path(str(file_path)))
-        candidate = Path(parsed_path) if os.path.isabs(parsed_path) else root_path / parsed_path
-        # resolve(strict=False) follows symlinks, so a symlink inside the storage
-        # root cannot be used to escape it.
-        full_file_path = candidate.resolve(strict=False)
+        candidate = (
+            parsed_path if os.path.isabs(parsed_path) else os.path.join(root_path, parsed_path)
+        )
+        # realpath follows symlinks, so a symlink inside the storage root cannot be
+        # used to escape it. The realpath + startswith containment check is the idiom
+        # static analyzers (CodeQL py/path-injection) recognize as a path sanitizer.
+        full_file_path = os.path.realpath(candidate)
 
-        if full_file_path != root_path:
-            try:
-                full_file_path.relative_to(root_path)
-            except ValueError:
-                raise ValueError("File path is outside the configured storage root.")
+        if full_file_path == root_path:
+            return Path(root_path)
+        if not full_file_path.startswith(root_path.rstrip(os.sep) + os.sep):
+            raise ValueError("File path is outside the configured storage root.")
 
-        return full_file_path
+        return Path(full_file_path)
 
     async def store(self, file_path: str, data: BinaryIO | str, overwrite: bool = False) -> str:
         """

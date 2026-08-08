@@ -3,7 +3,6 @@ from urllib.parse import urlparse
 from typing import List, Union, BinaryIO
 
 from cognee.tasks.ingestion.exceptions import S3FileSystemNotFoundError
-from cognee.exceptions import CogneeSystemError
 from cognee.infrastructure.files.storage.s3_config import get_s3_config
 from cognee.infrastructure.files.utils.local_path_safety import resolve_local_path
 
@@ -15,8 +14,11 @@ def _resolve_existing_local_path(item: str) -> Path | None:
         return None
     except OSError:
         return None
-    except ValueError as error:
-        raise CogneeSystemError(message="Local path is outside allowed roots.") from error
+    except ValueError:
+        # A path-looking string outside the allowed roots is never expanded or read
+        # here; it is passed through unchanged and handled downstream by
+        # save_data_item_to_storage (which ingests it as plain text).
+        return None
 
 
 async def resolve_data_directories(
