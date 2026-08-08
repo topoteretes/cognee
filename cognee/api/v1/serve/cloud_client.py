@@ -215,6 +215,10 @@ class CloudClient:
             payload["context_profile"] = kwargs["context_profile"]
         if kwargs.get("include_references") is not None:
             payload["include_references"] = kwargs["include_references"]
+        if kwargs.get("tool_connections") is not None:
+            payload["tool_connections"] = kwargs["tool_connections"]
+        if kwargs.get("tools_trigger") not in (None, "always"):
+            payload["tools_trigger"] = kwargs["tools_trigger"]
 
         async with session.post(
             f"{self.service_url}/api/v1/recall",
