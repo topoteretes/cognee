@@ -125,10 +125,17 @@ jobs:
             ARGS+=(--num-memories "${{ inputs.num_memories }}")
           fi
 
+          # Capture the exit code instead of failing here: the report writes
+          # its JSON/HTML even when runs fail, and the upload + metrics steps
+          # must still run. The job fails at the end via REPORT_RC.
+          set +e
           uv run python cognee/tests/performance/statistics_percentile_report.py \
             "${ARGS[@]}" \
             --output "$JSON_PATH" \
             --html "$HTML_PATH"
+          REPORT_RC=$?
+          set -e
+          echo "REPORT_RC=$REPORT_RC" >> "$GITHUB_ENV"
 
       - name: Upload reports to S3
         id: upload
@@ -158,6 +165,12 @@ jobs:
             total:   {p50: .stats.total_ingest_time_s.p50, p90: .stats.total_ingest_time_s.p90, p99: .stats.total_ingest_time_s.p99}
           }' "$JSON_PATH")"
           echo "metrics=$METRICS" >> "$GITHUB_OUTPUT"
+
+      - name: Fail if any benchmark run failed
+        if: ${{ env.REPORT_RC != '0' }}
+        run: |
+          echo "Performance report exited with code $REPORT_RC — one or more benchmark runs failed."
+          exit 1
 
   # ── Postgres backend: Postgres relational + PGVector + Postgres graph ────────
   postgres:
@@ -263,10 +276,17 @@ jobs:
             ARGS+=(--num-memories "${{ inputs.num_memories }}")
           fi
 
+          # Capture the exit code instead of failing here: the report writes
+          # its JSON/HTML even when runs fail, and the upload + metrics steps
+          # must still run. The job fails at the end via REPORT_RC.
+          set +e
           uv run python cognee/tests/performance/statistics_percentile_report.py \
             "${ARGS[@]}" \
             --output "$JSON_PATH" \
             --html "$HTML_PATH"
+          REPORT_RC=$?
+          set -e
+          echo "REPORT_RC=$REPORT_RC" >> "$GITHUB_ENV"
 
       - name: Upload reports to S3
         id: upload
@@ -296,3 +316,9 @@ jobs:
             total:   {p50: .stats.total_ingest_time_s.p50, p90: .stats.total_ingest_time_s.p90, p99: .stats.total_ingest_time_s.p99}
           }' "$JSON_PATH")"
           echo "metrics=$METRICS" >> "$GITHUB_OUTPUT"
+
+      - name: Fail if any benchmark run failed
+        if: ${{ env.REPORT_RC != '0' }}
+        run: |
+          echo "Performance report exited with code $REPORT_RC — one or more benchmark runs failed."
+          exit 1

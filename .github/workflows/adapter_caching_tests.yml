@@ -219,3 +219,73 @@ jobs:
           DB_USERNAME: cognee
           DB_PASSWORD: cognee
         run: uv run python ./cognee/tests/test_adapter_object_caching.py
+
+  run-postgres-pgvector-postgres-caching:
+    name: Adapter caching — Postgres graph + PGVector + Postgres (access control)
+    runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
+    if: ${{ inputs.databases == 'all' || contains(inputs.databases, 'postgres/pgvector/postgres') }}
+    services:
+      postgres:
+        image: ghcr.io/topoteretes/pgvector:pg17
+        credentials:
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+        env:
+          POSTGRES_USER: cognee
+          POSTGRES_PASSWORD: cognee
+          POSTGRES_DB: cognee_db
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    steps:
+      - name: Check out
+        uses: actions/checkout@v6
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: ${{ inputs.python-version }}
+          extra-dependencies: "postgres"
+
+      - name: Run adapter caching test
+        env:
+          ENV: 'dev'
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_ARGS: ${{ secrets.LLM_ARGS }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_DIMENSIONS: 300
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          # Access control mode: every dataset gets its own physical Postgres
+          # database (named after the deterministic dataset id) that is created
+          # on add and dropped on delete — the engine-cache lifecycle across
+          # that drop/recreate boundary is what this job guards.
+          ENABLE_BACKEND_ACCESS_CONTROL: 'true'
+          DB_PROVIDER: 'postgres'
+          DB_NAME: 'cognee_db'
+          DB_HOST: ${{ inputs.ci-image != '' && 'postgres' || '127.0.0.1' }}
+          DB_PORT: 5432
+          DB_USERNAME: cognee
+          DB_PASSWORD: cognee
+          VECTOR_DB_PROVIDER: 'pgvector'
+          VECTOR_DB_NAME: 'cognee_db'
+          VECTOR_DB_HOST: ${{ inputs.ci-image != '' && 'postgres' || '127.0.0.1' }}
+          VECTOR_DB_PORT: 5432
+          VECTOR_DB_USERNAME: cognee
+          VECTOR_DB_PASSWORD: cognee
+          VECTOR_DATASET_DATABASE_HANDLER: 'pgvector'
+          GRAPH_DATABASE_PROVIDER: 'postgres'
+          GRAPH_DATABASE_NAME: 'cognee_db'
+          GRAPH_DATABASE_HOST: ${{ inputs.ci-image != '' && 'postgres' || '127.0.0.1' }}
+          GRAPH_DATABASE_PORT: 5432
+          GRAPH_DATABASE_USERNAME: cognee
+          GRAPH_DATABASE_PASSWORD: cognee
+          GRAPH_DATASET_DATABASE_HANDLER: 'postgres_graph'
+        run: uv run python ./cognee/tests/test_adapter_object_caching.py

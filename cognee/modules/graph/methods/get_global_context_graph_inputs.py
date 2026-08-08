@@ -8,8 +8,19 @@ from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
+from cognee.infrastructure.databases.provenance.markers import stores_provenance_in_graph
 from cognee.infrastructure.databases.relational import with_async_session
+from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.modules.graph.models import Edge, Node
+
+# Graph node types and edge relationship names traversed to build the graph
+# bucketing input. On graph-provenance graphs both edges live in relationship_name
+# (the relational ledger splits "contains" into label, but the graph does not).
+_SUMMARY_TYPE = "TextSummary"
+_CHUNK_TYPE = "DocumentChunk"
+_ENTITY_TYPE = "Entity"
+_MADE_FROM = "made_from"
+_CONTAINS = "contains"
 
 
 @dataclass
@@ -44,8 +55,106 @@ def coerce_graph_uuid_set(values: Iterable[str | UUID], field_name: str) -> set[
     return {coerce_graph_uuid(value, field_name) for value in values}
 
 
+async def _resolve_graph_provenance_engine():
+    """Return the graph engine if this graph stores provenance in the graph
+    itself (so its relational Node/Edge ledger is empty), else None."""
+    unified = await get_unified_engine()
+    if not unified.supports_graph_provenance_delete():
+        return None
+    graph_engine = unified.graph
+    if await stores_provenance_in_graph(graph_engine):
+        return graph_engine
+    return None
+
+
+async def _graph_provenance_dataset_subgraph(
+    graph_engine,
+    dataset_uuid: UUID,
+) -> tuple[dict[str, dict], list[tuple[str, str, str]]]:
+    """Load this dataset's nodes + edges from the graph.
+
+    Scopes by source-ref provenance (works whether or not the graph is isolated
+    per dataset), then keeps edges whose endpoints both belong to the dataset.
+    """
+    node_refs = await graph_engine.find_node_source_refs_by_dataset(str(dataset_uuid))
+    dataset_node_ids = set(node_refs)
+    all_nodes, all_edges = await graph_engine.get_graph_data()
+    nodes_by_id = {
+        str(node_id): props for node_id, props in all_nodes if str(node_id) in dataset_node_ids
+    }
+    edges = [
+        (str(source_id), str(target_id), relationship_name)
+        for source_id, target_id, relationship_name, _props in all_edges
+        if str(source_id) in dataset_node_ids and str(target_id) in dataset_node_ids
+    ]
+    return nodes_by_id, edges
+
+
+def _graph_provenance_entity_input(
+    nodes_by_id: dict[str, dict],
+    edges: list[tuple[str, str, str]],
+    expected_summary_uuids: set[UUID],
+) -> DatasetGraphEntityInput:
+    """Rebuild summary→chunk→entity rows from graph edges, then reuse the same
+    result builders as the relational path."""
+    type_of = {node_id: props.get("type") for node_id, props in nodes_by_id.items()}
+    expected_str = {str(summary_id) for summary_id in expected_summary_uuids}
+
+    summary_chunk_pairs = [
+        (source_id, target_id)
+        for source_id, target_id, relationship_name in edges
+        if relationship_name == _MADE_FROM
+        and source_id in expected_str
+        and type_of.get(source_id) == _SUMMARY_TYPE
+        and type_of.get(target_id) == _CHUNK_TYPE
+    ]
+    chunk_ids = {target_id for _, target_id in summary_chunk_pairs}
+    chunk_entity_pairs = [
+        (source_id, target_id)
+        for source_id, target_id, relationship_name in edges
+        if relationship_name == _CONTAINS
+        and source_id in chunk_ids
+        and type_of.get(target_id) == _ENTITY_TYPE
+    ]
+
+    summary_chunk_rows = [
+        (
+            coerce_graph_uuid(source_id, "summary node id"),
+            coerce_graph_uuid(target_id, "chunk node id"),
+        )
+        for source_id, target_id in summary_chunk_pairs
+    ]
+    chunk_entity_rows = [
+        (
+            coerce_graph_uuid(source_id, "chunk node id"),
+            coerce_graph_uuid(target_id, "entity node id"),
+        )
+        for source_id, target_id in chunk_entity_pairs
+    ]
+
+    return DatasetGraphEntityInput(
+        summary_entities=_build_summary_entity_load_result(
+            expected_summary_uuids,
+            summary_chunk_rows,
+            chunk_entity_rows,
+        ),
+        entity_counts=_build_dataset_entity_counts(summary_chunk_rows, chunk_entity_rows),
+    )
+
+
+async def get_dataset_text_summary_ids(dataset_id: str | UUID) -> set[str]:
+    graph_engine = await _resolve_graph_provenance_engine()
+    if graph_engine is not None:
+        dataset_uuid = coerce_graph_uuid(dataset_id, "dataset_id")
+        nodes_by_id, _edges = await _graph_provenance_dataset_subgraph(graph_engine, dataset_uuid)
+        return {
+            node_id for node_id, props in nodes_by_id.items() if props.get("type") == _SUMMARY_TYPE
+        }
+    return await _relational_dataset_text_summary_ids(dataset_id)
+
+
 @with_async_session
-async def get_dataset_text_summary_ids(
+async def _relational_dataset_text_summary_ids(
     dataset_id: str | UUID,
     session: AsyncSession,
 ) -> set[str]:
@@ -110,6 +219,11 @@ async def _load_dataset_graph_entity_input(
             summary_entities=_build_summary_entity_load_result(set(), [], []),
             entity_counts=DatasetEntityCounts(chunk_count=0, entity_chunk_counts={}),
         )
+
+    graph_engine = await _resolve_graph_provenance_engine()
+    if graph_engine is not None:
+        nodes_by_id, edges = await _graph_provenance_dataset_subgraph(graph_engine, dataset_uuid)
+        return _graph_provenance_entity_input(nodes_by_id, edges, expected_summary_uuids)
 
     summary_chunk_rows = await _load_summary_chunk_rows(
         dataset_uuid, expected_summary_uuids, session

@@ -29,7 +29,7 @@ async def test_get_context_success(mock_vector_engine):
     retriever = TripletRetriever(top_k=5)
 
     with patch(
-        "cognee.modules.retrieval.triplet_retriever.get_vector_engine",
+        "cognee.modules.retrieval.triplet_retriever.get_vector_engine_async",
         return_value=mock_vector_engine,
     ):
         objects = await retriever.get_retrieved_objects("test query")
@@ -38,7 +38,12 @@ async def test_get_context_success(mock_vector_engine):
 
     assert context == "Alice knows Bob\nBob works at Tech Corp"
     mock_vector_engine.search.assert_awaited_once_with(
-        "Triplet_text", "test query", limit=5, include_payload=True
+        "Triplet_text",
+        "test query",
+        limit=5,
+        include_payload=True,
+        node_name=None,
+        node_name_filter_operator="OR",
     )
 
 
@@ -50,7 +55,7 @@ async def test_get_objects_no_collection(mock_vector_engine):
     retriever = TripletRetriever()
 
     with patch(
-        "cognee.modules.retrieval.triplet_retriever.get_vector_engine",
+        "cognee.modules.retrieval.triplet_retriever.get_vector_engine_async",
         return_value=mock_vector_engine,
     ):
         with pytest.raises(NoDataError, match="create_triplet_embeddings"):
@@ -65,7 +70,7 @@ async def test_get_context_empty_results(mock_vector_engine):
     retriever = TripletRetriever()
 
     with patch(
-        "cognee.modules.retrieval.triplet_retriever.get_vector_engine",
+        "cognee.modules.retrieval.triplet_retriever.get_vector_engine_async",
         return_value=mock_vector_engine,
     ):
         context = await retriever.get_context_from_objects("test query", [])
@@ -81,7 +86,7 @@ async def test_get_objects_collection_not_found_error(mock_vector_engine):
     retriever = TripletRetriever()
 
     with patch(
-        "cognee.modules.retrieval.triplet_retriever.get_vector_engine",
+        "cognee.modules.retrieval.triplet_retriever.get_vector_engine_async",
         return_value=mock_vector_engine,
     ):
         with pytest.raises(NoDataError, match="No data found"):
@@ -99,7 +104,7 @@ async def test_get_context_empty_payload_text(mock_vector_engine):
     retriever = TripletRetriever()
 
     with patch(
-        "cognee.modules.retrieval.triplet_retriever.get_vector_engine",
+        "cognee.modules.retrieval.triplet_retriever.get_vector_engine_async",
         return_value=mock_vector_engine,
     ):
         with pytest.raises(KeyError):
@@ -118,7 +123,7 @@ async def test_get_context_single_triplet(mock_vector_engine):
     retriever = TripletRetriever()
 
     with patch(
-        "cognee.modules.retrieval.triplet_retriever.get_vector_engine",
+        "cognee.modules.retrieval.triplet_retriever.get_vector_engine_async",
         return_value=mock_vector_engine,
     ):
         objects = await retriever.get_retrieved_objects("test query")
@@ -136,6 +141,8 @@ async def test_init_defaults():
     assert retriever.system_prompt_path == "answer_simple_question.txt"
     assert retriever.top_k == 5  # Default is 5
     assert retriever.system_prompt is None
+    assert retriever.node_name is None
+    assert retriever.node_name_filter_operator == "OR"
 
 
 @pytest.mark.asyncio
@@ -146,12 +153,43 @@ async def test_init_custom_params():
         system_prompt_path="custom_system.txt",
         system_prompt="Custom prompt",
         top_k=10,
+        node_name=["KEN", "src_type:figure"],
+        node_name_filter_operator="AND",
     )
 
     assert retriever.user_prompt_path == "custom_user.txt"
     assert retriever.system_prompt_path == "custom_system.txt"
     assert retriever.system_prompt == "Custom prompt"
     assert retriever.top_k == 10
+    assert retriever.node_name == ["KEN", "src_type:figure"]
+    assert retriever.node_name_filter_operator == "AND"
+
+
+@pytest.mark.asyncio
+async def test_get_context_forwards_nodeset_filter_to_vector_search(mock_vector_engine):
+    """node_set filtering must be passed through to the vector engine (TRIPLET_COMPLETION)."""
+    mock_vector_engine.search.return_value = []
+
+    retriever = TripletRetriever(
+        top_k=30,
+        node_name=["KEN", "src_type:figure"],
+        node_name_filter_operator="AND",
+    )
+
+    with patch(
+        "cognee.modules.retrieval.triplet_retriever.get_vector_engine_async",
+        return_value=mock_vector_engine,
+    ):
+        await retriever.get_retrieved_objects("land cover")
+
+    mock_vector_engine.search.assert_awaited_once_with(
+        "Triplet_text",
+        "land cover",
+        limit=30,
+        include_payload=True,
+        node_name=["KEN", "src_type:figure"],
+        node_name_filter_operator="AND",
+    )
 
 
 @pytest.mark.asyncio
@@ -166,7 +204,7 @@ async def test_get_completion_without_context(mock_vector_engine):
 
     with (
         patch(
-            "cognee.modules.retrieval.triplet_retriever.get_vector_engine",
+            "cognee.modules.retrieval.triplet_retriever.get_vector_engine_async",
             return_value=mock_vector_engine,
         ),
         patch(
@@ -226,7 +264,7 @@ async def test_get_completion_with_session(mock_vector_engine):
 
     with (
         patch(
-            "cognee.modules.retrieval.triplet_retriever.get_vector_engine",
+            "cognee.modules.retrieval.triplet_retriever.get_vector_engine_async",
             return_value=mock_vector_engine,
         ),
         patch(
@@ -276,7 +314,7 @@ async def test_get_completion_with_session_no_user_id(mock_vector_engine):
 
     with (
         patch(
-            "cognee.modules.retrieval.triplet_retriever.get_vector_engine",
+            "cognee.modules.retrieval.triplet_retriever.get_vector_engine_async",
             return_value=mock_vector_engine,
         ),
         patch(
@@ -316,7 +354,7 @@ async def test_get_completion_with_response_model(mock_vector_engine):
 
     with (
         patch(
-            "cognee.modules.retrieval.triplet_retriever.get_vector_engine",
+            "cognee.modules.retrieval.triplet_retriever.get_vector_engine_async",
             return_value=mock_vector_engine,
         ),
         patch(

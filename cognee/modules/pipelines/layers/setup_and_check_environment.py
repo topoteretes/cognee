@@ -22,6 +22,7 @@ _first_run_lock = asyncio.Lock()
 async def setup_and_check_environment(
     vector_db_config: dict = None,
     graph_db_config: dict = None,
+    skip_connection_test: bool = False,
 ):
     if vector_db_config:
         context_vector_db_config.set(vector_db_config)
@@ -44,6 +45,15 @@ async def setup_and_check_environment(
                 logger.info(
                     "Skipping LLM/embedding connection tests (COGNEE_SKIP_CONNECTION_TEST is set)."
                 )
+            elif skip_connection_test:
+                # Caller-scoped skip (e.g. the LLM-free code graph pipeline).
+                # Do not mark the first run done: a later pipeline that does
+                # need LLM/embeddings must still run the checks.
+                logger.info(
+                    "Skipping LLM/embedding connection tests for this pipeline "
+                    "(requested by the caller)."
+                )
+                return
             else:
                 from cognee.infrastructure.llm.utils import (
                     determine_embedding_dimensions,
@@ -53,5 +63,5 @@ async def setup_and_check_environment(
 
                 await test_llm_connection()
                 detected_embedding_dimensions = await test_embedding_connection()
-                determine_embedding_dimensions(detected_embedding_dimensions)
+                await determine_embedding_dimensions(detected_embedding_dimensions)
             _first_run_done = True

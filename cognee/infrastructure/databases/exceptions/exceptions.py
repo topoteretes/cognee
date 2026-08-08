@@ -1,5 +1,10 @@
 from fastapi import status
-from cognee.exceptions import CogneeSystemError, CogneeValidationError, CogneeConfigurationError
+from cognee.exceptions import (
+    CogneeApiError,
+    CogneeSystemError,
+    CogneeValidationError,
+    CogneeConfigurationError,
+)
 
 
 class DatabaseNotCreatedError(CogneeSystemError):
@@ -18,6 +23,18 @@ class DatabaseNotCreatedError(CogneeSystemError):
         status_code: int = status.HTTP_422_UNPROCESSABLE_CONTENT,
     ):
         super().__init__(message, name, status_code)
+
+
+class UnsupportedProvenanceCapability(CogneeApiError):
+    """Raised when an adapter does not implement graph provenance operations."""
+
+    def __init__(
+        self,
+        message: str = "This backend does not support graph provenance yet.",
+        name: str = "UnsupportedProvenanceCapability",
+        status_code: int = status.HTTP_501_NOT_IMPLEMENTED,
+    ):
+        super().__init__(message, name, status_code, log=False)
 
 
 class EntityNotFoundError(CogneeValidationError):
@@ -43,10 +60,11 @@ class EntityNotFoundError(CogneeValidationError):
         name: str = "EntityNotFoundError",
         status_code=status.HTTP_404_NOT_FOUND,
     ):
-        self.message = message
-        self.name = name
-        self.status_code = status_code
-        # super().__init__(message, name, status_code) :TODO: This is not an error anymore with the dynamic exception handling therefore we shouldn't log error
+        # log=False: this is raised in routine control flow (caught in user
+        # resolution, migrations, pruning, graph projection, etc.), so logging
+        # every occurrence at ERROR would be noise. super() still populates
+        # Exception.args and preserves chaining.
+        super().__init__(message, name, status_code, log=False)
 
 
 class EntityAlreadyExistsError(CogneeValidationError):
@@ -81,9 +99,9 @@ class NodesetFilterNotSupportedError(CogneeConfigurationError):
         name: str = "NodeSetFilterNotSupportedError",
         status_code=status.HTTP_404_NOT_FOUND,
     ):
-        self.message = message
-        self.name = name
-        self.status_code = status_code
+        # log=False: a missing nodeset filter is a capability difference between
+        # backends, not an application error worth logging on every raise.
+        super().__init__(message, name, status_code, log=False)
 
 
 class EmbeddingException(CogneeConfigurationError):
@@ -99,6 +117,18 @@ class EmbeddingException(CogneeConfigurationError):
         self,
         message: str = "Embedding Exception.",
         name: str = "EmbeddingException",
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+    ):
+        super().__init__(message, name, status_code)
+
+
+class EmbeddingContextWindowTooSmallError(EmbeddingException):
+    """Raised when over-length embedding input cannot be split any further."""
+
+    def __init__(
+        self,
+        message: str = "Text is too short to split further but exceeds context window.",
+        name: str = "EmbeddingContextWindowTooSmallError",
         status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
     ):
         super().__init__(message, name, status_code)

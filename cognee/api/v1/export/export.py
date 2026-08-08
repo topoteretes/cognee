@@ -7,17 +7,19 @@ from uuid import UUID
 from cognee.modules.migration.export import ExportResult, export_dataset
 from cognee.modules.migration.snapshot import GraphSnapshot
 from cognee.modules.observability import new_span, COGNEE_DATASET_NAME
+from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 
 _FileFormat = Literal["cogx", "json", "graphml", "cypher"]
 
 
 @overload
 async def export(
-    dataset: Union[str, UUID] = "main_dataset",
+    dataset: Union[str, UUID] = DEFAULT_DATASET_NAME,
     format: Literal["pydantic"] = "pydantic",
     destination: Optional[Union[str, Path]] = None,
     user=None,
     link_relations: bool = False,
+    include_permissions: bool = False,
 ) -> GraphSnapshot: ...
 
 
@@ -28,26 +30,29 @@ async def export(
     destination: Optional[Union[str, Path]] = None,
     user=None,
     link_relations: bool = False,
+    include_permissions: bool = False,
 ) -> ExportResult: ...
 
 
 @overload
 async def export(
-    dataset: Union[str, UUID] = "main_dataset",
+    dataset: Union[str, UUID] = DEFAULT_DATASET_NAME,
     *,
     format: _FileFormat,
     destination: Optional[Union[str, Path]] = None,
     user=None,
     link_relations: bool = False,
+    include_permissions: bool = False,
 ) -> ExportResult: ...
 
 
 async def export(
-    dataset: Union[str, UUID] = "main_dataset",
+    dataset: Union[str, UUID] = DEFAULT_DATASET_NAME,
     format: str = "pydantic",
     destination: Optional[Union[str, Path]] = None,
     user=None,
     link_relations: bool = False,
+    include_permissions: bool = False,
 ) -> Union[ExportResult, GraphSnapshot]:
     """Export a dataset's knowledge graph.
 
@@ -97,4 +102,5 @@ async def export(
             destination=destination,
             user=user,
             link_relations=link_relations,
+            include_permissions=include_permissions,
         )

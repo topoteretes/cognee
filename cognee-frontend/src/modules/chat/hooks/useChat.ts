@@ -11,12 +11,12 @@ interface ChatMessage {
 }
 
 const fetchMessages = (instance: CogneeInstance) => {
-  return instance.fetch("/v1/search/")
+  return instance.fetch("/v1/search")
     .then(response => response.json());
 };
 
 const sendMessage = (message: string, searchType: string, topK: number, instance: CogneeInstance) => {
-  return instance.fetch("/v1/search/", {
+  return instance.fetch("/v1/search", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

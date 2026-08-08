@@ -4,8 +4,6 @@ import random
 from typing import Optional, Any, List, Union, Tuple
 import zipfile
 
-import gdown
-
 from cognee.eval_framework.benchmark_adapters.base_benchmark_adapter import BaseBenchmarkAdapter
 
 
@@ -108,6 +106,16 @@ class MusiqueQAAdapter(BaseBenchmarkAdapter):
 
     def _musique_download_file(self) -> None:
         """Downloads and unzips the Musique dataset if not present locally."""
+        # Imported lazily so the benchmark registry (and the eval runner) can be
+        # imported without the optional eval extra installed.
+        try:
+            import gdown
+        except ImportError as error:
+            raise ImportError(
+                "Downloading the Musique dataset requires optional dependencies. "
+                'Install them with: pip install "cognee[eval]"'
+            ) from error
+
         url = self.dataset_info["download_url"]
         zip_filename = self.dataset_info["zip_filename"]
         target_filename = self.dataset_info["filename"]
