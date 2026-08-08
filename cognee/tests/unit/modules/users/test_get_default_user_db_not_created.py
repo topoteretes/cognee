@@ -71,3 +71,16 @@ class TestGetDefaultUserDatabaseNotCreated:
         with patch.object(gdu_mod, "get_relational_engine", return_value=engine):
             with pytest.raises(RuntimeError):
                 await gdu_mod.get_default_user()
+
+    def test_database_not_created_error_does_not_self_log(self):
+        # The exception base class logs itself on construction by default.
+        # DatabaseNotCreatedError is a recoverable signal (the CLI catches it
+        # and auto-creates the database), so it must stay silent — an ERROR
+        # line on stderr during a successful fresh-install `cognee-cli add`
+        # both alarms users and fails the CLI integration test.
+        import cognee.exceptions.exceptions as exc_mod
+
+        with patch.object(exc_mod, "logger") as mock_logger:
+            DatabaseNotCreatedError()
+        mock_logger.error.assert_not_called()
+        mock_logger.warning.assert_not_called()

@@ -22,7 +22,10 @@ class DatabaseNotCreatedError(CogneeSystemError):
         name: str = "DatabaseNotCreatedError",
         status_code: int = status.HTTP_422_UNPROCESSABLE_CONTENT,
     ):
-        super().__init__(message, name, status_code)
+        # log=False: this is a recoverable signal — the CLI catches it and
+        # auto-creates the database (cognee/cli/user_resolution.py), so an
+        # ERROR log line here would alarm users on every fresh install.
+        super().__init__(message, name, status_code, log=False)
 
 
 class UnsupportedProvenanceCapability(CogneeApiError):
