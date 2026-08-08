@@ -478,7 +478,9 @@ class CogneeGraph(CogneeAbstractGraph):
             self.feedback_influence if feedback_influence is None else feedback_influence
         )
 
-        def _effective_distance(distance: float, feedback_weight: Any) -> float:
+        def _effective_distance(
+            distance: float, feedback_weight: Any, frequency_weight: Any
+        ) -> float:
             if active_feedback_influence <= 0.0:
                 return distance
 
@@ -494,11 +496,28 @@ class CogneeGraph(CogneeAbstractGraph):
                 normalized_feedback_weight = 0.5
 
             normalized_feedback_weight = max(0.0, min(1.0, normalized_feedback_weight))
+            try:
+                frequency_count = float(frequency_weight)
+            except (TypeError, ValueError):
+                frequency_count = 0.0
+            frequency_count = max(0.0, frequency_count)
+
+            reinforcement_weight = normalized_feedback_weight
+            if frequency_count > 0.0:
+                # Frequency is an unbounded recall count, not a [0, 1] opinion score.
+                # Compress it with a saturating curve and map count=0 to the neutral
+                # feedback prior, so "never recalled" does not become a negative signal.
+                normalized_frequency_weight = frequency_count / (frequency_count + 1.0)
+                frequency_reinforcement_weight = 0.5 + (0.5 * normalized_frequency_weight)
+                reinforcement_weight = (
+                    normalized_feedback_weight + frequency_reinforcement_weight
+                ) / 2.0
+
             # Blend in a normalized space (cosine distance in [0, 2] -> [0, 1]),
             # then project back to distance scale so score magnitudes stay consistent.
             normalized_distance = distance / 2.0
             blended_normalized = (1.0 - active_feedback_influence) * normalized_distance + (
-                active_feedback_influence * (1.0 - normalized_feedback_weight)
+                active_feedback_influence * (1.0 - reinforcement_weight)
             )
             return blended_normalized * 2.0
 
@@ -533,7 +552,8 @@ class CogneeGraph(CogneeAbstractGraph):
                     )
                 distance = (2 - importance_weight) * distance
                 feedback_weight = element.attributes.get("feedback_weight", 0.5)
-                importances.append(_effective_distance(distance, feedback_weight))
+                frequency_weight = element.attributes.get("frequency_weight", 0.0)
+                importances.append(_effective_distance(distance, feedback_weight, frequency_weight))
 
             return sum(importances)
 

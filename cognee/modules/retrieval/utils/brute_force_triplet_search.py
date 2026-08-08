@@ -68,10 +68,16 @@ async def get_memory_fragment(
     edge_properties_to_project = ["relationship_name", "edge_text", "edge_object_id"]
 
     if feedback_influence > 0.0:
+        # Frequency is part of the same reinforcement signal, so it shares the
+        # existing feedback influence gate instead of adding another config knob.
         if "feedback_weight" not in node_properties_to_project:
             node_properties_to_project.append("feedback_weight")
         if "feedback_weight" not in edge_properties_to_project:
             edge_properties_to_project.append("feedback_weight")
+        if "frequency_weight" not in node_properties_to_project:
+            node_properties_to_project.append("frequency_weight")
+        if "frequency_weight" not in edge_properties_to_project:
+            edge_properties_to_project.append("frequency_weight")
 
     memory_fragment = CogneeGraph()
 

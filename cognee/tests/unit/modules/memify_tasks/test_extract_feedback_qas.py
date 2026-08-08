@@ -6,9 +6,12 @@ import pytest
 from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.cache.models import SessionQAEntry
 from cognee.infrastructure.session.session_manager import SessionManager
-from cognee.tasks.memify.extract_feedback_qas import extract_feedback_qas
+from cognee.tasks.memify.extract_feedback_qas import extract_feedback_qas, extract_recall_qas
 from cognee.tasks.memify.feedback_weights_constants import (
     MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY,
+)
+from cognee.tasks.memify.frequency_weights_constants import (
+    MEMIFY_METADATA_FREQUENCY_WEIGHTS_APPLIED_KEY,
 )
 
 extract_feedback_qas_module = sys.modules["cognee.tasks.memify.extract_feedback_qas"]
@@ -77,6 +80,55 @@ async def test_extract_feedback_qas_filters_eligible_entries(mock_user):
     assert extracted[0]["qa_id"] == "q1"
     assert extracted[0]["session_id"] == "s1"
     assert extracted[0]["feedback_score"] == 5
+
+
+@pytest.mark.asyncio
+async def test_extract_recall_qas_includes_unrated_entries_with_graph_ids(mock_user):
+    entries = [
+        _make_entry(
+            qa_id="q1",
+            feedback_score=None,
+            used_graph_element_ids={"node_ids": ["n1"], "edge_ids": []},
+            memify_metadata=None,
+        ),
+        _make_entry(
+            qa_id="q2",
+            time="2026-01-01T10:01:00",
+            feedback_score=5,
+            used_graph_element_ids={"node_ids": [], "edge_ids": []},
+        ),
+        _make_entry(
+            qa_id="q3",
+            time="2026-01-01T10:02:00",
+            feedback_score=5,
+            used_graph_element_ids={"edge_ids": ["e1"]},
+            memify_metadata={MEMIFY_METADATA_FREQUENCY_WEIGHTS_APPLIED_KEY: True},
+        ),
+    ]
+
+    mock_session_manager = MagicMock()
+    mock_session_manager.is_available = True
+    mock_session_manager.get_session = AsyncMock(return_value=entries)
+
+    with (
+        patch.object(extract_feedback_qas_module, "session_user") as mock_session_user,
+        patch.object(
+            extract_feedback_qas_module,
+            "get_session_manager",
+            return_value=mock_session_manager,
+        ),
+    ):
+        mock_session_user.get.return_value = mock_user
+
+        extracted = []
+        async for item in extract_recall_qas([{}], session_ids=["s1"]):
+            extracted.append(item)
+
+    assert len(extracted) == 1
+    assert extracted[0]["qa_id"] == "q1"
+    assert extracted[0]["session_id"] == "s1"
+    assert extracted[0]["used_graph_element_ids"] == {"node_ids": ["n1"], "edge_ids": []}
+    assert "feedback_score" not in extracted[0]
 
 
 @pytest.mark.asyncio
