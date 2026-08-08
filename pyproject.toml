@@ -197,6 +197,7 @@ docling = [
     "docling-slim[convert-core,format-pdf,format-office,format-html,format-email,format-markdown,format-latex]>=2.115,<3",
 ]
 docling-full = ["docling>=2.115,<3", "transformers>=4.55"]
+rapidocr = ["rapidocr-onnxruntime>=1.3.0,<2"]
 
 [project.urls]
 Homepage = "https://www.cognee.ai"

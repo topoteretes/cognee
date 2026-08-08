@@ -10,6 +10,7 @@ from typing import List, Optional
 
 from pydantic import ValidationError
 from sqlalchemy import (
+    NullPool,
     create_engine,
     delete,
     event,
@@ -137,6 +138,11 @@ class SqlCacheAdapter(CacheDBInterface):
             pool_args: dict = (
                 dict(relational_config.pool_args) if relational_config.pool_args else {}
             )
+            # POOL_ARGS is shared configuration: the relational adapter accepts
+            # "nullpool" as a string and normalizes it to the pool class, so the
+            # same value must work here — SQLAlchemy itself needs the class.
+            if pool_args.get("poolclass", "").lower() == "nullpool":
+                pool_args["poolclass"] = NullPool
             if is_sqlite:
                 # Concurrency tuning: wait out writer locks instead of failing
                 # with SQLITE_BUSY when several processes share one cache.db.
