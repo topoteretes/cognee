@@ -49,6 +49,7 @@ async def search(
     retriever_specific_config: Optional[dict] = None,
     neighborhood_depth: Optional[int] = None,
     neighborhood_seed_top_k: Optional[int] = None,
+    wide_search_max_distance: Optional[float] = 1.5,
     skills: Optional[List[Union[str, Skill]]] = None,
     tools: Optional[List[str]] = None,
     max_iter: Optional[int] = None,
@@ -175,6 +176,12 @@ async def search(
         verbose: If True, returns detailed result information including graph representation (when possible).
 
         retriever_specific_config: Optional dictionary of additional configuration parameters specific to the retriever being used.
+        wide_search_max_distance: Maximum cosine distance threshold for filtering vector search
+                                  results in graph-based search types. Results with distance above
+                                  this threshold are excluded from the graph projection, preventing
+                                  ineffective filtering when wide_search_top_k exceeds the collection
+                                  size. Cosine distance ranges from 0 (identical) to 2 (opposite).
+                                  Set to None to disable distance-based filtering. Defaults to 1.5.
         code_query: Structured deterministic CODE operation and arguments. Supported
                     operations are query_facts, explore, traverse, find_path, and
                     impact_analysis.
@@ -344,6 +351,7 @@ async def search(
             retriever_specific_config=retriever_specific_config,
             neighborhood_depth=neighborhood_depth,
             neighborhood_seed_top_k=neighborhood_seed_top_k,
+            wide_search_max_distance=wide_search_max_distance,
             include_references=include_references,
             llm_config=llm_config,
             embedding_config=embedding_config,
