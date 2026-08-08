@@ -9,6 +9,14 @@ if "langchain_aws" not in sys.modules:
     mock_lc = MagicMock()
     sys.modules["langchain_aws"] = mock_lc
 
+# Mock botocore if not installed (the adapter imports botocore.config at module level)
+try:
+    import botocore  # noqa: F401
+except ImportError:
+    mock_botocore = MagicMock()
+    sys.modules["botocore"] = mock_botocore
+    sys.modules["botocore.config"] = mock_botocore.config
+
 from cognee.infrastructure.databases.graph.neptune_driver.adapter import NeptuneGraphDB
 from cognee.infrastructure.databases.utils.closing_lru_cache import ClosingLRUCache
 
@@ -43,12 +51,15 @@ async def test_neptune_adapter_close():
 @pytest.mark.asyncio
 async def test_neptune_adapter_close_no_client():
     """close() should be a no-op when _client is None."""
-    with patch(
-        "cognee.infrastructure.databases.graph.neptune_driver.adapter.NeptuneGraphDB._initialize_client",
-        return_value=None,
-    ), patch(
-        "cognee.infrastructure.databases.graph.neptune_driver.adapter.NeptuneGraphDB.__init__",
-        side_effect=lambda **kw: None,
+    with (
+        patch(
+            "cognee.infrastructure.databases.graph.neptune_driver.adapter.NeptuneGraphDB._initialize_client",
+            return_value=None,
+        ),
+        patch(
+            "cognee.infrastructure.databases.graph.neptune_driver.adapter.NeptuneGraphDB.__init__",
+            side_effect=lambda **kw: None,
+        ),
     ):
         adapter = NeptuneGraphDB.__new__(NeptuneGraphDB)
         adapter._client = None
