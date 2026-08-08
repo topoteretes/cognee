@@ -57,6 +57,7 @@ async def search(
     retriever_specific_config: Optional[dict] = None,
     neighborhood_depth: Optional[int] = None,
     neighborhood_seed_top_k: Optional[int] = None,
+    wide_search_max_distance: Optional[float] = 1.5,
     include_references: bool = False,
     llm_config: Optional[LLMConfig] = None,
     embedding_config: Optional[EmbeddingConfig] = None,
@@ -115,6 +116,7 @@ async def search(
             retriever_specific_config=retriever_specific_config,
             neighborhood_depth=neighborhood_depth,
             neighborhood_seed_top_k=neighborhood_seed_top_k,
+            wide_search_max_distance=wide_search_max_distance,
             include_references=include_references,
             llm_config=llm_config,
             embedding_config=embedding_config,
@@ -177,6 +179,10 @@ async def authorized_search(
     """
     Verifies access for provided datasets or uses all datasets user has read access for and performs search per dataset.
     Not to be used outside of active access control mode.
+
+    Args:
+        wide_search_max_distance: Maximum cosine distance threshold for filtering vector search
+            results. Set to None to disable distance-based filtering. Defaults to 1.5.
     """
     # Find datasets user has read access for (if datasets are provided only return them. Provided user has read access)
     search_datasets = await get_authorized_existing_datasets(
@@ -239,6 +245,10 @@ async def search_in_datasets_context(
     """
     Searches all provided datasets and handles setting up of appropriate database context based on permissions.
     Not to be used outside of active access control mode.
+
+    Args:
+        wide_search_max_distance: Maximum cosine distance threshold for filtering vector search
+            results. Set to None to disable distance-based filtering. Defaults to 1.5.
     """
 
     async def _search_in_dataset_context(
@@ -313,6 +323,7 @@ async def search_in_datasets_context(
                     retriever_specific_config=retriever_specific_config,
                     neighborhood_depth=neighborhood_depth,
                     neighborhood_seed_top_k=neighborhood_seed_top_k,
+                    wide_search_max_distance=wide_search_max_distance,
                     include_references=include_references,
                 )
 
@@ -362,6 +373,7 @@ async def search_in_datasets_context(
                     retriever_specific_config=retriever_specific_config,
                     neighborhood_depth=neighborhood_depth,
                     neighborhood_seed_top_k=neighborhood_seed_top_k,
+                    wide_search_max_distance=wide_search_max_distance,
                     include_references=include_references,
                 )
             )
@@ -390,6 +402,7 @@ async def search_in_datasets_context(
             retriever_specific_config=retriever_specific_config,
             neighborhood_depth=neighborhood_depth,
             neighborhood_seed_top_k=neighborhood_seed_top_k,
+            wide_search_max_distance=wide_search_max_distance,
             include_references=include_references,
         )
 

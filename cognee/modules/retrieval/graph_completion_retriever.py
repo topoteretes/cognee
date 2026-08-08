@@ -62,7 +62,14 @@ class GraphCompletionRetriever(BaseRetriever):
         global_context_index_top_k: int = 3,
         include_references: bool = False,
     ):
-        """Initialize retriever with prompt paths and search parameters."""
+        """Initialize retriever with prompt paths and search parameters.
+
+        Args:
+            wide_search_max_distance: Maximum cosine distance threshold for filtering
+                vector search results (cosine distance range: 0-2). Results with distance
+                above this threshold are excluded from the graph projection. Set to None
+                to disable distance-based filtering. Defaults to 1.5.
+        """
         self.user_prompt_path = user_prompt_path
         self.system_prompt_path = system_prompt_path
         self.system_prompt = system_prompt

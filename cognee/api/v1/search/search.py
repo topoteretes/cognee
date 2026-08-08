@@ -176,6 +176,12 @@ async def search(
         verbose: If True, returns detailed result information including graph representation (when possible).
 
         retriever_specific_config: Optional dictionary of additional configuration parameters specific to the retriever being used.
+        wide_search_max_distance: Maximum cosine distance threshold for filtering vector search
+                                  results in graph-based search types. Results with distance above
+                                  this threshold are excluded from the graph projection, preventing
+                                  ineffective filtering when wide_search_top_k exceeds the collection
+                                  size. Cosine distance ranges from 0 (identical) to 2 (opposite).
+                                  Set to None to disable distance-based filtering. Defaults to 1.5.
         code_query: Structured deterministic CODE operation and arguments. Supported
                     operations are query_facts, explore, traverse, find_path, and
                     impact_analysis.

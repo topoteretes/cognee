@@ -99,9 +99,7 @@ class NodeEdgeVectorSearch:
             for collection_results in self.node_distances.values()
         )
 
-    def extract_relevant_node_ids(
-        self, max_distance: Optional[float] = None
-    ) -> List[str]:
+    def extract_relevant_node_ids(self, max_distance: Optional[float] = None) -> List[str]:
         """Extracts unique node IDs from search results.
 
         Args:

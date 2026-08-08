@@ -6,51 +6,8 @@ filter from becoming ineffective on small datasets where
 ``wide_search_top_k`` exceeds the collection size.
 """
 
-import sys
-import types
-import pytest
 from unittest.mock import MagicMock
 
-# --- Lightweight import of NodeEdgeVectorSearch without pulling in all of cognee ---
-
-# Stub out heavy cognee submodules that the real import would trigger
-_stub_modules = [
-    "cognee.infrastructure.databases.vector",
-    "cognee.infrastructure.databases.vector.exceptions",
-    "cognee.modules.observability",
-    "cognee.shared.logging_utils",
-]
-
-for mod_name in _stub_modules:
-    if mod_name not in sys.modules:
-        sys.modules[mod_name] = types.ModuleType(mod_name)
-
-# Provide minimal stubs for imported names
-sys.modules["cognee.infrastructure.databases.vector.exceptions"].CollectionNotFoundError = Exception
-sys.modules["cognee.infrastructure.databases.vector"].get_vector_engine = lambda: None
-
-# Stub out new_span to be a no-op context manager
-class _DummySpan:
-    def __enter__(self): return self
-    def __exit__(self, *a): pass
-    def set_attribute(self, *a): pass
-
-def _noop_span(name):
-    return _DummySpan()
-
-sys.modules["cognee.modules.observability"].new_span = _noop_span
-sys.modules["cognee.modules.observability"].COGNEE_VECTOR_COLLECTION = "cognee.vector.collection"
-
-# Stub logging
-class _DummyLogger:
-    def info(self, *a, **kw): pass
-    def error(self, *a, **kw): pass
-    def warning(self, *a, **kw): pass
-
-sys.modules["cognee.shared.logging_utils"].get_logger = lambda *a, **kw: _DummyLogger()
-sys.modules["cognee.shared.logging_utils"].ERROR = 40
-
-# Now import the module under test
 from cognee.modules.retrieval.utils.node_edge_vector_search import NodeEdgeVectorSearch
 
 
@@ -85,9 +42,9 @@ class TestExtractRelevantNodeIds:
         vs.query_list_length = None
         vs.node_distances = {
             "Entity_name": [
-                _make_scored_result("id1", 0.5),   # passes (0.5 <= 1.5)
-                _make_scored_result("id2", 1.8),   # filtered out (1.8 > 1.5)
-                _make_scored_result("id3", 1.5),   # passes (1.5 <= 1.5, boundary)
+                _make_scored_result("id1", 0.5),  # passes (0.5 <= 1.5)
+                _make_scored_result("id2", 1.8),  # filtered out (1.8 > 1.5)
+                _make_scored_result("id3", 1.5),  # passes (1.5 <= 1.5, boundary)
             ]
         }
         result = vs.extract_relevant_node_ids(max_distance=1.5)
@@ -114,9 +71,7 @@ class TestExtractRelevantNodeIds:
         """Batch mode should always return empty list."""
         vs = NodeEdgeVectorSearch.__new__(NodeEdgeVectorSearch)
         vs.query_list_length = 3  # batch mode
-        vs.node_distances = {
-            "Entity_name": [_make_scored_result("id1", 0.5)]
-        }
+        vs.node_distances = {"Entity_name": [_make_scored_result("id1", 0.5)]}
         result = vs.extract_relevant_node_ids(max_distance=1.5)
         assert result == []
 
@@ -148,13 +103,9 @@ class TestExtractRelevantNodeIds:
         vs.query_list_length = None
         # Simulate a small dataset where wide_search_top_k=100 returns everything
         vs.node_distances = {
-            "Entity_name": [
-                _make_scored_result(f"entity_{i}", 0.3 + i * 0.1)
-                for i in range(20)
-            ],
+            "Entity_name": [_make_scored_result(f"entity_{i}", 0.3 + i * 0.1) for i in range(20)],
             "DocumentChunk_text": [
-                _make_scored_result(f"chunk_{i}", 0.5 + i * 0.1)
-                for i in range(44)
+                _make_scored_result(f"chunk_{i}", 0.5 + i * 0.1) for i in range(44)
             ],
         }
         result_no_filter = vs.extract_relevant_node_ids(max_distance=None)
