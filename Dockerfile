@@ -74,9 +74,19 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-COPY --from=uv /app /app
-# COPY --from=uv /app/.venv /app/.venv
-# COPY --from=uv /root/.local /root/.local
+# Run as the same non-root user as the cognee-mcp image (uid/gid 1000) so both
+# containers can share the storage volumes without ownership conflicts (a
+# root-created database directory is unwritable for the uid-1000 MCP server).
+# Created before the COPY so ownership is set in that single layer — a
+# separate `chown -R /app` would copy the whole tree up into a second layer.
+# /cognee-storage is baked into the image cognee-owned so a fresh named
+# volume mounted there initializes with the right ownership.
+RUN groupadd --system --gid 1000 cognee \
+    && useradd --system --uid 1000 --gid cognee --no-create-home --shell /usr/sbin/nologin cognee \
+    && mkdir -p /cognee-storage/system /cognee-storage/data \
+    && chown -R cognee:cognee /cognee-storage
+
+COPY --from=uv --chown=cognee:cognee /app /app
 
 # Strip Windows carriage returns (fixes "no such file" on Windows Docker)
 RUN sed -i 's/\r$//' /app/entrypoint.sh && chmod +x /app/entrypoint.sh
@@ -87,6 +97,16 @@ ENV PATH="/app/.venv/bin:$PATH"
 ENV PYTHONPATH=/app
 # ENV LOG_LEVEL=ERROR
 ENV PYTHONUNBUFFERED=1
+# Writable HOME for the non-root user (~/.cognee logs, tool caches).
+ENV HOME=/app
+# Default storage OUTSIDE the source tree: the ./cognee bind mount exists for
+# dev reload and must not double as the persistence location (host-uid
+# sensitive, pollutes the checkout, and was shared with the MCP container by
+# accident rather than by design). docker-compose mounts named volumes here.
+ENV SYSTEM_ROOT_DIRECTORY=/cognee-storage/system
+ENV DATA_ROOT_DIRECTORY=/cognee-storage/data
+
+USER cognee
 
 ENTRYPOINT ["/app/entrypoint.sh"]
 
