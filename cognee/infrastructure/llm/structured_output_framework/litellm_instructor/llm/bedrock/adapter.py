@@ -156,7 +156,13 @@ class BedrockAdapter(LLMInterface):
     async def create_transcript(self, input: str, **kwargs: Any) -> TranscriptionReturnType | None:
         raise NotImplementedError
 
-    async def transcribe_image(self, input: str) -> Any:
+    async def transcribe_image(
+        self,
+        input: str,
+        prompt: str | None = None,
+        max_completion_tokens: int | None = None,
+        reasoning_effort: str | None = None,
+    ) -> Any:
         raise NotImplementedError
 
     def show_prompt(self, text_input: str, system_prompt: str) -> str | None:
