@@ -242,7 +242,7 @@ class OllamaAPIAdapter(LLMInterface):
             - input (str): The path to the image file to be transcribed.
             - prompt: Optional extraction instruction; falls back to "What's in this image?".
             - max_completion_tokens: Optional length cap; falls back to 300 when omitted.
-            - reasoning_effort: Ignored; Ollama models do not support it.
+            - reasoning_effort: Accepted for interface compatibility; ignored by Ollama.
 
         Returns:
         --------
