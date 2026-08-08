@@ -6,6 +6,7 @@ from .supported_databases import supported_databases
 from .embeddings import get_embedding_engine
 from cognee.infrastructure.databases.dataset_queue.pinning import dataset_queue_pin_predicate
 from cognee.infrastructure.databases.utils.closing_lru_cache import closing_lru_cache
+from cognee.infrastructure.databases.utils.engine_cache_ops import EngineCacheOps
 from cognee.shared.lru_cache import DATABASE_MAX_LRU_CACHE_SIZE
 from cognee.shared.logging_utils import get_logger
 
@@ -113,92 +114,13 @@ def create_vector_engine(
     )
 
 
-def evict_vector_engine(force_close: bool = False, **kwargs) -> bool:
-    """Evict a cached vector engine entry created via ``create_vector_engine``.
-
-    Mirrors ``create_vector_engine``'s normalization so the cache key
-    matches. ``force_close=True`` closes the adapter immediately even while
-    idle holders still pin its proxy (they re-resolve on next use) — the
-    dataset-queue teardown path, where the worker must exit and release its
-    file locks promptly. Returns True if the entry existed.
-    """
-    evict = (
-        _create_vector_engine.cache_evict_and_close
-        if force_close
-        else _create_vector_engine.cache_evict
-    )
-    return evict(*_vector_engine_key_args(kwargs))
-
-
 def _vector_engine_key_args(kwargs) -> tuple:
     """Positional cache-key args for a ``create_vector_engine`` config dict,
     normalized the way ``create_vector_engine`` normalizes them so the key
-    matches. Shared by ``evict_vector_engine`` / ``touch_vector_engine``."""
+    matches. The single place this knowledge lives — every cache operation
+    in ``_vector_engine_cache_ops`` routes through it."""
     normalized = _normalize_optional_create_vector_engine_params(kwargs)
     return (
-        kwargs.get("vector_db_provider", ""),
-        kwargs.get("vector_db_url", ""),
-        kwargs.get("vector_db_name", ""),
-        normalized["vector_db_port"],
-        normalized["vector_db_key"],
-        normalized["vector_dataset_database_handler"],
-        normalized["vector_db_username"],
-        normalized["vector_db_password"],
-        normalized["vector_db_host"],
-        normalized["vector_db_subprocess_enabled"],
-    )
-
-
-def touch_vector_engine(**kwargs) -> bool:
-    """Refresh the idle timestamp of the cached vector engine for this config.
-
-    Dataset-queue release path under the idle-TTL keep-alive; see
-    ``touch_graph_engine``. Returns True if the entry exists.
-    """
-    return _create_vector_engine.cache_touch(*_vector_engine_key_args(kwargs))
-
-
-def evict_vector_engines_for_database(vector_db_name: str) -> int:
-    """Evict every cached vector engine bound to *vector_db_name*.
-
-    The same per-dataset database can be cached under multiple keys: the
-    dataset-handler paths and the pipeline's context-config path build their
-    engines with different kwargs (e.g. ``vector_dataset_database_handler``),
-    so key-exact ``evict_vector_engine`` misses entries and leaves an engine
-    with a dead connection pool and stale collection metadata. Per-dataset
-    database names are dataset UUIDs, so matching the name against key fields
-    cannot collide with other entries.
-
-    Returns the number of evicted entries.
-    """
-    if not vector_db_name:
-        raise ValueError("vector_db_name must be a non-empty database name")
-    return _create_vector_engine.cache_evict_matching(vector_db_name=vector_db_name)
-
-
-async def aevict_vector_engines_for_database(vector_db_name: str) -> int:
-    """Evict every cached vector engine bound to *vector_db_name* and wait
-    until their IN-FLIGHT closes have completed. Use before removing the
-    database's files so a teardown that is already running cannot race the
-    removal.
-
-    A close still deferred behind a live caller proxy (an idle engine handle)
-    is NOT waited on — see the ``closing_lru_cache`` module docstring. In that
-    case files are removed under an engine that closes later; on POSIX the
-    unlinked files stay valid for the holder and the eventual close writes to
-    nowhere, which is acceptable for a dataset being deleted.
-
-    Returns the number of evicted entries.
-    """
-    evicted = evict_vector_engines_for_database(vector_db_name)
-    await _create_vector_engine.cache_await_closed(vector_db_name=vector_db_name)
-    return evicted
-
-
-def is_vector_engine_cached(**kwargs) -> bool:
-    """Check whether a vector engine entry exists in the cache without creating."""
-    normalized = _normalize_optional_create_vector_engine_params(kwargs)
-    return _create_vector_engine.cache_contains(
         kwargs.get("vector_db_provider", ""),
         kwargs.get("vector_db_url", ""),
         kwargs.get("vector_db_name", ""),
@@ -402,3 +324,15 @@ def _create_vector_engine(
             f"Unsupported vector database provider: {vector_db_provider}. "
             f"Supported providers are: {', '.join(list(supported_databases.keys()) + ['LanceDB', 'PGVector', 'neptune_analytics', 'Turso'])}"
         )
+
+
+# Cache-management operations — mechanics shared with the graph engine via
+# EngineCacheOps; only the key knowledge above is vector-specific.
+_vector_engine_cache_ops = EngineCacheOps(
+    _create_vector_engine, _vector_engine_key_args, "vector_db_name"
+)
+evict_vector_engine = _vector_engine_cache_ops.evict
+touch_vector_engine = _vector_engine_cache_ops.touch
+is_vector_engine_cached = _vector_engine_cache_ops.is_cached
+evict_vector_engines_for_database = _vector_engine_cache_ops.evict_for_database
+aevict_vector_engines_for_database = _vector_engine_cache_ops.aevict_for_database

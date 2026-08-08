@@ -6,6 +6,7 @@ from numbers import Number
 
 from cognee.infrastructure.databases.dataset_queue.pinning import dataset_queue_pin_predicate
 from cognee.infrastructure.databases.utils.closing_lru_cache import closing_lru_cache
+from cognee.infrastructure.databases.utils.engine_cache_ops import EngineCacheOps
 from cognee.shared.lru_cache import DATABASE_MAX_LRU_CACHE_SIZE
 from cognee.shared.logging_utils import get_logger
 
@@ -282,30 +283,6 @@ async def acreate_graph_engine(**kwargs):
     return await _create_graph_engine.acall(*_resolve_graph_engine_args(kwargs))
 
 
-def evict_graph_engine(force_close: bool = False, **kwargs) -> bool:
-    """Evict a cached graph engine entry created via ``create_graph_engine``.
-
-    Mirrors ``create_graph_engine``'s normalization so the cache key
-    matches. Used by per-dataset deletion paths to drop the leased
-    adapter (and trigger its ``close()``) without disturbing the rest
-    of the cache.
-
-    ``force_close=True`` closes the adapter immediately even while idle
-    holders still pin its proxy (they re-resolve on next use) — the
-    dataset-queue teardown path, where the worker must exit and release
-    its file locks promptly. Default keeps lease semantics: the close
-    waits for the last holder.
-
-    Returns True if the entry existed.
-    """
-    evict = (
-        _create_graph_engine.cache_evict_and_close
-        if force_close
-        else _create_graph_engine.cache_evict
-    )
-    return evict(*_graph_engine_key_args(kwargs))
-
-
 def _graph_engine_key_args(kwargs) -> tuple:
     """Positional cache-key args for a ``create_graph_engine`` config dict,
     normalized exactly the way ``create_graph_engine`` normalizes them so the
@@ -313,77 +290,6 @@ def _graph_engine_key_args(kwargs) -> tuple:
     normalized = _normalize_optional_create_graph_engine_params(kwargs)
     provider = _normalize_graph_database_provider(kwargs.get("graph_database_provider"))
     return (
-        provider,
-        kwargs.get("graph_file_path"),
-        normalized["graph_database_url"],
-        normalized["graph_database_name"],
-        normalized["graph_database_username"],
-        normalized["graph_database_password"],
-        normalized["graph_database_host"],
-        normalized["graph_database_allow_anonymous"],
-        normalized["graph_database_port"],
-        normalized["graph_database_key"],
-        normalized["graph_dataset_database_handler"],
-        normalized["graph_database_subprocess_enabled"],
-        normalized["kuzu_num_threads"],
-        normalized["kuzu_buffer_pool_size"],
-        normalized["kuzu_max_db_size"],
-    )
-
-
-def touch_graph_engine(**kwargs) -> bool:
-    """Refresh the idle timestamp of the cached graph engine for this config.
-
-    The dataset-queue release path calls this when the idle-TTL keep-alive is
-    enabled, instead of evicting: the engine stays cached (and its worker
-    alive) until it has been idle for the TTL. Returns True if the entry
-    exists.
-    """
-    return _create_graph_engine.cache_touch(*_graph_engine_key_args(kwargs))
-
-
-def evict_graph_engines_for_database(graph_database_name: str) -> int:
-    """Evict every cached graph engine bound to *graph_database_name*.
-
-    The same per-dataset database can be cached under multiple keys: the
-    dataset-handler creation key and the pipeline's context-config key differ
-    in ``graph_file_path`` and ``graph_dataset_database_handler``, so key-exact
-    ``evict_graph_engine`` misses the pipeline's entry and leaves an engine
-    whose connection pool died with the dropped database. Per-dataset database
-    names are dataset UUIDs, so matching the name against key fields cannot
-    collide with other entries.
-
-    Returns the number of evicted entries.
-    """
-    if not graph_database_name:
-        raise ValueError("graph_database_name must be a non-empty database name")
-    return _create_graph_engine.cache_evict_matching(graph_database_name=graph_database_name)
-
-
-async def aevict_graph_engines_for_database(graph_database_name: str) -> int:
-    """Evict every cached graph engine bound to *graph_database_name* and wait
-    until their IN-FLIGHT closes have completed (workers exited, file locks
-    released). Use before removing the database's files so a teardown that is
-    already running cannot race the removal.
-
-    A close still deferred behind a live caller proxy (an idle engine handle)
-    is NOT waited on — see the ``closing_lru_cache`` module docstring. In that
-    case files are removed under an engine that closes later; on POSIX the
-    unlinked files stay valid for the holder and the eventual close writes to
-    nowhere, which is acceptable for a dataset being deleted.
-
-    Returns the number of evicted entries.
-    """
-    evicted = evict_graph_engines_for_database(graph_database_name)
-    await _create_graph_engine.cache_await_closed(graph_database_name=graph_database_name)
-    return evicted
-
-
-def is_graph_engine_cached(**kwargs) -> bool:
-    """Check whether a graph engine entry exists in the cache without creating."""
-    normalized = _normalize_optional_create_graph_engine_params(kwargs)
-    provider = _normalize_graph_database_provider(kwargs.get("graph_database_provider"))
-    return _create_graph_engine.cache_contains(
         provider,
         kwargs.get("graph_file_path"),
         normalized["graph_database_url"],
@@ -661,3 +567,16 @@ def _create_graph_engine(
         f"Unsupported graph database provider: {graph_database_provider}. "
         f"Supported providers are: {', '.join(all_providers)}"
     )
+
+
+# Cache-management operations (evict / touch / is-cached / by-database
+# evictions) — mechanics shared with the vector engine via EngineCacheOps;
+# only the key knowledge above is graph-specific.
+_graph_engine_cache_ops = EngineCacheOps(
+    _create_graph_engine, _graph_engine_key_args, "graph_database_name"
+)
+evict_graph_engine = _graph_engine_cache_ops.evict
+touch_graph_engine = _graph_engine_cache_ops.touch
+is_graph_engine_cached = _graph_engine_cache_ops.is_cached
+evict_graph_engines_for_database = _graph_engine_cache_ops.evict_for_database
+aevict_graph_engines_for_database = _graph_engine_cache_ops.aevict_for_database
