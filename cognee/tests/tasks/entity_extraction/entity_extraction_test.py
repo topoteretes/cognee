@@ -70,7 +70,7 @@ async def main():
 
     document_chunks = []
     async for chunk in extract_chunks_from_documents(
-        [text_document], max_chunk_size=get_max_chunk_tokens(), chunker=TextChunker
+        [text_document], max_chunk_size=await get_max_chunk_tokens(), chunker=TextChunker
     ):
         document_chunks.append(chunk)
 

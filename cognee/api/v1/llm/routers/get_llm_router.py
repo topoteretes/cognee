@@ -11,6 +11,7 @@ from cognee import __version__ as cognee_version
 from cognee.api.DTO import InDTO, OutDTO
 from cognee.infrastructure.llm import get_llm_config
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
+from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError
 from cognee.infrastructure.llm.prompts import render_prompt
 from cognee.infrastructure.loaders import get_loader_engine
 from cognee.modules.users.methods import get_authenticated_user
@@ -244,6 +245,10 @@ def get_llm_router() -> APIRouter:
             )
 
             return CustomPromptGenerationResponseDTO(custom_prompt=llm_output)
+        except LLMPaymentRequiredError as error:
+            return JSONResponse(
+                status_code=402, content={"error": "Token budget exhausted", "detail": str(error)}
+            )
         except ValueError as error:
             return JSONResponse(status_code=400, content={"error": str(error)})
         except Exception as error:
@@ -352,6 +357,10 @@ def get_llm_router() -> APIRouter:
             return JSONResponse(
                 status_code=422,
                 content={"error": f"LLM output did not match expected schema: {error}"},
+            )
+        except LLMPaymentRequiredError as error:
+            return JSONResponse(
+                status_code=402, content={"error": "Token budget exhausted", "detail": str(error)}
             )
         except Exception as error:
             logger.error("LLM schema inference failed: %s", error)

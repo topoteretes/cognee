@@ -5,6 +5,7 @@ from cognee.cli.reference import SupportsCliCommand
 from cognee.cli import DEFAULT_DOCS_URL
 import cognee.cli.echo as fmt
 from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
+from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 
 
 class ImproveCommand(SupportsCliCommand):
@@ -22,7 +23,7 @@ tasks on an existing knowledge graph to add context, rules, and connections.
         parser.add_argument(
             "--dataset-name",
             "-d",
-            default="main_dataset",
+            default=DEFAULT_DATASET_NAME,
             help="Dataset name (default: main_dataset)",
         )
         parser.add_argument(

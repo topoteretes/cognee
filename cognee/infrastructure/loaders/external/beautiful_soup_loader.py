@@ -192,19 +192,20 @@ class BeautifulSoupLoader(LoaderInterface):
                 r.all = True
             normalized_rules.append(r)
 
+        soup = BeautifulSoup(html, "html.parser")
         pieces = []
+        extracted_elements: set[int] = set()
         for rule in normalized_rules:
-            text = self._extract_from_html(html, rule)
+            text, new_elements = self._extract_from_html(soup, rule, extracted_elements, html)
             if text:
                 pieces.append(text)
+                extracted_elements.update(id(el) for el in new_elements if el is not None)
 
         full_content = " ".join(pieces).strip()
 
         # remove after defaults for extraction rules
         # Fallback: If no content extracted, check if the file is plain text (not HTML)
         if not full_content:
-            from bs4 import BeautifulSoup
-
             soup = BeautifulSoup(html, "html.parser")
             # If there are no HTML tags, treat as plain text
             if not soup.find():
@@ -255,20 +256,29 @@ class BeautifulSoupLoader(LoaderInterface):
             )
         raise ValueError(f"Invalid extraction rule: {rule}")
 
-    def _extract_from_html(self, html: bytes, rule: ExtractionRule) -> str:
-        """Extract content from HTML using BeautifulSoup or lxml XPath.
+    def _extract_from_html(
+        self,
+        soup: BeautifulSoup,
+        rule: ExtractionRule,
+        extracted_elements: set[int] | None = None,
+        html: bytes | None = None,
+    ) -> tuple[str, list[Any]]:
+        """Extract content from a BeautifulSoup parsed document.
 
         Args:
-            html: The HTML content to extract from.
+            soup: BeautifulSoup parsed document.
             rule: The extraction rule to apply.
+            extracted_elements: Set of element ids already extracted by broader rules.
+                Elements that are descendants of these will be skipped.
+            html: Raw bytes needed for XPath extraction (lxml parses from bytes).
 
         Returns:
-            str: The extracted content.
+            tuple[str, list[Any]]: The extracted content and the list of elements extracted.
 
         Raises:
             RuntimeError: If XPath is used but lxml is not installed.
         """
-        soup = BeautifulSoup(html, "html.parser")
+        extracted_elements = extracted_elements or set()
 
         if rule.xpath:
             try:
@@ -277,6 +287,8 @@ class BeautifulSoupLoader(LoaderInterface):
                 raise RuntimeError(
                     "XPath requested but lxml is not available. Install lxml or use CSS selectors."
                 )
+            if html is None:
+                return "", []
             doc = lxml_html.fromstring(html)
             nodes = doc.xpath(rule.xpath)
             texts = []
@@ -285,29 +297,38 @@ class BeautifulSoupLoader(LoaderInterface):
                     texts.append(n.text_content().strip())
                 else:
                     texts.append(str(n).strip())
-            return rule.join_with.join(t for t in texts if t)
+            return rule.join_with.join(t for t in texts if t), []
 
         if not rule.selector:
-            return ""
+            return "", []
 
         if rule.all:
             nodes = soup.select(rule.selector)
             pieces = []
+            used_nodes = []
             for el in nodes:
+                if any(
+                    ancestor in extracted_elements for ancestor in (id(p) for p in el.parents)
+                ):
+                    continue
                 if rule.attr:
                     val = el.get(rule.attr)
                     if val:
                         pieces.append(val.strip())  # ty:ignore[unresolved-attribute]
+                        used_nodes.append(el)
                 else:
                     text = el.get_text(strip=True)
                     if text:
                         pieces.append(text)
-            return rule.join_with.join(pieces).strip()
+                        used_nodes.append(el)
+            return rule.join_with.join(pieces).strip(), used_nodes
         else:
             el = soup.select_one(rule.selector)
             if el is None:
-                return ""
+                return "", []
+            if any(ancestor in extracted_elements for ancestor in (id(p) for p in el.parents)):
+                return "", []
             if rule.attr:
                 val = el.get(rule.attr)
-                return (val or "").strip()  # ty:ignore[unresolved-attribute]
-            return el.get_text(strip=True)
+                return (val or "").strip(), [el]  # ty:ignore[unresolved-attribute]
+            return el.get_text(strip=True), [el]

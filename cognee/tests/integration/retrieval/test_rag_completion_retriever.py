@@ -7,7 +7,7 @@ import cognee
 
 from cognee.low_level import setup
 from cognee.tasks.storage import add_data_points
-from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.modules.chunking.models import DocumentChunk
 from cognee.modules.data.processing.document_types import TextDocument
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
@@ -323,7 +323,7 @@ async def test_get_rag_completion_context_on_empty_graph(setup_test_environment_
     with pytest.raises(NoDataError):
         await retriever.get_retrieved_objects(query)
 
-    vector_engine = get_vector_engine()
+    vector_engine = await get_vector_engine_async()
     await vector_engine.create_collection(
         "DocumentChunk_text", payload_schema=DocumentChunkWithEntities
     )

@@ -2,8 +2,7 @@ import os
 import asyncio
 from uuid import UUID
 from pydantic import Field
-from typing import List, Optional
-from fastapi.encoders import jsonable_encoder
+from typing import Dict, List, Optional
 from fastapi.responses import JSONResponse
 from fastapi import APIRouter, WebSocket, Depends, WebSocketDisconnect, status
 from starlette.status import WS_1000_NORMAL_CLOSURE, WS_1008_POLICY_VIOLATION
@@ -29,6 +28,7 @@ from cognee.modules.pipelines.queues.pipeline_run_info_queues import (
     initialize_queue,
     remove_queue,
 )
+from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.utils import send_telemetry
 from cognee.shared.usage_logger import log_usage
@@ -121,7 +121,7 @@ def get_cognify_router() -> APIRouter:
 
     @router.post(
         "",
-        response_model=dict,
+        response_model=Dict[UUID, PipelineRunInfo],
         responses={
             400: {"model": ErrorResponse},
             403: {"model": ErrorResponse},
@@ -265,6 +265,14 @@ def get_cognify_router() -> APIRouter:
                     ).model_dump(),
                 )
             return cognify_run
+        except LLMPaymentRequiredError as error:
+            return JSONResponse(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                content=ErrorResponse(
+                    error="Token budget exhausted",
+                    detail=str(error),
+                ).model_dump(),
+            )
         except ValueError as e:
             # Ontology key not found (OntologyService raises ValueError)
             return JSONResponse(

@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+import cognee.modules.graph.methods.get_global_context_graph_inputs as gci
 from cognee.modules.graph.methods.get_global_context_graph_inputs import (
     DatasetEntityCounts,
     DatasetGraphEntityInput,
@@ -10,12 +11,20 @@ from cognee.modules.graph.methods.get_global_context_graph_inputs import (
     _chunk_entity_statement,
     _summary_chunk_statement,
     get_dataset_chunk_entity_counts,
+    get_dataset_text_summary_ids,
     load_dataset_graph_entity_input,
     load_summary_entities_for_dataset,
 )
 from cognee.tasks.memify.global_context_index.bucketing.graph.inputs import (
     load_graph_bucketing_inputs,
 )
+
+
+@pytest.fixture(autouse=True)
+def _force_relational_path(monkeypatch):
+    """Default every test to the relational (ledger) read path. Graph-provenance
+    tests override this with their own fake engine."""
+    monkeypatch.setattr(gci, "_resolve_graph_provenance_engine", AsyncMock(return_value=None))
 
 
 class FakeResult:
@@ -30,6 +39,22 @@ def _session_with_results(*results):
     session = AsyncMock()
     session.execute.side_effect = [FakeResult(result) for result in results]
     return session
+
+
+class _FakeGraphNativeEngine:
+    """Minimal graph engine for the graph-provenance read branch: a dataset's node
+    set (via source-ref provenance) plus full nodes/edges from get_graph_data."""
+
+    def __init__(self, dataset_node_ids, nodes, edges):
+        self._dataset_node_ids = dataset_node_ids
+        self._nodes = nodes  # list[(id, {"type": ...})]
+        self._edges = edges  # list[(src, dst, rel, props)]
+
+    async def find_node_source_refs_by_dataset(self, dataset_id):
+        return {node_id: ["source_ref"] for node_id in self._dataset_node_ids}
+
+    async def get_graph_data(self):
+        return self._nodes, self._edges
 
 
 @pytest.mark.asyncio
@@ -286,3 +311,59 @@ def test_chunk_entity_query_filters_contains_label_and_entity_type():
     assert "contains" in params
     assert "DocumentChunk" in params
     assert "Entity" in params
+
+
+# ---------------------------------------------------------------------------
+# Graph-provenance read path (provenance in the graph, empty relational ledger)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_graph_provenance_text_summary_ids_read_from_graph(monkeypatch):
+    s1, s2, c1, e1 = (str(uuid4()) for _ in range(4))
+    nodes = [
+        (s1, {"type": "TextSummary"}),
+        (s2, {"type": "TextSummary"}),
+        (c1, {"type": "DocumentChunk"}),
+        (e1, {"type": "Entity"}),
+    ]
+    edges = [(s1, c1, "made_from", {}), (c1, e1, "contains", {})]
+    engine = _FakeGraphNativeEngine({s1, s2, c1, e1}, nodes, edges)
+    monkeypatch.setattr(gci, "_resolve_graph_provenance_engine", AsyncMock(return_value=engine))
+
+    ids = await get_dataset_text_summary_ids(uuid4())
+    assert ids == {s1, s2}
+
+
+@pytest.mark.asyncio
+async def test_graph_provenance_entity_input_builds_summary_chunk_entity(monkeypatch):
+    s1, s2, s3, c1, c2, e1, e2, x1 = (str(uuid4()) for _ in range(8))
+    nodes = [
+        (s1, {"type": "TextSummary"}),
+        (s2, {"type": "TextSummary"}),
+        (s3, {"type": "TextSummary"}),
+        (c1, {"type": "DocumentChunk"}),
+        (c2, {"type": "DocumentChunk"}),
+        (e1, {"type": "Entity"}),
+        (e2, {"type": "Entity"}),
+    ]
+    edges = [
+        (s1, c1, "made_from", {}),
+        (s2, c2, "made_from", {}),
+        (s3, c1, "made_from", {}),  # s3 not in expected -> excluded
+        (c1, e1, "contains", {}),
+        (c1, e2, "contains", {}),
+        (c2, e2, "contains", {}),
+        (x1, c1, "made_from", {}),  # x1 outside the dataset -> edge dropped by scoping
+    ]
+    engine = _FakeGraphNativeEngine({s1, s2, s3, c1, c2, e1, e2}, nodes, edges)
+    monkeypatch.setattr(gci, "_resolve_graph_provenance_engine", AsyncMock(return_value=engine))
+
+    # session is required by the decorator but unused on the graph-provenance branch.
+    result = await load_dataset_graph_entity_input(uuid4(), [s1, s2], session=AsyncMock())
+
+    assert result.summary_entities.entities_by_summary_id == {s1: {e1, e2}, s2: {e2}}
+    assert result.entity_counts.chunk_count == 2
+    assert result.entity_counts.entity_chunk_counts == {e1: 1, e2: 2}
+    # s2 has a made_from chunk, so it is not flagged missing.
+    assert result.summary_entities.missing_made_from_summary_ids == set()

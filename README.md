@@ -23,7 +23,7 @@
 
 
   [![GitHub forks](https://img.shields.io/github/forks/topoteretes/cognee.svg?style=social&label=Fork&maxAge=2592000)](https://GitHub.com/topoteretes/cognee/network/)
-  [![GitHub stars](https://img.shields.io/github/stars/topoteretes/cognee.svg?style=social&label=Star&maxAge=2592000)](https://GitHub.com/topoteretes/cognee/stargazers/)
+  [![GitHub stars](https://img.shields.io/github/stars/topoteretes/cognee.svg?style=social&label=Star&maxAge=2592000)](https://github.com/topoteretes/cognee)
   [![GitHub commits](https://badgen.net/github/commits/topoteretes/cognee)](https://GitHub.com/topoteretes/cognee/commit/)
   [![GitHub tag](https://badgen.net/github/tag/topoteretes/cognee)](https://github.com/topoteretes/cognee/tags/)
   [![Downloads](https://static.pepy.tech/badge/cognee)](https://pepy.tech/project/cognee)
@@ -98,9 +98,9 @@ Cognee is an open-source AI memory platform for AI Agents. Ingest data in any fo
 
 ## Basic Usage & Feature Guide
 
-To learn more, [check out this short, end-to-end Colab walkthrough](https://colab.research.google.com/drive/12Vi9zID-M3fpKpKiaqDBvkk98ElkRPWy?usp=sharing) of Cognee's core features.
+To learn more, [check out this short, end-to-end Colab walkthrough](https://colab.research.google.com/drive/1HRrzIvzcbwrESVfX76wJLKmtIg00SUga?usp=sharing) of Cognee's core features.
 
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/12Vi9zID-M3fpKpKiaqDBvkk98ElkRPWy?usp=sharing)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1HRrzIvzcbwrESVfX76wJLKmtIg00SUga?usp=sharing)
 
 ## Quickstart
 
@@ -186,6 +186,10 @@ cognee-cli -ui
 Prefer containers? Cognee publishes prebuilt images to Docker Hub on every push to `main`:
 [`cognee/cognee`](https://hub.docker.com/r/cognee/cognee) (the API server) and
 [`cognee/cognee-mcp`](https://hub.docker.com/r/cognee/cognee-mcp) (the MCP server).
+
+> **Just want to try it?** Follow the
+> [minimal docker-compose try-out](docs/minimal-docker-compose.md) — a single
+> copy-pasteable compose file that runs the prebuilt image, no clone or build needed.
 
 ### Option A — Docker Compose (build from source)
 
@@ -328,6 +332,11 @@ Agent: "Here's how senior analysts solved a similar retention query.
 
 Graph memory traditionally means operating a stack — a graph database for relationships, a vector database for embeddings, Redis for sessions, and a relational database for metadata — all deployed, secured, and paid for before an agent remembers anything. In cognee 1.0 you can run the entire memory layer on a single Postgres instance.
 
+> **⚠️ Warning:** Using Postgres as a graph store is currently a released as a demo feature. The production ready feature is available as a licenced product. Use it to demo keeping relational metadata, PGVector, and graph
+> state in a single Postgres service.
+>
+> Interested in production use of Postgres as a graph database? Book a call with our sales team at our [website](https://www.cognee.ai)
+>
 | Memory layer | Traditional stack | cognee on Postgres |
 | --- | --- | --- |
 | Relationships | Neo4j or another graph database | cognee's Postgres graph backend |
@@ -337,7 +346,7 @@ Graph memory traditionally means operating a stack — a graph database for rela
 
 The graph still exists — it just lives inside the same Postgres-backed memory layer as the text, metadata, and embeddings, so retrieval moves between similarity and structure without crossing service boundaries. In our CI benchmarks, Postgres search ran ~10% faster than the separate graph-plus-vector setup.
 
-Postgres is the default we recommend for most deployments, but you can still swap in dedicated backends when a workload needs them (Neo4j and Neptune for graphs, Redis for sessions, pgvector and LanceDB for vectors, plus Qdrant, ChromaDB, Weaviate, and Milvus via community adapters). Local development stays fully embedded — SQLite, LanceDB, and Kuzudb — with no extra services to stand up.
+Postgres is a solid default for the relational, vector, and session layers, and you can swap in dedicated backends for any of them when a workload needs it (Neo4j and Neptune for graphs, Redis for sessions, pgvector and LanceDB for vectors, plus Qdrant, ChromaDB, Weaviate, and Milvus via community adapters). For the graph layer specifically, keep to a graph-native backend in production — the Postgres graph store is still a demo feature. Local development stays fully embedded — SQLite, LanceDB, and Kuzudb — with no extra services to stand up.
 
 ```bash
 pip install "cognee[postgres]"
@@ -368,6 +377,7 @@ Use [Cognee Cloud](https://www.cognee.ai) for a fully managed experience, or sel
 | **Fly.io** | Edge deployment, persistent volumes | `bash distributed/deploy/fly-deploy.sh` |
 | **Render** | Simple PaaS with managed Postgres | Deploy to Render button |
 | **Daytona** | Cloud sandboxes (SDK or CLI) | See `distributed/deploy/daytona_sandbox.py` |
+| **Islo** | Isolated cloud sandboxes (SDK) | See `distributed/deploy/islo_sandbox.py` |
 
 See the [`distributed/`](distributed/) folder for deploy scripts, worker configurations, and additional details.
 
@@ -397,14 +407,14 @@ See the [@cognee/cognee-ts package](https://www.npmjs.com/package/@cognee/cognee
 
 ## Benchmarks
 
-We ran cognee against [BEAM](https://github.com/topoteretes/cognee), a long-context benchmark that tests whether a system can keep track of a long conversation as it changes — a more useful test for agent memory than typical needle-in-a-haystack benchmarks. Using only cognee's default settings and standard open-source features (no custom models, no BEAM-specific pipelines), we beat the previous state of the art at the 100K-token setting and matched it at 10M tokens.
+We ran cognee against [BEAM](https://github.com/mohammadtavakoli78/BEAM), a long-context benchmark that tests whether a system can keep track of a long conversation as it changes — a more useful test for agent memory than typical needle-in-a-haystack benchmarks. Using only cognee's default settings and standard open-source features (no custom models, no BEAM-specific pipelines), we beat the previous state of the art at the 100K-token setting and matched it at 10M tokens.
 
 | Benchmark | Setting | cognee | Previous SOTA | Obsidian / RAG baseline |
 |-----------|---------|--------|---------------|--------------------------|
 | BEAM | 100K tokens | **0.79** (>0.8 with per-question routing) | 0.735 | ~0.33 |
 | BEAM | 10M tokens | **0.67** | 0.641 | ~0.33 |
 
-These numbers are a directional signal rather than a definitive measure — see the write-up for the full methodology, caveats, and what the results actually mean.
+These numbers are a directional signal rather than a definitive measure — see the [BEAM preliminary report](cognee/eval_framework/beam/REPORT.md) for the full methodology, caveats, and what the results actually mean.
 
 ## Latest News
 
