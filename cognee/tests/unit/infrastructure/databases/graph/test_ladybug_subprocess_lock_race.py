@@ -11,7 +11,7 @@ the worker process to actually exit, and retries the open on transient lock
 contention.
 
 Drives the REAL graph-engine cache (`create_graph_engine` / `acreate_graph_engine`
-/ `evict_graph_engine`) in subprocess mode — no LLM or full cognee config needed.
+/ `graph_engine_cache.evict`) in subprocess mode — no LLM or full cognee config needed.
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ pytest.importorskip("ladybug")
 from cognee.infrastructure.databases.graph.get_graph_engine import (
     acreate_graph_engine,
     create_graph_engine,
-    evict_graph_engine,
+    graph_engine_cache,
 )
 
 
@@ -48,7 +48,7 @@ async def _evict_after_use(cfg, *, use_async):
     engine = await acreate_graph_engine(**cfg) if use_async else create_graph_engine(**cfg)
     await engine.query("MATCH (n) RETURN 1 LIMIT 1")
     del engine
-    evict_graph_engine(**cfg)
+    graph_engine_cache.evict(**cfg)
     gc.collect()
 
 
@@ -90,7 +90,7 @@ async def test_handle_reresolves_after_eviction(tmp_path):
     # Simulate teardown: evict the cached engine. The handle pins the proxy, so
     # its next access detects the stale pin, drops it (deferred close releases
     # the lock off-loop), and re-resolves a fresh engine for the same path.
-    evict_graph_engine(**cfg)
+    graph_engine_cache.evict(**cfg)
     gc.collect()
 
     await handle.query("MATCH (n) RETURN 1 LIMIT 1")  # must NOT raise "is closed"

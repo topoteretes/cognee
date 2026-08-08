@@ -274,17 +274,17 @@ class DatasetQueue:
 
         g_cfg = get_graph_context_config()
         if g_cfg.get("graph_database_subprocess_enabled"):
-            from cognee.infrastructure.databases.graph.get_graph_engine import touch_graph_engine
+            from cognee.infrastructure.databases.graph.get_graph_engine import graph_engine_cache
 
-            touch_graph_engine(**g_cfg)
+            graph_engine_cache.touch(**g_cfg)
 
         v_cfg = get_vectordb_context_config()
         if v_cfg.get("vector_db_subprocess_enabled"):
             from cognee.infrastructure.databases.vector.create_vector_engine import (
-                touch_vector_engine,
+                vector_engine_cache,
             )
 
-            touch_vector_engine(**v_cfg)
+            vector_engine_cache.touch(**v_cfg)
 
     def _ensure_reaper(self) -> None:
         """Start the idle reaper thread, exactly once."""
@@ -377,17 +377,17 @@ class DatasetQueue:
 
         g_cfg = get_graph_context_config()
         if g_cfg.get("graph_database_subprocess_enabled"):
-            from cognee.infrastructure.databases.graph.get_graph_engine import evict_graph_engine
+            from cognee.infrastructure.databases.graph.get_graph_engine import graph_engine_cache
 
-            evict_graph_engine(force_close=True, **g_cfg)
+            graph_engine_cache.evict(force_close=True, **g_cfg)
 
         v_cfg = get_vectordb_context_config()
         if v_cfg.get("vector_db_subprocess_enabled"):
             from cognee.infrastructure.databases.vector.create_vector_engine import (
-                evict_vector_engine,
+                vector_engine_cache,
             )
 
-            evict_vector_engine(force_close=True, **v_cfg)
+            vector_engine_cache.evict(force_close=True, **v_cfg)
 
     # -------------------------------------------------------- release_slot_for
     async def release_slot_for(self, dataset_id: Any = None) -> None:
