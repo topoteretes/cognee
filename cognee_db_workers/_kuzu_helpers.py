@@ -16,6 +16,7 @@ avoids surprising contributors.
 from __future__ import annotations
 
 import os
+import sys
 import tempfile
 from typing import Optional
 
@@ -66,12 +67,22 @@ def install_json_extension_local(
             conn = ladybug.Connection(tmp_db)
             try:
                 conn.execute("INSTALL JSON;")
-            except Exception:
-                pass
-        except Exception:
+            except Exception as error:
+                # Still best-effort (LOAD EXTENSION retries the install on
+                # the live connection), but say why it failed — a silent
+                # swallow here made "has not been installed" errors at LOAD
+                # time impossible to diagnose from CI logs.
+                print(
+                    f"[ladybug worker] warm-up INSTALL JSON failed: {error!r}",
+                    file=sys.stderr,
+                )
+        except Exception as error:
             # Best-effort install: missing/incompatible JSON extension and
             # init failures all surface here. The cleanup below still runs.
-            pass
+            print(
+                f"[ladybug worker] warm-up JSON install setup failed: {error!r}",
+                file=sys.stderr,
+            )
         finally:
             _safe_close(conn)
             _safe_close(tmp_db)

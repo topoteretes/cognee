@@ -1,7 +1,6 @@
 from collections import Counter
 from typing import Optional, Dict, Any, List, Tuple, Union
 
-from cognee.modules.engine.utils.generate_edge_id import generate_edge_id
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.graph.utils.prepare_edges_for_storage import get_edge_retrieval_text
@@ -48,7 +47,7 @@ def create_edge_type_datapoints(edges_data) -> list[EdgeType]:
     edge_types = Counter(edge_texts)
 
     return [
-        EdgeType(id=generate_edge_id(edge_id=text), relationship_name=text, number_of_edges=count)
+        EdgeType(relationship_name=text, number_of_edges=count)
         for text, count in edge_types.items()
     ]
 

@@ -28,7 +28,7 @@ class TestConfigSetMethod:
 
     def test_set_vector_db_provider(self):
         """Test setting vector DB provider through generic set method."""
-        config.set("vector_db_provider", "chromadb")
+        config.set("vector_db_provider", "lancedb")
 
     def test_set_graph_database_subprocess_enabled(self):
         """Test enabling graph subprocess adapters through generic set method."""
@@ -67,7 +67,8 @@ class TestConfigSetMethod:
         params = list(sig.parameters.keys())
         assert "key" in params
         assert "value" in params
-        assert len(params) == 2
+        assert "persist" in params
+        assert len(params) == 3
 
     def test_set_can_be_called_without_instance(self):
         """Test that set can be called as a static method without instantiation."""

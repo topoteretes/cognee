@@ -5,7 +5,6 @@ cd "$(dirname "$0")"
 
 # List of workflows that should only be triggered via test-suites.yml
 WORKFLOWS=(
-  "test_chromadb.yml"
   "test_weaviate.yml"
   "test_kuzu.yml"
   "test_multimetric_qa_eval_run.yaml"

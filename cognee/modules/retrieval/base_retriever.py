@@ -12,6 +12,11 @@ class BaseRetriever(ABC):
     3. get_completion: Generate a final response with the help of an LLM using the context and original query.
     """
 
+    # Deterministic retrievers can opt out of conversational session analysis.
+    # That analysis may call an LLM before retrieval, which is not appropriate
+    # for search types whose contract is explicitly non-generative.
+    supports_session_turn_preparation = True
+
     @abstractmethod
     async def get_retrieved_objects(self, query: Optional[str], query_batch: Optional[str]) -> Any:
         """
@@ -78,6 +83,25 @@ class BaseRetriever(ABC):
         Only called when session is enabled.
         """
         return None
+
+    async def prepare_session_turn_for_retrieval(self, query: str):
+        """Analyze a session turn before retrieval and fail open to the original query."""
+        try:
+            from cognee.infrastructure.session.get_session_manager import get_session_manager
+            from cognee.infrastructure.session.session_manager import SessionTurnPreparation
+
+            if not query:
+                return SessionTurnPreparation(should_answer=True, effective_query=query or "")
+
+            session_manager = get_session_manager()
+            return await session_manager.prepare_session_turn(
+                session_id=getattr(self, "session_id", None),
+                query=query,
+            )
+        except Exception:
+            from cognee.infrastructure.session.session_manager import SessionTurnPreparation
+
+            return SessionTurnPreparation(should_answer=True, effective_query=query or "")
 
     async def get_completion(self, query: str) -> Union[List[str], List[dict]]:
         """

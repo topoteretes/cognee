@@ -18,6 +18,10 @@ from pathlib import Path
 from typing import Any
 
 
+def read_tool_prompt(prompt_name: str) -> str:
+    return (Path(__file__).parent / "prompts" / prompt_name).read_text(encoding="utf-8")
+
+
 def format_markdown(assessment: Any) -> str:
     needs_update = (
         assessment.needs_documentation_update
@@ -82,16 +86,7 @@ async def assess_with_llm(notes_json: str, notes_markdown: str) -> Any:
         recommended_next_steps: list[str] = Field(description="Practical next steps for docs work")
         confidence: str = Field(description="Confidence level and short explanation")
 
-    system_prompt = """You are a documentation strategist for the Cognee project.
-
-Analyze the provided daily dev notes and decide whether they imply documentation updates.
-
-Guidelines:
-- Focus on user-facing changes, APIs, integrations, setup, and operational behavior
-- Recommend docs work only when the notes indicate likely user impact
-- Keep recommendations concrete and concise
-"""
-
+    system_prompt = read_tool_prompt("docs_assessment_system.txt")
     user_prompt = (
         "Determine whether the daily dev notes imply that documentation updates are needed.\n\n"
         f"Dev notes JSON:\n{notes_json}\n\n"

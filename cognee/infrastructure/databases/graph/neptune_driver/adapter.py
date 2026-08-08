@@ -37,6 +37,17 @@ except ImportError:
 NEPTUNE_ENDPOINT_URL = "neptune-graph://"
 
 
+def _quote_relationship_type(relationship_name: str) -> str:
+    """Backtick-quote a relationship type for safe interpolation into openCypher.
+
+    openCypher cannot parameterize a created relationship type, so the type is
+    interpolated into the query text. Backtick-quoting it (and doubling any internal
+    backtick, per the Cypher escaping rules) lets a label contain spaces, hyphens, or
+    other characters without breaking the query or allowing injection.
+    """
+    return "`" + relationship_name.replace("`", "``") + "`"
+
+
 class NeptuneGraphDB(GraphDBInterface):
     """
     Adapter for interacting with Amazon Neptune Analytics graph store.
@@ -97,12 +108,12 @@ class NeptuneGraphDB(GraphDBInterface):
         )
 
         # Initialize Neptune Analytics client using langchain_aws
-        self._client: NeptuneAnalyticsGraph = self._initialize_client()
+        self._client: Any = self._initialize_client()
         logger.info(
             f'Initialized Neptune Analytics adapter for graph: "{graph_id}" in region: "{self.region}"'
         )
 
-    def _initialize_client(self) -> Optional[NeptuneAnalyticsGraph]:
+    def _initialize_client(self) -> Optional[Any]:
         """
         Initialize the Neptune Analytics client using langchain_aws.
 
@@ -228,7 +239,12 @@ class NeptuneGraphDB(GraphDBInterface):
             logger.error(f"Failed to add node {node.id}: {error_msg}")
             raise Exception(f"Failed to add node: {error_msg}") from e
 
-    async def add_nodes(self, nodes: List[DataPoint]) -> None:
+    async def add_nodes(
+        self,
+        nodes: List[DataPoint],
+        source_ref_key: Optional[str] = None,
+        pipeline_run_id: Optional[str] = None,
+    ) -> None:
         """
         Add multiple nodes to the graph in a single operation.
 
@@ -505,13 +521,14 @@ class NeptuneGraphDB(GraphDBInterface):
             # Prepare edge properties
             edge_props = properties or {}
             serialized_properties = self._serialize_properties(edge_props)
+            quoted_relationship = _quote_relationship_type(relationship_name)
 
             query = f"""
             MATCH (source:{self._GRAPH_NODE_LABEL})
             WHERE id(source) = $source_id
             MATCH (target:{self._GRAPH_NODE_LABEL})
             WHERE id(target) = $target_id
-            MERGE (source)-[r:{relationship_name}]->(target)
+            MERGE (source)-[r:{quoted_relationship}]->(target)
             ON CREATE SET r = $properties, r.updated_at = timestamp()
             ON MATCH SET r = $properties, r.updated_at = timestamp()
             RETURN r
@@ -532,7 +549,12 @@ class NeptuneGraphDB(GraphDBInterface):
             logger.error(f"Failed to add edge {source_id} -> {target_id}: {error_msg}")
             raise Exception(f"Failed to add edge: {error_msg}") from e
 
-    async def add_edges(self, edges: List[Tuple[str, str, str, Optional[Dict[str, Any]]]]) -> None:
+    async def add_edges(
+        self,
+        edges: List[Tuple[str, str, str, Optional[Dict[str, Any]]]],
+        source_ref_key: Optional[str] = None,
+        pipeline_run_id: Optional[str] = None,
+    ) -> None:
         """
         Add multiple edges to the graph in a single operation.
 
@@ -555,6 +577,7 @@ class NeptuneGraphDB(GraphDBInterface):
         results = {}
         for relationship_name, edges_for_relationship in edges_by_relationship.items():
             try:
+                quoted_relationship = _quote_relationship_type(relationship_name)
                 # Create the bulk-edge OpenCypher query using UNWIND
                 query = f"""
                     UNWIND $edges AS edge
@@ -562,7 +585,7 @@ class NeptuneGraphDB(GraphDBInterface):
                     WHERE id(source) = edge.from_node
                     MATCH (target:{self._GRAPH_NODE_LABEL})
                     WHERE id(target) = edge.to_node
-                    MERGE (source)-[r:{relationship_name}]->(target)
+                    MERGE (source)-[r:{quoted_relationship}]->(target)
                     ON CREATE SET r = edge.properties, r.updated_at = timestamp()
                     ON MATCH SET r = edge.properties, r.updated_at = timestamp()
                     RETURN count(*) AS edges_processed
@@ -588,7 +611,7 @@ class NeptuneGraphDB(GraphDBInterface):
                     f"Failed to add edges for relationship {relationship_name}: {format_neptune_error(e)}"
                 )
                 logger.info("Falling back to individual edge creation")
-                for edge in edges_by_relationship:
+                for edge in edges_for_relationship:
                     try:
                         source_id, target_id, relationship_name = edge[0], edge[1], edge[2]
                         properties = edge[3] if len(edge) > 3 else {}
@@ -621,6 +644,18 @@ class NeptuneGraphDB(GraphDBInterface):
             error_msg = format_neptune_error(e)
             logger.error(f"Failed to delete graph: {error_msg}")
             raise Exception(f"Failed to delete graph: {error_msg}") from e
+
+    async def is_empty(self) -> bool:
+        """
+        Check if the graph is empty.
+        """
+        query = """
+        MATCH (n)
+        RETURN true
+        LIMIT 1;
+        """
+        query_result = await self.query(query)
+        return len(query_result) == 0
 
     async def get_graph_data(self) -> Tuple[List[Node], List[EdgeData]]:
         """

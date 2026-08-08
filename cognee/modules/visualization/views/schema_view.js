@@ -235,9 +235,25 @@
   function renderSchemaDiagram(model, savedTransform) {
     const svg = d3.select('#schema-svg');
     svg.selectAll('*').remove();
-    // The schema explorer is always a clean, airy light surface (Segment-style),
-    // independent of the global graph-view theme toggle.
-    const isLight = true;
+    // Follow the global theme toggle (ui_chrome re-renders the schema on
+    // toggle). The light palette is the Segment-style airy surface; the dark
+    // palette mirrors it on deep neutrals.
+    const isLight = window._isLightMode !== false;
+    const P = isLight
+      ? {
+          card: '#ffffff', cardBorder: '#E6E8EB',
+          title: '#1A1F36', muted: '#8792A2',
+          pill: '#EEF1F4', pillText: '#4A5568',
+          mini: '#F6F8FA', miniBorder: '#EDF0F3', miniText: '#1A1F36',
+          shadow: '#1A1F36', shadowOpacity: 0.10,
+        }
+      : {
+          card: '#23272F', cardBorder: '#3A4049',
+          title: '#ECEFF4', muted: '#9AA4B2',
+          pill: '#2E333C', pillText: '#C3CAD4',
+          mini: '#2A2F37', miniBorder: '#3A4049', miniText: '#E4E8EE',
+          shadow: '#000000', shadowOpacity: 0.40,
+        };
     // Absolute rects captured during render so the spotlight overlay can draw
     // instance-level connectors without re-laying-out the diagram.
     window._miniCardRects = {};
@@ -313,6 +329,30 @@
           labelX = lx + 36;
           labelY = src.y + src.h / 2;
           sx = lx; sy = src.y + 30; tx = lx; ty = src.y + src.h - 30;
+        } else if (Math.abs(src.x - tgt.x) < LAYOUT.BOX_W * 0.5) {
+          // Same-column pair (vertically stacked cards — common in the tall
+          // Entity column). The horizontal-ease curve degenerates into an
+          // S-loop here, leaving arrowheads pointing backwards. Route a side
+          // loop instead: exit the source's right edge, bulge outward, enter
+          // the target's right edge — the head always points cleanly left
+          // into the target card.
+          const offset = (idxInPair - (group.length - 1) / 2) * 22;
+          const sxp = src.x + src.w, syp = src.y + Math.min(34, src.h / 2);
+          const txp = tgt.x + tgt.w, typ = tgt.y + Math.min(34, tgt.h / 2);
+          const bulge = 56 + Math.min(150, Math.abs(typ - syp) * 0.14) + Math.abs(offset);
+          // Straight run-in/run-out segments at both ends: the arrow marker
+          // orients to the path tangent at its endpoint, so it must sit on a
+          // visibly straight piece of line or the head looks detached.
+          const RUN = 10;
+          pathD = 'M ' + sxp + ' ' + syp +
+                  ' L ' + (sxp + RUN) + ' ' + syp +
+                  ' C ' + (sxp + bulge) + ' ' + syp +
+                  ', ' + (txp + bulge) + ' ' + typ +
+                  ', ' + (txp + RUN) + ' ' + typ +
+                  ' L ' + txp + ' ' + typ;
+          labelX = Math.max(sxp, txp) + bulge * 0.78;
+          labelY = (syp + typ) / 2;
+          sx = sxp; sy = syp; tx = txp; ty = typ;
         } else {
           const aSrc = boxAnchor(src, tgtCx, tgtCy);
           const aTgt = boxAnchor(tgt, srcCx, srcCy);
@@ -341,8 +381,8 @@
     shadow.append('feDropShadow')
       .attr('dx', 0).attr('dy', 2)
       .attr('stdDeviation', 5)
-      .attr('flood-color', '#1A1F36')
-      .attr('flood-opacity', 0.10);
+      .attr('flood-color', P.shadow)
+      .attr('flood-opacity', P.shadowOpacity);
 
     // Per-edge gradient: flows from the source type's accent to the target's.
     function gradId(e){ return 'sd-grad-' + String(e.id).replace(/[^a-zA-Z0-9_-]/g, ''); }
@@ -363,14 +403,18 @@
     drawnEdges.forEach(function(de) { markerTypes[accentTypeByName[de.edge.target_type] || de.edge.target_type] = true; });
     function arrowId(tname){ return 'sd-arrow-' + String(tname).replace(/[^a-zA-Z0-9_-]/g, ''); }
     Object.keys(markerTypes).forEach(function(tname) {
+      // Tip at viewBox x=10 with refX=10: the tip sits exactly on the path
+      // endpoint with the head body covering the line behind it — no empty
+      // marker margin past the tip (which left the path's round linecap
+      // poking out as a detached nub).
       defs.append('marker')
         .attr('id', arrowId(tname))
         .attr('viewBox', '0 -5 10 10')
-        .attr('refX', 8).attr('refY', 0)
-        .attr('markerWidth', 6.5).attr('markerHeight', 6.5)
+        .attr('refX', 10).attr('refY', 0)
+        .attr('markerWidth', 7).attr('markerHeight', 7)
         .attr('orient', 'auto')
         .append('path')
-        .attr('d', 'M0,-3.5L8,0L0,3.5')
+        .attr('d', 'M0,-4L10,0L0,4')
         .attr('fill', accentFor(tname));
     });
 
@@ -435,13 +479,13 @@
         .attr('data-node-id', t.id || '')
         .attr('transform', 'translate(' + p.x + ',' + p.y + ')');
 
-      // Card body — soft white card with a gentle drop shadow.
+      // Card body — soft themed card with a gentle drop shadow.
       g.append('rect')
         .attr('width', p.w)
         .attr('height', p.h)
         .attr('rx', 14)
-        .attr('fill', '#ffffff')
-        .attr('stroke', '#E6E8EB')
+        .attr('fill', P.card)
+        .attr('stroke', P.cardBorder)
         .attr('stroke-width', 1)
         .attr('filter', 'url(#sd-card-shadow)');
 
@@ -449,7 +493,7 @@
         // Single-instance card: the instance name is the headline.
         g.append('circle').attr('cx', 21).attr('cy', 25).attr('r', 5).attr('fill', accent);
         g.append('text').attr('x', 34).attr('y', 30)
-          .attr('font-size', 14.5).attr('font-weight', 700).attr('fill', '#1A1F36')
+          .attr('font-size', 14.5).attr('font-weight', 700).attr('fill', P.title)
           .text(truncate(name, 15));
         return;
       }
@@ -459,7 +503,7 @@
       g.append('circle').attr('cx', 18).attr('cy', 22).attr('r', 4).attr('fill', accent);
       g.append('text').attr('x', 30).attr('y', 25.5)
         .attr('font-size', 10.5).attr('font-weight', 700).attr('letter-spacing', '0.04em')
-        .attr('fill', '#8792A2')
+        .attr('fill', P.muted)
         .text(truncate(String(name).toUpperCase(), 18));
 
       // Count pill (top-right).
@@ -468,11 +512,11 @@
       g.append('rect')
         .attr('x', p.w - 14 - pw).attr('y', 13)
         .attr('width', pw).attr('height', 19).attr('rx', 9.5)
-        .attr('fill', '#EEF1F4');
+        .attr('fill', P.pill);
       g.append('text')
         .attr('x', p.w - 14 - pw / 2).attr('y', 26.5)
         .attr('text-anchor', 'middle')
-        .attr('font-size', 11).attr('font-weight', 600).attr('fill', '#4A5568')
+        .attr('font-size', 11).attr('font-weight', 600).attr('fill', P.pillText)
         .text(cstr);
 
       // "Modified by operations" badge (amber dot) — see the Transformations layer.
@@ -498,13 +542,13 @@
           .attr('x', 13).attr('y', cy)
           .attr('width', p.w - 26).attr('height', LAYOUT.CARD_H - 6)
           .attr('rx', 7)
-          .attr('fill', '#F6F8FA')
-          .attr('stroke', '#EDF0F3')
+          .attr('fill', P.mini)
+          .attr('stroke', P.miniBorder)
           .attr('stroke-width', 1);
         card.append('text')
           .attr('x', 25).attr('y', cy + (LAYOUT.CARD_H - 6) / 2 + 4)
           .attr('font-size', 11.5)
-          .attr('fill', '#1A1F36')
+          .attr('fill', P.miniText)
           .text(truncate(inst.name || inst.id, 24));
       });
       const total = t.instance_count || insts.length;
@@ -541,11 +585,11 @@
         const kindColor = OP_KIND_COLORS[op.op_kind] || '#8792A2';
         const g = opGroup.append('g').attr('class', 'sd-op-chip').attr('data-op', op.id);
         g.append('rect').attr('x', x).attr('y', railY).attr('width', chipW).attr('height', chipH)
-          .attr('rx', 8).attr('fill', '#FFFFFF').attr('stroke', kindColor).attr('stroke-width', 1.5)
+          .attr('rx', 8).attr('fill', P.card).attr('stroke', kindColor).attr('stroke-width', 1.5)
           .attr('filter', 'url(#sd-card-shadow)');
         g.append('circle').attr('cx', x + 13).attr('cy', railY + chipH / 2).attr('r', 4).attr('fill', kindColor);
         g.append('text').attr('x', x + 24).attr('y', railY + chipH / 2 + 4)
-          .attr('font-size', 11.5).attr('font-weight', 600).attr('fill', '#1A1F36')
+          .attr('font-size', 11.5).attr('font-weight', 600).attr('fill', P.title)
           .text(truncate(op.name, 16));
       });
     }
@@ -753,25 +797,39 @@
   function flowCurve(sx, sy, tx, ty, offset) {
     offset = offset || 0;
     const dx = tx - sx;
+    const dy = Math.abs(ty - sy);
     const span = Math.abs(dx) / (LAYOUT.BOX_W + LAYOUT.COL_GAP);
     const handle = Math.max(60, Math.abs(dx) * 0.5);
     const dir = dx >= 0 ? 1 : -1;
     let c1y = sy + offset, c2y = ty + offset;
     // Drop the control points below the card band so multi-column edges arc
-    // clearly under the intermediate cards rather than grazing them.
-    if (span >= 1.25) {
+    // clearly under the intermediate cards rather than grazing them. Only
+    // when the endpoints sit at similar heights: with a large vertical span
+    // (tall columns) the drop overshot below BOTH cards, hooking the curve
+    // back up so the arrowhead pointed the wrong way ("inverted" arrows).
+    // Vertically distant cards get the plain horizontal-ease instead, which
+    // already clears the band diagonally.
+    if (span >= 1.25 && dy < 140) {
       const drop = Math.max(sy, ty) + (64 + span * 40);
       c1y = drop + offset;
       c2y = drop + offset;
-    } else if (span >= 0.4) {
+    } else if (span >= 0.4 && dy < 90) {
       // Adjacent columns: a gentle downward bow so the edge clears the card edges.
       const drop = Math.max(sy, ty) + 34;
       c1y = drop + offset;
       c2y = drop + offset;
     }
     const c1x = sx + dir * handle, c2x = tx - dir * handle;
+    // Straight run-in/run-out segments: the arrow marker orients to the path
+    // tangent at the endpoint, so it must sit on a visibly straight piece of
+    // line or the head appears detached/rotated off the curve.
+    const RUN = 10;
+    const sx2 = sx + dir * RUN, tx2 = tx - dir * RUN;
     return {
-      d: 'M ' + sx + ' ' + sy + ' C ' + c1x + ' ' + c1y + ', ' + c2x + ' ' + c2y + ', ' + tx + ' ' + ty,
+      d: 'M ' + sx + ' ' + sy +
+         ' L ' + sx2 + ' ' + sy +
+         ' C ' + c1x + ' ' + c1y + ', ' + c2x + ' ' + c2y + ', ' + tx2 + ' ' + ty +
+         ' L ' + tx + ' ' + ty,
       mx: (c1x + c2x) / 2,
       my: (c1y + c2y) / 2,
     };
@@ -904,9 +962,26 @@
       const accent = accentFor(focus.type);
       const marker = overlay.append('defs').append('marker')
         .attr('id', 'sd-spot-arrow').attr('viewBox', '0 -5 10 10')
-        .attr('refX', 8).attr('refY', 0).attr('markerWidth', 7).attr('markerHeight', 7)
+        .attr('refX', 10).attr('refY', 0).attr('markerWidth', 7).attr('markerHeight', 7)
         .attr('orient', 'auto');
-      marker.append('path').attr('d', 'M0,-3.5L8,0L0,3.5').attr('fill', accent);
+      marker.append('path').attr('d', 'M0,-4L10,0L0,4').attr('fill', accent);
+      let sameCardIdx = 0;
+      let crossCardIdx = 0;
+      // Greedy vertical declutter: connector labels for links to nearby
+      // instances land on nearly the same midpoint and overprint into
+      // garbage. Push each new label below any already-placed neighbor.
+      const placedLabelYs = [];
+      function declutterY(y) {
+        let moved = true;
+        while (moved) {
+          moved = false;
+          for (let i = 0; i < placedLabelYs.length; i++) {
+            if (Math.abs(y - placedLabelYs[i]) < 13) { y = placedLabelYs[i] + 13; moved = true; }
+          }
+        }
+        placedLabelYs.push(y);
+        return y;
+      }
       links.forEach(function(l) {
         const n = index[l.id];
         if (!n) return;
@@ -914,13 +989,46 @@
         if (!tgtRect) return;
         let s = focusRect, t = tgtRect;
         if (l.dir === 'in') { s = tgtRect; t = focusRect; }
-        const a = anchorBetween(s, t);
-        const curve = flowCurve(a.sx, a.sy, a.tx, a.ty, 0);
-        overlay.append('path').attr('class', 'sd-spotlight-edge-halo').attr('fill', 'none').attr('stroke', accent).attr('d', curve.d);
+        let d, lx, ly, anchor = 'middle';
+        if (n.type === focus.type) {
+          // Connection between two instances of the SAME type card. The
+          // facing-side anchors degenerate here: the connector cut straight
+          // across the card with its label overprinting the others. Route a
+          // side loop out of the card's LEFT edge instead (the right side
+          // already hosts the type-pair loops), nesting loops and labels by
+          // index so multiple relations stay individually readable.
+          sameCardIdx += 1;
+          const sx = s.x, sy = s.y + s.h / 2;
+          const tx = t.x, ty = t.y + t.h / 2;
+          const bulge = 46 + Math.min(140, Math.abs(ty - sy) * 0.18) + sameCardIdx * 16;
+          const RUN = 8;
+          d = 'M ' + sx + ' ' + sy +
+              ' L ' + (sx - RUN) + ' ' + sy +
+              ' C ' + (sx - bulge) + ' ' + sy +
+              ', ' + (tx - bulge) + ' ' + ty +
+              ', ' + (tx - RUN) + ' ' + ty +
+              ' L ' + tx + ' ' + ty;
+          // Right-align the label just left of the loop apex so the text
+          // extends away from the nested loop strokes.
+          lx = Math.min(sx, tx) - bulge - 4;
+          ly = declutterY((sy + ty) / 2);
+          anchor = 'end';
+        } else {
+          // Cross-card connector: spread vertically so labels between the
+          // same pair of cards don't land on one coincident midpoint.
+          crossCardIdx += 1;
+          const spread = ((crossCardIdx % 5) - 2) * 16;
+          const a = anchorBetween(s, t);
+          const curve = flowCurve(a.sx, a.sy, a.tx, a.ty, spread);
+          d = curve.d;
+          lx = curve.mx;
+          ly = declutterY(curve.my);
+        }
+        overlay.append('path').attr('class', 'sd-spotlight-edge-halo').attr('fill', 'none').attr('stroke', accent).attr('d', d);
         overlay.append('path').attr('class', 'sd-spotlight-edge').attr('fill', 'none').attr('stroke', accent)
-          .attr('marker-end', 'url(#sd-spot-arrow)').attr('d', curve.d);
+          .attr('marker-end', 'url(#sd-spot-arrow)').attr('d', d);
         overlay.append('text').attr('class', 'sd-spotlight-label')
-          .attr('x', curve.mx).attr('y', curve.my).attr('text-anchor', 'middle')
+          .attr('x', lx).attr('y', ly).attr('text-anchor', anchor)
           .attr('fill', accent).text(l.relation);
       });
     }

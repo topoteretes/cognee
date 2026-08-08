@@ -1,8 +1,11 @@
 #!/bin/bash
 
 set -e  # Exit on error
+# ENV is the canonical environment variable (matches what the app reads).
+# ENVIRONMENT is accepted as a deprecated fallback for older deployments.
+ENV="${ENV:-${ENVIRONMENT:-}}"
 echo "Debug mode: $DEBUG"
-echo "Environment: $ENVIRONMENT"
+echo "Environment: $ENV"
 
 # Set default ports and bind address if not specified
 DEBUG_PORT=${DEBUG_PORT:-5678}
@@ -42,7 +45,7 @@ echo "Starting server..."
 sleep 2
 
 # Modified Gunicorn startup with error handling
-if [ "$ENVIRONMENT" = "dev" ] || [ "$ENVIRONMENT" = "local" ]; then
+if [ "$ENV" = "dev" ] || [ "$ENV" = "local" ]; then
     if [ "$DEBUG" = "true" ]; then
         echo "Waiting for the debugger to attach..."
         exec debugpy --wait-for-client --listen $BIND_ADDRESS:$DEBUG_PORT -m gunicorn -w 1 -k uvicorn.workers.UvicornWorker -t 30000 --bind=$BIND_ADDRESS:$HTTP_PORT --log-level debug --reload --access-logfile - --error-logfile - cognee.api.client:app

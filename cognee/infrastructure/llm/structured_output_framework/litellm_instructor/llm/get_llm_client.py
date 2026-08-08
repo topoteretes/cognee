@@ -5,7 +5,7 @@ from enum import Enum
 from functools import lru_cache
 from typing import Any, Hashable, TypeGuard
 
-from cognee.infrastructure.llm import get_llm_config
+from cognee.infrastructure.llm.config import get_llm_context_config
 from cognee.infrastructure.llm.exceptions import (
     LLMAPIKeyNotSetError,
     UnsupportedLLMProviderError,
@@ -90,6 +90,8 @@ class LLMProvider(Enum):
     AZURE = "azure"
     BEDROCK = "bedrock"
     LLAMA_CPP = "llama_cpp"
+    # Delegates completions to the host harness via MCP sampling (no API key).
+    MCP_SAMPLING = "mcp-sampling"
 
 
 _API_KEY_REQUIRED_PROVIDERS = {
@@ -198,7 +200,11 @@ def _raise_for_missing_api_key(
 @lru_cache(maxsize=_LLM_CLIENT_CACHE_MAXSIZE)
 def _get_llm_client_cached(cache_key: _LLMClientCacheKey) -> LLMInterface:
     """Create and cache LLM adapters with bounded LRU eviction."""
-    llm_config = get_llm_config()
+    # Read from the context config so the raw secrets (api key / fallback key),
+    # which are only represented in cache_key by a masked hash, match the config
+    # that produced cache_key. The cache_key already differentiates by that hash,
+    # so the first context to populate a given key bakes in the correct secret.
+    llm_config = get_llm_context_config()
     provider = LLMProvider(cache_key.provider)
     llm_api_key: str = llm_config.llm_api_key or ""
     llm_args = _unfreeze_from_cache(cache_key.llm_args) or {}
@@ -350,6 +356,18 @@ def _get_llm_client_cached(cache_key: _LLMClientCacheKey) -> LLMInterface:
             chat_format=cache_key.llama_cpp_chat_format,
             llm_args=llm_args,
         )
+
+    elif provider == LLMProvider.MCP_SAMPLING:
+        from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.mcp_sampling.adapter import (
+            MCPSamplingAdapter,
+        )
+
+        # No API key / endpoint: completions are delegated to the host MCP
+        # session. `model` is only a preference hint.
+        return MCPSamplingAdapter(
+            model=cache_key.model,
+            max_completion_tokens=max_completion_tokens,
+        )
     else:
         raise UnsupportedLLMProviderError(provider)
 
@@ -369,7 +387,7 @@ def get_llm_client(raise_api_key_error: bool = True) -> LLMInterface:
         An instance of the appropriate LLM client adapter based on the provider
         configuration.
     """
-    llm_config = get_llm_config()
+    llm_config = get_llm_context_config()
 
     provider = LLMProvider(llm_config.llm_provider)
     _raise_for_missing_api_key(

@@ -1,4 +1,5 @@
 import os
+import gc
 import asyncio
 from os import path
 import tempfile
@@ -8,7 +9,7 @@ from typing import AsyncGenerator, List
 from contextlib import asynccontextmanager
 from sqlalchemy.orm import joinedload
 from sqlalchemy.exc import NoResultFound
-from sqlalchemy import NullPool, text, select, MetaData, Table, delete, inspect, func
+from sqlalchemy import NullPool, event, text, select, MetaData, Table, delete, inspect, func
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 
 from cognee.modules.data.models.Data import Data
@@ -75,8 +76,29 @@ class SQLAlchemyAdapter:
             self.engine = create_async_engine(
                 connection_string,
                 poolclass=NullPool,
-                connect_args={**{"timeout": 30}, **final_connect_args},
+                connect_args={**{"timeout": 120}, **final_connect_args},
             )
+
+            # SQLite defaults to rollback-journal mode, where a connection that
+            # holds a read lock and then tries to upgrade to a write lock can
+            # deadlock against another reader's lock. Because cognify() fans
+            # work out to parallel greenlets that each open their own connection
+            # (NullPool), those read-then-write transactions race and surface as
+            # "sqlite3.OperationalError: database is locked" (see issue #2717).
+            #
+            # Enabling WAL serializes writers on a single write lock while
+            # letting readers proceed, so concurrent writers wait (bounded by
+            # busy_timeout) instead of deadlocking. These PRAGMAs are connection
+            # scoped, so they must be (re)applied on every new connection.
+            @event.listens_for(self.engine.sync_engine, "connect")
+            def _set_sqlite_pragmas(dbapi_connection, connection_record):
+                cursor = dbapi_connection.cursor()
+                try:
+                    cursor.execute("PRAGMA journal_mode=WAL")
+                    cursor.execute("PRAGMA synchronous=NORMAL")
+                    cursor.execute("PRAGMA busy_timeout=120000")
+                finally:
+                    cursor.close()
         else:
             # Transform pool_args from tuple into dict if provided
             # Note: For caching purposes, pool_args is stored as a sorted tuple of key-value pairs in the config
@@ -85,9 +107,14 @@ class SQLAlchemyAdapter:
             if pool_args.get("poolclass", "").lower() == "nullpool":
                 pool_args["poolclass"] = NullPool
             else:
-                # Standard QueuePool settings
-                pool_args.setdefault("pool_size", 20)
-                pool_args.setdefault("max_overflow", 20)
+                # Standard QueuePool settings. Lean pool_size with a large
+                # max_overflow: only pool_size connections are retained while
+                # idle (overflow connections close on release), so engines —
+                # which multiply per dataset under access control — hold few
+                # of the server's max_connections slots between bursts while
+                # keeping a 40-connection burst ceiling.
+                pool_args.setdefault("pool_size", 5)
+                pool_args.setdefault("max_overflow", 35)
                 pool_args.setdefault("pool_pre_ping", True)
                 pool_args.setdefault("pool_recycle", 280)
                 pool_args.setdefault("pool_timeout", 280)
@@ -128,8 +155,25 @@ class SQLAlchemyAdapter:
         async with async_session_maker() as session:
             try:
                 yield session
-            finally:
-                await session.close()  # Ensure the session is closed
+            except asyncio.CancelledError:
+                # A cancelled request can leave the connection in an open
+                # transaction; returning it to the pool leaks an "idle in
+                # transaction" backend. Invalidate (drop) it instead, shielded
+                # so the cleanup is not cut short by the same cancellation.
+                await asyncio.shield(self._discard_cancelled_session(session))
+                raise
+            # Happy path and ordinary exceptions: the sessionmaker context
+            # manager closes and rolls back, so no explicit close is needed.
+
+    @staticmethod
+    async def _discard_cancelled_session(session: AsyncSession) -> None:
+        # A graceful close needs a ROLLBACK round-trip that the cancellation
+        # keeps interrupting; invalidate() drops the DBAPI connection without
+        # it, so the connection is never reused dirty.
+        try:
+            await session.invalidate()
+        except Exception:
+            logger.exception("Failed to invalidate session on cancellation")
 
     def get_session(self):
         """
@@ -578,12 +622,51 @@ class SQLAlchemyAdapter:
         try:
             if self.engine.dialect.name == "sqlite":
                 await self.engine.dispose(close=True)
-                # Wait for the database connections to close and release the file (Windows)
+                # The create_relational_engine() lru_cache keeps this adapter
+                # (and its AsyncEngine/sessionmaker) reachable, which on Windows
+                # keeps the underlying aiosqlite connection/background thread
+                # alive and holding the file handle. Drop that strong reference
+                # so the connection can finalize before we remove the file.
+                # Imported lazily to avoid the circular import
+                # (create_relational_engine imports this adapter).
+                from cognee.infrastructure.databases.relational.create_relational_engine import (
+                    create_relational_engine,
+                )
+
+                create_relational_engine.cache_clear()
+                gc.collect()
+                # Wait for the database connections to close and release the file.
+                # This settle also preserves teardown timing other resources
+                # (e.g. the graph DB) rely on between tests, so keep it
+                # unconditional.
                 await asyncio.sleep(2)
                 db_directory = path.dirname(self.db_path)
                 file_name = path.basename(self.db_path)
                 file_storage = get_file_storage(db_directory)
-                await file_storage.remove(file_name)
+                # On Windows the SQLite file handle can still linger after the
+                # settle above (aiosqlite closes the connection on a background
+                # thread), so os.remove fails with WinError 32. Retry with short
+                # backoff and force a GC pass to finalize lingering connection
+                # objects.
+                for attempt in range(10):
+                    try:
+                        await file_storage.remove(file_name)
+                        break
+                    except (PermissionError, OSError) as remove_error:
+                        if attempt == 9:
+                            # Best-effort cleanup: a stubborn Windows file lock
+                            # must never poison teardown/prune. No test asserts
+                            # the file is gone and every create path uses
+                            # CREATE TABLE IF NOT EXISTS, so a left-behind file
+                            # is harmless. Log and continue instead of raising.
+                            logger.warning(
+                                "Could not remove sqlite database file %s after retries: %s",
+                                file_name,
+                                remove_error,
+                            )
+                            break
+                        gc.collect()
+                        await asyncio.sleep(0.5)
             else:
                 async with self.engine.begin() as connection:
                     # Create a MetaData instance to load table information

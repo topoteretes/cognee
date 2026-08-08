@@ -180,6 +180,47 @@ class TestInheritanceWarning:
         assert c.id.version == 4
 
 
+class TestIdForMatchesIdentityFields:
+    """id_for(...) and the identity_fields-derived instance id must be the SAME
+    value — they share one implementation (id_for) precisely so they cannot drift.
+    """
+
+    def test_id_for_matches_single_field_instance(self):
+        assert PersonWithIdentity.id_for("John") == PersonWithIdentity(name="John").id
+
+    def test_id_for_matches_after_normalization(self):
+        assert PersonWithIdentity.id_for("John Doe") == PersonWithIdentity(name="John_Doe").id
+
+    def test_id_for_matches_multi_field_in_declaration_order(self):
+        assert (
+            MultiFieldIdentity.id_for("John", "Doe")
+            == MultiFieldIdentity(first_name="John", last_name="Doe").id
+        )
+
+    def test_id_for_namespaced_by_class(self):
+        # Same input, different classes -> different ids (class supplies the namespace).
+        assert PersonWithIdentity.id_for("Engineering") != DepartmentWithIdentity.id_for(
+            "Engineering"
+        )
+
+
+class TestNormalizationMatchesGenerateNodeId:
+    """The identity normalization must stay byte-for-byte aligned with the legacy
+    ``generate_node_id`` normalization, otherwise the graph id migration can no
+    longer recompute historical ids from a node's stored name.
+    """
+
+    def test_normalization_equivalence(self):
+        from uuid import NAMESPACE_OID, uuid5
+
+        from cognee.infrastructure.engine.utils.generate_node_id import generate_node_id
+
+        for raw in ["John", "John Doe", "O'Brien", "New York City", "ALL CAPS", "mixed Case's"]:
+            normalized = DataPoint._normalize_identity_value(raw)
+            # generate_node_id hashes the bare normalized value (no class prefix).
+            assert generate_node_id(raw) == uuid5(NAMESPACE_OID, normalized)
+
+
 class TestTypeFieldPreserved:
     def test_type_is_class_name(self):
         p = PersonWithIdentity(name="John")

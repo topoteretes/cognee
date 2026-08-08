@@ -10,11 +10,9 @@ from pydantic import Field
 from cognee import __version__ as cognee_version
 from cognee.api.DTO import InDTO, OutDTO
 from cognee.api.v1.recall.recall import RecallResponse
-from cognee.exceptions import CogneeValidationError
-from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
+from cognee.exceptions import CogneeApiError
 from cognee.modules.search.operations import get_history
 from cognee.modules.search.types import SearchResult, SearchType
-from cognee.modules.users.exceptions.exceptions import PermissionDeniedError, UserNotFoundError
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
@@ -26,25 +24,71 @@ class RecallPayloadDTO(InDTO):
     # Default preserved as GRAPH_COMPLETION for backward compatibility
     # with existing HTTP clients. Pass ``search_type: null`` explicitly
     # to opt into auto-routing (the new ``cognee.recall`` default).
-    search_type: Optional[SearchType] = Field(default=SearchType.GRAPH_COMPLETION)
-    datasets: Optional[list[str]] = Field(default=None)
-    dataset_ids: Optional[list[UUID]] = Field(default=None, examples=[[]])
+    search_type: Optional[SearchType] = Field(
+        default=SearchType.GRAPH_COMPLETION,
+        description=(
+            "Search strategy, e.g. GRAPH_COMPLETION, RAG_COMPLETION, CHUNKS, SUMMARIES. "
+            "Pass null to let cognee auto-route the query to the best strategy."
+        ),
+    )
+    datasets: Optional[list[str]] = Field(
+        default=None,
+        examples=[["default_dataset"]],
+        description=(
+            "Dataset names to search within. Omit (null) to search all datasets "
+            "you have read access to."
+        ),
+    )
+    dataset_ids: Optional[list[UUID]] = Field(
+        default=None,
+        examples=[None],
+        description=(
+            "Dataset UUIDs to search within; takes precedence over 'datasets' names "
+            "when both are provided. Leave empty to resolve by name."
+        ),
+    )
     query: str = Field(default="What is in the document?")
     system_prompt: Optional[str] = Field(
         default="Answer the question using the provided context. Be as brief as possible."
     )
-    node_name: Optional[list[str]] = Field(default=None, example=[])
-    top_k: Optional[int] = Field(default=10)
+    node_name: Optional[list[str]] = Field(
+        default=None,
+        examples=[None],
+        description=(
+            "Restrict results to these node sets (the node_set values passed to "
+            "/v1/add or /v1/remember). Omit to search all nodes."
+        ),
+    )
+    top_k: Optional[int] = Field(default=15)
     only_context: bool = Field(default=False)
     verbose: bool = Field(default=False)
-    session_id: Optional[str] = Field(default=None, examples=[None])
+    include_references: bool = Field(
+        default=False,
+        description="Include source/provenance references in completion results.",
+    )
+    session_id: Optional[str] = Field(
+        default=None,
+        examples=[None],
+        description=(
+            "Session whose cached QA and trace entries should be searched. With "
+            "search_type null and no datasets, session hits short-circuit the "
+            "graph search."
+        ),
+    )
     scope: Optional[Union[str, list[str]]] = Field(
         default=None,
         examples=[None],
         description=(
             "Which memory sources to include: 'graph', 'session', 'trace', "
-            "'graph_context', 'all', or a list. Defaults to 'auto' (session "
-            "first when session_id is set, else graph)."
+            "'session_context', 'all', 'auto', or a list of these. Defaults to "
+            "'auto' (session first when session_id is set, else graph)."
+        ),
+    )
+    context_profile: str = Field(
+        default="qa",
+        description=(
+            "Profile to render for the 'session_context' scope: 'qa' (conversational) or "
+            "'agent' (tool/workflow). Ignored by other scopes."
         ),
     )
 
@@ -88,19 +132,33 @@ def get_recall_router() -> APIRouter:
         types and options from v1 are supported.
 
         ## Request Parameters
-        - **search_type** (SearchType): Type of search to perform
+        Field names are shown camelCased in the schema (e.g. searchType, datasetIds,
+        topK); both camelCase and snake_case are accepted.
+
+        - **search_type** (Optional[SearchType]): Type of search to perform
+          (default: GRAPH_COMPLETION). Pass null to enable automatic query routing.
         - **datasets** (Optional[List[str]]): Dataset names to search within
-        - **dataset_ids** (Optional[List[UUID]]): Dataset UUIDs to search within
+        - **dataset_ids** (Optional[List[UUID]]): Dataset UUIDs to search within;
+          take precedence over dataset names when both are provided
         - **query** (str): The search query string
         - **system_prompt** (Optional[str]): System prompt for completion searches
         - **node_name** (Optional[List[str]]): Filter to specific node sets
-        - **top_k** (Optional[int]): Maximum results (default: 10)
+        - **top_k** (Optional[int]): Maximum results (default: 15)
         - **only_context** (bool): Return only the LLM context
         - **verbose** (bool): Verbose output
+        - **include_references** (bool): Include source/provenance references in
+          completion results (default: true)
+        - **session_id** (Optional[str]): Session whose cached QA and trace entries
+          should be searched
+        - **scope** (Optional[str | List[str]]): Memory sources to include: "graph",
+          "session", "trace", "session_context", "all", "auto", or a list of these
+          (default: "auto" — session first when session_id is set, else graph)
 
         ## Error Codes
-        - **409 Conflict**: Error during recall
-        - **403 Forbidden**: Permission denied (returns empty list)
+        - **402/403/404/409/422**: Cognee errors (payment required, permission
+          denied, missing user, session-dataset conflict, prerequisites not met) return their own
+          status code and message via the global error handler
+        - **409 Conflict**: Unexpected non-Cognee error during recall
         """
         send_telemetry(
             "Recall API Endpoint Invoked",
@@ -128,21 +186,14 @@ def get_recall_router() -> APIRouter:
                 only_context=payload.only_context,
                 session_id=payload.session_id,
                 scope=payload.scope,
+                context_profile=payload.context_profile,
+                include_references=payload.include_references,
             )
             return jsonable_encoder(results)
-        except (DatabaseNotCreatedError, UserNotFoundError, CogneeValidationError) as e:
-            logger = get_logger()
-            logger.error("Recall prerequisites error: %s", e, exc_info=True)
-            status_code = getattr(e, "status_code", 422)
-            return JSONResponse(
-                status_code=status_code,
-                content={
-                    "error": "Recall prerequisites not met",
-                    "hint": "Run `await cognee.remember(...)` or `await cognee.add(...)` then `await cognee.cognify()` before recalling.",
-                },
-            )
-        except PermissionDeniedError:
-            return []
+        except CogneeApiError:
+            # Cognee errors carry their own status code and actionable message;
+            # the global handler in cognee/api/client.py returns them.
+            raise
         except Exception as error:
             logger = get_logger()
             logger.error("Recall endpoint error: %s", error, exc_info=True)

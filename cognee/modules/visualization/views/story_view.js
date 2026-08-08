@@ -41,6 +41,12 @@ nodes.forEach(function(n){
 });
 var nodeMap={};
 nodes.forEach(function(n){nodeMap[n.id]=n});
+// Share node/link details with the Memory view (views/memory_map.js) so its
+// slim structural payload never re-embeds the node JSON. _vizLinks must be
+// the UNFILTERED array: the memory payload's edge index holds integer
+// positions into the links array exactly as the preprocessor emitted it.
+window._vizNodeById=nodeMap;
+window._vizLinks=links;
 links=links.filter(function(l){
   var s=typeof l.source==="object"?(l.source.id||l.source):l.source;
   var t=typeof l.target==="object"?(l.target.id||l.target):l.target;
@@ -392,8 +398,8 @@ nodes.forEach(function(n){
   }
   n._rgb=typeRgbCache[n.type];
   if(n.ontology_valid===true){
-    n.color="#D8D8D8";
-    n._rgb=[216,216,216];
+    n.color="#FF5CA8";
+    n._rgb=[255,92,168];
   }
 });
 
@@ -450,20 +456,33 @@ var nodesetCounts={};
 nodes.forEach(function(n){var s=n.source_node_set||"Unknown";nodesetCounts[s]=(nodesetCounts[s]||0)+1});
 var userCounts={};
 nodes.forEach(function(n){var u=n.source_user||"Unknown";userCounts[u]=(userCounts[u]||0)+1});
-var uniqueTasks=Object.keys(taskCounts).length;
-var uniquePipelines=Object.keys(pipeCounts).length;
-var uniqueNodesets=Object.keys(nodesetCounts).length;
-var uniqueUsers=Object.keys(userCounts).length;
+// "Unknown" is the absence of provenance, not a value — counting it produced
+// stats like "1 node sets" on graphs with no node sets at all.
+function countKnown(counts){return Object.keys(counts).filter(function(k){return k!=="Unknown"}).length}
+function pluralize(n,word){return n.toLocaleString()+" "+word+(n===1?"":"s")}
+var uniqueTasks=countKnown(taskCounts);
+var uniquePipelines=countKnown(pipeCounts);
+var uniqueNodesets=countKnown(nodesetCounts);
+var uniqueUsers=countKnown(userCounts);
 var statsEl=document.getElementById("stats");
 var perfTier=N>10000?"large":N>2000?"medium":"small";
-statsEl.innerHTML='<span><span class="dot" style="background:#6510F4"></span>'+N.toLocaleString()+" nodes</span>"+
-  '<span><span class="dot" style="background:#747470"></span>'+M.toLocaleString()+" edges</span>"+
-  '<span>'+Object.keys(typeCounts).length+" types</span>"+
-  '<span>'+uniqueTasks+" tasks</span>"+
-  '<span>'+uniquePipelines+" pipelines</span>"+
-  '<span>'+uniqueNodesets+" node sets</span>"+
-  '<span>'+uniqueUsers+" users</span>"+
+statsEl.innerHTML='<span><span class="dot" style="background:#6510F4"></span>'+pluralize(N,"node")+"</span>"+
+  '<span><span class="dot" style="background:#747470"></span>'+pluralize(M,"edge")+"</span>"+
+  '<span title="Distinct node classes: documents, chunks, entities, types, summaries">'+pluralize(Object.keys(typeCounts).length,"node kind")+"</span>"+
+  '<span>'+pluralize(uniqueTasks,"task")+"</span>"+
+  '<span>'+pluralize(uniquePipelines,"pipeline")+"</span>"+
+  '<span>'+pluralize(uniqueNodesets,"node set")+"</span>"+
+  '<span>'+pluralize(uniqueUsers,"user")+"</span>"+
   '<span style="opacity:0.5">['+perfTier+']</span>';
+
+// Color-by modes for provenance the dataset doesn't carry render the whole
+// graph as one "Unknown" gray — disable them with an explanation instead.
+[["nodeset",uniqueNodesets,"No node sets in this graph"],["user",uniqueUsers,"No user provenance in this graph"]]
+  .forEach(function(entry){
+    if(entry[1]>0)return;
+    var btn=document.querySelector('.ctrl-btn[data-colorby="'+entry[0]+'"]');
+    if(btn){btn.disabled=true;btn.title=entry[2]}
+  });
 
 // ── Legend ──
 var legendEl=document.getElementById("legend");
@@ -473,7 +492,16 @@ function updateLegend(){
   if(colorByMode==="type"){
     counts=typeCounts;
     entries=Object.keys(counts).sort(function(a,b){return counts[b]-counts[a]});
-    colorSource=function(t){return colorByType[t]||typeColors[t]||"#DBD8D8"};
+    // Sample the color actually drawn on a node of this type (skipping the
+    // ontology-valid override) so the legend can never diverge from the
+    // canvas — the JS palette and the preprocessor palette had drifted apart.
+    colorSource=function(t){
+      for(var i=0;i<nodes.length;i++){
+        var n=nodes[i];
+        if(n.type===t&&n.ontology_valid!==true&&n.color)return n.color;
+      }
+      return colorByType[t]||typeColors[t]||"#DBD8D8";
+    };
     sectionLabel="Node type";
   }else if(colorByMode==="task"){
     counts=taskCounts;
@@ -508,6 +536,7 @@ function updateLegend(){
   var ontologySection=
     '<div class="legend-section">'+
       '<span class="legend-title">Ontology</span>'+
+      '<span class="legend-item"><span class="legend-dot" style="background:#FF5CA8"></span>grounded node</span>'+
       '<span class="legend-item"><span class="legend-ring"></span>matched in OWL</span>'+
     '</div>';
   var importanceSection=
@@ -520,6 +549,18 @@ function updateLegend(){
       '</span>'+
       '<span style="opacity:0.7">low → high</span>'+
     '</div>';
+  // Memory section — only when the graph actually contains distilled
+  // session learnings, so we don't advertise a cue that isn't present.
+  var memorySection="";
+  if(nodes.some(function(n){return n.is_memory_learning===true})){
+    memorySection=
+      '<span class="legend-sep"></span>'+
+      '<div class="legend-section">'+
+        '<span class="legend-title">Memory</span>'+
+        '<span class="legend-item"><span class="legend-dot" style="background:#FFC53D"></span>session learning</span>'+
+        '<span class="legend-item"><span class="legend-ring memory"></span>distilled into graph</span>'+
+      '</div>';
+  }
   legendEl.innerHTML=
     '<div class="legend-section">'+
       '<span class="legend-title">'+esc(sectionLabel)+'</span>'+
@@ -527,6 +568,7 @@ function updateLegend(){
     '</div>'+
     '<span class="legend-sep"></span>'+
     ontologySection+
+    memorySection+
     '<span class="legend-sep"></span>'+
     importanceSection;
 }
@@ -832,17 +874,64 @@ var searchMatches=new Set();
 
 // ── Search ──
 var searchInput=document.getElementById("search-input");
+var searchCountEl=document.getElementById("search-count");
+var searchMatchList=[];  // matches ordered by importance, for Enter-cycling
+var searchMatchIdx=-1;
+
+function updateSearchCount(){
+  if(!searchCountEl)return;
+  if(!searchQuery){searchCountEl.textContent="";return}
+  var n=searchMatchList.length;
+  if(!n){searchCountEl.textContent="no matches";return}
+  searchCountEl.textContent=searchMatchIdx>=0?((searchMatchIdx%n)+1)+" / "+n:n+(n===1?" match":" matches");
+}
+
 searchInput.addEventListener("input",function(){
   searchQuery=searchInput.value.trim().toLowerCase();
   searchMatches.clear();
+  searchMatchList=[];
+  searchMatchIdx=-1;
   if(searchQuery){
     nodes.forEach(function(n){
       var name=(n.name||"").toLowerCase();
       var type=(n.type||"").toLowerCase();
-      if(name.indexOf(searchQuery)>=0||type.indexOf(searchQuery)>=0)searchMatches.add(n.id);
+      if(name.indexOf(searchQuery)>=0||type.indexOf(searchQuery)>=0){
+        searchMatches.add(n.id);
+        searchMatchList.push(n);
+      }
     });
+    searchMatchList.sort(function(a,b){return (b.importance||0)-(a.importance||0)});
   }
+  updateSearchCount();
   draw();
+});
+
+// Enter jumps to the best match and cycles onward (Shift+Enter backwards);
+// Escape clears. Search was previously display-only — highlighting with no
+// way to navigate to what you found.
+searchInput.addEventListener("keydown",function(ev){
+  if(ev.key==="Escape"){
+    searchInput.value="";
+    searchQuery="";
+    searchMatches.clear();
+    searchMatchList=[];
+    searchMatchIdx=-1;
+    updateSearchCount();
+    searchInput.blur();
+    draw();
+    return;
+  }
+  if(ev.key!=="Enter"||!searchMatchList.length)return;
+  ev.preventDefault();
+  searchMatchIdx=ev.shiftKey
+    ?(searchMatchIdx-1+searchMatchList.length)%searchMatchList.length
+    :(searchMatchIdx+1)%searchMatchList.length;
+  var match=searchMatchList[searchMatchIdx];
+  if(typeof match.x==="number"){
+    var ns=clamp(Math.max(scale,1.5),0.02,30);
+    smoothPanZoomTo(ns,W/2-match.x*ns,H/2-match.y*ns,300);
+  }
+  updateSearchCount();
 });
 
 // ── Schema → graph highlight bridge (PR3) ──
@@ -1199,16 +1288,40 @@ function isInViewport(wx,wy,margin,vp){
 
 // ── Mouse ──
 var isDragging=false,dragNode=null,isPanning=false;
-var lastMx=0,lastMy=0;
+// A press only becomes a drag after the cursor moves DRAG_THRESHOLD px.
+// Plain clicks must never touch node pins or reheat the simulation —
+// doing so unpinned the clicked node and let repulsion push it off into
+// space (the layout anchors are much weaker than the charge force).
+var dragStarted=false;
+// 6px: trackpad clicks routinely jitter 3-5px, and treating that as a
+// drag reheated the simulation — a plain click sent the dot (and, in
+// Force mode, the whole layout) flying.
+var DRAG_THRESHOLD=6;
+var lastMx=0,lastMy=0,downMx=0,downMy=0;
+
+function releaseDragNode(){
+  if(!dragNode)return;
+  if(layoutMode==="story"){
+    // Story pins every node into its lane; snap the dragged node back so
+    // interaction can never degrade the deterministic grid. The sim is
+    // not running in story drags, so restore x/y directly too.
+    if(typeof dragNode._targetX==="number"){dragNode.fx=dragNode._targetX;dragNode.x=dragNode._targetX}
+    else{dragNode.fx=null}
+    if(typeof dragNode._targetY==="number"){dragNode.fy=dragNode._targetY;dragNode.y=dragNode._targetY}
+    else{dragNode.fy=null}
+    if(dragStarted){rebuildQuadtree();draw()}
+  }else{
+    dragNode.fx=null;dragNode.fy=null;
+    if(dragStarted)simulation.alphaTarget(0);
+  }
+}
 
 canvas.addEventListener("mousedown",function(ev){
   var mx=ev.offsetX,my=ev.offsetY;
-  lastMx=mx;lastMy=my;
+  lastMx=mx;lastMy=my;downMx=mx;downMy=my;
   var hit=findNodeAt(mx,my);
   if(hit){
-    dragNode=hit;isDragging=true;
-    dragNode.fx=dragNode.x;dragNode.fy=dragNode.y;
-    simulation.alphaTarget(0.3).restart();
+    dragNode=hit;isDragging=true;dragStarted=false;
     canvas.style.cursor="grabbing";
   }else{
     isPanning=true;
@@ -1219,8 +1332,22 @@ canvas.addEventListener("mousedown",function(ev){
 canvas.addEventListener("mousemove",function(ev){
   var mx=ev.offsetX,my=ev.offsetY;
   if(isDragging&&dragNode){
+    if(!dragStarted){
+      var dx=mx-downMx,dy=my-downMy;
+      if(dx*dx+dy*dy<DRAG_THRESHOLD*DRAG_THRESHOLD){lastMx=mx;lastMy=my;return}
+      dragStarted=true;
+      // Story is a fully pinned grid — reheating the simulation only
+      // agitates it (and a hot sim is what made clicked dots shoot off).
+      // Drive the node directly instead; other layouts use the standard
+      // d3 drag reheat so neighbors respond to the drag.
+      if(layoutMode!=="story")simulation.alphaTarget(0.3).restart();
+    }
     var w=screenToWorld(mx,my);
     dragNode.fx=w.x;dragNode.fy=w.y;
+    if(layoutMode==="story"){
+      dragNode.x=w.x;dragNode.y=w.y;
+      draw();
+    }
   }else if(isPanning){
     tx+=mx-lastMx;ty+=my-lastMy;
     draw();
@@ -1243,17 +1370,14 @@ canvas.addEventListener("mousemove",function(ev){
 });
 
 canvas.addEventListener("mouseup",function(){
-  if(isDragging&&dragNode){
-    dragNode.fx=null;dragNode.fy=null;
-    simulation.alphaTarget(0);
-  }
-  isDragging=false;dragNode=null;isPanning=false;
+  if(isDragging)releaseDragNode();
+  isDragging=false;dragNode=null;isPanning=false;dragStarted=false;
   canvas.style.cursor="grab";
 });
 
 canvas.addEventListener("mouseleave",function(){
-  if(isDragging&&dragNode){dragNode.fx=null;dragNode.fy=null;simulation.alphaTarget(0)}
-  isDragging=false;dragNode=null;isPanning=false;
+  if(isDragging)releaseDragNode();
+  isDragging=false;dragNode=null;isPanning=false;dragStarted=false;
   hoveredNode=null;draw();
 });
 
@@ -1441,10 +1565,11 @@ function updateFps(){
 }
 
 // Top-chrome reserved zone in screen-pixels. Tabs (32px), header (~40px),
-// theme toggle, search box all live in the first ~64px of the viewport.
-// Column gridlines and column labels must start below this so they don't
-// bleed into the chrome.
-var TOP_CHROME_PAD=72;
+// theme toggle, and the fixed search box (top:56px, ~34px tall — see
+// #search-box in template.html) live in the first ~90px of the viewport.
+// Column gridlines and column labels must start below ALL of it, or the
+// first column's "Documents" pill collides with the "Search nodes" input.
+var TOP_CHROME_PAD=104;
 // Bottom-chrome zone for the floating controls bar.
 var BOT_CHROME_PAD=64;
 function drawRankColumns(vp,_light){
@@ -1469,6 +1594,20 @@ function drawRankColumns(vp,_light){
       ctx.lineWidth=1/scale;
       ctx.stroke();
     }
+  });
+  ctx.restore();
+}
+
+// Stage label pills are drawn in a SEPARATE pass at the END of draw() —
+// after edges, nodes and node labels — so a dense graph panned toward
+// the top of the viewport can never paint over them.
+function drawRankColumnLabels(vp,_light){
+  if((layoutMode!=="ranked"&&layoutMode!=="story")||rankColumns.length<2)return;
+  ctx.save();
+  var topY=vp.y1+TOP_CHROME_PAD/scale;
+  rankColumns.forEach(function(column){
+    var half=rankColumnGap/2;
+    if(column.x+half<vp.x1||column.x-half>vp.x2)return;
 
     if(scale>0.12){
       // Pill-style stage header drawn below the tab bar
@@ -1791,6 +1930,19 @@ function draw(){
         ctx.lineWidth=1.6/scale;
         ctx.stroke();
       }
+
+      // Distilled session-learning marker: a dashed gold ring (drawn outside
+      // the ontology ring so both can coexist) flags memory promoted into the
+      // graph by the self-improvement loop, regardless of color-by mode.
+      if(n.is_memory_learning===true){
+        ctx.beginPath();
+        ctx.arc(n.x,n.y,r+3.8/scale,0,Math.PI*2);
+        ctx.strokeStyle=_light ? "rgba(217,164,6,0.95)" : "rgba(255,197,61,0.95)";
+        ctx.lineWidth=1.6/scale;
+        ctx.setLineDash([3/scale,2/scale]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
       ctx.globalAlpha=1;
     });
   }
@@ -1815,33 +1967,39 @@ function draw(){
       else if(N>500){labelEvery=scale<0.3?Math.ceil(N/20):scale<0.8?Math.ceil(N/80):1}
       else{labelEvery=1}
 
+      // Two-pass labeling: collect candidates first, then place them in
+      // priority order with rectangle-collision rejection. Drawing labels
+      // node-by-node let neighbors overprint each other, which made
+      // entity names unreadable even on small graphs.
+      var labelCandidates=[];
       nodes.forEach(function(n,i){
         if(typeof n.x!=="number")return;
         // Viewport culling for labels
         if(!isInViewport(n.x,n.y,n._r+fontSize*2+vpMargin,vp))return;
 
-        var shouldLabel=false;
+        // Priority: hovered focus (3) > search match (2) > key node (1).
+        var prio=-1;
 
         // Always label hovered + neighbors (budget-independent)
-        if(hoveredNode&&neighborSet&&neighborSet.has(n.id))shouldLabel=true;
+        if(hoveredNode&&neighborSet&&neighborSet.has(n.id))prio=3;
         // Always label search matches
-        if(hasSearch&&searchMatches.has(n.id))shouldLabel=true;
+        if(hasSearch&&searchMatches.has(n.id))prio=Math.max(prio,2);
 
         if(labelBudget==="key"){
           // Default: label only nodes the preprocessor marked as
           // label_priority (documents, entity-types, top-quartile
           // importance). Hovered/searched already opted-in above.
-          if(n.label_priority===true)shouldLabel=true;
+          if(n.label_priority===true)prio=Math.max(prio,1);
         }else if(N>5000){
           // "all" mode on a huge graph still has to cap somewhere
-          if(topDegreeSet.has(n.id))shouldLabel=true;
+          if(topDegreeSet.has(n.id))prio=Math.max(prio,1);
         }else{
           // "all" mode — original legacy adaptive behavior
-          if(n._degree>=maxDeg*0.3)shouldLabel=true;
-          if(labelEvery<Infinity&&i%labelEvery===0)shouldLabel=true;
+          if(n._degree>=maxDeg*0.3)prio=Math.max(prio,1);
+          if(labelEvery<Infinity&&i%labelEvery===0)prio=Math.max(prio,0);
         }
 
-        if(!shouldLabel)return;
+        if(prio<0)return;
 
         var alpha2=0.85;
         if(hoveredNode){
@@ -1851,14 +2009,44 @@ function draw(){
           alpha2=searchMatches.has(n.id)?1:0.08;
         }
 
+        labelCandidates.push({n:n,prio:prio,alpha:alpha2});
+      });
+
+      // Important labels claim space first; ties broken by degree so hubs
+      // keep their names when space runs out.
+      labelCandidates.sort(function(a,b){
+        if(a.prio!==b.prio)return b.prio-a.prio;
+        return (b.n._degree||0)-(a.n._degree||0);
+      });
+
+      var placedLabelRects=[];
+      var MAX_PLACED_LABELS=250;
+      labelCandidates.forEach(function(c){
+        if(placedLabelRects.length>=MAX_PLACED_LABELS)return;
+        var n=c.n;
         var label=truncate(n.name||"",30);
+        if(!label)return;
         var yOff=n._r+fontSize*0.8;
+        var halfW=ctx.measureText(label).width/2+2;
+        var rect={
+          x1:n.x-halfW,x2:n.x+halfW,
+          y1:n.y+yOff-fontSize*0.7,y2:n.y+yOff+fontSize*0.7,
+        };
+        // The hovered node's neighborhood is the user's focus — always
+        // drawn. Everything else must not overlap an already-placed label.
+        if(c.prio<3){
+          for(var p=0;p<placedLabelRects.length;p++){
+            var r=placedLabelRects[p];
+            if(rect.x1<r.x2&&rect.x2>r.x1&&rect.y1<r.y2&&rect.y2>r.y1)return;
+          }
+        }
+        placedLabelRects.push(rect);
 
         // Text shadow
-        ctx.fillStyle=_light ? "rgba(255,255,255,"+alpha2*0.8+")" : "rgba(0,0,0,"+alpha2*0.8+")";
+        ctx.fillStyle=_light ? "rgba(255,255,255,"+c.alpha*0.8+")" : "rgba(0,0,0,"+c.alpha*0.8+")";
         ctx.fillText(label,n.x+0.5,n.y+yOff+0.5);
 
-        ctx.fillStyle=_light ? "rgba(30,30,30,"+alpha2+")" : "rgba(244,244,244,"+alpha2+")";
+        ctx.fillStyle=_light ? "rgba(30,30,30,"+c.alpha+")" : "rgba(244,244,244,"+c.alpha+")";
         ctx.fillText(label,n.x,n.y+yOff);
       });
     }else if(hoveredNode){
@@ -1872,6 +2060,9 @@ function draw(){
       ctx.fillText(label2,hn.x,hn.y+yOff2);
     }
   }
+
+  // Stage label pills last — always readable above the node mass.
+  drawRankColumnLabels(vp,_light);
 
   ctx.restore();
 
@@ -2140,5 +2331,10 @@ document.querySelectorAll(".ctrl-btn[data-layout], .ctrl-btn[data-labelbudget], 
 // Apply hash on initial load (deferred so all listeners are wired).
 setTimeout(readHashState,0);
 window.addEventListener("hashchange",readHashState);
+
+// The canvas only repaints on interaction; expose a redraw hook so the theme
+// toggle (ui_chrome.js) can request a frame instead of leaving the canvas in
+// the previous theme until the next pan/zoom.
+window._requestGraphRedraw=function(){draw()};
 
 })();

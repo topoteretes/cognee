@@ -1,6 +1,7 @@
 import asyncio
 from typing import Optional, List, Type, Union
 
+from cognee.base_config import get_base_config
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.modules.retrieval.utils.query_state import QueryState
 from cognee.modules.retrieval.utils.validate_queries import validate_retriever_input
@@ -28,12 +29,13 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
         node_name_filter_operator: str = "OR",
         wide_search_top_k: Optional[int] = 100,
         triplet_distance_penalty: Optional[float] = 6.5,
-        feedback_influence: float = 0.0,
+        feedback_influence: float = get_base_config().default_feedback_influence,
         context_extension_rounds: int = 4,
         session_id: Optional[str] = None,
         response_model: Type = str,
         neighborhood_depth: Optional[int] = None,
         neighborhood_seed_top_k: Optional[int] = 10,
+        include_references: bool = False,
     ):
         super().__init__(
             user_prompt_path=user_prompt_path,
@@ -50,6 +52,7 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
             response_model=response_model,
             neighborhood_depth=neighborhood_depth,
             neighborhood_seed_top_k=neighborhood_seed_top_k,
+            include_references=include_references,
         )
         self.context_extension_rounds = context_extension_rounds
 

@@ -6,8 +6,13 @@ This module provides a unified interface for interacting with Cognee, supporting
 - API mode: Makes HTTP requests to a running Cognee FastAPI server
 """
 
+import os
 import sys
+import base64
 import hashlib
+import mimetypes
+import tempfile
+from pathlib import Path
 from typing import Optional, Any, List, Dict
 from uuid import UUID
 from contextlib import redirect_stdout
@@ -26,6 +31,39 @@ except ImportError:
     from retrieval_utils import get_chunk_neighbors_from_graph, get_document_from_graph
 
 logger = get_logger()
+
+# Read-only GETs (dataset list/status) should fail fast rather than inherit the
+# 300s client timeout intended for long POSTs like cognify: a hung or black-holed
+# GET would otherwise freeze the caller for a full 5 minutes.
+READ_TIMEOUT_SECONDS = 30.0
+
+
+def _default_recall_system_prompt() -> Optional[str]:
+    """Return the server-side default synthesis prompt for recall, if configured.
+
+    Opt-in via environment:
+      COGNEE_MCP_RECALL_SYSTEM_PROMPT       inline prompt text
+      COGNEE_MCP_RECALL_SYSTEM_PROMPT_FILE  path to a file holding the prompt
+
+    Returns None when neither is set, leaving current behaviour untouched.
+    """
+    inline = os.environ.get("COGNEE_MCP_RECALL_SYSTEM_PROMPT")
+    if inline and inline.strip():
+        return inline.strip()
+
+    path = os.environ.get("COGNEE_MCP_RECALL_SYSTEM_PROMPT_FILE")
+    if path:
+        try:
+            with open(path, encoding="utf-8") as handle:
+                text = handle.read().strip()
+        except OSError as error:
+            logger.warning(
+                "Could not read COGNEE_MCP_RECALL_SYSTEM_PROMPT_FILE %s: %s", path, error
+            )
+            return None
+        if text:
+            return text
+    return None
 
 
 class CogneeClient:
@@ -59,7 +97,13 @@ class CogneeClient:
             logger.info(f"Cognee client initialized in API mode: {self.api_url}")
             if self.tenant_id:
                 logger.info(f"Tenant ID extracted from URL: {self.tenant_id}")
-            self.client = httpx.AsyncClient(timeout=300.0)  # 5 minute timeout for long operations
+            # follow_redirects=True is required: the cloud API serves collection
+            # routes with a trailing slash (e.g. /api/v1/datasets/) and 307-redirects
+            # the slash-less form. Without following redirects, GETs like
+            # list_datasets() silently read the empty redirect body as "no data".
+            self.client = httpx.AsyncClient(
+                timeout=300.0, follow_redirects=True
+            )  # 5 minute timeout for long operations
         else:
             logger.info("Cognee client initialized in direct mode")
             # Import cognee only if we're using direct mode
@@ -104,6 +148,57 @@ class CogneeClient:
         digest = hashlib.md5(content.encode("utf-8")).hexdigest()
         return {"data": (f"text_{digest}.txt", content, "text/plain")}
 
+    @staticmethod
+    def _decode_upload(filename: str, content_base64: str) -> tuple[str, bytes]:
+        """Decode a base64 file upload and sanitize its filename.
+
+        Strips any directory components from `filename` (defends against
+        path traversal via multipart form fields) and falls back to a
+        generic name/extension when the caller didn't provide a usable one,
+        so the file always lands with a safe, non-empty basename.
+        """
+        raw_bytes = base64.b64decode(content_base64, validate=True)
+
+        safe_name = Path(filename or "").name or "upload"
+        if not Path(safe_name).suffix:
+            safe_name += ".txt"
+
+        return safe_name, raw_bytes
+
+    @staticmethod
+    def _file_upload(filename: str, content_base64: str) -> Dict[str, tuple[str, bytes, str]]:
+        """Create a real file upload (preserving basename) for API-mode ingestion."""
+        safe_name, raw_bytes = CogneeClient._decode_upload(filename, content_base64)
+        mime_type, _ = mimetypes.guess_type(safe_name)
+        return {"data": (safe_name, raw_bytes, mime_type or "application/octet-stream")}
+
+    @staticmethod
+    def _path_upload(path: str) -> Dict[str, tuple[str, bytes, str]]:
+        """Create a real file upload (preserving basename) for an existing filesystem path."""
+        safe_name = Path(path).name or "upload"
+        with open(path, "rb") as f:
+            raw_bytes = f.read()
+        mime_type, _ = mimetypes.guess_type(safe_name)
+        return {"data": (safe_name, raw_bytes, mime_type or "application/octet-stream")}
+
+    @staticmethod
+    def _build_upload(
+        data: Any = None,
+        filename: Optional[str] = None,
+        content_base64: Optional[str] = None,
+    ) -> Dict[str, tuple[str, Any, str]]:
+        """Pick the multipart upload for an API-mode ingestion payload.
+
+        Base64 uploads and real filesystem paths keep their original
+        basename; anything else is uploaded as content-addressed
+        text so repeated writes don't collide.
+        """
+        if content_base64:
+            return CogneeClient._file_upload(filename, content_base64)
+        if isinstance(data, (str, Path)) and os.path.isfile(data):
+            return CogneeClient._path_upload(data)
+        return CogneeClient._text_upload(data)
+
     async def add(
         self, data: Any, dataset_name: str = "main_dataset", node_set: Optional[List[str]] = None
     ) -> Dict[str, Any]:
@@ -127,7 +222,7 @@ class CogneeClient:
         if self.use_api:
             endpoint = f"{self.api_url}/api/v1/add"
 
-            files = self._text_upload(data)
+            files = self._build_upload(data)
             form_data = {
                 "datasetName": dataset_name,
             }
@@ -175,7 +270,11 @@ class CogneeClient:
             endpoint = f"{self.api_url}/api/v1/cognify"
             payload = {
                 "datasets": datasets or ["main_dataset"],
-                "run_in_background": False,
+                # Kick cognify off server-side and return immediately instead of
+                # holding the HTTP request open for the whole (minutes-long)
+                # pipeline. The MCP cognify tool already runs in the background
+                # and directs the caller to poll dataset status for completion.
+                "run_in_background": True,
             }
             if custom_prompt:
                 payload["custom_prompt"] = custom_prompt
@@ -203,7 +302,7 @@ class CogneeClient:
         query_type: str,
         datasets: Optional[List[str]] = None,
         system_prompt: Optional[str] = None,
-        top_k: int = 10,
+        top_k: int = 15,
     ) -> Any:
         """
         Search the knowledge graph.
@@ -230,6 +329,16 @@ class CogneeClient:
             # API mode: Make HTTP request
             endpoint = f"{self.api_url}/api/v1/search"
             payload = {"query": query_text, "search_type": query_type.upper(), "top_k": top_k}
+            if not datasets:
+                # Cloud search with no dataset targets the (usually empty) default
+                # dataset and 404s with NoDataError. Default to every dataset the
+                # caller can see so an unscoped query ("what do you know?") searches
+                # real memory instead of nothing. Unauthorized/empty datasets are
+                # filtered server-side, so passing them all is safe. A failure to
+                # list datasets (e.g. the cloud is unreachable) is left to
+                # propagate: it means the search would fail anyway, and surfacing
+                # it beats silently retrying the same query unscoped.
+                datasets = [d["name"] for d in await self.list_datasets() if d.get("name")]
             if datasets:
                 payload["datasets"] = datasets
             if system_prompt:
@@ -366,8 +475,15 @@ class CogneeClient:
             Status information keyed by dataset ID
         """
         if self.use_api:
-            # Note: This would need a custom endpoint on the API side
-            raise NotImplementedError("Pipeline status is not available via API")
+            # API mode: query the server's dataset-status endpoint, which
+            # reports the pipeline run state keyed by dataset id.
+            endpoint = f"{self.api_url}/api/v1/datasets/status"
+            params = [("dataset", str(d)) for d in dataset_ids]
+            response = await self.client.get(
+                endpoint, params=params, headers=self._get_headers(), timeout=READ_TIMEOUT_SECONDS
+            )
+            response.raise_for_status()
+            return response.json()
         else:
             # Direct mode: Call cognee directly
             from cognee.modules.pipelines.operations.get_pipeline_status import get_pipeline_status
@@ -387,8 +503,13 @@ class CogneeClient:
         """
         if self.use_api:
             # API mode: Make HTTP request
-            endpoint = f"{self.api_url}/api/v1/datasets"
-            response = await self.client.get(endpoint, headers=self._get_headers())
+            # Canonical collection route has a trailing slash; calling it
+            # directly avoids a 307 redirect (and the http:// downgrade that
+            # used to black-hole this call — see CLO-320).
+            endpoint = f"{self.api_url}/api/v1/datasets/"
+            response = await self.client.get(
+                endpoint, headers=self._get_headers(), timeout=READ_TIMEOUT_SECONDS
+            )
             response.raise_for_status()
             return response.json()
         else:
@@ -456,12 +577,22 @@ class CogneeClient:
         dataset_name: str = "main_dataset",
         session_id: Optional[str] = None,
         custom_prompt: Optional[str] = None,
+        filename: Optional[str] = None,
+        content_base64: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Store data in memory via remember().
 
         With session_id: stores in session cache only (fast).
         Without session_id: full add + cognify pipeline (permanent).
+
+        Pass either `data` (text) or `filename` + `content_base64` (file
+        upload), not both. File uploads are permanent-memory only.
         """
+        if content_base64 and data:
+            raise ValueError("Pass either `data` or `filename` + `content_base64`, not both.")
+        if content_base64 and session_id:
+            raise ValueError("File uploads (content_base64) do not support session_id.")
+
         if self.use_api:
             if session_id:
                 if custom_prompt:
@@ -495,7 +626,7 @@ class CogneeClient:
                 return response.json()
 
             endpoint = f"{self.api_url}/api/v1/remember"
-            files = self._text_upload(data)
+            files = self._build_upload(data, filename, content_base64)
             form_data = {"datasetName": dataset_name}
             if custom_prompt:
                 form_data["custom_prompt"] = custom_prompt
@@ -509,15 +640,38 @@ class CogneeClient:
             return response.json()
         else:
             with redirect_stdout(sys.stderr):
+                tmp_dir = None
+                if content_base64:
+                    safe_name, raw_bytes = self._decode_upload(filename, content_base64)
+                    tmp_dir = tempfile.mkdtemp(prefix="cognee_upload_")
+                    remember_data = os.path.join(tmp_dir, safe_name)
+                    with open(remember_data, "wb") as f:
+                        f.write(raw_bytes)
+                else:
+                    remember_data = data
+
                 kwargs = {
-                    "data": data,
+                    "data": remember_data,
                     "dataset_name": dataset_name,
                 }
                 if session_id:
                     kwargs["session_id"] = session_id
                 if custom_prompt:
                     kwargs["custom_prompt"] = custom_prompt
-                result = await self.cognee.remember(**kwargs)
+
+                try:
+                    result = await self.cognee.remember(**kwargs)
+                finally:
+                    if tmp_dir is not None:
+                        try:
+                            os.unlink(remember_data)
+                        except OSError:
+                            pass
+                        try:
+                            os.rmdir(tmp_dir)
+                        except OSError:
+                            pass
+
                 return {
                     "status": getattr(result, "status", "completed"),
                     "dataset_name": dataset_name,
@@ -530,18 +684,32 @@ class CogneeClient:
         search_type: Optional[str] = None,
         datasets: Optional[List[str]] = None,
         session_id: Optional[str] = None,
-        top_k: int = 10,
+        system_prompt: Optional[str] = None,
+        top_k: int = 15,
     ) -> Any:
         """Search memory via recall() with auto-routing and session awareness."""
+        if not system_prompt:
+            system_prompt = _default_recall_system_prompt()
         if self.use_api:
             endpoint = f"{self.api_url}/api/v1/recall"
             payload = {"query": query_text, "top_k": top_k, "search_type": None}
             if search_type:
                 payload["search_type"] = search_type.upper()
+            if not datasets and not session_id:
+                # A bare recall (no dataset and no session) targets the empty
+                # default dataset and 404s ("Recall prerequisites not met"). Fall
+                # back to every dataset the caller can see so an unscoped
+                # "what do you know?" recalls from real memory. A session-scoped
+                # recall is left untouched so it can search the session cache. A
+                # failure to list datasets (e.g. the cloud is unreachable) is left
+                # to propagate rather than silently retrying the same query unscoped.
+                datasets = [d["name"] for d in await self.list_datasets() if d.get("name")]
             if datasets:
                 payload["datasets"] = datasets
             if session_id:
                 payload["session_id"] = session_id
+            if system_prompt:
+                payload["system_prompt"] = system_prompt
             response = await self.client.post(endpoint, json=payload, headers=self._get_headers())
             response.raise_for_status()
             return response.json()
@@ -556,6 +724,8 @@ class CogneeClient:
                     kwargs["datasets"] = datasets
                 if session_id:
                     kwargs["session_id"] = session_id
+                if system_prompt:
+                    kwargs["system_prompt"] = system_prompt
                 return await self.cognee.recall(query_text=query_text, **kwargs)
 
     async def forget(

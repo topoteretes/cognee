@@ -30,6 +30,7 @@ class SessionQAEntry(BaseModel):
         feedback_score: Optional feedback score 1-5.
         used_graph_element_ids: Optional dict with only "node_ids" and "edge_ids" (lists of str).
         memify_metadata: Optional dict with memify status keys (e.g. "feedback_weights_applied") and bool values.
+        used_session_context_ids: Optional list of session-context entry ids served to this answer.
     """
 
     time: str
@@ -41,6 +42,7 @@ class SessionQAEntry(BaseModel):
     feedback_score: Optional[int] = None
     used_graph_element_ids: Optional[Dict[str, List[str]]] = None
     memify_metadata: Optional[Dict[str, bool]] = None
+    used_session_context_ids: Optional[List[str]] = None
 
     @field_validator("used_graph_element_ids")
     @classmethod
@@ -60,6 +62,14 @@ class SessionQAEntry(BaseModel):
         if "edge_ids" in v:
             out["edge_ids"] = _validate_list_of_str(v["edge_ids"], "edge_ids")
         return out if out else None
+
+    @field_validator("used_session_context_ids")
+    @classmethod
+    def validate_used_session_context_ids(cls, v: Optional[List[str]]) -> Optional[List[str]]:
+        if v is None:
+            return None
+        validated = _validate_list_of_str(v, "used_session_context_ids")
+        return validated if validated else None
 
     @field_validator("feedback_score")
     @classmethod

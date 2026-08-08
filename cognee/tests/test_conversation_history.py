@@ -144,9 +144,19 @@ async def main():
         f"Default session should return non-empty list, got: {result4!r}"
     )
 
-    history_default = await cache_engine.get_latest_qa(str(user.id), "default_session", last_n=10)
+    # An omitted session_id derives the dataset-scoped default: the search ran
+    # in this dataset's context, so the turn lands in default_session_<dataset_id>.
+    from cognee.modules.data.methods import get_datasets_by_name
+
+    dataset = (await get_datasets_by_name([dataset_name], user.id))[0]
+    derived_default_session = f"default_session_{dataset.id}"
+    history_default = await cache_engine.get_latest_qa(
+        str(user.id), derived_default_session, last_n=10
+    )
     our_qa_default = [h for h in history_default if h.question == "Test default session"]
-    assert len(our_qa_default) == 1, "Should find 'Test default session' in default_session"
+    assert len(our_qa_default) == 1, (
+        f"Should find 'Test default session' in {derived_default_session}"
+    )
 
     session_id_rag = "test_session_rag"
 
@@ -341,9 +351,9 @@ async def main():
         f"Number of DocumentChunk ndoes in the graph is incorrect, found {type_counts.get('DocumentChunk', 0)} but there should be exactly 4 (2 original documents, 2 sessions)."
     )
 
-    from cognee.infrastructure.databases.vector.get_vector_engine import get_vector_engine
+    from cognee.infrastructure.databases.vector.get_vector_engine import get_vector_engine_async
 
-    vector_engine = get_vector_engine()
+    vector_engine = await get_vector_engine_async()
     collection_size = await vector_engine.search(
         collection_name="DocumentChunk_text",
         query_text="test",
@@ -422,15 +432,12 @@ async def main():
     )
     entry_autofeedback = entries_autofeedback[0]
     assert entry_autofeedback.question == "What is TechCorp?", (
-        "Single entry must be the first question (feedback was attached to it, not stored as new QA)"
+        "Single entry must be the first question; feedback-only text was not stored as new QA"
     )
-    assert getattr(entry_autofeedback, "feedback_text", None) and getattr(
-        entry_autofeedback, "feedback_score", None
-    ), "Automatic feedback must be stored on the previous QA (feedback_text or feedback_score set)"
+    assert getattr(entry_autofeedback, "feedback_text", None) is None
+    assert getattr(entry_autofeedback, "feedback_score", None) is None
     logger.info(
-        "Automatic feedback detection e2e passed: feedback_text=%s, feedback_score=%s",
-        getattr(entry_autofeedback, "feedback_text", None),
-        getattr(entry_autofeedback, "feedback_score", None),
+        "Automatic feedback detection e2e passed without auto-populating QA feedback fields",
     )
     ###### END E2E: Automatic feedback detection #####
 
