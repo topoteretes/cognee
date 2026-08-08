@@ -33,6 +33,7 @@ from cognee.api.v1.responses.routers import get_responses_router
 from cognee.api.v1.llm.routers import get_llm_router
 from cognee.api.v1.sync.routers import get_sync_router
 from cognee.api.v1.health.routers import get_health_router
+from cognee.api.v1.validate.routers import get_validate_router
 from cognee.api.v1.update.routers import get_update_router
 from cognee.api.v1.users.routers import (
     get_auth_router,
@@ -258,6 +259,8 @@ app.include_router(
 )
 
 app.include_router(get_delete_router(), prefix="/api/v1/delete", tags=["delete"])
+
+app.include_router(get_validate_router(), prefix="/api/v1/validate", tags=["validate"])
 
 app.include_router(get_update_router(), prefix="/api/v1/update", tags=["update"])
 
