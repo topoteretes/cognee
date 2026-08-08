@@ -367,6 +367,9 @@ jobs:
         uses: ./.github/actions/cognee_setup
         with:
           python-version: '3.11.x'
+          # codegraph (in the default base set) is declared conflicting with
+          # docling-full, so this job installs only what the test needs.
+          base-extras: ''
           extra-dependencies: 'docling-full'
 
       - name: Run Docling Test
@@ -399,6 +402,9 @@ jobs:
         uses: ./.github/actions/cognee_setup
         with:
           python-version: '3.11.x'
+          # The default base set pulls torch through docs -> unstructured[pdf],
+          # which would trip this test's no-torch guard. Sync only the slim extra.
+          base-extras: ''
           extra-dependencies: 'docling'
 
       - name: Run Docling Slim Loader Test
