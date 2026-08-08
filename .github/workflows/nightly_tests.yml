@@ -358,6 +358,35 @@ jobs:
                   text: |
                     <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View run>
 
+      - name: Load performance reports into MotherDuck
+        # Reads the report JSON the perf jobs already uploaded to S3 and loads it
+        # into ci_analytics.nightly (SDK-37). Deliberately placed BEFORE the
+        # failure gate and marked continue-on-error: a warehouse hiccup must not
+        # turn a green nightly red, and the reports from a failed suite are the
+        # interesting rows, so they still need to land.
+        # Skipped on pull_request for the same reason as the Slack post — the
+        # trigger exists to validate this file, not to write to the warehouse.
+        if: ${{ github.event_name != 'pull_request' }}
+        continue-on-error: true
+        env:
+          # duckdb is PINNED: an unpinned install pulled a release MotherDuck
+          # rejects and broke the sibling analytics ETL (COG-5953).
+          DUCKDB_VERSION: '1.4.5'
+          motherduck_token: ${{ secrets.MOTHERDUCK_TOKEN }}
+          MD_TARGET: ci_analytics.nightly
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_S3_DEV_USER_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_S3_DEV_USER_SECRET_KEY }}
+          AWS_DEFAULT_REGION: eu-west-1
+          PERF_BUCKET: github-runner-cognee-tests
+        run: |
+          set -euo pipefail
+          if [ -z "${motherduck_token:-}" ]; then
+            echo "MOTHERDUCK_TOKEN is not set — skipping warehouse load."
+            exit 0
+          fi
+          python -m pip install --quiet "duckdb==${DUCKDB_VERSION}"
+          python .github/scripts/motherduck_nightly_etl.py
+
       - name: Fail if any suite failed
         if: ${{ steps.status.outputs.passed != 'true' }}
         run: |
