@@ -49,7 +49,7 @@ supported_dataset_database_handlers = {
         "handler_instance": PGVectorSharedDatasetDatabaseHandler,
         "handler_provider": "pgvector",
     },
-    "turso_vector": {
+    "turso": {
         "handler_instance": TursoVectorDatasetDatabaseHandler,
         "handler_provider": "turso",
     },
