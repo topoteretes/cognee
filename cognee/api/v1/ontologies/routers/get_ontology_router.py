@@ -7,8 +7,11 @@ from typing import Optional, List
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.shared.utils import send_telemetry
+from cognee.shared.logging_utils import get_logger
 from cognee import __version__ as cognee_version
-from ..ontologies import OntologyService
+from ..ontologies import OntologyService, DuplicateOntologyKeyError
+
+logger = get_logger(__name__)
 
 
 def get_ontology_router() -> APIRouter:
@@ -67,18 +70,23 @@ def get_ontology_router() -> APIRouter:
             },
         )
 
+        # Request-shape validation returns fixed, non-sensitive messages directly
+        # (no exception text reaches the response -> no stack-trace exposure).
+        form = await request.form()
+        uploaded_files = form.getlist("ontology_file")
+        if len(uploaded_files) != 1:
+            logger.warning("Ontology upload rejected: expected exactly one ontology_file")
+            return JSONResponse(
+                status_code=400, content={"error": "Only one ontology_file is allowed"}
+            )
+        if ontology_key.strip().startswith(("[", "{")):
+            logger.warning("Ontology upload rejected: non-string ontology_key")
+            return JSONResponse(status_code=400, content={"error": "ontology_key must be a string"})
+        if description is not None and description.strip().startswith(("[", "{")):
+            logger.warning("Ontology upload rejected: non-string description")
+            return JSONResponse(status_code=400, content={"error": "description must be a string"})
+
         try:
-            # Enforce: exactly one uploaded file for "ontology_file"
-            form = await request.form()
-            uploaded_files = form.getlist("ontology_file")
-            if len(uploaded_files) != 1:
-                raise ValueError("Only one ontology_file is allowed")
-
-            if ontology_key.strip().startswith(("[", "{")):
-                raise ValueError("ontology_key must be a string")
-            if description is not None and description.strip().startswith(("[", "{")):
-                raise ValueError("description must be a string")
-
             result = await ontology_service.upload_ontology(
                 ontology_key=ontology_key,
                 file=ontology_file,
@@ -97,10 +105,15 @@ def get_ontology_router() -> APIRouter:
                     }
                 ]
             }
-        except ValueError as e:
-            return JSONResponse(status_code=400, content={"error": str(e)})
-        except Exception as e:
-            return JSONResponse(status_code=500, content={"error": str(e)})
+        except DuplicateOntologyKeyError:
+            logger.warning("Ontology upload rejected: ontology key already exists")
+            return JSONResponse(status_code=400, content={"error": "Ontology key already exists."})
+        except ValueError as error:
+            logger.warning("Ontology upload request failed: %s", error)
+            return JSONResponse(status_code=400, content={"error": "Invalid ontology request."})
+        except Exception:
+            logger.exception("Ontology upload failed")
+            return JSONResponse(status_code=500, content={"error": "Ontology upload failed."})
 
     @router.delete("/{ontology_key}", response_model=dict)
     async def delete_ontology(
@@ -140,10 +153,15 @@ def get_ontology_router() -> APIRouter:
                 ontology_service.delete_ontology, ontology_key=ontology_key, user=user
             )
             return {"status": "success", "ontology_key": ontology_key}
-        except ValueError as e:
-            return JSONResponse(status_code=400, content={"error": str(e)})
-        except Exception as e:
-            return JSONResponse(status_code=500, content={"error": str(e)})
+        except ValueError as error:
+            logger.warning("Ontology delete request failed: %s", error)
+            return JSONResponse(
+                status_code=400,
+                content={"error": "Ontology key not found or invalid."},
+            )
+        except Exception:
+            logger.exception("Ontology delete failed")
+            return JSONResponse(status_code=500, content={"error": "Ontology delete failed."})
 
     @router.get("", response_model=dict)
     async def list_ontologies(user: User = Depends(get_authenticated_user)):
@@ -169,7 +187,8 @@ def get_ontology_router() -> APIRouter:
             # list_ontologies reads metadata from disk; run it off the event loop.
             metadata = await asyncio.to_thread(ontology_service.list_ontologies, user)
             return metadata
-        except Exception as e:
-            return JSONResponse(status_code=500, content={"error": str(e)})
+        except Exception:
+            logger.exception("Ontology list failed")
+            return JSONResponse(status_code=500, content={"error": "Ontology list failed."})
 
     return router

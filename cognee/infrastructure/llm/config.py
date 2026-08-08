@@ -123,6 +123,9 @@ class LLMConfig(BaseSettings):
     graph_prompt_path: str = "generate_graph_prompt.txt"
     temporal_graph_prompt_path: str = "generate_event_graph_prompt.txt"
     event_entity_prompt_path: str = "generate_event_entity_prompt.txt"
+    image_transcription_prompt_path: str = "transcribe_image_prompt.txt"
+    image_transcription_max_completion_tokens: int = 1024
+    image_transcription_reasoning_effort: str = "low"
     llm_rate_limit_enabled: bool = False
     # Default 60 requests per interval; local inference servers get
     # LOCAL_DEFAULT_RATE_LIMIT_REQUESTS instead (see default_local_rate_limit_budget).
