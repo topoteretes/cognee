@@ -57,19 +57,11 @@ class GraphCompletionRetriever(BaseRetriever):
         response_model: Type = str,
         neighborhood_depth: Optional[int] = None,
         neighborhood_seed_top_k: Optional[int] = 10,
-        wide_search_max_distance: Optional[float] = 1.5,
         include_global_context_index: bool = False,
         global_context_index_top_k: int = 3,
         include_references: bool = False,
     ):
-        """Initialize retriever with prompt paths and search parameters.
-
-        Args:
-            wide_search_max_distance: Maximum cosine distance threshold for filtering
-                vector search results (cosine distance range: 0-2). Results with distance
-                above this threshold are excluded from the graph projection. Set to None
-                to disable distance-based filtering. Defaults to 1.5.
-        """
+        """Initialize retriever with prompt paths and search parameters."""
         self.user_prompt_path = user_prompt_path
         self.system_prompt_path = system_prompt_path
         self.system_prompt = system_prompt
@@ -86,7 +78,6 @@ class GraphCompletionRetriever(BaseRetriever):
         self.response_model = response_model
         self.neighborhood_depth = neighborhood_depth
         self.neighborhood_seed_top_k = neighborhood_seed_top_k
-        self.wide_search_max_distance = wide_search_max_distance
         self.include_global_context_index = include_global_context_index
         self.global_context_index_top_k = global_context_index_top_k
         self.include_references = include_references
@@ -198,7 +189,6 @@ class GraphCompletionRetriever(BaseRetriever):
             unified_engine=unified_engine,
             neighborhood_depth=self.neighborhood_depth,
             neighborhood_seed_top_k=self.neighborhood_seed_top_k,
-            wide_search_max_distance=self.wide_search_max_distance,
         )
 
     async def get_triplets_batch(
