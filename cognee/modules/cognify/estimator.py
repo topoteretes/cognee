@@ -357,7 +357,15 @@ def _path_candidate(value: str) -> Optional[Path]:
         return None
 
     if not _accept_local_file_path():
-        if value.startswith("/"):
+        # Absolute-path detection mirrors save_data_item_to_storage, including
+        # Windows drive-letter paths (C:\...), which "/"-prefix checking misses.
+        is_windows_absolute_path = (
+            os.name == "nt"
+            and len(value) > 1
+            and value[1] == ":"
+            and Path(os.path.normpath(value)).is_absolute()
+        )
+        if value.startswith("/") or is_windows_absolute_path:
             raise ValueError(f"Local files are not accepted, got {value!r}.")
         return None
 

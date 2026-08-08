@@ -7,9 +7,22 @@ from uuid import UUID
 
 import aiohttp
 
+from cognee.modules.ingestion.data_types.TextData import create_text_data
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("serve.cloud_client")
+
+
+def _text_upload_filename(text: str) -> str:
+    """Content-hash filename for raw-text uploads, via local ingestion's namer.
+
+    Delegates to ``TextData`` — the same source ``save_data_to_file`` uses for
+    nameless text (``text_<md5>.txt``). A fixed placeholder here instead makes
+    every text upload for a tenant collide on one remote object, racing
+    concurrent adds against the server's content-hash read-back
+    (FileContentHashingError 409s).
+    """
+    return create_text_data(text).get_metadata()["name"]
 
 
 class CloudClient:
@@ -26,11 +39,13 @@ class CloudClient:
 
     # Default for ordinary API calls: aiohttp's standard 5-minute total,
     # with connect failures surfacing quickly.
-    DEFAULT_TIMEOUT = aiohttp.ClientTimeout(total=300, sock_connect=30)
+    # 600s: long-running blocking operations (e.g. cognify over a large
+    # dataset) can legitimately take many minutes server-side
+    DEFAULT_TIMEOUT = aiohttp.ClientTimeout(total=600, sock_connect=30)
     # Archive uploads (cognee.push) plus the synchronous server-side import
     # can legitimately exceed any fixed total; per-read inactivity stays
     # bounded instead. Applied per-request, only to archive uploads.
-    UPLOAD_TIMEOUT = aiohttp.ClientTimeout(total=None, sock_connect=30, sock_read=300)
+    UPLOAD_TIMEOUT = aiohttp.ClientTimeout(total=None, sock_connect=30, sock_read=600)
 
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
@@ -63,6 +78,8 @@ class CloudClient:
         form = aiohttp.FormData()
         form.add_field("datasetName", dataset_name)
 
+        if kwargs.get("dataset_id"):
+            form.add_field("datasetId", str(kwargs["dataset_id"]))
         if kwargs.get("session_id"):
             form.add_field("session_id", kwargs["session_id"])
         if kwargs.get("run_in_background"):
@@ -105,7 +122,7 @@ class CloudClient:
             form.add_field(
                 "data",
                 io.BytesIO(data.encode("utf-8")),
-                filename="data.txt",
+                filename=_text_upload_filename(data),
                 content_type="text/plain",
             )
         elif isinstance(data, list):
@@ -114,7 +131,7 @@ class CloudClient:
                     form.add_field(
                         "data",
                         io.BytesIO(item.encode("utf-8")),
-                        filename="data.txt",
+                        filename=_text_upload_filename(item),
                         content_type="text/plain",
                     )
                 elif hasattr(item, "read"):
@@ -244,7 +261,7 @@ class CloudClient:
             form.add_field(
                 "data",
                 io.BytesIO(data.encode("utf-8")),
-                filename="data.txt",
+                filename=_text_upload_filename(data),
                 content_type="text/plain",
             )
         elif isinstance(data, list):
@@ -253,7 +270,7 @@ class CloudClient:
                     form.add_field(
                         "data",
                         io.BytesIO(item.encode("utf-8")),
-                        filename="data.txt",
+                        filename=_text_upload_filename(item),
                         content_type="text/plain",
                     )
                 elif hasattr(item, "read"):

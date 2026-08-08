@@ -8,6 +8,7 @@ import { useFilter } from "@/ui/layout/FilterContext";
 import type { Dataset } from "@/ui/layout/FilterContext";
 import { trackEvent } from "@/modules/analytics";
 import rememberData from "@/modules/ingestion/rememberData";
+import { MAX_FILES_PER_UPLOAD } from "@/modules/ingestion/uploadLimits";
 import createDataset from "@/modules/datasets/createDataset";
 import pollDatasetStatus from "@/modules/datasets/pollDatasetStatus";
 import { datasetStatusQueryKey } from "@/modules/datasets/useDatasetStatuses";
@@ -50,6 +51,16 @@ export function useDatasetUpload(): DatasetUploadState {
 
   async function uploadToDataset(ds: Dataset, files: File[]): Promise<void> {
     if (!cogniInstance) return;
+
+    if (files.length > MAX_FILES_PER_UPLOAD) {
+      notifications.show({
+        title: "Too many files",
+        message: `You selected ${files.length} files. Please upload ${MAX_FILES_PER_UPLOAD} or fewer at a time.`,
+        color: "red",
+      });
+      return;
+    }
+
     setIsUploading(true);
     try {
       const cfg = await loadGraphModelsConfig(cogniInstance);
@@ -66,22 +77,39 @@ export function useDatasetUpload(): DatasetUploadState {
       const ontologyKey = findOntologyForDataset(cfg.ontologyAssignments ?? {}, ds.id);
       if (ontologyKey) rememberOpts.ontologyKey = [ontologyKey];
 
+      // The add itself is done once this call returns — anything that fails after
+      // this point (status polling) must not be reported as an upload failure.
       await rememberData({ id: ds.id }, files, cogniInstance, rememberOpts);
-      trackEvent({
-        pageName: "Dashboard",
-        eventName: "dashboard_files_uploaded",
-        additionalProperties: {
-          dataset_id: ds.id,
-          dataset_name: ds.name,
-          file_count: String(files.length),
-        },
-      });
+    } catch (err) {
+      console.error("Dashboard upload failed:", err);
       notifications.show({
-        title: `Files uploaded to "${ds.name}"`,
-        message: `${files.length} file(s) added. Cognify running.`,
-        color: "blue",
-        autoClose: 5000,
+        title: "Upload failed",
+        message: err instanceof Error ? err.message : String(err),
+        color: "red",
       });
+      setIsUploading(false);
+      return;
+    }
+
+    trackEvent({
+      pageName: "Dashboard",
+      eventName: "dashboard_files_uploaded",
+      additionalProperties: {
+        dataset_id: ds.id,
+        dataset_name: ds.name,
+        file_count: String(files.length),
+      },
+    });
+    notifications.show({
+      title: `Files uploaded to "${ds.name}"`,
+      message: `${files.length} file(s) added. Cognify running.`,
+      color: "blue",
+      autoClose: 5000,
+    });
+
+    try {
+      // Files were already added successfully by this point — this only tracks
+      // knowledge-graph build progress, so its failure is reported separately.
       await pollDatasetStatus(ds.id, cogniInstance, { intervalMs: 5000 });
       // Any open Datasets/Detail/Knowledge Graph page shares this query key —
       // invalidate so they reflect the finished upload immediately instead of
@@ -90,10 +118,12 @@ export function useDatasetUpload(): DatasetUploadState {
       refreshDatasets();
       setShowUploadDoneModal({ datasetName: ds.name, datasetId: ds.id });
     } catch (err) {
-      console.error("Dashboard upload failed:", err);
+      console.error("Dataset processing failed:", err);
+      queryClient.invalidateQueries({ queryKey: datasetStatusQueryKey(tenant?.tenant_id) });
+      refreshDatasets();
       notifications.show({
-        title: "Upload failed",
-        message: err instanceof Error ? err.message : String(err),
+        title: "Knowledge graph build failed",
+        message: `Files were added, but building the knowledge graph failed: ${err instanceof Error ? err.message : String(err)}`,
         color: "red",
       });
     } finally {
