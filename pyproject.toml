@@ -76,10 +76,6 @@ dependencies = [
 [project.optional-dependencies]
 api=[]
 
-distributed = [
-    "modal>=1.0.5,<2.0.0",
-]
-
 scraping = [
     "tavily-python>=0.7.12",
     "beautifulsoup4>=4.13.1",
@@ -230,7 +226,7 @@ exclude = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["cognee", "cognee_db_workers", "distributed", "kuzu"]
+packages = ["cognee", "cognee_db_workers", "kuzu"]
 
 [tool.uv]
 # Note: exclude newer packages that are less than 2 days old
