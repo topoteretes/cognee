@@ -16,7 +16,7 @@ This document summarizes how to work with the cognee repository: how it’s orga
   - `__main__.py`: Entrypoint to route to CLI.
 - `cognee-mcp/`: Model Context Protocol server exposing cognee as MCP tools (SSE/HTTP/stdio). Contains its own README and Dockerfile.
 - `cognee-frontend/`: Next.js UI for local development and demos.
-- `distributed/`: Utilities for distributed execution (Modal, workers, queues).
+- `distributed/deploy/`: One-click deployment templates (Modal, Fly.io, Railway, Render, Daytona).
 - `examples/`: Example scripts demonstrating the public APIs and features (graph, code graph, multimodal, permissions, etc.).
 - `notebooks/`: Jupyter notebooks for demos and tutorials.
 - `alembic/`: Database migrations for relational backends.

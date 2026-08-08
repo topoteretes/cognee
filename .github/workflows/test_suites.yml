@@ -45,7 +45,10 @@ jobs:
       - name: Compute dep hash and image tag
         id: set-image
         run: |
-          DEP_HASH=$(sha256sum pyproject.toml uv.lock | sha256sum | head -c 16)
+          # Dockerfile.ci is part of the key: it decides which extras get baked
+          # into the image, so changing it must produce a new tag (the build is
+          # skipped whenever the tag already exists).
+          DEP_HASH=$(sha256sum pyproject.toml uv.lock Dockerfile.ci | sha256sum | head -c 16)
           IMAGE="ghcr.io/${{ github.repository }}/ci-env:deps-${DEP_HASH}"
           echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
           echo "dep_hash=${DEP_HASH}" >> "$GITHUB_OUTPUT"
@@ -244,18 +247,6 @@ jobs:
     needs: [ build-ci-env ]
     if: ${{ !cancelled() }}
     uses: ./.github/workflows/relational_db_migration_tests.yml
-    with:
-      ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
-    secrets: inherit
-
-  # NOTE: intentionally excluded from the `notify` aggregator below — this is
-  # external infra (Modal + Azure secrets), informational only; it must not gate
-  # merges. (`continue-on-error` is not allowed on a reusable-workflow job.)
-  distributed-tests:
-    name: Distributed Cognee Test
-    needs: [ build-ci-env ]
-    if: ${{ !cancelled() }}
-    uses: ./.github/workflows/distributed_test.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
     secrets: inherit

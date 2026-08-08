@@ -140,9 +140,6 @@ async def test_recall_session_with_dataset_ids_does_not_short_circuit_graph(
     async def dummy_search_trace(**kwargs):
         return []
 
-    async def dummy_fetch_graph_context(**kwargs):
-        return []
-
     monkeypatch.setattr(
         api_recall_mod,
         "set_session_user_context_variable",
@@ -155,7 +152,6 @@ async def test_recall_session_with_dataset_ids_does_not_short_circuit_graph(
     )
     monkeypatch.setattr(api_recall_mod, "_search_session", dummy_search_session)
     monkeypatch.setattr(api_recall_mod, "_search_trace", dummy_search_trace)
-    monkeypatch.setattr(api_recall_mod, "_fetch_graph_context", dummy_fetch_graph_context)
 
     serve_state = importlib.import_module("cognee.api.v1.serve.state")
     search_methods = importlib.import_module("cognee.modules.search.methods.search")
@@ -183,7 +179,10 @@ def test_normalize_scope_accepts_session_context():
     from cognee.memory.entries import normalize_scope
 
     assert normalize_scope("session_context") == ["session_context"]
+    assert normalize_scope("graph_context") == ["graph"]
+    assert normalize_scope(["graph_context", "session_context"]) == ["graph", "session_context"]
     assert "session_context" in normalize_scope("all")
+    assert "graph_context" not in normalize_scope("all")
 
 
 @pytest.mark.asyncio
@@ -244,6 +243,109 @@ async def test_recall_remote_client_forwards_context_profile(monkeypatch, api_re
 
     assert out == []
     assert captured["context_profile"] == "agent"
+
+
+@pytest.mark.asyncio
+async def test_recall_remote_client_receives_resolved_all_scope(monkeypatch, api_recall_mod):
+    user = _make_user()
+    captured = {}
+
+    async def dummy_remote_recall(query_text, query_type, **kwargs):
+        captured["scope"] = kwargs.get("scope")
+        return []
+
+    serve_state = importlib.import_module("cognee.api.v1.serve.state")
+    monkeypatch.setattr(
+        serve_state, "get_remote_client", lambda: types.SimpleNamespace(recall=dummy_remote_recall)
+    )
+
+    out = await api_recall_mod.recall(
+        query_text="q",
+        scope="all",
+        session_id="s",
+        user=user,
+    )
+
+    assert out == []
+    assert captured["scope"] == ["graph", "session", "trace", "session_context"]
+
+
+@pytest.mark.asyncio
+async def test_recall_remote_client_receives_resolved_legacy_graph_context_scope(
+    monkeypatch, api_recall_mod
+):
+    user = _make_user()
+    captured = {}
+
+    async def dummy_remote_recall(query_text, query_type, **kwargs):
+        captured["scope"] = kwargs.get("scope")
+        return []
+
+    serve_state = importlib.import_module("cognee.api.v1.serve.state")
+    monkeypatch.setattr(
+        serve_state, "get_remote_client", lambda: types.SimpleNamespace(recall=dummy_remote_recall)
+    )
+
+    out = await api_recall_mod.recall(
+        query_text="q",
+        scope="graph_context",
+        session_id="s",
+        user=user,
+    )
+
+    assert out == []
+    assert captured["scope"] == ["graph"]
+
+
+@pytest.mark.asyncio
+async def test_recall_remote_client_receives_resolved_legacy_graph_context_scope_list(
+    monkeypatch, api_recall_mod
+):
+    user = _make_user()
+    captured = {}
+
+    async def dummy_remote_recall(query_text, query_type, **kwargs):
+        captured["scope"] = kwargs.get("scope")
+        return []
+
+    serve_state = importlib.import_module("cognee.api.v1.serve.state")
+    monkeypatch.setattr(
+        serve_state, "get_remote_client", lambda: types.SimpleNamespace(recall=dummy_remote_recall)
+    )
+
+    out = await api_recall_mod.recall(
+        query_text="q",
+        scope=["graph_context", "session_context"],
+        session_id="s",
+        user=user,
+    )
+
+    assert out == []
+    assert captured["scope"] == ["graph", "session_context"]
+
+
+@pytest.mark.asyncio
+async def test_recall_remote_client_preserves_default_scope(monkeypatch, api_recall_mod):
+    user = _make_user()
+    captured = {}
+
+    async def dummy_remote_recall(query_text, query_type, **kwargs):
+        captured["scope"] = kwargs.get("scope")
+        return []
+
+    serve_state = importlib.import_module("cognee.api.v1.serve.state")
+    monkeypatch.setattr(
+        serve_state, "get_remote_client", lambda: types.SimpleNamespace(recall=dummy_remote_recall)
+    )
+
+    out = await api_recall_mod.recall(
+        query_text="q",
+        session_id="s",
+        user=user,
+    )
+
+    assert out == []
+    assert captured["scope"] is None
 
 
 class _FakeRecallResponse:

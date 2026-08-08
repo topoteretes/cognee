@@ -63,6 +63,9 @@ jobs:
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          # Notebooks execute with cwd=notebooks/ but ingest data files from
+          # elsewhere in the repo; allow the whole workspace.
+          COGNEE_ALLOWED_LOCAL_FILE_ROOTS: ${{ github.workspace }}
         run: |
           uv run jupyter nbconvert \
           --to notebook \

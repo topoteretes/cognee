@@ -427,7 +427,7 @@ class TestCloudClientTimeout:
 
         timeout = asyncio.run(get_timeout())
         assert isinstance(timeout, aiohttp.ClientTimeout)
-        assert timeout.total == 300
+        assert timeout.total == 600
         assert timeout.sock_connect == 30
 
     def test_upload_timeout_is_unbounded_and_scoped_to_archives(self):
@@ -436,5 +436,5 @@ class TestCloudClientTimeout:
 
         assert CloudClient.UPLOAD_TIMEOUT.total is None
         assert CloudClient.UPLOAD_TIMEOUT.sock_connect == 30
-        assert CloudClient.UPLOAD_TIMEOUT.sock_read == 300
-        assert CloudClient.DEFAULT_TIMEOUT.total == 300
+        assert CloudClient.UPLOAD_TIMEOUT.sock_read == 600
+        assert CloudClient.DEFAULT_TIMEOUT.total == 600
