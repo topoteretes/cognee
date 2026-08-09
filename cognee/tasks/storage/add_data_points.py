@@ -204,15 +204,13 @@ async def add_data_points(
             edges, source_ref_key=fold_source_ref_key, pipeline_run_id=fold_run_arg
         )
     else:
-        await asyncio.gather(
-            graph_engine.add_edges(
-                edges, source_ref_key=fold_source_ref_key, pipeline_run_id=fold_run_arg
-            ),
-            index_graph_edges(
-                edges,
-                vector_engine=vector_engine,
-                graph_engine=graph_engine,
-            ),
+        await graph_engine.add_edges(
+            edges, source_ref_key=fold_source_ref_key, pipeline_run_id=fold_run_arg
+        )
+        await index_graph_edges(
+            edges,
+            vector_engine=vector_engine,
+            graph_engine=graph_engine,
         )
 
     if custom_edges:
@@ -228,17 +226,15 @@ async def add_data_points(
                 pipeline_run_id=fold_run_arg,
             )
         else:
-            await asyncio.gather(
-                graph_engine.add_edges(
-                    custom_edges,
-                    source_ref_key=fold_source_ref_key,
-                    pipeline_run_id=fold_run_arg,
-                ),
-                index_graph_edges(
-                    custom_edges,
-                    vector_engine=vector_engine,
-                    graph_engine=graph_engine,
-                ),
+            await graph_engine.add_edges(
+                custom_edges,
+                source_ref_key=fold_source_ref_key,
+                pipeline_run_id=fold_run_arg,
+            )
+            await index_graph_edges(
+                custom_edges,
+                vector_engine=vector_engine,
+                graph_engine=graph_engine,
             )
 
         edges.extend(custom_edges)
