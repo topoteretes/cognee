@@ -453,6 +453,9 @@ class RememberResult:
         self.session_ids: Optional[List[str]] = session_ids
         self.pipeline_run_id = pipeline_run_id
         self.error: Optional[str] = None
+        # Set when the optional self-improvement pass fails; remember() itself
+        # stays completed — improvement is enrichment, not part of storage.
+        self.improve_error: Optional[str] = None
         self.raw_result: Optional[dict] = None
         self.elapsed_seconds: Optional[float] = None
         self.content_hash: Optional[str] = None
@@ -493,6 +496,8 @@ class RememberResult:
             parts.append(f"elapsed={self.elapsed_seconds:.1f}s")
         if self.error:
             parts.append(f"error={self.error!r}")
+        if self.improve_error:
+            parts.append(f"improve_error={self.improve_error!r}")
         return f"RememberResult({', '.join(parts)})"
 
     def __str__(self):
@@ -520,6 +525,8 @@ class RememberResult:
             d["entry_id"] = self.entry_id
         if self.error:
             d["error"] = self.error
+        if self.improve_error:
+            d["improve_error"] = self.improve_error
         return d
 
     def __bool__(self):
@@ -1234,6 +1241,7 @@ async def _remember_inner(
                     )
                     logger.info("remember: session '%s' bridged to permanent graph", session_id)
                 except Exception as exc:
+                    result.improve_error = str(exc)
                     logger.warning("remember: session improve failed (non-fatal): %s", exc)
 
             result._task = asyncio.create_task(_session_improve())
@@ -1278,7 +1286,13 @@ async def _remember_inner(
             improve_kwargs = {"dataset": dataset_id or dataset_name, "user": user}
             if session_ids:
                 improve_kwargs["session_ids"] = session_ids
-            await improve(**improve_kwargs)
+            try:
+                await improve(**improve_kwargs)
+            except Exception as exc:
+                # Storage + cognify already completed; a failed improvement pass
+                # must not flip the remember() result to errored.
+                result.improve_error = str(exc)
+                logger.warning("remember: self-improvement failed (non-fatal): %s", exc)
 
     if run_in_background:
         # Background runs must not depend on caller/request-scoped stream lifetimes.

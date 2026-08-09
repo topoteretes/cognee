@@ -35,6 +35,29 @@ class ImproveKwargs(TypedDict, total=False):
     feedback_alpha: float
 
 
+def _stage_record(
+    stage: str,
+    status: str,
+    *,
+    error: Optional[str] = None,
+    reason: Optional[str] = None,
+    count: Optional[int] = None,
+) -> dict:
+    """One per-stage status entry in the structured improve() result."""
+    return {"stage": stage, "status": status, "error": error, "reason": reason, "count": count}
+
+
+def _stage_summary(stage_records: List[dict]) -> str:
+    """Compact ``name`` / ``name:status`` form for the tracing span attribute."""
+    parts = []
+    for record in stage_records:
+        if record["status"] == "ok":
+            parts.append(record["stage"])
+        else:
+            parts.append(f"{record['stage']}:{record['status']}")
+    return ",".join(parts)
+
+
 async def improve(
     dataset: Union[str, UUID] = "main_dataset",
     *,
@@ -92,7 +115,21 @@ async def improve(
         **kwargs: Additional options -- see ``ImproveKwargs``.
 
     Returns:
-        Pipeline run info (same as ``cognee.memify()``).
+        A structured result dict::
+
+            {
+                "status": "completed" | "skipped",
+                "reason": None | "lock_held",
+                "stages": [
+                    {"stage": ..., "status": "ok"|"failed"|"skipped",
+                     "error": ..., "reason": ..., "count": ...},
+                    ...
+                ],
+                "run_info": <cognee.memify() pipeline run info> | None,
+            }
+
+        ``run_info`` carries the legacy return value (the memify pipeline run
+        info) so existing consumers keep access to it.
 
     Example::
 
@@ -105,7 +142,7 @@ async def improve(
     from cognee.shared.utils import send_telemetry
     from cognee import __version__ as cognee_version
 
-    stages_run = []
+    stage_records: List[dict] = []
 
     send_telemetry(
         "cognee.improve",
@@ -169,51 +206,59 @@ async def improve(
                     "improve: session '%s' already being improved, skipping",
                     sole_session,
                 )
-                return {}
+                return {
+                    "status": "skipped",
+                    "reason": "lock_held",
+                    "stages": [],
+                    "run_info": None,
+                }
             acquired_lock_for = sole_session
 
         try:
             # Stage 1 & 2: bridge sessions into the permanent graph
             if session_ids:
-                bridge_stages = await _bridge_sessions(
-                    dataset=write_dataset_ref,
-                    session_ids=session_ids,
-                    user=user,
-                    feedback_alpha=feedback_alpha,
-                    run_in_background=run_in_background,
+                stage_records.extend(
+                    await _bridge_sessions(
+                        dataset=write_dataset_ref,
+                        session_ids=session_ids,
+                        user=user,
+                        feedback_alpha=feedback_alpha,
+                        run_in_background=run_in_background,
+                    )
                 )
-                stages_run.extend(bridge_stages)
 
                 # Stage 2b: persist agent trace steps (tool calls with
                 # per-step feedback) into the graph. Without this, the
                 # plugin's trace activity never reaches permanent
                 # memory — only QA entries do.
-                await _persist_session_traces(
-                    dataset=write_dataset_ref,
-                    session_ids=session_ids,
-                    user=user,
-                    run_in_background=run_in_background,
+                stage_records.append(
+                    await _persist_session_traces(
+                        dataset=write_dataset_ref,
+                        session_ids=session_ids,
+                        user=user,
+                        run_in_background=run_in_background,
+                    )
                 )
-                stages_run.append("persist_trace_steps")
 
                 # Stage 2b2: distill each session's agent traces into agent-profile
                 # session-context lessons (the LLM batch pass) before distillation, so
                 # those lessons are available as gated guidance for stage 2c.
-                if await _extract_agent_context(session_ids=session_ids, user=user):
-                    stages_run.append("extract_agent_context")
+                stage_records.append(
+                    await _extract_agent_context(session_ids=session_ids, user=user)
+                )
 
                 # Stage 2c: distill each session's gated guidance into curated,
                 # entity-anchored lessons and add+cognify them into the graph.
                 # This is what lets remember(session, self_improvement=True)
                 # cover session distillation without an explicit
                 # cognee.session.distill_session call.
-                distilled = await _distill_sessions(
-                    dataset=dataset,
-                    session_ids=session_ids,
-                    user=user,
+                stage_records.append(
+                    await _distill_sessions(
+                        dataset=dataset,
+                        session_ids=session_ids,
+                        user=user,
+                    )
                 )
-                if distilled:
-                    stages_run.append("distill_sessions")
 
                 # Stage 2d: build the truth subspace from distilled session
                 # learnings (opt-in, default OFF). Runs after distillation so
@@ -231,9 +276,26 @@ async def improve(
                             user=user,
                         )
                         logger.info("improve: truth subspace built -> %s", result_ts)
-                        stages_run.append("build_truth_subspace")
+                        skipped_reason = (result_ts or {}).get("skipped")
+                        if skipped_reason:
+                            stage_records.append(
+                                _stage_record(
+                                    "build_truth_subspace", "skipped", reason=skipped_reason
+                                )
+                            )
+                        else:
+                            stage_records.append(
+                                _stage_record(
+                                    "build_truth_subspace",
+                                    "ok",
+                                    count=(result_ts or {}).get("nodes_scored"),
+                                )
+                            )
                     except Exception as e:
                         logger.warning("improve: truth subspace build failed (non-fatal): %s", e)
+                        stage_records.append(
+                            _stage_record("build_truth_subspace", "failed", error=str(e))
+                        )
 
             # Stage 3: default enrichment (triplet embeddings)
             from cognee.modules.memify import memify
@@ -258,7 +320,7 @@ async def improve(
                 run_in_background=run_in_background,
                 **kwargs,
             )
-            stages_run.append("memify_enrichment")
+            stage_records.append(_stage_record("memify_enrichment", "ok"))
 
             if build_global_context_index:
                 if run_in_background:
@@ -266,17 +328,22 @@ async def improve(
                         "improve: global context index skipped in background mode "
                         "because ordered background pipeline chaining is not supported"
                     )
-                else:
-                    global_context_index_updated = await _build_global_context_index(
-                        dataset=dataset,
-                        user=user,
+                    stage_records.append(
+                        _stage_record("global_context_index", "skipped", reason="background_mode")
                     )
-                    if global_context_index_updated:
-                        stages_run.append("global_context_index")
+                else:
+                    stage_records.append(
+                        await _build_global_context_index(dataset=dataset, user=user)
+                    )
 
-            span.set_attribute(COGNEE_IMPROVE_STAGES, ",".join(stages_run))
+            span.set_attribute(COGNEE_IMPROVE_STAGES, _stage_summary(stage_records))
 
-            return result
+            return {
+                "status": "completed",
+                "reason": None,
+                "stages": stage_records,
+                "run_info": result,
+            }
         finally:
             if acquired_lock_for:
                 from cognee.infrastructure.locks import release_improve_lock
@@ -287,7 +354,7 @@ async def improve(
 async def _build_global_context_index(
     dataset: Union[str, UUID],
     user,
-) -> bool:
+) -> dict:
     from cognee.memify_pipelines.global_context_index import global_context_index_pipeline
 
     try:
@@ -299,10 +366,10 @@ async def _build_global_context_index(
             max_bucket_size=4,
         )
         logger.info("improve: global context index updated")
-        return True
+        return _stage_record("global_context_index", "ok")
     except Exception as e:
         logger.warning("improve: global context index update failed (non-fatal): %s", e)
-        return False
+        return _stage_record("global_context_index", "failed", error=str(e))
 
 
 async def _bridge_sessions(
@@ -311,8 +378,8 @@ async def _bridge_sessions(
     user,
     feedback_alpha: float,
     run_in_background: bool,
-) -> List[str]:
-    """Run feedback weights and session persistence pipelines; return the stages run.
+) -> List[dict]:
+    """Run feedback weights and session persistence pipelines; return their stage records.
 
     Stage 1 (feedback weights): Updates ``feedback_weight`` on graph nodes
     and edges that were *used during retrieval* in session Q&A entries.
@@ -328,7 +395,7 @@ async def _bridge_sessions(
     """
     from cognee.base_config import get_base_config
 
-    stages: List[str] = []
+    stages: List[dict] = []
 
     # Stage 1: apply feedback weights from session retrieval traces
     if get_base_config().default_feedback_influence <= 0:
@@ -336,7 +403,7 @@ async def _bridge_sessions(
             "improve: feedback-weights stage skipped — DEFAULT_FEEDBACK_INFLUENCE is 0, "
             "so no retriever reads feedback weights at query time; set it > 0 to enable"
         )
-        stages.append("feedback_weights_skipped:influence_zero")
+        stages.append(_stage_record("feedback_weights", "skipped", reason="influence_zero"))
     else:
         from cognee.memify_pipelines.apply_feedback_weights import (
             apply_feedback_weights_pipeline,
@@ -351,9 +418,10 @@ async def _bridge_sessions(
                 run_in_background=run_in_background,
             )
             logger.info("improve: feedback weights applied from %d session(s)", len(session_ids))
-            stages.append("feedback_weights")
+            stages.append(_stage_record("feedback_weights", "ok"))
         except Exception as e:
             logger.warning("improve: feedback weights failed (non-fatal): %s", e)
+            stages.append(_stage_record("feedback_weights", "failed", error=str(e)))
 
     # Stage 2: persist session Q&A into permanent graph
     from cognee.memify_pipelines.persist_sessions_in_knowledge_graph import (
@@ -367,21 +435,22 @@ async def _bridge_sessions(
         run_in_background=run_in_background,
     )
     logger.info("improve: session Q&A persisted from %d session(s)", len(session_ids))
-    stages.append("persist_sessions")
+    stages.append(_stage_record("persist_sessions", "ok"))
     return stages
 
 
 async def _extract_agent_context(
     session_ids: List[str],
     user,
-) -> int:
+) -> dict:
     """Flush pending trace windows into agent-profile lessons before distillation.
 
     Delegates to ``agent_context_extraction.extract_pending_agent_context`` per session, which
     shares the same watermark used by mid-session trace extraction. ``min_new_traces=1`` makes
     improve/session-end flush any remaining unprocessed traces before distillation. Gated on
     automatic session context and best-effort/fail-open: an error on one session never blocks the
-    others or the rest of ``improve()``. Returns the number of lessons created/linked.
+    others or the rest of ``improve()``. Returns the stage record with the number of lessons
+    created/linked.
     """
     from cognee.infrastructure.session.agent_context_extraction import (
         extract_pending_agent_context,
@@ -390,10 +459,11 @@ async def _extract_agent_context(
 
     session_manager = get_session_manager()
     if not session_manager.is_available or not session_manager.is_auto_feedback_enabled():
-        return 0
+        return _stage_record("extract_agent_context", "skipped", reason="auto_feedback_disabled")
 
     user_id = str(user.id)
     touched = 0
+    errors = []
     for session_id in session_ids:
         try:
             ids = await extract_pending_agent_context(
@@ -409,14 +479,23 @@ async def _extract_agent_context(
                 session_id,
                 e,
             )
-    return touched
+            errors.append(f"{session_id}: {e}")
+
+    if errors and not touched:
+        return _stage_record("extract_agent_context", "failed", error="; ".join(errors))
+    return _stage_record(
+        "extract_agent_context",
+        "ok",
+        count=touched,
+        error="; ".join(errors) or None,
+    )
 
 
 async def _distill_sessions(
     dataset: Union[str, UUID],
     session_ids: List[str],
     user,
-) -> int:
+) -> dict:
     """Distill each session's gated learnings into curated lessons in the graph.
 
     Delegates to ``session_distillation.distill_session`` per session: it loads
@@ -426,8 +505,8 @@ async def _distill_sessions(
 
     Best-effort and fail-open: a session with no gated guidance simply yields no
     lessons (status ``no_gated_entries``), and an error on one session never
-    blocks the others or the rest of ``improve()``. Returns the total number of
-    lesson documents written across all sessions.
+    blocks the others or the rest of ``improve()``. Returns the stage record with
+    the total number of lesson documents written across all sessions.
 
     Note: ``distill_session`` runs its own ``add``/``cognify`` (it does not call
     ``improve``), so there is no recursion back into this function.
@@ -435,6 +514,7 @@ async def _distill_sessions(
     from cognee.modules.session_distillation import distill_session
 
     distilled = 0
+    errors = []
     for session_id in session_ids:
         try:
             result = await distill_session(session_id, dataset=dataset, user=user)
@@ -451,7 +531,16 @@ async def _distill_sessions(
                 session_id,
                 e,
             )
-    return distilled
+            errors.append(f"{session_id}: {e}")
+
+    if errors and not distilled:
+        return _stage_record("distill_sessions", "failed", error="; ".join(errors))
+    return _stage_record(
+        "distill_sessions",
+        "ok",
+        count=distilled,
+        error="; ".join(errors) or None,
+    )
 
 
 async def _persist_session_traces(
@@ -459,7 +548,7 @@ async def _persist_session_traces(
     session_ids: List[str],
     user,
     run_in_background: bool,
-):
+) -> dict:
     """Cognify per-step agent trace feedbacks into the knowledge graph.
 
     Without this step, the Claude Code plugin's tool-call activity
@@ -489,5 +578,7 @@ async def _persist_session_traces(
             "improve: agent trace steps persisted from %d session(s)",
             len(session_ids),
         )
+        return _stage_record("persist_trace_steps", "ok")
     except Exception as e:
         logger.warning("improve: trace persistence failed (non-fatal): %s", e)
+        return _stage_record("persist_trace_steps", "failed", error=str(e))

@@ -6,7 +6,7 @@ from fastapi import Depends
 from pydantic import Field
 from typing import Dict, List, Optional, Union, Literal
 
-from cognee.api.DTO import InDTO
+from cognee.api.DTO import InDTO, OutDTO
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.shared.utils import send_telemetry
@@ -36,10 +36,29 @@ class ImprovePayloadDTO(InDTO):
     session_ids: Optional[List[str]] = Field(default=None, examples=[[]])
 
 
+class ImproveStageDTO(OutDTO):
+    """Status of one improve() stage."""
+
+    stage: str
+    status: Literal["ok", "failed", "skipped"]
+    error: Optional[str] = None
+    reason: Optional[str] = None
+    count: Optional[int] = None
+
+
+class ImproveResponseDTO(OutDTO):
+    """Structured improve() result: per-stage statuses plus the nested legacy run info."""
+
+    status: Literal["completed", "skipped"]
+    reason: Optional[str] = None
+    stages: List[ImproveStageDTO] = Field(default_factory=list)
+    run_info: Optional[Dict[UUID, PipelineRunInfo]] = None
+
+
 def get_improve_router() -> APIRouter:
     router = APIRouter()
 
-    @router.post("", response_model=Dict[UUID, PipelineRunInfo])
+    @router.post("", response_model=ImproveResponseDTO)
     @log_usage(function_name="POST /v1/improve", log_type="api_endpoint")
     async def improve(payload: ImprovePayloadDTO, user: User = Depends(get_authenticated_user)):
         """
@@ -94,8 +113,15 @@ def get_improve_router() -> APIRouter:
                 run_in_background=payload.run_in_background,
             )
 
-            if isinstance(improve_run, PipelineRunErrored):
-                return JSONResponse(status_code=420, content=improve_run)
+            run_info = improve_run.get("run_info") if isinstance(improve_run, dict) else improve_run
+            errored = isinstance(run_info, PipelineRunErrored) or (
+                isinstance(run_info, dict)
+                and any(isinstance(value, PipelineRunErrored) for value in run_info.values())
+            )
+            if errored:
+                from fastapi.encoders import jsonable_encoder
+
+                return JSONResponse(status_code=420, content=jsonable_encoder(improve_run))
             return improve_run
         except CogneeApiError:
             # Cognee errors carry their own status code and actionable message;

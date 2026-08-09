@@ -86,7 +86,23 @@ tasks on an existing knowledge graph to add context, rules, and connections.
                 fmt.success("Knowledge graph improved successfully!")
 
             if result and isinstance(result, dict):
-                for ds_id, run_info in result.items():
+                if "stages" in result:
+                    # Structured improve() result: per-stage statuses + nested run info.
+                    if result.get("status") == "skipped":
+                        fmt.echo(f"  Skipped: {result.get('reason')}")
+                    for record in result.get("stages") or []:
+                        line = f"  Stage {record.get('stage')}: {record.get('status')}"
+                        if record.get("reason"):
+                            line += f" ({record['reason']})"
+                        if record.get("count") is not None:
+                            line += f" [count={record['count']}]"
+                        if record.get("error"):
+                            line += f" — {record['error']}"
+                        fmt.echo(line)
+                    run_infos = result.get("run_info") or {}
+                else:
+                    run_infos = result
+                for ds_id, run_info in run_infos.items():
                     status = getattr(run_info, "status", str(run_info))
                     fmt.echo(f"  Dataset {ds_id}: {status}")
 

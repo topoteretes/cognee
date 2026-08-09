@@ -86,8 +86,10 @@ async def test_improve_global_context_index_opt_in(monkeypatch, build_global_con
         build_global_context_index=build_global_context_index,
     )
 
-    assert result == {"status": "memify-ok"}
+    assert result["status"] == "completed"
+    assert result["run_info"] == {"status": "memify-ok"}
     memify_mock.assert_awaited_once()
+    stage_names = [record["stage"] for record in result["stages"]]
     if build_global_context_index:
         global_context_mock.assert_awaited_once_with(
             user=user,
@@ -96,8 +98,10 @@ async def test_improve_global_context_index_opt_in(monkeypatch, build_global_con
             bucketing_strategy="graph",
             max_bucket_size=4,
         )
+        assert "global_context_index" in stage_names
     else:
         global_context_mock.assert_not_awaited()
+        assert "global_context_index" not in stage_names
 
 
 @pytest.mark.asyncio
@@ -131,9 +135,13 @@ async def test_improve_skips_global_context_index_in_background(monkeypatch):
         build_global_context_index=True,
     )
 
-    assert result == {"status": "memify-ok"}
+    assert result["status"] == "completed"
+    assert result["run_info"] == {"status": "memify-ok"}
     memify_mock.assert_awaited_once()
     global_context_mock.assert_not_awaited()
+    gci_records = [r for r in result["stages"] if r["stage"] == "global_context_index"]
+    assert gci_records and gci_records[0]["status"] == "skipped"
+    assert gci_records[0]["reason"] == "background_mode"
 
 
 def test_improve_payload_global_context_index_defaults_to_false():

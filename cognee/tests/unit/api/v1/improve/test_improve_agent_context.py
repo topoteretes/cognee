@@ -47,10 +47,11 @@ async def test_runs_extraction_per_session_and_counts_lessons(monkeypatch, impro
     _patch_session_manager(monkeypatch)
     calls = _patch_extractor(monkeypatch, behavior=lambda _sid: ["lesson"])
 
-    total = await improve_mod._extract_agent_context(session_ids=["s1", "s2"], user=_make_user())
+    record = await improve_mod._extract_agent_context(session_ids=["s1", "s2"], user=_make_user())
 
     assert calls == [("s1", 1), ("s2", 1)]
-    assert total == 2
+    assert record["status"] == "ok"
+    assert record["count"] == 2
 
 
 @pytest.mark.asyncio
@@ -58,9 +59,10 @@ async def test_skipped_when_auto_feedback_disabled(monkeypatch, improve_mod):
     _patch_session_manager(monkeypatch, auto_feedback=False)
     calls = _patch_extractor(monkeypatch, behavior=lambda _sid: ["lesson"])
 
-    total = await improve_mod._extract_agent_context(session_ids=["s1"], user=_make_user())
+    record = await improve_mod._extract_agent_context(session_ids=["s1"], user=_make_user())
 
-    assert total == 0
+    assert record["status"] == "skipped"
+    assert record["reason"] == "auto_feedback_disabled"
     assert calls == []
 
 
@@ -75,7 +77,9 @@ async def test_one_failing_session_does_not_block_others(monkeypatch, improve_mo
 
     calls = _patch_extractor(monkeypatch, behavior=behavior)
 
-    total = await improve_mod._extract_agent_context(session_ids=["s1", "s2"], user=_make_user())
+    record = await improve_mod._extract_agent_context(session_ids=["s1", "s2"], user=_make_user())
 
     assert calls == [("s1", 1), ("s2", 1)]  # s2 still processed after s1 raised
-    assert total == 1
+    assert record["status"] == "ok"
+    assert record["count"] == 1
+    assert "s1" in record["error"]
