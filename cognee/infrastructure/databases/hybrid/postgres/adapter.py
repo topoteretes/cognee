@@ -11,7 +11,6 @@ round-trip, and can perform graph+vector writes in a single transaction.
 
 import json
 import re
-from collections import Counter
 from datetime import datetime, timezone
 from collections.abc import AsyncIterable
 from typing import Dict, Any, List, Union, Optional, Tuple, Type, TYPE_CHECKING
@@ -31,8 +30,7 @@ if TYPE_CHECKING:
     from cognee.infrastructure.databases.graph.postgres.adapter import PostgresAdapter
     from cognee.infrastructure.databases.vector.pgvector.PGVectorAdapter import PGVectorAdapter
 from cognee.modules.storage.utils import JSONEncoder
-from cognee.modules.graph.models.EdgeType import EdgeType
-from cognee.modules.graph.utils.prepare_edges_for_storage import get_edge_retrieval_text
+from cognee.modules.graph.utils.edge_index_points import build_edge_index_points
 
 logger = get_logger()
 
@@ -402,12 +400,12 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
     async def add_edges_with_vectors(
         self, edges: List[Tuple[str, str, str, Dict[str, Any]]]
     ) -> None:
-        """Insert edges into graph and their type embeddings into vector
-        tables in a single database transaction.
+        """Atomically insert graph edges with type and instance embeddings.
 
         All graph edge rows are inserted in one batched statement, and
-        edge type vector rows in one batched statement. This keeps the
-        transaction short and avoids deadlocks.
+        each vector collection is upserted in one batched statement. Type
+        payloads carry the graph-wide relationship count while instance rows
+        retain the individual edge prose and stable ``edge_object_id``.
         """
         if not edges:
             return
@@ -415,32 +413,34 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
         await self._graph.initialize()
         now = datetime.now(timezone.utc)
 
-        # Collect edge type counts for EdgeType vector indexing
-        edge_texts = []
-        for edge in edges:
-            props = edge[3] if len(edge) > 3 and edge[3] else {}
-            edge_text = get_edge_retrieval_text(props.get("edge_text"), edge[2])
-            if edge_text:
-                edge_texts.append(edge_text)
+        local_points = build_edge_index_points(edges)
+        type_texts = [point.relationship_name for point in local_points.edge_types]
+        instance_texts = [point.text for point in local_points.edge_instances]
 
-        edge_type_counts = Counter(edge_texts)
+        type_vectors = []
+        if type_texts:
+            batch_size = self._resolve_batch_size(type_texts)
+            for i in range(0, len(type_texts), batch_size):
+                type_vectors.extend(await self._vector.embed_data(type_texts[i : i + batch_size]))
 
-        # Embed unique edge types
-        unique_texts = list(edge_type_counts.keys())
-        if unique_texts:
-            batch_size = self._resolve_batch_size(unique_texts)
-            unique_vectors = []
-            for i in range(0, len(unique_texts), batch_size):
-                unique_vectors.extend(
-                    await self._vector.embed_data(unique_texts[i : i + batch_size])
+        instance_vectors = []
+        if instance_texts:
+            batch_size = self._resolve_batch_size(instance_texts)
+            for i in range(0, len(instance_texts), batch_size):
+                instance_vectors.extend(
+                    await self._vector.embed_data(instance_texts[i : i + batch_size])
                 )
-            text_to_vector = dict(zip(unique_texts, unique_vectors))
-        else:
-            text_to_vector = {}
 
-        # Ensure edge type collection exists
-        collection = "EdgeType_relationship_name"
+        type_vectors_by_relationship = dict(zip(type_texts, type_vectors))
+        instance_vectors_by_id = {
+            str(point.id): vector
+            for point, vector in zip(local_points.edge_instances, instance_vectors)
+        }
+
+        type_collection = "EdgeType_relationship_name"
+        instance_collection = "EdgeInstance_text"
         await self._vector.create_vector_index("EdgeType", "relationship_name")
+        await self._vector.create_vector_index("EdgeInstance", "text")
 
         # Build all rows in Python, then one INSERT per table.
         edge_rows = []
@@ -458,28 +458,10 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
                 }
             )
 
-        vector_rows = []
-        table = _validate_table_name(collection)
-        for edge_text, count in edge_type_counts.items():
-            vector = text_to_vector.get(edge_text)
-            if vector is None:
-                continue
-            edge_type_dp = EdgeType(
-                relationship_name=edge_text,
-                number_of_edges=count,
-            )
-            edge_id = edge_type_dp.id
-            index_point = index_schema_from_data_point(edge_type_dp)
-            payload = json.dumps(serialize_data(index_point.model_dump()))
-            vector_rows.append(
-                {
-                    "id": str(edge_id),
-                    "payload": payload,
-                    "vector": str(vector),
-                }
-            )
+        type_table = _validate_table_name(type_collection)
+        instance_table = _validate_table_name(instance_collection)
 
-        # Single transaction: one batched INSERT per table
+        # Single transaction: graph upsert, graph-wide counts, and both vector tables.
         async with self._graph._session() as session:
             if edge_rows:
                 await session.execute(
@@ -495,16 +477,69 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
                     edge_rows,
                 )
 
-            if vector_rows:
+            relationship_counts = dict.fromkeys(type_texts, 0)
+            if relationship_counts:
+                count_result = await session.execute(
+                    text("""
+                        SELECT relationship_name, COUNT(*)
+                        FROM graph_edge
+                        WHERE relationship_name = ANY(:relationship_names)
+                        GROUP BY relationship_name
+                    """),
+                    {"relationship_names": list(relationship_counts)},
+                )
+                for relationship_name, count in count_result.fetchall():
+                    relationship_counts[relationship_name] = count
+
+            edge_points = build_edge_index_points(edges, relationship_counts=relationship_counts)
+            type_rows = []
+            for point in edge_points.edge_types:
+                vector = type_vectors_by_relationship.get(point.relationship_name)
+                if vector is not None:
+                    index_point = index_schema_from_data_point(point)
+                    type_rows.append(
+                        {
+                            "id": str(point.id),
+                            "payload": json.dumps(serialize_data(index_point.model_dump())),
+                            "vector": str(vector),
+                        }
+                    )
+
+            instance_rows = []
+            for point in edge_points.edge_instances:
+                vector = instance_vectors_by_id.get(str(point.id))
+                if vector is not None:
+                    index_point = index_schema_from_data_point(point)
+                    instance_rows.append(
+                        {
+                            "id": str(point.id),
+                            "payload": json.dumps(serialize_data(index_point.model_dump())),
+                            "vector": str(vector),
+                        }
+                    )
+
+            if type_rows:
                 await session.execute(
                     text(f"""
-                        INSERT INTO {table} (id, payload, vector)
+                        INSERT INTO {type_table} (id, payload, vector)
                         VALUES (:id, CAST(:payload AS json), :vector)
                         ON CONFLICT (id) DO UPDATE SET
                             payload = EXCLUDED.payload,
                             vector = EXCLUDED.vector
                     """),
-                    vector_rows,
+                    type_rows,
+                )
+
+            if instance_rows:
+                await session.execute(
+                    text(f"""
+                        INSERT INTO {instance_table} (id, payload, vector)
+                        VALUES (:id, CAST(:payload AS json), :vector)
+                        ON CONFLICT (id) DO UPDATE SET
+                            payload = EXCLUDED.payload,
+                            vector = EXCLUDED.vector
+                    """),
+                    instance_rows,
                 )
 
             await session.commit()

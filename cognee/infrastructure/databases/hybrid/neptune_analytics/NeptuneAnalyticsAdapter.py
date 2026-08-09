@@ -2,18 +2,16 @@
 
 import asyncio
 import json
-from collections import Counter
 from collections.abc import AsyncIterable
 from typing import List, Optional, Any, Dict, Tuple
 from uuid import UUID
 
-from cognee.modules.graph.models.EdgeType import EdgeType
+from cognee.modules.graph.utils.edge_index_points import build_edge_index_points
 from cognee.infrastructure.databases.exceptions import MissingQueryParameterError
 from cognee.infrastructure.databases.exceptions import MutuallyExclusiveQueryParametersError
 from cognee.infrastructure.databases.graph.neptune_driver.adapter import NeptuneGraphDB
 from cognee.infrastructure.databases.vector.vector_db_interface import VectorDBInterface
 from cognee.infrastructure.engine import DataPoint
-from cognee.modules.graph.utils.prepare_edges_for_storage import get_edge_retrieval_text
 from cognee.modules.storage.utils import JSONEncoder
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
@@ -543,12 +541,11 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
     async def add_edges_with_vectors(
         self, edges: List[Tuple[str, str, str, Dict[str, Any]]]
     ) -> None:
-        """Add edges to the graph and index unique relationship types as vector data points.
+        """Add graph edges, then index relationship types and edge prose.
 
-        Graph edges are inserted via ``add_edges``. Each distinct relationship type
-        (or ``edge_text`` when present in edge properties) is embedded and stored as a
-        COGNEE_NODE in the ``EdgeType_relationship_name`` collection, matching the
-        behaviour of the non-hybrid ``index_graph_edges`` task.
+        The graph write happens first, so each EdgeType payload reflects the current
+        graph-wide count. Individual ``EdgeInstance_text`` points retain the prose
+        and stable edge-object IDs built by the shared edge point helper.
 
         Parameters:
         -----------
@@ -560,24 +557,24 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
 
         await self.add_edges(edges)
 
-        # Collect unique edge texts for embedding.
-        edge_texts = []
-        for edge in edges:
-            props = edge[3] if len(edge) > 3 and edge[3] else {}
-            edge_text = get_edge_retrieval_text(props.get("edge_text"), edge[2])
-            if edge_text:
-                edge_texts.append(edge_text)
+        local_points = build_edge_index_points(edges)
+        relationship_names = [point.relationship_name for point in local_points.edge_types]
+        relationship_counts = await self.get_edge_type_counts(relationship_names)
+        edge_points = build_edge_index_points(edges, relationship_counts=relationship_counts)
 
-        edge_type_counts = Counter(edge_texts)
-        if not edge_type_counts:
-            return
+        if edge_points.edge_types:
+            await self.create_vector_index("EdgeType", "relationship_name")
+            await self.create_data_points(
+                "EdgeType_relationship_name",
+                [index_schema_from_data_point(point) for point in edge_points.edge_types],
+            )
 
-        await self.create_vector_index("EdgeType", "relationship_name")
-        index_schemas = [
-            index_schema_from_data_point(EdgeType(relationship_name=text, number_of_edges=count))
-            for text, count in edge_type_counts.items()
-        ]
-        await self.create_data_points("EdgeType_relationship_name", index_schemas)
+        if edge_points.edge_instances:
+            await self.create_vector_index("EdgeInstance", "text")
+            await self.create_data_points(
+                "EdgeInstance_text",
+                [index_schema_from_data_point(point) for point in edge_points.edge_instances],
+            )
 
     async def run_migrations(self):
         """Run Neptune Analytics adapter migrations (currently no-op)."""

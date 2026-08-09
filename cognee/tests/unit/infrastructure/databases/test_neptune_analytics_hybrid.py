@@ -42,6 +42,7 @@ class _FakeAdapter:
     def __init__(self):
         self.add_nodes = AsyncMock()
         self.add_edges = AsyncMock()
+        self.get_edge_type_counts = AsyncMock(return_value={})
         self.create_vector_index = AsyncMock()
         self.create_data_points = AsyncMock()
 
@@ -131,29 +132,45 @@ async def test_add_edges_with_vectors_empty():
 
 
 @pytest.mark.asyncio
-async def test_add_edges_with_vectors_calls_add_edges_and_creates_edge_type_vectors():
-    """Edges are inserted into graph and one EdgeType schema per unique relationship."""
+async def test_add_edges_with_vectors_indexes_relationship_types_and_edge_prose_separately():
+    """Neptune writes type and instance points after graph persistence."""
     adapter = _FakeAdapter()
-    src, tgt = str(uuid4()), str(uuid4())
+    first_id, second_id = str(uuid4()), str(uuid4())
     edges = [
-        (src, tgt, "knows", {"source_node_id": src, "target_node_id": tgt}),
-        (src, tgt, "knows", {"source_node_id": src, "target_node_id": tgt}),
-        (tgt, src, "likes", {"source_node_id": tgt, "target_node_id": src}),
+        (
+            "a",
+            "b",
+            "depends_on",
+            {"edge_object_id": first_id, "edge_text": "Package A depends on Package B."},
+        ),
+        (
+            "c",
+            "d",
+            "depends_on",
+            {"edge_object_id": second_id, "edge_text": "Service C depends on Service D."},
+        ),
     ]
+    adapter.get_edge_type_counts.return_value = {"depends_on": 7}
 
     await adapter.add_edges_with_vectors(edges)
 
     adapter.add_edges.assert_awaited_once_with(edges)
-    adapter.create_vector_index.assert_awaited_once_with("EdgeType", "relationship_name")
-    adapter.create_data_points.assert_awaited_once()
+    adapter.get_edge_type_counts.assert_awaited_once_with(["depends_on"])
+    assert adapter.create_vector_index.await_args_list[0].args == ("EdgeType", "relationship_name")
+    assert adapter.create_vector_index.await_args_list[1].args == ("EdgeInstance", "text")
+    assert adapter.create_data_points.await_count == 2
 
-    collection_arg = adapter.create_data_points.call_args[0][0]
-    assert collection_arg == "EdgeType_relationship_name"
-
-    schemas = adapter.create_data_points.call_args[0][1]
-    assert len(schemas) == 2
-    texts = {s.text for s in schemas}
-    assert texts == {"knows", "likes"}
+    type_collection, type_schemas = adapter.create_data_points.await_args_list[0].args
+    instance_collection, instance_schemas = adapter.create_data_points.await_args_list[1].args
+    assert type_collection == "EdgeType_relationship_name"
+    assert instance_collection == "EdgeInstance_text"
+    assert [schema.text for schema in type_schemas] == ["depends_on"]
+    assert sorted(schema.text for schema in instance_schemas) == [
+        "Package A depends on Package B.",
+        "Service C depends on Service D.",
+    ]
+    assert type_schemas[0].number_of_edges == 7
+    assert {str(schema.id) for schema in instance_schemas} == {first_id, second_id}
 
 
 @pytest.mark.asyncio
@@ -165,9 +182,10 @@ async def test_add_edges_with_vectors_uses_edge_text_property_when_present():
 
     await adapter.add_edges_with_vectors(edges)
 
-    schemas = adapter.create_data_points.call_args[0][1]
-    assert len(schemas) == 1
-    assert schemas[0].text == "custom text"
+    type_schemas = adapter.create_data_points.await_args_list[0].args[1]
+    instance_schemas = adapter.create_data_points.await_args_list[1].args[1]
+    assert type_schemas[0].text == "rel"
+    assert instance_schemas[0].text == "custom text"
 
 
 @pytest.mark.asyncio
@@ -181,8 +199,8 @@ async def test_add_edges_with_vectors_falls_back_from_blank_edge_text_to_relatio
 
     await adapter.add_edges_with_vectors(edges)
 
-    schemas = adapter.create_data_points.call_args[0][1]
-    assert {schema.text for schema in schemas} == {"blank_rel", "none_rel"}
+    instance_schemas = adapter.create_data_points.await_args_list[1].args[1]
+    assert {schema.text for schema in instance_schemas} == {"blank_rel", "none_rel"}
 
 
 # ---------------------------------------------------------------------------
