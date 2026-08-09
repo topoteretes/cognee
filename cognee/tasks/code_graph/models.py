@@ -6,10 +6,17 @@ from cognee.infrastructure.engine.models.DataPoint import DataPoint
 
 
 class CodeRepository(DataPoint):
-    """The repository an enola snapshot was extracted from."""
+    """The repository an enola snapshot was extracted from.
+
+    last_snapshot_id records the enola snapshot identity of the last fully
+    loaded (and swept) ingestion; extract_code_graph skips re-loading when the
+    current snapshot carries the same id. It is stamped only after a load
+    completes, so a crashed run can never be mistaken for an up-to-date one.
+    """
 
     name: str
     path: str
+    last_snapshot_id: Optional[str] = None
     metadata: dict = {"index_fields": ["name"]}
 
 

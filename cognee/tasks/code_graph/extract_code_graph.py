@@ -1,5 +1,6 @@
 """Map enola snapshot facts to cognee DataPoints and typed graph edges."""
 
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 import posixpath
@@ -15,6 +16,7 @@ from cognee.tasks.code_graph.enola import (
     normalize_relation,
     parse_enola_snapshot,
     run_enola_generate,
+    snapshot_identity,
 )
 from cognee.tasks.code_graph.models import (
     ApiEndpoint,
@@ -45,6 +47,16 @@ KIND_TO_MODEL = {
     "file_ref": CodeFileReference,
     "insight": CodeInsight,
 }
+
+# Ids per delete statement when sweeping stale nodes/edges, mirroring the
+# write-side _WRITE_CHUNK_SIZE convention so no single statement can run past
+# the subprocess engine's per-call deadline.
+_SWEEP_CHUNK_SIZE = 2000
+
+
+def _is_mappable_fact(kind: Any, name: Any) -> bool:
+    """Whether a fact will become a graph node (known kind, non-empty name)."""
+    return isinstance(kind, str) and kind in KIND_TO_MODEL and isinstance(name, str) and name != ""
 
 
 def fact_node_id(repo: str, kind: str, name: str) -> UUID:
@@ -187,11 +199,6 @@ def build_code_graph_edges(
     """
     fallback_repo = _resolve_fallback_repo(facts, repo_path)
 
-    def _is_mappable(kind: Any, name: Any) -> bool:
-        return (
-            isinstance(kind, str) and kind in KIND_TO_MODEL and isinstance(name, str) and name != ""
-        )
-
     valid_facts = []
     name_index: Dict[str, set] = {}
     short_name_index: Dict[str, set] = {}
@@ -201,7 +208,7 @@ def build_code_graph_edges(
     for fact in facts:
         kind = fact.get("kind")
         name = fact.get("name")
-        if not _is_mappable(kind, name):
+        if not _is_mappable_fact(kind, name):
             continue
         repo = _fact_repo(fact, fallback_repo)
         valid_facts.append((fact, repo))
@@ -442,9 +449,80 @@ async def extract_code_graph(
             receipt.get("snapshot_id"),
         )
 
+    snapshot_id = snapshot_identity(snapshot_dir, receipt)
+    if snapshot_id is not None:
+        fallback_repo = _resolve_fallback_repo(facts, repo_path)
+        try:
+            stored_id = await _stored_snapshot_identity(fallback_repo)
+        except Exception as error:
+            # The skip check is an optimization; never let it break ingestion.
+            logger.warning("Could not read the stored snapshot id (%s); loading fully.", error)
+            stored_id = None
+        if stored_id == snapshot_id:
+            logger.info(
+                "Code graph for '%s' already matches snapshot %s; skipping load.",
+                fallback_repo,
+                snapshot_id,
+            )
+            return []
+
     data_points = map_facts_to_data_points(facts, repo_path=repo_path)
     logger.info("Mapped %d enola fact(s) to %d data point(s).", len(facts), len(data_points))
     return data_points
+
+
+async def _stored_snapshot_identity(repo: str) -> Optional[str]:
+    """The snapshot id recorded on the repository node by the last full load.
+
+    The marker lives on the CodeRepository node in the graph itself — not in
+    the relational metastore — because this pipeline persists no Data row to
+    key relational state on (the payload is a repo path), and because a marker
+    stored with the graph can never outlive it: forget(memory_only=True),
+    prune, and even manual deletion of the graph database files all take the
+    marker down with the data it describes.
+    """
+    from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
+
+    graph_engine = await get_graph_engine()
+    node = await graph_engine.get_node(str(fact_node_id(repo, "repository", repo)))
+    if not isinstance(node, dict):
+        return None
+    stored = node.get("last_snapshot_id")
+    if isinstance(stored, str) and stored:
+        return stored
+    properties = node.get("properties")
+    if isinstance(properties, str):
+        try:
+            properties = json.loads(properties)
+        except json.JSONDecodeError:
+            return None
+    if isinstance(properties, dict):
+        stored = properties.get("last_snapshot_id")
+        if isinstance(stored, str) and stored:
+            return stored
+    return None
+
+
+def _snapshot_repos(facts: List[dict], fallback_repo: str) -> set:
+    """Every repo this snapshot covers (multi-repo snapshots have several)."""
+    repos = {fallback_repo}
+    for fact in facts:
+        if _is_mappable_fact(fact.get("kind"), fact.get("name")):
+            repos.add(_fact_repo(fact, fallback_repo))
+    return repos
+
+
+def _current_code_node_ids(facts: List[dict], fallback_repo: str) -> set:
+    """String node ids the snapshot derives: every mappable fact + repository nodes."""
+    ids = set()
+    for fact in facts:
+        kind = fact.get("kind")
+        name = fact.get("name")
+        if _is_mappable_fact(kind, name):
+            ids.add(str(fact_node_id(_fact_repo(fact, fallback_repo), kind, name)))
+    for repo in _snapshot_repos(facts, fallback_repo):
+        ids.add(str(fact_node_id(repo, "repository", repo)))
+    return ids
 
 
 def _pipeline_data_id(ctx: Optional["PipelineContext"] = None) -> Any:
@@ -481,6 +559,10 @@ async def add_code_graph_data_points(
     """
     from cognee.tasks.storage.add_data_points import add_data_points
 
+    if not data_points:
+        # extract_code_graph skipped an unchanged snapshot.
+        return data_points
+
     storage_ctx = ctx if _pipeline_data_id(ctx) is not None else None
     try:
         result = await add_data_points(data_points, ctx=storage_ctx, graph_only=graph_only)
@@ -501,23 +583,30 @@ async def add_code_graph_edges(
 
     Relation names are dynamic, so they cannot be expressed as DataPoint field
     references; instead they are written directly through the graph engine,
-    following the extract_dlt_fk_edges precedent. Passthrough: returns
-    data_points unchanged.
+    following the extract_dlt_fk_edges precedent. Afterwards, stale nodes and
+    edges from earlier ingestions of the same repos are swept, and the
+    snapshot identity is stamped on the repository node so the next unchanged
+    ingestion can skip entirely. Passthrough: returns data_points unchanged.
     """
     from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
+
+    if not data_points:
+        # extract_code_graph skipped an unchanged snapshot; nothing to add,
+        # sweep, or stamp.
+        return data_points
 
     if snapshot_dir is None:
         if repo_path is None:
             raise ValueError("add_code_graph_edges requires repo_path or snapshot_dir.")
         snapshot_dir = Path(repo_path) / ".enola"
 
-    facts, _receipt = parse_enola_snapshot(snapshot_dir)
+    facts, receipt = parse_enola_snapshot(snapshot_dir)
     edges, skipped = build_code_graph_edges(facts, repo_path=repo_path)
     logger.info("Resolved %d code graph edge(s), skipped %d.", len(edges), skipped)
 
     try:
+        graph_engine = await get_graph_engine()
         if edges:
-            graph_engine = await get_graph_engine()
             await graph_engine.add_edges(edges)
 
             # Register the edges in the relational rollback ledger (when a pipeline
@@ -542,10 +631,117 @@ async def add_code_graph_edges(
                     data_id=data_id,
                     pipeline_run_id=ctx.pipeline_run_id,
                 )
+
+        # Insert-then-sweep: with the current snapshot fully merged, remove
+        # what previous ingestions derived that this snapshot no longer does.
+        # Runs even with zero edges — a shrunken repo still needs its sweep.
+        await _sweep_stale_code_graph(graph_engine, facts, edges, repo_path)
+
+        # Stamp last: only a load that added, swept, and got here may record
+        # its snapshot id, so a crashed run can never be skipped-past later.
+        await _stamp_snapshot_identity(
+            graph_engine, facts, repo_path, snapshot_identity(snapshot_dir, receipt)
+        )
     finally:
-        # Direct edge writes and rollback-ledger writes may partially succeed.
+        # Direct edge writes, sweeps, and ledger writes may partially succeed.
         _invalidate_code_graph_snapshot(ctx)
     return data_points
+
+
+async def _sweep_stale_code_graph(
+    graph_engine,
+    facts: List[dict],
+    current_edges: List[tuple],
+    repo_path: Optional[Union[str, Path]] = None,
+) -> None:
+    """Remove code graph nodes/edges no longer derivable from the snapshot.
+
+    Only nodes of code-graph types belonging to repos covered by this snapshot
+    are considered; other datasets' content and other repos in the same graph
+    are untouched. Edges are swept only between surviving code nodes, so edges
+    to non-code nodes (e.g. belongs_to_set -> NodeSet) always survive.
+    """
+    from cognee.infrastructure.databases.provenance.delete_data import EdgeIdentity
+
+    fallback_repo = _resolve_fallback_repo(facts, repo_path)
+    snapshot_repos = _snapshot_repos(facts, fallback_repo)
+    current_ids = _current_code_node_ids(facts, fallback_repo)
+
+    nodes, existing_edges = await graph_engine.get_graph_data()
+
+    code_types = {model.__name__ for model in KIND_TO_MODEL.values()} | {CodeRepository.__name__}
+    stale_node_ids = []
+    for node_id, properties in nodes:
+        node_id = str(node_id)
+        if node_id in current_ids or not isinstance(properties, dict):
+            continue
+        node_type = properties.get("type")
+        if node_type not in code_types:
+            continue
+        # Repository nodes carry their repo in name; entities in the repo field.
+        repo = properties.get("name") if node_type == "CodeRepository" else properties.get("repo")
+        if repo not in snapshot_repos:
+            continue
+        stale_node_ids.append(node_id)
+
+    if stale_node_ids:
+        for start in range(0, len(stale_node_ids), _SWEEP_CHUNK_SIZE):
+            await graph_engine.delete_nodes(stale_node_ids[start : start + _SWEEP_CHUNK_SIZE])
+        logger.info("Swept %d stale code graph node(s).", len(stale_node_ids))
+
+    expected_edge_keys = {
+        (str(source_id), str(target_id), relationship_name)
+        for source_id, target_id, relationship_name, _properties in current_edges
+    }
+    # Structural containment edges written by add_data_points from the
+    # DataPoint part_of field.
+    for fact in facts:
+        kind = fact.get("kind")
+        name = fact.get("name")
+        if not _is_mappable_fact(kind, name):
+            continue
+        repo = _fact_repo(fact, fallback_repo)
+        expected_edge_keys.add(
+            (
+                str(fact_node_id(repo, kind, name)),
+                str(fact_node_id(repo, "repository", repo)),
+                "part_of",
+            )
+        )
+
+    stale_edges = [
+        EdgeIdentity(source_id=str(source), target_id=str(target), relationship_name=relationship)
+        for source, target, relationship, _properties in existing_edges
+        if str(source) in current_ids
+        and str(target) in current_ids
+        and (str(source), str(target), relationship) not in expected_edge_keys
+    ]
+    if stale_edges:
+        for start in range(0, len(stale_edges), _SWEEP_CHUNK_SIZE):
+            await graph_engine.delete_edge_triples(stale_edges[start : start + _SWEEP_CHUNK_SIZE])
+        logger.info("Swept %d stale code graph edge(s).", len(stale_edges))
+
+
+async def _stamp_snapshot_identity(
+    graph_engine,
+    facts: List[dict],
+    repo_path: Optional[Union[str, Path]],
+    snapshot_id: Optional[str],
+) -> None:
+    """Record the loaded snapshot's identity on this snapshot's repository nodes."""
+    if snapshot_id is None:
+        return
+    fallback_repo = _resolve_fallback_repo(facts, repo_path)
+    repositories = [
+        CodeRepository(
+            id=fact_node_id(repo, "repository", repo),
+            name=repo,
+            path=str(repo_path) if repo_path and repo == fallback_repo else repo,
+            last_snapshot_id=snapshot_id,
+        )
+        for repo in sorted(_snapshot_repos(facts, fallback_repo))
+    ]
+    await graph_engine.add_nodes(repositories)
 
 
 def get_code_graph_tasks(

@@ -480,6 +480,7 @@ async def test_add_code_graph_edges_writes_edges_and_passes_data_points_through(
     code_retriever_module = importlib.import_module("cognee.modules.retrieval.code_retriever")
 
     graph_engine = AsyncMock()
+    graph_engine.get_graph_data.return_value = ([], [])
     invalidate_mock = MagicMock()
     monkeypatch.setattr(
         graph_engine_module, "get_graph_engine", AsyncMock(return_value=graph_engine)
@@ -508,6 +509,7 @@ async def test_add_code_graph_edges_registers_edges_in_rollback_ledger(monkeypat
     graph_methods_module = importlib.import_module("cognee.modules.graph.methods")
 
     graph_engine = AsyncMock()
+    graph_engine.get_graph_data.return_value = ([], [])
     monkeypatch.setattr(
         graph_engine_module, "get_graph_engine", AsyncMock(return_value=graph_engine)
     )
@@ -521,7 +523,9 @@ async def test_add_code_graph_edges_registers_edges_in_rollback_ledger(monkeypat
         pipeline_run_id=uuid4(),
     )
 
-    await add_code_graph_edges([], snapshot_dir=FIXTURES_DIR, ctx=ctx)
+    # Empty data_points now signals "extract skipped an unchanged snapshot",
+    # so pass a sentinel to exercise the ledger path.
+    await add_code_graph_edges(["sentinel"], snapshot_dir=FIXTURES_DIR, ctx=ctx)
 
     upsert_edges_mock.assert_awaited_once()
     call = upsert_edges_mock.await_args
@@ -551,6 +555,7 @@ async def test_public_code_graph_pipeline_accepts_repo_path_payload_with_access_
     monkeypatch.setenv("ENABLE_BACKEND_ACCESS_CONTROL", "true")
 
     graph_engine = AsyncMock()
+    graph_engine.get_graph_data.return_value = ([], [])
     vector_engine = MagicMock()
     unified_engine = SimpleNamespace(
         graph=graph_engine,
@@ -619,7 +624,11 @@ async def test_public_code_graph_pipeline_accepts_repo_path_payload_with_access_
 
     assert len(result) == 1
     assert len(result[0]) == 17
-    graph_engine.add_nodes.assert_awaited_once()
+    # One bulk node load, then the incremental-skip stamp on the repository node.
+    assert graph_engine.add_nodes.await_count == 2
+    stamped = graph_engine.add_nodes.await_args_list[-1].args[0]
+    assert [type(node).__name__ for node in stamped] == ["CodeRepository"]
+    assert stamped[0].last_snapshot_id is not None
     assert graph_engine.add_edges.await_count == 2
     add_data_points_module.get_unified_engine.assert_not_awaited()
     add_data_points_module.index_data_points.assert_not_awaited()
