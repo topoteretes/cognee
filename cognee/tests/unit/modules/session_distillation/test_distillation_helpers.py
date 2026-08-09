@@ -257,18 +257,25 @@ class TestRenderLessonDocument:
                 why_learned="Learned while planning the audit trip",
             ),
             session_id="s-1",
-            distilled_on="2026-06-11",
         )
 
-        assert document.startswith("# Session learning — 2026-06-11 (session s-1)")
+        assert document.startswith("# Session learning — (session s-1)")
         assert "RoutePulse predicts delivery delays for European freight." in document
         assert "(Learned while planning the audit trip.)" in document
+
+    def test_document_carries_no_run_date(self):
+        """Same lesson re-accepted on a different day must render identically so
+        ingestion dedups it instead of storing a near-duplicate document."""
+        document = render_lesson_document(
+            WrittenLesson(accept=True, statement="Stable statement."),
+            session_id="s-1",
+        )
+        assert "202" not in document  # no year-like run date anywhere
 
     def test_one_document_holds_exactly_one_lesson(self):
         document = render_lesson_document(
             WrittenLesson(accept=True, statement="Talk to Priya Tan before Mateo Reed."),
             session_id="s-1",
-            distilled_on="2026-06-11",
         )
         assert "## " not in document
         assert document.count("# Session learning") == 1
@@ -277,7 +284,6 @@ class TestRenderLessonDocument:
         document = render_lesson_document(
             WrittenLesson(accept=True, statement="Plain statement."),
             session_id="s-1",
-            distilled_on="2026-06-11",
         )
         assert "Plain statement.\n" in document
         assert "()" not in document

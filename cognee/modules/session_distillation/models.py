@@ -92,6 +92,7 @@ class DistillationResult(BaseModel):
     status: Literal[
         "completed",
         "no_gated_entries",
+        "no_new_entries",
         "no_proposed_lessons",
         "no_accepted_lessons",
     ]

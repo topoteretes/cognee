@@ -58,6 +58,53 @@ WRITER_PROMPT_FILE = "session_distillation_writer_system.txt"
 # scope the novelty search to previously persisted lessons.
 DISTILLATE_NODE_SET = ["session_learnings"]
 
+# Watermark row (same pattern as agent_context_extraction's trace watermark): which
+# gated entry ids a previous run already considered. Keyed per dataset so the same
+# session distilled into two datasets tracks progress independently.
+DISTILLATION_STATE_KIND = "distillation_state"
+
+
+def _distillation_state_id(dataset_id: str) -> str:
+    return f"__distillation_state__:{dataset_id}"
+
+
+async def _load_processed_entry_ids(scope: "SessionDistillationScope") -> set:
+    """Gated entry ids a previous distillation run already considered. Missing -> empty."""
+    session_manager = get_session_manager()
+    raw_entries = await session_manager.get_session_context_entries(
+        user_id=scope.user_id, session_id=scope.session_id
+    )
+    state_id = _distillation_state_id(scope.dataset_id)
+    for raw in raw_entries or []:
+        if isinstance(raw, dict) and raw.get("id") == state_id:
+            values = raw.get("processed_entry_ids")
+            return {value for value in (values or []) if isinstance(value, str)}
+    return set()
+
+
+async def _save_processed_entry_ids(scope: "SessionDistillationScope", entry_ids: set) -> None:
+    """Persist the watermark; advances only after a run completes without raising."""
+    session_manager = get_session_manager()
+    state_id = _distillation_state_id(scope.dataset_id)
+    payload = {
+        "id": state_id,
+        "kind": DISTILLATION_STATE_KIND,
+        "processed_entry_ids": sorted(entry_ids),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    updated = await session_manager.update_session_context_entry(
+        user_id=scope.user_id,
+        session_id=scope.session_id,
+        entry_id=state_id,
+        merge=payload,
+    )
+    if not updated:
+        await session_manager.create_session_context_entry(
+            user_id=scope.user_id,
+            session_id=scope.session_id,
+            entry_dump=payload,
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class SessionDistillationScope:
@@ -209,7 +256,22 @@ async def propose_lessons(
     per_batch = await gather_with_concurrency_limit(curator_calls, CURATOR_CONCURRENCY)
 
     proposed = [lesson for batch_lessons in per_batch for lesson in batch_lessons]
-    return proposed
+    # Batches are curated independently, so one theme restated across the session
+    # comes back as near-identical proposals; dedupe before paying writer calls.
+    return _dedupe_by_statement(proposed, lambda lesson: lesson.working_statement)
+
+
+def _dedupe_by_statement(lessons: list, statement_of) -> list:
+    """Keep the first lesson per normalized statement text."""
+    seen = set()
+    unique = []
+    for lesson in lessons:
+        key = " ".join(str(statement_of(lesson)).casefold().split())
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        unique.append(lesson)
+    return unique
 
 
 async def search_payload_texts(
@@ -346,35 +408,33 @@ async def accept_proposed_lessons(
         for lesson in decisions
         if lesson is not None and lesson.accept and lesson.statement.strip()
     ]
-    return accepted
+    # Writers run per lesson and can converge on the same final statement.
+    return _dedupe_by_statement(accepted, lambda lesson: lesson.statement)
 
 
 def render_lesson_document(
     lesson: WrittenLesson,
     *,
     session_id: str,
-    distilled_on: str,
 ) -> str:
     """Render ONE accepted lesson as a standalone markdown document.
 
     The template — not the LLM — controls the format. One document per lesson, so each
-    learning is an independently identifiable unit in the graph.
+    learning is an independently identifiable unit in the graph. Deliberately no run
+    date in the text: the same lesson re-accepted on a different day must produce an
+    identical document so ingestion dedups it instead of storing a near-duplicate.
     """
     statement = lesson.statement.strip()
     why = lesson.why_learned.strip().rstrip(".")
     body = f"{statement} ({why}.)" if why else statement
-    return f"# Session learning — {distilled_on} (session {session_id})\n\n{body}\n"
+    return f"# Session learning — (session {session_id})\n\n{body}\n"
 
 
 async def publish_distilled_lessons(
     scope: SessionDistillationScope,
     accepted: List[WrittenLesson],
 ) -> List[str]:
-    distilled_on = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    documents = [
-        render_lesson_document(lesson, session_id=scope.session_id, distilled_on=distilled_on)
-        for lesson in accepted
-    ]
+    documents = [render_lesson_document(lesson, session_id=scope.session_id) for lesson in accepted]
 
     # Imported lazily to avoid a circular import through the cognee package root.
     from cognee.api.v1.add import add
@@ -391,20 +451,36 @@ async def distill_session(
     dataset: Union[str, UUID],
     user: Optional[User] = None,
 ) -> DistillationResult:
-    """Distill one finished session's distillable learnings into its dataset's knowledge graph."""
+    """Distill one finished session's distillable learnings into its dataset's knowledge graph.
+
+    A per-(session, dataset) watermark tracks which gated entries earlier runs already
+    considered: re-running improve() on an unchanged session performs zero curator or
+    writer LLM calls. The watermark advances only after a run completes without raising.
+    """
     scope = await resolve_distillation_scope(session_id=session_id, dataset=dataset, user=user)
 
     qa_rows, context_entries = await load_distillable_session_inputs(scope)
     if not context_entries:
         return scope.result("no_gated_entries")
 
+    processed_entry_ids = await _load_processed_entry_ids(scope)
+    gated_entry_ids = {entry.id for entry in context_entries}
+    if not (gated_entry_ids - processed_entry_ids):
+        return scope.result("no_new_entries")
+
+    async def finish(status: str, documents: Optional[List[str]] = None) -> DistillationResult:
+        # Every gated entry was considered this run (curation sees the full timeline
+        # for context), so the watermark covers them all.
+        await _save_processed_entry_ids(scope, processed_entry_ids | gated_entry_ids)
+        return scope.result(status, documents=documents)
+
     proposed = await propose_lessons(qa_rows, context_entries)
     if not proposed:
-        return scope.result("no_proposed_lessons")
+        return await finish("no_proposed_lessons")
 
     accepted = await accept_proposed_lessons(scope, proposed, context_entries)
     if not accepted:
-        return scope.result("no_accepted_lessons")
+        return await finish("no_accepted_lessons")
 
     documents = await publish_distilled_lessons(scope, accepted)
-    return scope.result("completed", documents=documents)
+    return await finish("completed", documents=documents)
