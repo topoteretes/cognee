@@ -321,14 +321,24 @@ class Neo4jAdapter(GraphDBInterface):
         # write back the union so a DataPoint cognified into multiple datasets
         # retains every dataset tag on its node property (edges are already
         # additive; this keeps the property consistent with them).
+        # Learned per-node signals (feedback_weight, truth_alignment/epoch) are
+        # owned by the graph store, not the incoming document: capture them
+        # before `+=` and write them back so a re-cognify of the same document
+        # cannot reset what feedback/truth builds learned since ingestion.
         query = dedent(
             f"""MERGE (node: `{BASE_LABEL}`{{id: $node_id}})
                 WITH node, apoc.coll.toSet(
                     coalesce(node.belongs_to_set, [])
                     + coalesce($properties.belongs_to_set, [])
-                ) AS merged_belongs_to_set
+                ) AS merged_belongs_to_set,
+                node.feedback_weight AS learned_feedback_weight,
+                node.truth_alignment AS learned_truth_alignment,
+                node.truth_epoch AS learned_truth_epoch
                 SET node += $properties, node.updated_at = timestamp()
                 SET node.belongs_to_set = merged_belongs_to_set
+                SET node.feedback_weight = coalesce(learned_feedback_weight, node.feedback_weight),
+                    node.truth_alignment = coalesce(learned_truth_alignment, node.truth_alignment),
+                    node.truth_epoch = coalesce(learned_truth_epoch, node.truth_epoch)
                 WITH node, $node_label AS label
                 CALL apoc.create.addLabels(node, [label]) YIELD node AS labeledNode
                 RETURN ID(labeledNode) AS internal_id, labeledNode.id AS nodeId"""
@@ -376,15 +386,24 @@ class Neo4jAdapter(GraphDBInterface):
             fold_clause = _provenance_fold_clause("n")
             provenance_params = _provenance_fold_params(source_ref_key, pipeline_run_id)
 
+        # As in add_node: learned per-node signals (feedback_weight,
+        # truth_alignment/epoch) are captured before `+=` and written back so
+        # re-cognify cannot reset them to the incoming defaults.
         query = f"""
         UNWIND $nodes AS node
         MERGE (n: `{BASE_LABEL}`{{id: node.node_id}})
         WITH n, node, apoc.coll.toSet(
             coalesce(n.belongs_to_set, [])
             + coalesce(node.properties.belongs_to_set, [])
-        ) AS merged_belongs_to_set
+        ) AS merged_belongs_to_set,
+        n.feedback_weight AS learned_feedback_weight,
+        n.truth_alignment AS learned_truth_alignment,
+        n.truth_epoch AS learned_truth_epoch
         SET n += node.properties, n.updated_at = timestamp()
         SET n.belongs_to_set = merged_belongs_to_set
+        SET n.feedback_weight = coalesce(learned_feedback_weight, n.feedback_weight),
+            n.truth_alignment = coalesce(learned_truth_alignment, n.truth_alignment),
+            n.truth_epoch = coalesce(learned_truth_epoch, n.truth_epoch)
         {fold_clause}
         WITH n, node.label AS label
         CALL apoc.create.addLabels(n, [label]) YIELD node AS labeledNode

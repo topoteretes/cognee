@@ -18,6 +18,9 @@ def _adapter_with_mocked_writes():
     adapter = object.__new__(LadybugAdapter)
     adapter.query = AsyncMock(return_value=[])
     adapter.checkpoint = AsyncMock()
+    # add_nodes pre-reads learned state (feedback/truth fields) via get_nodes;
+    # stub it so query-call counting below sees only the write statements.
+    adapter.get_nodes = AsyncMock(return_value=[])
     return adapter
 
 

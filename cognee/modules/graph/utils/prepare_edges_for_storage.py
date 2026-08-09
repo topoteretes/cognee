@@ -114,8 +114,9 @@ def ensure_default_edge_properties(
             props["edge_object_id"] = generate_edge_object_id(
                 source_id, target_id, relationship_name
             )
-        if "feedback_weight" not in props:
-            props["feedback_weight"] = 0.5
+        # No feedback_weight default here: consumers already fall back to 0.5 at
+        # read time, and injecting it on every prepare made re-cognify overwrite
+        # learned weights on existing edges.
 
         edge_text = get_edge_retrieval_text(props.get("edge_text"), None)
         if not edge_text:

@@ -1125,6 +1125,14 @@ class LadybugAdapter(GraphDBInterface):
         try:
             now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
 
+            # Learned per-node signals are owned by the graph store, not the
+            # incoming document: ON MATCH replaces the whole JSON blob, so carry
+            # them over or a re-cognify resets feedback/truth state to defaults.
+            incoming_ids = [
+                str(getattr(node, "id", "") or "") for node in nodes if getattr(node, "id", None)
+            ]
+            learned_by_id = await self._load_learned_node_state(incoming_ids)
+
             # Prepare all nodes data
             node_params = []
             for node in nodes:
@@ -1143,6 +1151,8 @@ class LadybugAdapter(GraphDBInterface):
                 # Provenance lives in declared STRING columns, never the JSON blob.
                 for key in PROVENANCE_COLUMNS:
                     properties.pop(key, None)
+
+                properties.update(learned_by_id.get(core_properties["id"], {}))
 
                 node_params.append(
                     {
@@ -1917,12 +1927,32 @@ class LadybugAdapter(GraphDBInterface):
         try:
             now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
 
+            # ON MATCH replaces the whole edge JSON blob; carry learned feedback
+            # weights over so re-cognify cannot reset them (same policy as nodes).
+            incoming_edge_ids = {
+                properties.get("edge_object_id")
+                for _from, _to, _rel, properties in edges
+                if isinstance(properties, dict) and properties.get("edge_object_id")
+            }
+            learned_by_edge_id = await self._load_learned_edge_state(incoming_edge_ids)
+
             edge_params = [
                 {
                     "from_id": from_node,
                     "to_id": to_node,
                     "relationship_name": relationship_name,
-                    "properties": json.dumps(properties, cls=JSONEncoder),
+                    "properties": json.dumps(
+                        {
+                            **properties,
+                            **learned_by_edge_id.get(
+                                properties.get("edge_object_id")
+                                if isinstance(properties, dict)
+                                else None,
+                                {},
+                            ),
+                        },
+                        cls=JSONEncoder,
+                    ),
                     "created_at": now,
                     "updated_at": now,
                 }
@@ -2304,6 +2334,55 @@ class LadybugAdapter(GraphDBInterface):
         result = await self.query(query, {"items": edge_updates, "updated_at": now})
         rows_dicts = self._rows_to_dicts(result, ["edge_object_id"])
         return {str(r["edge_object_id"]) for r in rows_dicts if r.get("edge_object_id") is not None}
+
+    # Fields learned after ingestion (feedback loop, truth-subspace builds). The
+    # graph store — not the incoming document — is their source of truth, so node
+    # and edge upserts carry them over instead of resetting them to model defaults.
+    _LEARNED_NODE_FIELDS = ("feedback_weight", "truth_alignment", "truth_epoch")
+
+    async def _load_learned_node_state(self, node_ids: List[str]) -> Dict[str, Dict[str, Any]]:
+        """Existing learned fields per node id, for preservation across upserts."""
+        valid_ids = [node_id for node_id in node_ids if isinstance(node_id, str) and node_id]
+        if not valid_ids:
+            return {}
+        existing_nodes = await self.get_nodes(valid_ids)
+        learned: Dict[str, Dict[str, Any]] = {}
+        for node in existing_nodes:
+            node_id = node.get("id")
+            if not isinstance(node_id, str):
+                continue
+            fields = {
+                field: node[field]
+                for field in self._LEARNED_NODE_FIELDS
+                if node.get(field) is not None
+            }
+            if fields:
+                learned[node_id] = fields
+        return learned
+
+    async def _load_learned_edge_state(self, edge_object_ids) -> Dict[str, Dict[str, Any]]:
+        """Existing learned edge fields keyed by edge_object_id (only when present)."""
+        requested_ids = {eid for eid in edge_object_ids or [] if isinstance(eid, str) and eid}
+        if not requested_ids:
+            return {}
+        edge_rows = await self._fetch_edge_rows_by_object_ids(requested_ids)
+        learned: Dict[str, Dict[str, Any]] = {}
+        for row in edge_rows:
+            properties_raw = row.get("properties")
+            if not properties_raw:
+                continue
+            try:
+                properties = json.loads(properties_raw)
+            except (TypeError, json.JSONDecodeError):
+                continue
+            edge_object_id = self._resolve_edge_object_id(
+                properties, row.get("edge_object_id_json")
+            )
+            if not edge_object_id or edge_object_id not in requested_ids:
+                continue
+            if properties.get("feedback_weight") is not None:
+                learned[edge_object_id] = {"feedback_weight": properties["feedback_weight"]}
+        return learned
 
     async def get_node_feedback_weights(self, node_ids: List[str]) -> Dict[str, float]:
         if not node_ids:
