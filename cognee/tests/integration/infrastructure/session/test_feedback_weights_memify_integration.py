@@ -170,7 +170,11 @@ async def test_feedback_weights_first_run_then_idempotent(session_manager_with_b
 
 
 @pytest.mark.asyncio
-async def test_feedback_weights_mixed_success_keeps_false(session_manager_with_backend):
+async def test_feedback_weights_missing_edge_pruned_and_never_rescanned(
+    session_manager_with_backend,
+):
+    """A deleted element is pruned; the QA completes and is never re-fetched, so
+    re-running improve() cannot re-apply (compound) the same feedback step."""
     sm = session_manager_with_backend
     user = _make_user()
 
@@ -202,9 +206,103 @@ async def test_feedback_weights_mixed_success_keeps_false(session_manager_with_b
 
         result = await apply_feedback_weights(items, alpha=0.1)
 
+        rescan = []
+        async for item in extract_feedback_qas([{}], session_ids=["s1"]):
+            rescan.append(item)
+
     assert len(items) == 1
     assert result["processed"] == 1
-    assert result["applied"] == 0
+    assert result["applied"] == 1
+    assert graph.node_weights["n1"] == pytest.approx(0.55)
+    assert rescan == []
 
     entries = await sm.get_session(user_id="u1", session_id="s1", formatted=False)
-    assert entries[0].memify_metadata[MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY] is False
+    assert entries[0].memify_metadata[MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY] is True
+
+
+@pytest.mark.asyncio
+async def test_feedback_closes_the_loop_into_triplet_ranking(session_manager_with_backend):
+    """Closed loop: a rated session QA moves graph feedback weights, and with
+    feedback_influence > 0 those weights re-rank brute-force triplet search's
+    scoring (CogneeGraph.calculate_top_triplet_importances). Deleting the
+    feedback blend in CogneeGraph._effective_distance fails this test."""
+    from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
+    from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge, Node
+
+    sm = session_manager_with_backend
+    user = _make_user()
+
+    # The user rates an answer 5 that used n1/e1, and 1 for an answer that used n3/e2.
+    await sm.add_qa(
+        user_id="u1",
+        question="good",
+        context="C",
+        answer="A",
+        session_id="s1",
+        feedback_score=5,
+        used_graph_element_ids={"node_ids": ["n1"], "edge_ids": ["e1"]},
+    )
+    await sm.add_qa(
+        user_id="u1",
+        question="bad",
+        context="C",
+        answer="A",
+        session_id="s1",
+        feedback_score=1,
+        used_graph_element_ids={"node_ids": ["n3"], "edge_ids": ["e2"]},
+    )
+
+    graph_store = InMemoryGraphWithWeights()
+    graph_store.node_weights.update({"n3": 0.5})
+    graph_store.edge_weights.update({"e2": 0.5})
+
+    with (
+        patch("cognee.tasks.memify.extract_feedback_qas.session_user") as extract_user_ctx,
+        patch("cognee.tasks.memify.apply_feedback_weights.session_user") as apply_user_ctx,
+        patch("cognee.tasks.memify.extract_feedback_qas.get_session_manager", return_value=sm),
+        patch("cognee.tasks.memify.apply_feedback_weights.get_session_manager", return_value=sm),
+        patch(
+            "cognee.tasks.memify.apply_feedback_weights.get_graph_engine",
+            return_value=graph_store,
+        ),
+    ):
+        extract_user_ctx.get.return_value = user
+        apply_user_ctx.get.return_value = user
+
+        items = [item async for item in extract_feedback_qas([{}], session_ids=["s1"])]
+        # High alpha so a single rating separates the weights decisively.
+        await apply_feedback_weights(items, alpha=1.0)
+
+    assert graph_store.node_weights["n1"] == pytest.approx(1.0)
+    assert graph_store.node_weights["n3"] == pytest.approx(0.0)
+
+    # Project a graph where both triplets tie on vector distance; only the
+    # learned feedback weights can break the tie.
+    def build_graph():
+        graph = CogneeGraph()
+        node1 = Node("n1", {"feedback_weight": graph_store.node_weights["n1"]})
+        node2 = Node("n2")
+        node3 = Node("n3", {"feedback_weight": graph_store.node_weights["n3"]})
+        for node in (node1, node2, node3):
+            graph.add_node(node)
+        edge_good = Edge(
+            node1, node2, attributes={"feedback_weight": graph_store.edge_weights["e1"]}
+        )
+        edge_bad = Edge(
+            node2, node3, attributes={"feedback_weight": graph_store.edge_weights["e2"]}
+        )
+        graph.add_edge(edge_good)
+        graph.add_edge(edge_bad)
+        for element in (node1, node2, node3, edge_good, edge_bad):
+            element.add_attribute("vector_distance", [0.4])
+        return graph, edge_good, edge_bad
+
+    graph, edge_good, edge_bad = build_graph()
+    ranked = await graph.calculate_top_triplet_importances(k=2, feedback_influence=0.5)
+    assert ranked[0] == edge_good
+    assert ranked[1] == edge_bad
+
+    # With influence 0 (the current default) the weights are ignored: exact tie.
+    graph, edge_good, edge_bad = build_graph()
+    baseline = await graph.calculate_top_triplet_importances(k=2, feedback_influence=0.0)
+    assert set(baseline) == {edge_good, edge_bad}
