@@ -72,6 +72,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         api_version: str = None,
         max_completion_tokens: int = 512,
         batch_size: int = 100,
+        huggingface_tokenizer: Optional[str] = None,
     ):
         self.api_key = api_key
         self.endpoint = endpoint
@@ -80,6 +81,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         self.model = model
         self.dimensions = dimensions
         self.max_completion_tokens = max_completion_tokens
+        self.huggingface_tokenizer = huggingface_tokenizer
         self.tokenizer = self.get_tokenizer()
         self.retry_count = 0
         self.batch_size = batch_size
@@ -330,6 +332,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
             provider=self.provider,
             model=model,
             max_completion_tokens=self.max_completion_tokens,
+            huggingface_tokenizer=self.huggingface_tokenizer,
         )
         logger.debug(f"Tokenizer loaded for model: {self.model}")
         return tokenizer
