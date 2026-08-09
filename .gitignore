@@ -197,6 +197,8 @@ cognee/cache/
 .data_storage/
 .cognee_cache/
 .artifacts/
+.superpowers/
+.worktrees/
 .anon_id
 
 node_modules/
