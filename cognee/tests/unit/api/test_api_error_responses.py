@@ -109,9 +109,12 @@ def _restore_api_package_functions():
     """
     import cognee.api.v1.add as add_pkg
     import cognee.api.v1.cognify as cognify_pkg
-    import cognee.api.v1.memify as memify_pkg
     import cognee.api.v1.search as search_pkg
     import cognee.api.v1.update as update_pkg
+
+    # The memify router imports from cognee.modules.memify (not cognee.api.v1.memify),
+    # so that is the package the memify tests patch and the one that must be restored.
+    import cognee.modules.memify as memify_pkg
 
     targets = [
         (add_pkg, "add"),
