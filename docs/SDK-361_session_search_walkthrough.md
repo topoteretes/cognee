@@ -110,7 +110,9 @@ This one call is the entire integration surface. It returns one of two things:
 | `None` | not eligible | falls through to the code that was always there → **flow 2** |
 | `ConcurrentTurnResult` | the turn already ran | returns it → **flow 3** |
 
-Nothing else in the sequential path was modified. That is the point of the `None`.
+The `None` is what keeps the sequential path behaviourally untouched. Its only edits in this
+branch are the marker comment in step 1 of flow 2 and one refactor that collapsed duplicated
+dataset-field plumbing into `_dataset_fields` — neither changes what it does.
 
 ### 6 — Inside the fork: four checks, cheapest first
 
