@@ -35,6 +35,7 @@ from cognee.modules.retrieval.base_retriever import BaseRetriever
 
 CODE_NODE_TYPES = (
     "ApiEndpoint",
+    "CodeInsight",
     "CodeModule",
     "CodeService",
     "CodeSymbol",
@@ -46,6 +47,7 @@ CODE_NODE_TYPES = (
 
 _KIND_BY_TYPE = {
     "ApiEndpoint": "route",
+    "CodeInsight": "insight",
     "CodeModule": "module",
     "CodeService": "service",
     "CodeSymbol": "symbol",
