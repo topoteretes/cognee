@@ -125,6 +125,8 @@ def map_facts_to_data_points(
 
     entities: List[DataPoint] = []
     skipped_facts = 0
+    duplicate_facts = 0
+    seen_ids: set = set()
 
     for fact in facts:
         kind = fact.get("kind")
@@ -137,6 +139,17 @@ def map_facts_to_data_points(
             continue
 
         repo = _fact_repo(fact, fallback_repo)
+        node_id = fact_node_id(repo, kind, name)
+        if node_id in seen_ids:
+            # Same-named facts of the same kind collapse into one node (see
+            # fact_node_id). Keep the FIRST occurrence — the same rule the
+            # storage-side deduplication applies — so the stored node content
+            # (and its fact_hash) is deterministic across ingestions. Without
+            # this, two duplicates with different content flip-flop the stored
+            # hash and the fact reads as "updated" on every re-ingestion.
+            duplicate_facts += 1
+            continue
+        seen_ids.add(node_id)
         props = fact.get("props")
         if not isinstance(props, dict):
             props = {}
@@ -144,7 +157,7 @@ def map_facts_to_data_points(
         line = fact.get("line")
 
         fields: Dict[str, Any] = {
-            "id": fact_node_id(repo, kind, name),
+            "id": node_id,
             "name": name,
             "kind": kind,
             "file_path": file_path if isinstance(file_path, str) else None,
@@ -171,6 +184,8 @@ def map_facts_to_data_points(
 
     if skipped_facts:
         logger.warning("Skipped %d fact(s) that could not be mapped to DataPoints.", skipped_facts)
+    if duplicate_facts:
+        logger.info("Collapsed %d duplicate fact(s) into existing node ids.", duplicate_facts)
 
     return list(repositories.values()) + entities
 
