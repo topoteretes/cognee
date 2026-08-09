@@ -60,6 +60,7 @@ class RecallKwargs(TypedDict, total=False):
     feedback_influence: float
     verbose: bool
     retriever_specific_config: dict
+    response_model: type
     user: object
 
 
@@ -355,6 +356,7 @@ async def recall(
     feedback_influence: float = get_base_config().default_feedback_influence,
     verbose: bool = False,
     retriever_specific_config: dict | None = None,
+    response_model: type | None = None,
     neighborhood_depth: int | None = None,
     neighborhood_seed_top_k: int | None = None,
     include_references: bool = False,
@@ -388,6 +390,16 @@ async def recall(
         top_k: Maximum results to return (default *15*).
         auto_route: If True and query_type is None, classify the query
             automatically. If False, fall back to GRAPH_COMPLETION.
+        response_model: Pydantic model class for structured completion output.
+            Forwarded to the retriever, which validates the LLM answer against
+            it; each result then carries the validated payload as a dict in its
+            ``structured`` field. Shorthand for
+            ``retriever_specific_config={"response_model": ...}`` — pass it in
+            one place only. Supported by the completion-style search types
+            (GRAPH_COMPLETION and variants, RAG/TRIPLET/HYBRID/TEMPORAL/
+            AGENTIC completion). With a remote Cognee server the model's JSON
+            Schema is sent (``model_json_schema()``); the server validates
+            structure only — Python-side validators do not travel.
         tool_connections: Names of authorized external database connections
             for the ``"tools"`` scope. ``None`` uses every connection visible
             to the user. Only consulted when ``scope`` includes ``"tools"``
@@ -404,6 +416,21 @@ async def recall(
     """
     from cognee import __version__ as cognee_version
     from cognee.shared.utils import send_telemetry
+
+    # Fold the first-class response_model param into retriever_specific_config,
+    # the channel the retriever registry already reads. Doing this up front means
+    # every downstream path (graph search, scope routing) sees one merged config.
+    if response_model is not None:
+        configured_model = (retriever_specific_config or {}).get("response_model")
+        if configured_model is not None and configured_model is not response_model:
+            raise CogneeValidationError(
+                message="response_model was passed both directly and in "
+                "retriever_specific_config with different values; pass it once."
+            )
+        retriever_specific_config = {
+            **(retriever_specific_config or {}),
+            "response_model": response_model,
+        }
 
     telemetry_user = getattr(user, "id", user) or "sdk"
 
@@ -476,6 +503,11 @@ async def recall(
 
         client = get_remote_client()
         if client is not None:
+            # A model class cannot cross the HTTP boundary — send its JSON
+            # Schema instead; the server rebuilds a validation model from it
+            # and results come back with the validated dict in `structured`.
+            # Read from the merged config so the dict form travels too.
+            remote_response_model = (retriever_specific_config or {}).get("response_model")
             results = await client.recall(
                 query_text,
                 query_type,
@@ -490,6 +522,11 @@ async def recall(
                 context_profile=context_profile,
                 verbose=verbose,
                 include_references=include_references,
+                response_schema=(
+                    remote_response_model.model_json_schema()
+                    if remote_response_model is not None
+                    else None
+                ),
                 tool_connections=tool_connections,
                 tools_trigger=tools_trigger,
             )
