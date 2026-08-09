@@ -26,6 +26,7 @@ async def persist_agent_trace_feedbacks_in_knowledge_graph_pipeline(
     node_set_name: str = "agent_trace_feedbacks",
     raw_trace_content: bool = False,
     last_n_steps: Optional[int] = None,
+    since_watermark: bool = False,
     run_in_background: bool = False,
 ):
     """
@@ -45,6 +46,9 @@ async def persist_agent_trace_feedbacks_in_knowledge_graph_pipeline(
             of ``session_feedback`` summaries.
         last_n_steps: Optional number of most recent trace steps to persist per
             session. When None, all stored steps are persisted.
+        since_watermark: When True, persist only steps above the per-session
+            persist watermark (advanced after successful cognify), so repeated
+            improve() runs never re-cognify the full growing trace history.
         run_in_background: If True, runs memify asynchronously and returns immediately.
     """
     await set_session_user_context_variable(user)
@@ -68,6 +72,7 @@ async def persist_agent_trace_feedbacks_in_knowledge_graph_pipeline(
             session_ids=session_ids,
             raw_trace_content=raw_trace_content,
             last_n_steps=last_n_steps,
+            since_watermark=since_watermark,
         )
     ]
     enrichment_tasks = [

@@ -574,7 +574,9 @@ async def _persist_session_traces(
             dataset=dataset,
             node_set_name="agent_trace_feedbacks",
             raw_trace_content=False,
-            last_n_steps=None,  # persist all stored steps on demand
+            # Only steps above the per-session persist watermark: without it every
+            # improve() re-cognified the full growing trace blob (O(n^2) per session).
+            since_watermark=True,
             run_in_background=run_in_background,
         )
         logger.info(

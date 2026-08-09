@@ -101,3 +101,45 @@ async def test_cognify_agent_trace_feedback_cognify_failure():
 
         with pytest.raises(CogneeSystemError, match="Failed to cognify agent trace content"):
             await cognify_agent_trace_feedback(trace_content)
+
+
+@pytest.mark.asyncio
+async def test_watermark_advances_only_after_successful_cognify():
+    """A TracePersistWindow advances the trace persist watermark after cognify;
+    a failed cognify leaves it untouched so the window retries next run."""
+    import sys
+
+    task_module = sys.modules["cognee.tasks.memify.cognify_agent_trace_feedback"]
+    from unittest.mock import AsyncMock, patch
+
+    from cognee.infrastructure.session.session_persist_watermark import TracePersistWindow
+    from cognee.tasks.memify.cognify_agent_trace_feedback import cognify_agent_trace_feedback
+
+    window = TracePersistWindow(
+        user_id="u1", session_id="s1", text="Session ID: s1\n\nstep", persisted_trace_count=7
+    )
+
+    save_spy = AsyncMock()
+    session_manager = object()
+    with (
+        patch.object(task_module.cognee, "add", new=AsyncMock()),
+        patch.object(task_module.cognee, "cognify", new=AsyncMock()),
+        patch.object(task_module, "save_persisted_trace_count", new=save_spy),
+        patch(
+            "cognee.infrastructure.session.get_session_manager.get_session_manager",
+            return_value=session_manager,
+        ),
+    ):
+        await cognify_agent_trace_feedback(window, dataset_id="d1", user=None)
+
+    save_spy.assert_awaited_once_with(session_manager, "u1", "s1", persisted_trace_count=7)
+
+    save_spy.reset_mock()
+    with (
+        patch.object(task_module.cognee, "add", new=AsyncMock(side_effect=RuntimeError("down"))),
+        patch.object(task_module, "save_persisted_trace_count", new=save_spy),
+    ):
+        with pytest.raises(Exception):
+            await cognify_agent_trace_feedback(window, dataset_id="d1", user=None)
+
+    save_spy.assert_not_awaited()

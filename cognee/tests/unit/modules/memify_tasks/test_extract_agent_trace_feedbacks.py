@@ -400,3 +400,87 @@ async def test_extract_agent_trace_feedbacks_passes_last_n_to_raw_trace_lookup(m
         session_id="trace_session",
         last_n=2,
     )
+
+
+@pytest.mark.asyncio
+async def test_extract_since_watermark_yields_window_with_pending_only(mock_user):
+    """Watermark mode fetches only steps above the persist watermark and yields a
+    TracePersistWindow so cognify can advance the watermark after success."""
+    from cognee.infrastructure.session.session_persist_watermark import TracePersistWindow
+
+    mock_session_manager = _make_mock_session_manager(
+        ["old-1", "old-2", "new-3", "new-4"],
+    )
+    mock_session_manager.get_agent_trace_count = AsyncMock(return_value=4)
+    mock_session_manager.get_session_context_entries = AsyncMock(
+        return_value=[
+            {
+                "id": "trace_persist_watermark",
+                "kind": "trace_persist_watermark_state",
+                "persisted_trace_count": 2,
+            }
+        ]
+    )
+
+    with (
+        patch.object(extract_agent_trace_feedbacks_module, "session_user") as mock_session_user,
+        patch.object(
+            extract_agent_trace_feedbacks_module,
+            "get_session_manager",
+            return_value=mock_session_manager,
+        ),
+    ):
+        mock_session_user.get.return_value = mock_user
+
+        windows = []
+        async for window in extract_agent_trace_feedbacks(
+            [{}], session_ids=["trace_session"], since_watermark=True
+        ):
+            windows.append(window)
+
+    (window,) = windows
+    assert isinstance(window, TracePersistWindow)
+    assert window.persisted_trace_count == 4
+    assert window.session_id == "trace_session"
+    assert "new-3" in window.text and "new-4" in window.text
+    assert "old-1" not in window.text
+    mock_session_manager.get_agent_trace_feedback.assert_called_once_with(
+        user_id="test-user-123",
+        session_id="trace_session",
+        last_n=2,
+    )
+
+
+@pytest.mark.asyncio
+async def test_extract_since_watermark_skips_fully_persisted_session(mock_user):
+    mock_session_manager = _make_mock_session_manager(["a", "b"])
+    mock_session_manager.get_agent_trace_count = AsyncMock(return_value=2)
+    mock_session_manager.get_session_context_entries = AsyncMock(
+        return_value=[
+            {
+                "id": "trace_persist_watermark",
+                "kind": "trace_persist_watermark_state",
+                "persisted_trace_count": 2,
+            }
+        ]
+    )
+
+    with (
+        patch.object(extract_agent_trace_feedbacks_module, "session_user") as mock_session_user,
+        patch.object(
+            extract_agent_trace_feedbacks_module,
+            "get_session_manager",
+            return_value=mock_session_manager,
+        ),
+    ):
+        mock_session_user.get.return_value = mock_user
+
+        windows = [
+            window
+            async for window in extract_agent_trace_feedbacks(
+                [{}], session_ids=["trace_session"], since_watermark=True
+            )
+        ]
+
+    assert windows == []
+    mock_session_manager.get_agent_trace_feedback.assert_not_called()

@@ -18,7 +18,6 @@ raises into the trace write path — a failure just means no lesson this time.
 
 import json
 import re
-from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
@@ -73,12 +72,9 @@ _UUID_RE = re.compile(
 _LONG_NUMBER_RE = re.compile(r"\b\d{8,}\b")
 
 
-@dataclass(frozen=True, slots=True)
-class TraceExtractionPlan:
-    """A bounded trace window to extract and the watermark to save afterward."""
-
-    total_trace_count: int
-    window_size: int
+# Catch-up bound: how many extraction windows one pending pass may process. A large
+# backlog drains across successive calls instead of one unbounded LLM burst.
+MAX_DRAIN_WINDOWS = 5
 
 
 def _sanitize_error_text(error_message: str, max_chars: int = MAX_ERROR_TEXT_CHARS) -> str:
@@ -143,11 +139,6 @@ async def extract_live_agent_context(
         return []
 
 
-def _trace_window_size(pending_trace_count: int, overlap: int, max_window: int) -> int:
-    """Return the bounded trace window size for pending-trace extraction."""
-    return max(1, min(max_window, pending_trace_count + overlap))
-
-
 def _extract_state_row(raw_entries: list) -> dict | None:
     """Find this session's internal agent-extraction watermark row, if present."""
     for raw in raw_entries or []:
@@ -196,30 +187,6 @@ async def _save_processed_trace_count(
             session_id=session_id,
             entry_dump=payload,
         )
-
-
-async def _plan_pending_extraction(
-    *,
-    session_manager,
-    user_id: str,
-    session_id: str,
-    min_new_traces: int,
-    overlap: int,
-    max_window: int,
-) -> TraceExtractionPlan | None:
-    """Load trace-count state and decide whether a new extraction window is due."""
-    total_trace_count = await session_manager.get_agent_trace_count(
-        user_id=user_id, session_id=session_id
-    )
-    processed_count = await _get_processed_trace_count(session_manager, user_id, session_id)
-    pending_count = max(0, total_trace_count - processed_count)
-    if pending_count < min_new_traces:
-        return None
-
-    return TraceExtractionPlan(
-        total_trace_count=total_trace_count,
-        window_size=_trace_window_size(pending_count, overlap, max_window),
-    )
 
 
 def _trace_line(entry) -> str:
@@ -347,6 +314,7 @@ async def extract_pending_agent_context(
     min_new_traces: int = TRACE_EXTRACTION_INTERVAL,
     overlap: int = TRACE_EXTRACTION_OVERLAP,
     max_window: int = BATCH_TRACE_LIMIT,
+    max_windows: int = MAX_DRAIN_WINDOWS,
 ) -> list[str]:
     """Extract agent lessons from unprocessed traces using one shared watermark policy.
 
@@ -354,41 +322,61 @@ async def extract_pending_agent_context(
     - trace-write path uses the interval default, so extraction happens periodically;
     - improve/session-end callers can pass ``1`` to flush any pending traces before distillation.
 
-    The LLM receives only the latest ``pending + overlap`` trace steps, capped by ``max_window``.
-    The watermark advances only after the extraction attempt completes without raising.
-    Fail-open -> [].
+    Pending traces are drained oldest-first in windows of at most ``max_window`` steps
+    (with ``overlap`` already-processed steps as leading context), advancing the
+    watermark after each window — a backlog is never skipped, only spread across up to
+    ``max_windows`` LLM calls per pass (the rest waits for the next call). A window
+    that raises leaves the watermark at the last completed window. Fail-open -> [].
     """
     if min_new_traces <= 0:
         return []
     try:
-        plan = await _plan_pending_extraction(
-            session_manager=session_manager,
-            user_id=user_id,
-            session_id=session_id,
-            min_new_traces=min_new_traces,
-            overlap=overlap,
-            max_window=max_window,
+        total_trace_count = await session_manager.get_agent_trace_count(
+            user_id=user_id, session_id=session_id
         )
-        if plan is None:
+        processed_count = await _get_processed_trace_count(session_manager, user_id, session_id)
+        if processed_count > total_trace_count:
+            # The session's traces were cleared and rebuilt; start over.
+            processed_count = 0
+        pending_count = total_trace_count - processed_count
+        if pending_count < min_new_traces:
             return []
 
-        traces = await session_manager.get_agent_trace_session(
+        fetch_count = min(pending_count + max(0, overlap), total_trace_count)
+        all_traces = await session_manager.get_agent_trace_session(
             user_id=user_id,
             session_id=session_id,
-            last_n=plan.window_size,
+            last_n=fetch_count,
         )
-        touched = await _extract_batch_from_traces(
-            session_manager=session_manager,
-            user_id=user_id,
-            session_id=session_id,
-            traces=traces,
-        )
-        await _save_processed_trace_count(
-            session_manager,
-            user_id,
-            session_id,
-            processed_trace_count=plan.total_trace_count,
-        )
+        # all_traces is chronological and covers the last fetch_count steps; the
+        # first pending step sits pending_count entries from its end.
+        first_pending_index = max(0, len(all_traces) - pending_count)
+        window_step = max(1, max_window - max(0, overlap))
+
+        touched: list[str] = []
+        position = first_pending_index
+        for _window in range(max(1, max_windows)):
+            if position >= len(all_traces):
+                break
+            window_start = max(0, position - max(0, overlap))
+            window_traces = all_traces[window_start : position + window_step]
+            new_in_window = len(all_traces[position : position + window_step])
+            touched.extend(
+                await _extract_batch_from_traces(
+                    session_manager=session_manager,
+                    user_id=user_id,
+                    session_id=session_id,
+                    traces=window_traces,
+                )
+            )
+            processed_count += new_in_window
+            await _save_processed_trace_count(
+                session_manager,
+                user_id,
+                session_id,
+                processed_trace_count=processed_count,
+            )
+            position += new_in_window
         return touched
     except Exception as error:
         logger.warning("Pending agent-context extraction failed open: %s", error)

@@ -368,7 +368,8 @@ async def test_pending_extraction_runs_at_interval_and_sets_watermark(monkeypatc
     )
 
     assert len(touched) == 1
-    assert sm.trace_session_last_n_calls == [4]
+    # Fetch is bounded by the session's actual trace count (3), not pending+overlap.
+    assert sm.trace_session_last_n_calls == [3]
     state = next(row for row in sm.store if row.get("kind") == TRACE_EXTRACTION_STATE_KIND)
     assert state["processed_trace_count"] == 3
 
@@ -392,7 +393,7 @@ async def test_pending_extraction_can_flush_below_interval(monkeypatch):
     )
 
     assert len(touched) == 1
-    assert sm.trace_session_last_n_calls == [3]
+    assert sm.trace_session_last_n_calls == [2]
     state = next(row for row in sm.store if row.get("kind") == TRACE_EXTRACTION_STATE_KIND)
     assert state["processed_trace_count"] == 2
 
@@ -414,6 +415,71 @@ async def test_pending_extraction_uses_overlap_after_watermark(monkeypatch):
     assert "step-12" in captured["text_input"]
     state = next(row for row in sm.store if row.get("kind") == TRACE_EXTRACTION_STATE_KIND)
     assert state["processed_trace_count"] == 13
+
+
+@pytest.mark.asyncio
+async def test_pending_extraction_drains_backlog_in_windows(monkeypatch):
+    """A backlog wider than one window is processed oldest-first across several LLM
+    calls, never skipped (the old code jumped the watermark past unread traces)."""
+    sm = FakeSessionManager(traces=[_trace(f"step-{index}") for index in range(9)])
+    captured_batches = []
+
+    async def capture_llm(text_input, system_prompt, response_model):
+        captured_batches.append(text_input)
+        return agent_context_extraction.AgentContextExtraction(lessons=[])
+
+    monkeypatch.setattr(
+        agent_context_extraction.LLMGateway, "acreate_structured_output", capture_llm
+    )
+
+    touched = await extract_pending_agent_context(
+        session_manager=sm,
+        user_id="u",
+        session_id="s",
+        min_new_traces=1,
+        overlap=1,
+        max_window=4,
+    )
+
+    assert touched == []
+    # 9 pending, window step 3 (max_window 4 - overlap 1) -> 3 windows, oldest first.
+    assert len(captured_batches) == 3
+    assert "step-0" in captured_batches[0]
+    assert "step-8" in captured_batches[-1]
+    state = next(row for row in sm.store if row.get("kind") == TRACE_EXTRACTION_STATE_KIND)
+    assert state["processed_trace_count"] == 9
+
+
+@pytest.mark.asyncio
+async def test_pending_extraction_respects_window_cap_and_resumes(monkeypatch):
+    """max_windows bounds one pass; the leftover stays pending for the next call."""
+    sm = FakeSessionManager(traces=[_trace(f"step-{index}") for index in range(9)])
+    _patch_llm(monkeypatch, lessons=[])
+
+    await extract_pending_agent_context(
+        session_manager=sm,
+        user_id="u",
+        session_id="s",
+        min_new_traces=1,
+        overlap=1,
+        max_window=4,
+        max_windows=1,
+    )
+
+    state = next(row for row in sm.store if row.get("kind") == TRACE_EXTRACTION_STATE_KIND)
+    assert state["processed_trace_count"] == 3  # one window of step 3 processed
+
+    await extract_pending_agent_context(
+        session_manager=sm,
+        user_id="u",
+        session_id="s",
+        min_new_traces=1,
+        overlap=1,
+        max_window=4,
+        max_windows=5,
+    )
+    state = next(row for row in sm.store if row.get("kind") == TRACE_EXTRACTION_STATE_KIND)
+    assert state["processed_trace_count"] == 9
 
 
 @pytest.mark.asyncio

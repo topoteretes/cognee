@@ -29,6 +29,11 @@ logger = get_logger("session_persist_watermark")
 SESSION_PERSIST_STATE_ID = "session_persist_watermark"
 SESSION_PERSIST_STATE_KIND = "session_persist_watermark_state"
 
+# Same policy for agent trace steps: improve() previously re-extracted and
+# re-cognified the FULL growing trace blob per run (O(n^2) work per session).
+TRACE_PERSIST_STATE_ID = "trace_persist_watermark"
+TRACE_PERSIST_STATE_KIND = "trace_persist_watermark_state"
+
 
 @dataclass(frozen=True, slots=True)
 class SessionPersistWindow:
@@ -46,14 +51,33 @@ class SessionPersistWindow:
     persisted_qa_count: int
 
 
+@dataclass(frozen=True, slots=True)
+class TracePersistWindow:
+    """One not-yet-persisted slice of a session's agent trace steps.
+
+    ``persisted_trace_count`` is the TOTAL step count captured at extraction
+    time — the value the watermark advances to once this window is
+    successfully cognified.
+    """
+
+    user_id: str
+    session_id: str
+    text: str
+    persisted_trace_count: int
+
+
 def _extract_state_row(raw_entries: list) -> dict | None:
-    """Find this session's internal persist-watermark row, if present."""
+    """Find this session's internal QA persist-watermark row, if present."""
+    return _find_state_row(raw_entries, SESSION_PERSIST_STATE_ID, SESSION_PERSIST_STATE_KIND)
+
+
+def _find_state_row(raw_entries: list, state_id: str, state_kind: str) -> dict | None:
     for raw in raw_entries or []:
         if not isinstance(raw, dict):
             continue
-        if raw.get("id") == SESSION_PERSIST_STATE_ID:
+        if raw.get("id") == state_id:
             return raw
-        if raw.get("kind") == SESSION_PERSIST_STATE_KIND:
+        if raw.get("kind") == state_kind:
             return raw
     return None
 
@@ -86,6 +110,44 @@ async def save_persisted_qa_count(
         user_id=user_id,
         session_id=session_id,
         entry_id=SESSION_PERSIST_STATE_ID,
+        merge=payload,
+    )
+    if not updated:
+        await session_manager.create_session_context_entry(
+            user_id=user_id,
+            session_id=session_id,
+            entry_dump=payload,
+        )
+
+
+async def get_persisted_trace_count(session_manager, user_id: str, session_id: str) -> int:
+    """Read the trace persist watermark. Missing/malformed means nothing persisted yet."""
+    raw_entries = await session_manager.get_session_context_entries(
+        user_id=user_id, session_id=session_id
+    )
+    row = _find_state_row(raw_entries, TRACE_PERSIST_STATE_ID, TRACE_PERSIST_STATE_KIND)
+    if row is None:
+        return 0
+    try:
+        return max(0, int(row.get("persisted_trace_count") or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+async def save_persisted_trace_count(
+    session_manager, user_id: str, session_id: str, persisted_trace_count: int
+) -> None:
+    """Persist the trace watermark as an internal non-rendered session-context row."""
+    payload = {
+        "id": TRACE_PERSIST_STATE_ID,
+        "kind": TRACE_PERSIST_STATE_KIND,
+        "persisted_trace_count": max(0, int(persisted_trace_count)),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    updated = await session_manager.update_session_context_entry(
+        user_id=user_id,
+        session_id=session_id,
+        entry_id=TRACE_PERSIST_STATE_ID,
         merge=payload,
     )
     if not updated:
