@@ -35,7 +35,7 @@ def test_task_instances_pass_through_unchanged():
         return data
 
     task = Task(custom_task)
-    resolved = resolve_memify_tasks([task, "apply_frequency_weights"])
+    resolved = resolve_memify_tasks([task, "apply_feedback_weights"])
 
     assert resolved is not None
     assert resolved[0] is task

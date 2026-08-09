@@ -29,7 +29,6 @@ def _build_task_factories() -> Dict[str, Callable[[], Task]]:
     from cognee.tasks.memify.extract_agent_trace_feedbacks import extract_agent_trace_feedbacks
     from cognee.tasks.memify.cognify_agent_trace_feedback import cognify_agent_trace_feedback
     from cognee.tasks.memify.apply_feedback_weights import apply_feedback_weights
-    from cognee.tasks.memify.apply_frequency_weights import apply_frequency_weights
     from cognee.tasks.memify.consolidate_entities import (
         detect_entity_duplicates,
         merge_entity_duplicates,
@@ -46,9 +45,6 @@ def _build_task_factories() -> Dict[str, Callable[[], Task]]:
         "cognify_agent_trace_feedback": lambda: Task(cognify_agent_trace_feedback),
         "apply_feedback_weights": lambda: Task(
             apply_feedback_weights, task_config={"batch_size": 100}
-        ),
-        "apply_frequency_weights": lambda: Task(
-            apply_frequency_weights, task_config={"batch_size": 100}
         ),
         "detect_entity_duplicates": lambda: Task(detect_entity_duplicates),
         "merge_entity_duplicates": lambda: Task(merge_entity_duplicates),
