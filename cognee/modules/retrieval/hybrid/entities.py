@@ -1,6 +1,9 @@
 from typing import Any, Optional
 
-from cognee.modules.retrieval.hybrid.facts import connection_edge_type_id
+from cognee.modules.retrieval.hybrid.facts import (
+    connection_edge_instance_id,
+    connection_edge_type_id,
+)
 from cognee.modules.retrieval.hybrid.results import (
     display_value,
     first_display_value,
@@ -16,7 +19,8 @@ async def build_entities(
     graph_engine: Any,
     entity_hits: list[Any],
     max_edges_per_entity: int,
-    edge_ranks: Optional[dict[str, int]] = None,
+    edge_type_ranks: Optional[dict[str, int]] = None,
+    edge_instance_ranks: Optional[dict[str, int]] = None,
 ):
     if not entity_hits:
         return []
@@ -39,7 +43,8 @@ async def build_entities(
         entity["edges"] = _edge_bullets_from_connections(
             connections_by_entity_id.get(entity["id"], []),
             max_edges_per_entity,
-            edge_ranks or {},
+            edge_type_ranks or {},
+            edge_instance_ranks or {},
         )
     return entities
 
@@ -128,7 +133,10 @@ def _entity_type(result_payload: dict) -> Optional[str]:
 
 
 def _edge_bullets_from_connections(
-    connections: list[Any], max_edges: int, edge_ranks: dict[str, int]
+    connections: list[Any],
+    max_edges: int,
+    edge_type_ranks: dict[str, int],
+    edge_instance_ranks: dict[str, int],
 ) -> list[dict]:
     if max_edges <= 0:
         return []
@@ -157,18 +165,21 @@ def _edge_bullets_from_connections(
         else:
             seen_texts.add(bullet["text"])
         edges.append(bullet)
-    edges.sort(key=lambda edge: _edge_sort_key(edge, edge_ranks))
+    edges.sort(key=lambda edge: _edge_sort_key(edge, edge_type_ranks, edge_instance_ranks))
     return edges[:max_edges]
 
 
-def _edge_sort_key(edge: dict, edge_ranks: dict[str, int]) -> tuple[int, int]:
-    """Pinned type edges first, then query-ranked edges, then legacy graph order."""
+def _edge_sort_key(
+    edge: dict, edge_type_ranks: dict[str, int], edge_instance_ranks: dict[str, int]
+) -> tuple[int, int]:
+    """Pinned type edges first, then instance and type vector ranks."""
     if _is_type_edge(edge):
         return (0, 0)
-    rank = edge_ranks.get(edge.get("edge_type_id"))
-    if rank is None:
-        return (2, 0)
-    return (1, rank)
+    if edge.get("edge_instance_id") in edge_instance_ranks:
+        return (1, edge_instance_ranks[edge["edge_instance_id"]])
+    if edge.get("edge_type_id") in edge_type_ranks:
+        return (2, edge_type_ranks[edge["edge_type_id"]])
+    return (3, 0)
 
 
 def _unpack_connection(connection: Any) -> Optional[tuple[dict, dict, dict]]:
@@ -198,6 +209,7 @@ def _edge_bullet(source: dict, edge: dict, target: dict) -> Optional[dict]:
         "relationship": relationship,
         "target_id": display_value(target.get("id")),
         "edge_type_id": connection_edge_type_id(edge),
+        "edge_instance_id": connection_edge_instance_id(edge),
     }
 
 

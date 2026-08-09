@@ -2,6 +2,7 @@ from unittest.mock import MagicMock
 
 from cognee.modules.graph.models.EdgeType import EdgeType
 from cognee.modules.retrieval.hybrid.facts import (
+    connection_edge_instance_id,
     connection_edge_type_id,
     edge_rank_by_id,
     format_facts,
@@ -20,16 +21,17 @@ def _hit(text):
     return hit
 
 
-def test_connection_edge_type_id_prefers_top_level_edge_text():
-    edge = {"edge_text": "Alice works at Acme.", "relationship_name": "works_at"}
+def test_connection_ids_separate_type_from_instance():
+    edge = {
+        "relationship_name": "works_at",
+        "properties": {
+            "edge_object_id": "15bfc0f0-51d7-5ac8-8589-3c32fe75aa10",
+            "edge_text": "Alice works at Acme.",
+        },
+    }
 
-    assert connection_edge_type_id(edge) == _edge_id("Alice works at Acme.")
-
-
-def test_connection_edge_type_id_reads_nested_properties_edge_text():
-    edge = {"properties": {"edge_text": "Alice works at Acme."}, "relationship_name": "works_at"}
-
-    assert connection_edge_type_id(edge) == _edge_id("Alice works at Acme.")
+    assert connection_edge_type_id(edge) == str(EdgeType.id_for("works_at"))
+    assert connection_edge_instance_id(edge) == "15bfc0f0-51d7-5ac8-8589-3c32fe75aa10"
 
 
 def test_connection_edge_type_id_falls_back_to_relationship_name():
@@ -38,7 +40,12 @@ def test_connection_edge_type_id_falls_back_to_relationship_name():
 
 def test_connection_edge_type_id_returns_none_without_any_text():
     assert connection_edge_type_id({}) is None
-    assert connection_edge_type_id({"edge_text": "  ", "relationship_name": ""}) is None
+    assert connection_edge_type_id({"edge_text": "text", "relationship_name": ""}) is None
+
+
+def test_connection_edge_instance_id_requires_stored_nonblank_object_id():
+    assert connection_edge_instance_id({"properties": {"edge_object_id": "  "}}) is None
+    assert connection_edge_instance_id({"edge_object_id": "top-level-id"}) is None
 
 
 def test_edge_rank_by_id_keeps_first_occurrence_of_duplicate_ids():

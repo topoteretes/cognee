@@ -40,7 +40,10 @@ async def test_node_edge_vector_search_single_query_shape():
     )
 
     assert vector_search.query_list_length is None
-    assert vector_search.edge_distances == edge_results
+    assert vector_search.edge_distances == {
+        "EdgeType_relationship_name": edge_results,
+        "EdgeInstance_text": [],
+    }
     assert vector_search.node_distances["Entity_name"] == node_results
     mock_vector_engine.embedding_engine.embed_text.assert_called_once_with(["test query"])
 
@@ -82,9 +85,10 @@ async def test_node_edge_vector_search_batch_query_shape_and_empties():
     )
 
     assert vector_search.query_list_length == 2
-    assert len(vector_search.edge_distances) == 2
-    assert vector_search.edge_distances[0] == edge_results_query_a
-    assert vector_search.edge_distances[1] == edge_results_query_b
+    assert vector_search.edge_distances == {
+        "EdgeType_relationship_name": [edge_results_query_a, edge_results_query_b],
+        "EdgeInstance_text": [[], []],
+    }
     assert len(vector_search.node_distances["Entity_name"]) == 2
     assert vector_search.node_distances["Entity_name"][0] == node_results_query_a
     assert vector_search.node_distances["Entity_name"][1] == node_results_query_b
@@ -159,15 +163,24 @@ async def test_node_edge_vector_search_has_results_single_query():
     mock_vector_engine = AsyncMock()
     vector_search = NodeEdgeVectorSearch(vector_engine=mock_vector_engine)
 
-    vector_search.edge_distances = [MockScoredResult("edge1", 0.92)]
+    vector_search.edge_distances = {
+        "EdgeType_relationship_name": [MockScoredResult("edge1", 0.92)],
+        "EdgeInstance_text": [],
+    }
     vector_search.node_distances = {}
     assert vector_search.has_results() is True
 
-    vector_search.edge_distances = []
+    vector_search.edge_distances = {
+        "EdgeType_relationship_name": [],
+        "EdgeInstance_text": [],
+    }
     vector_search.node_distances = {"Entity_name": [MockScoredResult("node1", 0.95)]}
     assert vector_search.has_results() is True
 
-    vector_search.edge_distances = []
+    vector_search.edge_distances = {
+        "EdgeType_relationship_name": [],
+        "EdgeInstance_text": [],
+    }
     vector_search.node_distances = {}
     assert vector_search.has_results() is False
 
@@ -179,17 +192,26 @@ async def test_node_edge_vector_search_has_results_batch():
     vector_search = NodeEdgeVectorSearch(vector_engine=mock_vector_engine)
     vector_search.query_list_length = 2
 
-    vector_search.edge_distances = [[MockScoredResult("edge1", 0.92)], []]
+    vector_search.edge_distances = {
+        "EdgeType_relationship_name": [[MockScoredResult("edge1", 0.92)], []],
+        "EdgeInstance_text": [[], []],
+    }
     vector_search.node_distances = {}
     assert vector_search.has_results() is True
 
-    vector_search.edge_distances = [[], []]
+    vector_search.edge_distances = {
+        "EdgeType_relationship_name": [[], []],
+        "EdgeInstance_text": [[], []],
+    }
     vector_search.node_distances = {
         "Entity_name": [[MockScoredResult("node1", 0.95)], []],
     }
     assert vector_search.has_results() is True
 
-    vector_search.edge_distances = [[], []]
+    vector_search.edge_distances = {
+        "EdgeType_relationship_name": [[], []],
+        "EdgeInstance_text": [[], []],
+    }
     vector_search.node_distances = {"Entity_name": [[], []]}
     assert vector_search.has_results() is False
 
@@ -248,12 +270,38 @@ async def test_node_edge_vector_search_missing_collections_single_query():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("missing_lane", ["EdgeType_relationship_name", "EdgeInstance_text"])
+async def test_node_edge_vector_search_keeps_missing_edge_lanes_empty(missing_lane):
+    mock_vector_engine = AsyncMock()
+    mock_vector_engine.embedding_engine = AsyncMock()
+    mock_vector_engine.embedding_engine.embed_text = AsyncMock(return_value=[[0.1, 0.2, 0.3]])
+
+    async def search_side_effect(*args, **kwargs):
+        if kwargs["collection_name"] == missing_lane:
+            raise CollectionNotFoundError("Collection not found")
+        return [MockScoredResult("edge-id", 0.92)]
+
+    mock_vector_engine.search = AsyncMock(side_effect=search_side_effect)
+    vector_search = NodeEdgeVectorSearch(vector_engine=mock_vector_engine)
+
+    await vector_search.embed_and_retrieve_distances(
+        query="test query",
+        collections=["EdgeType_relationship_name", "EdgeInstance_text"],
+    )
+
+    assert vector_search.edge_distances[missing_lane] == []
+
+
+@pytest.mark.asyncio
 async def test_node_edge_vector_search_has_results_batch_nodes_only():
     """Test has_results returns True when only node distances are populated in batch mode."""
     mock_vector_engine = AsyncMock()
     vector_search = NodeEdgeVectorSearch(vector_engine=mock_vector_engine)
     vector_search.query_list_length = 2
-    vector_search.edge_distances = [[], []]
+    vector_search.edge_distances = {
+        "EdgeType_relationship_name": [[], []],
+        "EdgeInstance_text": [[], []],
+    }
     vector_search.node_distances = {
         "Entity_name": [[MockScoredResult("node1", 0.95)], []],
     }
@@ -267,7 +315,10 @@ async def test_node_edge_vector_search_has_results_batch_edges_only():
     mock_vector_engine = AsyncMock()
     vector_search = NodeEdgeVectorSearch(vector_engine=mock_vector_engine)
     vector_search.query_list_length = 2
-    vector_search.edge_distances = [[MockScoredResult("edge1", 0.92)], []]
+    vector_search.edge_distances = {
+        "EdgeType_relationship_name": [[MockScoredResult("edge1", 0.92)], []],
+        "EdgeInstance_text": [[], []],
+    }
     vector_search.node_distances = {}
 
     assert vector_search.has_results() is True

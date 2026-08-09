@@ -416,13 +416,42 @@ async def test_map_vector_distances_to_graph_edges_with_payload(setup_graph):
     )
     graph.add_edge(edge)
 
-    edge_distances = [
-        MockScoredResult(EdgeType.id_for("CONNECTS_TO"), 0.92, payload={"text": "CONNECTS_TO"}),
-    ]
+    edge_distances = {
+        "EdgeType_relationship_name": [
+            MockScoredResult(EdgeType.id_for("connects"), 0.92, payload={"text": "connects"}),
+        ],
+        "EdgeInstance_text": [],
+    }
 
     await graph.map_vector_distances_to_graph_edges(edge_distances=edge_distances)
 
     assert graph.edges[0].attributes.get("vector_distance") == [0.92]
+
+
+@pytest.mark.asyncio
+async def test_map_vector_distances_prioritizes_instance_lane(setup_graph):
+    graph = setup_graph
+    node1 = Node("1")
+    node2 = Node("2")
+    graph.add_node(node1)
+    graph.add_node(node2)
+    edge = Edge(
+        node1,
+        node2,
+        attributes={"relationship_type": "works_at", "edge_object_id": "instance-id"},
+    )
+    graph.add_edge(edge)
+
+    await graph.map_vector_distances_to_graph_edges(
+        {
+            "EdgeType_relationship_name": [MockScoredResult(EdgeType.id_for("works_at"), 0.1)],
+            "EdgeInstance_text": [MockScoredResult("instance-id", 0.9)],
+        }
+    )
+
+    assert edge.attributes["edge_type_id"] == EdgeType.id_for("works_at")
+    assert edge.attributes["edge_instance_id"] == "instance-id"
+    assert edge.attributes["vector_distance"] == [0.9]
 
 
 @pytest.mark.asyncio
@@ -437,15 +466,18 @@ async def test_map_vector_distances_partial_edge_coverage(setup_graph):
     graph.add_node(node2)
     graph.add_node(node3)
 
-    edge1 = Edge(node1, node2, attributes={"edge_text": "CONNECTS_TO"})
-    edge2 = Edge(node2, node3, attributes={"edge_text": "DEPENDS_ON"})
+    edge1 = Edge(node1, node2, attributes={"relationship_type": "CONNECTS_TO"})
+    edge2 = Edge(node2, node3, attributes={"relationship_type": "DEPENDS_ON"})
     graph.add_edge(edge1)
     graph.add_edge(edge2)
 
     edge_1_text = "CONNECTS_TO"
-    edge_distances = [
-        MockScoredResult(EdgeType.id_for(edge_1_text), 0.92, payload={"text": edge_1_text}),
-    ]
+    edge_distances = {
+        "EdgeType_relationship_name": [
+            MockScoredResult(EdgeType.id_for(edge_1_text), 0.92, payload={"text": edge_1_text}),
+        ],
+        "EdgeInstance_text": [],
+    }
 
     await graph.map_vector_distances_to_graph_edges(edge_distances=edge_distances)
 
@@ -471,9 +503,12 @@ async def test_map_vector_distances_edges_fallback_to_relationship_type(setup_gr
     graph.add_edge(edge)
 
     edge_text = "KNOWS"
-    edge_distances = [
-        MockScoredResult(EdgeType.id_for(edge_text), 0.85, payload={"text": edge_text}),
-    ]
+    edge_distances = {
+        "EdgeType_relationship_name": [
+            MockScoredResult(EdgeType.id_for(edge_text), 0.85, payload={"text": edge_text}),
+        ],
+        "EdgeInstance_text": [],
+    }
 
     await graph.map_vector_distances_to_graph_edges(edge_distances=edge_distances)
 
@@ -498,9 +533,12 @@ async def test_map_vector_distances_no_edge_matches(setup_graph):
     graph.add_edge(edge)
 
     edge_text = "SOME_OTHER_EDGE"
-    edge_distances = [
-        MockScoredResult(EdgeType.id_for(edge_text), 0.92, payload={"text": edge_text}),
-    ]
+    edge_distances = {
+        "EdgeType_relationship_name": [
+            MockScoredResult(EdgeType.id_for(edge_text), 0.92, payload={"text": edge_text}),
+        ],
+        "EdgeInstance_text": [],
+    }
 
     await graph.map_vector_distances_to_graph_edges(edge_distances=edge_distances)
 
@@ -547,21 +585,20 @@ async def test_map_vector_distances_to_graph_edges_multi_query(setup_graph):
     graph.add_node(node2)
     graph.add_node(node3)
 
-    edge1 = Edge(node1, node2, attributes={"edge_text": "A"})
-    edge2 = Edge(node2, node3, attributes={"edge_text": "B"})
+    edge1 = Edge(node1, node2, attributes={"relationship_type": "A"})
+    edge2 = Edge(node2, node3, attributes={"relationship_type": "B"})
     graph.add_edge(edge1)
     graph.add_edge(edge2)
 
     edge_1_text = "A"
     edge_2_text = "B"
-    edge_distances = [
-        [
-            MockScoredResult(EdgeType.id_for(edge_1_text), 0.1, payload={"text": edge_1_text})
-        ],  # query 0
-        [
-            MockScoredResult(EdgeType.id_for(edge_2_text), 0.2, payload={"text": edge_2_text})
-        ],  # query 1
-    ]
+    edge_distances = {
+        "EdgeType_relationship_name": [
+            [MockScoredResult(EdgeType.id_for(edge_1_text), 0.1, payload={"text": edge_1_text})],
+            [MockScoredResult(EdgeType.id_for(edge_2_text), 0.2, payload={"text": edge_2_text})],
+        ],
+        "EdgeInstance_text": [[], []],
+    }
 
     await graph.map_vector_distances_to_graph_edges(
         edge_distances=edge_distances, query_list_length=2
@@ -583,18 +620,19 @@ async def test_map_vector_distances_to_graph_edges_preserves_unmapped_indices(se
     graph.add_node(node2)
     graph.add_node(node3)
 
-    edge1 = Edge(node1, node2, attributes={"edge_text": "A"})
-    edge2 = Edge(node2, node3, attributes={"edge_text": "B"})
+    edge1 = Edge(node1, node2, attributes={"relationship_type": "A"})
+    edge2 = Edge(node2, node3, attributes={"relationship_type": "B"})
     graph.add_edge(edge1)
     graph.add_edge(edge2)
 
     edge_1_text = "A"
-    edge_distances = [
-        [
-            MockScoredResult(EdgeType.id_for(edge_1_text), 0.1, payload={"text": edge_1_text})
-        ],  # query 0: only edge1 mapped
-        [],  # query 1: no edges mapped
-    ]
+    edge_distances = {
+        "EdgeType_relationship_name": [
+            [MockScoredResult(EdgeType.id_for(edge_1_text), 0.1, payload={"text": edge_1_text})],
+            [],
+        ],
+        "EdgeInstance_text": [[], []],
+    }
 
     await graph.map_vector_distances_to_graph_edges(
         edge_distances=edge_distances, query_list_length=2
@@ -999,8 +1037,8 @@ async def test_missing_distance_penalty_ranks_below_max_real_triplet(setup_graph
     graph.add_node(node2)
     graph.add_node(node3)
 
-    edge_real = Edge(node1, node2, attributes={"edge_text": "A"})
-    edge_fallback = Edge(node2, node3, attributes={"edge_text": "B"})
+    edge_real = Edge(node1, node2, attributes={"relationship_type": "A"})
+    edge_fallback = Edge(node2, node3, attributes={"relationship_type": "B"})
     graph.add_edge(edge_real)
     graph.add_edge(edge_fallback)
 
@@ -1008,7 +1046,12 @@ async def test_missing_distance_penalty_ranks_below_max_real_triplet(setup_graph
         {"Entity_name": [MockScoredResult("1", 2.0), MockScoredResult("2", 2.0)]}
     )
     await graph.map_vector_distances_to_graph_edges(
-        [MockScoredResult(EdgeType.id_for("A"), 2.0, payload={"text": "A"})]
+        {
+            "EdgeType_relationship_name": [
+                MockScoredResult(EdgeType.id_for("A"), 2.0, payload={"text": "A"})
+            ],
+            "EdgeInstance_text": [],
+        }
     )
 
     ranked = await graph.calculate_top_triplet_importances(k=2, feedback_influence=0.0)

@@ -1,7 +1,6 @@
 from typing import Any, Optional
 
 from cognee.modules.graph.models.EdgeType import EdgeType
-from cognee.modules.graph.utils.prepare_edges_for_storage import get_edge_retrieval_text
 from cognee.modules.retrieval.hybrid.results import first_display_value, payload, result_id
 
 MIN_FACT_WORD_COUNT = 3
@@ -11,18 +10,16 @@ CONTAINS_FACT_PREFIX = "Document chunk mentions "
 
 
 def connection_edge_type_id(edge: dict) -> Optional[str]:
-    """Recompute the EdgeType vector row id for a graph connection edge.
+    """Return the EdgeType vector row id from the relationship name only."""
+    relationship_name = first_display_value(edge.get("relationship_name"))
+    return str(EdgeType.id_for(relationship_name)) if relationship_name else None
 
-    Must mirror index_graph_edges._get_edge_text: nonblank edge_text first
-    (top-level, then nested in properties), falling back to relationship_name.
-    """
+
+def connection_edge_instance_id(edge: dict) -> Optional[str]:
+    """Return the stored EdgeInstance id without reconstructing edge identity."""
     properties = edge.get("properties")
-    nested_edge_text = properties.get("edge_text") if isinstance(properties, dict) else None
-    retrieval_text = get_edge_retrieval_text(
-        first_display_value(edge.get("edge_text"), nested_edge_text),
-        edge.get("relationship_name"),
-    )
-    return str(EdgeType.id_for(retrieval_text)) if retrieval_text else None
+    edge_object_id = properties.get("edge_object_id") if isinstance(properties, dict) else None
+    return first_display_value(edge_object_id)
 
 
 def edge_rank_by_id(edge_hits: list[Any]) -> dict[str, int]:

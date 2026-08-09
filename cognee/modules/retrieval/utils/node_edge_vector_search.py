@@ -13,15 +13,18 @@ logger = get_logger(level=ERROR)
 class NodeEdgeVectorSearch:
     """Manages vector search and distance retrieval for graph nodes and edges."""
 
-    def __init__(self, edge_collection: str = "EdgeType_relationship_name", vector_engine=None):
-        self.edge_collection = edge_collection
+    edge_collections = ("EdgeType_relationship_name", "EdgeInstance_text")
+
+    def __init__(self, vector_engine=None):
         # ``get_vector_engine_async()`` is async, so this sync ``__init__`` can't
         # eagerly resolve it. Keep the (possibly-None) injected engine and
         # resolve lazily in the first async method via ``_get_vector_engine()``.
         self.vector_engine = vector_engine
         self.query_vector: Optional[Any] = None
         self.node_distances: dict[str, list[Any]] = {}
-        self.edge_distances: list[Any] = []
+        self.edge_distances: dict[str, list[Any]] = {
+            collection: [] for collection in self.edge_collections
+        }
         self.query_list_length: Optional[int] = None
 
     async def _get_vector_engine(self):
@@ -86,13 +89,16 @@ class NodeEdgeVectorSearch:
     def has_results(self) -> bool:
         """Checks if any collections returned results."""
         if self.query_list_length is None:
-            if self.edge_distances and any(self.edge_distances):
+            if any(any(results) for results in self.edge_distances.values()):
                 return True
             return any(
                 bool(collection_results) for collection_results in self.node_distances.values()
             )
 
-        if self.edge_distances and any(inner_list for inner_list in self.edge_distances):
+        if any(
+            any(results_per_query for results_per_query in collection_results)
+            for collection_results in self.edge_distances.values()
+        ):
             return True
         return any(
             any(results_per_query for results_per_query in collection_results)
@@ -124,21 +130,19 @@ class NodeEdgeVectorSearch:
         - Single mode: missing/empty collections become []
         """
         self.node_distances = {}
-        self.edge_distances = (
-            [] if query_list_length is None else [[] for _ in range(query_list_length)]
-        )
+        empty_result = [] if query_list_length is None else [[] for _ in range(query_list_length)]
+        self.edge_distances = {
+            collection: list(empty_result) for collection in self.edge_collections
+        }
         for collection, result in zip(collections, search_results):
             if not result:
-                empty_result = (
-                    [] if query_list_length is None else [[] for _ in range(query_list_length)]
-                )
-                if collection == self.edge_collection:
-                    self.edge_distances = empty_result
+                if collection in self.edge_collections:
+                    self.edge_distances[collection] = list(empty_result)
                 else:
-                    self.node_distances[collection] = empty_result
+                    self.node_distances[collection] = list(empty_result)
             else:
-                if collection == self.edge_collection:
-                    self.edge_distances = result
+                if collection in self.edge_collections:
+                    self.edge_distances[collection] = result
                 else:
                     self.node_distances[collection] = result
 

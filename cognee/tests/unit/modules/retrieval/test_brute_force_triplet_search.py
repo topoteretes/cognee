@@ -132,6 +132,7 @@ async def test_brute_force_triplet_search_default_collections():
             "EntityType_name",
             "DocumentChunk_text",
             "EdgeType_relationship_name",
+            "EdgeInstance_text",
         ]
 
         call_collections = [
@@ -159,12 +160,15 @@ async def test_brute_force_triplet_search_custom_collections():
         call_collections = [
             call[1]["collection_name"] for call in mock_vector_engine.search.call_args_list
         ]
-        assert set(call_collections) == set(custom_collections) | {"EdgeType_relationship_name"}
+        assert set(call_collections) == set(custom_collections) | {
+            "EdgeType_relationship_name",
+            "EdgeInstance_text",
+        }
 
 
 @pytest.mark.asyncio
-async def test_brute_force_triplet_search_always_includes_edge_collection():
-    """Test that EdgeType_relationship_name is always searched even when not in collections."""
+async def test_brute_force_triplet_search_always_includes_edge_collections():
+    """Both type and instance edge collections must be searched even when omitted."""
     mock_vector_engine = AsyncMock()
     mock_vector_engine.embedding_engine = AsyncMock()
     mock_vector_engine.embedding_engine.embed_text = AsyncMock(return_value=[[0.1, 0.2, 0.3]])
@@ -182,8 +186,10 @@ async def test_brute_force_triplet_search_always_includes_edge_collection():
             call[1]["collection_name"] for call in mock_vector_engine.search.call_args_list
         ]
         assert "EdgeType_relationship_name" in call_collections
+        assert "EdgeInstance_text" in call_collections
         assert set(call_collections) == set(collections_without_edge) | {
-            "EdgeType_relationship_name"
+            "EdgeType_relationship_name",
+            "EdgeInstance_text",
         }
 
 
@@ -762,6 +768,7 @@ async def test_brute_force_triplet_search_collection_not_found_error():
             CollectionNotFoundError("Collection not found"),
             [],
             [],
+            [],
         ]
     )
 
@@ -1075,7 +1082,7 @@ async def test_cognee_graph_mapping_batch_shapes():
     graph.add_node(node1)
     graph.add_node(node2)
 
-    edge = Edge(node1, node2, attributes={"edge_text": "relates_to"})
+    edge = Edge(node1, node2, attributes={"relationship_type": "relates_to"})
     graph.add_edge(edge)
 
     node_distances_batch = {
@@ -1087,10 +1094,13 @@ async def test_cognee_graph_mapping_batch_shapes():
 
     edge_1_text = "relates_to"
     edge_2_text = "relates_to"
-    edge_distances_batch = [
-        [MockScoredResult(EdgeType.id_for(edge_1_text), 0.92, payload={"text": edge_1_text})],
-        [MockScoredResult(EdgeType.id_for(edge_2_text), 0.88, payload={"text": edge_2_text})],
-    ]
+    edge_distances_batch = {
+        "EdgeType_relationship_name": [
+            [MockScoredResult(EdgeType.id_for(edge_1_text), 0.92, payload={"text": edge_1_text})],
+            [MockScoredResult(EdgeType.id_for(edge_2_text), 0.88, payload={"text": edge_2_text})],
+        ],
+        "EdgeInstance_text": [[], []],
+    }
 
     await graph.map_vector_distances_to_graph_nodes(
         node_distances=node_distances_batch, query_list_length=2
