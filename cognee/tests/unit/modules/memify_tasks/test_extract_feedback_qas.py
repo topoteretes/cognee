@@ -80,6 +80,42 @@ async def test_extract_feedback_qas_filters_eligible_entries(mock_user):
 
 
 @pytest.mark.asyncio
+async def test_extract_feedback_qas_yields_scored_entries_without_ids(mock_user):
+    """A scored QA with no usable graph ids is yielded once so the apply task can
+    mark it processed and stop it being rescanned on every improve() run."""
+    entries = [
+        _make_entry(qa_id="q1", feedback_score=4, used_graph_element_ids=None),
+        _make_entry(
+            qa_id="q2",
+            time="2026-01-01T10:01:00",
+            feedback_score=4,
+            used_graph_element_ids=None,
+            memify_metadata={MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY: True},
+        ),
+    ]
+
+    mock_session_manager = MagicMock()
+    mock_session_manager.is_available = True
+    mock_session_manager.get_session = AsyncMock(return_value=entries)
+
+    with (
+        patch.object(extract_feedback_qas_module, "session_user") as mock_session_user,
+        patch.object(
+            extract_feedback_qas_module,
+            "get_session_manager",
+            return_value=mock_session_manager,
+        ),
+    ):
+        mock_session_user.get.return_value = mock_user
+
+        extracted = []
+        async for item in extract_feedback_qas([{}], session_ids=["s1"]):
+            extracted.append(item)
+
+    assert [item["qa_id"] for item in extracted] == ["q1"]
+
+
+@pytest.mark.asyncio
 async def test_extract_feedback_qas_respects_session_ids(mock_user):
     mock_session_manager = MagicMock()
     mock_session_manager.is_available = True

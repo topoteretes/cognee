@@ -25,21 +25,9 @@ def _is_eligible(entry: SessionQAEntry) -> bool:
     ):
         return False
 
-    used_graph_element_ids = entry.used_graph_element_ids
-    if not isinstance(used_graph_element_ids, dict):
-        return False
-
-    node_ids = used_graph_element_ids.get("node_ids")
-    edge_ids = used_graph_element_ids.get("edge_ids")
-
-    has_node_ids = isinstance(node_ids, list) and any(
-        isinstance(node_id, str) for node_id in node_ids
-    )
-    has_edge_ids = isinstance(edge_ids, list) and any(
-        isinstance(edge_id, str) for edge_id in edge_ids
-    )
-
-    return has_node_ids or has_edge_ids
+    # Entries without usable graph element ids are still yielded once: the apply task
+    # marks them processed so they are never rescanned on later improve() runs.
+    return True
 
 
 async def extract_feedback_qas(data, session_ids: Optional[List[str]] = None):

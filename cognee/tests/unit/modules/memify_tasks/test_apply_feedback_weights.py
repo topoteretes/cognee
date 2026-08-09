@@ -10,6 +10,7 @@ from cognee.tasks.memify.apply_feedback_weights import (
 )
 from cognee.tasks.memify.feedback_weights_constants import (
     MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY,
+    MEMIFY_METADATA_FEEDBACK_WEIGHTS_DETAIL_KEY,
 )
 
 apply_feedback_weights_module = sys.modules["cognee.tasks.memify.apply_feedback_weights"]
@@ -221,7 +222,8 @@ async def test_apply_feedback_weights_skips_already_applied():
 
 
 @pytest.mark.asyncio
-async def test_apply_feedback_weights_missing_mapping_sets_false():
+async def test_apply_feedback_weights_empty_ids_marks_processed():
+    """A QA with no usable ids is marked processed so it is never rescanned."""
     graph = InMemoryGraphWithWeights()
     session_manager = MagicMock()
     session_manager.is_available = True
@@ -243,11 +245,13 @@ async def test_apply_feedback_weights_missing_mapping_sets_false():
         )
 
     call_kwargs = session_manager.update_qa.call_args.kwargs
-    assert call_kwargs["memify_metadata"][MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY] is False
+    assert call_kwargs["memify_metadata"][MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY] is True
+    assert graph.node_weights["n1"] == pytest.approx(0.5)
 
 
 @pytest.mark.asyncio
-async def test_apply_feedback_weights_partial_failure_keeps_false():
+async def test_apply_feedback_weights_prunes_missing_edge_and_completes():
+    """A deleted element is pruned (recorded as missing); the QA still completes."""
     graph = InMemoryGraphWithWeights(missing_edge=True)
     session_manager = MagicMock()
     session_manager.is_available = True
@@ -266,6 +270,79 @@ async def test_apply_feedback_weights_partial_failure_keeps_false():
         result = await apply_feedback_weights([_feedback_item()], alpha=0.1)
 
     assert result["processed"] == 1
-    assert result["applied"] == 0
-    call_kwargs = session_manager.update_qa.call_args.kwargs
-    assert call_kwargs["memify_metadata"][MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY] is False
+    assert result["applied"] == 1
+    assert graph.node_weights["n1"] == pytest.approx(0.55)
+    metadata = session_manager.update_qa.call_args.kwargs["memify_metadata"]
+    assert metadata[MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY] is True
+    detail = metadata[MEMIFY_METADATA_FEEDBACK_WEIGHTS_DETAIL_KEY]
+    assert detail["applied_node_ids"] == ["n1"]
+    assert detail["missing_edge_ids"] == ["e1"]
+
+
+@pytest.mark.asyncio
+async def test_apply_feedback_weights_reapplication_does_not_compound():
+    """Re-running with the stored metadata never applies a second alpha step (deleted-node
+    acceptance: three runs move surviving weights exactly once)."""
+    graph = InMemoryGraphWithWeights(missing_edge=True)
+    session_manager = MagicMock()
+    session_manager.is_available = True
+    session_manager.update_qa = AsyncMock(return_value=True)
+
+    metadata = {}
+    with (
+        patch.object(apply_feedback_weights_module, "session_user") as mock_session_user,
+        patch.object(apply_feedback_weights_module, "get_graph_engine", return_value=graph),
+        patch.object(
+            apply_feedback_weights_module,
+            "get_session_manager",
+            return_value=session_manager,
+        ),
+    ):
+        mock_session_user.get.return_value = _mock_user()
+        for _run in range(3):
+            await apply_feedback_weights([_feedback_item(memify_metadata=metadata)], alpha=0.1)
+            if session_manager.update_qa.call_args is not None:
+                metadata = session_manager.update_qa.call_args.kwargs["memify_metadata"]
+
+    assert graph.node_weights["n1"] == pytest.approx(0.55)
+    assert metadata[MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY] is True
+
+
+@pytest.mark.asyncio
+async def test_apply_feedback_weights_write_failure_retries_only_failed_then_gives_up():
+    """A found-but-write-failed element keeps the entry retryable, but already-applied
+    ids are skipped on retry, and the entry is marked done after MAX_APPLY_ATTEMPTS."""
+
+    class WriteFailingGraph(InMemoryGraphWithWeights):
+        async def set_edge_feedback_weights(self, edge_feedback_weights):
+            return {edge_id: False for edge_id in edge_feedback_weights}
+
+    graph = WriteFailingGraph()
+    session_manager = MagicMock()
+    session_manager.is_available = True
+    session_manager.update_qa = AsyncMock(return_value=True)
+
+    metadata = {}
+    with (
+        patch.object(apply_feedback_weights_module, "session_user") as mock_session_user,
+        patch.object(apply_feedback_weights_module, "get_graph_engine", return_value=graph),
+        patch.object(
+            apply_feedback_weights_module,
+            "get_session_manager",
+            return_value=session_manager,
+        ),
+    ):
+        mock_session_user.get.return_value = _mock_user()
+        statuses = []
+        for _run in range(apply_feedback_weights_module.MAX_APPLY_ATTEMPTS):
+            await apply_feedback_weights([_feedback_item(memify_metadata=metadata)], alpha=0.1)
+            metadata = session_manager.update_qa.call_args.kwargs["memify_metadata"]
+            statuses.append(metadata[MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY])
+
+    # Node applied exactly once despite three attempts on the failing edge.
+    assert graph.node_weights["n1"] == pytest.approx(0.55)
+    assert statuses[:-1] == [False] * (len(statuses) - 1)
+    assert statuses[-1] is True
+    detail = metadata[MEMIFY_METADATA_FEEDBACK_WEIGHTS_DETAIL_KEY]
+    assert detail["attempts"] == apply_feedback_weights_module.MAX_APPLY_ATTEMPTS
+    assert detail["applied_node_ids"] == ["n1"]

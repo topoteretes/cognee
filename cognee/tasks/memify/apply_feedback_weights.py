@@ -8,12 +8,19 @@ from cognee.infrastructure.session.get_session_manager import get_session_manage
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.memify.feedback_weights_constants import (
     MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY,
+    MEMIFY_METADATA_FEEDBACK_WEIGHTS_DETAIL_KEY,
 )
 
 logger = get_logger("apply_feedback_weights")
 
 MEMIFY_METADATA_KEY = MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY
+MEMIFY_METADATA_DETAIL_KEY = MEMIFY_METADATA_FEEDBACK_WEIGHTS_DETAIL_KEY
 FEEDBACK_WEIGHT_DECIMALS = 4
+
+# A QA whose weight writes keep failing is retried at most this many times before it is
+# marked processed anyway; each retry skips already-applied ids, so retries never
+# re-apply the same feedback step to an element.
+MAX_APPLY_ATTEMPTS = 3
 
 
 class FeedbackItem(TypedDict, total=False):
@@ -77,6 +84,12 @@ def _iter_feedback_items(data: Any) -> Iterable[FeedbackItem]:
                 yield item
 
 
+class ElementUpdateOutcome(TypedDict):
+    applied: "list[str]"
+    missing: "list[str]"
+    failed: "list[str]"
+
+
 async def _update_element_weights(
     *,
     ids: list[str],
@@ -84,32 +97,35 @@ async def _update_element_weights(
     alpha: float,
     get_weights: WeightGetter,
     set_weights: WeightSetter,
-) -> bool:
+) -> ElementUpdateOutcome:
     """
-    Update weights for one element type (nodes or edges).
+    Update weights for one element type (nodes or edges), applying at most one step per id.
 
-    Returns True only when all requested ids were found and successfully updated or when the id set is empty.
+    Ids absent from the graph (e.g. deleted since the answer was produced) are pruned and
+    reported as ``missing``; ids whose write did not succeed are reported as ``failed`` so a
+    later run can retry only those.
     """
     if not ids:
-        return True
+        return {"applied": [], "missing": [], "failed": []}
 
     existing_weights = await get_weights(ids)
 
-    updates: dict[str, float] = {}
-    all_found = True
-    for element_id in ids:
-        previous_weight = existing_weights.get(element_id)
-        if previous_weight is None:
-            all_found = False
-            continue
-        updates[element_id] = stream_update_weight(previous_weight, normalized_rating, alpha)
+    missing = [element_id for element_id in ids if existing_weights.get(element_id) is None]
+    updates = {
+        element_id: stream_update_weight(existing_weights[element_id], normalized_rating, alpha)
+        for element_id in ids
+        if existing_weights.get(element_id) is not None
+    }
 
     if not updates:
-        return False
+        return {"applied": [], "missing": missing, "failed": []}
 
     update_result = await set_weights(updates)
-    all_written = all(bool(update_result.get(element_id, False)) for element_id in updates)
-    return all_found and all_written
+    applied = [element_id for element_id in updates if bool(update_result.get(element_id, False))]
+    failed = [
+        element_id for element_id in updates if not bool(update_result.get(element_id, False))
+    ]
+    return {"applied": applied, "missing": missing, "failed": failed}
 
 
 async def _mark_feedback_processed(
@@ -119,9 +135,14 @@ async def _mark_feedback_processed(
     session_id: str,
     qa_id: str,
     current_metadata: dict[str, Any],
-    success: bool,
+    done: bool,
+    detail: dict[str, Any],
 ) -> None:
-    metadata = {**current_metadata, MEMIFY_METADATA_KEY: success}
+    metadata = {
+        **current_metadata,
+        MEMIFY_METADATA_KEY: done,
+        MEMIFY_METADATA_DETAIL_KEY: detail,
+    }
     updated = await session_manager.update_qa(
         user_id=user_id,
         session_id=session_id,
@@ -133,6 +154,13 @@ async def _mark_feedback_processed(
             message=f"Failed to update memify metadata for qa_id={qa_id} in session={session_id}",
             log=False,
         )
+
+
+def _detail_ids(detail: dict[str, Any], key: str) -> set:
+    values = detail.get(key)
+    if not isinstance(values, list):
+        return set()
+    return {value for value in values if isinstance(value, str) and value}
 
 
 async def _process_feedback_item(
@@ -159,28 +187,45 @@ async def _process_feedback_item(
     except CogneeValidationError:
         return {"processed": 0, "applied": 0, "skipped": 1}
 
-    node_ids = _extract_ids(item.get("used_graph_element_ids"), "node_ids")
-    edge_ids = _extract_ids(item.get("used_graph_element_ids"), "edge_ids")
+    detail = memify_metadata.get(MEMIFY_METADATA_DETAIL_KEY)
+    detail = detail if isinstance(detail, dict) else {}
+    already_applied_nodes = _detail_ids(detail, "applied_node_ids")
+    already_applied_edges = _detail_ids(detail, "applied_edge_ids")
+
+    # Retries only ever see the ids this QA has not yet applied, so a partially
+    # failed run can never re-apply the same feedback step to an element.
+    node_ids = [
+        element_id
+        for element_id in _extract_ids(item.get("used_graph_element_ids"), "node_ids")
+        if element_id not in already_applied_nodes
+    ]
+    edge_ids = [
+        element_id
+        for element_id in _extract_ids(item.get("used_graph_element_ids"), "edge_ids")
+        if element_id not in already_applied_edges
+    ]
 
     if not node_ids and not edge_ids:
+        # Nothing (left) to apply: mark the entry processed so it is never rescanned.
         await _mark_feedback_processed(
             session_manager=session_manager,
             user_id=user_id,
             session_id=session_id,
             qa_id=qa_id,
             current_metadata=memify_metadata,
-            success=False,
+            done=True,
+            detail=detail,
         )
         return {"processed": 0, "applied": 0, "skipped": 1}
 
-    node_success = await _update_element_weights(
+    node_outcome = await _update_element_weights(
         ids=node_ids,
         normalized_rating=normalized_rating,
         alpha=alpha,
         get_weights=graph_engine.get_node_feedback_weights,
         set_weights=graph_engine.set_node_feedback_weights,
     )
-    edge_success = await _update_element_weights(
+    edge_outcome = await _update_element_weights(
         ids=edge_ids,
         normalized_rating=normalized_rating,
         alpha=alpha,
@@ -188,26 +233,61 @@ async def _process_feedback_item(
         set_weights=graph_engine.set_edge_feedback_weights,
     )
 
-    qa_success = node_success and edge_success
+    attempts = detail.get("attempts")
+    attempts = (int(attempts) if isinstance(attempts, int) else 0) + 1
+    failed_ids = node_outcome["failed"] + edge_outcome["failed"]
+    # Missing ids (deleted since the answer) are pruned, not failures: the entry is done
+    # once every remaining id was either applied or found missing.
+    done = not failed_ids or attempts >= MAX_APPLY_ATTEMPTS
+
+    new_detail = {
+        "applied_node_ids": sorted(already_applied_nodes | set(node_outcome["applied"])),
+        "applied_edge_ids": sorted(already_applied_edges | set(edge_outcome["applied"])),
+        "missing_node_ids": sorted(
+            _detail_ids(detail, "missing_node_ids") | set(node_outcome["missing"])
+        ),
+        "missing_edge_ids": sorted(
+            _detail_ids(detail, "missing_edge_ids") | set(edge_outcome["missing"])
+        ),
+        "attempts": attempts,
+    }
+
+    if failed_ids:
+        logger.warning(
+            "Feedback QA %s: weight write failed for %d element(s)%s",
+            qa_id,
+            len(failed_ids),
+            " — giving up after max attempts" if done else "; will retry only those",
+        )
+    if node_outcome["missing"] or edge_outcome["missing"]:
+        logger.warning(
+            "Feedback QA %s: %d referenced element(s) no longer exist in the graph; pruned",
+            qa_id,
+            len(node_outcome["missing"]) + len(edge_outcome["missing"]),
+        )
+
     await _mark_feedback_processed(
         session_manager=session_manager,
         user_id=user_id,
         session_id=session_id,
         qa_id=qa_id,
         current_metadata=memify_metadata,
-        success=qa_success,
+        done=done,
+        detail=new_detail,
     )
 
+    applied_any = bool(node_outcome["applied"] or edge_outcome["applied"])
     logger.info(
-        "Processed feedback QA %s from session %s (nodes=%d, edges=%d, applied=%s)",
+        "Processed feedback QA %s from session %s (applied=%d, missing=%d, failed=%d, done=%s)",
         qa_id,
         session_id,
-        len(node_ids),
-        len(edge_ids),
-        qa_success,
+        len(node_outcome["applied"]) + len(edge_outcome["applied"]),
+        len(node_outcome["missing"]) + len(edge_outcome["missing"]),
+        len(failed_ids),
+        done,
     )
 
-    return {"processed": 1, "applied": 1 if qa_success else 0, "skipped": 0}
+    return {"processed": 1, "applied": 1 if applied_any else 0, "skipped": 0}
 
 
 async def apply_feedback_weights(data: Any, alpha: float = 0.1) -> ApplyFeedbackWeightsResult:
