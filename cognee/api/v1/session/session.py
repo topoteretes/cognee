@@ -122,7 +122,7 @@ async def add_feedback(
 
     try:
         sm = get_session_manager()
-        return await sm.add_feedback(
+        updated = await sm.add_feedback(
             user_id=user_id,
             session_id=session_id,
             qa_id=qa_id,
@@ -132,6 +132,44 @@ async def add_feedback(
     except Exception as e:
         logger.warning("add_feedback: error from SessionManager: %s", e)
         return False
+
+    if updated and feedback_score is not None and feedback_score <= 2:
+        # Bridge explicit judgement back into the session-context loop: the
+        # guidance entries served to this answer contributed to a bad one.
+        await _rate_served_context_entries(sm, user_id, session_id, qa_id, "harmful")
+
+    return updated
+
+
+async def _rate_served_context_entries(
+    sm, user_id: str, session_id: str, qa_id: str, verdict: str
+) -> None:
+    """Bump helpful/harmful counters on the context entries served to a rated QA.
+
+    Fail-open: rating counters must never make add_feedback fail.
+    """
+    from types import SimpleNamespace
+
+    from cognee.infrastructure.session.session_turn import apply_served_context_ratings
+
+    try:
+        entries = await sm.get_session_entries_by_ids(
+            user_id=user_id, session_id=session_id, qa_ids=[qa_id]
+        )
+        if not entries:
+            return
+        entry = entries[0]
+        served_ids = getattr(entry, "used_session_context_ids", None) or []
+        if not served_ids:
+            return
+        ratings = [
+            SimpleNamespace(entry_id=str(entry_id), rating=verdict) for entry_id in served_ids
+        ]
+        await apply_served_context_ratings(
+            sm, user_id=user_id, session_id=session_id, ratings=ratings
+        )
+    except Exception as e:
+        logger.warning("add_feedback: served-context rating bridge failed: %s", e)
 
 
 async def add_frequency_weights(

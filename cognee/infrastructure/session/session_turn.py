@@ -276,6 +276,48 @@ async def apply_served_context_ratings(
         logger.warning("Session turn: served-context rating update failed: %s", e)
 
 
+# Conservative implicit scores: never the extremes, so an inferred judgement moves
+# graph weights less than a deliberate 1/5 rating would.
+IMPLICIT_RATING_SCORES = {"helpful": 4, "harmful": 2}
+
+
+async def apply_implicit_answer_rating(
+    session_manager,
+    *,
+    user_id: str,
+    session_id: str,
+    previous_entry: dict,
+    rating: str | None,
+) -> bool:
+    """Write an implicit feedback_score for the previous answer from turn analysis.
+
+    This is the bridge between the two feedback loops: without it, users who never
+    call add_feedback produce no feedback_score, and the graph feedback-weights
+    stage has nothing to apply. Explicit ratings stay authoritative — an existing
+    score is never overwritten. Fail-open -> False.
+    """
+    score = IMPLICIT_RATING_SCORES.get(rating or "")
+    if score is None:
+        return False
+    qa_id = previous_entry.get("qa_id")
+    if not qa_id:
+        return False
+    if previous_entry.get("feedback_score") is not None:
+        return False
+    try:
+        return bool(
+            await session_manager.add_feedback(
+                user_id=user_id,
+                session_id=session_id,
+                qa_id=qa_id,
+                feedback_score=score,
+            )
+        )
+    except Exception as e:
+        logger.warning("Session turn: implicit answer rating failed: %s", e)
+        return False
+
+
 async def apply_session_turn_analysis(
     session_manager,
     *,
@@ -403,6 +445,14 @@ async def prepare_session_turn(
     except Exception as error:
         logger.warning("Session turn analysis application failed open: %s", error)
         accepted_context_ids = []
+
+    await apply_implicit_answer_rating(
+        session_manager,
+        user_id=str(resolved_user_id),
+        session_id=resolved_session_id,
+        previous_entry=previous_entry,
+        rating=analysis.overall_answer_rating,
+    )
 
     query_to_answer = (analysis.query_to_answer or "").strip()
     response_to_user = (analysis.response_to_user or "").strip() or None

@@ -20,6 +20,14 @@ class SessionTurnAnalysis(BaseModel):
         default=None,
         description="The question/request to answer now, or null when there is none.",
     )
+    overall_answer_rating: str | None = Field(
+        default=None,
+        description=(
+            "Set only when the message clearly judges the previous answer as a whole: "
+            "'helpful' for clear acceptance or praise, 'harmful' for clear rejection or "
+            "correction of the answer. Omit when the message is neutral or unclear."
+        ),
+    )
     served_context_ratings: list[ServedContextRating] = Field(
         default_factory=list,
         description="Up to 3 ratings of session-context entries served to the previous answer.",
@@ -41,6 +49,15 @@ class SessionTurnAnalysis(BaseModel):
             raise ValueError("value must be a string")
         stripped = value.strip()
         return stripped or None
+
+    @field_validator("overall_answer_rating", mode="before")
+    @classmethod
+    def normalize_overall_answer_rating(cls, value):
+        """Coerce to 'helpful'/'harmful' or None; never raises (non-blocking contract)."""
+        if not isinstance(value, str):
+            return None
+        normalized = value.strip().lower()
+        return normalized if normalized in ("helpful", "harmful") else None
 
     @field_validator("candidate_context_updates", mode="before")
     @classmethod

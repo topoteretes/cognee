@@ -685,11 +685,14 @@ class SessionManager:
         Add or update feedback for a QA entry.
 
         Convenience method that updates only feedback fields.
-        Resets feedback-weight memify status so updated feedback can be re-applied.
+        Resets feedback-weight memify status — including the applied-ids detail,
+        so the new rating applies one fresh step to every used element instead of
+        skipping ids the previous rating already touched.
         Returns True if updated, False if not found or cache unavailable.
         """
         from cognee.tasks.memify.feedback_weights_constants import (
             MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY,
+            MEMIFY_METADATA_FEEDBACK_WEIGHTS_DETAIL_KEY,
         )
 
         return await self.update_qa(
@@ -697,7 +700,10 @@ class SessionManager:
             qa_id=qa_id,
             feedback_text=feedback_text,
             feedback_score=feedback_score,
-            memify_metadata={MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY: False},
+            memify_metadata={
+                MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY: False,
+                MEMIFY_METADATA_FEEDBACK_WEIGHTS_DETAIL_KEY: {},
+            },
             session_id=session_id,
         )
 
