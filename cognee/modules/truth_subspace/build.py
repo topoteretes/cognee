@@ -191,22 +191,30 @@ async def build_truth_subspace(
         if not rebuilt_centroids:
             return empty_result
 
-        if centroids_changed(existing_centroids, rebuilt_centroids):
+        centroids_dirty = centroids_changed(existing_centroids, rebuilt_centroids)
+        if centroids_dirty:
             current_epoch = previous_epoch + 1
             centroids = build_for_epoch(current_epoch)
-            try:
-                await upsert_centroids(vector_engine, centroids)
-            except Exception as error:
-                logger.warning("truth_subspace: centroid upsert failed open: %s", error)
-                return {
-                    "anchors": len(centroids),
-                    "nodes_scored": 0,
-                    "signature": signature,
-                    "truth_epoch": current_epoch,
-                }
         else:
             current_epoch = previous_epoch
             centroids = existing_centroids
+
+        async def commit_centroids() -> bool:
+            """Upsert the new centroid slots — the epoch goes live only when this succeeds.
+
+            Called after chunk scoring: ranking honors chunk coords only when their epoch
+            matches the live centroid epoch, so committing centroids first would neutralize
+            the whole corpus if scoring then failed mid-build. Committing last means a
+            mid-build failure leaves the previous epoch fully live.
+            """
+            if not centroids_dirty:
+                return True
+            try:
+                await upsert_centroids(vector_engine, centroids)
+                return True
+            except Exception as error:
+                logger.warning("truth_subspace: centroid upsert failed open: %s", error)
+                return False
 
         centroid_vecs = [centroid.centroid for centroid in centroids]
 
@@ -226,7 +234,7 @@ async def build_truth_subspace(
                 "anchors": len(centroids),
                 "nodes_scored": 0,
                 "signature": signature,
-                "truth_epoch": current_epoch,
+                "truth_epoch": previous_epoch,
             }
 
         chunk_label = DocumentChunk.__name__
@@ -244,11 +252,12 @@ async def build_truth_subspace(
 
         if not node_texts:
             logger.info("truth_subspace: %d centroids, no scoreable nodes", len(centroids))
+            committed = await commit_centroids()
             return {
                 "anchors": len(centroids),
                 "nodes_scored": 0,
                 "signature": signature,
-                "truth_epoch": current_epoch,
+                "truth_epoch": current_epoch if committed else previous_epoch,
             }
 
         # Step 6: EMBED node texts (batched) and compute coords per node.
@@ -269,14 +278,17 @@ async def build_truth_subspace(
                 logger.debug("truth_subspace: coords failed for node %s: %s", node_id, error)
 
         if not scored:
+            committed = await commit_centroids()
             return {
                 "anchors": len(centroids),
                 "nodes_scored": 0,
                 "signature": signature,
-                "truth_epoch": current_epoch,
+                "truth_epoch": current_epoch if committed else previous_epoch,
             }
 
-        # Step 7: PERSIST per-node coordinate vectors.
+        # Step 7: PERSIST per-node coordinate vectors, then commit the centroids.
+        # Chunk states carry the new epoch but stay dormant until the centroid
+        # upsert makes that epoch live.
         try:
             write_result = await graph_engine.set_node_truth_state(scored)
         except Exception as error:
@@ -285,10 +297,20 @@ async def build_truth_subspace(
                 "anchors": len(centroids),
                 "nodes_scored": 0,
                 "signature": signature,
-                "truth_epoch": current_epoch,
+                "truth_epoch": previous_epoch,
             }
 
         nodes_scored = sum(1 for ok in write_result.values() if ok)
+
+        if not await commit_centroids():
+            # Scored chunks are tagged with an epoch that never went live; the
+            # previous epoch remains the one ranking sees.
+            return {
+                "anchors": len(centroids),
+                "nodes_scored": nodes_scored,
+                "signature": signature,
+                "truth_epoch": previous_epoch,
+            }
 
     logger.info(
         "truth_subspace: built subspace -> centroids=%d nodes_scored=%d epoch=%d signature=%s",

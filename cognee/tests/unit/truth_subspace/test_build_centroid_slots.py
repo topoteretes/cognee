@@ -105,6 +105,109 @@ async def test_build_skips_nodes_whose_embedding_batch_failed(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_centroids_commit_after_chunk_scoring(monkeypatch):
+    """Centroid upsert (the epoch bump) must happen after chunk-state writes, so a
+    mid-build failure leaves the previous epoch fully live."""
+    order = []
+
+    result, vector_engine, graph_engine = await _run_build(monkeypatch)
+
+    # Successful build: both writes happened, truth state before centroids.
+    assert result["truth_epoch"] == 1
+    vector_engine.upsert_raw_vectors.assert_awaited_once()
+    graph_engine.set_node_truth_state.assert_awaited_once()
+
+    # mock_calls interleaving across two mocks isn't directly comparable; re-run with
+    # side effects that record ordering.
+    def record(name):
+        async def _side_effect(*args, **kwargs):
+            order.append(name)
+            return {"chunk-1": True} if name == "truth_state" else None
+
+        return _side_effect
+
+    dataset = SimpleNamespace(id=uuid4(), owner_id=uuid4())
+    user = SimpleNamespace(id=uuid4())
+    vector_engine = MagicMock()
+    vector_engine.retrieve = AsyncMock(return_value=[])
+    vector_engine.upsert_raw_vectors = AsyncMock(side_effect=record("centroids"))
+    graph_engine = MagicMock()
+    graph_engine.get_nodeset_subgraph = AsyncMock(
+        return_value=([("learning-1", {"type": "DocumentChunk", "text": "alpha"})], [])
+    )
+    graph_engine.get_graph_data = AsyncMock(
+        return_value=([("chunk-1", {"type": "DocumentChunk", "text": "alpha corpus"})], [])
+    )
+    graph_engine.set_node_truth_state = AsyncMock(side_effect=record("truth_state"))
+    monkeypatch.setenv("ENABLE_BACKEND_ACCESS_CONTROL", "false")
+
+    with (
+        patch(
+            "cognee.modules.truth_subspace.build.get_authorized_existing_datasets",
+            new=AsyncMock(return_value=[dataset]),
+        ),
+        patch(
+            "cognee.modules.truth_subspace.build.get_vector_engine_async",
+            new=AsyncMock(return_value=vector_engine),
+        ),
+        patch(
+            "cognee.modules.truth_subspace.build.get_graph_engine",
+            new=AsyncMock(return_value=graph_engine),
+        ),
+        patch(
+            "cognee.modules.truth_subspace.build.get_embedding_engine",
+            return_value=_EmbeddingEngine(),
+        ),
+    ):
+        await build_truth_subspace(dataset.id, session_ids=None, user=user)
+
+    assert order == ["truth_state", "centroids"]
+
+
+@pytest.mark.asyncio
+async def test_mid_build_scoring_failure_leaves_old_epoch_live(monkeypatch):
+    """If persisting chunk truth states fails, the new centroid epoch must not commit."""
+    dataset = SimpleNamespace(id=uuid4(), owner_id=uuid4())
+    user = SimpleNamespace(id=uuid4())
+    vector_engine = MagicMock()
+    vector_engine.retrieve = AsyncMock(return_value=[])
+    vector_engine.upsert_raw_vectors = AsyncMock()
+    graph_engine = MagicMock()
+    graph_engine.get_nodeset_subgraph = AsyncMock(
+        return_value=([("learning-1", {"type": "DocumentChunk", "text": "alpha"})], [])
+    )
+    graph_engine.get_graph_data = AsyncMock(
+        return_value=([("chunk-1", {"type": "DocumentChunk", "text": "alpha corpus"})], [])
+    )
+    graph_engine.set_node_truth_state = AsyncMock(side_effect=RuntimeError("db down"))
+    monkeypatch.setenv("ENABLE_BACKEND_ACCESS_CONTROL", "false")
+
+    with (
+        patch(
+            "cognee.modules.truth_subspace.build.get_authorized_existing_datasets",
+            new=AsyncMock(return_value=[dataset]),
+        ),
+        patch(
+            "cognee.modules.truth_subspace.build.get_vector_engine_async",
+            new=AsyncMock(return_value=vector_engine),
+        ),
+        patch(
+            "cognee.modules.truth_subspace.build.get_graph_engine",
+            new=AsyncMock(return_value=graph_engine),
+        ),
+        patch(
+            "cognee.modules.truth_subspace.build.get_embedding_engine",
+            return_value=_EmbeddingEngine(),
+        ),
+    ):
+        result = await build_truth_subspace(dataset.id, session_ids=None, user=user)
+
+    vector_engine.upsert_raw_vectors.assert_not_awaited()
+    assert result["truth_epoch"] == 0
+    assert result["nodes_scored"] == 0
+
+
+@pytest.mark.asyncio
 async def test_build_truth_subspace_filters_learning_sets_by_session_ids(monkeypatch):
     _result, _vector_engine, graph_engine = await _run_build(
         monkeypatch, session_ids=["s-1", "s-2"]
