@@ -31,8 +31,8 @@ class ImprovePayloadDTO(InDTO):
     build_global_context_index: Optional[bool] = Field(default=False)
     # Session IDs to bridge into the permanent graph. When set, improve
     # runs the full session pipeline (feedback weights + QA persist +
-    # trace-step persist + graph→session sync) in addition to the
-    # default memify enrichment.
+    # trace-step persist + distillation) in addition to the default
+    # memify enrichment.
     session_ids: Optional[List[str]] = Field(default=None, examples=[[]])
 
 

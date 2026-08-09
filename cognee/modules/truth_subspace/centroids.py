@@ -52,18 +52,6 @@ def weighted_centroid(old: Sequence[float], count: int, new: Sequence[float]) ->
     return normalize(merged)
 
 
-def unique_learning_vectors(
-    statements: Sequence[str],
-    vectors: Sequence[Sequence[float]],
-) -> list[tuple[str, list[float]]]:
-    unique: dict[str, list[float]] = {}
-    for statement, vector in zip(statements, vectors):
-        if not str(statement).strip():
-            continue
-        unique.setdefault(learning_id(statement), list(vector))
-    return sorted(unique.items(), key=lambda item: item[0])
-
-
 def build_centroids_from_learning_vectors(
     dataset_id: str,
     learning_vectors: Sequence[tuple[str, Sequence[float]]],

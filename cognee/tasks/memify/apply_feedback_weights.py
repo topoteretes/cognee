@@ -290,6 +290,20 @@ async def _process_feedback_item(
     return {"processed": 1, "applied": 1 if applied_any else 0, "skipped": 0}
 
 
+def _supports_feedback_weights(graph_engine) -> bool:
+    """Whether the graph backend overrides the feedback-weight persistence hooks.
+
+    The interface defaults raise NotImplementedError; probing up front turns a
+    would-be per-item crash into one visible skip.
+    """
+    from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
+
+    method = getattr(graph_engine, "set_node_feedback_weights", None)
+    if method is None:
+        return False
+    return getattr(method, "__func__", method) is not GraphDBInterface.set_node_feedback_weights
+
+
 async def apply_feedback_weights(data: Any, alpha: float = 0.1) -> ApplyFeedbackWeightsResult:
     """Apply feedback-based weight updates for graph nodes and edges."""
     if alpha <= 0 or alpha > 1:
@@ -301,6 +315,16 @@ async def apply_feedback_weights(data: Any, alpha: float = 0.1) -> ApplyFeedback
 
     session_manager = get_session_manager()
     graph_engine = await get_graph_engine()
+
+    if not _supports_feedback_weights(graph_engine):
+        skipped = sum(1 for _ in _iter_feedback_items(data))
+        logger.warning(
+            "Feedback weights skipped: graph backend %s does not implement "
+            "feedback-weight persistence (%d item(s) left unprocessed)",
+            type(graph_engine).__name__,
+            skipped,
+        )
+        return {"processed": 0, "applied": 0, "skipped": skipped}
 
     processed = 0
     applied = 0

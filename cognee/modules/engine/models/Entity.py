@@ -12,7 +12,6 @@ class Entity(DataPoint):
     # Optional truth-alignment fields; never embedded (kept out of index_fields)
     # and not part of id/dedup (kept out of identity_fields).
     truth_alignment: Optional[list[float]] = None
-    truth_subspace_signature: Optional[str] = None
     truth_epoch: Optional[int] = None
     # identity_fields makes the id deterministic and namespaced by class
     # (``Entity:<name>``) when constructed without an explicit id — the same

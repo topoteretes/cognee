@@ -100,16 +100,6 @@ _OPERATIONS: List[Dict[str, Any]] = [
         ],
     },
     {
-        "name": "apply_frequency_weights",
-        "label": "frequency weighting",
-        "kind": "self_improve",
-        "scope": "subset",
-        "summary": "Increments usage counts on used nodes/edges (frequency_weight).",
-        "effects": [
-            {"effect": "modifies", "target_type": "Entity", "property": "frequency_weight"},
-        ],
-    },
-    {
         "name": "consolidate_entity_descriptions",
         "label": "consolidate descriptions",
         "kind": "pipeline",

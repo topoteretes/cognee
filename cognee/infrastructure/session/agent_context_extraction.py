@@ -277,35 +277,6 @@ async def _extract_batch_from_traces(
     )
 
 
-async def extract_batch_agent_context(
-    *,
-    session_manager,
-    user_id: str,
-    session_id: str,
-    last_n: int = BATCH_TRACE_LIMIT,
-) -> list[str]:
-    """LLM batch pass: read recent traces, propose new agent lessons, and store them.
-
-    The prompt is shown the session's existing agent lessons so the model only proposes
-    genuinely new ones, and the output is capped at ``MAX_BATCH_LESSONS`` — together these bound
-    store growth across repeated improve() runs. Exact-content dedup in the applier is the final
-    backstop. Fail-open -> [].
-    """
-    try:
-        traces = await session_manager.get_agent_trace_session(
-            user_id=user_id, session_id=session_id, last_n=last_n
-        )
-        return await _extract_batch_from_traces(
-            session_manager=session_manager,
-            user_id=user_id,
-            session_id=session_id,
-            traces=traces,
-        )
-    except Exception as error:
-        logger.warning("Batch agent-context extraction failed open: %s", error)
-        return []
-
-
 async def extract_pending_agent_context(
     *,
     session_manager,

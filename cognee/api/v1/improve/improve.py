@@ -279,7 +279,10 @@ async def improve(
                 # cognee.session.distill_session call.
                 stage_records.append(
                     await _distill_sessions(
-                        dataset=dataset,
+                        # The resolved UUID, never the raw name: names are
+                        # owner-scoped, so a shared dataset's name would
+                        # re-resolve to the caller's own same-named dataset.
+                        dataset=write_dataset_ref,
                         session_ids=session_ids,
                         user=user,
                     )
@@ -296,7 +299,7 @@ async def improve(
                         )
 
                         result_ts = await _build_truth_subspace(
-                            dataset=dataset,
+                            dataset=write_dataset_ref,
                             session_ids=session_ids,
                             user=user,
                         )

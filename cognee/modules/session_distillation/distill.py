@@ -184,12 +184,29 @@ async def load_distillable_session_inputs(
         for entry in (raw_qa if isinstance(raw_qa, list) else [])
     ]
 
+    # Net-helpfulness gate (same clamped signal the serving-time ranker uses):
+    # entries rated harmful more often than helpful are excluded, but a single
+    # misread harmful rating no longer disqualifies an entry for life, and
+    # helpful ratings count as positive evidence.
     context_entries = [
         entry
         for entry in coerce_active_context_entries(context_rows)
-        if entry.harmful_count == 0 and entry.confidence >= MIN_GATE_CONFIDENCE
+        if (entry.helpful_count - entry.harmful_count) >= 0
+        and entry.confidence >= MIN_GATE_CONFIDENCE
     ]
     return qa_rows, context_entries
+
+
+def _timeline_sort_key(stamp: str) -> float:
+    """Chronological key for mixed timestamp formats; unparseable stamps sort first.
+
+    Lexical string comparison mis-orders mixed formats (offset vs naive, differing
+    precision), so parse to epoch seconds and fall back cleanly.
+    """
+    try:
+        return datetime.fromisoformat(str(stamp)).timestamp()
+    except (TypeError, ValueError):
+        return float("-inf")
 
 
 def build_curator_batches(
@@ -216,7 +233,7 @@ def build_curator_batches(
         block = f"Candidate {entry.id} [{entry.context_profile}/{entry.section}]: {content}"
         timeline.append((entry.created_at or "", block))
 
-    timeline.sort(key=lambda item: item[0])
+    timeline.sort(key=lambda item: _timeline_sort_key(item[0]))
     blocks = [block for _timestamp, block in timeline]
 
     return [
@@ -427,7 +444,14 @@ def render_lesson_document(
     statement = lesson.statement.strip()
     why = lesson.why_learned.strip().rstrip(".")
     body = f"{statement} ({why}.)" if why else statement
-    return f"# Session learning — (session {session_id})\n\n{body}\n"
+    document = f"# Session learning — (session {session_id})\n\n{body}\n"
+    # Entity provenance (stable across re-acceptance, so dedup still holds).
+    # Member entry ids are deliberately NOT embedded: they are cache-internal and
+    # differ per run, which would defeat content-hash dedup of identical lessons.
+    entities = [name.strip() for name in lesson.entities if isinstance(name, str) and name.strip()]
+    if entities:
+        document += f"\nEntities: {', '.join(entities)}\n"
+    return document
 
 
 async def publish_distilled_lessons(

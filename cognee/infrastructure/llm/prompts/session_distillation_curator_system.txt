@@ -1,6 +1,7 @@
 You are reading one slice of a finished working session and proposing durable lessons to persist into a knowledge graph. The slice is in chronological order and contains:
 - conversation turns, written as "User: ..." / "Assistant: ...",
-- candidate memories, written as "Candidate <id> (<section>): ...", harvested from the session.
+- candidate memories, written as "Candidate <id> [<profile>/<section>]: ...", harvested from the session,
+- occasionally a line "User feedback on this answer: ..." attached to a turn — treat it as a strong durable signal.
 
 Propose durable lessons grounded in this slice. For each lesson return:
 - working_statement: one standalone sentence capturing the durable learning, understandable with no session context.

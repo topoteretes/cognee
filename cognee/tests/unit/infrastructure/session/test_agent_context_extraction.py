@@ -17,7 +17,6 @@ from cognee.infrastructure.session.agent_context_extraction import (
     TRACE_EXTRACTION_STATE_KIND,
     build_live_agent_candidates,
     build_trace_batch,
-    extract_batch_agent_context,
     extract_live_agent_context,
     extract_pending_agent_context,
 )
@@ -248,7 +247,9 @@ async def test_batch_stores_llm_lessons(monkeypatch):
             {"section": "tool_rules", "content": "Run tests with uv run pytest", "confidence": 0.8},
         ],
     )
-    touched = await extract_batch_agent_context(session_manager=sm, user_id="u", session_id="s")
+    touched = await agent_context_extraction._extract_batch_from_traces(
+        session_manager=sm, user_id="u", session_id="s", traces=sm.traces
+    )
     assert len(touched) == 2
     sections = {row["section"] for row in sm.store}
     assert sections == {"environment_facts", "tool_rules"}
@@ -261,21 +262,27 @@ async def test_batch_stores_llm_lessons(monkeypatch):
 async def test_batch_noop_without_traces(monkeypatch):
     sm = FakeSessionManager(traces=[])
     _patch_llm(monkeypatch, lessons=[{"section": "tool_rules", "content": "x", "confidence": 0.9}])
-    touched = await extract_batch_agent_context(session_manager=sm, user_id="u", session_id="s")
+    touched = await agent_context_extraction._extract_batch_from_traces(
+        session_manager=sm, user_id="u", session_id="s", traces=sm.traces
+    )
     assert touched == []
     assert sm.store == []
 
 
 @pytest.mark.asyncio
-async def test_batch_fail_open_on_llm_error(monkeypatch):
+async def test_batch_raises_on_llm_error_so_callers_keep_watermarks(monkeypatch):
+    """The internal batch pass propagates infra errors; the pending path catches
+    them and — crucially — leaves the watermark untouched (fail-open lives there)."""
     sm = FakeSessionManager(traces=[_trace("run_tests", status="error", error_message="exit 1")])
 
     async def boom(text_input, system_prompt, response_model):
         raise RuntimeError("llm down")
 
     monkeypatch.setattr(agent_context_extraction.LLMGateway, "acreate_structured_output", boom)
-    touched = await extract_batch_agent_context(session_manager=sm, user_id="u", session_id="s")
-    assert touched == []
+    with pytest.raises(RuntimeError, match="llm down"):
+        await agent_context_extraction._extract_batch_from_traces(
+            session_manager=sm, user_id="u", session_id="s", traces=sm.traces
+        )
     assert sm.store == []
 
 
@@ -294,7 +301,9 @@ async def test_batch_shows_existing_lessons_to_the_model(monkeypatch):
     captured = {}
     _patch_llm(monkeypatch, lessons=[], captured=captured)
 
-    await extract_batch_agent_context(session_manager=sm, user_id="u", session_id="s")
+    await agent_context_extraction._extract_batch_from_traces(
+        session_manager=sm, user_id="u", session_id="s", traces=sm.traces
+    )
 
     assert "EXISTING LESSONS" in captured["text_input"]
     assert "Old lesson about uv." in captured["text_input"]
@@ -311,7 +320,9 @@ async def test_batch_caps_new_lessons_per_run(monkeypatch):
     ]
     _patch_llm(monkeypatch, lessons=lessons)
 
-    touched = await extract_batch_agent_context(session_manager=sm, user_id="u", session_id="s")
+    touched = await agent_context_extraction._extract_batch_from_traces(
+        session_manager=sm, user_id="u", session_id="s", traces=sm.traces
+    )
 
     assert len(touched) == MAX_BATCH_LESSONS
     assert len(sm.store) == MAX_BATCH_LESSONS

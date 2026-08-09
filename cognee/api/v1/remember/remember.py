@@ -779,10 +779,9 @@ async def remember(
         self_improvement: If *True* (default), automatically runs
             ``improve()`` after cognify to enrich the graph with
             triplet embeddings and indexing.
-        session_ids: Session IDs to sync graph knowledge back to.
-            Only used when ``self_improvement=True``. When provided,
-            ``improve()`` will also copy recent graph relationships
-            into these sessions for fast retrieval.
+        session_ids: Session IDs whose feedback, Q&A content, and agent
+            traces should be bridged into the permanent graph. Only used
+            when ``self_improvement=True``.
         dry_run: If *True*, return a stage-level estimate of LLM token usage
             and rough cost without ingesting data or making LLM calls. Only
             supported for permanent add+cognify inputs in local mode. The

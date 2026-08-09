@@ -11,7 +11,6 @@ from cognee.modules.truth_subspace.centroids import (
     learning_id,
     normalize,
     pad_coords,
-    unique_learning_vectors,
     weighted_centroid,
 )
 
@@ -40,14 +39,6 @@ def test_pad_coords_keeps_fixed_slot_count():
 def test_weighted_centroid_updates_toward_new_vector():
     updated = weighted_centroid([1.0, 0.0], 1, [0.0, 1.0])
     assert math.isclose(updated[0], updated[1], rel_tol=1e-9)
-
-
-def test_unique_learning_vectors_deduplicates_by_statement_text():
-    pairs = unique_learning_vectors(
-        ["Coffee matters", " coffee   matters ", "Tea matters"],
-        [[1.0, 0.0], [0.5, 0.5], [0.0, 1.0]],
-    )
-    assert len(pairs) == 2
 
 
 def test_build_centroids_creates_slots_until_limit():
