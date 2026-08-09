@@ -508,6 +508,21 @@ class GraphDBInterface(ABC):
         """
         raise NotImplementedError
 
+    async def get_edge_type_counts(self, relationship_names: List[str]) -> Dict[str, int]:
+        """Return current directed-edge counts for the requested relationship names.
+
+        Backends with native aggregation should override this compatibility fallback.
+        """
+        requested = dict.fromkeys(relationship_names, 0)
+        if not requested:
+            return {}
+        _, edges = await self.get_graph_data()
+        for edge in edges:
+            relationship_name = edge[2]
+            if relationship_name in requested:
+                requested[relationship_name] += 1
+        return requested
+
     @abstractmethod
     async def get_graph_metrics(self, include_optional: bool = False) -> Dict[str, Any]:
         """

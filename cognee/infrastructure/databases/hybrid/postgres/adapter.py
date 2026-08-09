@@ -151,6 +151,9 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
     ) -> Tuple[List[Tuple[str, Dict[str, Any]]], List[Tuple[str, str, str, Dict[str, Any]]]]:
         return await self._graph.get_graph_data()
 
+    async def get_edge_type_counts(self, relationship_names: List[str]) -> Dict[str, int]:
+        return await self._graph.get_edge_type_counts(relationship_names)
+
     async def get_filtered_graph_data(
         self, attribute_filters: List[Dict[str, List[Union[str, int]]]]
     ) -> Tuple[List[Tuple[str, Dict]], List[Tuple[str, str, str, Dict]]]:

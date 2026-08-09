@@ -2756,6 +2756,23 @@ class LadybugAdapter(GraphDBInterface):
             logger.error(f"Failed to get graph data: {e}")
             raise
 
+    async def get_edge_type_counts(self, relationship_names: List[str]) -> Dict[str, int]:
+        """Return current edge counts grouped by the requested relationship names."""
+        counts = dict.fromkeys(relationship_names, 0)
+        if not counts:
+            return {}
+        rows = await self.query(
+            """
+            MATCH (:Node)-[r:EDGE]->(:Node)
+            WHERE r.relationship_name IN $relationship_names
+            RETURN r.relationship_name, COUNT(*)
+            """,
+            {"relationship_names": list(counts)},
+        )
+        for relationship_name, count in rows:
+            counts[relationship_name] = count
+        return counts
+
     async def get_neighborhood(
         self,
         node_ids: List[str],
