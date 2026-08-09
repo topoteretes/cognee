@@ -1,8 +1,10 @@
 import jwt
-import os
 import datetime
 
-SECRET_KEY = os.getenv("FASTAPI_USERS_JWT_SECRET", "super_secret")
+from cognee.modules.users.authentication.get_auth_secret import (
+    JWT_SECRET_ENV_VAR,
+    get_auth_secret,
+)
 
 
 def create_jwt(user_id: str, tenant_id: str, roles: list[str]):
@@ -13,7 +15,7 @@ def create_jwt(user_id: str, tenant_id: str, roles: list[str]):
         "exp": datetime.datetime.now(datetime.timezone.utc)
         + datetime.timedelta(hours=1),  # 1 hour expiry
     }
-    return jwt.encode(payload, SECRET_KEY, algorithm="HS256")
+    return jwt.encode(payload, get_auth_secret(JWT_SECRET_ENV_VAR), algorithm="HS256")
 
 
 if __name__ == "__main__":

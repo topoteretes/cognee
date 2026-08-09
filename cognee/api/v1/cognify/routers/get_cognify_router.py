@@ -16,6 +16,10 @@ from cognee.modules.graph.methods import get_formatted_graph_data
 from cognee.modules.users.get_user_manager import get_user_manager_context
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.users.authentication.default.default_jwt_strategy import DefaultJWTStrategy
+from cognee.modules.users.authentication.get_auth_secret import (
+    JWT_SECRET_ENV_VAR,
+    get_auth_secret,
+)
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.shared.graph_model_utils import graph_schema_to_graph_model
 from cognee.modules.pipelines.models.PipelineRunInfo import (
@@ -304,7 +308,7 @@ def get_cognify_router() -> APIRouter:
         access_token = websocket.cookies.get(os.getenv("AUTH_TOKEN_COOKIE_NAME", "auth_token"))
 
         try:
-            secret = os.getenv("FASTAPI_USERS_JWT_SECRET", "super_secret")
+            secret = get_auth_secret(JWT_SECRET_ENV_VAR)
 
             strategy = DefaultJWTStrategy(secret, lifetime_seconds=3600)
 

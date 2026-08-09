@@ -1,4 +1,3 @@
-import os
 import re
 import json
 import uuid
@@ -16,16 +15,29 @@ from .models import User
 from .get_user_db import get_user_db
 from cognee.modules.users.models.UserApiKey import UserApiKey
 from cognee.modules.users.api_key.hash_api_key import prepare_api_key
+from cognee.modules.users.authentication.get_auth_secret import (
+    RESET_PASSWORD_TOKEN_SECRET_ENV_VAR,
+    VERIFICATION_TOKEN_SECRET_ENV_VAR,
+    get_auth_secret,
+)
 from cognee.infrastructure.databases.relational import get_relational_engine
 
 logger = logging.getLogger(__name__)
 
 
 class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
-    reset_password_token_secret = os.getenv(
-        "FASTAPI_USERS_RESET_PASSWORD_TOKEN_SECRET", "super_secret"
-    )
-    verification_token_secret = os.getenv("FASTAPI_USERS_VERIFICATION_TOKEN_SECRET", "super_secret")
+    # Resolved on first use rather than at class-definition time: `import cognee`
+    # pulls this module in, and an SDK user who never mints a reset or
+    # verification token should not be warned about secrets they do not use.
+    # It also means a variable exported after import is still picked up, which
+    # the previous module-level `os.getenv` could not do.
+    @property
+    def reset_password_token_secret(self) -> str:
+        return get_auth_secret(RESET_PASSWORD_TOKEN_SECRET_ENV_VAR)
+
+    @property
+    def verification_token_secret(self) -> str:
+        return get_auth_secret(VERIFICATION_TOKEN_SECRET_ENV_VAR)
 
     async def on_after_login(
         self, user: User, request: Optional[Request] = None, response: Optional[Response] = None
