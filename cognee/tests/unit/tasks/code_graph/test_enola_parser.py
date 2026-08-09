@@ -75,3 +75,55 @@ def test_parse_enola_snapshot_missing_facts_raises(tmp_path):
 )
 def test_normalize_relation_tolerates_alternate_key_spellings(relation, expected):
     assert normalize_relation(relation) == expected
+
+
+def _write_minimal_snapshot(tmp_path, insights):
+    (tmp_path / "facts.jsonl").write_text(
+        '{"kind": "symbol", "name": "app/db.Database", "file": "app/db.py"}\n'
+    )
+    (tmp_path / "insights.json").write_text(json.dumps(insights))
+
+
+def test_parse_enola_snapshot_synthesizes_insight_facts(tmp_path):
+    _write_minimal_snapshot(
+        tmp_path,
+        [
+            {
+                "title": "Call-graph hotspot: app/db.Database",
+                "source": "hotspots",
+                "confidence": 0.7,
+                "description": "A pinch point.",
+                "evidence": [
+                    {"symbol": "app/db.Database", "detail": "fan-in 9"},
+                    {"detail": "no target here"},
+                ],
+            }
+        ],
+    )
+
+    facts, _receipt = parse_enola_snapshot(tmp_path)
+
+    insight_facts = [fact for fact in facts if fact["kind"] == "insight"]
+    assert len(insight_facts) == 1
+    insight = insight_facts[0]
+    assert insight["name"] == "Call-graph hotspot: app/db.Database"
+    assert insight["props"]["source"] == "hotspots"
+    assert insight["props"]["confidence"] == 0.7
+    assert insight["relations"] == [{"kind": "evidences", "target": "app/db.Database"}]
+
+
+def test_parse_enola_snapshot_tolerates_bad_insights(tmp_path):
+    _write_minimal_snapshot(tmp_path, ["not-a-dict", {"no_title": True}])
+
+    facts, _receipt = parse_enola_snapshot(tmp_path)
+
+    assert [fact["kind"] for fact in facts] == ["symbol"]
+
+
+def test_parse_enola_snapshot_ignores_corrupt_insights_file(tmp_path):
+    (tmp_path / "facts.jsonl").write_text('{"kind": "module", "name": "app"}\n')
+    (tmp_path / "insights.json").write_text("{ not json")
+
+    facts, _receipt = parse_enola_snapshot(tmp_path)
+
+    assert len(facts) == 1
