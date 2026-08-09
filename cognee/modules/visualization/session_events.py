@@ -16,6 +16,7 @@ Two event kinds are emitted per the renderer's contract:
 """
 
 from typing import Any, Dict, List, Optional
+from uuid import UUID
 
 from cognee.shared.logging_utils import get_logger
 
@@ -68,7 +69,9 @@ def map_session_entries_to_events(session_id: str, entries: List[Any]) -> List[D
     return events
 
 
-async def _list_recent_session_ids(user_uuid, limit: int) -> List[str]:
+async def _list_recent_session_ids(
+    user_uuid, limit: int, dataset_id: Optional[UUID] = None
+) -> List[str]:
     """Most recently active session ids for a user, from the lifecycle table.
 
     ``user_uuid`` must be the raw UUID (the column is UUID-typed; a string
@@ -81,18 +84,14 @@ async def _list_recent_session_ids(user_uuid, limit: int) -> List[str]:
 
     engine = get_relational_engine()
     async with engine.get_async_session() as session:
+        statement = select(SessionRecord).where(SessionRecord.user_id == user_uuid)
+        if dataset_id is not None:
+            statement = statement.where(SessionRecord.dataset_id == dataset_id)
         rows = (
-            (
-                await session.execute(
-                    select(SessionRecord)
-                    .where(SessionRecord.user_id == user_uuid)
-                    .order_by(SessionRecord.last_activity_at.desc())
-                    .limit(limit)
-                )
+            await session.execute(
+                statement.order_by(SessionRecord.last_activity_at.desc()).limit(limit)
             )
-            .scalars()
-            .all()
-        )
+        ).scalars().all()
     return [str(row.session_id) for row in rows]
 
 
@@ -100,6 +99,7 @@ async def collect_session_events(
     user=None,
     session_ids: Optional[List[str]] = None,
     max_sessions: int = MAX_SESSIONS_SCANNED,
+    dataset_id: Optional[UUID] = None,
 ) -> List[Dict[str, Any]]:
     """Best-effort collection of search/improve events from the session cache.
 
@@ -119,7 +119,18 @@ async def collect_session_events(
             logger.debug("Session cache unavailable; no operation events collected.")
             return []
 
-        if session_ids is None:
+        if dataset_id is not None:
+            scoped_session_ids = await _list_recent_session_ids(
+                user.id, max_sessions, dataset_id
+            )
+            if session_ids is None:
+                session_ids = scoped_session_ids
+            else:
+                allowed_session_ids = set(scoped_session_ids)
+                session_ids = [
+                    session_id for session_id in session_ids if session_id in allowed_session_ids
+                ]
+        elif session_ids is None:
             try:
                 session_ids = await _list_recent_session_ids(user.id, max_sessions)
             except Exception as error:  # noqa: BLE001 — lifecycle table may not exist

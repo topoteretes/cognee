@@ -42,11 +42,15 @@ async def test_no_since_returns_every_event_and_cursor_is_the_newest():
     events = [_event("2026-08-03T09:00:00.000000"), _event("2026-08-03T09:00:05.000000")]
 
     ctx_a, ctx_b = _patches(events)
+    user = SimpleNamespace(id="user-1")
     with ctx_a, ctx_b:
-        result = await visualize_module.get_live_events(DATASET_ID)
+        result = await visualize_module.get_live_events(DATASET_ID, user=user)
 
     assert result["events"] == events
     assert result["cursor"] == "2026-08-03T09:00:05.000000"
+    visualize_module.collect_session_events.assert_awaited_once_with(
+        user=user, dataset_id=DATASET_ID
+    )
 
 
 @pytest.mark.asyncio
