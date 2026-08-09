@@ -105,7 +105,7 @@ async def test_improve_global_context_index_opt_in(monkeypatch, build_global_con
 
 
 @pytest.mark.asyncio
-async def test_improve_skips_global_context_index_in_background(monkeypatch):
+async def test_improve_background_runs_whole_chain_in_one_task(monkeypatch):
     import cognee.shared.utils as shared_utils
 
     improve_module = import_module("cognee.api.v1.improve.improve")
@@ -135,13 +135,17 @@ async def test_improve_skips_global_context_index_in_background(monkeypatch):
         build_global_context_index=True,
     )
 
-    assert result["status"] == "completed"
-    assert result["run_info"] == {"status": "memify-ok"}
+    # Background mode returns immediately; the whole chain (including the global
+    # context index, which used to be skipped) runs inside one anchored task.
+    assert result == {"status": "started", "reason": None, "stages": [], "run_info": None}
+    memify_mock.assert_not_awaited()
+
+    from cognee.infrastructure.background_tasks import wait_for_background_tasks
+
+    assert await wait_for_background_tasks(timeout=5)
     memify_mock.assert_awaited_once()
-    global_context_mock.assert_not_awaited()
-    gci_records = [r for r in result["stages"] if r["stage"] == "global_context_index"]
-    assert gci_records and gci_records[0]["status"] == "skipped"
-    assert gci_records[0]["reason"] == "background_mode"
+    assert memify_mock.await_args.kwargs["run_in_background"] is False
+    global_context_mock.assert_awaited_once()
 
 
 def test_improve_payload_global_context_index_defaults_to_false():

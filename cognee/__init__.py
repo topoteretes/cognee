@@ -86,6 +86,10 @@ from .api.v1 import (
 )
 from .memory import MemoryEntry, QAEntry, TraceEntry, FeedbackEntry
 
+# Drain hook for fire-and-forget work (auto-improve, background remember): scripts
+# that would otherwise exit before those tasks finish can await this explicitly.
+from .infrastructure.background_tasks import wait_for_background_tasks
+
 # Memory migration (cognee.migration has the provider sources:
 # Mem0Source, ZepSource/GraphitiSource, LettaSource, COGXArchiveSource)
 from . import migration

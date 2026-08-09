@@ -142,6 +142,28 @@ async def improve(
     from cognee.shared.utils import send_telemetry, telemetry_safe_id
     from cognee import __version__ as cognee_version
 
+    if run_in_background:
+        # Run the WHOLE stage chain inside one anchored background task that
+        # holds the per-session improve lock for its lifetime. Forwarding
+        # run_in_background into each pipeline broke stage ordering (distillation
+        # read entries while the persist pipelines were still writing) and
+        # released the lock with writes in flight.
+        from cognee.infrastructure.background_tasks import spawn_background_task
+
+        spawn_background_task(
+            improve(
+                dataset,
+                run_in_background=False,
+                node_name=node_name,
+                session_ids=session_ids,
+                build_global_context_index=build_global_context_index,
+                build_truth_subspace=build_truth_subspace,
+                **kwargs,
+            ),
+            name=f"improve:{dataset}",
+        )
+        return {"status": "started", "reason": None, "stages": [], "run_info": None}
+
     stage_records: List[dict] = []
 
     send_telemetry(
@@ -326,18 +348,7 @@ async def improve(
             stage_records.append(_stage_record("memify_enrichment", "ok"))
 
             if build_global_context_index:
-                if run_in_background:
-                    logger.warning(
-                        "improve: global context index skipped in background mode "
-                        "because ordered background pipeline chaining is not supported"
-                    )
-                    stage_records.append(
-                        _stage_record("global_context_index", "skipped", reason="background_mode")
-                    )
-                else:
-                    stage_records.append(
-                        await _build_global_context_index(dataset=dataset, user=user)
-                    )
+                stage_records.append(await _build_global_context_index(dataset=dataset, user=user))
 
             span.set_attribute(COGNEE_IMPROVE_STAGES, _stage_summary(stage_records))
 

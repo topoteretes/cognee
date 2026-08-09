@@ -49,7 +49,7 @@ class ImproveStageDTO(OutDTO):
 class ImproveResponseDTO(OutDTO):
     """Structured improve() result: per-stage statuses plus the nested legacy run info."""
 
-    status: Literal["completed", "skipped"]
+    status: Literal["completed", "skipped", "started"]
     reason: Optional[str] = None
     stages: List[ImproveStageDTO] = Field(default_factory=list)
     run_info: Optional[Dict[UUID, PipelineRunInfo]] = None

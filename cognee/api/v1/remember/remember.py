@@ -1,4 +1,5 @@
 import asyncio
+import os
 import time
 from pathlib import Path
 from uuid import UUID
@@ -397,6 +398,88 @@ async def _dispatch_session_entry(
         return result
 
     raise TypeError(f"Unsupported memory entry type: {type(entry).__name__}")
+
+
+# Auto-improve debounce: the improve lock stops overlapping runs, not repeated
+# cost — without a debounce every remember() fired the full multi-stage chain.
+AUTO_IMPROVE_MIN_ENTRIES = int(os.getenv("AUTO_IMPROVE_MIN_ENTRIES", "3"))
+AUTO_IMPROVE_MIN_INTERVAL_SECONDS = float(os.getenv("AUTO_IMPROVE_MIN_INTERVAL_SECONDS", "300"))
+AUTO_IMPROVE_STATE_ID = "__auto_improve_state__"
+AUTO_IMPROVE_STATE_KIND = "auto_improve_state"
+
+
+async def _should_auto_improve(user, session_id: str) -> bool:
+    """Fire auto-improve only when the session accumulated enough new entries or
+    enough time passed since the last run.
+
+    State lives in an internal session-context row (same pattern as the extraction
+    and persist watermarks). Bounded staleness by design: improve()'s own watermarks
+    make the eventual run pick up everything the debounced ones skipped. Fail-open
+    to True so a broken cache never silences self-improvement.
+    """
+    from datetime import datetime, timezone
+
+    from cognee.infrastructure.session.get_session_manager import get_session_manager
+
+    session_manager = get_session_manager()
+    if not session_manager.is_available:
+        return True
+    user_id = str(user.id)
+    try:
+        rows = await session_manager.get_session_context_entries(
+            user_id=user_id, session_id=session_id
+        )
+        state = next(
+            (
+                row
+                for row in rows or []
+                if isinstance(row, dict) and row.get("id") == AUTO_IMPROVE_STATE_ID
+            ),
+            None,
+        )
+        now = datetime.now(timezone.utc)
+        entries_since_improve = 1
+        last_improve_at = None
+        if state is not None:
+            try:
+                entries_since_improve = int(state.get("entries_since_improve") or 0) + 1
+            except (TypeError, ValueError):
+                entries_since_improve = 1
+            raw_last = state.get("last_improve_at")
+            if isinstance(raw_last, str):
+                try:
+                    last_improve_at = datetime.fromisoformat(raw_last)
+                except ValueError:
+                    last_improve_at = None
+
+        due = (
+            entries_since_improve >= AUTO_IMPROVE_MIN_ENTRIES
+            or last_improve_at is None
+            or (now - last_improve_at).total_seconds() >= AUTO_IMPROVE_MIN_INTERVAL_SECONDS
+        )
+
+        payload = {
+            "id": AUTO_IMPROVE_STATE_ID,
+            "kind": AUTO_IMPROVE_STATE_KIND,
+            "entries_since_improve": 0 if due else entries_since_improve,
+            "last_improve_at": now.isoformat()
+            if due
+            else (state or {}).get("last_improve_at") or now.isoformat(),
+        }
+        updated = await session_manager.update_session_context_entry(
+            user_id=user_id,
+            session_id=session_id,
+            entry_id=AUTO_IMPROVE_STATE_ID,
+            merge=payload,
+        )
+        if not updated:
+            await session_manager.create_session_context_entry(
+                user_id=user_id, session_id=session_id, entry_dump=payload
+            )
+        return due
+    except Exception as error:
+        logger.warning("remember: auto-improve debounce failed open: %s", error)
+        return True
 
 
 class RememberResult:
@@ -1229,9 +1312,12 @@ async def _remember_inner(
         )
         result.elapsed_seconds = time.monotonic() - result._started_at
 
-        # Bridge session data to permanent graph in the background
-        if self_improvement:
+        # Bridge session data to permanent graph in the background — debounced,
+        # and anchored in the background-task registry so it survives GC and can
+        # be drained at shutdown or via cognee.wait_for_background_tasks().
+        if self_improvement and await _should_auto_improve(user, session_id):
             from cognee.api.v1.improve import improve
+            from cognee.infrastructure.background_tasks import spawn_background_task
 
             async def _session_improve():
                 try:
@@ -1245,7 +1331,9 @@ async def _remember_inner(
                     result.improve_error = str(exc)
                     logger.warning("remember: session improve failed (non-fatal): %s", exc)
 
-            result._task = asyncio.create_task(_session_improve())
+            result._task = spawn_background_task(
+                _session_improve(), name=f"improve-session:{session_id}"
+            )
 
         return result
 
@@ -1309,7 +1397,11 @@ async def _remember_inner(
                 result._fail(exc)
                 logger.exception("Background remember failed")
 
-        result._task = asyncio.create_task(_remember_background())
+        from cognee.infrastructure.background_tasks import spawn_background_task
+
+        result._task = spawn_background_task(
+            _remember_background(), name=f"remember:{dataset_name}"
+        )
         return result
 
     # Blocking mode

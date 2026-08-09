@@ -92,6 +92,12 @@ async def lifespan(app: FastAPI):
 
     yield
 
+    # Drain fire-and-forget work (auto-improve, background remember) before
+    # closing engines: those tasks write through the engines below.
+    from cognee.infrastructure.background_tasks import wait_for_background_tasks
+
+    await wait_for_background_tasks(timeout=30)
+
     # Flush and close all cached database adapters so Ladybug can
     # CHECKPOINT its WAL before the process exits.  Without this,
     # a SIGTERM during an active WAL write leaves a half-written
