@@ -1929,12 +1929,20 @@ class LadybugAdapter(GraphDBInterface):
 
             # ON MATCH replaces the whole edge JSON blob; carry learned feedback
             # weights over so re-cognify cannot reset them (same policy as nodes).
+            # Endpoint ids scope the pre-read to this batch's edges (index seeks)
+            # instead of scanning every edge on the hot ingestion path.
             incoming_edge_ids = {
                 properties.get("edge_object_id")
                 for _from, _to, _rel, properties in edges
                 if isinstance(properties, dict) and properties.get("edge_object_id")
             }
-            learned_by_edge_id = await self._load_learned_edge_state(incoming_edge_ids)
+            learned_by_edge_id = await self._load_learned_edge_state(
+                incoming_edge_ids,
+                endpoint_ids=(
+                    {str(from_node) for from_node, _to, _rel, _props in edges},
+                    {str(to_node) for _from, to_node, _rel, _props in edges},
+                ),
+            )
 
             edge_params = [
                 {
@@ -2187,20 +2195,39 @@ class LadybugAdapter(GraphDBInterface):
     ]
 
     async def _fetch_edge_rows_by_object_ids(
-        self, edge_object_ids: Set[str]
+        self,
+        edge_object_ids: Set[str],
+        endpoint_ids: Optional[Tuple[Set[str], Set[str]]] = None,
     ) -> List[Dict[str, Any]]:
-        """Fetch edge rows (as dicts) for the given edge_object_ids."""
+        """Fetch edge rows (as dicts) for the given edge_object_ids.
+
+        ``endpoint_ids`` — an optional ``(from_ids, to_ids)`` pair — narrows the
+        match to edges between those nodes via primary-key seeks. Without it the
+        query scans (and json_extracts) every edge, which is fine for the
+        improve-time feedback paths but not for per-batch callers on the hot
+        ingestion path.
+        """
         if not edge_object_ids:
             return []
         requested_ids_json = [json.dumps(eid) for eid in edge_object_ids]
-        query = """
+        endpoint_filter = ""
+        params: Dict[str, Any] = {"edge_object_ids_json": requested_ids_json}
+        if endpoint_ids is not None:
+            from_ids, to_ids = endpoint_ids
+            if not from_ids or not to_ids:
+                return []
+            endpoint_filter = "WHERE from.id IN $from_ids AND to.id IN $to_ids"
+            params["from_ids"] = sorted(from_ids)
+            params["to_ids"] = sorted(to_ids)
+        query = f"""
         MATCH (from:Node)-[r:EDGE]->(to:Node)
+        {endpoint_filter}
         WITH from, to, r, CAST(json_extract(r.properties, '$.edge_object_id') AS STRING) AS edge_object_id_json
         WHERE edge_object_id_json IN $edge_object_ids_json
         RETURN from.id AS from_id, to.id AS to_id, r.relationship_name AS relationship_name,
                edge_object_id_json AS edge_object_id_json, r.properties AS properties
         """
-        rows = await self.query(query, {"edge_object_ids_json": requested_ids_json})
+        rows = await self.query(query, params)
         return self._rows_to_dicts(rows, self._EDGE_BY_OBJECT_ID_COLUMNS)
 
     def _build_node_feedback_updates(
@@ -2360,12 +2387,20 @@ class LadybugAdapter(GraphDBInterface):
                 learned[node_id] = fields
         return learned
 
-    async def _load_learned_edge_state(self, edge_object_ids) -> Dict[str, Dict[str, Any]]:
-        """Existing learned edge fields keyed by edge_object_id (only when present)."""
+    async def _load_learned_edge_state(
+        self,
+        edge_object_ids,
+        endpoint_ids: Optional[Tuple[Set[str], Set[str]]] = None,
+    ) -> Dict[str, Dict[str, Any]]:
+        """Existing learned edge fields keyed by edge_object_id (only when present).
+
+        Callers on the hot ingestion path pass ``endpoint_ids`` so the lookup
+        seeks the batch's endpoints instead of scanning every edge.
+        """
         requested_ids = {eid for eid in edge_object_ids or [] if isinstance(eid, str) and eid}
         if not requested_ids:
             return {}
-        edge_rows = await self._fetch_edge_rows_by_object_ids(requested_ids)
+        edge_rows = await self._fetch_edge_rows_by_object_ids(requested_ids, endpoint_ids)
         learned: Dict[str, Dict[str, Any]] = {}
         for row in edge_rows:
             properties_raw = row.get("properties")

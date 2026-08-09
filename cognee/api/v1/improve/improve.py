@@ -100,14 +100,14 @@ async def improve(
 
     Args:
         dataset: Dataset name or UUID to process.
-        run_in_background: Run processing asynchronously.
+        run_in_background: Run the whole stage chain in one anchored
+            background task and return ``{"status": "started", ...}``
+            immediately.
         node_name: Filter graph to specific named entities.
         session_ids: Session IDs whose feedback and Q&A content
             should be bridged into the permanent graph.
         build_global_context_index: Opt-in flag for building the global
-            context index after default enrichment. Skipped in background
-            mode because ordered background pipeline chaining is not
-            supported yet.
+            context index after default enrichment.
         build_truth_subspace: Opt-in flag (default ``False``) for building the
             truth subspace from distilled session learnings after distillation
             and before enrichment. Only runs when ``session_ids`` is provided.
@@ -118,7 +118,7 @@ async def improve(
         A structured result dict::
 
             {
-                "status": "completed" | "skipped",
+                "status": "completed" | "skipped" | "started",
                 "reason": None | "lock_held",
                 "stages": [
                     {"stage": ..., "status": "ok"|"failed"|"skipped",
@@ -176,7 +176,6 @@ async def improve(
             "session_ids": ",".join(telemetry_safe_id(session_id) for session_id in session_ids)
             if session_ids
             else "",
-            "run_in_background": run_in_background,
             "build_global_context_index": build_global_context_index,
             "build_truth_subspace": build_truth_subspace,
             "cognee_version": cognee_version,
@@ -248,7 +247,6 @@ async def improve(
                         session_ids=session_ids,
                         user=user,
                         feedback_alpha=feedback_alpha,
-                        run_in_background=run_in_background,
                     )
                 )
 
@@ -261,7 +259,6 @@ async def improve(
                         dataset=write_dataset_ref,
                         session_ids=session_ids,
                         user=user,
-                        run_in_background=run_in_background,
                     )
                 )
 
@@ -345,7 +342,7 @@ async def improve(
                 dataset=dataset,
                 node_name=node_name,
                 user=user,
-                run_in_background=run_in_background,
+                run_in_background=False,
                 **kwargs,
             )
             stage_records.append(_stage_record("memify_enrichment", "ok"))
@@ -394,7 +391,6 @@ async def _bridge_sessions(
     session_ids: List[str],
     user,
     feedback_alpha: float,
-    run_in_background: bool,
 ) -> List[dict]:
     """Run feedback weights and session persistence pipelines; return their stage records.
 
@@ -432,7 +428,6 @@ async def _bridge_sessions(
                 session_ids=session_ids,
                 dataset=dataset,
                 alpha=feedback_alpha,
-                run_in_background=run_in_background,
             )
             logger.info("improve: feedback weights applied from %d session(s)", len(session_ids))
             stages.append(_stage_record("feedback_weights", "ok"))
@@ -449,7 +444,6 @@ async def _bridge_sessions(
         user=user,
         session_ids=session_ids,
         dataset=dataset,
-        run_in_background=run_in_background,
     )
     logger.info("improve: session Q&A persisted from %d session(s)", len(session_ids))
     stages.append(_stage_record("persist_sessions", "ok"))
@@ -564,7 +558,6 @@ async def _persist_session_traces(
     dataset: Union[str, UUID],
     session_ids: List[str],
     user,
-    run_in_background: bool,
 ) -> dict:
     """Cognify per-step agent trace feedbacks into the knowledge graph.
 
@@ -591,7 +584,6 @@ async def _persist_session_traces(
             # Only steps above the per-session persist watermark: without it every
             # improve() re-cognified the full growing trace blob (O(n^2) per session).
             since_watermark=True,
-            run_in_background=run_in_background,
         )
         logger.info(
             "improve: agent trace steps persisted from %d session(s)",

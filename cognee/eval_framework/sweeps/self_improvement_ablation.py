@@ -22,7 +22,7 @@ usefulness is measured instead of just lesson counts.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Optional
 
@@ -65,15 +65,9 @@ class AblationSettings:
     primary_metric_name: str = "correctness"
     max_concurrent_questions: int = 10
     artifact_prefix: str = "ablation"
-    summary_tags: dict[str, Any] = field(default_factory=dict)
 
 
-def build_self_improvement_axes(
-    *,
-    feedback_influence: float = 0.2,
-    graph_completion_kwargs: Optional[dict[str, Any]] = None,
-    hybrid_kwargs: Optional[dict[str, Any]] = None,
-) -> list[AblationAxis]:
+def build_self_improvement_axes(*, feedback_influence: float = 0.2) -> list[AblationAxis]:
     """Default axes for the two learned ranking signals.
 
     Retriever classes are imported lazily so this module stays importable in
@@ -82,9 +76,6 @@ def build_self_improvement_axes(
     from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
     from cognee.modules.retrieval.hybrid_retriever import HybridRetriever
 
-    graph_kwargs = dict(graph_completion_kwargs or {})
-    hybrid_base_kwargs = dict(hybrid_kwargs or {})
-
     return [
         AblationAxis(
             name="feedback_influence",
@@ -92,13 +83,13 @@ def build_self_improvement_axes(
                 "name": "graph_completion_influence_off",
                 "mode": "fixed_retriever",
                 "retriever_cls": GraphCompletionRetriever,
-                "retriever_kwargs": {**graph_kwargs, "feedback_influence": 0.0},
+                "retriever_kwargs": {"feedback_influence": 0.0},
             },
             variant_config={
                 "name": f"graph_completion_influence_{feedback_influence}",
                 "mode": "fixed_retriever",
                 "retriever_cls": GraphCompletionRetriever,
-                "retriever_kwargs": {**graph_kwargs, "feedback_influence": feedback_influence},
+                "retriever_kwargs": {"feedback_influence": feedback_influence},
             },
         ),
         AblationAxis(
@@ -107,13 +98,13 @@ def build_self_improvement_axes(
                 "name": "hybrid_truth_off",
                 "mode": "fixed_retriever",
                 "retriever_cls": HybridRetriever,
-                "retriever_kwargs": {**hybrid_base_kwargs, "use_truth_weight": False},
+                "retriever_kwargs": {"use_truth_weight": False},
             },
             variant_config={
                 "name": "hybrid_truth_on",
                 "mode": "fixed_retriever",
                 "retriever_cls": HybridRetriever,
-                "retriever_kwargs": {**hybrid_base_kwargs, "use_truth_weight": True},
+                "retriever_kwargs": {"use_truth_weight": True},
             },
         ),
     ]
@@ -153,12 +144,12 @@ def _metric_by_question(
         if not isinstance(row, dict):
             continue
         question_idx = row.get("question_idx")
-        metric_value = row.get("metrics", {})
-        if isinstance(metric_value, dict):
-            entry = metric_value.get(metric_name)
-            score = entry.get("score") if isinstance(entry, dict) else entry
-        else:
-            score = row.get(metric_name)
+        entry = (
+            row.get("metrics", {}).get(metric_name)
+            if isinstance(row.get("metrics"), dict)
+            else None
+        )
+        score = entry.get("score") if isinstance(entry, dict) else entry
         try:
             values[question_idx] = float(score)
         except (TypeError, ValueError):
@@ -281,7 +272,6 @@ async def run_self_improvement_ablation(
         "artifact_prefix": settings.artifact_prefix,
         "primary_metric": settings.primary_metric_name,
         "question_count": len(questions),
-        "tags": settings.summary_tags,
         "axes": axis_reports,
     }
     report_path = settings.output_dir / f"{settings.artifact_prefix}_report.json"

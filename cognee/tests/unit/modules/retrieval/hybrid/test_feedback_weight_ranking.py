@@ -30,20 +30,22 @@ def test_feedback_weights_rerank_equal_candidates():
     assert [pair["chunk_id"] for pair in ranked] == ["high", "low"]
 
 
-def test_none_map_keeps_exact_baseline_order():
+def test_neutral_weight_map_keeps_baseline_order():
+    """An empty map exercises the factor path at the neutral 1.0 for every chunk,
+    so ranking must match the no-map baseline exactly."""
     baseline = rank_chunk_summary_pairs(
         [_pair("a", 0), _pair("b", 1)],
         limit=2,
         use_importance_weight=False,
     )
-    with_none = rank_chunk_summary_pairs(
+    with_neutral_map = rank_chunk_summary_pairs(
         [_pair("a", 0), _pair("b", 1)],
         limit=2,
         use_importance_weight=False,
-        feedback_weight_by_id=None,
+        feedback_weight_by_id={},
     )
 
-    assert [p["chunk_id"] for p in baseline] == [p["chunk_id"] for p in with_none]
+    assert [p["chunk_id"] for p in baseline] == [p["chunk_id"] for p in with_neutral_map]
 
 
 def test_missing_chunk_id_ranks_at_neutral_factor():

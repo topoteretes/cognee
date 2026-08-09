@@ -59,14 +59,11 @@ def _rrf_k(chunks_top_k: int) -> int:
 
 
 def _importance_factor(chunk) -> float:
-    raw_importance = payload(chunk).get("importance_weight")
-    importance = raw_importance if isinstance(raw_importance, (int, float)) else 0.5
-    importance = max(0.0, min(1.0, importance))
-    return 0.75 + 0.5 * importance
+    return _feedback_factor(payload(chunk).get("importance_weight"))
 
 
 def _feedback_factor(raw_weight) -> float:
-    """[0.75, 1.25] factor from a learned feedback weight; 0.5 (the default) is 1.0."""
+    """[0.75, 1.25] factor from a [0, 1] weight; 0.5 (the default) maps to 1.0."""
     weight = raw_weight if isinstance(raw_weight, (int, float)) else 0.5
     weight = max(0.0, min(1.0, weight))
     return 0.75 + 0.5 * weight

@@ -10,7 +10,6 @@ import pytest
 
 from cognee.api.v1.remember.remember import AUTO_IMPROVE_STATE_ID, _should_auto_improve
 from cognee.infrastructure.background_tasks import (
-    pending_background_task_count,
     spawn_background_task,
     wait_for_background_tasks,
 )
@@ -108,13 +107,12 @@ async def test_background_task_registry_anchors_and_drains():
 
     task = spawn_background_task(work(), name="test-task")
     await started.wait()
-    assert pending_background_task_count() >= 1
 
-    # Drain times out while the task is blocked, without cancelling it.
+    # Drain times out while the task is blocked, without cancelling it —
+    # only possible if the registry actually anchored the task.
     assert await wait_for_background_tasks(timeout=0.01) is False
     assert not task.cancelled()
 
     release.set()
     assert await wait_for_background_tasks(timeout=5) is True
     assert task.result() == "done"
-    assert pending_background_task_count() == 0

@@ -250,24 +250,8 @@ async def build_truth_subspace(
             current_epoch = previous_epoch
             centroids = existing_centroids
 
-        async def commit_centroids() -> bool:
-            """Upsert the new centroid slots — the epoch goes live only when this succeeds.
-
-            Called after chunk scoring: ranking honors chunk coords only when their epoch
-            matches the live centroid epoch, so committing centroids first would neutralize
-            the whole corpus if scoring then failed mid-build. Committing last means a
-            mid-build failure leaves the previous epoch fully live.
-            """
-            if not centroids_dirty:
-                return True
-            try:
-                await upsert_centroids(vector_engine, centroids)
-                return True
-            except Exception as error:
-                logger.warning("truth_subspace: centroid upsert failed open: %s", error)
-                return False
-
         centroid_vecs = [centroid.centroid for centroid in centroids]
+        nodes_scored = 0
 
         # Step 5: LOAD nodes — ALL DocumentChunk nodes in the dataset (the chunk
         # lane the hybrid retriever reranks). Scoping to the session_learnings
@@ -327,88 +311,75 @@ async def build_truth_subspace(
             node_ids = [node_id for node_id, _text in fresh]
             node_texts = [text for _node_id, text in fresh]
 
-        if not node_texts:
+        if node_texts:
+            # Step 6: reuse stored chunk embeddings where the vector store can return
+            # them; EMBED only the remainder (batched), and compute coords per node.
+            stored_vectors = await _load_stored_chunk_vectors(vector_engine, node_ids)
+            texts_to_embed = [
+                text for node_id, text in zip(node_ids, node_texts) if node_id not in stored_vectors
+            ]
+            embedded = await _embed_in_batches(embedding_engine, texts_to_embed)
+            embedded_iter = iter(embedded)
+            node_vecs = [
+                stored_vectors[node_id] if node_id in stored_vectors else next(embedded_iter, [])
+                for node_id in node_ids
+            ]
+            for node_id, node_vec in zip(node_ids, node_vecs):
+                if not node_vec:
+                    # Embedding failed for this node's batch: writing [0.0]*k coords at
+                    # the current epoch would demote it to the 0.75x floor at query time.
+                    continue
+                try:
+                    coords = pad_coords(align.node_coords(node_vec, centroid_vecs), k)
+                    scored[node_id] = {
+                        "truth_alignment": coords,
+                        "truth_epoch": current_epoch,
+                    }
+                except Exception as error:
+                    # Per-node fail-open: one bad node never sinks the batch.
+                    logger.debug("truth_subspace: coords failed for node %s: %s", node_id, error)
+        else:
             logger.info("truth_subspace: %d centroids, no scoreable nodes", len(centroids))
-            committed = await commit_centroids()
-            return {
-                "anchors": len(centroids),
-                "nodes_scored": 0,
-                "signature": signature,
-                "truth_epoch": current_epoch if committed else previous_epoch,
-            }
 
-        # Step 6: reuse stored chunk embeddings where the vector store can return
-        # them; EMBED only the remainder (batched), and compute coords per node.
-        stored_vectors = await _load_stored_chunk_vectors(vector_engine, node_ids)
-        texts_to_embed = [
-            text for node_id, text in zip(node_ids, node_texts) if node_id not in stored_vectors
-        ]
-        embedded = await _embed_in_batches(embedding_engine, texts_to_embed)
-        embedded_iter = iter(embedded)
-        node_vecs = [
-            stored_vectors[node_id] if node_id in stored_vectors else next(embedded_iter, [])
-            for node_id in node_ids
-        ]
-        for node_id, node_vec in zip(node_ids, node_vecs):
-            if not node_vec:
-                # Embedding failed for this node's batch: writing [0.0]*k coords at the
-                # current epoch would demote it to the 0.75x floor at query time.
-                continue
+        if scored:
+            # Step 7: PERSIST per-node coordinate vectors BEFORE committing the
+            # centroids. Chunk states carry the new epoch but stay dormant until
+            # the centroid upsert makes that epoch live.
             try:
-                coords = pad_coords(align.node_coords(node_vec, centroid_vecs), k)
-                scored[node_id] = {
-                    "truth_alignment": coords,
-                    "truth_epoch": current_epoch,
-                }
+                write_result = await graph_engine.set_node_truth_state(scored)
             except Exception as error:
-                # Per-node fail-open: one bad node never sinks the batch.
-                logger.debug("truth_subspace: coords failed for node %s: %s", node_id, error)
+                # Must NOT fall through to the centroid commit: going live with a
+                # new epoch and zero scored chunks would neutralize the corpus.
+                logger.warning("truth_subspace: persisting alignments failed open: %s", error)
+                return {
+                    "anchors": len(centroids),
+                    "nodes_scored": 0,
+                    "signature": signature,
+                    "truth_epoch": previous_epoch,
+                }
+            nodes_scored = sum(1 for ok in write_result.values() if ok)
 
-        if not scored:
-            committed = await commit_centroids()
-            return {
-                "anchors": len(centroids),
-                "nodes_scored": 0,
-                "signature": signature,
-                "truth_epoch": current_epoch if committed else previous_epoch,
-            }
+        # COMMIT: upsert the centroid slots last — the epoch goes live only when
+        # this succeeds, so a mid-build failure leaves the previous epoch fully live.
+        committed = True
+        if centroids_dirty:
+            try:
+                await upsert_centroids(vector_engine, centroids)
+            except Exception as error:
+                logger.warning("truth_subspace: centroid upsert failed open: %s", error)
+                committed = False
 
-        # Step 7: PERSIST per-node coordinate vectors, then commit the centroids.
-        # Chunk states carry the new epoch but stay dormant until the centroid
-        # upsert makes that epoch live.
-        try:
-            write_result = await graph_engine.set_node_truth_state(scored)
-        except Exception as error:
-            logger.warning("truth_subspace: persisting alignments failed open: %s", error)
-            return {
-                "anchors": len(centroids),
-                "nodes_scored": 0,
-                "signature": signature,
-                "truth_epoch": previous_epoch,
-            }
-
-        nodes_scored = sum(1 for ok in write_result.values() if ok)
-
-        if not await commit_centroids():
-            # Scored chunks are tagged with an epoch that never went live; the
-            # previous epoch remains the one ranking sees.
-            return {
-                "anchors": len(centroids),
-                "nodes_scored": nodes_scored,
-                "signature": signature,
-                "truth_epoch": previous_epoch,
-            }
-
+    live_epoch = current_epoch if committed else previous_epoch
     logger.info(
         "truth_subspace: built subspace -> centroids=%d nodes_scored=%d epoch=%d signature=%s",
         len(centroids),
         nodes_scored,
-        current_epoch,
+        live_epoch,
         signature,
     )
     return {
         "anchors": len(centroids),
         "nodes_scored": nodes_scored,
         "signature": signature,
-        "truth_epoch": current_epoch,
+        "truth_epoch": live_epoch,
     }

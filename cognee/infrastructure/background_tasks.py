@@ -29,11 +29,6 @@ def spawn_background_task(coroutine: Coroutine, *, name: Optional[str] = None) -
     return task
 
 
-def pending_background_task_count() -> int:
-    """Number of registered tasks that have not finished yet."""
-    return sum(1 for task in _background_tasks if not task.done())
-
-
 async def wait_for_background_tasks(timeout: Optional[float] = None) -> bool:
     """Wait for every registered background task to finish.
 
