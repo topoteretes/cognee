@@ -35,8 +35,8 @@ async def retrieve_hybrid_chunks(
     query_vector: Optional[list[float]] = None,
     use_truth_weight: bool = False,
     q_coords: Optional[list[float]] = None,
-    truth_state_by_id: Optional[dict] = None,
     current_truth_epoch: Optional[int] = None,
+    fetch_truth_state: Optional[Any] = None,
     fetch_feedback_weights: Optional[Any] = None,
 ) -> dict[str, Any]:
     candidate_limit = max(0, chunks_top_k * 2)
@@ -81,17 +81,24 @@ async def retrieve_hybrid_chunks(
         )
         attach_source_chunks(pairs, source_chunks)
 
-    # Learned feedback weights for the lane's own candidates, fetched in one
-    # batched call. None fetcher (influence off / unsupported backend) or a
-    # failed lookup keeps ranking at exact baseline.
+    # Learned per-chunk state (feedback weights, truth alignments) for the lane's
+    # OWN candidates — BM25 and summary hits included, so no lane-coverage bias —
+    # each in one batched call. A None fetcher (signal off / unsupported backend)
+    # or a failed lookup keeps ranking at exact baseline.
+    candidate_ids = [pair["chunk_id"] for pair in pairs if pair.get("chunk_id")]
     feedback_weight_by_id = None
-    if fetch_feedback_weights is not None:
-        candidate_ids = [pair["chunk_id"] for pair in pairs if pair.get("chunk_id")]
-        if candidate_ids:
+    truth_state_by_id = None
+    if candidate_ids:
+        if fetch_feedback_weights is not None:
             try:
                 feedback_weight_by_id = await fetch_feedback_weights(candidate_ids)
             except Exception as error:
                 logger.debug("Feedback-weight lookup failed; using baseline ranking: %s", error)
+        if fetch_truth_state is not None:
+            try:
+                truth_state_by_id = await fetch_truth_state(candidate_ids)
+            except Exception as error:
+                logger.debug("Truth-state lookup failed; using baseline ranking: %s", error)
 
     ranked_pairs = rank_chunk_summary_pairs(
         pairs,
