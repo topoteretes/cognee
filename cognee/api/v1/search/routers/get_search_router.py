@@ -9,12 +9,9 @@ from pydantic import Field
 
 from cognee import __version__ as cognee_version
 from cognee.api.DTO import ErrorResponse, InDTO, OutDTO
-from cognee.exceptions import CogneeValidationError
-from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
-from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError
+from cognee.exceptions import CogneeApiError
 from cognee.modules.search.operations import get_history
 from cognee.modules.search.types import SearchResult, SearchType
-from cognee.modules.users.exceptions.exceptions import PermissionDeniedError, UserNotFoundError
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.models import User
 from cognee.shared.usage_logger import log_usage
@@ -198,8 +195,9 @@ def get_search_router() -> APIRouter:
         Returns a list of search results containing relevant nodes from the graph.
 
         ## Error Codes
-        - **403 Forbidden**: User lacks permission on the requested datasets (error body)
-        - **422 Unprocessable Content**: Search prerequisites not met (run add + cognify first), or skills/tools sent without search_type=AGENTIC_COMPLETION, or max_iter < 1
+        - **402/403/404/409/422**: Cognee errors (payment required, permission
+          denied, missing user, session-dataset conflict, prerequisites not met)
+          return their own status code and message via the global error handler
         - **500 Internal Server Error**: Unexpected error during search
 
         ## Notes
@@ -254,32 +252,12 @@ def get_search_router() -> APIRouter:
             )
 
             return jsonable_encoder(results)
-        except PermissionDeniedError as e:
-            return JSONResponse(
-                status_code=status.HTTP_403_FORBIDDEN,
-                content=ErrorResponse(
-                    error="Permission denied",
-                    detail=str(e),
-                ).model_dump(),
-            )
-        except LLMPaymentRequiredError as error:
-            return JSONResponse(
-                status_code=status.HTTP_402_PAYMENT_REQUIRED,
-                content=ErrorResponse(
-                    error="Token budget exhausted",
-                    detail=str(error),
-                ).model_dump(),
-            )
-        except (DatabaseNotCreatedError, UserNotFoundError, CogneeValidationError) as e:
-            status_code = getattr(e, "status_code", status.HTTP_422_UNPROCESSABLE_CONTENT)
-            return JSONResponse(
-                status_code=status_code,
-                content=ErrorResponse(
-                    error="Search prerequisites not met, hint: Run `await cognee.add(...)` then `await cognee.cognify()` before searching.",
-                    detail=str(e),
-                    # Previous hint not matching "Error Response" structure defined in cognee.api.DTO, included in error.
-                ).model_dump(),
-            )
+        except CogneeApiError:
+            # Cognee errors (permission denied, payment required, prerequisites,
+            # session-dataset conflicts, ...) carry their own status code and
+            # actionable message; the global handler in cognee/api/client.py
+            # returns them to the caller.
+            raise
         except Exception as error:
             return JSONResponse(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

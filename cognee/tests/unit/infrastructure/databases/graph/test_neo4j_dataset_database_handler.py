@@ -206,8 +206,8 @@ async def test_delete_dataset_evicts_and_drops_database(monkeypatch):
     )
     monkeypatch.setattr(
         "cognee.infrastructure.databases.graph.neo4j_driver."
-        "Neo4jDatasetDatabaseHandler.evict_graph_engine",
-        lambda **kwargs: evicted_configs.append(kwargs),
+        "Neo4jDatasetDatabaseHandler.graph_engine_cache",
+        SimpleNamespace(evict=lambda **kwargs: evicted_configs.append(kwargs)),
     )
 
     dataset_database = SimpleNamespace(

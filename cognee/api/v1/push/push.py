@@ -18,6 +18,7 @@ from typing import Optional, Union
 from uuid import UUID
 
 from cognee.shared.logging_utils import get_logger
+from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 
 logger = get_logger("push")
 
@@ -94,7 +95,7 @@ def _verify_migration_import(response: dict) -> None:
 
 
 async def push(
-    dataset: Union[str, UUID] = "main_dataset",
+    dataset: Union[str, UUID] = DEFAULT_DATASET_NAME,
     *,
     target_dataset: Optional[str] = None,
     mode: str = "preserve",

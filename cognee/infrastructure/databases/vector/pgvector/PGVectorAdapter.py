@@ -17,8 +17,6 @@ from cognee.infrastructure.engine.utils import parse_id
 from cognee.infrastructure.databases.relational import get_relational_engine, get_relational_config
 from cognee.infrastructure.databases.vector.config import get_vectordb_config
 
-from distributed.utils import override_distributed
-from distributed.tasks.queued_add_data_points import queued_add_data_points
 from cognee.infrastructure.databases.exceptions import MissingQueryParameterError
 from cognee.context_global_variables import backend_access_control_enabled
 from cognee.modules.graph.methods.sanitize_relational_payload import sanitize_relational_payload
@@ -93,17 +91,19 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
         # Resolve effective pool_args for any new PGVector engine we create:
         # 1. Explicit VECTOR_POOL_ARGS always wins.
-        # 2. When access control is on, each dataset gets its own engine — use a small default
-        #    to avoid connection fan-out (N datasets × pool_size).
-        # 3. Otherwise inherit the relational pool config.
+        # 2. Then the relational POOL_ARGS, when configured — an operator who
+        #    sized the pool explicitly outranks our built-in default.
+        # 3. Otherwise, when access control is on, each dataset gets its own
+        #    engine — use a small default to avoid connection fan-out
+        #    (N datasets × pool_size).
         if vector_config.vector_pool_args is not None:
             effective_pool_args = dict(vector_config.vector_pool_args)
+        elif relational_config.pool_args:
+            effective_pool_args = dict(relational_config.pool_args)
         elif backend_access_control_enabled():
             effective_pool_args = _ACCESS_CONTROL_DEFAULT_POOL_ARGS
         else:
-            effective_pool_args = (
-                dict(relational_config.pool_args) if relational_config.pool_args else {}
-            )
+            effective_pool_args = {}
 
         # A per-dataset PGVector engine may connect to managed
         # Postgres (Neon) which requires SSL. Reuse the relational connect_args
@@ -271,7 +271,6 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=2, min=1, max=6),
     )
-    @override_distributed(queued_add_data_points)
     async def create_data_points(self, collection_name: str, data_points: List[DataPoint]):
         """Upsert DataPoints into `collection_name`, merging belongs_to_set on conflict."""
         data_point_types = get_type_hints(DataPoint)
@@ -605,9 +604,12 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             return None
 
         async with self._get_write_lock(collection_name):
+            # Resolve the table BEFORE opening the session. get_table() checks out
+            # its own connection; doing it inside the session would hold two pooled
+            # connections at once and deadlock the pool under concurrency (same
+            # class as #4197). Mirrors retrieve()/search().
+            PGVectorDataPoint = await self.get_table(collection_name)
             async with self.get_async_session() as session:
-                PGVectorDataPoint = await self.get_table(collection_name)
-
                 results = None
                 if not data_point_ids:
                     results = await session.execute(
