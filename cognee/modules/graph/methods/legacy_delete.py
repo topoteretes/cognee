@@ -4,30 +4,40 @@ from cognee.api.v1.exceptions.exceptions import DocumentSubgraphNotFoundError
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.data.models import Data
-from cognee.modules.graph.models.EdgeType import EdgeType
-from cognee.modules.graph.utils.prepare_edges_for_storage import get_edge_retrieval_text
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses
+from cognee.modules.graph.methods.sync_edge_indexes import delete_edge_instances, sync_edge_types
 
 
 logger = get_logger()
 
 
-def _is_contains_edge(edge: dict) -> bool:
-    relationship_name = str(edge.get("relationship_name", ""))
-    return relationship_name == "contains" or "relationship_name: contains;" in relationship_name
-
-
-def _get_edge_vector_text(edge: dict) -> str:
-    return get_edge_retrieval_text(edge.get("edge_text"), edge.get("relationship_name"))
+def _connection_edge(connection) -> tuple[str, str, str, dict] | None:
+    source, relationship, target = connection
+    if (
+        not isinstance(source, dict)
+        or not isinstance(relationship, dict)
+        or not isinstance(target, dict)
+    ):
+        return None
+    relationship_name = relationship.get("relationship_name")
+    if not relationship_name or source.get("id") is None or target.get("id") is None:
+        return None
+    properties = relationship.get("properties")
+    return (
+        str(source["id"]),
+        str(target["id"]),
+        str(relationship_name),
+        properties if isinstance(properties, dict) else relationship,
+    )
 
 
 async def legacy_delete(data: Data, mode: str = "soft"):
     """Delete a single document by its content hash."""
 
     # Delete from graph database
-    deleted_node_ids = await delete_document_subgraph(data.id, mode)
+    deleted_node_ids, deleted_edges = await delete_document_subgraph(data.id, mode)
 
     # Delete from vector database
     vector_engine = await get_vector_engine_async()
@@ -39,13 +49,13 @@ async def legacy_delete(data: Data, mode: str = "soft"):
     for subclass in subclasses:
         index_fields = subclass.model_fields["metadata"].default.get("index_fields", [])
         for field_name in index_fields:
-            vector_collections.append(f"{subclass.__name__}_{field_name}")
+            if subclass.__name__ not in {"EdgeInstance", "EdgeType"}:
+                vector_collections.append(f"{subclass.__name__}_{field_name}")
 
     # If no collections found, use default collections
     if not vector_collections:
         vector_collections = [
             "DocumentChunk_text",
-            "EdgeType_relationship_name",
             "EntityType_name",
             "Entity_name",
             "TextDocument_name",
@@ -58,6 +68,13 @@ async def legacy_delete(data: Data, mode: str = "soft"):
             await vector_engine.delete_data_points(
                 collection, [str(node_id) for node_id in deleted_node_ids]
             )
+
+    await delete_edge_instances(vector_engine, deleted_edges)
+    await sync_edge_types(
+        await get_graph_engine(),
+        vector_engine,
+        [edge[2] for edge in deleted_edges],
+    )
 
 
 async def delete_document_subgraph(document_id: UUID, mode: str = "soft"):
@@ -80,21 +97,16 @@ async def delete_document_subgraph(document_id: UUID, mode: str = "soft"):
     ]
 
     deleted_node_ids = []
+    deleted_edges: dict[tuple[str, str, str, str], tuple[str, str, str, dict]] = {}
     for key, description in deletion_order:
         nodes = subgraph[key]
         if nodes:
             for node in nodes:
                 node_id = node["id"]
-
-                if key == "chunks":
-                    chunk_connections = await graph_db.get_connections(node_id)
-                    deleted_node_ids.extend(
-                        [
-                            str(EdgeType.id_for(_get_edge_vector_text(edge)))
-                            for (__, edge, __) in chunk_connections
-                            if _is_contains_edge(edge) and _get_edge_vector_text(edge)
-                        ]
-                    )
+                for connection in await graph_db.get_connections(node_id):
+                    edge = _connection_edge(connection)
+                    if edge is not None:
+                        deleted_edges[(edge[0], edge[1], edge[2], str(edge[3]))] = edge
 
                 await graph_db.delete_node(node_id)
                 deleted_node_ids.append(node_id)
@@ -104,13 +116,21 @@ async def delete_document_subgraph(document_id: UUID, mode: str = "soft"):
         # Get and delete degree one entity nodes
         degree_one_entity_nodes = await graph_db.get_degree_one_nodes("Entity")
         for node in degree_one_entity_nodes:
+            for connection in await graph_db.get_connections(node["id"]):
+                edge = _connection_edge(connection)
+                if edge is not None:
+                    deleted_edges[(edge[0], edge[1], edge[2], str(edge[3]))] = edge
             await graph_db.delete_node(node["id"])
             deleted_node_ids.append(node["id"])
 
         # Get and delete degree one entity types
         degree_one_entity_types = await graph_db.get_degree_one_nodes("EntityType")
         for node in degree_one_entity_types:
+            for connection in await graph_db.get_connections(node["id"]):
+                edge = _connection_edge(connection)
+                if edge is not None:
+                    deleted_edges[(edge[0], edge[1], edge[2], str(edge[3]))] = edge
             await graph_db.delete_node(node["id"])
             deleted_node_ids.append(node["id"])
 
-    return deleted_node_ids
+    return deleted_node_ids, list(deleted_edges.values())

@@ -28,8 +28,6 @@ from cognee.infrastructure.databases.provenance import (
     NodeDeleteData,
 )
 from cognee.modules.engine.utils import generate_node_id
-from cognee.modules.graph.models.EdgeType import EdgeType
-from cognee.modules.graph.utils.prepare_edges_for_storage import get_edge_retrieval_text
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("provenance_delete_planner")
@@ -142,69 +140,23 @@ async def execute_source_ref_removal(
 
     if unowned_edges:
         await graph_engine.delete_edge_triples(unowned_edges)
+        from cognee.modules.graph.methods.sync_edge_indexes import (
+            delete_edge_instances,
+            sync_edge_types,
+        )
+
+        await delete_edge_instances(vector_engine, [edge_data[edge] for edge in unowned_edges])
+        await sync_edge_types(
+            graph_engine,
+            vector_engine,
+            [edge.relationship_name for edge in unowned_edges],
+        )
 
     # ------------------------------------------------------------------
     # 5. Post-delete cleanup parity with delete_from_graph_and_vector
     #    (best-effort, non-fatal).
     # ------------------------------------------------------------------
-    await _cleanup_orphaned_edge_types(graph_engine, vector_engine, unowned_edges, edge_data)
     await _cleanup_orphaned_nodeset_tags(graph_engine, vector_engine, unowned_node_ids, node_data)
-
-
-async def _cleanup_orphaned_edge_types(
-    graph_engine,
-    vector_engine,
-    unowned_edges: list[EdgeIdentity],
-    edge_data: dict[EdgeIdentity, EdgeDeleteData],
-) -> None:
-    """Prune EdgeType nodes (and their vectors) whose text no longer appears.
-
-    EdgeType artifacts are keyed by *shared* relationship text, so an EdgeType is
-    only orphaned when no surviving edge in the graph still uses that text. We
-    delete the graph node and the vector point together, off the same orphaned-
-    text set, so a relationship that another edge still uses keeps both.
-    """
-    if not unowned_edges:
-        return
-
-    deleted_edge_texts: set[str] = set()
-    for edge in unowned_edges:
-        data = edge_data[edge]
-        edge_text = get_edge_retrieval_text(data.edge_text, edge.relationship_name)
-        if edge_text:
-            deleted_edge_texts.add(edge_text)
-
-    if not deleted_edge_texts:
-        return
-
-    try:
-        _, remaining_edges = await graph_engine.get_graph_data()
-        remaining_edge_texts: set[str] = set()
-        for edge in remaining_edges:
-            properties = edge[3] if len(edge) > 3 and isinstance(edge[3], dict) else {}
-            edge_text = get_edge_retrieval_text(properties.get("edge_text"), edge[2])
-            if edge_text:
-                remaining_edge_texts.add(edge_text)
-
-        orphaned_edge_texts = [
-            edge_text for edge_text in deleted_edge_texts if edge_text not in remaining_edge_texts
-        ]
-        orphaned_edge_type_ids = [str(EdgeType.id_for(text)) for text in orphaned_edge_texts]
-
-        if orphaned_edge_type_ids:
-            await graph_engine.delete_nodes(orphaned_edge_type_ids)
-            logger.info(
-                "Deleted %d orphaned EdgeType node(s)",
-                len(orphaned_edge_type_ids),
-            )
-            try:
-                await vector_engine.delete_data_points(
-                    "EdgeType_relationship_name", orphaned_edge_type_ids
-                )
-            except Exception as error:
-                logger.warning("EdgeType vector cleanup failed (non-fatal): %s", error)
-    except Exception as error:
-        logger.warning("EdgeType cleanup failed (non-fatal): %s", error)
 
 
 async def _cleanup_orphaned_nodeset_tags(

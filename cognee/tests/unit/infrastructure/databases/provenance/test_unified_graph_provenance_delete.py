@@ -35,7 +35,7 @@ from cognee.infrastructure.databases.provenance import (
 )
 from cognee.infrastructure.databases.unified import UnifiedStoreEngine
 from cognee.infrastructure.databases.unified.capabilities import EngineCapability
-from cognee.modules.engine.utils import generate_node_id
+from cognee.modules.engine.utils import generate_edge_object_id, generate_node_id
 from cognee.modules.graph.models.EdgeType import EdgeType
 from cognee.modules.graph.utils.prepare_edges_for_storage import get_edge_retrieval_text
 
@@ -77,12 +77,14 @@ class FakeVectorEngine:
 
     def __init__(self, fail_on_collection: str | None = None):
         self.deleted: list[tuple[str, list[str]]] = []
+        self.indexed: list[tuple[str, str, list[object]]] = []
         self.removed_tags: list[list[str]] = []
         self._fail_on_collection = fail_on_collection
         self._existing_collections = {
             "Entity_name",
             "NodeSet_name",
             "EdgeType_relationship_name",
+            "EdgeInstance_text",
         }
 
     async def has_collection(self, collection: str) -> bool:
@@ -97,6 +99,21 @@ class FakeVectorEngine:
             # Mirror the real "Triplet collection may not exist" case.
             raise RuntimeError(f"collection {collection} does not exist")
         self.deleted.append((collection, list(ids)))
+
+    async def create_vector_index(self, _type_name: str, _field_name: str) -> None:
+        return None
+
+    async def index_data_points(
+        self, type_name: str, field_name: str, points: list[object]
+    ) -> None:
+        self.indexed.append((type_name, field_name, list(points)))
+
+    class _EmbeddingEngine:
+        @staticmethod
+        def get_batch_size() -> int:
+            return 100
+
+    embedding_engine = _EmbeddingEngine()
 
     async def remove_belongs_to_set_tags(self, tags: list[str]) -> None:
         self.removed_tags.append(list(tags))
@@ -301,6 +318,13 @@ class FakeProvenanceGraphEngine:
         ]
         return nodes, edges
 
+    async def get_edge_type_counts(self, relationship_names):
+        counts = dict.fromkeys(relationship_names, 0)
+        for edge in self.edges:
+            if edge.relationship_name in counts:
+                counts[edge.relationship_name] += 1
+        return counts
+
     async def remove_belongs_to_set_tags(self, tags):
         self._guard()
         self.removed_tags = getattr(self, "removed_tags", [])
@@ -389,8 +413,74 @@ async def test_delete_by_source_ref_unowned_delete_and_shared_detach():
     deleted_collections = {c for c, _ in vector.deleted}
     assert ("Entity_name", ["n_owned"]) in vector.deleted
     assert all(ids != ["n_shared"] for _, ids in vector.deleted)
+    assert (
+        "EdgeInstance_text",
+        [str(generate_edge_object_id("n_owned", "n_shared", "located_in"))],
+    ) in vector.deleted
+    assert ("EdgeType_relationship_name", [str(EdgeType.id_for("located_in"))]) in vector.deleted
     assert "EdgeType_relationship_name" in deleted_collections
     assert owned is not None and shared is not None  # keep references explicit
+
+
+async def test_hard_deleted_edge_removes_instance_and_reindexes_shared_type():
+    """A hard-deleted edge removes its stored instance id, not its prose-derived type id."""
+    dataset_a = uuid4()
+    dataset_b = uuid4()
+    ref_a = make_source_ref_key(dataset_a, uuid4())
+    ref_b = make_source_ref_key(dataset_b, uuid4())
+    graph = FakeProvenanceGraphEngine()
+    vector = FakeVectorEngine()
+    first = graph.add_edge(
+        "a",
+        "b",
+        "depends_on",
+        "A depends on B.",
+        {"edge_object_id": "15bfc0f0-51d7-5ac8-8589-3c32fe75aa10"},
+    )
+    second = graph.add_edge("c", "d", "depends_on", "C depends on D.")
+    await graph.attach_edge_source_refs([first], [ref_a])
+    await graph.attach_edge_source_refs([second], [ref_b])
+
+    await _build_engine(graph, vector).delete_by_source_ref(ref_a)
+
+    assert ("EdgeInstance_text", ["15bfc0f0-51d7-5ac8-8589-3c32fe75aa10"]) in vector.deleted
+    indexed_edge_types = [
+        point
+        for type_name, field_name, points in vector.indexed
+        if (type_name, field_name) == ("EdgeType", "relationship_name")
+        for point in points
+    ]
+    assert [(point.relationship_name, point.number_of_edges) for point in indexed_edge_types] == [
+        ("depends_on", 1)
+    ]
+    assert str(EdgeType.id_for("A depends on B.")) not in [
+        item
+        for collection, ids in vector.deleted
+        if collection == "EdgeType_relationship_name"
+        for item in ids
+    ]
+
+
+async def test_removing_one_shared_source_ref_keeps_edge_instance():
+    """Removing provenance alone must not delete an EdgeInstance vector point."""
+    ref_a = make_source_ref_key(uuid4(), uuid4())
+    ref_b = make_source_ref_key(uuid4(), uuid4())
+    graph = FakeProvenanceGraphEngine()
+    vector = FakeVectorEngine()
+    shared = graph.add_edge(
+        "a",
+        "b",
+        "depends_on",
+        "A depends on B.",
+        {"edge_object_id": "15bfc0f0-51d7-5ac8-8589-3c32fe75aa10"},
+    )
+    await graph.attach_edge_source_refs([shared], [ref_a, ref_b])
+
+    await _build_engine(graph, vector).delete_by_source_ref(ref_a)
+
+    assert shared in graph.edges
+    assert graph.edges[shared].source_ref_keys == [ref_b]
+    assert all(collection != "EdgeInstance_text" for collection, _ in vector.deleted)
 
 
 async def test_delete_by_dataset_id_preserves_cross_dataset_artifacts():
