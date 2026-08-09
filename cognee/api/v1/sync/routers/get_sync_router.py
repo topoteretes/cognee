@@ -144,13 +144,14 @@ def get_sync_router() -> APIRouter:
             return sync_result
 
         except ValueError as e:
-            return JSONResponse(status_code=400, content={"error": str(e)})
+            logger.warning("Cloud sync validation failed: %s", e)
+            return JSONResponse(status_code=400, content={"error": "Invalid sync request."})
         except PermissionError as e:
-            return JSONResponse(status_code=403, content={"error": str(e)})
+            logger.warning("Cloud sync permission denied: %s", e)
+            return JSONResponse(status_code=403, content={"error": "Sync permission denied."})
         except ConnectionError as e:
-            return JSONResponse(
-                status_code=409, content={"error": f"Cloud service unavailable: {str(e)}"}
-            )
+            logger.error("Cloud service unavailable during sync: %s", e)
+            return JSONResponse(status_code=409, content={"error": "Cloud service unavailable."})
         except Exception as e:
             logger.error(f"Cloud sync operation failed: {str(e)}")
             return JSONResponse(status_code=409, content={"error": "Cloud sync operation failed."})

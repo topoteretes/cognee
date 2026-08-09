@@ -107,12 +107,15 @@ class TemporalRetriever(GraphCompletionRetriever):
         return time_from, time_to
 
     async def filter_top_k_events(self, relevant_events, scored_results):
-        # Build a score lookup from vector search results
-        score_lookup = {res.id: res.score for res in scored_results}
+        # Build a score lookup from vector search results.
+        # ScoredResult.id is a UUID while event["id"] arrives from the graph as a string,
+        # so both sides must be normalized to str or every lookup misses and all events
+        # collapse to float("inf"), discarding the vector-similarity ranking.
+        score_lookup = {str(res.id): res.score for res in scored_results}
 
         events_with_scores = []
         for event in relevant_events[0]["events"]:
-            score = score_lookup.get(event["id"], float("inf"))
+            score = score_lookup.get(str(event["id"]), float("inf"))
             events_with_scores.append({**event, "score": score})
 
         events_with_scores.sort(key=itemgetter("score"))

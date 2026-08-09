@@ -237,12 +237,18 @@ async def test_delete_dataset_evicts_engines_and_removes_container(monkeypatch, 
 
     # The `graph` package re-exports a `get_graph_engine` function that shadows
     # the module of the same name, so resolve the module via importlib.
+    # EngineCacheOps uses __slots__, so patch the module-level instance with a
+    # stand-in rather than setting an attribute on it.
     import importlib
 
     get_graph_engine_module = importlib.import_module(
         "cognee.infrastructure.databases.graph.get_graph_engine"
     )
-    monkeypatch.setattr(get_graph_engine_module, "aevict_graph_engines_for_url", fake_aevict)
+    monkeypatch.setattr(
+        get_graph_engine_module,
+        "graph_engine_cache",
+        SimpleNamespace(aevict_for_url=fake_aevict),
+    )
 
     dataset_database = SimpleNamespace(
         dataset_id=DATASET_ID,
@@ -464,9 +470,9 @@ def test_create_graph_engine_selects_community_adapter(monkeypatch):
     try:
         assert isinstance(engine, Neo4jCommunityAdapter)
     finally:
-        from cognee.infrastructure.databases.graph.get_graph_engine import evict_graph_engine
+        from cognee.infrastructure.databases.graph.get_graph_engine import graph_engine_cache
 
-        evict_graph_engine(
+        graph_engine_cache.evict(
             graph_database_provider="neo4j",
             graph_file_path="",
             graph_database_url="bolt://localhost:7799",

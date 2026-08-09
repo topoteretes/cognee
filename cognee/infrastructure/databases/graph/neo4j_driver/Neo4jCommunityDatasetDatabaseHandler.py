@@ -161,7 +161,7 @@ class Neo4jCommunityDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
     @classmethod
     async def delete_dataset(cls, dataset_database: DatasetDatabase) -> None:
         from cognee.infrastructure.databases.graph.get_graph_engine import (
-            aevict_graph_engines_for_url,
+            graph_engine_cache,
         )
 
         info = dataset_database.graph_database_connection_info or {}
@@ -170,7 +170,7 @@ class Neo4jCommunityDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
         if bolt_url:
             # Drop cached engines for this container and wait for their
             # in-flight closes so nothing races the container removal.
-            await aevict_graph_engines_for_url(bolt_url)
+            await graph_engine_cache.aevict_for_url(bolt_url)
 
         await get_container_manager().remove_container(
             container_name=info.get(

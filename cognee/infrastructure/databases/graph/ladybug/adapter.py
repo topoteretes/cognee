@@ -50,6 +50,17 @@ from cognee.modules.observability.tracing import (
 
 logger = get_logger()
 
+
+# Rows per bulk MERGE statement (same convention as the Postgres/Turso
+# adapters' _WRITE_CHUNK_SIZE). Bulk node/edge writes are split into chunks of
+# this size so no single statement can exceed the subprocess engine's per-call
+# deadline on large graphs (e.g. code-graph ingests with tens of thousands of
+# facts). Each chunk is its own statement; the writes are idempotent MERGEs
+# and failed runs are swept by the pipeline rollback ledger, so partial
+# progress is safe. Does not change how many data points the pipeline batches.
+_WRITE_CHUNK_SIZE = 2000
+
+
 DEFAULT_KUZU_BUFFER_POOL_SIZE = 1 << 35  # 32 GB (must be a power of 2 for Kuzu)
 DEFAULT_KUZU_MAX_DB_SIZE = 1 << 35  # 32 GB (must be a power of 2 for Kuzu)
 
@@ -1159,14 +1170,19 @@ class LadybugAdapter(GraphDBInterface):
                     n.properties = node.properties,
                     n.updated_at = timestamp(node.updated_at)
                 """
-                query_params = {"nodes": node_params}
+                extra_params = {}
                 if source_ref_key is not None:
                     merge_query += _provenance_fold_clause("n")
-                    query_params.update(_provenance_fold_params(source_ref_key, pipeline_run_id))
+                    extra_params = _provenance_fold_params(source_ref_key, pipeline_run_id)
 
-                await self.query(merge_query, query_params)
+                total = len(node_params)
+                for start in range(0, total, _WRITE_CHUNK_SIZE):
+                    chunk = node_params[start : start + _WRITE_CHUNK_SIZE]
+                    await self.query(merge_query, {"nodes": chunk, **extra_params})
+                    if total > _WRITE_CHUNK_SIZE:
+                        logger.info("Merged nodes %d/%d", start + len(chunk), total)
                 await self.checkpoint()
-                logger.debug(f"Processed {len(node_params)} nodes in batch")
+                logger.debug(f"Processed {total} nodes in batch")
 
         except Exception as e:
             logger.error(f"Failed to add nodes in batch: {e}")
@@ -1913,10 +1929,12 @@ class LadybugAdapter(GraphDBInterface):
                 for from_node, to_node, relationship_name, properties in edges
             ]
 
+            # Property-map matches (primary-key index seeks) instead of a
+            # cartesian MATCH + WHERE, which planned as a scan on large graphs.
             query = """
             UNWIND $edges AS edge
-            MATCH (from:Node), (to:Node)
-            WHERE from.id = edge.from_id AND to.id = edge.to_id
+            MATCH (from:Node {id: edge.from_id})
+            MATCH (to:Node {id: edge.to_id})
             MERGE (from)-[r:EDGE {
                 relationship_name: edge.relationship_name
             }]->(to)
@@ -1928,12 +1946,17 @@ class LadybugAdapter(GraphDBInterface):
                 r.updated_at = timestamp(edge.updated_at),
                 r.properties = edge.properties
             """
-            query_params = {"edges": edge_params}
+            extra_params = {}
             if source_ref_key is not None:
                 query += _provenance_fold_clause("r")
-                query_params.update(_provenance_fold_params(source_ref_key, pipeline_run_id))
+                extra_params = _provenance_fold_params(source_ref_key, pipeline_run_id)
 
-            await self.query(query, query_params)
+            total = len(edge_params)
+            for start in range(0, total, _WRITE_CHUNK_SIZE):
+                chunk = edge_params[start : start + _WRITE_CHUNK_SIZE]
+                await self.query(query, {"edges": chunk, **extra_params})
+                if total > _WRITE_CHUNK_SIZE:
+                    logger.info("Merged edges %d/%d", start + len(chunk), total)
             await self.checkpoint()
 
         except Exception as e:
@@ -2357,6 +2380,41 @@ class LadybugAdapter(GraphDBInterface):
             return {nid: False for nid in node_ids}
         updated_ids = await self._execute_node_truth_state_updates(updates)
         return {nid: (nid in updated_ids) for nid in node_ids}
+
+    async def update_node(self, node_id: str, values: Dict[str, Any]) -> bool:
+        """Merge *values* into an existing node's JSON property blob.
+
+        Reads the node, layers the patch on top of its current properties, and writes
+        the blob back in a single MATCH/SET. Only ``id``/``name``/``type`` are excluded
+        when rebuilding the blob: those are the native columns ``get_node`` injects and
+        ``add_node`` keeps out of the blob. Every other field — ``created_at``,
+        ``updated_at``, ``version``, ... — lives *inside* the blob (that is where
+        ``get_node`` reads them from), so it is carried through untouched and a patch
+        never silently drops a field the caller did not name. Returns False if the node
+        does not exist (or *values* is empty, i.e. there is nothing to patch).
+        """
+        if not isinstance(node_id, str) or not node_id or not values:
+            return False
+        node = await self.get_node(node_id)
+        if node is None:
+            return False
+        # get_node merges the JSON blob with the native id/name/type columns; rebuild
+        # the blob from everything except those three (created_at/updated_at and the
+        # rest are stored in the blob, not as native columns get_node returns), then
+        # layer the patch on top.
+        properties = {k: v for k, v in node.items() if k not in {"id", "name", "type"}}
+        properties.update(values)
+        query = """
+        MATCH (n:Node)
+        WHERE n.id = $id
+        SET n.properties = $properties
+        RETURN n.id AS id
+        """
+        result = await self.query(
+            query,
+            {"id": node_id, "properties": json.dumps(properties, cls=JSONEncoder)},
+        )
+        return bool(result)
 
     async def get_edge_feedback_weights(self, edge_object_ids: List[str]) -> Dict[str, float]:
         if not edge_object_ids:
@@ -3602,6 +3660,9 @@ class LadybugAdapter(GraphDBInterface):
 
         query = """
         MATCH (start_node:Node)-[relationship:EDGE]->(end_node:Node)
+        WITH start_node, relationship, end_node
+        ORDER BY start_node.id, end_node.id, relationship.relationship_name
+        SKIP $offset LIMIT $limit
         RETURN {
             start_node: {
                 id: start_node.id,
@@ -3620,7 +3681,6 @@ class LadybugAdapter(GraphDBInterface):
                 properties: end_node.properties
             }
         } AS triplet
-        SKIP $offset LIMIT $limit
         """
 
         try:

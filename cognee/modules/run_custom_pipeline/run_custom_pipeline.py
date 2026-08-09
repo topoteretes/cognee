@@ -7,6 +7,7 @@ from cognee.modules.pipelines import run_pipeline
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.users.models import User
 from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
+from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 
 logger = get_logger()
 
@@ -14,7 +15,7 @@ logger = get_logger()
 async def run_custom_pipeline(
     tasks: Union[List[Task], List[str]] = None,
     data: Any = None,
-    dataset: Union[str, UUID] = "main_dataset",
+    dataset: Union[str, UUID] = DEFAULT_DATASET_NAME,
     user: User = None,
     vector_db_config: Optional[dict] = None,
     graph_db_config: Optional[dict] = None,

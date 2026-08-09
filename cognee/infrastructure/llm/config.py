@@ -15,6 +15,47 @@ except ImportError:
 _STAGE_NAMES = {"extraction", "summarization", "query"}
 
 
+# Providers cognee can dispatch to. Duplicated from the ``LLMProvider`` enum
+# (importing it here would be circular); a unit test keeps the two in sync.
+KNOWN_LLM_PROVIDERS = frozenset(
+    {
+        "openai",
+        "ollama",
+        "anthropic",
+        "custom",
+        "gemini",
+        "mistral",
+        "azure",
+        "bedrock",
+        "llama_cpp",
+        "mcp-sampling",
+    }
+)
+
+# Local inference servers process requests (near-)serially, unlike cloud
+# providers. One definition of the distinction, for everything that needs it:
+# by first-class provider name, or by litellm model routing prefix (LM Studio
+# has no first-class provider in cognee). vLLM is deliberately NOT here: it
+# serves with continuous batching and absorbs concurrency like a cloud
+# endpoint, so it keeps the regular settings.
+LOCAL_LLM_PROVIDERS = frozenset({"ollama", "llama_cpp"})
+LOCAL_LLM_MODEL_PREFIXES = ("lm_studio/",)
+
+# Default RPM budget for local inference servers when LLM_RATE_LIMIT_REQUESTS
+# is not explicitly configured; cloud providers keep the regular default of 60.
+LOCAL_DEFAULT_RATE_LIMIT_REQUESTS = 10
+
+
+def is_local_llm(provider: str | None, model: str | None) -> bool:
+    """True when the provider/model points at a serial local inference server
+    (Ollama, llama.cpp by provider; LM Studio by model prefix). vLLM counts
+    as regular: continuous batching absorbs concurrency like a cloud endpoint.
+    """
+    if (provider or "").lower() in LOCAL_LLM_PROVIDERS:
+        return True
+    return (model or "").lower().startswith(LOCAL_LLM_MODEL_PREFIXES)
+
+
 class LLMConfig(BaseSettings):
     """
     Configuration settings for the LLM (Large Language Model) provider and related options.
@@ -33,9 +74,6 @@ class LLMConfig(BaseSettings):
     - llm_rate_limit_enabled
     - llm_rate_limit_requests
     - llm_rate_limit_interval
-    - embedding_rate_limit_enabled
-    - embedding_rate_limit_requests
-    - embedding_rate_limit_interval
 
     Public methods include:
     - ensure_env_vars_for_ollama
@@ -85,19 +123,24 @@ class LLMConfig(BaseSettings):
     graph_prompt_path: str = "generate_graph_prompt.txt"
     temporal_graph_prompt_path: str = "generate_event_graph_prompt.txt"
     event_entity_prompt_path: str = "generate_event_entity_prompt.txt"
+    image_transcription_prompt_path: str = "transcribe_image_prompt.txt"
+    image_transcription_max_completion_tokens: int = 1024
+    image_transcription_reasoning_effort: str = "low"
     llm_rate_limit_enabled: bool = False
+    # Default 60 requests per interval; local inference servers get
+    # LOCAL_DEFAULT_RATE_LIMIT_REQUESTS instead (see default_local_rate_limit_budget).
     llm_rate_limit_requests: int = 60
     llm_rate_limit_interval: int = 60  # in seconds (default is 60 requests per minute)
     llm_rate_limit_tokens: int = 0  # max tokens per interval (0 = disabled)
-    embedding_rate_limit_enabled: bool = False
-    embedding_rate_limit_requests: int = 60
-    embedding_rate_limit_interval: int = 60  # in seconds (default is 60 requests per minute)
-    embedding_rate_limit_tokens: int = 0  # max tokens per interval (0 = disabled)
+    # When the provider reports a rate limit, warn and switch on the RPM limiter
+    # (with the llm_rate_limit_requests/interval budget) for the rest of the process.
+    auto_rate_limit: bool = True
 
     llama_cpp_model_path: str | None = None
     llama_cpp_n_ctx: int = 2048
     llama_cpp_n_gpu_layers: int = 0
     llama_cpp_chat_format: str = "chatml"
+    ollama_num_ctx: int = 2048
 
     fallback_api_key: str = ""
     fallback_endpoint: str = ""
@@ -114,37 +157,67 @@ class LLMConfig(BaseSettings):
     @model_validator(mode="after")
     def strip_quotes_from_strings(self) -> "LLMConfig":
         """
-        Strip surrounding quotes from specific string fields that often come from
-        environment variables with extra quotes (e.g., via Docker's --env-file).
+        Strip a matching pair of surrounding quotes from every string field.
 
-        Only applies to known config keys where quotes are invalid or cause issues.
+        Such quotes commonly arrive from env vars passed via Docker's
+        ``--env-file``. Covering all declared string fields (not an allow-list)
+        means new fields are handled automatically; only a matching outer pair
+        of quotes is removed, so internal quotes are left untouched.
         """
-        string_fields_to_strip = [
-            "llm_api_key",
-            "llm_endpoint",
-            "llm_api_version",
-            "baml_llm_api_key",
-            "baml_llm_endpoint",
-            "baml_llm_api_version",
-            "fallback_api_key",
-            "fallback_endpoint",
-            "fallback_model",
-            "llm_provider",
-            "llm_model",
-            "baml_llm_provider",
-            "baml_llm_model",
-            "llama_cpp_model_path",
-            "llama_cpp_chat_format",
-        ]
-
-        cls = self.__class__
-        for field_name in string_fields_to_strip:
-            if field_name not in cls.model_fields:
-                continue
+        for field_name in self.__class__.model_fields:
             value = getattr(self, field_name, None)
             if isinstance(value, str) and len(value) >= 2:
                 if value[0] == value[-1] and value[0] in ("'", '"'):
                     setattr(self, field_name, value[1:-1])
+
+        return self
+
+    @model_validator(mode="after")
+    def infer_provider_from_model(self) -> "LLMConfig":
+        """
+        Infer ``llm_provider`` from the ``llm_model`` prefix when it was not set
+        explicitly, so ``LLM_PROVIDER`` is optional for litellm-style model ids
+        (e.g. ``"anthropic/claude-3-5-sonnet"`` -> ``anthropic``).
+
+        An explicit ``llm_provider`` (kwarg or env var) always wins, as does a
+        model with no ``"/"`` prefix. A prefix that is not a supported provider
+        (e.g. ``"openrouter/..."``, which needs ``LLM_PROVIDER="custom"``) raises
+        ``ProviderNotDeducibleError`` instead of silently defaulting to something
+        that would fail downstream. Runs after ``strip_quotes_from_strings`` so
+        the prefix is already unquoted.
+        """
+        if "llm_provider" in self.model_fields_set:
+            return self
+
+        model = self.llm_model
+        if isinstance(model, str) and "/" in model:
+            prefix = model.split("/", 1)[0].strip().lower()
+            if prefix in KNOWN_LLM_PROVIDERS:
+                self.llm_provider = prefix
+            else:
+                from cognee.infrastructure.llm.exceptions import ProviderNotDeducibleError
+
+                raise ProviderNotDeducibleError(model)
+
+        return self
+
+    @model_validator(mode="after")
+    def default_local_rate_limit_budget(self) -> "LLMConfig":
+        """
+        Give local inference servers a smaller default RPM budget.
+
+        Serial local servers (Ollama, LM Studio, llama.cpp) process requests
+        (near-)serially, so when the rate limiter engages, the regular cloud
+        default of 60 requests per interval would still flood them. An
+        explicitly configured ``LLM_RATE_LIMIT_REQUESTS`` always wins. Runs
+        after ``infer_provider_from_model`` so the provider is already
+        resolved.
+        """
+        if "llm_rate_limit_requests" in self.model_fields_set:
+            return self
+
+        if is_local_llm(self.llm_provider, self.llm_model):
+            self.llm_rate_limit_requests = LOCAL_DEFAULT_RATE_LIMIT_REQUESTS
 
         return self
 
@@ -210,9 +283,8 @@ class LLMConfig(BaseSettings):
             val = os.environ.get(var_name)
             return val is not None and val.strip() != ""
 
-        #
-        # 1. Check LLM environment variables
-        #
+        # Only LLM env vars are validated here; embedding env vars are
+        # EmbeddingConfig's responsibility, not LLMConfig's.
         llm_env_vars = {
             "LLM_MODEL": is_env_set("LLM_MODEL"),
             "LLM_ENDPOINT": is_env_set("LLM_ENDPOINT"),
@@ -225,22 +297,12 @@ class LLMConfig(BaseSettings):
                 f"for LLM usage (LLM_MODEL, LLM_ENDPOINT, LLM_API_KEY). Missing: {missing_llm}"
             )
 
-        #
-        # 2. Check embedding environment variables
-        #
-        embedding_env_vars = {
-            "EMBEDDING_PROVIDER": is_env_set("EMBEDDING_PROVIDER"),
-            "EMBEDDING_MODEL": is_env_set("EMBEDDING_MODEL"),
-            "EMBEDDING_DIMENSIONS": is_env_set("EMBEDDING_DIMENSIONS"),
-        }
-        if any(embedding_env_vars.values()) and not all(embedding_env_vars.values()):
-            missing_embed = [key for key, is_set in embedding_env_vars.items() if not is_set]
-            raise ValueError(
-                "You have set some but not all of the required environment variables "
-                "for embeddings (EMBEDDING_PROVIDER, EMBEDDING_MODEL, "
-                "EMBEDDING_DIMENSIONS). Missing: "
-                f"{missing_embed}"
-            )
+        # Check model support matrix if LLM_MODEL is configured
+        model_name = os.environ.get("LLM_MODEL") or self.llm_model
+        if model_name:
+            from cognee.infrastructure.llm.ollama_support import check_model_support
+
+            check_model_support(model_name)
 
         return self
 
@@ -269,9 +331,6 @@ class LLMConfig(BaseSettings):
             "rate_limit_enabled": self.llm_rate_limit_enabled,
             "rate_limit_requests": self.llm_rate_limit_requests,
             "rate_limit_interval": self.llm_rate_limit_interval,
-            "embedding_rate_limit_enabled": self.embedding_rate_limit_enabled,
-            "embedding_rate_limit_requests": self.embedding_rate_limit_requests,
-            "embedding_rate_limit_interval": self.embedding_rate_limit_interval,
             "fallback_api_key": self.fallback_api_key,
             "fallback_endpoint": self.fallback_endpoint,
             "fallback_model": self.fallback_model,
@@ -279,6 +338,7 @@ class LLMConfig(BaseSettings):
             "llama_cpp_n_ctx": self.llama_cpp_n_ctx,
             "llama_cpp_n_gpu_layers": self.llama_cpp_n_gpu_layers,
             "llama_cpp_chat_format": self.llama_cpp_chat_format,
+            "ollama_num_ctx": self.ollama_num_ctx,
             "llm_args": self.llm_args,
         }
 

@@ -14,6 +14,9 @@ from tenacity import (
     retry,
     wait_exponential_jitter,
 )
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.instructor_modes import (
+    get_instructor_mode,
+)
 from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError, is_budget_exhausted_error
 
 from cognee.infrastructure.llm.retry_config import (
@@ -65,7 +68,7 @@ class LlamaCppAPIAdapter(LLMInterface):
     model: str | None
     model_path: str | None
     mode_type: str  # "server" or "local"
-    default_instructor_mode = instructor.Mode.JSON
+    default_instructor_mode = get_instructor_mode("llama_cpp")
 
     def __init__(
         self,
@@ -222,5 +225,11 @@ class LlamaCppAPIAdapter(LLMInterface):
     async def create_transcript(self, input: str, **kwargs: Any) -> TranscriptionReturnType:
         raise NotImplementedError
 
-    async def transcribe_image(self, input: str, **kwargs: Any) -> str:
+    async def transcribe_image(
+        self,
+        input: str,
+        prompt: str | None = None,
+        max_completion_tokens: int | None = None,
+        reasoning_effort: str | None = None,
+    ) -> str:
         raise NotImplementedError

@@ -267,10 +267,10 @@ class Neo4jCommunityContainerManager:
             # Lazy import: get_graph_engine lazily imports the community adapter,
             # which imports this module.
             from cognee.infrastructure.databases.graph.get_graph_engine import (
-                evict_graph_engines_for_url,
+                graph_engine_cache,
             )
 
-            evict_graph_engines_for_url(bolt_url)
+            graph_engine_cache.evict_for_url(bolt_url)
 
         try:
             await _docker(["stop", container_name])

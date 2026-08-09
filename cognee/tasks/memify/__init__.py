@@ -14,3 +14,4 @@ from .extract_agent_trace_feedbacks import extract_agent_trace_feedbacks
 from .extract_user_sessions import extract_user_sessions
 from .extract_feedback_qas import extract_feedback_qas
 from .apply_feedback_weights import apply_feedback_weights
+from .consolidate_entities import detect_entity_duplicates, merge_entity_duplicates

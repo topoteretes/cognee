@@ -1,3 +1,4 @@
+import logging
 from typing import Any
 
 import instructor
@@ -5,8 +6,16 @@ import litellm
 from instructor.exceptions import InstructorRetryException
 from litellm.exceptions import ContentPolicyViolationError
 from pydantic import BaseModel
+from tenacity import before_sleep_log, retry, wait_exponential_jitter
 
 from cognee.infrastructure.files.storage.s3_config import get_s3_config
+from cognee.infrastructure.llm.retry_config import (
+    llm_retry_condition,
+    llm_retry_stop_condition,
+)
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.instructor_modes import (
+    get_instructor_mode,
+)
 from cognee.infrastructure.llm.exceptions import (
     ContentPolicyFilterError,
     LLMPaymentRequiredError,
@@ -17,17 +26,14 @@ from cognee.infrastructure.llm.prompts.read_query_prompt import read_query_promp
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.llm_interface import (
     LLMInterface,
 )
-from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.rate_limiter import (
-    rate_limit_async,
-    rate_limit_sync,
-    sleep_and_retry_async,
-    sleep_and_retry_sync,
-)
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.types import (
     TranscriptionReturnType,
 )
 from cognee.modules.observability.get_observe import get_observe
+from cognee.shared.logging_utils import get_logger
+from cognee.shared.rate_limiting import llm_rate_limiter_context_manager
 
+logger = get_logger()
 observe = get_observe()
 
 
@@ -40,7 +46,7 @@ class BedrockAdapter(LLMInterface):
     """
 
     name = "Bedrock"
-    default_instructor_mode = "json_schema_mode"
+    default_instructor_mode = get_instructor_mode("bedrock")
 
     MAX_RETRIES = 2
 
@@ -108,8 +114,13 @@ class BedrockAdapter(LLMInterface):
         return request_params
 
     @observe(as_type="generation")
-    @sleep_and_retry_async()
-    @rate_limit_async
+    @retry(
+        stop=llm_retry_stop_condition,
+        wait=wait_exponential_jitter(8, 128),
+        retry=llm_retry_condition,
+        before_sleep=before_sleep_log(logger, logging.WARNING),
+        reraise=True,
+    )
     async def acreate_structured_output(
         self, text_input: str, system_prompt: str, response_model: type[BaseModel], **kwargs: Any
     ) -> BaseModel:
@@ -119,7 +130,10 @@ class BedrockAdapter(LLMInterface):
             request_params = self._create_bedrock_request(
                 text_input, system_prompt, response_model, **kwargs
             )
-            return await self.aclient.chat.completions.create(**request_params)
+            # Dispatch through the pacing seam so overload errors reach the
+            # OverloadPolicy and paced episodes throttle this adapter too.
+            async with llm_rate_limiter_context_manager():
+                return await self.aclient.chat.completions.create(**request_params)
 
         except (
             ContentPolicyViolationError,
@@ -142,7 +156,13 @@ class BedrockAdapter(LLMInterface):
     async def create_transcript(self, input: str, **kwargs: Any) -> TranscriptionReturnType | None:
         raise NotImplementedError
 
-    async def transcribe_image(self, input: str) -> Any:
+    async def transcribe_image(
+        self,
+        input: str,
+        prompt: str | None = None,
+        max_completion_tokens: int | None = None,
+        reasoning_effort: str | None = None,
+    ) -> Any:
         raise NotImplementedError
 
     def show_prompt(self, text_input: str, system_prompt: str) -> str | None:
