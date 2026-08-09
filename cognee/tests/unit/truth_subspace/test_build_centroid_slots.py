@@ -250,6 +250,137 @@ async def test_unsupported_backend_skips_before_any_embedding(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_unchanged_corpus_rebuild_embeds_no_chunk_texts(monkeypatch):
+    """Second build with unchanged learnings + already-scored chunks must not
+    embed a single corpus text (only the learning statements re-embed)."""
+    from cognee.modules.truth_subspace.centroids import learning_id
+    from cognee.modules.truth_subspace.models import TruthCentroidPayload
+
+    embedded_texts = []
+
+    class _TrackingEngine(_EmbeddingEngine):
+        async def embed_text(self, texts):
+            embedded_texts.extend(texts)
+            return await super().embed_text(texts)
+
+    dataset = SimpleNamespace(id=uuid4(), owner_id=uuid4())
+    user = SimpleNamespace(id=uuid4())
+    existing = [
+        TruthCentroidPayload(
+            dataset_id=str(dataset.id),
+            slot=0,
+            count=1,
+            truth_epoch=1,
+            updated_at=1,
+            centroid=[1.0, 0.0],
+            learning_ids=[learning_id("alpha")],
+        )
+    ]
+    vector_engine = MagicMock()
+    vector_engine.retrieve = AsyncMock(
+        return_value=[SimpleNamespace(payload=existing[0].model_dump())]
+    )
+    vector_engine.upsert_raw_vectors = AsyncMock()
+
+    graph_engine = MagicMock()
+    graph_engine.get_nodeset_subgraph = AsyncMock(
+        return_value=([("learning-1", {"type": "DocumentChunk", "text": "alpha"})], [])
+    )
+    graph_engine.get_graph_data = AsyncMock(
+        return_value=([("chunk-1", {"type": "DocumentChunk", "text": "alpha corpus"})], [])
+    )
+    graph_engine.get_node_truth_state = AsyncMock(
+        return_value={"chunk-1": {"truth_alignment": [1.0, 0.0], "truth_epoch": 1}}
+    )
+    graph_engine.set_node_truth_state = AsyncMock()
+    monkeypatch.setenv("ENABLE_BACKEND_ACCESS_CONTROL", "false")
+
+    with (
+        patch(
+            "cognee.modules.truth_subspace.build.get_authorized_existing_datasets",
+            new=AsyncMock(return_value=[dataset]),
+        ),
+        patch(
+            "cognee.modules.truth_subspace.build.get_vector_engine_async",
+            new=AsyncMock(return_value=vector_engine),
+        ),
+        patch(
+            "cognee.modules.truth_subspace.build.get_graph_engine",
+            new=AsyncMock(return_value=graph_engine),
+        ),
+        patch(
+            "cognee.modules.truth_subspace.build.get_embedding_engine",
+            return_value=_TrackingEngine(),
+        ),
+    ):
+        # session_ids -> extend mode, so the pre-existing centroid slot is reused.
+        result = await build_truth_subspace(dataset.id, session_ids=["s-1"], user=user)
+
+    assert result["truth_epoch"] == 1
+    assert result["nodes_scored"] == 0
+    assert "alpha corpus" not in embedded_texts  # corpus untouched
+    graph_engine.set_node_truth_state.assert_not_awaited()
+    vector_engine.upsert_raw_vectors.assert_not_awaited()  # centroids unchanged
+
+
+@pytest.mark.asyncio
+async def test_new_chunks_reuse_stored_vectors_instead_of_embedding(monkeypatch):
+    """Chunk vectors already stored in DocumentChunk_text are read back; only
+    texts the store cannot return get embedded."""
+    embedded_texts = []
+
+    class _TrackingEngine(_EmbeddingEngine):
+        async def embed_text(self, texts):
+            embedded_texts.extend(texts)
+            return await super().embed_text(texts)
+
+    dataset = SimpleNamespace(id=uuid4(), owner_id=uuid4())
+    user = SimpleNamespace(id=uuid4())
+    vector_engine = MagicMock()
+
+    async def retrieve(collection_name, ids, include_vector=False):
+        if collection_name == "DocumentChunk_text" and include_vector:
+            return [SimpleNamespace(id="chunk-1", payload={"vector": [1.0, 0.0]})]
+        return []
+
+    vector_engine.retrieve = AsyncMock(side_effect=retrieve)
+    vector_engine.upsert_raw_vectors = AsyncMock()
+
+    graph_engine = MagicMock()
+    graph_engine.get_nodeset_subgraph = AsyncMock(
+        return_value=([("learning-1", {"type": "DocumentChunk", "text": "alpha"})], [])
+    )
+    graph_engine.get_graph_data = AsyncMock(
+        return_value=([("chunk-1", {"type": "DocumentChunk", "text": "alpha corpus"})], [])
+    )
+    graph_engine.set_node_truth_state = AsyncMock(return_value={"chunk-1": True})
+    monkeypatch.setenv("ENABLE_BACKEND_ACCESS_CONTROL", "false")
+
+    with (
+        patch(
+            "cognee.modules.truth_subspace.build.get_authorized_existing_datasets",
+            new=AsyncMock(return_value=[dataset]),
+        ),
+        patch(
+            "cognee.modules.truth_subspace.build.get_vector_engine_async",
+            new=AsyncMock(return_value=vector_engine),
+        ),
+        patch(
+            "cognee.modules.truth_subspace.build.get_graph_engine",
+            new=AsyncMock(return_value=graph_engine),
+        ),
+        patch(
+            "cognee.modules.truth_subspace.build.get_embedding_engine",
+            return_value=_TrackingEngine(),
+        ),
+    ):
+        result = await build_truth_subspace(dataset.id, session_ids=None, user=user)
+
+    assert result["nodes_scored"] == 1
+    assert embedded_texts == ["alpha"]  # learning statement only; corpus reused
+
+
+@pytest.mark.asyncio
 async def test_build_truth_subspace_filters_learning_sets_by_session_ids(monkeypatch):
     _result, _vector_engine, graph_engine = await _run_build(
         monkeypatch, session_ids=["s-1", "s-2"]

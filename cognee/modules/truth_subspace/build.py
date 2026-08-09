@@ -99,6 +99,36 @@ async def _fetch_learning_statements(graph_engine, session_ids: Optional[List[st
     return statements
 
 
+async def _load_stored_chunk_vectors(vector_engine, node_ids: List[str]) -> dict:
+    """Reuse embeddings already stored in DocumentChunk_text instead of re-embedding.
+
+    cognify embedded every chunk when it was ingested; re-embedding the corpus on
+    each truth build was the single biggest build cost. ``include_vector`` is a
+    LanceDB extension — backends without it (TypeError) simply fall back to
+    embedding. Fail-open -> {}.
+    """
+    if not node_ids:
+        return {}
+    try:
+        rows = await vector_engine.retrieve(
+            "DocumentChunk_text", list(node_ids), include_vector=True
+        )
+    except TypeError:
+        return {}
+    except Exception as error:
+        logger.debug("truth_subspace: stored-vector read-back failed open: %s", error)
+        return {}
+
+    vectors: dict = {}
+    for row in rows or []:
+        payload = getattr(row, "payload", None)
+        vector = payload.get("vector") if isinstance(payload, dict) else None
+        row_id = str(getattr(row, "id", "") or "")
+        if row_id and isinstance(vector, (list, tuple)) and len(vector):
+            vectors[row_id] = [float(value) for value in vector]
+    return vectors
+
+
 async def _embed_in_batches(embedding_engine, texts: List[str]) -> List[List[float]]:
     """Embed ``texts`` in bounded batches, preserving order. Fail-open -> []."""
     vectors: List[List[float]] = []
@@ -271,6 +301,32 @@ async def build_truth_subspace(
             node_ids.append(str(node_id))
             node_texts.append(text)
 
+        # Step 5.5: INCREMENTAL — with an unchanged centroid basis, chunks already
+        # scored at the current epoch keep their coords; only new or stale chunks
+        # need embedding and scoring. A second build over an unchanged corpus does
+        # zero embedding work.
+        if not centroids_dirty and node_ids:
+            try:
+                existing_states = await graph_engine.get_node_truth_state(node_ids)
+            except Exception as error:
+                logger.debug("truth_subspace: truth-state lookup failed open: %s", error)
+                existing_states = {}
+            fresh = [
+                (node_id, text)
+                for node_id, text in zip(node_ids, node_texts)
+                if (existing_states.get(node_id) or {}).get("truth_epoch") != current_epoch
+            ]
+            already_scored = len(node_ids) - len(fresh)
+            if already_scored:
+                logger.info(
+                    "truth_subspace: %d chunk(s) already scored at epoch %d; scoring %d",
+                    already_scored,
+                    current_epoch,
+                    len(fresh),
+                )
+            node_ids = [node_id for node_id, _text in fresh]
+            node_texts = [text for _node_id, text in fresh]
+
         if not node_texts:
             logger.info("truth_subspace: %d centroids, no scoreable nodes", len(centroids))
             committed = await commit_centroids()
@@ -281,8 +337,18 @@ async def build_truth_subspace(
                 "truth_epoch": current_epoch if committed else previous_epoch,
             }
 
-        # Step 6: EMBED node texts (batched) and compute coords per node.
-        node_vecs = await _embed_in_batches(embedding_engine, node_texts)
+        # Step 6: reuse stored chunk embeddings where the vector store can return
+        # them; EMBED only the remainder (batched), and compute coords per node.
+        stored_vectors = await _load_stored_chunk_vectors(vector_engine, node_ids)
+        texts_to_embed = [
+            text for node_id, text in zip(node_ids, node_texts) if node_id not in stored_vectors
+        ]
+        embedded = await _embed_in_batches(embedding_engine, texts_to_embed)
+        embedded_iter = iter(embedded)
+        node_vecs = [
+            stored_vectors[node_id] if node_id in stored_vectors else next(embedded_iter, [])
+            for node_id in node_ids
+        ]
         for node_id, node_vec in zip(node_ids, node_vecs):
             if not node_vec:
                 # Embedding failed for this node's batch: writing [0.0]*k coords at the

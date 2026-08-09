@@ -277,6 +277,67 @@ class Neo4jAdapter(GraphDBInterface):
                 logger.error("Neo4j query error: %s", error, exc_info=True)
                 raise error
 
+    async def get_node_truth_state(self, node_ids: List[str]) -> Dict[str, Dict[str, Any]]:
+        """Truth alignment coords + epoch per node id; missing nodes are omitted."""
+        valid_ids = [node_id for node_id in node_ids if isinstance(node_id, str) and node_id]
+        if not valid_ids:
+            return {}
+        rows = await self.query(
+            f"""
+            MATCH (n:`{BASE_LABEL}`)
+            WHERE n.id IN $node_ids
+            RETURN n.id AS id, n.truth_alignment AS truth_alignment, n.truth_epoch AS truth_epoch
+            """,
+            {"node_ids": valid_ids},
+        )
+        result: Dict[str, Dict[str, Any]] = {}
+        for row in rows or []:
+            node_id = row.get("id")
+            if not isinstance(node_id, str):
+                continue
+            alignment = row.get("truth_alignment")
+            epoch = row.get("truth_epoch")
+            try:
+                truth_epoch = int(epoch) if epoch is not None else None
+            except (TypeError, ValueError):
+                truth_epoch = None
+            result[node_id] = {
+                "truth_alignment": list(alignment) if isinstance(alignment, (list, tuple)) else [],
+                "truth_epoch": truth_epoch,
+            }
+        return result
+
+    async def set_node_truth_state(
+        self, node_truth_state: Dict[str, Dict[str, Any]]
+    ) -> Dict[str, bool]:
+        """Persist truth alignment coords + epoch; returns per-id success."""
+        updates = []
+        for node_id, state in (node_truth_state or {}).items():
+            if not isinstance(node_id, str) or not node_id or not isinstance(state, dict):
+                continue
+            alignment = state.get("truth_alignment") or []
+            updates.append(
+                {
+                    "id": node_id,
+                    "truth_alignment": [float(value) for value in alignment],
+                    "truth_epoch": int(state.get("truth_epoch") or 0),
+                }
+            )
+        if not updates:
+            return {node_id: False for node_id in node_truth_state or {}}
+        rows = await self.query(
+            f"""
+            UNWIND $updates AS update
+            MATCH (n:`{BASE_LABEL}` {{id: update.id}})
+            SET n.truth_alignment = update.truth_alignment,
+                n.truth_epoch = update.truth_epoch
+            RETURN n.id AS id
+            """,
+            {"updates": updates},
+        )
+        updated_ids = {row.get("id") for row in rows or []}
+        return {node_id: (node_id in updated_ids) for node_id in node_truth_state}
+
     async def has_node(self, node_id: str) -> bool:
         """
         Check if a node with the specified ID exists in the database.
