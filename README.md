@@ -181,6 +181,23 @@ cognee-cli -ui
 > Docker Desktop, Colima, or any OCI-compatible runtime with a working `docker` CLI is
 > required. See [Docker & Colima Setup](docs/docker-colima-setup.md) for details.
 
+### Performance tuning
+
+Cognee's defaults favor memory quality over raw latency. Two knobs matter:
+
+- **`AUTO_FEEDBACK=false`** removes the one LLM call cognee makes after each answered
+  query to self-tune its memory. Reads get faster and cheaper; session memory itself
+  keeps working. Turn it back on when you want memory that improves from conversation
+  signals.
+- **`CACHING=false`** disables session memory entirely — `remember(session_id=...)`
+  stops working and `recall()` loses conversation context. Only set this if you don't
+  use session memory at all. **If you're benchmarking cognee, leave it on** — turning
+  it off benchmarks cognee with its memory layer removed.
+
+A third flag, `DATASET_QUEUE_ENABLED=false`, removes the per-process concurrency guard
+on datasets; it saves a little latency but risks file-lock leaks and resource
+exhaustion when multiple datasets run in parallel — leave it on for servers.
+
 ## Run with Docker
 
 Prefer containers? Cognee publishes prebuilt images to Docker Hub on every push to `main`:
@@ -332,6 +349,11 @@ Agent: "Here's how senior analysts solved a similar retention query.
 
 Graph memory traditionally means operating a stack — a graph database for relationships, a vector database for embeddings, Redis for sessions, and a relational database for metadata — all deployed, secured, and paid for before an agent remembers anything. In cognee 1.0 you can run the entire memory layer on a single Postgres instance.
 
+> **⚠️ Warning:** Using Postgres as a graph store is currently a released as a demo feature. The production ready feature is available as a licenced product. Use it to demo keeping relational metadata, PGVector, and graph
+> state in a single Postgres service.
+>
+> Interested in production use of Postgres as a graph database? Book a call with our sales team at our [website](https://www.cognee.ai)
+>
 | Memory layer | Traditional stack | cognee on Postgres |
 | --- | --- | --- |
 | Relationships | Neo4j or another graph database | cognee's Postgres graph backend |
@@ -341,7 +363,7 @@ Graph memory traditionally means operating a stack — a graph database for rela
 
 The graph still exists — it just lives inside the same Postgres-backed memory layer as the text, metadata, and embeddings, so retrieval moves between similarity and structure without crossing service boundaries. In our CI benchmarks, Postgres search ran ~10% faster than the separate graph-plus-vector setup.
 
-Postgres is the default we recommend for most deployments, but you can still swap in dedicated backends when a workload needs them (Neo4j and Neptune for graphs, Redis for sessions, pgvector and LanceDB for vectors, plus Qdrant, ChromaDB, Weaviate, and Milvus via community adapters). Local development stays fully embedded — SQLite, LanceDB, and Kuzudb — with no extra services to stand up.
+Postgres is a solid default for the relational, vector, and session layers, and you can swap in dedicated backends for any of them when a workload needs it (Neo4j and Neptune for graphs, Redis for sessions, pgvector and LanceDB for vectors, plus Qdrant, ChromaDB, Weaviate, and Milvus via community adapters). For the graph layer specifically, keep to a graph-native backend in production — the Postgres graph store is still a demo feature. Local development stays fully embedded — SQLite, LanceDB, and Kuzudb — with no extra services to stand up.
 
 ```bash
 pip install "cognee[postgres]"
@@ -375,6 +397,25 @@ Use [Cognee Cloud](https://www.cognee.ai) for a fully managed experience, or sel
 | **Islo** | Isolated cloud sandboxes (SDK) | See `distributed/deploy/islo_sandbox.py` |
 
 See the [`distributed/`](distributed/) folder for deploy scripts, worker configurations, and additional details.
+
+### Multi-tenant deployments
+
+With `ENABLE_BACKEND_ACCESS_CONTROL=true` (the default), each user+dataset combination
+gets its own isolated graph and vector databases. Not every backend supports this:
+
+| Layer | Isolation supported | Not supported |
+|---|---|---|
+| Graph | Ladybug/Kuzu (default), Neo4j*, Postgres (demo), Turso | Neptune, remote Ladybug |
+| Vector | LanceDB (default), PGVector, Turso | Neptune Analytics, community adapters |
+| Relational | — | SQLite/Postgres is always one shared database (users, permissions, registry) |
+
+\* Neo4j isolation creates one database per dataset inside your DBMS, which requires an
+edition with multi-database support (Enterprise or Aura).
+
+Both your graph **and** vector backends must support isolation — if either doesn't,
+cognee raises an error naming the unsupported backend rather than silently falling
+back to shared databases. To run an unsupported backend, deploy
+single-tenant with `ENABLE_BACKEND_ACCESS_CONTROL=false`.
 
 ## Use Cognee in Other Languages
 

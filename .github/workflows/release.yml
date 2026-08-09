@@ -2,6 +2,11 @@ name: release.yml
 on:
   workflow_dispatch:
 
+# Minimal default permissions for all jobs (OSSF Scorecard: Token-Permissions).
+# Jobs that need more (release creation, OIDC, attestations) opt in explicitly.
+permissions:
+  contents: read
+
 jobs:
   release-github:
     name: Create GitHub Release from ${{ github.ref_name }}
@@ -14,7 +19,7 @@ jobs:
 
     steps:
       - name: Check out ${{ github.ref_name }}
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
           ref: ${{ github.ref_name }}
           fetch-depth: 0  # Fetch all history for comparison
@@ -28,7 +33,7 @@ jobs:
         run: git fetch origin dev:dev
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78  # v7.6.0
 
       - name: Install Python
         run: uv python install
@@ -70,7 +75,7 @@ jobs:
             --github-output
 
       - name: Create GitHub Release with AI-generated notes
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2.6.2
         with:
           tag_name: ${{ steps.create_tag.outputs.tag }}
           name: ${{ steps.generate_notes.outputs.RELEASE_TITLE }}
@@ -82,18 +87,24 @@ jobs:
   release-pypi-package:
     needs: release-github
     name: Release PyPI Package from ${{ github.ref_name }}
+    # Publishing happens through PyPI Trusted Publishing (OIDC) so the uploaded
+    # distributions carry verifiable PEP 740 provenance attestations, and the
+    # built artifacts also get a SLSA build-provenance attestation hosted by
+    # GitHub. See docs/supply_chain_provenance.md for the one-time PyPI setup.
     permissions:
       contents: read
+      id-token: write       # OIDC: Trusted Publishing + signing attestations
+      attestations: write   # Persist the SLSA build provenance attestation
     runs-on: ubuntu-latest
 
     steps:
       - name: Check out ${{ github.ref_name }}
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
           ref: ${{ github.ref_name }}
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78  # v7.6.0
 
       - name: Install Python
         run: uv python install
@@ -104,10 +115,17 @@ jobs:
       - name: Build distributions
         run: uv build
 
+      - name: Attest build provenance for distributions
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be  # v2.4.0
+        with:
+          subject-path: "dist/*"
+
       - name: Publish ${{ github.ref_name }} release to PyPI
-        env:
-          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_TOKEN }}
-        run: uv publish
+        # Trusted Publishing (OIDC) — no API token. The action generates and
+        # uploads PEP 740 digital attestations by default (attestations: true).
+        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b  # v1.14.0
+        with:
+          packages-dir: dist/
 
   release-docker-image:
     needs: release-github
@@ -118,26 +136,29 @@ jobs:
 
     steps:
       - name: Check out ${{ github.ref_name }}
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
           ref: ${{ github.ref_name }}
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f  # v3.12.0
 
       - name: Log in to Docker Hub
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9  # v3.7.0
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
       - name: Build and push Dev Docker Image
         if: ${{ github.ref_name == 'dev' }}
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8  # v6.19.2
         with:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
+          # Attach SLSA build provenance + SBOM in-toto attestations to the image.
+          provenance: mode=max
+          sbom: true
           tags: cognee/cognee:${{ needs.release-github.outputs.version }}
           labels: |
             version=${{ needs.release-github.outputs.version }}
@@ -147,11 +168,13 @@ jobs:
 
       - name: Build and push Main Docker Image
         if: ${{ github.ref_name == 'main' }}
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8  # v6.19.2
         with:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
+          provenance: mode=max
+          sbom: true
           tags: |
             cognee/cognee:${{ needs.release-github.outputs.version }}
             cognee/cognee:latest
@@ -163,12 +186,14 @@ jobs:
 
       - name: Build and push Dev MCP Docker Image
         if: ${{ github.ref_name == 'dev' }}
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8  # v6.19.2
         with:
           context: .
           file: cognee-mcp/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
+          provenance: mode=max
+          sbom: true
           tags: cognee/cognee-mcp:${{ needs.release-github.outputs.version }}
           labels: |
             version=${{ needs.release-github.outputs.version }}
@@ -178,12 +203,14 @@ jobs:
 
       - name: Build and push Main MCP Docker Image
         if: ${{ github.ref_name == 'main' }}
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8  # v6.19.2
         with:
           context: .
           file: cognee-mcp/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
+          provenance: mode=max
+          sbom: true
           tags: |
             cognee/cognee-mcp:${{ needs.release-github.outputs.version }}
             cognee/cognee-mcp:latest

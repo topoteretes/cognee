@@ -3,7 +3,7 @@ from uuid import UUID
 from typing import Optional
 
 from cognee.infrastructure.databases.graph.get_graph_engine import (
-    aevict_graph_engines_for_database,
+    graph_engine_cache,
 )
 from cognee.base_config import get_base_config
 from cognee.modules.users.models import User
@@ -69,11 +69,11 @@ class LadybugDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
         # which races the just-torn-down one. Evict every cached engine for
         # this database — the same DB can sit under multiple cache keys —
         # wait for their in-flight closes to finish (a close deferred behind
-        # an idle holder is not waited on; see aevict_graph_engines_for_database),
+        # an idle holder is not waited on; see graph_engine_cache.aevict_for_database),
         # then remove the files directly. Server-backed handlers (e.g.
         # Postgres) are different on purpose: they drop the per-dataset
         # database over a connection, so no file handling applies there.
-        await aevict_graph_engines_for_database(graph_db_name)
+        await graph_engine_cache.aevict_for_database(graph_db_name)
 
         file_storage = get_file_storage(databases_directory_path)
         if await file_storage.is_file(graph_db_name):
