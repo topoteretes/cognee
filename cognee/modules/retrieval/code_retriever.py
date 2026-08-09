@@ -63,6 +63,7 @@ _OPERATIONS = {
     "traverse",
     "find_path",
     "impact_analysis",
+    "delta",
 }
 _TYPE_SYMBOL_KINDS = {"struct", "class", "interface", "type"}
 _CODE_EXTENSIONS = {
@@ -245,6 +246,10 @@ class _CodeGraphSnapshot:
 
     def __init__(self, raw_nodes: Iterable[Any], raw_edges: Iterable[Any]):
         self.nodes: dict[str, dict[str, Any]] = {}
+        # Repository nodes are deliberately NOT facts (kept out of every fact
+        # index and traversal); they are held aside only for the delta
+        # operation, which reports the last ingestion's changes.
+        self.repositories: dict[str, dict[str, Any]] = {}
         for item in raw_nodes or []:
             if not isinstance(item, (tuple, list)) or len(item) != 2:
                 continue
@@ -252,6 +257,10 @@ class _CodeGraphSnapshot:
             node_id = str(raw_id)
             properties = _normalize_properties(raw_properties)
             node_type = properties.get("type")
+            if node_type == "CodeRepository":
+                properties["id"] = node_id
+                self.repositories[node_id] = properties
+                continue
             if node_type not in CODE_NODE_TYPES:
                 continue
             properties["id"] = node_id
@@ -779,7 +788,7 @@ class CodeRetriever(BaseRetriever):
         async def load() -> _CodeGraphSnapshot:
             graph_engine = await get_graph_engine()
             nodes, edges = await graph_engine.get_filtered_graph_data(
-                [{"type": list(CODE_NODE_TYPES)}]
+                [{"type": [*CODE_NODE_TYPES, "CodeRepository"]}]
             )
             return _CodeGraphSnapshot(nodes, edges)
 
@@ -808,6 +817,33 @@ class CodeRetriever(BaseRetriever):
         context: Any = None,
     ) -> dict[str, Any]:
         return retrieved_objects
+
+    def _delta(self, graph: _CodeGraphSnapshot, query: str) -> dict[str, Any]:
+        """What the last ingestion changed, per repository.
+
+        Reads the last_delta record that add_code_graph_edges stamps on each
+        CodeRepository node after a completed load + sweep (counts of added/
+        updated/removed nodes and edges, capped name samples, the snapshot id
+        and load timestamp). A repository loaded before delta stamping existed
+        reports delta: None.
+        """
+        repo_filter = self.config.get("repo") or self.config.get("name") or query or ""
+        repo_filter = str(repo_filter).strip().casefold()
+        repositories = []
+        for node_id in sorted(graph.repositories):
+            node = graph.repositories[node_id]
+            repo_name = str(node.get("name") or "")
+            if repo_filter and repo_filter not in repo_name.casefold():
+                continue
+            repositories.append(
+                {
+                    "id": node_id,
+                    "repo": repo_name,
+                    "last_snapshot_id": node.get("last_snapshot_id"),
+                    "delta": node.get("last_delta"),
+                }
+            )
+        return {"operation": "delta", "repositories": repositories}
 
     def _query_facts(self, graph: _CodeGraphSnapshot, query: str) -> dict[str, Any]:
         kinds = _as_strings(self.config.get("kinds"), "kinds")

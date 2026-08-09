@@ -181,3 +181,74 @@ async def test_sweep_failure_prevents_snapshot_stamp(tmp_path, monkeypatch):
         await add_code_graph_edges(["sentinel"], repo_path=f"/repos/{REPO}", snapshot_dir=tmp_path)
 
     engine.add_nodes.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_delta_write_skips_unchanged_facts(tmp_path, monkeypatch):
+    """Second ingest of a snapshot where one fact changed writes only that fact."""
+    from cognee.tasks.code_graph.extract_code_graph import map_facts_to_data_points
+
+    add_data_points_module = importlib.import_module("cognee.tasks.storage.add_data_points")
+    add_data_points_mock = AsyncMock(side_effect=lambda points, **kwargs: points)
+    monkeypatch.setattr(add_data_points_module, "add_data_points", add_data_points_mock)
+
+    data_points = map_facts_to_data_points(FACTS, repo_path=f"/repos/{REPO}")
+    # Existing graph state: Database unchanged (same hash), handler changed.
+    by_name = {getattr(p, "name", ""): p for p in data_points}
+    existing_nodes = [
+        (str(by_name["app/db.Database"].id), {"fact_hash": by_name["app/db.Database"].fact_hash}),
+        (str(by_name["app/api.handler"].id), {"fact_hash": "sha256:outdated"}),
+    ]
+    engine = _mock_engine(monkeypatch, existing_nodes, [])
+
+    result = await add_code_graph_data_points(data_points)
+
+    written = add_data_points_mock.await_args.args[0]
+    written_names = sorted(getattr(p, "name", "?") for p in written)
+    # Repository always rewritten (carries the stamp); Database skipped.
+    assert written_names == ["app/api.handler", REPO]
+    assert result.node_delta == {
+        "nodes_added": 0,
+        "nodes_updated": 1,
+        "nodes_unchanged": 1,
+        "samples_added": [],
+        "samples_updated": ["app/api.handler"],
+    }
+    assert list(result) == list(data_points)
+    engine.get_graph_data.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_delta_write_adds_only_missing_edges_and_stamps_delta(tmp_path, monkeypatch):
+    """Edges already in the graph are not re-added; last_delta lands on the repo node."""
+    _write_snapshot(tmp_path, FACTS)
+    handler_id = _node_id("symbol", "app/api.handler")
+    database_id = _node_id("symbol", "app/db.Database")
+
+    existing_nodes = [
+        (REPO_NODE_ID, {"type": "CodeRepository", "name": REPO}),
+        (database_id, {"type": "CodeSymbol", "repo": REPO}),
+        (handler_id, {"type": "CodeSymbol", "repo": REPO}),
+    ]
+    existing_edges = [
+        (database_id, REPO_NODE_ID, "part_of", {}),
+        (handler_id, REPO_NODE_ID, "part_of", {}),
+        # The calls edge already exists -> must NOT be re-added.
+        (handler_id, database_id, "calls", {}),
+    ]
+    engine = _mock_engine(monkeypatch, existing_nodes, existing_edges)
+    monkeypatch.setattr(
+        code_retriever_module, "invalidate_code_graph_snapshot_cache", lambda **kwargs: None
+    )
+
+    await add_code_graph_edges(["sentinel"], repo_path=f"/repos/{REPO}", snapshot_dir=tmp_path)
+
+    engine.add_edges.assert_not_awaited()
+    engine.delete_nodes.assert_not_awaited()
+    engine.delete_edge_triples.assert_not_awaited()
+
+    stamped = engine.add_nodes.await_args.args[0]
+    assert stamped[0].last_delta["edges_added"] == 0
+    assert stamped[0].last_delta["edges_removed"] == 0
+    assert stamped[0].last_delta["nodes_removed"] == 0
+    assert stamped[0].last_delta["snapshot_id"] == SNAPSHOT_ID

@@ -1,5 +1,6 @@
 """Map enola snapshot facts to cognee DataPoints and typed graph edges."""
 
+import hashlib
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -160,6 +161,8 @@ def map_facts_to_data_points(
         if model is CodeSymbol:
             fields["symbol_kind"] = props.get("symbol_kind")
 
+        fields["fact_hash"] = _fact_content_hash(fields)
+
         try:
             entities.append(model(**fields))
         except ValidationError:
@@ -170,6 +173,20 @@ def map_facts_to_data_points(
         logger.warning("Skipped %d fact(s) that could not be mapped to DataPoints.", skipped_facts)
 
     return list(repositories.values()) + entities
+
+
+def _fact_content_hash(fields: Dict[str, Any]) -> str:
+    """Fingerprint of a fact's derived fields, for delta writes on re-ingestion.
+
+    Covers exactly what map_facts_to_data_points derives from the fact; the id
+    and the part_of reference are excluded (both are functions of repo/kind/
+    name, which are covered).
+    """
+    hashed_fields = {
+        key: value for key, value in fields.items() if key not in ("id", "part_of", "fact_hash")
+    }
+    canonical = json.dumps(hashed_fields, sort_keys=True, default=str)
+    return "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def _short_target_names(name: str) -> set:
@@ -544,6 +561,26 @@ def _invalidate_code_graph_snapshot(ctx: Optional["PipelineContext"] = None) -> 
         invalidate_code_graph_snapshot_cache(dataset_id=dataset_id)
 
 
+class _CodeGraphLoadState(list):
+    """The data_points passthrough between the load and edges tasks.
+
+    Also carries the pre-write graph state and the node delta computed by
+    add_code_graph_data_points, so the edge diff and the stale sweep in
+    add_code_graph_edges reuse the same single graph read.
+    """
+
+    existing_edge_keys: Optional[set] = None
+    existing_nodes: Optional[list] = None
+    node_delta: Optional[dict] = None
+
+
+_DELTA_SAMPLE_LIMIT = 20
+
+
+def _delta_samples(names: List[str]) -> List[str]:
+    return sorted(names)[:_DELTA_SAMPLE_LIMIT]
+
+
 async def add_code_graph_data_points(
     data_points: List[DataPoint],
     ctx: Optional["PipelineContext"] = None,
@@ -551,26 +588,83 @@ async def add_code_graph_data_points(
 ) -> List[DataPoint]:
     """Store code graph nodes while allowing a repository path payload.
 
+    Delta writes: the graph is read once before writing and only facts whose
+    fact_hash is new or changed are stored; unchanged facts are not touched.
+    The pre-read state rides on the returned list so add_code_graph_edges can
+    diff edges and sweep without reading the graph again.
+
     A custom-pipeline payload may be any value, but the storage rollback ledger
     requires a persisted data item id. Preserve the full context when one is
     available and otherwise store without ledger provenance. graph_only keeps
     the deterministic default free of embedding calls; set it to False to also
     build vector indexes for completion-based search types.
     """
+    from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
     from cognee.tasks.storage.add_data_points import add_data_points
 
     if not data_points:
         # extract_code_graph skipped an unchanged snapshot.
         return data_points
 
+    graph_engine = await get_graph_engine()
+    existing_nodes, existing_edges = await graph_engine.get_graph_data()
+    existing_hashes: Dict[str, Any] = {
+        str(node_id): properties.get("fact_hash")
+        for node_id, properties in existing_nodes
+        if isinstance(properties, dict)
+    }
+
+    to_write: List[DataPoint] = []
+    added: List[str] = []
+    updated: List[str] = []
+    unchanged = 0
+    for point in data_points:
+        if isinstance(point, CodeRepository):
+            # Repository nodes are always rewritten (they carry the snapshot
+            # stamp) and are not counted as content changes.
+            to_write.append(point)
+            continue
+        point_id = str(getattr(point, "id", point))
+        fact_hash = getattr(point, "fact_hash", None)
+        if point_id not in existing_hashes:
+            to_write.append(point)
+            added.append(str(getattr(point, "name", point_id)))
+        elif fact_hash is None or existing_hashes[point_id] != fact_hash:
+            to_write.append(point)
+            updated.append(str(getattr(point, "name", point_id)))
+        else:
+            unchanged += 1
+
+    logger.info(
+        "Code graph node delta: %d added, %d updated, %d unchanged.",
+        len(added),
+        len(updated),
+        unchanged,
+    )
+
     storage_ctx = ctx if _pipeline_data_id(ctx) is not None else None
     try:
-        result = await add_data_points(data_points, ctx=storage_ctx, graph_only=graph_only)
+        if to_write:
+            await add_data_points(to_write, ctx=storage_ctx, graph_only=graph_only)
     finally:
         # Storage can fail after a partial graph write. Invalidate even on an
         # exception so no pre-write snapshot survives that ambiguous outcome.
         _invalidate_code_graph_snapshot(ctx)
-    return result
+
+    state = _CodeGraphLoadState(data_points)
+    state.existing_nodes = existing_nodes
+    state.existing_edge_keys = {
+        (str(source), str(target), relationship)
+        for source, target, relationship, _properties in existing_edges
+    }
+    state.node_delta = {
+        "nodes_added": len(added),
+        "nodes_updated": len(updated),
+        "nodes_unchanged": unchanged,
+        "samples_added": _delta_samples(added),
+        "samples_updated": _delta_samples(updated),
+    }
+    return state
 
 
 async def add_code_graph_edges(
@@ -606,13 +700,38 @@ async def add_code_graph_edges(
 
     try:
         graph_engine = await get_graph_engine()
-        if edges:
-            await graph_engine.add_edges(edges)
 
-            # Register the edges in the relational rollback ledger (when a pipeline
-            # context with a persisted data item is available) so pipeline rollback
-            # can clean them up. Custom pipelines may use arbitrary payloads, such
-            # as the repository path used by the code graph example.
+        # Pre-write graph state: reuse the read add_code_graph_data_points
+        # already did (it rides on the passthrough list); direct callers pay
+        # one read here instead.
+        existing_nodes = getattr(data_points, "existing_nodes", None)
+        existing_edge_keys = getattr(data_points, "existing_edge_keys", None)
+        if existing_nodes is None or existing_edge_keys is None:
+            existing_nodes, existing_edges = await graph_engine.get_graph_data()
+            existing_edge_keys = {
+                (str(source), str(target), relationship)
+                for source, target, relationship, _properties in existing_edges
+            }
+
+        # Delta writes: only edges the graph does not already have.
+        new_edges = [
+            edge
+            for edge in edges
+            if (str(edge[0]), str(edge[1]), edge[2]) not in existing_edge_keys
+        ]
+        logger.info(
+            "Code graph edge delta: %d new, %d already present.",
+            len(new_edges),
+            len(edges) - len(new_edges),
+        )
+        if new_edges:
+            await graph_engine.add_edges(new_edges)
+
+            # Register the edges added by this run in the relational rollback
+            # ledger (when a pipeline context with a persisted data item is
+            # available) so pipeline rollback can clean them up. Custom
+            # pipelines may use arbitrary payloads, such as the repository
+            # path used by the code graph example.
             data_id = _pipeline_data_id(ctx)
             if (
                 ctx is not None
@@ -624,7 +743,7 @@ async def add_code_graph_edges(
                 from cognee.modules.graph.methods import upsert_edges
 
                 await upsert_edges(
-                    edges,
+                    new_edges,
                     tenant_id=ctx.user.tenant_id,
                     user_id=ctx.user.id,
                     dataset_id=ctx.dataset.id,
@@ -635,13 +754,25 @@ async def add_code_graph_edges(
         # Insert-then-sweep: with the current snapshot fully merged, remove
         # what previous ingestions derived that this snapshot no longer does.
         # Runs even with zero edges — a shrunken repo still needs its sweep.
-        await _sweep_stale_code_graph(graph_engine, facts, edges, repo_path)
+        nodes_removed, edges_removed, samples_removed = await _sweep_stale_code_graph(
+            graph_engine, facts, edges, repo_path, existing_nodes, existing_edge_keys
+        )
+
+        snapshot_id = snapshot_identity(snapshot_dir, receipt)
+        node_delta = getattr(data_points, "node_delta", None) or {}
+        delta = {
+            **node_delta,
+            "edges_added": len(new_edges),
+            "edges_removed": edges_removed,
+            "nodes_removed": nodes_removed,
+            "samples_removed": samples_removed,
+            "snapshot_id": snapshot_id,
+            "loaded_at": datetime.now(timezone.utc).isoformat(),
+        }
 
         # Stamp last: only a load that added, swept, and got here may record
         # its snapshot id, so a crashed run can never be skipped-past later.
-        await _stamp_snapshot_identity(
-            graph_engine, facts, repo_path, snapshot_identity(snapshot_dir, receipt)
-        )
+        await _stamp_snapshot_identity(graph_engine, facts, repo_path, snapshot_id, delta)
     finally:
         # Direct edge writes, sweeps, and ledger writes may partially succeed.
         _invalidate_code_graph_snapshot(ctx)
@@ -652,14 +783,19 @@ async def _sweep_stale_code_graph(
     graph_engine,
     facts: List[dict],
     current_edges: List[tuple],
-    repo_path: Optional[Union[str, Path]] = None,
-) -> None:
+    repo_path: Optional[Union[str, Path]],
+    existing_nodes: List[tuple],
+    existing_edge_keys: set,
+) -> Tuple[int, int, List[str]]:
     """Remove code graph nodes/edges no longer derivable from the snapshot.
 
-    Only nodes of code-graph types belonging to repos covered by this snapshot
-    are considered; other datasets' content and other repos in the same graph
-    are untouched. Edges are swept only between surviving code nodes, so edges
-    to non-code nodes (e.g. belongs_to_set -> NodeSet) always survive.
+    existing_nodes/existing_edge_keys are the pre-write graph state (the same
+    read the node-delta computation used). Only nodes of code-graph types
+    belonging to repos covered by this snapshot are considered; other
+    datasets' content and other repos in the same graph are untouched. Edges
+    are swept only between surviving code nodes, so edges to non-code nodes
+    (e.g. belongs_to_set -> NodeSet) always survive. Returns
+    (nodes_removed, edges_removed, removed_name_samples).
     """
     from cognee.infrastructure.databases.provenance.delete_data import EdgeIdentity
 
@@ -667,11 +803,10 @@ async def _sweep_stale_code_graph(
     snapshot_repos = _snapshot_repos(facts, fallback_repo)
     current_ids = _current_code_node_ids(facts, fallback_repo)
 
-    nodes, existing_edges = await graph_engine.get_graph_data()
-
     code_types = {model.__name__ for model in KIND_TO_MODEL.values()} | {CodeRepository.__name__}
     stale_node_ids = []
-    for node_id, properties in nodes:
+    stale_node_names = []
+    for node_id, properties in existing_nodes:
         node_id = str(node_id)
         if node_id in current_ids or not isinstance(properties, dict):
             continue
@@ -683,6 +818,7 @@ async def _sweep_stale_code_graph(
         if repo not in snapshot_repos:
             continue
         stale_node_ids.append(node_id)
+        stale_node_names.append(str(properties.get("name") or node_id))
 
     if stale_node_ids:
         for start in range(0, len(stale_node_ids), _SWEEP_CHUNK_SIZE):
@@ -710,16 +846,18 @@ async def _sweep_stale_code_graph(
         )
 
     stale_edges = [
-        EdgeIdentity(source_id=str(source), target_id=str(target), relationship_name=relationship)
-        for source, target, relationship, _properties in existing_edges
-        if str(source) in current_ids
-        and str(target) in current_ids
-        and (str(source), str(target), relationship) not in expected_edge_keys
+        EdgeIdentity(source_id=source, target_id=target, relationship_name=relationship)
+        for source, target, relationship in existing_edge_keys
+        if source in current_ids
+        and target in current_ids
+        and (source, target, relationship) not in expected_edge_keys
     ]
     if stale_edges:
         for start in range(0, len(stale_edges), _SWEEP_CHUNK_SIZE):
             await graph_engine.delete_edge_triples(stale_edges[start : start + _SWEEP_CHUNK_SIZE])
         logger.info("Swept %d stale code graph edge(s).", len(stale_edges))
+
+    return len(stale_node_ids), len(stale_edges), _delta_samples(stale_node_names)
 
 
 async def _stamp_snapshot_identity(
@@ -727,8 +865,9 @@ async def _stamp_snapshot_identity(
     facts: List[dict],
     repo_path: Optional[Union[str, Path]],
     snapshot_id: Optional[str],
+    delta: Optional[dict] = None,
 ) -> None:
-    """Record the loaded snapshot's identity on this snapshot's repository nodes."""
+    """Record the loaded snapshot's identity and delta on the repository nodes."""
     if snapshot_id is None:
         return
     fallback_repo = _resolve_fallback_repo(facts, repo_path)
@@ -738,6 +877,7 @@ async def _stamp_snapshot_identity(
             name=repo,
             path=str(repo_path) if repo_path and repo == fallback_repo else repo,
             last_snapshot_id=snapshot_id,
+            last_delta=delta,
         )
         for repo in sorted(_snapshot_repos(facts, fallback_repo))
     ]

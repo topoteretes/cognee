@@ -458,16 +458,28 @@ async def test_extract_code_graph_without_repo_path_or_snapshot_dir_raises():
 async def test_add_code_graph_data_points_invalidates_cached_indexes(monkeypatch):
     add_data_points_module = importlib.import_module("cognee.tasks.storage.add_data_points")
     code_retriever_module = importlib.import_module("cognee.modules.retrieval.code_retriever")
+    graph_engine_module = importlib.import_module(
+        "cognee.infrastructure.databases.graph.get_graph_engine"
+    )
     add_data_points_mock = AsyncMock(return_value=["stored"])
     invalidate_mock = MagicMock()
+    graph_engine = AsyncMock()
+    graph_engine.get_graph_data.return_value = ([], [])
     monkeypatch.setattr(add_data_points_module, "add_data_points", add_data_points_mock)
     monkeypatch.setattr(
         code_retriever_module, "invalidate_code_graph_snapshot_cache", invalidate_mock
     )
+    monkeypatch.setattr(
+        graph_engine_module, "get_graph_engine", AsyncMock(return_value=graph_engine)
+    )
 
     result = await add_code_graph_data_points(["node"])
 
-    assert result == ["stored"]
+    # Passthrough of the full fact set (not add_data_points' return), so the
+    # edges task sees every fact and the carried pre-read state.
+    assert list(result) == ["node"]
+    assert result.node_delta["nodes_added"] == 1
+    assert result.existing_edge_keys == set()
     add_data_points_mock.assert_awaited_once_with(["node"], ctx=None, graph_only=True)
     invalidate_mock.assert_called_once_with()
 

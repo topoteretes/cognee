@@ -17,11 +17,16 @@ class CodeRepository(DataPoint):
     name: str
     path: str
     last_snapshot_id: Optional[str] = None
+    last_delta: Optional[dict] = None
     metadata: dict = {"index_fields": ["name"]}
 
 
 class CodeGraphEntity(DataPoint):
-    """Common shape of every enola fact mapped into the graph."""
+    """Common shape of every enola fact mapped into the graph.
+
+    fact_hash fingerprints the derived fields, so re-ingestion can write only
+    the facts whose content actually changed (delta writes).
+    """
 
     name: str
     kind: str
@@ -30,6 +35,7 @@ class CodeGraphEntity(DataPoint):
     repo: Optional[str] = None
     description: Optional[str] = None
     fact_properties: dict[str, Any] = Field(default_factory=dict)
+    fact_hash: Optional[str] = None
     part_of: Optional[CodeRepository] = None
     metadata: dict = {"index_fields": ["name"]}
 
