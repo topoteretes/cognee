@@ -236,6 +236,20 @@ def _get_api_key_fingerprint() -> str:
     return _get_api_key_tracking_id()
 
 
+def telemetry_safe_id(value: str) -> str:
+    """Stable pseudonymous form of a caller-chosen identifier (e.g. a session id).
+
+    Session ids are free text chosen by users and agents and can embed project or
+    personal names; hash them so telemetry can still correlate events for one
+    session without carrying the raw string.
+    """
+    import hashlib
+
+    if not value:
+        return ""
+    return f"sid_{hashlib.sha256(str(value).encode('utf-8')).hexdigest()[:16]}"
+
+
 def send_telemetry(event_name: str, user_id: str | UUID, additional_properties: dict | None = None):
     """Send a product telemetry event.
 

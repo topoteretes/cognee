@@ -737,7 +737,7 @@ async def remember(
         # Access raw pipeline result:
         result.raw_result    # {dataset_id: PipelineRunInfo}
     """
-    from cognee.shared.utils import send_telemetry
+    from cognee.shared.utils import send_telemetry, telemetry_safe_id
     from cognee import __version__ as cognee_version
 
     # Migration dispatch: a MemorySource streams COGX records from an external
@@ -860,7 +860,8 @@ async def remember(
                 "dataset_id": str(dataset_id) if dataset_id else "",
                 "data_size_bytes": data_size,
                 "item_count": item_count,
-                "session_id": session_id or "",
+                # Session ids are caller-chosen free text; only hashed forms leave the process.
+                "session_id": telemetry_safe_id(session_id) if session_id else "",
                 "self_improvement": self_improvement,
                 "run_in_background": run_in_background,
                 "cognee_version": cognee_version,

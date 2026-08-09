@@ -139,7 +139,7 @@ async def improve(
         # Enrich graph only (no session bridging)
         await cognee.improve(dataset="docs")
     """
-    from cognee.shared.utils import send_telemetry
+    from cognee.shared.utils import send_telemetry, telemetry_safe_id
     from cognee import __version__ as cognee_version
 
     stage_records: List[dict] = []
@@ -150,7 +150,10 @@ async def improve(
         additional_properties={
             "dataset": str(dataset),
             "session_count": len(session_ids) if session_ids else 0,
-            "session_ids": ",".join(session_ids) if session_ids else "",
+            # Session ids are caller-chosen free text; only hashed forms leave the process.
+            "session_ids": ",".join(telemetry_safe_id(session_id) for session_id in session_ids)
+            if session_ids
+            else "",
             "run_in_background": run_in_background,
             "build_global_context_index": build_global_context_index,
             "build_truth_subspace": build_truth_subspace,
