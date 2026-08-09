@@ -31,6 +31,12 @@ class ToolsConfig(BaseSettings):
     # per-user registration (cognee.tools.register_sql_connection) instead.
     tool_sql_connections: str = "{}"
 
+    # User-registered targets are denied by default. Configure an approved
+    # SQLite root and/or comma-separated PostgreSQL host allowlist before
+    # allowing per-user connections in a deployment.
+    tool_sqlite_allowed_root: str = ""
+    tool_sql_allowed_hosts: str = ""
+
     text_to_sql_max_rows: int = 100
     text_to_sql_max_attempts: int = 3
     text_to_sql_statement_timeout_ms: int = 5000
@@ -64,6 +70,14 @@ class ToolsConfig(BaseSettings):
                     "or an object with a 'connection_string' key"
                 )
         return connections
+
+    def sql_allowed_hosts(self) -> set[str]:
+        """Return normalized PostgreSQL hosts approved for user connections."""
+        return {
+            host.strip().lower().rstrip(".")
+            for host in self.tool_sql_allowed_hosts.split(",")
+            if host.strip()
+        }
 
     def to_dict(self) -> dict:
         return {
