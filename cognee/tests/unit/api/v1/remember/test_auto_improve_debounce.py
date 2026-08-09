@@ -9,13 +9,13 @@ from uuid import uuid4
 import pytest
 
 from cognee.api.v1.remember.remember import AUTO_IMPROVE_STATE_ID, _should_auto_improve
-
-remember_module = sys.modules["cognee.api.v1.remember.remember"]
 from cognee.infrastructure.background_tasks import (
     pending_background_task_count,
     spawn_background_task,
     wait_for_background_tasks,
 )
+
+remember_module = sys.modules["cognee.api.v1.remember.remember"]
 
 
 class _StateStore:
