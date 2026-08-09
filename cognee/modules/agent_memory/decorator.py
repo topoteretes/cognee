@@ -41,7 +41,9 @@ def agent_memory(
     session_id: Optional[str] = None,
     user: Optional[User] = None,
     dataset_name: Optional[str] = None,
-    session_trace_summary: bool = True,
+    # Off by default: True meant one LLM summary call for every traced agent
+    # method invocation; the batch lesson extraction reads raw trace data anyway.
+    session_trace_summary: bool = False,
     persist_session_trace_after: Optional[int] = None,
     persist_session_trace_raw_content: bool = False,
     persist_session_trace_node_set_name: Optional[str] = None,

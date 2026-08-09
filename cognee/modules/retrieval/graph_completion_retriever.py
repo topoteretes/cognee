@@ -395,16 +395,33 @@ class GraphCompletionRetriever(BaseRetriever):
 
         effective_query = query
         turn_preparation = None
+
+        # Overlap the turn-analysis LLM call with retrieval instead of paying it
+        # serially first. Trade-off (deliberate): retrieval runs on the raw query,
+        # so an analysis query-rewrite only shapes context building and answer
+        # generation — one turn of staleness in exchange for zero serial LLM
+        # latency before retrieval starts.
+        prep_task = None
         if query is not None and not query_batch:
-            turn_preparation = await self.prepare_session_turn_for_retrieval(query)
+            prep_task = asyncio.ensure_future(self.prepare_session_turn_for_retrieval(query))
+
+        try:
+            retrieved_objects = await self.get_retrieved_objects(
+                query=query,
+                query_batch=query_batch,
+            )
+        except BaseException:
+            if prep_task is not None:
+                prep_task.cancel()
+                await asyncio.gather(prep_task, return_exceptions=True)
+            raise
+
+        if prep_task is not None:
+            turn_preparation = await prep_task
             if not turn_preparation.should_answer:
                 return [turn_preparation.response_to_user or "Got it."]
             effective_query = turn_preparation.effective_query or query
 
-        retrieved_objects = await self.get_retrieved_objects(
-            query=effective_query,
-            query_batch=query_batch,
-        )
         context = await self.get_context_from_objects(
             query=effective_query,
             query_batch=query_batch,

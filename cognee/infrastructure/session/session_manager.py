@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from typing import Any
 
@@ -203,7 +204,10 @@ class SessionManager:
         user_id: str,
         origin_function: str,
         status: str,
-        generate_feedback_with_llm: bool = True,
+        # Off by default: one LLM summary per traced tool call is the loop's single
+        # biggest hidden cost, and the batch extraction pass reads the raw
+        # method_return_value anyway. The deterministic fallback covers display.
+        generate_feedback_with_llm: bool = False,
         session_id: str | None = None,
         memory_query: str = "",
         memory_context: str = "",
@@ -283,6 +287,7 @@ class SessionManager:
                 extract_pending_agent_context,
             )
 
+            # Live extraction is deterministic and cheap — keep it inline.
             await extract_live_agent_context(
                 session_manager=self,
                 user_id=user_id,
@@ -292,13 +297,35 @@ class SessionManager:
                 status=status,
                 error_message=error_message,
             )
-            await extract_pending_agent_context(
-                session_manager=self,
-                user_id=user_id,
-                session_id=session_id,
-            )
         except Exception as error:
             logger.warning("Agent-context extraction skipped: %s", error)
+            return
+
+        # The batch (LLM) pass runs fire-and-forget behind a per-session guard: a
+        # trace write that crosses the extraction interval must not pay the latency
+        # of an LLM call. The registry dict anchors the task against GC; improve()
+        # and session end still flush any pending tail via the shared watermark.
+        tasks = getattr(self, "_pending_extraction_tasks", None)
+        if tasks is None:
+            tasks = self._pending_extraction_tasks = {}
+        task_key = f"{user_id}:{session_id}"
+        existing = tasks.get(task_key)
+        if existing is not None and not existing.done():
+            return
+
+        async def _run_pending_extraction():
+            try:
+                await extract_pending_agent_context(
+                    session_manager=self,
+                    user_id=user_id,
+                    session_id=session_id,
+                )
+            except Exception as error:
+                logger.warning("Background agent-context extraction failed open: %s", error)
+            finally:
+                tasks.pop(task_key, None)
+
+        tasks[task_key] = asyncio.create_task(_run_pending_extraction())
 
     def is_session_available_for_completion(self, user_id: str | None) -> bool:
         """Return True if session (history + save) is available for completion."""

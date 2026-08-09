@@ -250,11 +250,19 @@ class TestSessionManager:
         assert call_kw["status"] == "error"
         assert call_kw["error_message"] == "exit 1"
         assert call_kw["session_id"] == "s1"
+
+        # The batch (LLM) pass is fire-and-forget so the trace write never pays
+        # its latency; drain the scheduled task before asserting.
+        pending_tasks = list(getattr(sm, "_pending_extraction_tasks", {}).values())
+        assert pending_tasks, "batch extraction task was not scheduled"
+        for task in pending_tasks:
+            await task
         pending_spy.assert_awaited_once_with(
             session_manager=sm,
             user_id="u1",
             session_id="s1",
         )
+        assert not sm._pending_extraction_tasks
 
     @pytest.mark.asyncio
     async def test_add_agent_trace_step_skips_extraction_when_disabled(
@@ -282,6 +290,23 @@ class TestSessionManager:
         pending_spy.assert_not_awaited()
 
     @pytest.mark.asyncio
+    async def test_add_agent_trace_step_llm_feedback_is_off_by_default(self, sm, mock_cache):
+        """The per-step LLM summary is opt-in: default writes the deterministic fallback."""
+        with patch(
+            "cognee.infrastructure.session.session_manager.generate_agent_trace_feedback",
+            new_callable=AsyncMock,
+        ) as llm_feedback:
+            await sm.add_agent_trace_step(
+                user_id="u1",
+                origin_function="plan_trip",
+                status="success",
+                session_id="s1",
+            )
+        llm_feedback.assert_not_awaited()
+        call_kw = mock_cache.append_agent_trace_step.call_args.kwargs
+        assert call_kw["session_feedback"]  # deterministic fallback text
+
+    @pytest.mark.asyncio
     async def test_add_agent_trace_step_returns_trace_id_and_feedback(self, sm, mock_cache):
         """add_agent_trace_step returns generated trace_id and persists generated feedback."""
         with (
@@ -306,6 +331,7 @@ class TestSessionManager:
                 memory_context="User likes quiet places",
                 method_params={"city": "Tokyo"},
                 method_return_value="Plan created",
+                generate_feedback_with_llm=True,
             )
         assert trace_id is not None
         mock_cache.append_agent_trace_step.assert_called_once()
