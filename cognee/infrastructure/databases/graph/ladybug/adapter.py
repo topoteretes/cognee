@@ -1896,9 +1896,14 @@ class LadybugAdapter(GraphDBInterface):
         """
         Add multiple edges in a batch operation.
 
-        This method enables efficient insertion of multiple edges at once by processing a list
-        of edge details. It improves performance for batch operations compared to adding edges
-        individually. Errors during execution are logged and raised as necessary.
+        Upsert semantics per exact (source, target, relationship_name) triple.
+        A single MERGE on the relationship pattern cannot express this on
+        ladybug: property predicates in a relationship MERGE pattern are not
+        honored when matching, so a MERGE would match ANY :EDGE between the
+        endpoints and rename it, silently collapsing parallel relationships
+        such as `A imports B` + `A calls B` (COG-6118). Each chunk is written
+        in two exact statements instead: update the edges that already exist
+        under this exact name, then CREATE the ones that do not.
 
         Parameters:
         -----------
@@ -1917,8 +1922,12 @@ class LadybugAdapter(GraphDBInterface):
         try:
             now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
 
-            edge_params = [
-                {
+            # Repeated triples within one call would double-CREATE below; the
+            # old MERGE collapsed them, so collapse here too (last occurrence
+            # wins, matching MERGE's final ON MATCH state).
+            deduped: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
+            for from_node, to_node, relationship_name, properties in edges:
+                deduped[(str(from_node), str(to_node), relationship_name)] = {
                     "from_id": from_node,
                     "to_id": to_node,
                     "relationship_name": relationship_name,
@@ -1926,35 +1935,48 @@ class LadybugAdapter(GraphDBInterface):
                     "created_at": now,
                     "updated_at": now,
                 }
-                for from_node, to_node, relationship_name, properties in edges
-            ]
+            edge_params = list(deduped.values())
 
-            # Property-map matches (primary-key index seeks) instead of a
-            # cartesian MATCH + WHERE, which planned as a scan on large graphs.
-            query = """
+            update_query = """
+            UNWIND $edges AS edge
+            MATCH (from:Node {id: edge.from_id})-[r:EDGE]->(to:Node {id: edge.to_id})
+            WHERE r.relationship_name = edge.relationship_name
+            SET r.updated_at = timestamp(edge.updated_at),
+                r.properties = edge.properties
+            """
+            create_query = """
             UNWIND $edges AS edge
             MATCH (from:Node {id: edge.from_id})
             MATCH (to:Node {id: edge.to_id})
-            MERGE (from)-[r:EDGE {
-                relationship_name: edge.relationship_name
+            CREATE (from)-[r:EDGE {
+                relationship_name: edge.relationship_name,
+                created_at: timestamp(edge.created_at),
+                updated_at: timestamp(edge.updated_at),
+                properties: edge.properties
             }]->(to)
-            ON CREATE SET
-                r.created_at = timestamp(edge.created_at),
-                r.updated_at = timestamp(edge.updated_at),
-                r.properties = edge.properties
-            ON MATCH SET
-                r.updated_at = timestamp(edge.updated_at),
-                r.properties = edge.properties
             """
             extra_params = {}
             if source_ref_key is not None:
-                query += _provenance_fold_clause("r")
+                update_query += _provenance_fold_clause("r")
+                create_query += _provenance_fold_clause("r")
                 extra_params = _provenance_fold_params(source_ref_key, pipeline_run_id)
+            update_query += "\n            RETURN edge.from_id, edge.to_id, edge.relationship_name"
 
             total = len(edge_params)
             for start in range(0, total, _WRITE_CHUNK_SIZE):
                 chunk = edge_params[start : start + _WRITE_CHUNK_SIZE]
-                await self.query(query, {"edges": chunk, **extra_params})
+                updated_rows = await self.query(update_query, {"edges": chunk, **extra_params})
+                updated_keys = {
+                    (str(row[0]), str(row[1]), str(row[2])) for row in updated_rows or []
+                }
+                to_create = [
+                    edge
+                    for edge in chunk
+                    if (str(edge["from_id"]), str(edge["to_id"]), edge["relationship_name"])
+                    not in updated_keys
+                ]
+                if to_create:
+                    await self.query(create_query, {"edges": to_create, **extra_params})
                 if total > _WRITE_CHUNK_SIZE:
                     logger.info("Merged edges %d/%d", start + len(chunk), total)
             await self.checkpoint()
