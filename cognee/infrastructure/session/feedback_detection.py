@@ -48,6 +48,7 @@ async def analyze_turn_for_session_context(
     previous_question: str | None = None,
     previous_answer: str | None = None,
     served_context: list | str | None = None,
+    recent_turns: str | None = None,
 ) -> SessionTurnAnalysis:
     """
     Analyze a user message for answer routing and session-context updates.
@@ -79,6 +80,11 @@ async def analyze_turn_for_session_context(
             text_input,
             "PREVIOUS ANSWER",
             previous_answer,
+        )
+        text_input = _append_optional_section(
+            text_input,
+            "RECENT TURNS (oldest first, tagged with [qa_id])",
+            recent_turns,
         )
         rendered_context = _render_served_context(served_context)
         if rendered_context:

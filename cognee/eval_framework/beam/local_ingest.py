@@ -295,7 +295,7 @@ async def harvest_session_candidates(
             session_id=session_id,
             query=turn["user"],
             analysis=analysis,
-            previous_qa_id=previous_qa_id,
+            referenced_qa_ids=[previous_qa_id] if previous_qa_id else [],
             served_ids=[],
         )
         previous_qa_id = qa_id

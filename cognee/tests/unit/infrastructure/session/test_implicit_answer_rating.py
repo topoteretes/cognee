@@ -112,3 +112,46 @@ def test_analysis_normalizes_overall_answer_rating():
     assert SessionTurnAnalysis(overall_answer_rating="meh").overall_answer_rating is None
     assert SessionTurnAnalysis(overall_answer_rating=None).overall_answer_rating is None
     assert SessionTurnAnalysis().overall_answer_rating is None
+
+
+def test_analysis_normalizes_referenced_qa_ids():
+    analysis = SessionTurnAnalysis(
+        referenced_qa_ids=["q1", "", "  q2 ", 3, None, "q4", "q5", "q6", "q7"]
+    )
+    assert analysis.referenced_qa_ids == ["q1", "q2", "q4", "q5", "q6"]
+    assert SessionTurnAnalysis(referenced_qa_ids="q1").referenced_qa_ids == []
+
+
+def test_select_previous_answer_entry_skips_acknowledgements():
+    from cognee.infrastructure.session.session_turn import select_previous_answer_entry
+
+    real_answer = {
+        "qa_id": "q1",
+        "question": "what is X?",
+        "answer": "X is ...",
+        "context": "chunk",
+        "used_session_context_ids": ["c1"],
+    }
+    acknowledgement = {
+        "qa_id": "q2",
+        "question": "that was wrong",
+        "answer": "Got it.",
+        "context": "",
+    }
+
+    assert select_previous_answer_entry([real_answer, acknowledgement]) is real_answer
+    assert select_previous_answer_entry([acknowledgement]) is acknowledgement
+    assert select_previous_answer_entry([]) == {}
+
+
+def test_render_recent_turns_tags_qa_ids():
+    from cognee.infrastructure.session.session_turn import render_recent_turns
+
+    rendered = render_recent_turns(
+        [
+            {"qa_id": "q1", "question": "a?", "answer": "b"},
+            {"qa_id": "q2", "question": "c?", "answer": "d"},
+        ]
+    )
+    assert "[q1] User: a?" in rendered
+    assert "[q2] Assistant: d" in rendered

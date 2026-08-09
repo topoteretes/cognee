@@ -77,6 +77,7 @@ async def extract_feedback_qas(data, session_ids: Optional[List[str]] = None):
                 "session_id": session_id,
                 "qa_id": qa_id,
                 "feedback_score": entry.feedback_score,
+                "feedback_text": entry.feedback_text,
                 "used_graph_element_ids": entry.used_graph_element_ids,
                 "memify_metadata": memify_metadata if isinstance(memify_metadata, dict) else {},
             }

@@ -72,3 +72,11 @@ Set overall_answer_rating only when the current message clearly judges the PREVI
 - harmful: clear rejection or correction of the answer ("that's wrong", "this broke the build", "no — I asked about X").
 
 Politeness alone ("thanks") without a judgement, topic changes, and follow-up questions are NOT ratings. Do not guess: when unclear, set overall_answer_rating to null.
+
+## 5. Referenced earlier answers
+
+The input may include a RECENT TURNS block where each turn is tagged with its [qa_id].
+
+Set referenced_qa_ids only when the message clearly refers to specific earlier answers from that block (e.g. "your first suggestion was wrong", "the SQL from two answers ago worked"). List those qa_id tags, most relevant first, at most 5.
+
+Leave referenced_qa_ids empty when the message refers to the immediately previous answer or when the reference is unclear.

@@ -280,6 +280,44 @@ async def apply_served_context_ratings(
 # graph weights less than a deliberate 1/5 rating would.
 IMPLICIT_RATING_SCORES = {"helpful": 4, "harmful": 2}
 
+# How much recent history the per-turn analysis sees. One turn misattributes any
+# feedback arriving late ("actually, the query from before was wrong"); a small
+# tagged window lets the model name the QA it means via referenced_qa_ids.
+RECENT_TURNS_FOR_ANALYSIS = 5
+MAX_RECENT_TURN_CHARS = 240
+
+
+def _is_acknowledgement_entry(entry: dict) -> bool:
+    """Feedback-only turns store an acknowledgement QA: no context, no used ids."""
+    return (
+        not (entry.get("context") or "").strip()
+        and not entry.get("used_graph_element_ids")
+        and not entry.get("used_session_context_ids")
+    )
+
+
+def select_previous_answer_entry(entries: list[dict]) -> dict:
+    """The most recent real answer (skipping acknowledgement entries).
+
+    Rating "Thanks for your feedback." would waste the judgement; feedback after
+    feedback should still attach to the last substantive answer.
+    """
+    for entry in reversed(entries):
+        if not _is_acknowledgement_entry(entry):
+            return entry
+    return entries[-1] if entries else {}
+
+
+def render_recent_turns(entries: list[dict]) -> str:
+    """Compact, qa_id-tagged rendering of recent turns for the analysis prompt."""
+    lines = []
+    for entry in entries:
+        qa_id = entry.get("qa_id") or "unknown"
+        question = " ".join((entry.get("question") or "").split())[:MAX_RECENT_TURN_CHARS]
+        answer = " ".join((entry.get("answer") or "").split())[:MAX_RECENT_TURN_CHARS]
+        lines.append(f"[{qa_id}] User: {question}\n[{qa_id}] Assistant: {answer}")
+    return "\n".join(lines)
+
 
 async def apply_implicit_answer_rating(
     session_manager,
@@ -325,7 +363,7 @@ async def apply_session_turn_analysis(
     session_id: str,
     query: str,
     analysis: SessionTurnAnalysis,
-    previous_qa_id: str | None,
+    referenced_qa_ids: list[str],
     served_ids: list[str],
 ) -> list[str]:
     """Persist turn evidence, apply candidate updates, and bump helpful/harmful counters."""
@@ -339,7 +377,7 @@ async def apply_session_turn_analysis(
             id=str(uuid4()),
             created_at=datetime.now(timezone.utc).isoformat(),
             raw_text=query,
-            referenced_qa_ids=[previous_qa_id] if previous_qa_id else [],
+            referenced_qa_ids=list(referenced_qa_ids or []),
             influencing_context_ids=list(served_ids or []),
             candidate_context_entries=[
                 c.model_dump() if hasattr(c, "model_dump") else dict(c) for c in candidates
@@ -397,17 +435,16 @@ async def prepare_session_turn(
     resolved_session_id = session_manager.resolve_session_id(session_id)
 
     try:
-        previous_entries = await session_manager.get_session(
+        recent_raw = await session_manager.get_session(
             user_id=str(resolved_user_id),
             session_id=resolved_session_id,
             formatted=False,
-            last_n=1,
+            last_n=RECENT_TURNS_FOR_ANALYSIS,
         )
-        previous_entry = (
-            coerce_qa_entry(previous_entries[-1])
-            if isinstance(previous_entries, list) and previous_entries
-            else {}
+        recent_entries = (
+            [coerce_qa_entry(entry) for entry in recent_raw] if isinstance(recent_raw, list) else []
         )
+        previous_entry = select_previous_answer_entry(recent_entries)
         previous_qa_id = previous_entry.get("qa_id")
         previous_question = previous_entry.get("question")
         previous_answer = previous_entry.get("answer")
@@ -427,10 +464,21 @@ async def prepare_session_turn(
             previous_question=previous_question,
             previous_answer=previous_answer,
             served_context=served_context,
+            recent_turns=render_recent_turns(recent_entries) if len(recent_entries) > 1 else None,
         )
     except Exception as error:
         logger.warning("Session turn preparation failed open: %s", error)
         return _empty_turn_preparation(query)
+
+    # Feedback attribution: prefer the QA the model explicitly referenced from
+    # the tagged recent-turns block, falling back to the previous real answer.
+    entries_by_qa_id = {entry.get("qa_id"): entry for entry in recent_entries if entry.get("qa_id")}
+    rating_entry = previous_entry
+    referenced_qa_ids = [
+        qa_id for qa_id in (analysis.referenced_qa_ids or []) if qa_id in entries_by_qa_id
+    ]
+    if referenced_qa_ids:
+        rating_entry = entries_by_qa_id[referenced_qa_ids[0]]
 
     try:
         accepted_context_ids = await apply_session_turn_analysis(
@@ -439,7 +487,8 @@ async def prepare_session_turn(
             session_id=resolved_session_id,
             query=query,
             analysis=analysis,
-            previous_qa_id=previous_qa_id,
+            referenced_qa_ids=referenced_qa_ids
+            or ([str(previous_qa_id)] if previous_qa_id else []),
             served_ids=[str(entry_id) for entry_id in previous_served_ids],
         )
     except Exception as error:
@@ -450,7 +499,7 @@ async def prepare_session_turn(
         session_manager,
         user_id=str(resolved_user_id),
         session_id=resolved_session_id,
-        previous_entry=previous_entry,
+        previous_entry=rating_entry,
         rating=analysis.overall_answer_rating,
     )
 

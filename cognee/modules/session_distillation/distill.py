@@ -157,6 +157,11 @@ def build_curator_batches(
         if not question and not answer:
             continue
         block = f"User: {question}\nAssistant: {answer}"
+        # Explicit feedback is the strongest durable signal a turn carries; without
+        # this line the curator never saw it anywhere in the loop.
+        feedback = " ".join((row.get("feedback_text") or "").split())[:MAX_CANDIDATE_CHARS]
+        if feedback:
+            block += f"\nUser feedback on this answer: {feedback}"
         timeline.append((row.get("time") or "", block))
 
     for entry in context_entries:

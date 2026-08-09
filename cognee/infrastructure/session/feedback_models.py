@@ -28,6 +28,14 @@ class SessionTurnAnalysis(BaseModel):
             "correction of the answer. Omit when the message is neutral or unclear."
         ),
     )
+    referenced_qa_ids: list[str] = Field(
+        default_factory=list,
+        description=(
+            "qa_id tags (from the RECENT TURNS block) of the earlier answers this "
+            "message refers to, most relevant first. Empty when unclear or when the "
+            "message refers to the immediately previous answer."
+        ),
+    )
     served_context_ratings: list[ServedContextRating] = Field(
         default_factory=list,
         description="Up to 3 ratings of session-context entries served to the previous answer.",
@@ -58,6 +66,15 @@ class SessionTurnAnalysis(BaseModel):
             return None
         normalized = value.strip().lower()
         return normalized if normalized in ("helpful", "harmful") else None
+
+    @field_validator("referenced_qa_ids", mode="before")
+    @classmethod
+    def normalize_referenced_qa_ids(cls, value):
+        """Keep at most 5 non-empty string ids; never raises (non-blocking contract)."""
+        if not isinstance(value, list):
+            return []
+        ids = [item.strip() for item in value if isinstance(item, str) and item.strip()]
+        return ids[:5]
 
     @field_validator("candidate_context_updates", mode="before")
     @classmethod
