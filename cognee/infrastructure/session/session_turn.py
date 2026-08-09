@@ -232,9 +232,31 @@ async def apply_served_context_ratings(
     session_id: str,
     ratings: list,
 ) -> None:
-    """Increment helpful_count / harmful_count for rated entries. Fail-open per rating."""
+    """Increment helpful_count / harmful_count for rated entries. Fail-open per rating.
+
+    The whole read-modify-write runs under the per-session lock (the same primitive
+    update_qa uses): concurrent raters — turn analysis and the explicit add_feedback
+    bridge — otherwise read the same counts and lose increments. Cross-process
+    atomicity stays out of scope, matching session_lock's documented single-worker
+    contract.
+    """
     if not ratings:
         return
+    from cognee.infrastructure.locks import session_lock
+
+    async with session_lock(session_id, "context_counters"):
+        await _apply_served_context_ratings_locked(
+            session_manager, user_id=user_id, session_id=session_id, ratings=ratings
+        )
+
+
+async def _apply_served_context_ratings_locked(
+    session_manager,
+    *,
+    user_id: str,
+    session_id: str,
+    ratings: list,
+) -> None:
     try:
         entries = await session_manager.get_session_context_entries(
             user_id=user_id, session_id=session_id

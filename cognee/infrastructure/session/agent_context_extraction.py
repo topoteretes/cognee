@@ -330,6 +330,35 @@ async def extract_pending_agent_context(
     """
     if min_new_traces <= 0:
         return []
+
+    from cognee.infrastructure.locks import session_lock
+
+    # The watermark is a read-modify-write: concurrent passes (trace-write
+    # background task vs improve()'s flush) would read the same processed count
+    # and run duplicate LLM windows. Serialize per session, in-process — the
+    # same scope every session_lock user has.
+    async with session_lock(session_id, "agent_context_extraction"):
+        return await _extract_pending_agent_context_locked(
+            session_manager=session_manager,
+            user_id=user_id,
+            session_id=session_id,
+            min_new_traces=min_new_traces,
+            overlap=overlap,
+            max_window=max_window,
+            max_windows=max_windows,
+        )
+
+
+async def _extract_pending_agent_context_locked(
+    *,
+    session_manager,
+    user_id: str,
+    session_id: str,
+    min_new_traces: int,
+    overlap: int,
+    max_window: int,
+    max_windows: int,
+) -> list[str]:
     try:
         total_trace_count = await session_manager.get_agent_trace_count(
             user_id=user_id, session_id=session_id
