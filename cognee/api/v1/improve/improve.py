@@ -175,14 +175,14 @@ async def improve(
         try:
             # Stage 1 & 2: bridge sessions into the permanent graph
             if session_ids:
-                await _bridge_sessions(
+                bridge_stages = await _bridge_sessions(
                     dataset=write_dataset_ref,
                     session_ids=session_ids,
                     user=user,
                     feedback_alpha=feedback_alpha,
                     run_in_background=run_in_background,
                 )
-                stages_run.extend(["feedback_weights", "persist_sessions"])
+                stages_run.extend(bridge_stages)
 
                 # Stage 2b: persist agent trace steps (tool calls with
                 # per-step feedback) into the graph. Without this, the
@@ -311,34 +311,49 @@ async def _bridge_sessions(
     user,
     feedback_alpha: float,
     run_in_background: bool,
-):
-    """Run feedback weights and session persistence pipelines.
+) -> List[str]:
+    """Run feedback weights and session persistence pipelines; return the stages run.
 
     Stage 1 (feedback weights): Updates ``feedback_weight`` on graph nodes
     and edges that were *used during retrieval* in session Q&A entries.
     Only elements referenced in ``used_graph_element_ids`` are affected.
     If no retrieval has occurred in these sessions, no weights are updated.
+    Skipped when ``DEFAULT_FEEDBACK_INFLUENCE`` is 0: nothing reads the
+    weights at query time then, so writing them would be pure cost.
 
     Stage 2 (persist Q&A): Cognifies the actual question/answer text from
     sessions into the permanent graph, tagged with
     ``node_set="user_sessions_from_cache"``. This persists the Q&A content
     itself, not serialized graph edges.
     """
+    from cognee.base_config import get_base_config
+
+    stages: List[str] = []
 
     # Stage 1: apply feedback weights from session retrieval traces
-    from cognee.memify_pipelines.apply_feedback_weights import apply_feedback_weights_pipeline
-
-    try:
-        await apply_feedback_weights_pipeline(
-            user=user,
-            session_ids=session_ids,
-            dataset=dataset,
-            alpha=feedback_alpha,
-            run_in_background=run_in_background,
+    if get_base_config().default_feedback_influence <= 0:
+        logger.warning(
+            "improve: feedback-weights stage skipped — DEFAULT_FEEDBACK_INFLUENCE is 0, "
+            "so no retriever reads feedback weights at query time; set it > 0 to enable"
         )
-        logger.info("improve: feedback weights applied from %d session(s)", len(session_ids))
-    except Exception as e:
-        logger.warning("improve: feedback weights failed (non-fatal): %s", e)
+        stages.append("feedback_weights_skipped:influence_zero")
+    else:
+        from cognee.memify_pipelines.apply_feedback_weights import (
+            apply_feedback_weights_pipeline,
+        )
+
+        try:
+            await apply_feedback_weights_pipeline(
+                user=user,
+                session_ids=session_ids,
+                dataset=dataset,
+                alpha=feedback_alpha,
+                run_in_background=run_in_background,
+            )
+            logger.info("improve: feedback weights applied from %d session(s)", len(session_ids))
+            stages.append("feedback_weights")
+        except Exception as e:
+            logger.warning("improve: feedback weights failed (non-fatal): %s", e)
 
     # Stage 2: persist session Q&A into permanent graph
     from cognee.memify_pipelines.persist_sessions_in_knowledge_graph import (
@@ -352,6 +367,8 @@ async def _bridge_sessions(
         run_in_background=run_in_background,
     )
     logger.info("improve: session Q&A persisted from %d session(s)", len(session_ids))
+    stages.append("persist_sessions")
+    return stages
 
 
 async def _extract_agent_context(
