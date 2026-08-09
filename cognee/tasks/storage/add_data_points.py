@@ -208,7 +208,11 @@ async def add_data_points(
             graph_engine.add_edges(
                 edges, source_ref_key=fold_source_ref_key, pipeline_run_id=fold_run_arg
             ),
-            index_graph_edges(edges, vector_engine=vector_engine),
+            index_graph_edges(
+                edges,
+                vector_engine=vector_engine,
+                graph_engine=graph_engine,
+            ),
         )
 
     if custom_edges:
@@ -230,7 +234,11 @@ async def add_data_points(
                     source_ref_key=fold_source_ref_key,
                     pipeline_run_id=fold_run_arg,
                 ),
-                index_graph_edges(custom_edges, vector_engine=vector_engine),
+                index_graph_edges(
+                    custom_edges,
+                    vector_engine=vector_engine,
+                    graph_engine=graph_engine,
+                ),
             )
 
         edges.extend(custom_edges)

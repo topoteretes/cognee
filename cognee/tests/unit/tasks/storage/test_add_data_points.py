@@ -110,6 +110,11 @@ async def test_add_data_points_indexes_nodes_and_edges(
     assert expected_custom_edges[0] in first_call_edges
     assert graph_engine.add_edges.await_args_list[1].args[0] == expected_custom_edges
     assert mock_index_edges.await_count == 2
+    assert mock_index_edges.await_args_list[0].kwargs["graph_engine"] is graph_engine
+    assert mock_index_edges.await_args_list[1].kwargs["graph_engine"] is graph_engine
+    assert mock_index_edges.await_args_list[0].args[0][0][3]["edge_object_id"] == first_call_edges[0][3][
+        "edge_object_id"
+    ]
 
 
 @pytest.mark.asyncio
