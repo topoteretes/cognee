@@ -47,6 +47,20 @@ def _node_index_text(node_data: dict) -> str:
     return str(text).strip()
 
 
+def _supports_truth_state(graph_engine) -> bool:
+    """Whether the graph backend overrides the truth-state persistence hooks.
+
+    The interface defaults raise NotImplementedError; probing up front avoids paying
+    the full corpus-embedding cost on a backend that would then no-op the write.
+    """
+    from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
+
+    method = getattr(graph_engine, "set_node_truth_state", None)
+    if method is None:
+        return False
+    return getattr(method, "__func__", method) is not GraphDBInterface.set_node_truth_state
+
+
 def _truth_node_sets(session_ids: Optional[List[str]]) -> List[str]:
     if not session_ids:
         return TRUTH_NODE_SET
@@ -128,6 +142,13 @@ async def build_truth_subspace(
     async with set_database_global_context_variables(dataset_obj.id, dataset_obj.owner_id):
         vector_engine = await get_vector_engine_async()
         graph_engine = await get_graph_engine()
+
+        if not _supports_truth_state(graph_engine):
+            logger.info(
+                "truth_subspace: graph backend %s does not support truth state; skipping build",
+                type(graph_engine).__name__,
+            )
+            return {**empty_result, "skipped": "backend_unsupported"}
 
         # Step 1: accepted learning statements from session_learnings.
         statements = await _fetch_learning_statements(graph_engine, session_ids)

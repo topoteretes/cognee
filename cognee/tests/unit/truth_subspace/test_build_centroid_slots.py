@@ -208,6 +208,48 @@ async def test_mid_build_scoring_failure_leaves_old_epoch_live(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_unsupported_backend_skips_before_any_embedding(monkeypatch):
+    """A backend inheriting the interface's NotImplementedError default must skip the
+    whole build with zero embedding calls."""
+    from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
+
+    class _NoTruthBackend:
+        set_node_truth_state = GraphDBInterface.set_node_truth_state
+        get_nodeset_subgraph = AsyncMock()
+        get_graph_data = AsyncMock()
+
+    dataset = SimpleNamespace(id=uuid4(), owner_id=uuid4())
+    user = SimpleNamespace(id=uuid4())
+    embedding_engine = MagicMock()
+    embedding_engine.embed_text = AsyncMock()
+    monkeypatch.setenv("ENABLE_BACKEND_ACCESS_CONTROL", "false")
+
+    with (
+        patch(
+            "cognee.modules.truth_subspace.build.get_authorized_existing_datasets",
+            new=AsyncMock(return_value=[dataset]),
+        ),
+        patch(
+            "cognee.modules.truth_subspace.build.get_vector_engine_async",
+            new=AsyncMock(return_value=MagicMock()),
+        ),
+        patch(
+            "cognee.modules.truth_subspace.build.get_graph_engine",
+            new=AsyncMock(return_value=_NoTruthBackend()),
+        ),
+        patch(
+            "cognee.modules.truth_subspace.build.get_embedding_engine",
+            return_value=embedding_engine,
+        ),
+    ):
+        result = await build_truth_subspace(dataset.id, session_ids=None, user=user)
+
+    assert result["skipped"] == "backend_unsupported"
+    assert result["nodes_scored"] == 0
+    embedding_engine.embed_text.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_build_truth_subspace_filters_learning_sets_by_session_ids(monkeypatch):
     _result, _vector_engine, graph_engine = await _run_build(
         monkeypatch, session_ids=["s-1", "s-2"]
