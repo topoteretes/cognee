@@ -13,6 +13,7 @@ import json
 import re
 from collections import Counter
 from datetime import datetime, timezone
+from collections.abc import AsyncIterable
 from typing import Dict, Any, List, Union, Optional, Tuple, Type, TYPE_CHECKING
 from uuid import UUID
 
@@ -24,7 +25,7 @@ from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInte
 from cognee.infrastructure.databases.vector.vector_db_interface import VectorDBInterface
 from cognee.infrastructure.databases.vector.models.ScoredResult import ScoredResult
 from cognee.infrastructure.databases.vector.pgvector.serialize_data import serialize_data
-from cognee.infrastructure.databases.vector.pgvector.PGVectorAdapter import IndexSchema
+from cognee.infrastructure.databases.vector.models.IndexSchema import index_schema_from_data_point
 
 if TYPE_CHECKING:
     from cognee.infrastructure.databases.graph.postgres.adapter import PostgresAdapter
@@ -210,6 +211,16 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
     ):
         return await self._vector.index_data_points(index_name, index_property_name, data_points)
 
+    async def replace_index_data_points(
+        self,
+        index_name: str,
+        index_property_name: str,
+        data_point_batches: AsyncIterable[List[DataPoint]],
+    ) -> None:
+        return await self._vector.replace_index_data_points(
+            index_name, index_property_name, data_point_batches
+        )
+
     async def retrieve(self, collection_name: str, data_point_ids: List[str]):
         return await self._vector.retrieve(collection_name, data_point_ids)
 
@@ -346,17 +357,7 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
             table = _validate_table_name(collection)
             rows = []
             for dp, vector, embed_text in items:
-                index_point = IndexSchema(
-                    id=dp.id,
-                    text=embed_text,
-                    # Reference scalars for search "Evidence"; None for non-chunks.
-                    document_id=getattr(dp, "document_id", None),
-                    document_name=getattr(dp, "document_name", None),
-                    chunk_index=getattr(dp, "chunk_index", None),
-                    source_chunk_id=getattr(dp, "source_chunk_id", None),
-                    importance_weight=getattr(dp, "importance_weight", None),
-                    belongs_to_set=(dp.belongs_to_set or []),
-                )
+                index_point = index_schema_from_data_point(dp)
                 payload = serialize_data(index_point.model_dump())
                 rows.append(
                     {
@@ -468,11 +469,7 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
                 number_of_edges=count,
             )
             edge_id = edge_type_dp.id
-            index_point = IndexSchema(
-                id=edge_id,
-                text=edge_text,
-                belongs_to_set=(edge_type_dp.belongs_to_set or []),
-            )
+            index_point = index_schema_from_data_point(edge_type_dp)
             payload = json.dumps(serialize_data(index_point.model_dump()))
             vector_rows.append(
                 {

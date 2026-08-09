@@ -200,6 +200,50 @@ async def test_embed_data(adapter):
     assert len(vectors[0]) > 0
 
 
+@pytest.mark.asyncio
+async def test_vector_upsert_replaces_embedding_when_index_text_changes(adapter):
+    """A mutable index row must receive the vector for its newest text."""
+    from uuid import uuid4
+
+    from sqlalchemy import select
+
+    from cognee.infrastructure.databases.vector.pgvector.PGVectorAdapter import IndexSchema
+
+    collection = "test_hybrid_collection"
+    point_id = uuid4()
+    vector_adapter = adapter._vector
+
+    class _TextEmbeddingEngine:
+        def __init__(self, vector_size):
+            self._vector_size = vector_size
+
+        def get_vector_size(self):
+            return self._vector_size
+
+        async def embed_text(self, texts):
+            return [[float(len(text))] + [0.0] * (self._vector_size - 1) for text in texts]
+
+    original_engine = vector_adapter.embedding_engine
+    vector_adapter.embedding_engine = _TextEmbeddingEngine(original_engine.get_vector_size())
+    try:
+        await vector_adapter.create_data_points(
+            collection, [IndexSchema(id=point_id, text="first version")]
+        )
+        table = await vector_adapter.get_table(collection)
+        async with vector_adapter.get_async_session() as session:
+            first_vector = (await session.execute(select(table.c.vector))).scalar_one()
+
+        await vector_adapter.create_data_points(
+            collection, [IndexSchema(id=point_id, text="different second version")]
+        )
+        async with vector_adapter.get_async_session() as session:
+            second_vector = (await session.execute(select(table.c.vector))).scalar_one()
+    finally:
+        vector_adapter.embedding_engine = original_engine
+
+    assert second_vector != first_vector
+
+
 # -- Tests: query raises --
 
 

@@ -2,7 +2,9 @@
 
 import json
 import asyncio
+import re
 import threading
+from collections.abc import AsyncIterable
 from typing import Any, List, Optional
 from uuid import UUID
 
@@ -12,6 +14,7 @@ from cognee.infrastructure.engine.utils import parse_id
 from cognee.infrastructure.databases.exceptions import MissingQueryParameterError
 
 from ..models.ScoredResult import ScoredResult
+from ..models.IndexSchema import IndexSchema, index_schema_from_data_point
 from ..exceptions import CollectionNotFoundError
 from ..vector_db_interface import VectorDBInterface
 from ..embeddings.EmbeddingEngine import EmbeddingEngine
@@ -20,24 +23,6 @@ from ..pgvector.serialize_data import serialize_data
 logger = get_logger("TursoVectorAdapter")
 
 QUERY_BATCH_SIZE = 1000
-
-
-class IndexSchema(DataPoint):
-    """Schema for the rows written by ``index_data_points`` (mirrors PGVector)."""
-
-    text: str
-
-    # Optional reference scalars carried for the search "Evidence" feature.
-    # They stay None for non-chunk data points, so this schema remains
-    # compatible with every indexed DataPoint type.
-    document_id: Optional[str] = None
-    document_name: Optional[str] = None
-    chunk_index: Optional[int] = None
-    source_chunk_id: Optional[str] = None
-    importance_weight: Optional[float] = 0.5
-
-    metadata: dict = {"index_fields": ["text"]}
-    belongs_to_set: List[str] = []
 
 
 def _is_remote_url(url: str) -> bool:
@@ -212,7 +197,7 @@ class TursoVectorAdapter(VectorDBInterface):
             f"    UNION"
             f"    SELECT value FROM json_each(json_extract(excluded.payload, '$.belongs_to_set'))"
             f"  ))"
-            f")"
+            f"), vector = excluded.vector"
         )
 
         params = [
@@ -244,20 +229,28 @@ class TursoVectorAdapter(VectorDBInterface):
         """Write index rows derived from ``data_points`` into the {index}_{property} table."""
         await self.create_data_points(
             f"{index_name}_{index_property_name}",
-            [
-                IndexSchema(
-                    id=data_point.id,
-                    text=DataPoint.get_embeddable_data(data_point),
-                    document_id=getattr(data_point, "document_id", None),
-                    document_name=getattr(data_point, "document_name", None),
-                    chunk_index=getattr(data_point, "chunk_index", None),
-                    source_chunk_id=getattr(data_point, "source_chunk_id", None),
-                    importance_weight=getattr(data_point, "importance_weight", None),
-                    belongs_to_set=(data_point.belongs_to_set or []),
-                )
-                for data_point in data_points
-            ],
+            [index_schema_from_data_point(data_point) for data_point in data_points],
         )
+
+    async def replace_index_data_points(
+        self,
+        index_name: str,
+        index_property_name: str,
+        data_point_batches: AsyncIterable[List[DataPoint]],
+    ) -> None:
+        """Clear and repopulate exactly one validated libSQL collection."""
+        collection_name = f"{index_name}_{index_property_name}"
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", collection_name):
+            raise ValueError(f"Invalid collection table name: {collection_name!r}")
+        if not await self.has_collection(collection_name):
+            await self.create_collection(collection_name, payload_schema=IndexSchema)
+        await self._execute(f'DELETE FROM "{collection_name}"', commit=True)
+        async for batch in data_point_batches:
+            if batch:
+                await self.create_data_points(
+                    collection_name,
+                    [index_schema_from_data_point(data_point) for data_point in batch],
+                )
 
     # ------------------------------------------------------------------ #
     # Reads

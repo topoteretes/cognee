@@ -4,6 +4,7 @@ import inspect
 import threading
 import types
 from collections import OrderedDict
+from collections.abc import AsyncIterable
 from os import path
 from uuid import UUID
 from enum import Enum
@@ -23,6 +24,7 @@ from cognee.shared.logging_utils import get_logger
 
 from ..embeddings.EmbeddingEngine import EmbeddingEngine
 from ..models.ScoredResult import ScoredResult
+from ..models.IndexSchema import IndexSchema, index_schema_from_data_point
 from ..vector_db_interface import VectorDBInterface
 
 from cognee.modules.observability import new_span
@@ -49,34 +51,6 @@ _ORIGIN_DEFAULT_FACTORIES = {
     set: set,
     tuple: tuple,
 }
-
-
-class IndexSchema(DataPoint):
-    """
-    Represents a schema for an index data point containing an ID and text.
-
-    Attributes:
-
-    - id: A string representing the unique identifier for the data point.
-    - text: A string representing the content of the data point.
-    - metadata: A dictionary with default index fields for the schema, currently configured
-    to include 'text'.
-    """
-
-    id: str
-    text: str
-
-    # Optional reference scalars carried for the search "Evidence" feature.
-    # They stay None for non-chunk data points, so this schema remains
-    # compatible with every indexed DataPoint type.
-    document_id: Optional[str] = None
-    document_name: Optional[str] = None
-    chunk_index: Optional[int] = None
-    source_chunk_id: Optional[str] = None
-    importance_weight: Optional[float] = 0.5
-
-    metadata: dict = {"index_fields": ["text"]}
-    belongs_to_set: List[str] = []
 
 
 class LanceDBAdapter(VectorDBInterface):
@@ -1306,23 +1280,28 @@ class LanceDBAdapter(VectorDBInterface):
     ):
         await self.create_data_points(
             f"{index_name}_{index_property_name}",
-            [
-                IndexSchema(
-                    id=str(data_point.id),
-                    text=getattr(data_point, data_point.metadata["index_fields"][0]),
-                    # Reference scalars for search "Evidence". Pulled via getattr
-                    # so non-chunk data points (which lack these fields) simply
-                    # fall back to None instead of raising.
-                    document_id=getattr(data_point, "document_id", None),
-                    document_name=getattr(data_point, "document_name", None),
-                    chunk_index=getattr(data_point, "chunk_index", None),
-                    source_chunk_id=getattr(data_point, "source_chunk_id", None),
-                    importance_weight=getattr(data_point, "importance_weight", None),
-                    belongs_to_set=(data_point.belongs_to_set or []),
-                )
-                for data_point in data_points
-            ],
+            [index_schema_from_data_point(data_point) for data_point in data_points],
         )
+
+    async def replace_index_data_points(
+        self,
+        index_name: str,
+        index_property_name: str,
+        data_point_batches: AsyncIterable[List[DataPoint]],
+    ) -> None:
+        """Drop and rebuild only the requested LanceDB index collection."""
+        collection_name = f"{index_name}_{index_property_name}"
+        if await self.has_collection(collection_name):
+            async with self.VECTOR_DB_LOCK:
+                connection = await self.get_connection()
+                await connection.drop_table(collection_name)
+        await self.create_collection(collection_name, payload_schema=IndexSchema)
+        async for batch in data_point_batches:
+            if batch:
+                await self.create_data_points(
+                    collection_name,
+                    [index_schema_from_data_point(data_point) for data_point in batch],
+                )
 
     async def prune(self):
         connection = await self.get_connection()

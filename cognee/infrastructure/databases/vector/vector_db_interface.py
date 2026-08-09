@@ -1,4 +1,4 @@
-from typing import List, Protocol, Optional, Any
+from typing import AsyncIterable, List, Protocol, Optional, Any
 from abc import abstractmethod
 from cognee.infrastructure.engine import DataPoint
 from .models.PayloadSchema import PayloadSchema
@@ -262,6 +262,15 @@ class VectorDBInterface(Protocol):
             - data_points (List[DataPoint]): Data points to index
         """
         pass
+
+    async def replace_index_data_points(
+        self,
+        index_name: str,
+        index_property_name: str,
+        data_point_batches: AsyncIterable[List[DataPoint]],
+    ) -> None:
+        """Replace one index collection from an asynchronously streamed payload."""
+        raise NotImplementedError
 
     def get_data_point_schema(self, model_type: Any) -> Any:
         """
