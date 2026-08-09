@@ -531,9 +531,12 @@ class CogneeGraph(CogneeAbstractGraph):
                         f"{label}: vector_distance[{query_index}] must be float-like, "
                         f"got {type(value).__name__}"
                     )
-                distance = (2 - importance_weight) * distance
                 feedback_weight = element.attributes.get("feedback_weight", 0.5)
-                importances.append(_effective_distance(distance, feedback_weight))
+                # Blend on the raw cosine distance — the [0, 2] domain the blend
+                # gates on. Scaling by importance first maps distances into
+                # [0, 4], silently skipping the blend for scaled values above 2.
+                blended_distance = _effective_distance(distance, feedback_weight)
+                importances.append((2 - importance_weight) * blended_distance)
 
             return sum(importances)
 

@@ -37,6 +37,7 @@ async def retrieve_hybrid_chunks(
     q_coords: Optional[list[float]] = None,
     truth_state_by_id: Optional[dict] = None,
     current_truth_epoch: Optional[int] = None,
+    fetch_feedback_weights: Optional[Any] = None,
 ) -> dict[str, Any]:
     candidate_limit = max(0, chunks_top_k * 2)
     summary_limit = summary_candidate_limit(chunks_top_k, text_summaries_top_k)
@@ -80,6 +81,18 @@ async def retrieve_hybrid_chunks(
         )
         attach_source_chunks(pairs, source_chunks)
 
+    # Learned feedback weights for the lane's own candidates, fetched in one
+    # batched call. None fetcher (influence off / unsupported backend) or a
+    # failed lookup keeps ranking at exact baseline.
+    feedback_weight_by_id = None
+    if fetch_feedback_weights is not None:
+        candidate_ids = [pair["chunk_id"] for pair in pairs if pair.get("chunk_id")]
+        if candidate_ids:
+            try:
+                feedback_weight_by_id = await fetch_feedback_weights(candidate_ids)
+            except Exception as error:
+                logger.debug("Feedback-weight lookup failed; using baseline ranking: %s", error)
+
     ranked_pairs = rank_chunk_summary_pairs(
         pairs,
         chunks_top_k,
@@ -88,6 +101,7 @@ async def retrieve_hybrid_chunks(
         q_coords=q_coords,
         truth_state_by_id=truth_state_by_id,
         current_truth_epoch=current_truth_epoch,
+        feedback_weight_by_id=feedback_weight_by_id,
     )
     if summary_limit > 0:
         await load_summary_text_for_ranked_pairs(

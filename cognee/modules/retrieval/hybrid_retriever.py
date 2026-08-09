@@ -102,10 +102,25 @@ class HybridRetriever(BaseRetriever):
                 q_coords=q_coords,
                 truth_state_by_id=truth_state_by_id,
                 current_truth_epoch=current_truth_epoch,
+                fetch_feedback_weights=self._feedback_weight_fetcher(),
             ),
             self._retrieve_entities_and_facts(query, query_vector),
         )
         return {**chunk_objects, "entities": entities, "facts": facts}
+
+    def _feedback_weight_fetcher(self):
+        """Batched learned-weight lookup for the chunk lane, or None at baseline.
+
+        Gated on the same DEFAULT_FEEDBACK_INFLUENCE config as the triplet lane,
+        so influence 0 keeps hybrid ranking byte-identical to today. Backends
+        without feedback-weight support simply have no usable fetcher.
+        """
+        from cognee.base_config import get_base_config
+
+        if get_base_config().default_feedback_influence <= 0:
+            return None
+        graph_engine = getattr(self._unified_engine, "graph", None)
+        return getattr(graph_engine, "get_node_feedback_weights", None)
 
     async def _build_truth_context(self, query_vector: list[float]) -> tuple:
         """Truth-subspace alignment context for the chunk lane.

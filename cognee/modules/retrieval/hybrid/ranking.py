@@ -12,6 +12,7 @@ def rank_chunk_summary_pairs(
     q_coords: Optional[list[float]] = None,
     truth_state_by_id: Optional[dict] = None,
     current_truth_epoch: Optional[int] = None,
+    feedback_weight_by_id: Optional[dict] = None,
 ) -> list[dict]:
     if limit <= 0:
         return []
@@ -42,6 +43,11 @@ def rank_chunk_summary_pairs(
             if truth_state.get("truth_epoch") == current_truth_epoch:
                 final_score *= truth_factor(truth_state.get("truth_alignment", []), q_coords)
 
+        # Learned feedback weights (None = feedback influence off -> exact baseline;
+        # a chunk absent from the map ranks at the neutral 1.0 factor).
+        if feedback_weight_by_id is not None:
+            final_score *= _feedback_factor(feedback_weight_by_id.get(chunk_id))
+
         ranked.append((final_score, rrf_score, min(ranks), chunk_id, pair))
 
     ranked.sort(key=lambda item: (-item[0], -item[1], item[2], item[3]))
@@ -57,3 +63,10 @@ def _importance_factor(chunk) -> float:
     importance = raw_importance if isinstance(raw_importance, (int, float)) else 0.5
     importance = max(0.0, min(1.0, importance))
     return 0.75 + 0.5 * importance
+
+
+def _feedback_factor(raw_weight) -> float:
+    """[0.75, 1.25] factor from a learned feedback weight; 0.5 (the default) is 1.0."""
+    weight = raw_weight if isinstance(raw_weight, (int, float)) else 0.5
+    weight = max(0.0, min(1.0, weight))
+    return 0.75 + 0.5 * weight
