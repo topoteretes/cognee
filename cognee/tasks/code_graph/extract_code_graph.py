@@ -18,6 +18,7 @@ from cognee.tasks.code_graph.enola import (
 )
 from cognee.tasks.code_graph.models import (
     ApiEndpoint,
+    CodeInsight,
     CodeModule,
     CodeRepository,
     CodeService,
@@ -42,6 +43,7 @@ KIND_TO_MODEL = {
     "service": CodeService,
     "test_ref": CodeTestReference,
     "file_ref": CodeFileReference,
+    "insight": CodeInsight,
 }
 
 
@@ -135,7 +137,11 @@ def map_facts_to_data_points(
             "file_path": file_path if isinstance(file_path, str) else None,
             "line": line if isinstance(line, int) and not isinstance(line, bool) else None,
             "repo": repo,
-            "description": _describe_fact(kind, props),
+            # Insights carry prose from the explainer; use it verbatim instead
+            # of the generic "kind: k=v, ..." property summary.
+            "description": props.get("description")
+            if kind == "insight" and isinstance(props.get("description"), str)
+            else _describe_fact(kind, props),
             "fact_properties": props,
             "part_of": _get_repository(repo),
         }

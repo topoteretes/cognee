@@ -63,3 +63,14 @@ class CodeTestReference(CodeGraphEntity):
 
 class CodeFileReference(CodeGraphEntity):
     """A file-level reference (enola fact kind: file_ref)."""
+
+
+class CodeInsight(CodeGraphEntity):
+    """An architecture finding from an enola explainer (synthesized kind: insight).
+
+    enola 0.3.x explainers (hotspots, god-class, dependency-depth, cycles,
+    layers, exported-surface, complexity-outliers, ...) emit these into
+    insights.json. Each insight is linked to the facts it cites via
+    ``evidences`` edges. The explainer name and confidence live in
+    fact_properties ("source", "confidence").
+    """
