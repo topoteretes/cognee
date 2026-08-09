@@ -17,7 +17,7 @@ class _EmbeddingEngine:
         return [vectors_by_text[text] for text in texts]
 
 
-async def _run_build(monkeypatch, session_ids=None):
+async def _run_build(monkeypatch, session_ids=None, embedding_engine=None):
     dataset = SimpleNamespace(id=uuid4(), owner_id=uuid4())
     user = SimpleNamespace(id=uuid4())
     vector_engine = MagicMock()
@@ -60,7 +60,7 @@ async def _run_build(monkeypatch, session_ids=None):
         ),
         patch(
             "cognee.modules.truth_subspace.build.get_embedding_engine",
-            return_value=_EmbeddingEngine(),
+            return_value=embedding_engine or _EmbeddingEngine(),
         ),
     ):
         result = await build_truth_subspace(dataset.id, session_ids=session_ids, user=user)
@@ -83,6 +83,25 @@ async def test_build_truth_subspace_writes_centroids_and_epoch_state(monkeypatch
     assert len(node_state["chunk-1"]["truth_alignment"]) == 8
     assert sorted(node_state["chunk-1"]["truth_alignment"][:2]) == [0.0, 1.0]
     assert node_state["chunk-1"]["truth_alignment"][2:] == [0.0] * 6
+
+
+@pytest.mark.asyncio
+async def test_build_skips_nodes_whose_embedding_batch_failed(monkeypatch):
+    """A failed corpus embedding batch must leave those nodes without truth state
+    (neutral 1.0 factor), never zero coords at the current epoch (a 0.75x penalty)."""
+
+    class _CorpusFailingEngine(_EmbeddingEngine):
+        async def embed_text(self, texts):
+            if "alpha corpus" in texts:
+                raise RuntimeError("embedding provider down")
+            return await super().embed_text(texts)
+
+    result, _vector_engine, graph_engine = await _run_build(
+        monkeypatch, embedding_engine=_CorpusFailingEngine()
+    )
+
+    assert result["nodes_scored"] == 0
+    graph_engine.set_node_truth_state.assert_not_awaited()
 
 
 @pytest.mark.asyncio

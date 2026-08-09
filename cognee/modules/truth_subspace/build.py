@@ -94,7 +94,9 @@ async def _embed_in_batches(embedding_engine, texts: List[str]) -> List[List[flo
             vectors.extend(await embedding_engine.embed_text(batch))
         except Exception as error:
             logger.warning("truth_subspace: node embedding batch failed open: %s", error)
-            # Keep alignment: pad failed batch with empty vectors (NEUTRAL coords).
+            # Keep positional alignment with empty vectors; the scoring loop skips
+            # them so failed nodes keep no truth state (a genuinely neutral 1.0
+            # factor) instead of zero coords (a durable 0.75x penalty).
             vectors.extend([[] for _ in batch])
     return vectors
 
@@ -252,6 +254,10 @@ async def build_truth_subspace(
         # Step 6: EMBED node texts (batched) and compute coords per node.
         node_vecs = await _embed_in_batches(embedding_engine, node_texts)
         for node_id, node_vec in zip(node_ids, node_vecs):
+            if not node_vec:
+                # Embedding failed for this node's batch: writing [0.0]*k coords at the
+                # current epoch would demote it to the 0.75x floor at query time.
+                continue
             try:
                 coords = pad_coords(align.node_coords(node_vec, centroid_vecs), k)
                 scored[node_id] = {
