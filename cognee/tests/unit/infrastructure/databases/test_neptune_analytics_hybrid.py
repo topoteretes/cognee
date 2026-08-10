@@ -18,6 +18,8 @@ langchain_aws = pytest.importorskip(
 botocore = pytest.importorskip("botocore", reason="Neptune Analytics tests require botocore")
 
 from cognee.infrastructure.engine import DataPoint  # noqa: E402
+from cognee.modules.engine.utils import generate_edge_object_id  # noqa: E402
+from cognee.modules.graph.models.EdgeType import EdgeType  # noqa: E402
 from cognee.infrastructure.databases.hybrid.neptune_analytics.NeptuneAnalyticsAdapter import (  # noqa: E402
     NeptuneAnalyticsAdapter,
 )
@@ -132,16 +134,22 @@ async def test_add_edges_with_vectors_empty():
 
 
 @pytest.mark.asyncio
-async def test_add_edges_with_vectors_indexes_relationship_types_and_edge_prose_separately():
+async def test_edge_index_contract_neptune_hybrid_path():
     """Neptune writes type and instance points after graph persistence."""
     adapter = _FakeAdapter()
-    first_id, second_id = str(uuid4()), str(uuid4())
+    first_id, second_id = (
+        generate_edge_object_id("source", "target", "depends_on"),
+        str(uuid4()),
+    )
     edges = [
         (
-            "a",
-            "b",
+            "source",
+            "target",
             "depends_on",
-            {"edge_object_id": first_id, "edge_text": "Package A depends on Package B."},
+            {
+                "edge_object_id": first_id,
+                "edge_text": "Source depends on Target because the build requires it.",
+            },
         ),
         (
             "c",
@@ -171,6 +179,16 @@ async def test_add_edges_with_vectors_indexes_relationship_types_and_edge_prose_
     ]
     assert type_schemas[0].number_of_edges == 7
     assert {str(schema.id) for schema in instance_schemas} == {first_id, second_id}
+    edge_instance = next(schema for schema in instance_schemas if str(schema.id) == first_id)
+    type_id = str(type_schemas[0].id)
+    instance_id = str(edge_instance.id)
+    type_text = type_schemas[0].text
+    instance_text = edge_instance.text
+
+    assert type_id == str(EdgeType.id_for("depends_on"))
+    assert instance_id == generate_edge_object_id("source", "target", "depends_on")
+    assert type_text == "depends_on"
+    assert instance_text == "Source depends on Target because the build requires it."
 
 
 @pytest.mark.asyncio

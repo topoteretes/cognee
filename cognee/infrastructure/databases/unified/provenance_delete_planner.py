@@ -17,9 +17,11 @@ retry converges. All three steps are individually idempotent.
 Vector ids mirror ``delete_from_graph_and_vector``:
   - node -> collection ``f"{node_type}_{field}"`` for each indexed field,
     id = node_id;
-  - edge -> ``EdgeType.id_for(edge_text)`` in ``EdgeType_relationship_name``;
-    ``generate_node_id(source_id + relationship_name + target_id)`` in
-    ``Triplet_text`` (best-effort; the collection may not exist).
+  - edge -> an ``EdgeInstance_text`` row keyed by its stable ``edge_object_id``;
+    shared ``EdgeType_relationship_name`` rows are synchronized after graph
+    deletion from surviving relationship names. ``Triplet_text`` remains a
+    best-effort compatibility index keyed by
+    ``generate_node_id(source_id + relationship_name + target_id)``.
 """
 
 from cognee.infrastructure.databases.provenance import (
@@ -90,7 +92,7 @@ async def execute_source_ref_removal(
     if unowned_edges:
         # Per-edge triplet vectors are tied to a single deleted edge instance, so
         # they are safe to delete here. EdgeType vectors are keyed by *shared*
-        # relationship text and may still be used by a surviving edge, so they
+        # relationship names and may still be used by a surviving edge, so they
         # are handled in _cleanup_orphaned_edge_types (after the graph delete,
         # against the truly-orphaned text set) — never blindly here.
         triplet_ids: list[str] = [

@@ -17,6 +17,8 @@ pytest.importorskip("asyncpg", reason="PostgresHybridAdapter requires the postgr
 pytest.importorskip("pgvector", reason="PostgresHybridAdapter requires the postgres extra")
 
 from cognee.infrastructure.engine import DataPoint  # noqa: E402
+from cognee.modules.engine.utils import generate_edge_object_id  # noqa: E402
+from cognee.modules.graph.models.EdgeType import EdgeType  # noqa: E402
 from cognee.infrastructure.databases.hybrid.postgres.adapter import (  # noqa: E402
     PostgresHybridAdapter,
 )
@@ -208,16 +210,22 @@ async def test_add_edges_with_vectors_negative_batch_size_falls_back_to_single_c
 
 
 @pytest.mark.asyncio
-async def test_add_edges_with_vectors_indexes_relationship_types_and_edge_prose_separately():
+async def test_edge_index_contract_postgres_hybrid_path():
     """Type payloads use graph-wide counts; prose rows retain shared edge object ids."""
     adapter = _make_fake_hybrid(batch_size=10)
-    first_id, second_id = str(uuid4()), str(uuid4())
+    first_id, second_id = (
+        generate_edge_object_id("source", "target", "depends_on"),
+        str(uuid4()),
+    )
     edges = [
         (
-            "a",
-            "b",
+            "source",
+            "target",
             "depends_on",
-            {"edge_object_id": first_id, "edge_text": "Package A depends on Package B."},
+            {
+                "edge_object_id": first_id,
+                "edge_text": "Source depends on Target because the build requires it.",
+            },
         ),
         (
             "c",
@@ -254,6 +262,18 @@ async def test_add_edges_with_vectors_indexes_relationship_types_and_edge_prose_
     type_rows = calls_by_table['"EdgeType_relationship_name"']
     instance_rows = calls_by_table['"EdgeInstance_text"']
     type_payload = json.loads(type_rows[0]["payload"])
+    instance_payload = next(
+        json.loads(row["payload"]) for row in instance_rows if row["id"] == first_id
+    )
+    type_id = type_rows[0]["id"]
+    instance_id = first_id
+    type_text = type_payload["text"]
+    instance_text = instance_payload["text"]
+
+    assert type_id == str(EdgeType.id_for("depends_on"))
+    assert instance_id == generate_edge_object_id("source", "target", "depends_on")
+    assert type_text == "depends_on"
+    assert instance_text == "Source depends on Target because the build requires it."
     assert type_payload["number_of_edges"] == 7
     assert {row["id"] for row in instance_rows} == {first_id, second_id}
     assert session.commit.await_count == 1
