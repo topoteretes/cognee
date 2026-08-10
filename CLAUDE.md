@@ -34,7 +34,7 @@ pre-commit install
 - **neptune** - AWS Neptune support
 - **turso** - Turso vector database support
 - **docs** - Document processing (unstructured library)
-- **scraping** - Web scraping (Tavily, BeautifulSoup, Playwright)
+- **scraping** - Web scraping (Tavily, BeautifulSoup, Playwright; Keenable needs no extra — it uses the built-in httpx)
 - **langchain** - LangChain integration
 - **llama-index** - LlamaIndex integration
 - **anthropic** - Anthropic Claude models
