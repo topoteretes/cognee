@@ -35,6 +35,12 @@ class NodeNoIndex(DataPoint):
     metadata: dict = {"index_fields": []}
 
 
+class MultiIndexNode(DataPoint):
+    title: str
+    summary: str
+    metadata: dict = {"index_fields": ["title", "summary"]}
+
+
 class _FakeAdapter:
     """Minimal stand-in for NeptuneAnalyticsAdapter that carries the two new methods."""
 
@@ -115,6 +121,21 @@ async def test_add_nodes_with_vectors_multiple_nodes_same_type():
     assert len(schemas) == 2
     texts = {s.text for s in schemas}
     assert texts == {"Alice", "Bob"}
+
+
+@pytest.mark.asyncio
+async def test_add_nodes_with_vectors_keeps_text_specific_to_each_index_field():
+    """A multi-index node must create field-specific payload text in each collection."""
+    adapter = _FakeAdapter()
+    node = MultiIndexNode(id=uuid4(), title="Short title", summary="Detailed summary")
+
+    await adapter.add_nodes_with_vectors([node])
+
+    schemas_by_collection = {
+        call.args[0]: call.args[1] for call in adapter.create_data_points.await_args_list
+    }
+    assert schemas_by_collection["MultiIndexNode_title"][0].text == "Short title"
+    assert schemas_by_collection["MultiIndexNode_summary"][0].text == "Detailed summary"
 
 
 # ---------------------------------------------------------------------------

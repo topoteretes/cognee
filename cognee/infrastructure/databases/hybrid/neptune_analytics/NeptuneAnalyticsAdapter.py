@@ -444,7 +444,10 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
         """
         await self.create_data_points(
             f"{index_name}_{index_property_name}",
-            [index_schema_from_data_point(data_point) for data_point in data_points],
+            [
+                index_schema_from_data_point(data_point, index_property_name)
+                for data_point in data_points
+            ],
         )
 
     async def replace_index_data_points(
@@ -467,7 +470,10 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
             if batch:
                 await self.create_data_points(
                     collection_name,
-                    [index_schema_from_data_point(data_point) for data_point in batch],
+                    [
+                        index_schema_from_data_point(data_point, index_property_name)
+                        for data_point in batch
+                    ],
                 )
 
     async def prune(self):
@@ -535,7 +541,7 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
 
         for (type_name, field_name), points in groups.items():
             await self.create_vector_index(type_name, field_name)
-            index_schemas = [index_schema_from_data_point(dp) for dp in points]
+            index_schemas = [index_schema_from_data_point(dp, field_name) for dp in points]
             await self.create_data_points(f"{type_name}_{field_name}", index_schemas)
 
     async def add_edges_with_vectors(
@@ -566,14 +572,20 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
             await self.create_vector_index("EdgeType", "relationship_name")
             await self.create_data_points(
                 "EdgeType_relationship_name",
-                [index_schema_from_data_point(point) for point in edge_points.edge_types],
+                [
+                    index_schema_from_data_point(point, "relationship_name")
+                    for point in edge_points.edge_types
+                ],
             )
 
         if edge_points.edge_instances:
             await self.create_vector_index("EdgeInstance", "text")
             await self.create_data_points(
                 "EdgeInstance_text",
-                [index_schema_from_data_point(point) for point in edge_points.edge_instances],
+                [
+                    index_schema_from_data_point(point, "text")
+                    for point in edge_points.edge_instances
+                ],
             )
 
     async def run_migrations(self):

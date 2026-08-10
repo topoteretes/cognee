@@ -374,7 +374,10 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         """Write index rows derived from `data_points` into the `{index}_{property}` table."""
         await self.create_data_points(
             f"{index_name}_{index_property_name}",
-            [index_schema_from_data_point(data_point) for data_point in data_points],
+            [
+                index_schema_from_data_point(data_point, index_property_name)
+                for data_point in data_points
+            ],
         )
 
     async def replace_index_data_points(
@@ -395,7 +398,10 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                     continue
                 await self.create_data_points(
                     staging_name,
-                    [index_schema_from_data_point(data_point) for data_point in batch],
+                    [
+                        index_schema_from_data_point(data_point, index_property_name)
+                        for data_point in batch
+                    ],
                 )
                 staging_created = True
 

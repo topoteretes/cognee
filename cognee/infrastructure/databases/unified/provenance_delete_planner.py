@@ -6,7 +6,8 @@ source ref remains -> hard delete) versus which merely *survive* (some ref
 remains -> detach the targeted refs only). It then performs the removal in a
 retry-safe order:
 
-  1. delete vectors for unowned artifacts (from snapshots only),
+  1. delete vectors for unowned artifacts (from snapshots only), including
+     edge instances and prospective post-delete EdgeType counts,
   2. ``remove_*_source_refs`` for the targeted refs on ALL matched artifacts
      (idempotent),
   3. ``delete_nodes`` / ``delete_edge_triples`` for the unowned artifacts.
@@ -23,6 +24,8 @@ Vector ids mirror ``delete_from_graph_and_vector``:
     best-effort compatibility index keyed by
     ``generate_node_id(source_id + relationship_name + target_id)``.
 """
+
+from collections import Counter
 
 from cognee.infrastructure.databases.provenance import (
     EdgeDeleteData,
@@ -102,6 +105,24 @@ async def execute_source_ref_removal(
         if triplet_ids:
             await _delete_vector_points(vector_engine, "Triplet_text", triplet_ids)
 
+        # An edge must remain source-ref discoverable until *all* of its vector
+        # mutations have succeeded. Instance points are per edge; relationship
+        # type points are shared, so calculate their post-delete counts from
+        # the still-live graph and the exact unowned-edge snapshot. On failure,
+        # the graph remains unchanged and the entire operation is retryable.
+        from cognee.modules.graph.methods.sync_edge_indexes import (
+            delete_edge_instances,
+            sync_edge_types,
+        )
+
+        await delete_edge_instances(vector_engine, [edge_data[edge] for edge in unowned_edges])
+        await sync_edge_types(
+            graph_engine,
+            vector_engine,
+            [edge.relationship_name for edge in unowned_edges],
+            removed_edge_counts=Counter(edge.relationship_name for edge in unowned_edges),
+        )
+
     # ------------------------------------------------------------------
     # 3. Remove the targeted refs from SURVIVING artifacts only (idempotent).
     #    Unowned artifacts keep their refs until they are hard-deleted below, so
@@ -142,17 +163,6 @@ async def execute_source_ref_removal(
 
     if unowned_edges:
         await graph_engine.delete_edge_triples(unowned_edges)
-        from cognee.modules.graph.methods.sync_edge_indexes import (
-            delete_edge_instances,
-            sync_edge_types,
-        )
-
-        await delete_edge_instances(vector_engine, [edge_data[edge] for edge in unowned_edges])
-        await sync_edge_types(
-            graph_engine,
-            vector_engine,
-            [edge.relationship_name for edge in unowned_edges],
-        )
 
     # ------------------------------------------------------------------
     # 5. Post-delete cleanup parity with delete_from_graph_and_vector

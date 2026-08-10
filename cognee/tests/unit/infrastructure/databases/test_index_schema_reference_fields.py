@@ -9,6 +9,7 @@ from its payload — which would make chunk Evidence render empty on that backen
 import pytest
 
 from cognee.modules.graph.models.EdgeInstance import EdgeInstance
+from cognee.infrastructure.engine import DataPoint
 
 REFERENCE_FIELDS = ("document_id", "document_name", "chunk_index", "source_chunk_id")
 
@@ -99,3 +100,26 @@ def test_edge_payload_fields_survive_index_schema_conversion():
     assert indexed.model_dump()["relationship_name"] == "depends_on"
     assert indexed.model_dump()["source_node_id"] == "a"
     assert indexed.model_dump()["target_node_id"] == "b"
+
+
+def test_index_schema_conversion_uses_requested_multi_index_field():
+    """Each index collection must retain its own source field as payload text."""
+
+    from cognee.infrastructure.databases.vector.models.IndexSchema import (
+        index_schema_from_data_point,
+    )
+
+    class MultiIndexPoint(DataPoint):
+        title: str
+        summary: str
+        metadata: dict = {"index_fields": ["title", "summary"]}
+
+    point = MultiIndexPoint(
+        id="15bfc0f0-51d7-5ac8-8589-3c32fe75aa10",
+        title="Short title",
+        summary="Detailed summary",
+    )
+
+    indexed = index_schema_from_data_point(point, index_property_name="summary")
+
+    assert indexed.text == "Detailed summary"

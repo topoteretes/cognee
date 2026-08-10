@@ -483,6 +483,41 @@ async def test_removing_one_shared_source_ref_keeps_edge_instance():
     assert all(collection != "EdgeInstance_text" for collection, _ in vector.deleted)
 
 
+@pytest.mark.parametrize("failed_collection", ["EdgeInstance_text", "EdgeType_relationship_name"])
+async def test_edge_vector_cleanup_failure_keeps_edge_discoverable_for_retry(failed_collection):
+    """A failed edge-vector mutation must not strand the hard-delete provenance.
+
+    This catches deleting the graph edge before either the instance cleanup or
+    its shared relationship-type synchronization: a retry discovers the edge
+    through its source ref and repeats the complete cleanup.
+    """
+    ref = make_source_ref_key(uuid4(), uuid4())
+    graph = FakeProvenanceGraphEngine()
+    edge = graph.add_edge("a", "b", "depends_on", "A depends on B.")
+    await graph.attach_edge_source_refs([edge], [ref])
+
+    vector = FakeVectorEngine(fail_on_collection=failed_collection)
+    engine = _build_engine(graph, vector)
+
+    with pytest.raises(RuntimeError, match=f"injected vector failure on {failed_collection}"):
+        await engine.delete_by_source_ref(ref)
+
+    # The graph edge and provenance must survive a failed vector cleanup so the
+    # next delete-by-ref call can still discover and finish deleting it.
+    assert edge in graph.edges
+    assert graph.edges[edge].source_ref_keys == [ref]
+    assert await graph.find_edges_by_source_ref(ref) == [edge]
+
+    await engine.delete_by_source_ref(ref)
+
+    assert edge not in graph.edges
+    assert any(collection == "EdgeInstance_text" for collection, _ in vector.deleted)
+    assert (
+        "EdgeType_relationship_name",
+        [str(EdgeType.id_for("depends_on"))],
+    ) in vector.deleted
+
+
 async def test_delete_by_dataset_id_preserves_cross_dataset_artifacts():
     """Removing dataset A's refs leaves dataset-B-owned artifacts intact."""
     dataset_a = uuid4()

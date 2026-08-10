@@ -24,8 +24,10 @@ class IndexSchema(DataPoint):
     belongs_to_set: List[str] = []
 
 
-def index_schema_from_data_point(data_point: DataPoint) -> IndexSchema:
-    """Convert any indexable point without discarding optional vector payload."""
+def index_schema_from_data_point(
+    data_point: DataPoint, index_property_name: Optional[str] = None
+) -> IndexSchema:
+    """Convert an indexable point while retaining the collection's source text."""
     fields = (
         "document_id",
         "document_name",
@@ -37,9 +39,17 @@ def index_schema_from_data_point(data_point: DataPoint) -> IndexSchema:
         "source_node_id",
         "target_node_id",
     )
+    text = (
+        getattr(data_point, index_property_name, None)
+        if index_property_name is not None
+        else DataPoint.get_embeddable_data(data_point)
+    )
+    if isinstance(text, str):
+        text = text.strip()
+
     return IndexSchema(
         id=data_point.id,
-        text=DataPoint.get_embeddable_data(data_point),
+        text=text,
         belongs_to_set=data_point.belongs_to_set or [],
         **{field: getattr(data_point, field, None) for field in fields},
     )

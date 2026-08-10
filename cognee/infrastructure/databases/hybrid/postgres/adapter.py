@@ -312,20 +312,27 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
                 vector_groups[collection].append((dp, field_name))
 
         # Embed all texts grouped by collection
-        embeddings_by_collection: Dict[str, List[Tuple[DataPoint, List[float], str]]] = {}
+        embeddings_by_collection: Dict[str, List[Tuple[DataPoint, str, List[float], str]]] = {}
         for collection, items in vector_groups.items():
-            valid_items = [(dp, getattr(dp, field_name, None)) for dp, field_name in items]
-            valid_items = [(dp, t.strip() if isinstance(t, str) else t) for dp, t in valid_items]
-            valid_items = [(dp, t) for dp, t in valid_items if t is not None]
+            valid_items = [
+                (dp, field_name, getattr(dp, field_name, None)) for dp, field_name in items
+            ]
+            valid_items = [
+                (dp, field_name, t.strip() if isinstance(t, str) else t)
+                for dp, field_name, t in valid_items
+            ]
+            valid_items = [
+                (dp, field_name, t) for dp, field_name, t in valid_items if t is not None
+            ]
             if not valid_items:
                 continue
-            texts = [t for _, t in valid_items]
+            texts = [t for _, _, t in valid_items]
             batch_size = self._resolve_batch_size(texts)
             vectors = []
             for i in range(0, len(texts), batch_size):
                 vectors.extend(await self._vector.embed_data(texts[i : i + batch_size]))
             embeddings_by_collection[collection] = [
-                (dp, vec, t) for (dp, t), vec in zip(valid_items, vectors)
+                (dp, field_name, vec, t) for (dp, field_name, t), vec in zip(valid_items, vectors)
             ]
 
         # Ensure vector collection tables exist
@@ -354,8 +361,8 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
         for collection, items in embeddings_by_collection.items():
             table = _validate_table_name(collection)
             rows = []
-            for dp, vector, embed_text in items:
-                index_point = index_schema_from_data_point(dp)
+            for dp, field_name, vector, embed_text in items:
+                index_point = index_schema_from_data_point(dp, field_name)
                 payload = serialize_data(index_point.model_dump())
                 rows.append(
                     {
@@ -496,7 +503,7 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
             for point in edge_points.edge_types:
                 vector = type_vectors_by_relationship.get(point.relationship_name)
                 if vector is not None:
-                    index_point = index_schema_from_data_point(point)
+                    index_point = index_schema_from_data_point(point, "relationship_name")
                     type_rows.append(
                         {
                             "id": str(point.id),
@@ -509,7 +516,7 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
             for point in edge_points.edge_instances:
                 vector = instance_vectors_by_id.get(str(point.id))
                 if vector is not None:
-                    index_point = index_schema_from_data_point(point)
+                    index_point = index_schema_from_data_point(point, "text")
                     instance_rows.append(
                         {
                             "id": str(point.id),

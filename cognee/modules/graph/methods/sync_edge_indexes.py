@@ -1,5 +1,6 @@
 """Keep edge vector indexes aligned with graph-edge deletion."""
 
+from collections import Counter
 from collections.abc import Iterable, Mapping
 from typing import Any
 
@@ -39,13 +40,27 @@ async def delete_edge_instances(vector_engine, edges: Iterable[Any]) -> None:
         await vector_engine.delete_data_points("EdgeInstance_text", list(instance_ids))
 
 
-async def sync_edge_types(graph_engine, vector_engine, relationship_names: Iterable[str]) -> None:
-    """Reindex positive relationship counts and delete relationship types at zero."""
+async def sync_edge_types(
+    graph_engine,
+    vector_engine,
+    relationship_names: Iterable[str],
+    *,
+    removed_edge_counts: Mapping[str, int] | None = None,
+) -> None:
+    """Reindex positive relationship counts and delete relationship types at zero.
+
+    ``removed_edge_counts`` lets callers synchronize the post-delete vector
+    state before hard-deleting graph edges. This keeps a failed vector cleanup
+    retryable through the edge's still-present provenance.
+    """
     names = list(dict.fromkeys(name for name in relationship_names if name))
     if not names:
         return
 
     counts = await graph_engine.get_edge_type_counts(names)
+    if removed_edge_counts:
+        removed = Counter(removed_edge_counts)
+        counts = {name: max(0, count - removed[name]) for name, count in counts.items()}
     positive = [
         EdgeType(relationship_name=name, number_of_edges=count)
         for name, count in counts.items()
