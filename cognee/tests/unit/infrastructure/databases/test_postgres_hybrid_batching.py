@@ -245,7 +245,7 @@ async def test_edge_index_contract_postgres_hybrid_path():
     embedded_instance_texts = adapter._vector.embed_data.await_args_list[1].args[0]
     assert embedded_type_texts == ["depends_on"]
     assert sorted(embedded_instance_texts) == [
-        "Package A depends on Package B.",
+        "Source depends on Target because the build requires it.",
         "Service C depends on Service D.",
     ]
     assert adapter._vector.create_vector_index.await_args_list[0].args == (

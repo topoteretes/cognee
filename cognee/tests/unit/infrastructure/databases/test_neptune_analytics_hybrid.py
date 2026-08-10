@@ -174,7 +174,7 @@ async def test_edge_index_contract_neptune_hybrid_path():
     assert instance_collection == "EdgeInstance_text"
     assert [schema.text for schema in type_schemas] == ["depends_on"]
     assert sorted(schema.text for schema in instance_schemas) == [
-        "Package A depends on Package B.",
+        "Source depends on Target because the build requires it.",
         "Service C depends on Service D.",
     ]
     assert type_schemas[0].number_of_edges == 7
