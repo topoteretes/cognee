@@ -27,6 +27,10 @@ from cognee.modules.migrations.versions.postgres_graph_provenance_columns import
     downgrade as postgres_graph_provenance_columns_down,
     migrate as postgres_graph_provenance_columns,
 )
+from cognee.modules.migrations.versions.separate_edge_instance_index import (
+    downgrade as separate_edge_instance_index_down,
+    migrate as separate_edge_instance_index,
+)
 
 # The vector adapter's storage-schema sync (e.g. LanceDB adding columns) is NOT
 # in this chain: a chain entry runs once per database, but that sync must run on
@@ -66,6 +70,13 @@ MIGRATIONS: list[Migration] = [
         up=postgres_graph_provenance_columns,
         down_revision="namespace_edge_type_point_ids",
         down=postgres_graph_provenance_columns_down,
+    ),
+    Migration(
+        slug="separate_edge_instance_index",
+        cognee_version="1.4.1.dev1",
+        up=separate_edge_instance_index,
+        down_revision="postgres_graph_provenance_columns",
+        down=separate_edge_instance_index_down,
     ),
 ]
 

@@ -37,6 +37,7 @@ from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.engine.utils.generate_node_id import generate_node_id
+from cognee.modules.engine.utils import generate_edge_object_id
 from cognee.modules.data.methods.get_dataset_databases import get_dataset_databases
 from cognee.modules.data.models import Data, Dataset
 from cognee.modules.engine.models import Entity, EntityType
@@ -137,21 +138,46 @@ async def verify(stage: str):
             f"{len(triplet_rows)}/{len(triplet_ids)} resolvable",
         )
 
-        # EdgeType points: ids must be recomputable via the live lookup
-        # derivation (EdgeType.id_for) — this is the retrieval/delete join key.
+        # Edge indexes: types are keyed only by relationship name; prose is
+        # keyed per structural edge instance by the graph-owned object id.
         from cognee.modules.graph.models.EdgeType import EdgeType
-        from cognee.modules.graph.utils.prepare_edges_for_storage import get_edge_retrieval_text
 
-        edge_texts = {
-            get_edge_retrieval_text((props or {}).get("edge_text"), rel)
-            for _, _, rel, props in real_edges
-        } - {""}
-        edge_type_ids = [str(EdgeType.id_for(text)) for text in edge_texts]
+        relationship_counts = {}
+        for _, _, relationship_name, _ in real_edges:
+            relationship_counts[relationship_name] = (
+                relationship_counts.get(relationship_name, 0) + 1
+            )
+        edge_type_ids = [str(EdgeType.id_for(name)) for name in relationship_counts]
         edge_type_rows = await vector_engine.retrieve("EdgeType_relationship_name", edge_type_ids)
         check(
-            f"{stage}: EdgeType points keyed by EdgeType.id_for(text)",
+            f"{stage}: EdgeType points keyed by EdgeType.id_for(relationship_name)",
             len(edge_type_rows) == len(edge_type_ids),
             f"{len(edge_type_rows)}/{len(edge_type_ids)} resolvable",
+        )
+        count_by_name = {
+            row.payload.get("relationship_name"): row.payload.get("number_of_edges")
+            for row in edge_type_rows
+        }
+        check(
+            f"{stage}: EdgeType counts match graph edges",
+            count_by_name == relationship_counts,
+            f"stored={count_by_name}, graph={relationship_counts}",
+        )
+
+        edge_instance_ids = [
+            generate_edge_object_id(source, target, relationship_name)
+            for source, target, relationship_name, _ in real_edges
+        ]
+        persisted_ids = [(properties or {}).get("edge_object_id") for *_, properties in real_edges]
+        check(
+            f"{stage}: graph edges persist exact structural ids",
+            persisted_ids == edge_instance_ids,
+        )
+        edge_instance_rows = await vector_engine.retrieve("EdgeInstance_text", edge_instance_ids)
+        check(
+            f"{stage}: EdgeInstance points keyed by structural edge ids",
+            len(edge_instance_rows) == len(edge_instance_ids),
+            f"{len(edge_instance_rows)}/{len(edge_instance_ids)} resolvable",
         )
 
         # Ledger: every Entity/EntityType slug + edge endpoint resolves to the graph.

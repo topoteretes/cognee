@@ -147,6 +147,7 @@ def test_shipped_slugs_are_pinned():
         "namespace_entity_type_node_ids",
         "namespace_edge_type_point_ids",
         "postgres_graph_provenance_columns",
+        "separate_edge_instance_index",
     ]
 
 
@@ -223,6 +224,26 @@ def test_apply_runs_pending_in_order_and_stamps_per_step(monkeypatch):
     applied_order.clear()
     assert asyncio.run(runner._apply(object(), "t2", "head", stamp)) == []
     assert applied_order == []
+
+
+def test_apply_does_not_stamp_a_failed_migration(monkeypatch):
+    import cognee.modules.migrations.runner as runner
+
+    stamps = []
+
+    async def failing_up(context):
+        raise RuntimeError("second collection replacement failed")
+
+    async def stamp(revision):
+        stamps.append(revision)
+
+    migration = Migration(slug="failing", cognee_version="1.0.0", up=failing_up)
+    monkeypatch.setattr(runner, "MIGRATIONS", [migration])
+
+    with pytest.raises(RuntimeError, match="second collection replacement failed"):
+        asyncio.run(runner._apply(object(), None, "head", stamp))
+
+    assert stamps == []
 
 
 def test_revert_span_runs_downs_newest_first_and_stamps_per_step():

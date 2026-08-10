@@ -62,13 +62,16 @@ from cognee.api.v1.search import SearchType
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.session.get_session_manager import get_session_manager
 from cognee.infrastructure.session.session_persist_watermark import get_persisted_qa_count
 from cognee.modules.data.methods import get_dataset_data, get_datasets_by_name
 from cognee.modules.data.methods.get_dataset_databases import get_dataset_databases
 from cognee.modules.data.models import DatasetData
 from cognee.modules.engine.models import Entity, EntityType
+from cognee.modules.engine.utils import generate_edge_object_id
 from cognee.modules.graph.models import Edge, Node
+from cognee.modules.graph.models.EdgeType import EdgeType
 from cognee.modules.migrations.versions.namespace_entity_type_node_ids import build_id_remap
 from cognee.modules.users.methods import get_default_user
 
@@ -205,6 +208,51 @@ async def _verify_vector_access(stage: str) -> None:
     print(f"  [vector] CHUNKS: {len(results)} result(s) — OK")
 
 
+async def _verify_edge_indexes_for_current_graph(stage: str) -> None:
+    """Every graph edge must resolve through the separated type and prose indexes."""
+    dataset_rows = await get_dataset_databases()
+    stores = [(row.dataset_id, row.owner_id) for row in dataset_rows] or [(None, None)]
+
+    async def verify_store(graph_engine, vector_engine) -> None:
+        _, edges = await graph_engine.get_graph_data()
+        real_edges = [edge for edge in edges if not (edge[2] == "SELF" and edge[0] == edge[1])]
+        relationship_counts = Counter(edge[2] for edge in real_edges)
+        type_ids = [str(EdgeType.id_for(name)) for name in relationship_counts]
+        type_rows = await vector_engine.retrieve("EdgeType_relationship_name", type_ids)
+        stored_counts = {
+            row.payload.get("relationship_name"): row.payload.get("number_of_edges")
+            for row in type_rows
+        }
+        if stored_counts != dict(relationship_counts):
+            _fail(
+                f"[{stage}] edge-type vector counts differ from the graph: "
+                f"stored={stored_counts}, graph={dict(relationship_counts)}."
+            )
+
+        instance_ids = [
+            generate_edge_object_id(source, target, relationship_name)
+            for source, target, relationship_name, _ in real_edges
+        ]
+        persisted_ids = [(properties or {}).get("edge_object_id") for *_, properties in real_edges]
+        if persisted_ids != instance_ids:
+            _fail(f"[{stage}] graph edges do not persist the exact structural edge ids.")
+        instance_rows = await vector_engine.retrieve("EdgeInstance_text", instance_ids)
+        if len(instance_rows) != len(instance_ids):
+            _fail(
+                f"[{stage}] only {len(instance_rows)}/{len(instance_ids)} graph edges resolve "
+                "through EdgeInstance_text."
+            )
+
+    for dataset_id, owner_id in stores:
+        if dataset_id is None:
+            await verify_store(await get_graph_engine(), await get_vector_engine_async())
+        else:
+            async with set_database_global_context_variables(dataset_id, owner_id):
+                await verify_store(await get_graph_engine(), await get_vector_engine_async())
+
+    print("  [vector] edge types/counts and edge instances match current graph IDs — OK")
+
+
 async def _verify_ledger_access(stage: str, graph_node_ids: set) -> None:
     """Read the relational delete-ledger (``nodes`` / ``edges``) and verify it
     still points at the migrated graph.
@@ -266,6 +314,7 @@ async def _verify_access(stage: str) -> None:
     await _verify_graph_access(stage, nodes, edges)
     await _verify_ledger_access(stage, graph_node_ids)
     await _verify_vector_access(stage)
+    await _verify_edge_indexes_for_current_graph(stage)
 
     # Smoke-check the completion + summaries paths (must not raise). Not used
     # as the accessibility gate: the LLM can answer non-empty even with no
