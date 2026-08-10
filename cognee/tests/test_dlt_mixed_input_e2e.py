@@ -103,7 +103,7 @@ async def test_dlt_mixed_input():
     assert entities, "No Entity nodes — LLM extraction did not run for the regular text item"
 
     # --- Search: chunk search is documents-only; rows have their own
-    # collection (RelationalRow_text) read by row-aware retrieval. ----------
+    # collection (DltRow_text) read by row-aware retrieval. ----------
     chunk_result = await cognee.search(
         "Ada Lovelace", query_type=SearchType.CHUNKS, datasets=[DATASET_NAME]
     )
@@ -125,10 +125,10 @@ async def test_dlt_mixed_input():
     async with set_database_global_context_variables(dataset.id, dataset.owner_id):
         vector_engine = await get_vector_engine_async()
         row_hits = await vector_engine.search(
-            "RelationalRow_text", query_text="Ada Lovelace", limit=3, include_payload=True
+            "DltRow_text", query_text="Ada Lovelace", limit=3, include_payload=True
         )
     assert any("analytical engines" in str(hit.payload) for hit in row_hits), (
-        "DLT row text must be searchable in its own RelationalRow_text collection"
+        "DLT row text must be searchable in its own DltRow_text collection"
     )
 
     text_result = await cognee.search(

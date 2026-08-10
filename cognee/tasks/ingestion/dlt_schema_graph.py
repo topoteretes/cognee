@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Optional
 from uuid import UUID, uuid5, NAMESPACE_OID
 
 from cognee.infrastructure.databases.provenance import graph_provenance_write_kwargs
-from cognee.modules.engine.models import ColumnValue
+from cognee.modules.engine.models import DltColumn
 from cognee.tasks.schema.models import SchemaTable, SchemaRelationship
 from cognee.tasks.storage.index_data_points import index_data_points
 from cognee.shared.logging_utils import get_logger
@@ -226,7 +226,7 @@ async def emit_dlt_schema_graph(
                 emitted_value_node_ids is not None and value_node_id in emitted_value_node_ids
             )
             if not already_persisted and value_node_id not in column_value_nodes:
-                column_value_nodes[value_node_id] = ColumnValue(
+                column_value_nodes[value_node_id] = DltColumn(
                     id=value_node_id,
                     name=f"{table_name}:{column}:{value}",
                     properties=f"{column} {value} {table_name}",

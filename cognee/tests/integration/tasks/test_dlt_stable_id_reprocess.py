@@ -111,7 +111,7 @@ async def _row_texts():
     return " ".join(
         str(props.get("text", ""))
         for _, props in nodes
-        if props.get("type") in ("RelationalRow", "DocumentChunk")
+        if props.get("type") in ("DltRow", "DocumentChunk")
     )
 
 

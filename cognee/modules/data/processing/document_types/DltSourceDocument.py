@@ -10,7 +10,7 @@ class DltSourceDocument(Document):
 
     The raw data is a JSON manifest describing every unique row of the source
     (see resolve_dlt_sources._build_source_manifest_item). Skips text chunking
-    entirely — yields one RelationalRow per manifest row so each row remains an
+    entirely — yields one DltRow per manifest row so each row remains an
     individual node in the graph/vector stores. Chunk ids are the stable row
     node ids from the manifest, which FK edges reference. The graph structure
     is built deterministically by extract_dlt_source_edges, so no LLM
@@ -21,7 +21,7 @@ class DltSourceDocument(Document):
     mime_type: str = "application/x-dlt-source"
 
     async def read(self, chunker_cls: Chunker, max_chunk_size: int):
-        from cognee.modules.chunking.models.RelationalRow import RelationalRow
+        from cognee.modules.chunking.models.DltRow import DltRow
         from cognee.tasks.ingestion.dlt_utils import load_dlt_manifest
 
         manifest = await load_dlt_manifest(self.raw_data_location)
@@ -31,7 +31,7 @@ class DltSourceDocument(Document):
             if not text:
                 continue
 
-            yield RelationalRow(
+            yield DltRow(
                 id=UUID(row["node_id"]),
                 text=text,
                 chunk_size=len(text.split()),

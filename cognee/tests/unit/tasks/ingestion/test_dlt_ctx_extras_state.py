@@ -120,19 +120,19 @@ async def test_ctx_none_direct_call_uses_fresh_state(monkeypatch, emit_mock):
 
 
 @pytest.mark.asyncio
-async def test_relational_rows_index_into_their_own_collection(monkeypatch):
+async def test_dlt_rows_index_into_their_own_collection(monkeypatch):
     """Rows are their own type AND their own collection: chunk search
     (DocumentChunk_text) is documents-only; row text lands in
-    RelationalRow_text for row-aware retrieval. The pipeline rebuilds
+    DltRow_text for row-aware retrieval. The pipeline rebuilds
     data-point classes (copy_model keeps only the class NAME and fields),
     so the collection name must survive that rebuild too."""
     from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
-    from cognee.modules.chunking.models.RelationalRow import RelationalRow
+    from cognee.modules.chunking.models.DltRow import DltRow
     from cognee.modules.data.processing.document_types import DltSourceDocument
     from cognee.modules.storage.utils import copy_model
     from cognee.tasks.storage.index_data_points import index_data_points as run_indexing
 
-    chunk = RelationalRow(
+    chunk = DltRow(
         id=uuid4(),
         text="row text",
         chunk_size=2,
@@ -144,7 +144,7 @@ async def test_relational_rows_index_into_their_own_collection(monkeypatch):
         contains=[],
     )
     assert isinstance(chunk, DocumentChunk)  # field-shape reuse only
-    assert type(chunk).__name__ == "RelationalRow"
+    assert type(chunk).__name__ == "DltRow"
 
     rebuilt = copy_model(type(chunk))(**chunk.model_dump())
 
@@ -166,6 +166,6 @@ async def test_relational_rows_index_into_their_own_collection(monkeypatch):
 
     await run_indexing([chunk], vector_engine=_FakeEngine())
     await run_indexing([rebuilt], vector_engine=_FakeEngine())
-    assert created == [("RelationalRow", "text"), ("RelationalRow", "text")], (
-        "row vectors must land in RelationalRow_text, original and rebuilt alike"
+    assert created == [("DltRow", "text"), ("DltRow", "text")], (
+        "row vectors must land in DltRow_text, original and rebuilt alike"
     )
