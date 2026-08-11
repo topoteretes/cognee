@@ -1851,8 +1851,15 @@ class LadybugAdapter(GraphDBInterface):
             return existing_edges
 
         except Exception as e:
+            # A failed existence check is NOT an empty existence check: callers
+            # (e.g. the cognify dedup in retrieve_existing_edges) read [] as
+            # "none of these edges exist" and proceed to write them. When the
+            # store is unavailable/corrupt those writes also fail, and the run
+            # reports success while persisting nothing (issue #4348). Surface
+            # the failure like the other backends do (neo4j re-raises;
+            # postgres/turso let it propagate) instead of masking it.
             logger.error(f"Failed to check edges in batch: {e}")
-            return []
+            raise
 
     async def add_edge(
         self,
