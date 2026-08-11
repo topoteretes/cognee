@@ -21,6 +21,10 @@ def _rebuild(
     *,
     max_bucket_size: int = 2,
     min_overlap: float = 0.1,
+    entity_type_by_entity_id: dict[str, str] | None = None,
+    type_idf_weights: dict[str, float] | None = None,
+    entity_weight: float = 1.0,
+    type_weight: float = 0.0,
 ):
     return rebuild_graph_buckets_for_level(
         [_summary(summary_id) for summary_id in summary_ids],
@@ -30,6 +34,10 @@ def _rebuild(
         level=0,
         max_bucket_size=max_bucket_size,
         min_overlap=min_overlap,
+        entity_type_by_entity_id=entity_type_by_entity_id,
+        type_idf_weights=type_idf_weights,
+        entity_weight=entity_weight,
+        type_weight=type_weight,
     )
 
 
@@ -64,6 +72,10 @@ def _incremental(
     *,
     max_bucket_size: int = 2,
     min_overlap: float = 0.1,
+    entity_type_by_entity_id: dict[str, str] | None = None,
+    type_idf_weights: dict[str, float] | None = None,
+    entity_weight: float = 1.0,
+    type_weight: float = 0.0,
 ):
     return place_graph_summaries_incrementally(
         [_summary(summary_id) for summary_id in new_summary_ids],
@@ -74,6 +86,10 @@ def _incremental(
         level=0,
         max_bucket_size=max_bucket_size,
         min_overlap=min_overlap,
+        entity_type_by_entity_id=entity_type_by_entity_id,
+        type_idf_weights=type_idf_weights,
+        entity_weight=entity_weight,
+        type_weight=type_weight,
     )
 
 
@@ -408,6 +424,63 @@ def test_graph_incremental_normalizes_misc_bucket_before_placement():
     assert bucket.graph_bucket_entity_ids == {"alice"}
     assert [(assignment.child_id, assignment.parent_id) for assignment in assignments] == [
         ("s2", "bucket-promoted")
+    ]
+
+
+def test_graph_rebuild_keeps_no_shared_entity_summaries_separate_by_default():
+    buckets, _ = _rebuild(
+        ["hiking", "sailing"],
+        {
+            "hiking": {"trail-x"},
+            "sailing": {"boat-y"},
+        },
+        {"trail-x": 1.0, "boat-y": 1.0},
+        min_overlap=0.1,
+        entity_type_by_entity_id={"trail-x": "activity", "boat-y": "activity"},
+        type_idf_weights={"activity": 1.0},
+    )
+
+    assert _bucket_child_sets(buckets) == [{"hiking"}, {"sailing"}]
+
+
+def test_graph_rebuild_groups_by_shared_entity_type_when_type_weight_is_positive():
+    buckets, _ = _rebuild(
+        ["hiking", "sailing"],
+        {
+            "hiking": {"trail-x"},
+            "sailing": {"boat-y"},
+        },
+        {"trail-x": 1.0, "boat-y": 1.0},
+        min_overlap=0.1,
+        entity_type_by_entity_id={"trail-x": "activity", "boat-y": "activity"},
+        type_idf_weights={"activity": 1.0},
+        entity_weight=0.5,
+        type_weight=0.5,
+    )
+
+    assert _bucket_child_sets(buckets) == [{"hiking", "sailing"}]
+
+
+def test_graph_incremental_places_by_shared_entity_type_when_type_weight_is_positive():
+    existing_bucket = _bucket("bucket-hiking", {"s1"}, {"trail-x"})
+
+    buckets, assignments = _incremental(
+        ["s2"],
+        [existing_bucket],
+        {"s1": {"trail-x"}, "s2": {"boat-y"}},
+        {"trail-x": 1.0, "boat-y": 1.0},
+        max_bucket_size=3,
+        min_overlap=0.1,
+        entity_type_by_entity_id={"trail-x": "activity", "boat-y": "activity"},
+        type_idf_weights={"activity": 1.0},
+        entity_weight=0.5,
+        type_weight=0.5,
+    )
+
+    assert buckets == {"bucket-hiking": existing_bucket}
+    assert existing_bucket.child_ids == {"s1", "s2"}
+    assert [(assignment.child_id, assignment.parent_id) for assignment in assignments] == [
+        ("s2", "bucket-hiking")
     ]
 
 

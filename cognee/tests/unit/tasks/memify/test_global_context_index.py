@@ -187,8 +187,15 @@ async def test_extract_global_context_index_input_rejects_direct_input_data(monk
 def _graph_input(
     entities_by_summary_id: dict[str, set[str]],
     idf_weights: dict[str, float],
-) -> tuple[dict[str, set[str]], dict[str, float]]:
-    return entities_by_summary_id, idf_weights
+    entity_type_by_entity_id: dict[str, str] | None = None,
+    type_idf_weights: dict[str, float] | None = None,
+) -> tuple[dict[str, set[str]], dict[str, float], dict[str, str], dict[str, float]]:
+    return (
+        entities_by_summary_id,
+        idf_weights,
+        entity_type_by_entity_id or {},
+        type_idf_weights or {},
+    )
 
 
 def test_extract_context_index_input_uses_summary_edges_for_assignment():

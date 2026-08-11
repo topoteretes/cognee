@@ -32,6 +32,11 @@ class BuildOptions:
     min_overlap: float
     entities_by_summary_id: Mapping[str, set[str]]
     idf_weights: Mapping[str, float]
+    entity_type_by_entity_id: Mapping[str, str]
+    type_idf_weights: Mapping[str, float]
+    entity_weight: float
+    type_weight: float
+    pattern_weight: float
     ctx: PipelineContext | None
 
 
@@ -77,6 +82,10 @@ def place_graph_items(
             level=level,
             max_bucket_size=options.max_bucket_size,
             min_overlap=options.min_overlap,
+            entity_type_by_entity_id=options.entity_type_by_entity_id,
+            type_idf_weights=options.type_idf_weights,
+            entity_weight=options.entity_weight,
+            type_weight=options.type_weight,
         )
 
     return rebuild_graph_buckets_for_level(
@@ -87,6 +96,10 @@ def place_graph_items(
         level=level,
         max_bucket_size=options.max_bucket_size,
         min_overlap=options.min_overlap,
+        entity_type_by_entity_id=options.entity_type_by_entity_id,
+        type_idf_weights=options.type_idf_weights,
+        entity_weight=options.entity_weight,
+        type_weight=options.type_weight,
     )
 
 
@@ -210,6 +223,11 @@ async def build_context_index(
     min_overlap: float = 0.05,
     entities_by_summary_id: dict[str, set[str]] | None = None,
     idf_weights: dict[str, float] | None = None,
+    entity_type_by_entity_id: dict[str, str] | None = None,
+    type_idf_weights: dict[str, float] | None = None,
+    entity_weight: float = 1.0,
+    type_weight: float = 0.0,
+    pattern_weight: float = 0.0,
     ctx: PipelineContext | None = None,
 ) -> tuple[list[GlobalContextSummary], list[BucketAssignment]]:
     """
@@ -220,6 +238,11 @@ async def build_context_index(
     level does not exist yet. The loop stops once the topmost non-root level
     fits in the root's capacity. Root is regenerated when anything below
     changed or when no root exists yet.
+
+    ``entity_weight``/``type_weight``/``pattern_weight`` control how much the
+    "graph" strategy's placement score weighs entity overlap, entity-type
+    overlap, and relationship-pattern match, respectively. Defaults reproduce
+    today's entity-only behavior exactly (see ``combined_similarity``).
     """
     options = BuildOptions(
         dataset_id=dataset_id,
@@ -230,6 +253,11 @@ async def build_context_index(
         min_overlap=min_overlap,
         entities_by_summary_id=entities_by_summary_id or {},
         idf_weights=idf_weights or {},
+        entity_type_by_entity_id=entity_type_by_entity_id or {},
+        type_idf_weights=type_idf_weights or {},
+        entity_weight=entity_weight,
+        type_weight=type_weight,
+        pattern_weight=pattern_weight,
         ctx=ctx,
     )
 

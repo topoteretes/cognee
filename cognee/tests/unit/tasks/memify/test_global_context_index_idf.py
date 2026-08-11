@@ -3,9 +3,11 @@ import math
 import pytest
 
 from cognee.tasks.memify.global_context_index.bucketing.graph.scoring import (
+    combined_similarity,
     compute_idf_from_counts,
     entities_weight,
     entity_weight,
+    type_similarity,
     weighted_jaccard,
 )
 
@@ -84,3 +86,34 @@ def test_ubiquitous_entities_get_zero_weight():
     weights = compute_idf_from_counts(3, {"standup": 3})
 
     assert weights["standup"] == pytest.approx(0.0)
+
+
+def test_type_similarity_is_weighted_jaccard_over_type_ids():
+    type_weights = {"person": 2.0, "location": 1.0}
+
+    score = type_similarity({"person", "location"}, {"person"}, type_weights)
+
+    assert score == weighted_jaccard({"person", "location"}, {"person"}, type_weights)
+
+
+def test_combined_similarity_defaults_reproduce_entity_score_alone():
+    assert combined_similarity(0.4, 0.9, 0.7) == pytest.approx(0.4)
+    assert combined_similarity(0.0, 1.0, 1.0) == pytest.approx(0.0)
+
+
+def test_combined_similarity_lets_type_score_matter_when_entity_score_is_zero():
+    score = combined_similarity(
+        entity_score=0.0,
+        type_score=0.8,
+        pattern_score=0.0,
+        entity_weight=0.7,
+        type_weight=0.3,
+        pattern_weight=0.0,
+    )
+
+    assert score > 0.0
+    assert score == pytest.approx(0.24)
+
+
+def test_combined_similarity_returns_zero_when_all_weights_are_zero():
+    assert combined_similarity(0.9, 0.9, 0.9, 0.0, 0.0, 0.0) == 0.0

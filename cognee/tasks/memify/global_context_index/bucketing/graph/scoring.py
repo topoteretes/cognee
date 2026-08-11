@@ -53,3 +53,37 @@ def weighted_jaccard(
 
     intersection_weight = entities_weight(left_entities & right_entities, idf_weights)
     return intersection_weight / union_weight
+
+
+def type_similarity(
+    left_type_ids: Iterable[str],
+    right_type_ids: Iterable[str],
+    type_idf_weights: Mapping[str, float],
+) -> float:
+    """
+    Same weighted-Jaccard formula as ``weighted_jaccard``, applied to
+    ``EntityType`` ids instead of ``Entity`` ids, over their own IDF weights.
+    """
+    return weighted_jaccard(left_type_ids, right_type_ids, type_idf_weights)
+
+
+def combined_similarity(
+    entity_score: float,
+    type_score: float,
+    pattern_score: float,
+    entity_weight: float = 1.0,
+    type_weight: float = 0.0,
+    pattern_weight: float = 0.0,
+) -> float:
+    """
+    Weighted sum of three independent similarity signals (entity, entity-type,
+    relationship-pattern). Default weights make this identical to
+    ``entity_score`` alone (today's behavior).
+    """
+    total_weight = entity_weight + type_weight + pattern_weight
+    if total_weight == 0:
+        return 0.0
+
+    return (
+        entity_weight * entity_score + type_weight * type_score + pattern_weight * pattern_score
+    ) / total_weight

@@ -19,8 +19,10 @@ from cognee.modules.graph.models import Edge, Node
 _SUMMARY_TYPE = "TextSummary"
 _CHUNK_TYPE = "DocumentChunk"
 _ENTITY_TYPE = "Entity"
+_ENTITY_TYPE_NODE_TYPE = "EntityType"
 _MADE_FROM = "made_from"
 _CONTAINS = "contains"
+_IS_A = "is_a"
 
 
 @dataclass
@@ -39,9 +41,16 @@ class DatasetEntityCounts:
 
 
 @dataclass
+class EntityTypeInfo:
+    entity_type_by_entity_id: dict[str, str]
+    entity_type_chunk_counts: dict[str, int]
+
+
+@dataclass
 class DatasetGraphEntityInput:
     summary_entities: SummaryEntityLoadResult
     entity_counts: DatasetEntityCounts
+    entity_types: EntityTypeInfo
 
 
 def coerce_graph_uuid(value: str | UUID, field_name: str) -> UUID:
@@ -116,6 +125,14 @@ def _graph_provenance_entity_input(
         and source_id in chunk_ids
         and type_of.get(target_id) == _ENTITY_TYPE
     ]
+    entity_ids = {target_id for _, target_id in chunk_entity_pairs}
+    entity_type_pairs = [
+        (source_id, target_id)
+        for source_id, target_id, relationship_name in edges
+        if relationship_name == _IS_A
+        and source_id in entity_ids
+        and type_of.get(target_id) == _ENTITY_TYPE_NODE_TYPE
+    ]
 
     summary_chunk_rows = [
         (
@@ -131,6 +148,13 @@ def _graph_provenance_entity_input(
         )
         for source_id, target_id in chunk_entity_pairs
     ]
+    entity_type_rows = [
+        (
+            coerce_graph_uuid(source_id, "entity node id"),
+            coerce_graph_uuid(target_id, "entity type node id"),
+        )
+        for source_id, target_id in entity_type_pairs
+    ]
 
     return DatasetGraphEntityInput(
         summary_entities=_build_summary_entity_load_result(
@@ -139,6 +163,7 @@ def _graph_provenance_entity_input(
             chunk_entity_rows,
         ),
         entity_counts=_build_dataset_entity_counts(summary_chunk_rows, chunk_entity_rows),
+        entity_types=_build_entity_type_info(chunk_entity_rows, entity_type_rows),
     )
 
 
@@ -218,6 +243,7 @@ async def _load_dataset_graph_entity_input(
         return DatasetGraphEntityInput(
             summary_entities=_build_summary_entity_load_result(set(), [], []),
             entity_counts=DatasetEntityCounts(chunk_count=0, entity_chunk_counts={}),
+            entity_types=EntityTypeInfo(entity_type_by_entity_id={}, entity_type_chunk_counts={}),
         )
 
     graph_engine = await _resolve_graph_provenance_engine()
@@ -230,6 +256,8 @@ async def _load_dataset_graph_entity_input(
     )
     chunk_ids = {chunk_id for _, chunk_id in summary_chunk_rows}
     chunk_entity_rows = await _load_chunk_entity_rows(dataset_uuid, chunk_ids, session)
+    entity_ids = {entity_id for _, entity_id in chunk_entity_rows}
+    entity_type_rows = await _load_entity_type_rows(dataset_uuid, entity_ids, session)
 
     return DatasetGraphEntityInput(
         summary_entities=_build_summary_entity_load_result(
@@ -238,6 +266,7 @@ async def _load_dataset_graph_entity_input(
             chunk_entity_rows,
         ),
         entity_counts=_build_dataset_entity_counts(summary_chunk_rows, chunk_entity_rows),
+        entity_types=_build_entity_type_info(chunk_entity_rows, entity_type_rows),
     )
 
 
@@ -255,6 +284,30 @@ def _build_dataset_entity_counts(
         entity_chunk_counts={
             str(entity_id): len(entity_chunk_ids_for_entity)
             for entity_id, entity_chunk_ids_for_entity in entity_chunk_ids.items()
+        },
+    )
+
+
+def _build_entity_type_info(
+    chunk_entity_rows: list[tuple[UUID, UUID]],
+    entity_type_rows: list[tuple[UUID, UUID]],
+) -> EntityTypeInfo:
+    entity_type_by_entity_id = {
+        str(entity_id): str(entity_type_id) for entity_id, entity_type_id in entity_type_rows
+    }
+
+    entity_type_chunk_ids: dict[str, set[UUID]] = {}
+    for chunk_id, entity_id in chunk_entity_rows:
+        entity_type_id = entity_type_by_entity_id.get(str(entity_id))
+        if entity_type_id is None:
+            continue
+        entity_type_chunk_ids.setdefault(entity_type_id, set()).add(chunk_id)
+
+    return EntityTypeInfo(
+        entity_type_by_entity_id=entity_type_by_entity_id,
+        entity_type_chunk_counts={
+            entity_type_id: len(chunk_ids_for_type)
+            for entity_type_id, chunk_ids_for_type in entity_type_chunk_ids.items()
         },
     )
 
@@ -307,6 +360,18 @@ async def _load_chunk_entity_rows(
         return []
 
     result = await session.execute(_chunk_entity_statement(dataset_id, chunk_ids))
+    return [(row[0], row[1]) for row in result.all()]
+
+
+async def _load_entity_type_rows(
+    dataset_id: UUID,
+    entity_ids: set[UUID],
+    session: AsyncSession,
+) -> list[tuple[UUID, UUID]]:
+    if not entity_ids:
+        return []
+
+    result = await session.execute(_entity_type_statement(dataset_id, entity_ids))
     return [(row[0], row[1]) for row in result.all()]
 
 
@@ -374,6 +439,41 @@ def _chunk_entity_statement(dataset_id: UUID, chunk_ids: set[UUID]):
                 chunk_node.dataset_id == dataset_id,
                 chunk_node.type == "DocumentChunk",
                 chunk_node.slug.in_(chunk_ids),
+            )
+        )
+        .distinct()
+    )
+
+
+def _entity_type_statement(dataset_id: UUID, entity_ids: set[UUID]):
+    entity_node = aliased(Node)
+    entity_type_node = aliased(Node)
+    is_a_edge = aliased(Edge)
+
+    return (
+        select(entity_node.slug, entity_type_node.slug)
+        .select_from(entity_node)
+        .join(
+            is_a_edge,
+            and_(
+                entity_node.slug == is_a_edge.source_node_id,
+                is_a_edge.dataset_id == dataset_id,
+                is_a_edge.relationship_name == "is_a",
+            ),
+        )
+        .join(
+            entity_type_node,
+            and_(
+                entity_type_node.slug == is_a_edge.destination_node_id,
+                entity_type_node.dataset_id == dataset_id,
+                entity_type_node.type == "EntityType",
+            ),
+        )
+        .where(
+            and_(
+                entity_node.dataset_id == dataset_id,
+                entity_node.type == "Entity",
+                entity_node.slug.in_(entity_ids),
             )
         )
         .distinct()

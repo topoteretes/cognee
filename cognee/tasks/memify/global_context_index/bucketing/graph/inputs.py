@@ -16,7 +16,7 @@ async def load_graph_bucketing_inputs(
     dataset_id: str | UUID,
     expected_summary_ids: Iterable[str | UUID],
     session: AsyncSession | None = None,
-) -> tuple[dict[str, set[str]], dict[str, float]]:
+) -> tuple[dict[str, set[str]], dict[str, float], dict[str, str], dict[str, float]]:
     expected_summary_id_list = list(expected_summary_ids)
     if session is None:
         graph_entity_input = await load_dataset_graph_entity_input(
@@ -38,6 +38,11 @@ async def load_graph_bucketing_inputs(
         compute_idf_from_counts(
             graph_entity_input.entity_counts.chunk_count,
             graph_entity_input.entity_counts.entity_chunk_counts,
+        ),
+        graph_entity_input.entity_types.entity_type_by_entity_id,
+        compute_idf_from_counts(
+            graph_entity_input.entity_counts.chunk_count,
+            graph_entity_input.entity_types.entity_type_chunk_counts,
         ),
     )
 
