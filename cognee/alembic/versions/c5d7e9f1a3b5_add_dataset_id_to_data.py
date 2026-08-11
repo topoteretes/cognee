@@ -1,8 +1,9 @@
 """add_dataset_id_to_data
 
 Data rows become dataset-scoped: `dataset_id` names the dataset that owns the
-content row, and the (dataset_id, content_hash) index backs add-time dedup as
-a LOOKUP instead of a content-derived identity. Existing rows keep
+content row, and the (dataset_id, owner_id, content_hash) index backs
+add-time dedup as a LOOKUP (scoped to dataset + owner + tenant) instead of a
+content-derived identity. Existing rows keep
 dataset_id = NULL (legacy shared rows); they are resolved by DatasetData
 membership and split copy-on-write on their first content update, so no
 backfill is required here.
@@ -49,7 +50,7 @@ def upgrade() -> None:
 
     insp = sa.inspect(conn)
     if not _has_index(insp, "data", INDEX_NAME):
-        op.create_index(INDEX_NAME, "data", ["dataset_id", "content_hash"])
+        op.create_index(INDEX_NAME, "data", ["dataset_id", "owner_id", "content_hash"])
 
 
 def downgrade() -> None:

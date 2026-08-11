@@ -166,6 +166,23 @@ async def _scenario():
         "re-adding current content must reuse the row, not create a document"
     )
 
+    # --- 3b. dedup is owner-scoped ----------------------------------------- #
+    # In a shared multi-writer dataset, another user adding the same bytes must
+    # NOT resolve to (and later overwrite ownership of) this user's row.
+    from types import SimpleNamespace
+    from uuid import uuid4
+
+    import cognee.modules.ingestion as ingestion_module
+
+    classified = ingestion_module.classify(text_v2)
+    stranger = SimpleNamespace(id=uuid4(), tenant_id=None)
+    assert await ingestion_module.identify(classified, stranger, alpha.id) is None, (
+        "another owner's identical content must miss the dedup lookup"
+    )
+    assert await ingestion_module.identify(classified, user, alpha.id) == alpha_data.id, (
+        "the owning user's identical content must hit their own row"
+    )
+
     # --- 4. legacy shared row: refuse in-place mutation -------------------- #
     # Simulate a pre-refactor state: one NULL-scoped row shared by two datasets.
     await cognee.add(text_v1, dataset_name="legacy_a")

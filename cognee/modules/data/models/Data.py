@@ -12,9 +12,12 @@ from .DatasetData import DatasetData
 class Data(Base):
     __tablename__ = "data"
     # Dedup is a lookup, not an identity: adding content already present in a
-    # dataset reuses that row via this index; the id itself carries no content
-    # information and stays stable when the document's content changes.
-    __table_args__ = (Index("data_dataset_content_lookup", "dataset_id", "content_hash"),)
+    # dataset (by the same owner/tenant) reuses that row via this index; the id
+    # itself carries no content information and stays stable when the
+    # document's content changes.
+    __table_args__ = (
+        Index("data_dataset_content_lookup", "dataset_id", "owner_id", "content_hash"),
+    )
 
     id = Column(UUID, primary_key=True, default=uuid4)
     label = Column(String, nullable=True)

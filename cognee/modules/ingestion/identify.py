@@ -29,11 +29,22 @@ async def identify(data: IngestionData, user: User, dataset_id: UUID) -> Optiona
     content_hash: str = data.get_identifier()
     db_engine = get_relational_engine()
 
+    # Dedup is scoped to (dataset, owner, tenant): in a shared multi-writer
+    # dataset, two users adding the same bytes stay two rows — matching the
+    # old per-user identity semantics and keeping owner_id checks meaningful.
+    owner_filter = Data.owner_id == user.id
+    tenant_filter = Data.tenant_id == user.tenant_id if user.tenant_id else Data.tenant_id.is_(None)
+
     async with db_engine.get_async_session() as session:
         scoped = (
             await session.execute(
                 select(Data.id)
-                .filter(Data.dataset_id == dataset_id, Data.content_hash == content_hash)
+                .filter(
+                    Data.dataset_id == dataset_id,
+                    Data.content_hash == content_hash,
+                    owner_filter,
+                    tenant_filter,
+                )
                 .limit(1)
             )
         ).scalar_one_or_none()
@@ -48,6 +59,8 @@ async def identify(data: IngestionData, user: User, dataset_id: UUID) -> Optiona
                     DatasetData.dataset_id == dataset_id,
                     Data.dataset_id.is_(None),
                     Data.content_hash == content_hash,
+                    owner_filter,
+                    tenant_filter,
                 )
                 .limit(1)
             )
