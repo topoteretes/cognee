@@ -167,9 +167,10 @@ async def _dlt_pks(dataset):
 
 
 async def _store_counts(dataset):
-    """Count per-dataset graph nodes + DocumentChunk vector rows. Under access
-    control the graph/vector engines are per-dataset, so read them inside the
-    dataset DB context."""
+    """Count per-dataset graph nodes + DltRow vector rows (DLT rows live in
+    their own DltRow_text collection; chunk search is documents-only). Under
+    access control the graph/vector engines are per-dataset, so read them
+    inside the dataset DB context."""
     from cognee.infrastructure.databases.graph import get_graph_engine
     from cognee.infrastructure.databases.vector import get_vector_engine_async
 
@@ -177,7 +178,7 @@ async def _store_counts(dataset):
         nodes, _ = await (await get_graph_engine()).get_graph_data()
         ve = await get_vector_engine_async()
         try:
-            vec = await (await ve.get_collection("DocumentChunk_text")).count_rows()
+            vec = await (await ve.get_collection("DltRow_text")).count_rows()
         except Exception:
             vec = 0
     return len(nodes), vec
