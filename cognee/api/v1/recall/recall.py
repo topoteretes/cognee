@@ -670,7 +670,9 @@ async def recall(
                     local_query_type.value,
                     user.id,
                     graph_results,
-                    _single_dataset_id(search_dataset_ids),
+                    # Each row takes its dataset from its own payload; this is
+                    # only used for payloads that carry none.
+                    fallback_dataset_id=_single_dataset_id(search_dataset_ids),
                 )
             except Exception as log_error:
                 logger.warning(f"Failed to log recall to search history: {log_error}")
