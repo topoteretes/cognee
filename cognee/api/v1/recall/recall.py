@@ -586,7 +586,7 @@ async def recall(
                 authorized_search,
                 _single_dataset_id,
             )
-            from cognee.modules.search.operations import log_query
+            from cognee.modules.search.operations import log_search_history
 
             if user is None:
                 try:
@@ -635,23 +635,6 @@ async def recall(
                 if not search_dataset_ids:
                     raise DatasetNotFoundError(message="No datasets found.")
 
-            # /v1/search records every question it answers; recall never did,
-            # because it calls authorized_search() directly and skips the
-            # logging that search() wraps around it. Agents recall through this
-            # endpoint, so their questions were absent from recall history
-            # entirely. Reuses search()'s dataset attribution rule so both
-            # endpoints record the same thing. Never let logging break a
-            # search — a failed insert must not cost the caller their answer.
-            try:
-                await log_query(
-                    query_text,
-                    local_query_type.value,
-                    user.id,
-                    _single_dataset_id(search_dataset_ids),
-                )
-            except Exception as log_error:
-                logger.warning(f"Failed to log recall query to search history: {log_error}")
-
             graph_results = await authorized_search(
                 query_text=query_text,
                 query_type=local_query_type,
@@ -674,6 +657,23 @@ async def recall(
                 llm_config=llm_config,
                 embedding_config=embedding_config,
             )
+
+            # /v1/search records every question it answers; recall never did,
+            # because it calls authorized_search() directly and skips the
+            # logging that search() wraps around it. Agents recall through this
+            # endpoint, so their questions were absent from history entirely.
+            # Never let logging break a search — a failed insert must not cost
+            # the caller their answer.
+            try:
+                await log_search_history(
+                    query_text,
+                    local_query_type.value,
+                    user.id,
+                    graph_results,
+                    _single_dataset_id(search_dataset_ids),
+                )
+            except Exception as log_error:
+                logger.warning(f"Failed to log recall to search history: {log_error}")
 
             tagged = []
             for r in graph_results:

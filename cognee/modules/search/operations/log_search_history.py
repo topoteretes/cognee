@@ -1,0 +1,41 @@
+from typing import Any, List, Optional
+from uuid import UUID
+
+from .log_query import log_query
+from .log_result import log_result
+
+
+def _completion_of(payload: Any) -> Optional[str]:
+    """The text a user saw, preferring the completion over raw context."""
+    for attribute in ("completion", "context"):
+        value = getattr(payload, attribute, None)
+        if value:
+            return value if isinstance(value, str) else str(value)
+    return None
+
+
+async def log_search_history(
+    query_text: str,
+    query_type: str,
+    user_id: UUID,
+    search_results: List[Any],
+    fallback_dataset_id: Optional[UUID] = None,
+) -> None:
+    """Record a searched question and its answers, one row per dataset.
+
+    A search fans out over every dataset it is given and produces one payload
+    per dataset. Collapsing that into a single query row loses which dataset
+    was searched, and collapsing the answers into one blob loses which dataset
+    answered — so each payload gets its own query and result row.
+
+    ``fallback_dataset_id`` covers payloads that carry no dataset of their own,
+    which is what happens with access control disabled.
+    """
+    payloads = [item[0] if isinstance(item, tuple) else item for item in search_results] or [None]
+
+    for payload in payloads:
+        dataset_id = getattr(payload, "dataset_id", None) or fallback_dataset_id
+        query = await log_query(query_text, query_type, user_id, dataset_id)
+        completion = _completion_of(payload)
+        if completion:
+            await log_result(query.id, completion, user_id, dataset_id)
