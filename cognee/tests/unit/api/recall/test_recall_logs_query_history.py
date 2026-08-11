@@ -110,22 +110,21 @@ async def test_recall_logs_one_query_and_result_per_dataset(history, monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_recall_falls_back_to_the_requested_dataset(history, monkeypatch):
-    """Access control off: payloads carry no dataset, so the request's one is used."""
+async def test_recall_records_no_dataset_when_the_payload_has_none(history, monkeypatch):
+    """Access control off: the payload carries no dataset, so the row records None."""
     user = SimpleNamespace(id=uuid4())
-    dataset_id = uuid4()
     stub_search(monkeypatch, [payload(None, "the answer")])
 
     await recall(
         "what changed last week?",
         query_type=SearchType.GRAPH_COMPLETION,
-        dataset_ids=[dataset_id],
+        dataset_ids=[uuid4()],
         auto_route=False,
         user=user,
     )
 
-    assert [row["dataset_id"] for row in history["queries"]] == [dataset_id]
-    assert [row["dataset_id"] for row in history["results"]] == [dataset_id]
+    assert [row["dataset_id"] for row in history["queries"]] == [None]
+    assert [row["dataset_id"] for row in history["results"]] == [None]
 
 
 @pytest.mark.asyncio
@@ -149,8 +148,8 @@ async def test_recall_logs_the_question_even_with_no_results(history, monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_recall_survives_a_logging_failure(history, monkeypatch):
-    """A failed insert must never cost the caller their answer."""
+async def test_recall_raises_when_logging_fails(history, monkeypatch):
+    """A broken history write must surface, not be swallowed, so CI catches it."""
 
     async def exploding_log_query(*_args, **_kwargs):
         raise RuntimeError("history database is down")
@@ -158,12 +157,11 @@ async def test_recall_survives_a_logging_failure(history, monkeypatch):
     monkeypatch.setattr(history_mod, "log_query", exploding_log_query)
     stub_search(monkeypatch, [payload(uuid4(), "the answer")])
 
-    results = await recall(
-        "does this still answer?",
-        query_type=SearchType.GRAPH_COMPLETION,
-        dataset_ids=[uuid4()],
-        auto_route=False,
-        user=SimpleNamespace(id=uuid4()),
-    )
-
-    assert results != []
+    with pytest.raises(RuntimeError, match="history database is down"):
+        await recall(
+            "does this still answer?",
+            query_type=SearchType.GRAPH_COMPLETION,
+            dataset_ids=[uuid4()],
+            auto_route=False,
+            user=SimpleNamespace(id=uuid4()),
+        )

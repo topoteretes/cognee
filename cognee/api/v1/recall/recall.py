@@ -579,13 +579,7 @@ async def recall(
                 normalize_search_payload,
             )
 
-            # _single_dataset_id is imported rather than reimplemented so recall
-            # and search can never disagree about which dataset a question is
-            # attributed to.
-            from cognee.modules.search.methods.search import (
-                authorized_search,
-                _single_dataset_id,
-            )
+            from cognee.modules.search.methods.search import authorized_search
             from cognee.modules.search.operations import log_search_history
 
             if user is None:
@@ -662,20 +656,7 @@ async def recall(
             # because it calls authorized_search() directly and skips the
             # logging that search() wraps around it. Agents recall through this
             # endpoint, so their questions were absent from history entirely.
-            # Never let logging break a search — a failed insert must not cost
-            # the caller their answer.
-            try:
-                await log_search_history(
-                    query_text,
-                    local_query_type.value,
-                    user.id,
-                    graph_results,
-                    # Each row takes its dataset from its own payload; this is
-                    # only used for payloads that carry none.
-                    fallback_dataset_id=_single_dataset_id(search_dataset_ids),
-                )
-            except Exception as log_error:
-                logger.warning(f"Failed to log recall to search history: {log_error}")
+            await log_search_history(query_text, local_query_type.value, user.id, graph_results)
 
             tagged = []
             for r in graph_results:

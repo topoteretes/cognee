@@ -19,7 +19,6 @@ async def log_search_history(
     query_type: str,
     user_id: UUID,
     search_results: List[Any],
-    fallback_dataset_id: Optional[UUID] = None,
 ) -> None:
     """Record a searched question and its answers, one row per dataset.
 
@@ -28,13 +27,13 @@ async def log_search_history(
     was searched, and collapsing the answers into one blob loses which dataset
     answered — so each payload gets its own query and result row.
 
-    ``fallback_dataset_id`` covers payloads that carry no dataset of their own,
-    which is what happens with access control disabled.
+    A payload that carries no dataset of its own — which is what happens with
+    access control disabled — records ``None``.
     """
     payloads = [item[0] if isinstance(item, tuple) else item for item in search_results] or [None]
 
     for payload in payloads:
-        dataset_id = getattr(payload, "dataset_id", None) or fallback_dataset_id
+        dataset_id = getattr(payload, "dataset_id", None)
         query = await log_query(query_text, query_type, user_id, dataset_id)
         # Every query keeps a result row even when the search produced no text
         # — CHUNKS and SUMMARIES return objects, not completions — so history
