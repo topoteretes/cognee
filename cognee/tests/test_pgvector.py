@@ -312,11 +312,12 @@ async def main():
         print(f"{result}\n")
 
     user = await get_default_user()
-    # Two datasets, so an unscoped search records a query and a result per
-    # dataset while a scoped one records a single pair: 2 + 1 + 2 + 2 = 7 queries, each with its result.
+    # This test runs with access control disabled (see vector_db_tests.yml), so
+    # search payloads carry no dataset and there is no per-dataset fan-out:
+    # each of the 4 searches records exactly one query and one result row.
     # limit=0 lifts get_history's default cap of 10.
     history = await get_history(user.id, limit=0)
-    assert len(history) == 14, "Search history is not correct."
+    assert len(history) == 8, "Search history is not correct."
 
     await test_vector_engine_search_none_limit()
 
