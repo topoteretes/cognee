@@ -281,15 +281,18 @@ async def _scenario():
         "a pinned pre-fork id must resolve to the canonical row, not mint one"
     )
 
-    # --- 8. update() by the pre-fork id: carry-forward (flatten-on-write) -- #
+    # --- 8. update() keeps the data_id: pinned re-ingest + lineage restore - #
+    # A fork row updated by its PRE-FORK id: the row is recreated under the
+    # SAME canonical id, with the fork lineage restored, so both ids the user
+    # ever held keep resolving.
     text_v3 = text_v1.replace("ENTA", "ENTA3", 1)
     await cognee.update(pre_fork_id, text_v3, beta.id, user=user)
     beta_rows = await get_dataset_data(beta.id)
     assert len(beta_rows) == 1
     replacement = beta_rows[0]
-    assert replacement.id != beta_data.id, "the full path minted a replacement row"
+    assert replacement.id == beta_data.id, "update() must NOT change the document's data_id"
     assert str(replacement.legacy_id) == str(pre_fork_id), (
-        "flatten-on-write: the replacement records the ORIGINAL id, not the intermediate"
+        "the fork lineage is restored on the recreated row"
     )
     assert await _read_text(replacement) == text_v3
     assert await resolve_data_id(beta.id, pre_fork_id) == replacement.id, (
@@ -297,6 +300,22 @@ async def _scenario():
     )
     row = await get_data(user.id, pre_fork_id)
     assert row is not None and row.id == replacement.id
+
+    # A normal (unforked) row updated by its own id: same id, no lineage.
+    text_v4 = text_v2.replace("ENTB", "ENTB4", 1)
+    await cognee.update(alpha_data.id, text_v4, alpha.id, user=user)
+    alpha_updated = await _sole_data(alpha.id)
+    assert alpha_updated.id == alpha_data.id, "update() must NOT change the document's data_id"
+    assert alpha_updated.legacy_id is None
+    assert await _read_text(alpha_updated) == text_v4
+
+    # Replacing one document with several items is ambiguous — refused.
+    try:
+        await cognee.update(alpha_data.id, ["one", "two"], alpha.id, user=user)
+    except IngestionError:
+        pass
+    else:
+        raise AssertionError("update() with a multi-item list must be refused")
 
     # --- 9. delete by the pre-fork id through the real API ----------------- #
     from cognee.api.v1.datasets.datasets import datasets as datasets_api

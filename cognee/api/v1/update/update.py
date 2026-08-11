@@ -24,6 +24,11 @@ async def update(
     """
     Update existing data in Cognee.
 
+    The document keeps its ``data_id`` across updates: the replacement is
+    re-ingested pinned to the resolved id (exact, or the recorded pre-fork
+    ``legacy_id``), so externally held id mappings never break. Exactly one
+    document is replaced per call — lists of more than one item are rejected.
+
     Supported Input Types:
         - **Text strings**: Direct text content (str) - any string not starting with "/" or "file://"
         - **File paths**: Local file paths as strings in these formats:
@@ -78,20 +83,33 @@ async def update(
     if not user:
         user = await get_default_user()
 
-    # Lineage capture (flatten-on-write): the replacement row must keep
-    # resolving under every id the user ever held for this document.
     from cognee.infrastructure.databases.relational import get_relational_engine
     from cognee.modules.data.methods import resolve_data_id
     from cognee.modules.data.models import Data
+    from cognee.modules.ingestion.exceptions import IngestionError
+    from cognee.tasks.ingestion.data_item import DataItem
 
-    original_external_id = None
+    if isinstance(data, list):
+        if len(data) != 1:
+            raise IngestionError(
+                f"update() replaces exactly one document; got a list of {len(data)} items."
+            )
+        data = data[0]
+
+    # The document KEEPS its data_id through updates. Resolve the incoming id
+    # (exact, then pre-fork legacy_id) and re-ingest pinned to the resolved
+    # id; an unknown id creates the document under the given id — the same
+    # contract as a pinned add.
     resolved_id = await resolve_data_id(dataset_id, data_id)
+    pinned_id = resolved_id if resolved_id is not None else data_id
+
+    preserved_legacy_id = None
     if resolved_id is not None:
         db_engine = get_relational_engine()
         async with db_engine.get_async_session() as session:
             old_row = await session.get(Data, resolved_id)
             if old_row is not None:
-                original_external_id = old_row.legacy_id or old_row.id
+                preserved_legacy_id = old_row.legacy_id
 
     await datasets.delete_data(
         dataset_id=dataset_id,
@@ -99,8 +117,14 @@ async def update(
         user=user,
     )
 
-    add_run = await add(
-        data=data,
+    if isinstance(data, DataItem):
+        data.data_id = pinned_id
+        pinned_item = data
+    else:
+        pinned_item = DataItem(data=data, data_id=pinned_id)
+
+    await add(
+        data=pinned_item,
         dataset_id=dataset_id,
         user=user,
         node_set=node_set,
@@ -111,22 +135,14 @@ async def update(
         data_cache=data_cache,
     )
 
-    # Stamp the replacement row with the original external id, so the user's
-    # pre-update mapping keeps resolving. First-wins: never overwrite an
-    # existing lineage (the row may itself be a fork of an older id).
-    ingestion_info = getattr(add_run, "data_ingestion_info", None) or []
-    new_data_id = ingestion_info[0].get("data_id") if ingestion_info else None
-    if (
-        original_external_id is not None
-        and new_data_id is not None
-        and str(new_data_id) != str(original_external_id)
-    ):
+    # Restore fork lineage onto the recreated row: a fork document's pre-fork
+    # id must keep resolving across updates.
+    if preserved_legacy_id is not None:
         db_engine = get_relational_engine()
         async with db_engine.get_async_session() as session:
-            new_row = await session.get(Data, new_data_id)
+            new_row = await session.get(Data, pinned_id)
             if new_row is not None and new_row.legacy_id is None:
-                new_row.legacy_id = original_external_id
-                await session.merge(new_row)
+                new_row.legacy_id = preserved_legacy_id
                 await session.commit()
 
     cognify_run = await cognify(
