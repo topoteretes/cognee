@@ -126,11 +126,27 @@ async def improve(
         if session_ids:
             span.set_attribute(COGNEE_SESSION_ID, ",".join(session_ids))
 
-        from cognee.api.v1.serve.state import get_remote_client
+        from cognee.api.v1.serve.state import get_remote_client, warn_unsupported_remote_params
 
         client = get_remote_client()
         if client is not None:
-            return await client.improve(dataset, node_name=node_name, **kwargs)
+            warn_unsupported_remote_params(
+                "improve",
+                node_type=kwargs.pop("node_type", None),
+                user=kwargs.pop("user", None),
+                vector_db_config=kwargs.pop("vector_db_config", None),
+                graph_db_config=kwargs.pop("graph_db_config", None),
+                feedback_alpha=kwargs.pop("feedback_alpha", None),
+                build_truth_subspace=build_truth_subspace or None,
+            )
+            return await client.improve(
+                dataset,
+                node_name=node_name,
+                session_ids=session_ids,
+                run_in_background=run_in_background,
+                build_global_context_index=build_global_context_index,
+                **kwargs,
+            )
 
         from cognee.modules.users.methods import get_default_user
 

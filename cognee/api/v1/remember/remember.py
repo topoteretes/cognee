@@ -929,11 +929,19 @@ async def _remember_inner(
     span,
     **kwargs,
 ) -> "RememberResult":
-    from cognee.api.v1.serve.state import get_remote_client
+    from cognee.api.v1.serve.state import get_remote_client, warn_unsupported_remote_params
 
     client = get_remote_client()
     if client is not None:
         span.set_attribute(COGNEE_OPERATION_MODE, "cloud")
+        warn_unsupported_remote_params(
+            "remember",
+            user=kwargs.pop("user", None),
+            graph_model=kwargs.pop("graph_model", None),
+            preferred_loaders=kwargs.pop("preferred_loaders", None),
+            vector_db_config=kwargs.pop("vector_db_config", None),
+            graph_db_config=kwargs.pop("graph_db_config", None),
+        )
         return await client.remember(
             data,
             dataset_name,

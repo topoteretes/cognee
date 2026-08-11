@@ -24,7 +24,7 @@ class _Session:
     def __init__(self):
         self.payload = None
 
-    def post(self, _url, *, json):
+    def post(self, _url, *, json=None, data=None, timeout=None):
         self.payload = json
         return _Response()
 
