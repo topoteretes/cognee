@@ -15,7 +15,11 @@ migration and asserts:
   5. the ledger-backend branch honors dataset scoping (and global mode);
   6. downgrade fully reverses the store state (graph node, chunk properties,
      vector payloads, provenance refs), is idempotent, and the round trip
-     re-migrate -> delete-by-pre-fork-id still converges.
+     re-migrate -> delete-by-pre-fork-id still converges;
+  7. shared-store keeper: when the pre-fork id is still a live row (access
+     control off — one graph for all datasets), the fork pair is
+     provenance-only, the keeper's node/chunks/payloads untouched, and
+     refcounted deletion then works dataset by dataset.
 
 All scenarios share one event loop (cached engines bind asyncio locks to the
 first loop). Runs on the default local stack (kuzu + lancedb + sqlite),
@@ -125,8 +129,14 @@ async def _cognify_document(dataset_name: str):
     return user, dataset, (await get_dataset_data(dataset.id))[0]
 
 
-async def _simulate_backfill_fork(old_id):
-    """Copy the Data row under a fresh id with legacy_id, repoint ledger, drop old."""
+async def _simulate_backfill_fork(old_id, fork_dataset_id=None, keep_keeper=False):
+    """Copy the Data row under a fresh id with legacy_id, as the backfill would.
+
+    Default shape: the migrated dataset's row was the split one — ledger
+    repointed, old row gone. ``keep_keeper=True`` models the shared-store
+    shape instead: the keeper dataset retains the original row and the fork
+    row lands in ``fork_dataset_id``.
+    """
     from cognee.infrastructure.databases.relational import get_relational_engine
     from cognee.modules.data.models import Data
     from cognee.modules.graph.models import Node as LedgerNode
@@ -139,11 +149,14 @@ async def _simulate_backfill_fork(old_id):
         values = {column.name: getattr(row, column.name) for column in Data.__table__.columns}
         values["id"] = new_id
         values["legacy_id"] = old_id
+        if fork_dataset_id is not None:
+            values["dataset_id"] = fork_dataset_id
         await session.execute(sql_insert(Data.__table__).values(**values))
-        await session.execute(
-            sql_update(LedgerNode).where(LedgerNode.data_id == old_id).values(data_id=new_id)
-        )
-        await session.execute(Data.__table__.delete().where(Data.id == old_id))
+        if not keep_keeper:
+            await session.execute(
+                sql_update(LedgerNode).where(LedgerNode.data_id == old_id).values(data_id=new_id)
+            )
+            await session.execute(Data.__table__.delete().where(Data.id == old_id))
         await session.commit()
     return new_id
 
@@ -177,6 +190,7 @@ def test_rekey_fork_migration_end_to_end(rekey_env):
         await _scenario()
         await _ledger_scenario()
         await _downgrade_scenario()
+        await _keeper_scenario()
 
     asyncio.run(_all_scenarios())
 
@@ -401,3 +415,90 @@ async def _downgrade_scenario():
         if props.get("type") in ("DocumentChunk", "TextDocument", "TextSummary")
     ]
     assert not leftover, f"stranded graph nodes after roundtrip delete: {leftover}"
+
+
+async def _keeper_scenario():
+    """Shared-store keeper: the fork pair is provenance-only, the keeper untouched.
+
+    With access control off every dataset shares one graph. Pre-refactor, a
+    document shared by datasets A and B was ONE graph node carrying both
+    datasets' provenance refs; the backfill keeps the original row for A (the
+    keeper) and gives B a fork row. The migration must not steal the node,
+    chunk properties, or vector payloads from the keeper — it may only move
+    B's own provenance keys. Then refcounted deletion works dataset by
+    dataset: deleting A leaves the shared subgraph alive for B; deleting B by
+    its PRE-FORK id removes it completely.
+    """
+    from cognee.api.v1.datasets.datasets import datasets as datasets_api
+    from cognee.infrastructure.databases.graph import get_graph_engine
+    from cognee.infrastructure.databases.provenance import make_source_ref_key
+    from cognee.infrastructure.databases.vector import get_vector_engine_async
+    from cognee.modules.data.methods import load_or_create_datasets
+    from cognee.modules.data.methods.get_dataset_data import get_dataset_data
+    from cognee.modules.migrations.migration import MigrationContext
+    from cognee.modules.migrations.versions.rekey_fork_document_ids import migrate
+
+    user, dataset_a, row_a = await _cognify_document("keep_a")
+    old_id = row_a.id
+    graph = await get_graph_engine()
+    vector_engine = await get_vector_engine_async()
+    chunk_ids = await _doc_chunk_ids(graph, old_id)
+    assert chunk_ids
+
+    # Dataset B: pre-refactor shared membership = B's provenance refs on the
+    # SAME subgraph, then the backfill fork row (keeper row kept).
+    dataset_b = (await load_or_create_datasets(["keep_b"], [], user))[0]
+    key_a = make_source_ref_key(dataset_a.id, old_id)
+    key_b_old = make_source_ref_key(dataset_b.id, old_id)
+
+    shared_node_ids = await graph.find_nodes_by_source_ref(key_a)
+    shared_edges = await graph.find_edges_by_source_ref(key_a)
+    assert shared_node_ids and shared_edges
+    await graph.attach_node_source_refs(shared_node_ids, [key_b_old])
+    await graph.attach_edge_source_refs(shared_edges, [key_b_old])
+
+    new_id = await _simulate_backfill_fork(old_id, fork_dataset_id=dataset_b.id, keep_keeper=True)
+    key_b_new = make_source_ref_key(dataset_b.id, new_id)
+
+    context = MigrationContext(graph_engine=graph, vector_engine=vector_engine, dataset_id=None)
+    await migrate(context)
+
+    async def assert_keeper_intact(label):
+        assert await graph.get_node(str(old_id)) is not None, f"{label}: keeper node stays"
+        assert await graph.get_node(str(new_id)) is None, f"{label}: no node under the fork id"
+        for chunk in await graph.get_nodes(chunk_ids):
+            assert str(chunk.get("document_id")) == str(old_id), (
+                f"{label}: chunk document_id stays with the keeper"
+            )
+        assert await _vector_payload_document_ids(vector_engine, chunk_ids) == {str(old_id)}, (
+            f"{label}: vector payloads stay with the keeper"
+        )
+        assert await graph.find_nodes_by_source_ref(key_a), f"{label}: keeper provenance intact"
+        assert not await graph.find_nodes_by_source_ref(key_b_old), (
+            f"{label}: fork legacy provenance moved"
+        )
+        assert await graph.find_nodes_by_source_ref(key_b_new), (
+            f"{label}: fork canonical provenance present"
+        )
+
+    await assert_keeper_intact("after migrate")
+    await migrate(context)
+    await assert_keeper_intact("after re-run")
+
+    # Refcounted deletion: A first (shared subgraph survives for B) ...
+    await datasets_api.delete_data(dataset_a.id, old_id, user=user)
+    assert await get_dataset_data(dataset_a.id) == []
+    assert await graph.get_node(str(old_id)) is not None, (
+        "shared subgraph survives while the fork dataset still references it"
+    )
+
+    # ... then B by its PRE-FORK id: everything goes.
+    await datasets_api.delete_data(dataset_b.id, old_id, user=user)
+    assert await get_dataset_data(dataset_b.id) == []
+    nodes, _ = await graph.get_graph_data()
+    leftover = [
+        props
+        for _, props in nodes
+        if props.get("type") in ("DocumentChunk", "TextDocument", "TextSummary")
+    ]
+    assert not leftover, f"stranded graph nodes after keeper+fork delete: {leftover}"

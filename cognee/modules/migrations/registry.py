@@ -77,7 +77,7 @@ MIGRATIONS: list[Migration] = [
     # graph/vector path needs legacy awareness afterwards.
     Migration(
         slug="rekey_fork_document_ids",
-        cognee_version="1.4.0",
+        cognee_version="1.5.0",
         up=rekey_fork_document_ids,
         down_revision="postgres_graph_provenance_columns",
         down=rekey_fork_document_ids_down,

@@ -12,7 +12,12 @@ This migration closes that gap, per database pair:
 1. Build the map ``legacy_id -> id`` from the relational rows of this
    database's dataset (or all datasets in global mode).
 2. Skip pairs whose graph holds no old node (nothing to do) or already holds
-   the new node (idempotent re-run).
+   the new node (idempotent re-run). On shared stores, pairs whose pre-fork
+   id is still owned by a live KEEPER row are provenance-only: the shared
+   node, ledger references, chunk properties, and vector payloads stay with
+   the keeper; only the fork's own per-dataset provenance keys move. When
+   several forks share one legacy id, exactly one deterministic claimant
+   re-keys the node; the rest are provenance-only too.
 3. Derived stores first (README rule 3): the chunks' vector index rows are
    re-upserted so their ``document_id`` payload scalar (search Evidence)
    cites the canonical id — chunk POINT ids never change; relational ledger
@@ -194,13 +199,13 @@ class ForkChunkIndexPoint(DataPoint):
 
 
 async def _sync_chunk_vector_payloads(
-    vector_engine, properties_by_node: dict, normalized_edges: list, fork_rows: list
+    vector_engine, properties_by_node: dict, normalized_edges: list, claimant_pairs: list
 ) -> None:
     """Re-upsert fork chunks' vector rows so payload ``document_id`` is canonical.
 
     The chunk index payload carries ``document_id`` as a search-Evidence
     scalar; without this it would cite the pre-fork id until the document's
-    next natural rewrite. Driven by the fork rows (edges into either the
+    next natural rewrite. Driven by the claimant pairs (edges into either the
     legacy or the canonical document node are matched), so a run interrupted
     around the graph re-key converges here on re-run; the upsert is
     idempotent. Text is unchanged, so re-embedding yields an equivalent
@@ -211,7 +216,7 @@ async def _sync_chunk_vector_payloads(
         return
 
     doc_targets: dict = {}
-    for old_id, new_id, _dataset_id in fork_rows:
+    for old_id, new_id, _dataset_id in claimant_pairs:
         doc_targets[old_id] = new_id
         doc_targets[new_id] = new_id
 
@@ -247,9 +252,69 @@ async def _sync_chunk_vector_payloads(
     )
 
 
+async def _keeper_blocked_pairs(fork_rows: list, dataset_id: Optional[UUID]) -> set:
+    """Old-position ids whose node identity is owned by an UNRELATED live row.
+
+    On shared stores (access control off — one graph for every dataset) the
+    keeper dataset kept the pre-fork id through the backfill, and the single
+    graph document node under that id IS the keeper's document. A fork pair
+    whose original survives as the keeper must never re-key the node, ledger
+    references, chunk properties, or vector payloads — only its own
+    per-dataset provenance keys move. With isolated stores the keeper lives
+    in a different database pair, so the scoped query returns nothing and
+    the full re-key applies.
+
+    Pair-aware on purpose: in the downgrade direction the old position holds
+    the canonical id, whose live row is the pair ITSELF (its ``legacy_id`` is
+    the pair's target) — that is the row being moved, not a competing owner,
+    so it must not block.
+    """
+    if not fork_rows:
+        return set()
+    engine = get_relational_engine()
+    async with engine.get_async_session() as session:
+        query = select(Data.id, Data.legacy_id).filter(
+            Data.id.in_({UUID(old_id) for old_id, _new_id, _dataset_id in fork_rows})
+        )
+        if dataset_id is not None:
+            query = query.filter(Data.dataset_id == dataset_id)
+        owners = {str(row.id): row.legacy_id for row in (await session.execute(query)).all()}
+
+    blocked = set()
+    for old_id, new_id, _dataset_id in fork_rows:
+        if old_id not in owners:
+            continue  # no live row under the old id: nothing to protect
+        if str(owners[old_id]) != new_id:
+            blocked.add(old_id)  # an unrelated row (the keeper) owns this identity
+    return blocked
+
+
+def _claimant_pairs(fork_rows: list, blocked: set, properties_by_node: dict) -> list:
+    """One (old_id, new_id, dataset_id) claimant per re-keyable pre-fork id.
+
+    A graph node can carry only one id, so when several forks share a legacy
+    id (shared store, keeper deleted after the backfill) exactly one fork
+    claims the node re-key; the rest stay provenance-only. A fork whose
+    canonical node already exists in the graph wins (a partial prior run is
+    reality, not preference); otherwise the lowest canonical id, so re-runs
+    pick the same claimant.
+    """
+    by_old: dict = {}
+    for old_id, new_id, dataset_id in fork_rows:
+        if old_id in blocked:
+            continue
+        by_old.setdefault(old_id, []).append((new_id, dataset_id))
+
+    claimants = []
+    for old_id, candidates in by_old.items():
+        candidates.sort(key=lambda pair: (pair[0] not in properties_by_node, pair[0]))
+        new_id, dataset_id = candidates[0]
+        claimants.append((old_id, new_id, dataset_id))
+    return claimants
+
+
 async def _apply(context: MigrationContext, fork_rows: list) -> None:
     graph_engine = context.graph_engine
-    id_map_all = {old_id: new_id for old_id, new_id, _dataset_id in fork_rows}
     nodes, edges = await graph_engine.get_graph_data()
     properties_by_node = {str(node_id): dict(props or {}) for node_id, props in nodes}
     normalized_edges = [
@@ -257,9 +322,12 @@ async def _apply(context: MigrationContext, fork_rows: list) -> None:
         for edge in edges
     ]
 
+    blocked = await _keeper_blocked_pairs(fork_rows, context.dataset_id)
+    claimant_pairs = _claimant_pairs(fork_rows, blocked, properties_by_node)
+
     id_map: dict = {}
     properties_by_id: dict = {}
-    for old_id, new_id in id_map_all.items():
+    for old_id, new_id, _dataset_id in claimant_pairs:
         if old_id not in properties_by_node:
             continue  # not in this graph, or already migrated and old node gone
         if new_id in properties_by_node:
@@ -269,9 +337,10 @@ async def _apply(context: MigrationContext, fork_rows: list) -> None:
         properties_by_id[old_id] = properties
         id_map[old_id] = new_id
 
-    # Derived store, fork-rows-driven: chunk vector payloads first.
+    # Derived store, claimant-driven: chunk vector payloads first. Keeper and
+    # non-claimant pairs are excluded — their chunks stay with the node's id.
     await _sync_chunk_vector_payloads(
-        context.vector_engine, properties_by_node, normalized_edges, fork_rows
+        context.vector_engine, properties_by_node, normalized_edges, claimant_pairs
     )
 
     if id_map:
