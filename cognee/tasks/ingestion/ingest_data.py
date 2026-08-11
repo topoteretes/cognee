@@ -236,11 +236,23 @@ async def ingest_data(
             if len(new_datapoints) > 0:
                 dataset.data.extend(new_datapoints)
 
+            # existing_data_points and dataset_new_data_points were loaded in an
+            # earlier read-only session (existing_data_map), so they are detached
+            # here. Merge them into this session before linking: extending
+            # dataset.data with a detached instance cascades a save-update that
+            # tries to attach its stale, same-primary-key Dataset, which raises
+            # "another instance with key ... is already present in this session"
+            # on the retry path (gh #4029). Merging returns session-local
+            # instances and keeps the returned list pointing at them.
             if len(existing_data_points) > 0:
-                for data_point in existing_data_points:
-                    await session.merge(data_point)
+                existing_data_points = [
+                    await session.merge(data_point) for data_point in existing_data_points
+                ]
 
             if len(dataset_new_data_points) > 0:
+                dataset_new_data_points = [
+                    await session.merge(data_point) for data_point in dataset_new_data_points
+                ]
                 dataset.data.extend(dataset_new_data_points)
 
             await session.merge(dataset)
