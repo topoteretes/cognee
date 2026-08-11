@@ -5,7 +5,7 @@ from cognee.infrastructure.databases.exceptions.exceptions import EntityNotFound
 from sqlalchemy import select
 from sqlalchemy.sql import func
 from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.modules.data.models import Dataset, Data, DatasetData
+from cognee.modules.data.models import Dataset, Data
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_user
 from dataclasses import dataclass
@@ -52,9 +52,7 @@ async def get_deletion_counts(
 
             # Count data entries linked to this dataset
             count_query = (
-                select(func.count())
-                .select_from(DatasetData)
-                .where(DatasetData.dataset_id == dataset.id)
+                select(func.count()).select_from(Data).where(Data.dataset_id == dataset.id)
             )
             data_entry_count = (await session.execute(count_query)).scalar_one()
             counts.users = 1
@@ -87,9 +85,7 @@ async def get_deletion_counts(
                 dataset_ids = [d.id for d in user_datasets]
                 # Count all data data_entries across all of the user's datasets
                 data_count_query = (
-                    select(func.count())
-                    .select_from(DatasetData)
-                    .where(DatasetData.dataset_id.in_(dataset_ids))
+                    select(func.count()).select_from(Data).where(Data.dataset_id.in_(dataset_ids))
                 )
                 data_entry_count = (await session.execute(data_count_query)).scalar_one()
                 counts.data_entries = data_entry_count

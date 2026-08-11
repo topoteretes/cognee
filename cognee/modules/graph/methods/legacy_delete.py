@@ -27,7 +27,15 @@ async def legacy_delete(data: Data, mode: str = "soft"):
     """Delete a single document by its content hash."""
 
     # Delete from graph database
-    deleted_node_ids = await delete_document_subgraph(data.id, mode)
+    try:
+        deleted_node_ids = await delete_document_subgraph(data.id, mode)
+    except DocumentSubgraphNotFoundError:
+        # A backfill-split row: its graph document node still carries the
+        # pre-split id until the next full rebuild — delete under that id.
+        if getattr(data, "split_from_data_id", None):
+            deleted_node_ids = await delete_document_subgraph(data.split_from_data_id, mode)
+        else:
+            raise
 
     # Delete from vector database
     vector_engine = await get_vector_engine_async()

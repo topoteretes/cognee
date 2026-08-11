@@ -4,11 +4,10 @@ from uuid import UUID, uuid4
 from typing import Union, BinaryIO, Any, List, Optional
 
 import cognee.modules.ingestion as ingestion
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.models import Data
-from cognee.modules.data.models.DatasetData import DatasetData
 from cognee.modules.ingestion.exceptions import IngestionError
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_default_user
@@ -54,7 +53,6 @@ async def ingest_data(
     ):
         new_datapoints = []
         existing_data_points = []
-        dataset_new_data_points = []
 
         if not isinstance(data, list):
             # Convert data to a list as we work with lists further down.
@@ -181,31 +179,13 @@ async def ingest_data(
                 new_content_hash = original_file_metadata["content_hash"]
                 content_changed = str(data_point.content_hash) != str(new_content_hash)
 
-                if data_point.dataset_id is None:
-                    # Legacy shared row (pre-dataset-scoping). Adopt it into this
-                    # dataset when it is the sole member; NEVER mutate its content
-                    # while other datasets still reference it — that would rewrite
-                    # their stored text underneath their graphs.
-                    async with db_engine.get_async_session() as session:
-                        membership_count = (
-                            await session.execute(
-                                select(func.count())
-                                .select_from(DatasetData)
-                                .filter(DatasetData.data_id == data_point.id)
-                            )
-                        ).scalar_one()
-                    if membership_count <= 1:
-                        data_point.dataset_id = dataset.id
-                    elif content_changed:
-                        raise IngestionError(
-                            f"Data {data_point.id} is shared by {membership_count} datasets; "
-                            "its content cannot be updated in place. The update flow must "
-                            "split it into a dataset-private row first (full update path)."
-                        )
-                elif content_changed and str(data_point.dataset_id) != str(dataset.id):
+                # Rows are dataset-scoped (the startup migration backfills
+                # legacy rows). A row of another dataset can only reach this
+                # branch through a mispinned data_id — never mutate it.
+                if str(data_point.dataset_id) != str(dataset.id):
                     raise IngestionError(
                         f"Data {data_point.id} belongs to dataset {data_point.dataset_id}; "
-                        f"refusing to rewrite its content from dataset {dataset.id}."
+                        f"refusing to touch it from dataset {dataset.id}."
                     )
 
                 data_point.name = original_file_metadata["name"]
@@ -228,12 +208,8 @@ async def ingest_data(
                 if content_changed:
                     data_point.pipeline_status = {}
 
-                # Check if data is already in dataset
-                if str(data_point.id) in dataset_data_map:
-                    existing_data_points.append(data_point)
-                else:
-                    dataset_new_data_points.append(data_point)
-                    dataset_data_map[str(data_point.id)] = True
+                existing_data_points.append(data_point)
+                dataset_data_map[str(data_point.id)] = True
             else:
                 if str(data_id) in dataset_data_map:
                     continue
@@ -266,24 +242,12 @@ async def ingest_data(
                 dataset_data_map[str(data_point.id)] = True
 
         async with db_engine.get_async_session() as session:
-            if dataset not in session:
-                session.add(dataset)
-
-            if len(new_datapoints) > 0:
-                dataset.data.extend(new_datapoints)
-
-            if len(existing_data_points) > 0:
-                for data_point in existing_data_points:
-                    await session.merge(data_point)
-
-            if len(dataset_new_data_points) > 0:
-                dataset.data.extend(dataset_new_data_points)
-
-            await session.merge(dataset)
-
+            for data_point in existing_data_points:
+                await session.merge(data_point)
+            session.add_all(new_datapoints)
             await session.commit()
 
-        return existing_data_points + dataset_new_data_points + new_datapoints
+        return existing_data_points + new_datapoints
 
     # Legacy rows still carry content-derived ids, so concurrent ingests of the
     # same legacy content can both try to INSERT the same primary key — the loser

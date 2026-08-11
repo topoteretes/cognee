@@ -2,11 +2,8 @@ from datetime import datetime, timezone
 from uuid import uuid4
 from sqlalchemy import UUID, Column, DateTime, Index, String, JSON, Integer, Float
 from sqlalchemy.ext.mutable import MutableDict
-from sqlalchemy.orm import relationship
 
 from cognee.infrastructure.databases.relational import Base
-
-from .DatasetData import DatasetData
 
 
 class Data(Base):
@@ -38,6 +35,11 @@ class Data(Base):
     # datasets); those are resolved by membership and split copy-on-write on
     # their first content update.
     dataset_id = Column(UUID, index=True, nullable=True)
+    # Set when this row was minted by the backfill split of a pre-refactor
+    # shared row: it records the original data_id so graph-era lookups (the
+    # graph document node still carries the old id until the next full
+    # rebuild) can heal instead of failing.
+    split_from_data_id = Column(UUID, nullable=True)
     content_hash = Column(String)
     raw_content_hash = Column(String)
     external_metadata = Column(JSON)
@@ -52,14 +54,6 @@ class Data(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=lambda: datetime.now(timezone.utc))
     last_accessed = Column(DateTime(timezone=True), nullable=True)
     importance_weight = Column(Float, nullable=True)
-
-    datasets = relationship(
-        "Dataset",
-        secondary=DatasetData.__tablename__,
-        back_populates="data",
-        lazy="selectin",
-        cascade="all, delete",
-    )
 
     def to_json(self) -> dict:
         return {

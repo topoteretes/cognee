@@ -9,12 +9,9 @@ ingestion layer (no cognify, no LLM):
   2. THE BLEED REGRESSION: rewriting one dataset's document in place leaves
      the other dataset's row, stored text, and content hash untouched;
   3. re-adding content a dataset already holds reuses the row (idempotent);
-  4. a legacy shared row (dataset_id NULL, two memberships) refuses in-place
-     content mutation with a clear error, and the sibling dataset keeps the
-     original text byte-for-byte;
-  5. a legacy sole-member row resolves through its membership (no duplicate)
-     and is adopted — stamped with its dataset — on the first ingest that
-     touches it.
+  4. a data_id pinned from another dataset is refused outright — no linking,
+     no mutation. (Legacy-row semantics live in the backfill migration test:
+     tests/unit/modules/data/test_dataset_scoped_backfill.py.)
 
 Runs on the default local stack (sqlite), no API keys.
 """
@@ -113,15 +110,11 @@ def test_dataset_scoped_identity_and_bleed_regression(scoped_env):
 
 async def _scenario():
     import cognee
-    from cognee.infrastructure.databases.relational import get_relational_engine
     from cognee.modules.data.methods.get_dataset_data import get_dataset_data
-    from cognee.modules.data.models import Data
-    from cognee.modules.data.models.DatasetData import DatasetData
     from cognee.modules.ingestion.exceptions import IngestionError
     from cognee.modules.users.methods import get_default_user
     from cognee.tasks.ingestion.data_item import DataItem
     from cognee.tasks.ingestion.ingest_data import ingest_data
-    from sqlalchemy import select, update as sql_update
 
     text_v1 = "".join(_para(tag) for tag in ["a", "b", "c", "d"])
     text_v2 = text_v1.replace("ENTC", "ENTC2", 1)
@@ -183,58 +176,14 @@ async def _scenario():
         "the owning user's identical content must hit their own row"
     )
 
-    # --- 4. legacy shared row: refuse in-place mutation -------------------- #
-    # Simulate a pre-refactor state: one NULL-scoped row shared by two datasets.
-    await cognee.add(text_v1, dataset_name="legacy_a")
-    legacy_a = await _dataset("legacy_a", user)
-    shared = await _sole_data(legacy_a.id)
-
-    await cognee.add(text_v1, dataset_name="legacy_b")
-    legacy_b = await _dataset("legacy_b", user)
-    engine = get_relational_engine()
-    async with engine.get_async_session() as session:
-        await session.execute(sql_update(Data).where(Data.id == shared.id).values(dataset_id=None))
-        own_b = (await get_dataset_data(legacy_b.id))[0]
-        await session.execute(
-            sql_update(DatasetData)
-            .where(DatasetData.dataset_id == legacy_b.id, DatasetData.data_id == own_b.id)
-            .values(data_id=shared.id)
-        )
-        await session.execute(Data.__table__.delete().where(Data.id == own_b.id))
-        await session.commit()
-
-    shared_text_before = await _read_text(shared)
-    with pytest.raises(IngestionError, match="shared by 2 datasets"):
+    # --- 4. mispinned foreign row: refuse to touch ------------------------- #
+    # A data_id pinned from another dataset must never be linked or mutated.
+    with pytest.raises(IngestionError, match="belongs to dataset"):
         await ingest_data(
-            [DataItem(data=text_v2, data_id=shared.id)], "legacy_a", user, None, legacy_a.id
+            [DataItem(data=text_v1, data_id=alpha_data.id)], "beta", user, None, beta.id
         )
-
-    async with engine.get_async_session() as session:
-        survivor = (
-            await session.execute(select(Data).where(Data.id == shared.id))
-        ).scalar_one_or_none()
-    assert survivor is not None
-    assert await _read_text(survivor) == shared_text_before, (
-        "a refused in-place mutation must leave the shared text byte-identical"
-    )
-
-    # --- 5. legacy sole-member row: membership resolution + adoption ------- #
-    await cognee.add(text_v1, dataset_name="legacy_solo")
-    solo = await _dataset("legacy_solo", user)
-    solo_data = await _sole_data(solo.id)
-    async with engine.get_async_session() as session:
-        await session.execute(
-            sql_update(Data).where(Data.id == solo_data.id).values(dataset_id=None)
-        )
-        await session.commit()
-
-    # Direct ingest of the same content resolves via the membership probe
-    # (no duplicate row) and adopts the sole-member row into its dataset.
-    await ingest_data([text_v1], "legacy_solo", user, None, solo.id)
-    solo_rows = await get_dataset_data(solo.id)
-    assert len(solo_rows) == 1 and solo_rows[0].id == solo_data.id, (
-        "legacy content must resolve via membership, not mint a duplicate"
-    )
-    assert str(solo_rows[0].dataset_id) == str(solo.id), (
-        "the first ingest that touches a sole-member legacy row adopts it"
+    beta_rows = await get_dataset_data(beta.id)
+    assert len(beta_rows) == 1 and beta_rows[0].id == beta_data.id
+    assert await _read_text(beta_rows[0]) == beta_text_before, (
+        "a refused foreign pin must leave the target dataset untouched"
     )

@@ -66,7 +66,7 @@ from cognee.infrastructure.session.get_session_manager import get_session_manage
 from cognee.infrastructure.session.session_persist_watermark import get_persisted_qa_count
 from cognee.modules.data.methods import get_dataset_data, get_datasets_by_name
 from cognee.modules.data.methods.get_dataset_databases import get_dataset_databases
-from cognee.modules.data.models import DatasetData
+from cognee.modules.data.models import Data as _ScopedData
 from cognee.modules.engine.models import Entity, EntityType
 from cognee.modules.graph.models import Edge, Node
 from cognee.modules.migrations.versions.namespace_entity_type_node_ids import build_id_remap
@@ -443,7 +443,13 @@ async def _verify_delete(stage: str) -> None:
 
     db_engine = get_relational_engine()
     async with db_engine.get_async_session() as session:
-        pairs = (await session.execute(select(DatasetData.data_id, DatasetData.dataset_id))).all()
+        pairs = (
+            await session.execute(
+                select(_ScopedData.id, _ScopedData.dataset_id).where(
+                    _ScopedData.dataset_id.is_not(None)
+                )
+            )
+        ).all()
 
     if not pairs:
         _fail(f"[{stage}] no dataset_data rows found — nothing to delete, seed is broken.")

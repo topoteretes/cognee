@@ -9,7 +9,7 @@ membership and split copy-on-write on their first content update, so no
 backfill is required here.
 
 Revision ID: c5d7e9f1a3b5
-Revises: b2c4d6e8f0a1
+Revises: e5a7b9c1d3f4
 Create Date: 2026-08-11
 
 """
@@ -22,7 +22,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = "c5d7e9f1a3b5"
-down_revision: Union[str, None] = "b2c4d6e8f0a1"
+down_revision: Union[str, None] = "e5a7b9c1d3f4"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
