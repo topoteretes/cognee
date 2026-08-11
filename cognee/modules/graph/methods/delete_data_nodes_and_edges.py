@@ -23,6 +23,7 @@ from cognee.modules.graph.methods.try_delete_data_by_graph_provenance import (
 )
 from cognee.modules.data.methods.get_authorized_dataset import get_authorized_dataset
 from cognee.modules.users.methods.get_user import get_user
+from cognee.modules.versioning.operations.log_event import log_version_event
 from cognee.shared.logging_utils import get_logger
 
 
@@ -77,6 +78,21 @@ async def delete_data_nodes_and_edges(dataset_id: UUID, data_id: UUID, user_id: 
     if affected_nodes:
         is_legacy_node = await has_nodes_in_legacy_ledger(affected_nodes)
         is_legacy_edge = await has_edges_in_legacy_ledger(affected_edges)
+
+        # Log the FORGET event BEFORE the hard delete so the payload captures
+        # the full affected set.  Non-fatal: a logging failure must not prevent
+        # the actual delete from proceeding.
+        try:
+            await log_version_event(
+                "FORGET",
+                dataset_id,
+                data_id=data_id,
+                user_id=user_id,
+                node_slugs=[str(n.slug) for n in affected_nodes],
+                edge_slugs=[e.relationship_name for e in affected_edges if e.relationship_name],
+            )
+        except Exception as _exc:
+            logger.warning("Failed to log FORGET version event (non-fatal): %s", _exc)
 
         await delete_from_graph_and_vector(
             affected_nodes, affected_edges, is_legacy_node, is_legacy_edge
