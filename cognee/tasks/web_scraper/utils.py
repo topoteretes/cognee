@@ -5,6 +5,9 @@ both BeautifulSoup for custom extraction rules and Tavily for API-based scraping
 """
 
 import os
+import socket
+import ipaddress
+from urllib.parse import urlparse
 from typing import List, Union
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.web_scraper.types import UrlsToHtmls
@@ -12,6 +15,43 @@ from .default_url_crawler import DefaultUrlCrawler
 from .config import DefaultCrawlerConfig, TavilyConfig
 
 logger = get_logger(__name__)
+
+
+def validate_safe_url(url: str, allow_local: bool = None) -> None:
+    """Prevent SSRF by checking target host against loopback and private IP spaces."""
+    if allow_local is None:
+        allow_local = os.getenv("COGNEE_ALLOW_LOCAL_URLS", "false").lower() in ("true", "1", "yes")
+
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"SSRF Protection: Unsupported scheme '{parsed.scheme}' in URL: {url}")
+    hostname = parsed.hostname
+    if not hostname:
+        raise ValueError(f"SSRF Protection: Invalid URL missing hostname: {url}")
+
+    if allow_local:
+        return
+
+    try:
+        addr_infos = socket.getaddrinfo(hostname, None)
+        for addr_info in addr_infos:
+            ip_str = addr_info[4][0]
+            try:
+                ip_obj = ipaddress.ip_address(ip_str)
+            except ValueError:
+                continue
+            if (
+                ip_obj.is_private
+                or ip_obj.is_loopback
+                or ip_obj.is_link_local
+                or ip_obj.is_multicast
+                or ip_obj.is_unspecified
+            ):
+                raise ValueError(
+                    f"SSRF Protection: Access to internal/private IP address '{ip_str}' for host '{hostname}' is denied."
+                )
+    except socket.gaierror as e:
+        raise ValueError(f"SSRF Protection: Could not resolve hostname '{hostname}': {e}") from e
 
 
 async def fetch_page_content(urls: Union[str, List[str]]) -> UrlsToHtmls:
@@ -42,6 +82,8 @@ async def fetch_page_content(urls: Union[str, List[str]]) -> UrlsToHtmls:
             installed.
     """
     url_list = [urls] if isinstance(urls, str) else urls
+    for u in url_list:
+        validate_safe_url(u)
 
     if os.getenv("TAVILY_API_KEY"):
         logger.info("Using Tavily API for url fetching")
