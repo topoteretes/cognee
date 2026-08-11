@@ -9,7 +9,7 @@ legacy rows — then runs the real migration's ``upgrade()`` through an alembic
     with its dataset (user-held id mappings stay valid);
   - a multi-membership legacy row keeps the original id for its OLDEST
     membership; every other dataset gets a fresh row with a new id, all
-    columns copied, ``split_from_data_id`` recording the original, and its
+    columns copied, ``legacy_id`` recording the original, and its
     relational ledger (``nodes``) rows repointed to the new id;
   - already-scoped rows are untouched;
   - ``dataset_data`` is dropped.
@@ -126,7 +126,7 @@ def test_backfill_preserves_sole_ids_and_splits_shared_rows():
             sa.select(
                 data_table.c.id,
                 data_table.c.dataset_id,
-                data_table.c.split_from_data_id,
+                data_table.c.legacy_id,
                 data_table.c.name,
             )
         ).fetchall()
@@ -134,16 +134,16 @@ def test_backfill_preserves_sole_ids_and_splits_shared_rows():
 
         # Sole-membership: original id kept, dataset stamped.
         assert by_id[sole_id].dataset_id == dataset_a
-        assert by_id[sole_id].split_from_data_id is None
+        assert by_id[sole_id].legacy_id is None
 
         # Already-scoped: untouched.
         assert by_id[scoped_id].dataset_id == dataset_a
-        assert by_id[scoped_id].split_from_data_id is None
+        assert by_id[scoped_id].legacy_id is None
 
         # Shared: keeper (oldest membership, dataset_a) retains the id...
         assert by_id[shared_id].dataset_id == dataset_a
         # ...and dataset_b got a fresh row copied from it.
-        split_rows = [row for row in rows if row.split_from_data_id == shared_id]
+        split_rows = [row for row in rows if row.legacy_id == shared_id]
         assert len(split_rows) == 1
         split_row = split_rows[0]
         assert split_row.dataset_id == dataset_b

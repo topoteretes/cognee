@@ -32,8 +32,8 @@ async def legacy_delete(data: Data, mode: str = "soft"):
     except DocumentSubgraphNotFoundError:
         # A backfill-split row: its graph document node still carries the
         # pre-split id until the next full rebuild — delete under that id.
-        if getattr(data, "split_from_data_id", None):
-            deleted_node_ids = await delete_document_subgraph(data.split_from_data_id, mode)
+        if getattr(data, "legacy_id", None):
+            deleted_node_ids = await delete_document_subgraph(data.legacy_id, mode)
         else:
             raise
 

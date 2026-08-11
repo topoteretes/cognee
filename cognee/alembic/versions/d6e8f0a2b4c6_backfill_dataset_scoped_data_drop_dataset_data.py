@@ -3,16 +3,16 @@
 Completes the dataset-scoping of Data rows and retires the dataset_data
 membership table:
 
-1. Adds ``data.split_from_data_id`` (provenance for split rows).
+1. Adds ``data.legacy_id`` (provenance for split rows).
 2. Backfills every legacy row (``dataset_id IS NULL``) from its memberships:
    - exactly one membership → the row keeps its ORIGINAL id and is stamped
      with that dataset (user-held data_id mappings stay valid);
    - several memberships → the OLDEST membership keeps the original id; every
      other dataset gets a fresh row (new uuid4 id, all columns copied,
-     ``split_from_data_id`` recording the original). The relational ledger
+     ``legacy_id`` recording the original). The relational ledger
      (``nodes``) rows for those datasets are repointed to the new ids so
      ledger-driven deletion keeps working; their graph document nodes still
-     carry the old id until the next full rebuild, which ``split_from_data_id``
+     carry the old id until the next full rebuild, which ``legacy_id``
      lets the delete path resolve.
    - zero memberships → unreachable orphans, left untouched.
 3. Drops ``dataset_data``. Membership is now exactly ``Data.dataset_id``.
@@ -49,8 +49,9 @@ def upgrade() -> None:
     insp = sa.inspect(conn)
     tables = insp.get_table_names()
 
-    if not _get_column(insp, "data", "split_from_data_id"):
-        op.add_column("data", sa.Column("split_from_data_id", sa.UUID(), nullable=True))
+    if not _get_column(insp, "data", "legacy_id"):
+        op.add_column("data", sa.Column("legacy_id", sa.UUID(), nullable=True))
+        op.create_index("ix_data_legacy_id", "data", ["legacy_id"])
 
     if "dataset_data" not in tables:
         return
@@ -72,7 +73,7 @@ def upgrade() -> None:
         sa.column("owner_id", sa.Uuid),
         sa.column("tenant_id", sa.Uuid),
         sa.column("dataset_id", sa.Uuid),
-        sa.column("split_from_data_id", sa.Uuid),
+        sa.column("legacy_id", sa.Uuid),
         sa.column("content_hash", sa.String),
         sa.column("raw_content_hash", sa.String),
         sa.column("external_metadata", sa.JSON),
@@ -136,7 +137,7 @@ def upgrade() -> None:
             values = dict(row)
             values["id"] = new_id
             values["dataset_id"] = extra.dataset_id
-            values["split_from_data_id"] = data_id
+            values["legacy_id"] = data_id
             conn.execute(sa.insert(data_table).values(**values))
 
             if nodes_table is not None:
@@ -187,5 +188,9 @@ def downgrade() -> None:
                 )
             )
 
-    if _get_column(insp, "data", "split_from_data_id"):
-        op.drop_column("data", "split_from_data_id")
+    if _get_column(insp, "data", "legacy_id"):
+        try:
+            op.drop_index("ix_data_legacy_id", table_name="data")
+        except Exception:
+            pass
+        op.drop_column("data", "legacy_id")

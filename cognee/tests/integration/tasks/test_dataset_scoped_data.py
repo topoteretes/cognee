@@ -11,8 +11,11 @@ ingestion layer (no cognify, no LLM):
   3. re-adding content a dataset already holds reuses the row (idempotent);
   4. a data_id pinned from another dataset is refused outright — no linking,
      no mutation;
-  5. every id ever issued keeps resolving: a backfill-split row is found
-     (and deletable through the real API) by its pre-split id. (Legacy-row semantics live in the backfill migration test:
+  5-9. every id ever issued keeps resolving: pre-fork ids resolve scoped
+     and context-free (single fork), ambiguity refuses with candidates,
+     pinned pre-fork ids bind to the canonical row, update() carries the
+     original id onto its replacement row (flatten-on-write), and deletion
+     by the pre-fork id works through the real API — after an update. (Legacy-row semantics live in the backfill migration test:
      tests/unit/modules/data/test_dataset_scoped_backfill.py.)
 
 Runs on the default local stack (sqlite), no API keys.
@@ -74,8 +77,28 @@ def scoped_env():
         except (ImportError, AttributeError):
             pass
 
+    from cognee.infrastructure.llm.LLMGateway import LLMGateway
+    from cognee.shared.data_models import KnowledgeGraph, Node, SummarizedContent
+
+    @staticmethod
+    async def _mock_acreate(text_input, system_prompt, response_model, **kwargs):
+        if isinstance(response_model, type) and issubclass(response_model, KnowledgeGraph):
+            names = sorted(set(MARKER.findall(str(text_input))))
+            return KnowledgeGraph(
+                nodes=[Node(id=n, name=n, type="Marker", description=n) for n in names], edges=[]
+            )
+        if isinstance(response_model, type) and issubclass(response_model, SummarizedContent):
+            return SummarizedContent(summary="Mock summary.", description="")
+        if response_model is str:
+            return "mock answer"
+        return response_model()
+
+    original = LLMGateway.acreate_structured_output
+    LLMGateway.acreate_structured_output = _mock_acreate
+
     yield root
 
+    LLMGateway.acreate_structured_output = original
     shutil.rmtree(root, ignore_errors=True)
 
 
@@ -191,32 +214,92 @@ async def _scenario():
     )
 
     # --- 5. every id ever issued keeps resolving --------------------------- #
-    # Simulate a backfill-split row: beta's row records a pre-split original
-    # id. Resolution must find the row by the OLD id within the dataset.
+    # Simulate a backfill-split fork: beta's row records a pre-fork original.
     from uuid import uuid4 as _mint
     from sqlalchemy import update as sql_update
     from cognee.infrastructure.databases.relational import get_relational_engine
-    from cognee.modules.data.methods import resolve_data_id
+    from cognee.modules.data.exceptions import AmbiguousDataIdError
+    from cognee.modules.data.methods import get_data, resolve_data_id
     from cognee.modules.data.models import Data
 
-    pre_split_id = _mint()
+    pre_fork_id = _mint()
     engine = get_relational_engine()
     async with engine.get_async_session() as session:
         await session.execute(
-            sql_update(Data).where(Data.id == beta_data.id).values(split_from_data_id=pre_split_id)
+            sql_update(Data).where(Data.id == beta_data.id).values(legacy_id=pre_fork_id)
         )
         await session.commit()
 
     assert await resolve_data_id(beta.id, beta_data.id) == beta_data.id, "exact id wins"
-    assert await resolve_data_id(beta.id, pre_split_id) == beta_data.id, (
-        "the pre-split id must resolve to the canonical row within its dataset"
+    assert await resolve_data_id(beta.id, pre_fork_id) == beta_data.id, (
+        "the pre-fork id must resolve to the canonical row within its dataset"
     )
-    assert await resolve_data_id(alpha.id, pre_split_id) is None, (
+    assert await resolve_data_id(alpha.id, pre_fork_id) is None, (
         "the old id means nothing in an unrelated dataset"
     )
 
-    # And the real entry point honors it: delete by the OLD id removes the row.
+    # --- 6. get_data: context-free guard matrix ---------------------------- #
+    row = await get_data(user.id, beta_data.id)
+    assert row is not None and row.id == beta_data.id, "unforked exact id: unchanged behavior"
+
+    row = await get_data(user.id, pre_fork_id)
+    assert row is not None and row.id == beta_data.id, (
+        "single fork, no exact match: unambiguous, returned directly"
+    )
+
+    row = await get_data(user.id, pre_fork_id, dataset_id=beta.id)
+    assert row is not None and row.id == beta_data.id, "scoped resolution via legacy id"
+    assert await get_data(user.id, pre_fork_id, dataset_id=alpha.id) is None
+
+    # A second dataset forking from the SAME original -> ambiguity MUST refuse.
+    async with engine.get_async_session() as session:
+        await session.execute(
+            sql_update(Data).where(Data.id == alpha_data.id).values(legacy_id=pre_fork_id)
+        )
+        await session.commit()
+    try:
+        await get_data(user.id, pre_fork_id)
+        raise AssertionError("ambiguous context-free lookup must refuse, never guess")
+    except AmbiguousDataIdError as error:
+        candidate_ids = {str(c["data_id"]) for c in error.candidates}
+        assert candidate_ids == {str(alpha_data.id), str(beta_data.id)}, error.candidates
+    row = await get_data(user.id, pre_fork_id, dataset_id=alpha.id)
+    assert row is not None and row.id == alpha_data.id, "dataset scope disambiguates"
+    async with engine.get_async_session() as session:
+        await session.execute(
+            sql_update(Data).where(Data.id == alpha_data.id).values(legacy_id=None)
+        )
+        await session.commit()
+
+    # --- 7. pinned DataItem with a pre-fork id ----------------------------- #
+    beta_text_current = await _read_text(beta_data)
+    await ingest_data(
+        [DataItem(data=beta_text_current, data_id=pre_fork_id)], "beta", user, None, beta.id
+    )
+    beta_rows = await get_dataset_data(beta.id)
+    assert len(beta_rows) == 1 and beta_rows[0].id == beta_data.id, (
+        "a pinned pre-fork id must resolve to the canonical row, not mint one"
+    )
+
+    # --- 8. update() by the pre-fork id: carry-forward (flatten-on-write) -- #
+    text_v3 = text_v1.replace("ENTA", "ENTA3", 1)
+    await cognee.update(pre_fork_id, text_v3, beta.id, user=user)
+    beta_rows = await get_dataset_data(beta.id)
+    assert len(beta_rows) == 1
+    replacement = beta_rows[0]
+    assert replacement.id != beta_data.id, "the full path minted a replacement row"
+    assert str(replacement.legacy_id) == str(pre_fork_id), (
+        "flatten-on-write: the replacement records the ORIGINAL id, not the intermediate"
+    )
+    assert await _read_text(replacement) == text_v3
+    assert await resolve_data_id(beta.id, pre_fork_id) == replacement.id, (
+        "the pre-fork id survives the update"
+    )
+    row = await get_data(user.id, pre_fork_id)
+    assert row is not None and row.id == replacement.id
+
+    # --- 9. delete by the pre-fork id through the real API ----------------- #
     from cognee.api.v1.datasets.datasets import datasets as datasets_api
 
-    await datasets_api.delete_data(beta.id, pre_split_id, user=user)
-    assert await get_dataset_data(beta.id) == [], "delete by pre-split id must succeed"
+    await datasets_api.delete_data(beta.id, pre_fork_id, user=user)
+    assert await get_dataset_data(beta.id) == [], "delete by pre-fork id must succeed"

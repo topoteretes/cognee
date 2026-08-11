@@ -13,7 +13,7 @@ async def resolve_data_id(dataset_id: UUID, data_id: UUID) -> Optional[UUID]:
     Users hold data_ids in external mappings, so every id ever issued keeps
     resolving: the exact id wins (the normal case — ids are preserved through
     updates and by the backfill); on a miss, the id is matched against
-    ``split_from_data_id`` — the recorded original of a row whose identity
+    ``legacy_id`` — the recorded original of a row whose identity
     forked when a pre-refactor shared row was split per dataset. Within one
     dataset that fork target is unique, so the fallback is deterministic.
 
@@ -32,8 +32,6 @@ async def resolve_data_id(dataset_id: UUID, data_id: UUID) -> Optional[UUID]:
 
         return (
             await session.execute(
-                select(Data.id).filter(
-                    Data.split_from_data_id == data_id, Data.dataset_id == dataset_id
-                )
+                select(Data.id).filter(Data.legacy_id == data_id, Data.dataset_id == dataset_id)
             )
         ).scalar_one_or_none()

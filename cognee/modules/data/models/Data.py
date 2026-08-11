@@ -35,11 +35,11 @@ class Data(Base):
     # datasets); those are resolved by membership and split copy-on-write on
     # their first content update.
     dataset_id = Column(UUID, index=True, nullable=True)
-    # Set when this row was minted by the backfill split of a pre-refactor
-    # shared row: it records the original data_id so graph-era lookups (the
-    # graph document node still carries the old id until the next full
-    # rebuild) can heal instead of failing.
-    split_from_data_id = Column(UUID, nullable=True)
+    # The pre-refactor data_id this row's identity descends from (flattened —
+    # always the original user-visible id, never an intermediate). Set on
+    # backfill-split rows and carried forward by the update path so every id
+    # ever issued keeps resolving; NULL for rows whose id never changed.
+    legacy_id = Column(UUID, index=True, nullable=True)
     content_hash = Column(String)
     raw_content_hash = Column(String)
     external_metadata = Column(JSON)

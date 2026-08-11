@@ -1,0 +1,258 @@
+"""Chain migration: re-key fork documents' graph identity to canonical ids.
+
+The dataset-scoping relational backfill (alembic ``d6e8f0a2b4c6``) split
+pre-refactor shared ``Data`` rows: non-keeper datasets received fresh
+relational ids, with ``Data.legacy_id`` recording the pre-fork original. The
+relational ledger's ``data_id`` was repointed there — but the per-dataset
+GRAPH stores were deliberately untouched, so a fork dataset's graph document
+node (and everything derived from it) still carries the pre-fork id.
+
+This migration closes that gap, per database pair:
+
+1. Build the map ``legacy_id -> id`` from the relational rows of this
+   database's dataset (or all datasets in global mode).
+2. Skip pairs whose graph holds no old node (nothing to do) or already holds
+   the new node (idempotent re-run).
+3. Derived stores first (README rule 3): relational ledger ``slug`` /
+   edge-endpoint references are updated in place (plain column updates — the
+   ledger is only written on non-graph-provenance backends); the
+   ``document_id`` display property on the document's chunk nodes is updated
+   in the graph.
+4. Graph: the document node is re-keyed with full property preservation,
+   incident edges recreated on the new endpoint, provenance snapshots
+   restored, survivors re-asserted — all via the shared ``_migrate_graph``
+   mechanics from the namespace migration.
+5. Provenance LAST: on graph-provenance backends (where deletion resolves
+   through source ref keys embedding the data id, not the ledger), every
+   node/edge ref ``src:v:{dataset}:{legacy_id}`` is moved to the canonical
+   key — attach-then-remove, driven by the fork rows so an interrupted run
+   converges on re-run.
+
+After this runs, delete/read paths reach fork documents by their canonical id
+with no legacy awareness; the ``legacy_delete`` legacy_id heal becomes a
+belt-and-braces fallback rather than a load-bearing path.
+
+Deliberate boundary: vector-store chunk payload ``document_id`` values (used
+only for citation display, never for row or point resolution) are updated on
+the graph side; vector payloads follow on the natural rewrite of each point
+(next update of the document). Chunk POINT ids are untouched — nothing
+recomputes them from the document id on this code line.
+
+Fork rows are rare (same user, identical content, several datasets, before
+the upgrade), so this is cheap: one indexed relational query in the common
+case, per-document work only where forks exist.
+"""
+
+from typing import Optional
+from uuid import UUID
+
+from sqlalchemy import select
+
+from cognee.infrastructure.databases.exceptions import UnsupportedProvenanceCapability
+from cognee.infrastructure.databases.provenance import (
+    get_pipeline_run_id_from_source_run_ref,
+    get_source_ref_key_from_source_run_ref,
+    make_source_ref_key,
+)
+from cognee.infrastructure.databases.provenance.markers import stores_provenance_in_graph
+from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.modules.data.models import Data
+from cognee.modules.migrations.migration import MigrationContext
+from cognee.shared.logging_utils import get_logger
+
+from .namespace_entity_type_node_ids import _make_node, _migrate_graph
+
+logger = get_logger(__name__)
+
+_IS_PART_OF = "is_part_of"
+
+
+async def _fork_rows(dataset_id: Optional[UUID]) -> list:
+    """(legacy_id, canonical_id, dataset_id) triples for this scope's fork rows."""
+    engine = get_relational_engine()
+    async with engine.get_async_session() as session:
+        query = select(Data.id, Data.legacy_id, Data.dataset_id).filter(Data.legacy_id.is_not(None))
+        if dataset_id is not None:
+            query = query.filter(Data.dataset_id == dataset_id)
+        rows = (await session.execute(query)).all()
+    return [(str(row.legacy_id), str(row.id), row.dataset_id) for row in rows]
+
+
+def _document_chunk_ids(edges: list, document_ids: set) -> dict:
+    """chunk_node_id -> old document id, from is_part_of edges into the docs."""
+    chunk_owners: dict = {}
+    for source_id, target_id, relationship_name, _properties in edges:
+        if relationship_name == _IS_PART_OF and str(target_id) in document_ids:
+            chunk_owners[str(source_id)] = str(target_id)
+    return chunk_owners
+
+
+async def _update_ledger_references(id_map: dict, dataset_id: Optional[UUID]) -> None:
+    """Point ledger slug / edge-endpoint references at the canonical doc id.
+
+    Plain column updates — deletion reads rows by (data_id, dataset_id) and
+    deletes graph nodes by the slug values, so only the referenced ids must
+    move. Ledger primary keys are left untouched (they are only an upsert
+    dedup key for future writes, which use the canonical id anyway).
+    """
+    from sqlalchemy import update as sql_update
+
+    from cognee.modules.graph.models import Edge as LedgerEdge, Node as LedgerNode
+
+    engine = get_relational_engine()
+    async with engine.get_async_session() as session:
+        for old_id, new_id in id_map.items():
+            node_query = sql_update(LedgerNode).where(LedgerNode.slug == UUID(old_id))
+            if dataset_id is not None:
+                node_query = node_query.where(LedgerNode.dataset_id == dataset_id)
+            await session.execute(node_query.values(slug=UUID(new_id)))
+
+            for column in (LedgerEdge.source_node_id, LedgerEdge.destination_node_id):
+                edge_query = sql_update(LedgerEdge).where(column == UUID(old_id))
+                if dataset_id is not None:
+                    edge_query = edge_query.where(LedgerEdge.dataset_id == dataset_id)
+                await session.execute(edge_query.values(**{column.key: UUID(new_id)}))
+        await session.commit()
+
+
+def _run_id_for_key(snapshot, source_ref_key: str) -> Optional[str]:
+    """The pipeline run id recorded for this key, so rollback linkage survives."""
+    for run_ref in getattr(snapshot, "source_run_refs", None) or []:
+        if get_source_ref_key_from_source_run_ref(run_ref) == source_ref_key:
+            return str(get_pipeline_run_id_from_source_run_ref(run_ref))
+    return None
+
+
+async def _rekey_graph_provenance(graph_engine, fork_rows: list) -> None:
+    """Move graph-embedded provenance from pre-fork keys to canonical keys.
+
+    Graph-provenance backends (e.g. Ladybug) never write the relational
+    ledger; deletion resolves through source ref keys embedding the
+    (dataset_id, data_id) pair, stamped on every node and edge of the
+    document's subgraph. Those keys must follow the canonical id or a
+    post-migration delete matches nothing. Attach-then-remove keeps every
+    artifact deletable through at least one key throughout, and the sweep is
+    driven by the fork rows rather than the node re-key, so a run interrupted
+    between the two converges on the next attempt (a moved key finds nothing).
+    """
+    if not await stores_provenance_in_graph(graph_engine):
+        return
+
+    for old_id, new_id, dataset_id in fork_rows:
+        old_key = make_source_ref_key(dataset_id, UUID(old_id))
+        new_key = make_source_ref_key(dataset_id, UUID(new_id))
+        try:
+            node_ids = await graph_engine.find_nodes_by_source_ref(old_key)
+            edge_identities = await graph_engine.find_edges_by_source_ref(old_key)
+        except UnsupportedProvenanceCapability:
+            return
+
+        if node_ids:
+            snapshots = await graph_engine.get_node_delete_data(node_ids)
+            for node_id in node_ids:
+                run_id = _run_id_for_key(snapshots.get(node_id), old_key)
+                await graph_engine.attach_node_source_refs([node_id], [new_key], run_id)
+            await graph_engine.remove_node_source_refs(node_ids, [old_key])
+
+        if edge_identities:
+            edge_snapshots = await graph_engine.get_edge_delete_data(edge_identities)
+            for edge in edge_identities:
+                run_id = _run_id_for_key(edge_snapshots.get(edge), old_key)
+                await graph_engine.attach_edge_source_refs([edge], [new_key], run_id)
+            await graph_engine.remove_edge_source_refs(edge_identities, [old_key])
+
+        logger.info(
+            "rekey_fork_document_ids: moved provenance refs on %d node(s), %d edge(s) "
+            "from %s to %s",
+            len(node_ids),
+            len(edge_identities),
+            old_key,
+            new_key,
+        )
+
+
+async def _apply(context: MigrationContext, fork_rows: list) -> None:
+    graph_engine = context.graph_engine
+    id_map_all = {old_id: new_id for old_id, new_id, _dataset_id in fork_rows}
+    nodes, edges = await graph_engine.get_graph_data()
+    properties_by_node = {str(node_id): dict(props or {}) for node_id, props in nodes}
+
+    id_map: dict = {}
+    properties_by_id: dict = {}
+    for old_id, new_id in id_map_all.items():
+        if old_id not in properties_by_node:
+            continue  # not in this graph, or already migrated and old node gone
+        if new_id in properties_by_node:
+            continue  # idempotent re-run: canonical node already present
+        properties = dict(properties_by_node[old_id])
+        properties["id"] = old_id
+        properties_by_id[old_id] = properties
+        id_map[old_id] = new_id
+
+    if id_map:
+        await _rekey_graph_nodes(
+            graph_engine, id_map, properties_by_id, properties_by_node, edges, context
+        )
+
+    # Provenance refs move last: the node re-key restores the pre-fork keys
+    # onto the canonical document node verbatim, so the sweep must follow it.
+    await _rekey_graph_provenance(graph_engine, fork_rows)
+
+
+async def _rekey_graph_nodes(
+    graph_engine,
+    id_map: dict,
+    properties_by_id: dict,
+    properties_by_node: dict,
+    edges: list,
+    context: MigrationContext,
+) -> None:
+    normalized_edges = [
+        (str(edge[0]), str(edge[1]), edge[2], (edge[3] if len(edge) > 3 else {}) or {})
+        for edge in edges
+    ]
+
+    # Derived stores first: relational ledger references move before the graph.
+    await _update_ledger_references(id_map, context.dataset_id)
+
+    # Chunk display metadata: the chunks' document_id property follows the
+    # canonical id (property update via full-property upsert — MERGE replaces
+    # the whole blob, so the complete stored property set is carried).
+    chunk_owners = _document_chunk_ids(normalized_edges, set(id_map.keys()))
+    chunk_carriers = []
+    for chunk_id, old_document_id in chunk_owners.items():
+        chunk_properties = properties_by_node.get(chunk_id)
+        if not chunk_properties or "document_id" not in chunk_properties:
+            continue
+        chunk_carriers.append(
+            _make_node({**chunk_properties, "id": chunk_id, "document_id": id_map[old_document_id]})
+        )
+    if chunk_carriers:
+        await graph_engine.add_nodes(chunk_carriers)
+
+    # Graph last: re-key the document nodes themselves (also updates each
+    # node's own document_id property when it mirrors the node id).
+    for old_id in id_map:
+        if str(properties_by_id[old_id].get("document_id")) == old_id:
+            properties_by_id[old_id]["document_id"] = id_map[old_id]
+    remapped_edges = await _migrate_graph(graph_engine, id_map, properties_by_id, normalized_edges)
+    logger.info(
+        "rekey_fork_document_ids: re-keyed %d fork document node(s), %d edge(s)",
+        len(id_map),
+        remapped_edges,
+    )
+
+
+async def migrate(context: MigrationContext) -> None:
+    fork_rows = await _fork_rows(context.dataset_id)
+    if not fork_rows:
+        return
+    await _apply(context, fork_rows)
+
+
+async def downgrade(context: MigrationContext) -> None:
+    """Reverse: move fork document nodes back to their pre-fork (legacy) ids."""
+    forward = await _fork_rows(context.dataset_id)
+    if not forward:
+        return
+    await _apply(context, [(new_id, old_id, dataset_id) for old_id, new_id, dataset_id in forward])

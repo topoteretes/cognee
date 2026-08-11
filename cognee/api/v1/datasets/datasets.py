@@ -150,7 +150,7 @@ class datasets:
         # on this dataset and exclude concurrent deletes.
         async with dataset_lock(dataset.id):
             # Every id ever issued keeps resolving: exact id first, then the
-            # recorded original of a backfill-split row (split_from_data_id).
+            # recorded original of a backfill-split row (legacy_id).
             from cognee.modules.data.methods import resolve_data_id
 
             resolved_id = await resolve_data_id(dataset.id, data_id)

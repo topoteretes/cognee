@@ -78,13 +78,28 @@ async def update(
     if not user:
         user = await get_default_user()
 
+    # Lineage capture (flatten-on-write): the replacement row must keep
+    # resolving under every id the user ever held for this document.
+    from cognee.infrastructure.databases.relational import get_relational_engine
+    from cognee.modules.data.methods import resolve_data_id
+    from cognee.modules.data.models import Data
+
+    original_external_id = None
+    resolved_id = await resolve_data_id(dataset_id, data_id)
+    if resolved_id is not None:
+        db_engine = get_relational_engine()
+        async with db_engine.get_async_session() as session:
+            old_row = await session.get(Data, resolved_id)
+            if old_row is not None:
+                original_external_id = old_row.legacy_id or old_row.id
+
     await datasets.delete_data(
         dataset_id=dataset_id,
         data_id=data_id,
         user=user,
     )
 
-    await add(
+    add_run = await add(
         data=data,
         dataset_id=dataset_id,
         user=user,
@@ -95,6 +110,24 @@ async def update(
         incremental_loading=incremental_loading,
         data_cache=data_cache,
     )
+
+    # Stamp the replacement row with the original external id, so the user's
+    # pre-update mapping keeps resolving. First-wins: never overwrite an
+    # existing lineage (the row may itself be a fork of an older id).
+    ingestion_info = getattr(add_run, "data_ingestion_info", None) or []
+    new_data_id = ingestion_info[0].get("data_id") if ingestion_info else None
+    if (
+        original_external_id is not None
+        and new_data_id is not None
+        and str(new_data_id) != str(original_external_id)
+    ):
+        db_engine = get_relational_engine()
+        async with db_engine.get_async_session() as session:
+            new_row = await session.get(Data, new_data_id)
+            if new_row is not None and new_row.legacy_id is None:
+                new_row.legacy_id = original_external_id
+                await session.merge(new_row)
+                await session.commit()
 
     cognify_run = await cognify(
         datasets=[dataset_id],

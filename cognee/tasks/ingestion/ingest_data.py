@@ -16,6 +16,7 @@ from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_path
 from cognee.modules.data.methods import (
     get_authorized_existing_datasets,
+    resolve_data_id,
     get_dataset_data,
     load_or_create_datasets,
 )
@@ -102,7 +103,12 @@ async def ingest_data(
                 data_id = await ingestion.identify(classified_data, user, dataset.id)
 
             if item_data_id is not None:
-                data_id = item_data_id
+                # A pinned id may be one the user held before a fork/update —
+                # resolve it (exact, then legacy) instead of minting a new row
+                # under a legacy value. Unknown pins stay as-is (dlt mints
+                # stable ids through this path deliberately).
+                resolved_pin = await resolve_data_id(dataset.id, item_data_id)
+                data_id = resolved_pin if resolved_pin is not None else item_data_id
             elif data_id is None:
                 data_id = batch_id_by_hash.get(item_content_hash) or uuid4()
             batch_id_by_hash.setdefault(item_content_hash, data_id)
