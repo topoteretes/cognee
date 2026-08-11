@@ -19,7 +19,7 @@ from .bucketing.graph.placement import (
     validate_graph_buckets_can_be_extended,
     validate_vector_buckets_can_be_extended,
 )
-from .build import build_context_index, group_buckets_by_level
+from .build import BuildStrategyName, build_context_index, group_buckets_by_level
 from .bucketing_strategy import BucketingStrategyName
 from .load import dataset_id_from_context, load_context_index_input_from_graph
 from .models import GlobalContextIndexUpdateData, SummaryNode
@@ -40,6 +40,7 @@ def validate_global_context_index_config(
     placement_distance_threshold: float,
     bucketing_strategy: BucketingStrategyName,
     min_overlap: float,
+    build_strategy: BuildStrategyName = "seed_and_absorb",
 ) -> None:
     if isinstance(max_bucket_size, bool) or not isinstance(max_bucket_size, int):
         raise ValueError("max_bucket_size must be an integer.")
@@ -55,6 +56,9 @@ def validate_global_context_index_config(
 
     if bucketing_strategy not in ("vector", "graph"):
         raise ValueError('bucketing_strategy must be "vector" or "graph".')
+
+    if build_strategy not in ("seed_and_absorb", "divisive"):
+        raise ValueError('build_strategy must be "seed_and_absorb" or "divisive".')
 
     if isinstance(min_overlap, bool) or not isinstance(min_overlap, Real):
         raise ValueError("min_overlap must be a finite number in [0.0, 1.0].")
@@ -241,6 +245,7 @@ async def build_and_persist_context_index(
     min_overlap: float,
     graph_bucketing_inputs: GraphBucketingInputs | None,
     ctx: PipelineContext | None,
+    build_strategy: BuildStrategyName = "seed_and_absorb",
 ) -> list[GlobalContextSummary]:
     inputs = unpack_graph_bucketing_inputs(graph_bucketing_inputs)
     context_datapoints, assignments = await build_context_index(
@@ -253,6 +258,7 @@ async def build_and_persist_context_index(
         max_bucket_size=max_bucket_size,
         placement_distance_threshold=placement_distance_threshold,
         bucketing_strategy=bucketing_strategy,
+        build_strategy=build_strategy,
         min_overlap=min_overlap,
         entities_by_summary_id=inputs.entities_by_summary_id,
         idf_weights=inputs.idf_weights,
@@ -274,6 +280,7 @@ async def update_global_context_index(
     max_bucket_size: int = 20,
     placement_distance_threshold: float = 0.5,
     bucketing_strategy: BucketingStrategyName = "vector",
+    build_strategy: BuildStrategyName = "seed_and_absorb",
     min_overlap: float = 0.05,
     ctx: PipelineContext | None = None,
 ) -> list[GlobalContextSummary]:
@@ -288,12 +295,22 @@ async def update_global_context_index(
     vector-built buckets cannot be extended by graph incremental mode, and
     existing graph-built buckets cannot be extended by vector incremental mode;
     use ``rebuild=True`` to switch strategies.
+
+    ``build_strategy="divisive"`` only takes effect when building a dataset's
+    index for the very first time (no existing buckets or root at all,
+    including right after ``rebuild=True`` wipes the index) -- it picks poles
+    top-down instead of seeding-and-absorbing bottom-up. If the dataset
+    already has an index, this parameter has no effect and ordinary
+    ``bucketing_strategy`` incremental placement is used (divisively-built
+    buckets are structurally identical to bottom-up ones, so this is always
+    safe, never inconsistent -- see COG-6130).
     """
     validate_global_context_index_config(
         max_bucket_size,
         placement_distance_threshold,
         bucketing_strategy,
         min_overlap,
+        build_strategy,
     )
     scope = await load_update_scope(data, bucketing_strategy, ctx)
     unified_engine, graph_bucketing_inputs = await prepare_existing_context_index(
@@ -328,4 +345,5 @@ async def update_global_context_index(
         min_overlap,
         graph_bucketing_inputs,
         ctx,
+        build_strategy,
     )

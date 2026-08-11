@@ -8,6 +8,7 @@ from cognee.tasks.memify.global_context_index import (
     extract_global_context_index_input,
     update_global_context_index,
 )
+from cognee.tasks.memify.global_context_index.build import BuildStrategyName
 from cognee.tasks.memify.global_context_index.bucketing_strategy import BucketingStrategyName
 
 
@@ -16,6 +17,7 @@ def get_global_context_index_memify_tasks(
     placement_distance_threshold: float = 0.5,
     rebuild: bool = False,
     bucketing_strategy: BucketingStrategyName = "vector",
+    build_strategy: BuildStrategyName = "seed_and_absorb",
     min_overlap: float = 0.05,
 ):
     """
@@ -26,7 +28,8 @@ def get_global_context_index_memify_tasks(
     ``bucketing_strategy="graph"`` is experimental, uses ``min_overlap`` for
     level-0 graph placement, and falls back to vector bucketing for levels
     above 0. Switching between vector-built and graph-built indexes requires
-    ``rebuild=True``.
+    ``rebuild=True``. ``build_strategy="divisive"`` only affects a dataset's
+    very first build (see COG-6130); it has no effect on later updates.
     """
     return (
         [Task(extract_global_context_index_input)],
@@ -37,6 +40,7 @@ def get_global_context_index_memify_tasks(
                 max_bucket_size=max_bucket_size,
                 placement_distance_threshold=placement_distance_threshold,
                 bucketing_strategy=bucketing_strategy,
+                build_strategy=build_strategy,
                 min_overlap=min_overlap,
             )
         ],
@@ -51,6 +55,7 @@ async def global_context_index_pipeline(
     placement_distance_threshold: float = 0.5,
     rebuild: bool = False,
     bucketing_strategy: BucketingStrategyName = "vector",
+    build_strategy: BuildStrategyName = "seed_and_absorb",
     min_overlap: float = 0.05,
 ):
     """
@@ -65,6 +70,7 @@ async def global_context_index_pipeline(
         placement_distance_threshold=placement_distance_threshold,
         rebuild=rebuild,
         bucketing_strategy=bucketing_strategy,
+        build_strategy=build_strategy,
         min_overlap=min_overlap,
     )
 

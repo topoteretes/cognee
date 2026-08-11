@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 from cognee.modules.pipelines.models import PipelineContext
 from cognee.tasks.summarization.models import GlobalContextSummary
 
+from .bucketing.divisive.placement import build_divisive_buckets_for_level
 from .bucketing.graph.placement import (
     place_graph_summaries_incrementally,
     rebuild_graph_buckets_for_level,
@@ -20,6 +21,8 @@ from .summarize import (
     build_global_context_summary_datapoint,
     generate_bucket_summary_datapoints,
 )
+
+BuildStrategyName = Literal["seed_and_absorb", "divisive"]
 
 
 @dataclass(frozen=True)
@@ -40,6 +43,8 @@ class BuildOptions:
     entity_relations: list[tuple[str, str, str]]
     edge_type_embeddings: Mapping[str, list[float]]
     pattern_distance_threshold: float
+    build_strategy: BuildStrategyName
+    is_first_build: bool
     ctx: PipelineContext | None
 
 
@@ -144,6 +149,31 @@ async def place_vector_items(
     )
 
 
+async def place_divisive_items(
+    all_items: list[SummaryNode],
+    level: int,
+    options: BuildOptions,
+) -> tuple[dict[str, SummaryNode], list[BucketAssignment]]:
+    return await build_divisive_buckets_for_level(
+        all_items,
+        level,
+        options.dataset_id,
+        options.max_bucket_size,
+        options.bucketing_strategy,
+        options.vector_engine,
+        options.entities_by_summary_id,
+        options.idf_weights,
+        options.entity_type_by_entity_id,
+        options.type_idf_weights,
+        options.entity_weight,
+        options.type_weight,
+        options.pattern_weight,
+        options.entity_relations,
+        options.edge_type_embeddings,
+        options.pattern_distance_threshold,
+    )
+
+
 async def place_items_for_level(
     changed_items: list[SummaryNode],
     all_items: list[SummaryNode],
@@ -151,6 +181,9 @@ async def place_items_for_level(
     level: int,
     options: BuildOptions,
 ) -> tuple[dict[str, SummaryNode], list[BucketAssignment]]:
+    if options.build_strategy == "divisive" and options.is_first_build and not existing_buckets:
+        return await place_divisive_items(all_items, level, options)
+
     if options.bucketing_strategy == "graph" and level == 0:
         return place_graph_items(changed_items, all_items, existing_buckets, level, options)
 
@@ -231,6 +264,7 @@ async def build_context_index(
     max_bucket_size: int,
     placement_distance_threshold: float,
     bucketing_strategy: BucketingStrategyName = "vector",
+    build_strategy: BuildStrategyName = "seed_and_absorb",
     min_overlap: float = 0.05,
     entities_by_summary_id: dict[str, set[str]] | None = None,
     idf_weights: dict[str, float] | None = None,
@@ -257,7 +291,14 @@ async def build_context_index(
     "graph" strategy's placement score weighs entity overlap, entity-type
     overlap, and relationship-pattern match, respectively. Defaults reproduce
     today's entity-only behavior exactly (see ``combined_similarity``).
+
+    ``build_strategy="divisive"`` only takes effect for a dataset's very
+    first, complete build (no existing root or buckets at all) -- it picks
+    poles top-down instead of seeding-and-absorbing bottom-up. It has no
+    effect once an index already exists; ordinary incremental placement is
+    used from then on regardless of how the index was originally built.
     """
+    is_first_build = existing_root is None and not any(buckets_by_level.values())
     options = BuildOptions(
         dataset_id=dataset_id,
         vector_engine=vector_engine,
@@ -275,6 +316,8 @@ async def build_context_index(
         entity_relations=entity_relations or [],
         edge_type_embeddings=edge_type_embeddings or {},
         pattern_distance_threshold=pattern_distance_threshold,
+        build_strategy=build_strategy,
+        is_first_build=is_first_build,
         ctx=ctx,
     )
 
