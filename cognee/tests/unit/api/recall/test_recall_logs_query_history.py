@@ -148,9 +148,8 @@ async def test_recall_logs_the_question_even_with_no_results(history, monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_recall_survives_when_logging_fails(history, monkeypatch, caplog):
-    """History is best-effort bookkeeping on the read path: a broken history
-    write logs a warning and must never fail the recall that produced it."""
+async def test_recall_raises_when_logging_fails(history, monkeypatch):
+    """A broken history write must surface, not be swallowed, so CI catches it."""
 
     async def exploding_log_query(*_args, **_kwargs):
         raise RuntimeError("history database is down")
@@ -158,14 +157,11 @@ async def test_recall_survives_when_logging_fails(history, monkeypatch, caplog):
     monkeypatch.setattr(history_mod, "log_query", exploding_log_query)
     stub_search(monkeypatch, [payload(uuid4(), "the answer")])
 
-    results = await recall(
-        "does this still answer?",
-        query_type=SearchType.GRAPH_COMPLETION,
-        dataset_ids=[uuid4()],
-        auto_route=False,
-        user=SimpleNamespace(id=uuid4()),
-    )
-
-    assert results  # the answer was returned despite the broken history store
-    assert history["queries"] == []  # nothing was recorded
-    assert any("Failed to record search history" in r.message for r in caplog.records)
+    with pytest.raises(RuntimeError, match="history database is down"):
+        await recall(
+            "does this still answer?",
+            query_type=SearchType.GRAPH_COMPLETION,
+            dataset_ids=[uuid4()],
+            auto_route=False,
+            user=SimpleNamespace(id=uuid4()),
+        )

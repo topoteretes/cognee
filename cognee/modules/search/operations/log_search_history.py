@@ -1,12 +1,8 @@
 from typing import Any, List, Optional
 from uuid import UUID
 
-from cognee.shared.logging_utils import get_logger
-
 from .log_query import log_query
 from .log_result import log_result
-
-logger = get_logger()
 
 
 def _completion_of(payload: Any) -> Optional[str]:
@@ -33,21 +29,13 @@ async def log_search_history(
 
     A payload that carries no dataset of its own — which is what happens with
     access control disabled — records ``None``.
-
-    Best-effort: history is bookkeeping on the read path, so a failed write
-    logs a warning and never fails the search that produced it.
     """
-    try:
-        payloads = [item[0] if isinstance(item, tuple) else item for item in search_results] or [
-            None
-        ]
+    payloads = [item[0] if isinstance(item, tuple) else item for item in search_results] or [None]
 
-        for payload in payloads:
-            dataset_id = getattr(payload, "dataset_id", None)
-            query = await log_query(query_text, query_type, user_id, dataset_id)
-            # Every query keeps a result row even when the search produced no text
-            # — CHUNKS and SUMMARIES return objects, not completions — so history
-            # stays one result per query, as it was before this fanned out.
-            await log_result(query.id, _completion_of(payload) or "", user_id, dataset_id)
-    except Exception as error:
-        logger.warning("Failed to record search history: %s", error)
+    for payload in payloads:
+        dataset_id = getattr(payload, "dataset_id", None)
+        query = await log_query(query_text, query_type, user_id, dataset_id)
+        # Every query keeps a result row even when the search produced no text
+        # — CHUNKS and SUMMARIES return objects, not completions — so history
+        # stays one result per query, as it was before this fanned out.
+        await log_result(query.id, _completion_of(payload) or "", user_id, dataset_id)
