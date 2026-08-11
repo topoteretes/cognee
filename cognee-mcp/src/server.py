@@ -1587,11 +1587,10 @@ async def cognify_file(
                 await cognee_client.cognify(datasets=[dataset_name])
                 logger.info(f"cognify_file: background cognify finished for '{dataset_name}'.")
             except Exception as e:
-                ts = datetime.now(timezone.utc).isoformat()
-                _task_errors.setdefault(dataset_name, []).append((ts, str(e)))
+                _record_task_error(dataset_name, str(e))
                 logger.error(f"cognify_file: background cognify failed for '{dataset_name}': {e}")
 
-    asyncio.create_task(_cognify_bg())
+    _track_background(_cognify_bg())
 
     return [
         types.TextContent(

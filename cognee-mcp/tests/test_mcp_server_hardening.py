@@ -1,8 +1,10 @@
 import asyncio
+import base64
 import hashlib
 import importlib
 import json
 import sys
+from collections import deque
 from pathlib import Path
 
 import httpx
@@ -339,6 +341,83 @@ async def test_cognify_tool_batches_add_calls(monkeypatch, tmp_path):
         "custom_prompt": "extract carefully",
         "graph_model": None,
     }
+
+
+@pytest.mark.asyncio
+async def test_cognify_file_tracks_task_and_records_error_in_bounded_history(monkeypatch):
+    import src.server as server
+
+    dataset_name = "cognify_file_failure_ds"
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    class FakeClient:
+        async def add(self, data, dataset_name=None):
+            return None
+
+        async def cognify(self, datasets=None):
+            started.set()
+            await release.wait()
+            raise RuntimeError("cognify failed")
+
+    tracked_tasks = []
+    original_track_background = server._track_background
+
+    def capture_tracked_task(coro):
+        task = original_track_background(coro)
+        tracked_tasks.append(task)
+        return task
+
+    monkeypatch.setattr(server, "cognee_client", FakeClient())
+    monkeypatch.setattr(server, "_track_background", capture_tracked_task)
+    server._task_errors.pop(dataset_name, None)
+
+    try:
+        result = await server.cognify_file(
+            filename="memory.txt",
+            content_base64=base64.b64encode(b"memory").decode("ascii"),
+            dataset_name=dataset_name,
+        )
+
+        await started.wait()
+        assert "Cognify is running in the background" in result[0].text
+        assert len(tracked_tasks) == 1
+        task = tracked_tasks[0]
+        assert task in server._background_tasks
+
+        release.set()
+        await task
+        await asyncio.sleep(0)
+
+        assert task not in server._background_tasks
+        errors = server._task_errors[dataset_name]
+        assert isinstance(errors, deque)
+        assert errors.maxlen == server._TASK_ERROR_HISTORY
+        assert errors[-1][1] == "cognify failed"
+    finally:
+        release.set()
+        await asyncio.gather(*tracked_tasks, return_exceptions=True)
+        server._task_errors.pop(dataset_name, None)
+
+
+def test_task_error_history_is_bounded():
+    import src.server as server
+
+    dataset_name = "bounded_error_history_ds"
+    server._task_errors.pop(dataset_name, None)
+
+    try:
+        for index in range(server._TASK_ERROR_HISTORY + 5):
+            server._record_task_error(dataset_name, f"error-{index}")
+
+        errors = server._task_errors[dataset_name]
+        assert isinstance(errors, deque)
+        assert errors.maxlen == server._TASK_ERROR_HISTORY
+        assert len(errors) == server._TASK_ERROR_HISTORY
+        assert errors[0][1] == "error-5"
+        assert errors[-1][1] == f"error-{server._TASK_ERROR_HISTORY + 4}"
+    finally:
+        server._task_errors.pop(dataset_name, None)
 
 
 class FakeGraph:
