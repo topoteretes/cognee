@@ -10,16 +10,16 @@ logger = get_logger("deadlock_retry")
 
 def deadlock_retry(max_retries=10):
     """
-    Decorator that automatically retries an asynchronous function when rate limit errors occur.
+    Decorator that automatically retries an asynchronous Neo4j operation on
+    transient failures.
 
-    This decorator implements an exponential backoff strategy with jitter
-    to handle rate limit errors efficiently.
+    Retries when the wrapped call raises ``DatabaseUnavailable`` or a Neo4j
+    deadlock/transient error (``DeadlockDetected`` / ``Neo.TransientError``),
+    using an exponential backoff with jitter between attempts. Any other
+    ``Neo4jError`` is re-raised immediately.
 
     Args:
-        max_retries: Maximum number of retry attempts.
-        initial_backoff: Initial backoff time in seconds.
-        backoff_factor: Multiplier for exponential backoff.
-        jitter: Jitter factor to avoid the thundering herd problem.
+        max_retries: Maximum number of retry attempts after the initial call.
 
     Returns:
         The decorated async function.
@@ -35,8 +35,8 @@ def deadlock_retry(max_retries=10):
             async def wait():
                 backoff_time = calculate_backoff(attempt)
                 logger.warning(
-                    f"Neo4j rate limit hit, retrying in {backoff_time:.2f}s "
-                    f"Attempt {attempt}/{max_retries}"
+                    f"Neo4j transient error, retrying in {backoff_time:.2f}s "
+                    f"(attempt {attempt}/{max_retries})"
                 )
                 await asyncio.sleep(backoff_time)
 
@@ -44,6 +44,16 @@ def deadlock_retry(max_retries=10):
                 try:
                     attempt += 1
                     return await func(self, *args, **kwargs)
+                except DatabaseUnavailable:
+                    # DatabaseUnavailable subclasses Neo4jError, so this handler
+                    # must precede the `except Neo4jError` below — otherwise the
+                    # broader handler catches it first and this branch is dead
+                    # code. Use the same `attempt > max_retries` bound as the
+                    # Neo4jError branch so both retry the same number of times.
+                    if attempt > max_retries:
+                        raise  # Re-raise the original error
+
+                    await wait()
                 except Neo4jError as error:
                     if attempt > max_retries:
                         raise  # Re-raise the original error
@@ -53,11 +63,6 @@ def deadlock_retry(max_retries=10):
                         await wait()
                     else:
                         raise  # Re-raise the original error
-                except DatabaseUnavailable:
-                    if attempt >= max_retries:
-                        raise  # Re-raise the original error
-
-                    await wait()
 
         return wrapper
 
