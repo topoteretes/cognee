@@ -140,6 +140,48 @@ def get_permissions_router() -> APIRouter:
             status_code=200, content={"message": "Permission revoked from principal"}
         )
 
+    @permissions_router.get("/datasets/{dataset_id}/principals")
+    async def get_principals_with_dataset_permission(
+        dataset_id: UUID,
+        user: User = Depends(get_authenticated_user),
+    ):
+        """
+        List the principals (users, roles, tenants) with permission on a dataset.
+
+        The inverse of the grant/revoke endpoints above: those write access, this
+        one reads back who holds it. The authenticated user must have "share"
+        permission on the dataset — a caller who cannot share it cannot
+        enumerate who it is shared with either.
+
+        ## Path Parameters
+        - **dataset_id** (UUID): The UUID of the dataset (list yours via GET /api/v1/datasets)
+
+        ## Response
+        Returns a JSON list: [{"principal_id", "kind", "name", "permissions"}],
+        where kind is "user", "role" or "tenant", name is the user's email or the
+        role/tenant name, and permissions lists what that principal holds
+        (e.g. ["read", "write"]). A dataset shared with the whole workspace
+        appears once as a "tenant" entry, not once per member.
+
+        ## Error Codes
+        - **403 Forbidden**: Caller lacks share permission on the dataset
+        """
+        send_telemetry(
+            "Permissions API Endpoint Invoked",
+            user.id,
+            additional_properties={
+                "endpoint": f"GET /v1/permissions/datasets/{str(dataset_id)}/principals",
+                "dataset_id": str(dataset_id),
+                "cognee_version": cognee_version,
+            },
+        )
+
+        from cognee.modules.users.permissions.methods import get_dataset_principals
+
+        principals = await get_dataset_principals(dataset_id, user.id)
+
+        return JSONResponse(status_code=200, content=principals)
+
     @permissions_router.post("/roles")
     async def create_role(
         role_name: str = Query(

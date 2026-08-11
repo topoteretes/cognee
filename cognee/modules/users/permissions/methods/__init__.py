@@ -2,6 +2,7 @@ from .get_role import get_role
 from .get_tenant import get_tenant
 from .get_principal import get_principal
 from .get_principal_datasets import get_principal_datasets
+from .get_dataset_principals import get_dataset_principals
 from .get_all_user_permission_datasets import get_all_user_permission_datasets
 from .get_specific_user_permission_datasets import get_specific_user_permission_datasets
 from .check_permission_on_dataset import check_permission_on_dataset
