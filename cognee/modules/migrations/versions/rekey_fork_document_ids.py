@@ -401,7 +401,13 @@ async def migrate(context: MigrationContext) -> None:
 
 
 async def downgrade(context: MigrationContext) -> None:
-    """Reverse: move fork document nodes back to their pre-fork (legacy) ids."""
+    """Reverse: move fork document nodes back to their pre-fork (legacy) ids.
+
+    ROLLBACK ORDER: run this BEFORE the alembic downgrade (``d6e8f0a2b4c6``).
+    The reverse map here is built from ``Data.legacy_id``; the alembic
+    downgrade drops that column, after which this no-ops and fork graphs stay
+    stranded on canonical ids the old code cannot resolve.
+    """
     forward = await _fork_rows(context.dataset_id)
     if not forward:
         return

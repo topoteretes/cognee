@@ -154,6 +154,16 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """Restore the old schema shape: recreate ``dataset_data`` (one membership
+    per scoped row — data-preserving, never id-merging) and drop ``legacy_id``.
+
+    ROLLBACK ORDER: run the ``rekey_fork_document_ids`` chain migration's
+    downgrade BEFORE this one. Its reverse map is built from ``legacy_id``;
+    dropping the column first leaves fork graphs stranded on canonical ids
+    with no way back. Dropping ``legacy_id`` also loses fork lineage
+    permanently — the old schema has nowhere to keep it, so a later
+    re-upgrade re-splits shared rows with fresh ids.
+    """
     conn = op.get_bind()
     insp = sa.inspect(conn)
 
