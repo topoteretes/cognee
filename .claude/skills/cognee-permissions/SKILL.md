@@ -63,9 +63,10 @@ Everything reduces to one relation — **a grant**: *principal* × *permission*
    names is code (`CAPABILITY_TYPES` in `permission_types.py`), not a
    database table, "because the code is what gives each name meaning";
    only the assignment of a capability to a principal is data. `tenant_id`
-   is stored on every row even where it is derivable from the principal —
-   deliberate redundancy, so "a grant leaking across tenants becomes
-   unrepresentable instead of merely forbidden". Resolution
+   is stored on every row because a user can belong to multiple tenants:
+   it pins each grant to the user's membership in one specific tenant, so
+   holding a capability in one tenant never carries over to the same
+   user's other tenants. Resolution
    (`get_effective_capabilities(user, tenant)`) returns the union of what
    the tenant grants all of its members, what the user's roles in that
    tenant grant, and what the user was granted personally — there is no
@@ -92,9 +93,6 @@ Two behaviors worth knowing:
   dataset you cannot read yields `[]` — deliberate, to avoid leaking which
   datasets exist. When debugging "search returns nothing", check grants
   before checking the graph.
-- Document-level filtering runs inside the search path: the datasets
-  readable by the user (own + role + tenant grants) are collected first,
-  and retrieval is restricted to documents of those datasets.
 
 ## Roles, tenants, and who may manage them
 
