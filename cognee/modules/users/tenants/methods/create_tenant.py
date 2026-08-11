@@ -25,10 +25,14 @@ async def create_tenant(
         None
     """
     db_engine = get_relational_engine()
+
+    # Resolve the user (opens its own session) BEFORE opening ours, so this
+    # request never holds two pooled connections at once — that overlap
+    # deadlocks the pool under concurrency (issue #4197 class).
+    user = await get_user(user_id)
+
     async with db_engine.get_async_session() as session:
         try:
-            user = await get_user(user_id)
-
             tenant = Tenant(name=tenant_name, owner_id=user_id)
             session.add(tenant)
             await session.flush()

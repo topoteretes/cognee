@@ -1468,3 +1468,150 @@ def test_proxied_method_exceptions_always_propagate_to_the_caller():
     engine = cache.get_or_create("k", _EngineWithBadMethod)
     with pytest.raises(RuntimeError, match="boom in engine usage"):
         engine.query()
+
+
+def test_evict_and_close_closes_despite_outstanding_proxy():
+    """evict_and_close is deliberate teardown: an idle holder pinning the
+    lease proxy must not defer the close (a deferred close keeps a worker
+    process — and its file locks — alive indefinitely)."""
+    cache = ClosingLRUCache(maxsize=8, lease=True)
+    value = _Closeable("held")
+    proxy = cache.get_or_create("k", lambda: value)
+
+    assert cache.evict_and_close("k") is True
+    assert value.closed is True, "close must not be deferred behind the live proxy"
+    assert cache.cache_info().currsize == 0
+
+    # The stray holder's proxy finalizer must not double-close.
+    value.closed = "closed-once"
+    del proxy
+    gc.collect()
+    assert value.closed == "closed-once"
+
+
+def test_evict_and_close_missing_key_returns_false():
+    cache = ClosingLRUCache(maxsize=8, lease=True)
+    assert cache.evict_and_close("absent") is False
+
+
+def test_decorator_cache_evict_and_close():
+    """Decorator exposure: key scheme matches cache_evict."""
+
+    @closing_lru_cache(maxsize=4, lease=True)
+    def create(name):
+        return _Closeable(name)
+
+    proxy = create("a")
+    assert create.cache_evict_and_close("a") is True
+    assert proxy.__wrapped__.closed is True
+    assert create.cache_evict_and_close("a") is False
+
+
+def test_touch_refreshes_idle_timestamp():
+    cache = ClosingLRUCache(maxsize=8, lease=True)
+    cache.get_or_create("k", lambda: _Closeable("v"))
+
+    cache._cache["k"].last_touched -= 1000
+    assert cache.touch("k") is True
+    import time
+
+    assert time.monotonic() - cache._cache["k"].last_touched < 5
+    assert cache.touch("absent") is False
+
+
+class _SubprocessCloseable(_Closeable):
+    """Stub for a subprocess-backed adapter as the idle sweep sees it."""
+
+    _subprocess_mode = True
+
+
+def test_evict_and_close_idle_closes_only_expired():
+    cache = ClosingLRUCache(maxsize=8, lease=True)
+    stale, fresh = _SubprocessCloseable("stale"), _SubprocessCloseable("fresh")
+    cache.get_or_create("stale", lambda: stale)
+    cache.get_or_create("fresh", lambda: fresh)
+    cache._cache["stale"].last_touched -= 1000
+
+    assert cache.evict_and_close_idle(900) == 1
+    assert stale.closed is True
+    assert fresh.closed is False
+    assert cache.cache_info().currsize == 1
+
+
+def test_evict_and_close_idle_skips_pinned():
+    """An active dataset's engine must never be reaped, no matter how old its
+    timestamp (a query can outlive the TTL)."""
+    cache = ClosingLRUCache(maxsize=8, lease=True, pinned_predicate=lambda key: key == "active")
+    active, idle = _SubprocessCloseable("active"), _SubprocessCloseable("idle")
+    cache.get_or_create("active", lambda: active)
+    cache.get_or_create("idle", lambda: idle)
+    cache._cache["active"].last_touched -= 1000
+    cache._cache["idle"].last_touched -= 1000
+
+    assert cache.evict_and_close_idle(900) == 1
+    assert active.closed is False
+    assert idle.closed is True
+
+
+def test_evict_and_close_idle_skips_non_subprocess_values():
+    """Remote/in-process adapters (no ``_subprocess_mode``) are never reaped:
+    the keep-alive lifecycle only governs worker-backed engines. They stay
+    cached under LRU capacity rules, and their loop-bound close (e.g. a
+    SQLAlchemy pool dispose) is never run from the reaper thread."""
+    cache = ClosingLRUCache(maxsize=8, lease=True)
+    worker, remote = _SubprocessCloseable("worker"), _Closeable("remote")
+    cache.get_or_create("worker", lambda: worker)
+    cache.get_or_create("remote", lambda: remote)
+    cache._cache["worker"].last_touched -= 1000
+    cache._cache["remote"].last_touched -= 1000
+
+    assert cache.evict_and_close_idle(900) == 1
+    assert worker.closed is True
+    assert remote.closed is False
+    assert cache.contains("remote"), "remote adapter must stay cached"
+
+
+def test_cache_hit_refreshes_idle_timestamp():
+    cache = ClosingLRUCache(maxsize=8, lease=True)
+    cache.get_or_create("k", lambda: _Closeable("v"))
+    cache._cache["k"].last_touched -= 1000
+
+    cache.get_or_create("k", lambda: _Closeable("never"))
+    import time
+
+    assert time.monotonic() - cache._cache["k"].last_touched < 5
+
+
+def test_evict_and_close_idle_all_sweeps_decorated_caches():
+    """The reaper's single entry point: decorated caches register themselves,
+    and one sweep covers them all — closing only idle subprocess-backed
+    values, leaving remote adapters and fresh entries alone."""
+    from cognee.infrastructure.databases.utils.closing_lru_cache import (
+        evict_and_close_idle_all,
+    )
+
+    @closing_lru_cache(maxsize=4, lease=True)
+    def graph_like(name):
+        return _SubprocessCloseable(name)
+
+    @closing_lru_cache(maxsize=4, lease=True)
+    def remote_like(name):
+        return _Closeable(name)
+
+    stale = graph_like("stale").__wrapped__
+    fresh = graph_like("fresh").__wrapped__
+    remote = remote_like("remote").__wrapped__
+
+    # Back-date the idle candidates through the registry itself.
+    import cognee.infrastructure.databases.utils.closing_lru_cache as clc
+
+    for cache in list(clc._DECORATED_CACHES):
+        for entry in cache._cache.values():
+            if entry.value in (stale, remote):
+                entry.last_touched -= 1000
+
+    closed = evict_and_close_idle_all(900)
+    assert closed >= 1
+    assert stale.closed is True, "idle subprocess value must be reaped"
+    assert fresh.closed is False, "fresh value must survive"
+    assert remote.closed is False, "non-subprocess value must never be reaped"

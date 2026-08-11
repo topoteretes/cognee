@@ -51,7 +51,6 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # Then, add the rest of the project source code and install it
 # Installing separately from its dependencies allows optimal layer caching
 COPY ./cognee /app/cognee
-COPY ./distributed /app/distributed
 COPY ./cognee_db_workers /app/cognee_db_workers
 # Compatibility shim that re-exports ladybug under the legacy `kuzu`
 # module name. Listed in [tool.hatch.build.targets.wheel] packages, and

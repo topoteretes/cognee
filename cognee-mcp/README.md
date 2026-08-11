@@ -151,7 +151,6 @@ If you'd rather run cognee-mcp in a container, you have two options:
       - `neptune` - AWS Neptune support
       - `chromadb` - ChromaDB vector store support
       - `scraping` - Web scraping capabilities
-      - `distributed` - Modal distributed execution
       - `langchain` - LangChain integration
       - `llama-index` - LlamaIndex integration
       - `anthropic` - Anthropic models

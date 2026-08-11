@@ -22,6 +22,7 @@ from cognee.modules.users.exceptions.exceptions import PermissionDeniedError
 from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError
 from cognee.api.v1.add.routers.get_add_router import get_add_router
 from cognee.api.v1.cognify.routers.get_cognify_router import get_cognify_router
+from cognee.api.v1.datasets.routers.get_datasets_router import get_datasets_router
 from cognee.api.v1.memify.routers.get_memify_router import get_memify_router
 from cognee.api.v1.improve.routers.get_improve_router import get_improve_router
 from cognee.api.v1.recall.routers.get_recall_router import get_recall_router
@@ -64,6 +65,7 @@ def app():
     app = FastAPI()
     app.include_router(get_add_router(), prefix="/add")
     app.include_router(get_cognify_router(), prefix="/cognify")
+    app.include_router(get_datasets_router(), prefix="/datasets")
     app.include_router(get_improve_router(), prefix="/improve")
     app.include_router(get_memify_router(), prefix="/memify")
     app.include_router(get_recall_router(), prefix="/recall")
@@ -107,9 +109,12 @@ def _restore_api_package_functions():
     """
     import cognee.api.v1.add as add_pkg
     import cognee.api.v1.cognify as cognify_pkg
-    import cognee.api.v1.memify as memify_pkg
     import cognee.api.v1.search as search_pkg
     import cognee.api.v1.update as update_pkg
+
+    # The memify router imports from cognee.modules.memify (not cognee.api.v1.memify),
+    # so that is the package the memify tests patch and the one that must be restored.
+    import cognee.modules.memify as memify_pkg
 
     targets = [
         (add_pkg, "add"),
@@ -423,6 +428,20 @@ class TestMemifyEndpoint:
 
 
 class TestUpdateEndpoint:
+    def test_update_missing_file_returns_422_without_calling_update(self, client, monkeypatch):
+        import cognee.api.v1.update as update_pkg
+
+        update = AsyncMock()
+        monkeypatch.setattr(update_pkg, "update", update)
+
+        resp = client.patch(
+            "/update",
+            params={"data_id": str(uuid4()), "dataset_id": str(uuid4())},
+        )
+
+        assert resp.status_code == 422
+        update.assert_not_awaited()
+
     def test_update_pipeline_errored_returns_500(self, client):
         import cognee.api.v1.update as update_pkg
 
@@ -465,6 +484,54 @@ class TestUpdateEndpoint:
         )
         assert resp.status_code == 500
         assert resp.json()["error"] == "Internal server error"
+
+
+# ---------------------------------------------------------------------------
+# Datasets endpoint – regression: server errors must return 500, not 418
+# ---------------------------------------------------------------------------
+
+
+class TestDatasetsEndpoint:
+    def test_get_datasets_internal_error_returns_500(self, client, monkeypatch):
+        router_module = importlib.import_module(
+            "cognee.api.v1.datasets.routers.get_datasets_router"
+        )
+        monkeypatch.setattr(
+            router_module,
+            "get_all_user_permission_datasets",
+            AsyncMock(side_effect=RuntimeError("unexpected")),
+        )
+
+        resp = client.get("/datasets")
+        assert resp.status_code == 500
+        assert "Error retrieving datasets" in resp.json()["detail"]
+
+    def test_create_dataset_internal_error_returns_500(self, client, monkeypatch):
+        router_module = importlib.import_module(
+            "cognee.api.v1.datasets.routers.get_datasets_router"
+        )
+        monkeypatch.setattr(
+            router_module,
+            "get_datasets_by_name",
+            AsyncMock(side_effect=RuntimeError("unexpected")),
+        )
+
+        resp = client.post("/datasets", json={"name": "test_dataset"})
+        assert resp.status_code == 500
+        assert "Error creating dataset" in resp.json()["detail"]
+
+
+# ---------------------------------------------------------------------------
+# Exception base class – regression: default status code must be 500, not 418
+# ---------------------------------------------------------------------------
+
+
+class TestCogneeApiErrorDefaults:
+    def test_base_exception_defaults_to_500(self):
+        from cognee.exceptions.exceptions import CogneeApiError
+
+        exc = CogneeApiError(message="test error", log=False)
+        assert exc.status_code == 500
 
 
 # ---------------------------------------------------------------------------

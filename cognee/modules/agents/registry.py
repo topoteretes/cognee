@@ -79,7 +79,7 @@ def build_agent_connection_id(
     user_id: str | None = None,
 ) -> str:
     identity = f"{agent_session_name}|{user_id or ''}"
-    digest = hashlib.sha1(identity.encode("utf-8")).hexdigest()[:16]
+    digest = hashlib.blake2s(identity.encode("utf-8"), digest_size=8).hexdigest()
     base = re.sub(r"[^a-zA-Z0-9_-]+", "-", agent_session_name).strip("-")
     base = base[-48:] if len(base) > 48 else base
     return f"{base or 'agent'}-{digest}"

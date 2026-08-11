@@ -1,5 +1,6 @@
 import asyncio
 import time
+from pathlib import Path
 from uuid import UUID
 from typing import Union, BinaryIO, List, Optional, Any, Literal, TYPE_CHECKING
 
@@ -875,26 +876,42 @@ async def remember(
         )
 
 
-def _materialize_inline_skill(skills_text, skill_name):
-    """Write inline SKILL.md markdown into a temporary ``<slug>/SKILL.md`` folder.
+def _skill_materialize_root(dataset_id: UUID) -> Path:
+    """Stable on-disk base for materialized skills, per dataset.
+
+    Inline text and uploaded SKILL.md files are staged here so that
+    ``skill.source_dir`` (which feeds ``_scoped_skill_id``) is deterministic
+    across re-ingests. A fresh random tempdir would mint a new skill id on every
+    call and duplicate the Skill node in the graph. The system temp dir is always
+    an allowed skill source root (see ``_configured_skill_source_roots``).
+    """
+    import hashlib
+    import tempfile
+    from pathlib import Path as _Path
+
+    key = hashlib.sha256(str(dataset_id).encode("utf-8")).hexdigest()[:16]
+    return _Path(tempfile.gettempdir()) / f"cognee-skills-{key}"
+
+
+def _materialize_inline_skill(skills_text, skill_name, materialize_root):
+    """Write inline SKILL.md markdown into a deterministic ``<slug>/SKILL.md`` folder.
 
     The no-code companion to the file-upload skills path: callers can pass the
     SKILL.md body as a string (e.g. from an n8n field) instead of uploading a
     file. The parser derives the skill name from the parent directory, so the
-    file is nested under ``<slug>/``. Returns ``(cleanup_handle, source_root)``.
+    file is nested under ``<slug>/`` under the given materialization root.
+    Returns the materialization root.
     """
-    import tempfile
     from pathlib import Path as _Path
 
     slug = _Path((skill_name or "skill").strip() or "skill").name
-    tmp = tempfile.TemporaryDirectory(prefix="cognee-skills-")
-    skill_dir = _Path(tmp.name) / slug
+    skill_dir = _Path(materialize_root) / slug
     skill_dir.mkdir(parents=True, exist_ok=True)
     (skill_dir / "SKILL.md").write_text(
         skills_text if isinstance(skills_text, str) else str(skills_text),
         encoding="utf-8",
     )
-    return tmp, _Path(tmp.name)
+    return _Path(materialize_root)
 
 
 async def _remember_inner(
@@ -1026,7 +1043,6 @@ async def _remember_inner(
 
     if content_type == "skills":
         import shutil
-        import tempfile
         from pathlib import Path as _Path
 
         from cognee.context_global_variables import set_database_global_context_variables
@@ -1047,11 +1063,10 @@ async def _remember_inner(
 
         # HTTP callers (CloudClient + Swagger) deliver SKILL.md content as
         # UploadFile/file-like objects, not paths. add_skills reads paths from
-        # the local filesystem, so materialize the uploads into a tempdir
-        # under cwd (which is always allowed by _configured_skill_source_roots)
-        # before handing off. Local SDK callers continue to pass a path.
+        # the local filesystem, so materialize the uploads into a stable
+        # per-dataset temp dir before handing off. Local SDK callers continue to
+        # pass a path.
         skill_source: Any = data
-        tmp_dir: Optional[tempfile.TemporaryDirectory] = None
         normalized_uploads: list = []
         if isinstance(data, list):
             for item in data:
@@ -1060,44 +1075,56 @@ async def _remember_inner(
         elif data is not None and not isinstance(data, (str, _Path)) and hasattr(data, "read"):
             normalized_uploads.append(data)
 
-        if normalized_uploads:
-            tmp_dir = tempfile.TemporaryDirectory(prefix="cognee-skills-", dir=_Path.cwd())
-            tmp_root = _Path(tmp_dir.name)
-            for upload in normalized_uploads:
-                rel_name = (
-                    getattr(upload, "filename", None) or getattr(upload, "name", None) or "SKILL.md"
-                )
-                # Defensive: reject absolute paths / traversal in client-sent names.
-                safe_rel = _Path(rel_name).as_posix().lstrip("/")
-                if ".." in _Path(safe_rel).parts:
-                    raise ValueError(f"Invalid skill filename: {rel_name}")
-                dest = tmp_root / safe_rel
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                # UploadFile.read() is async; plain file-like .read() is sync.
-                read_result = upload.read()
-                payload = await read_result if hasattr(read_result, "__await__") else read_result
-                if isinstance(payload, str):
-                    payload = payload.encode("utf-8")
-                dest.write_bytes(payload or b"")
-            skill_files = list(tmp_root.rglob("SKILL.md"))
-            if skill_files:
-                skill_source = tmp_root
-            else:
-                raw_files = [path for path in tmp_root.rglob("*") if path.is_file()]
-                if raw_files:
-                    canonical_root = tmp_root / "__canonical_skills__"
-                    for index, raw_file in enumerate(raw_files):
-                        target_dir = canonical_root / f"skill-{index:04d}"
-                        target_dir.mkdir(parents=True, exist_ok=True)
-                        shutil.copy2(raw_file, target_dir / "SKILL.md")
-                    skill_source = canonical_root
-                else:
-                    skill_source = tmp_root
+        # A deterministic root keeps skill.source_dir (and therefore the
+        # _scoped_skill_id uuid5) stable across re-ingests, so re-ingesting an
+        # edited SKILL.md upserts the existing Skill node instead of creating a
+        # duplicate.
+        materialize_root: Optional[_Path] = None
+        if normalized_uploads or skills_text:
+            root = _skill_materialize_root(dataset.id)
+            root.mkdir(parents=True, exist_ok=True)
+            materialize_root = root
 
-        # No-code path: inline SKILL.md markdown supplied as a string instead of
-        # an uploaded file. Reuses the same add_skills pipeline as the upload path.
-        if not normalized_uploads and skills_text:
-            tmp_dir, skill_source = _materialize_inline_skill(skills_text, skill_name)
+            if normalized_uploads:
+                for upload in normalized_uploads:
+                    rel_name = (
+                        getattr(upload, "filename", None)
+                        or getattr(upload, "name", None)
+                        or "SKILL.md"
+                    )
+                    # Defensive: reject absolute paths / traversal in client-sent names.
+                    safe_rel = _Path(rel_name).as_posix().lstrip("/")
+                    if ".." in _Path(safe_rel).parts:
+                        raise ValueError(f"Invalid skill filename: {rel_name}")
+                    dest = root / safe_rel
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    # UploadFile.read() is async; plain file-like .read() is sync.
+                    read_result = upload.read()
+                    payload = (
+                        await read_result if hasattr(read_result, "__await__") else read_result
+                    )
+                    if isinstance(payload, str):
+                        payload = payload.encode("utf-8")
+                    dest.write_bytes(payload or b"")
+                skill_files = list(root.rglob("SKILL.md"))
+                if skill_files:
+                    skill_source = root
+                else:
+                    raw_files = [path for path in root.rglob("*") if path.is_file()]
+                    if raw_files:
+                        canonical_root = root / "__canonical_skills__"
+                        for index, raw_file in enumerate(raw_files):
+                            target_dir = canonical_root / f"skill-{index:04d}"
+                            target_dir.mkdir(parents=True, exist_ok=True)
+                            shutil.copy2(raw_file, target_dir / "SKILL.md")
+                        skill_source = canonical_root
+                    else:
+                        skill_source = root
+            else:
+                # No-code path: inline SKILL.md markdown supplied as a string
+                # instead of an uploaded file. Reuses the same add_skills
+                # pipeline as the upload path.
+                skill_source = _materialize_inline_skill(skills_text, skill_name, root)
 
         try:
             async with set_database_global_context_variables(dataset.id, owner_id):
@@ -1108,8 +1135,8 @@ async def _remember_inner(
                     dataset=dataset,
                 )
         finally:
-            if tmp_dir is not None:
-                tmp_dir.cleanup()
+            if materialize_root is not None:
+                shutil.rmtree(materialize_root, ignore_errors=True)
         result = RememberResult(
             status="completed",
             dataset_name=dataset.name,
