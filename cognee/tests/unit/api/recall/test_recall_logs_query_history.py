@@ -144,7 +144,8 @@ async def test_recall_logs_the_question_even_with_no_results(history, monkeypatc
 
     assert len(history["queries"]) == 1
     assert history["queries"][0]["dataset_id"] is None
-    assert history["results"] == []
+    # The query still keeps its result row, empty — history stays 1:1.
+    assert [row["value"] for row in history["results"]] == [""]
 
 
 @pytest.mark.asyncio

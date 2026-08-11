@@ -36,6 +36,7 @@ async def log_search_history(
     for payload in payloads:
         dataset_id = getattr(payload, "dataset_id", None) or fallback_dataset_id
         query = await log_query(query_text, query_type, user_id, dataset_id)
-        completion = _completion_of(payload)
-        if completion:
-            await log_result(query.id, completion, user_id, dataset_id)
+        # Every query keeps a result row even when the search produced no text
+        # — CHUNKS and SUMMARIES return objects, not completions — so history
+        # stays one result per query, as it was before this fanned out.
+        await log_result(query.id, _completion_of(payload) or "", user_id, dataset_id)
