@@ -8,6 +8,8 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from cognee.api.v1.exceptions import DataNotFoundError
+from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.modules.users.methods import get_authenticated_user
 
 
@@ -68,24 +70,22 @@ def _patch_raw_download_dependencies(
     monkeypatch.setattr(
         data_methods_module,
         "get_dataset_data",
-        AsyncMock(return_value=[SimpleNamespace(id=data_id)]),
-    )
-    monkeypatch.setattr(
-        data_methods_module,
-        "get_data",
         AsyncMock(
-            return_value=SimpleNamespace(
-                id=data_id,
-                raw_data_location=raw_data_location,
-                name=name,
-                mime_type=mime_type,
-            )
+            return_value=[
+                SimpleNamespace(
+                    id=data_id,
+                    owner_id=uuid.uuid4(),
+                    raw_data_location=raw_data_location,
+                    name=name,
+                    mime_type=mime_type,
+                )
+            ]
         ),
     )
 
 
-def test_get_raw_data_local_file_downloads_bytes(client, monkeypatch, tmp_path):
-    """Downloads bytes from a file:// raw_data_location."""
+def test_get_raw_data_allows_authorized_dataset_reader(client, monkeypatch, tmp_path):
+    """Dataset read access is sufficient even when the reader does not own the data row."""
     dataset_id = uuid.uuid4()
     data_id = uuid.uuid4()
 
@@ -204,3 +204,57 @@ def test_get_raw_data_encoded_path_downloads_bytes(client, monkeypatch, tmp_path
     response = client.get(f"/api/v1/datasets/{dataset_id}/data/{data_id}/raw")
     assert response.status_code == 200
     assert response.content == content
+
+
+@pytest.mark.parametrize("permission_denied", [False, True])
+@pytest.mark.parametrize("include_data_id", [False, True])
+def test_dataset_read_endpoints_return_404_when_dataset_is_unavailable(
+    client, monkeypatch, permission_denied, include_data_id
+):
+    import importlib
+
+    datasets_router_module = importlib.import_module(
+        "cognee.api.v1.datasets.routers.get_datasets_router"
+    )
+    dataset_id = uuid.uuid4()
+    data_id = uuid.uuid4()
+    result = (
+        AsyncMock(side_effect=PermissionDeniedError("denied"))
+        if permission_denied
+        else AsyncMock(return_value=[])
+    )
+    monkeypatch.setattr(datasets_router_module, "get_authorized_existing_datasets", result)
+
+    path = f"/api/v1/datasets/{dataset_id}/data"
+    if include_data_id:
+        path += f"/{data_id}/raw"
+
+    response = client.get(path)
+
+    assert response.status_code == 404
+    assert response.json() == {"message": f"Dataset ({dataset_id}) not found."}
+
+
+def test_get_raw_data_rejects_data_from_another_dataset(client, monkeypatch):
+    import importlib
+
+    datasets_router_module = importlib.import_module(
+        "cognee.api.v1.datasets.routers.get_datasets_router"
+    )
+    data_methods_module = importlib.import_module("cognee.modules.data.methods")
+    dataset_id = uuid.uuid4()
+    requested_data_id = uuid.uuid4()
+
+    monkeypatch.setattr(
+        datasets_router_module,
+        "get_authorized_existing_datasets",
+        AsyncMock(return_value=[SimpleNamespace(id=dataset_id)]),
+    )
+    monkeypatch.setattr(
+        data_methods_module,
+        "get_dataset_data",
+        AsyncMock(return_value=[SimpleNamespace(id=uuid.uuid4())]),
+    )
+
+    with pytest.raises(DataNotFoundError):
+        client.get(f"/api/v1/datasets/{dataset_id}/data/{requested_data_id}/raw")

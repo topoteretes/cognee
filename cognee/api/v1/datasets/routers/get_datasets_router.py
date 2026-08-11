@@ -22,6 +22,7 @@ from cognee.shared.logging_utils import get_logger
 from cognee.api.v1.exceptions import DataNotFoundError
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
+from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.modules.users.permissions.methods import get_all_user_permission_datasets
 from cognee.modules.graph.methods import get_formatted_graph_data
 from cognee.modules.pipelines.models import PipelineRunStatus
@@ -33,6 +34,13 @@ logger = get_logger()
 
 class ErrorResponseDTO(BaseModel):
     message: str
+
+
+def _dataset_not_found_response(dataset_id: UUID) -> JSONResponse:
+    return JSONResponse(
+        status_code=status.HTTP_404_NOT_FOUND,
+        content=ErrorResponseDTO(message=f"Dataset ({dataset_id}) not found.").model_dump(),
+    )
 
 
 class DatasetDTO(OutDTO):
@@ -368,15 +376,15 @@ def get_datasets_router() -> APIRouter:
         from cognee.modules.data.methods import get_dataset_data
 
         # Verify user has permission to read dataset
-        dataset = await get_authorized_existing_datasets([dataset_id], "read", user)
+        try:
+            authorized_datasets = await get_authorized_existing_datasets([dataset_id], "read", user)
+        except PermissionDeniedError:
+            return _dataset_not_found_response(dataset_id)
 
-        if dataset is None:
-            return JSONResponse(
-                status_code=404,
-                content=ErrorResponseDTO(f"Dataset ({str(dataset_id)}) not found."),
-            )
+        if not authorized_datasets:
+            return _dataset_not_found_response(dataset_id)
 
-        dataset_id = dataset[0].id
+        dataset_id = authorized_datasets[0].id
 
         dataset_data = await get_dataset_data(dataset_id=dataset_id)
 
@@ -519,18 +527,18 @@ def get_datasets_router() -> APIRouter:
             },
         )
 
-        from cognee.modules.data.methods import get_data
         from cognee.modules.data.methods import get_dataset_data
 
         # Verify user has permission to read dataset
-        dataset = await get_authorized_existing_datasets([dataset_id], "read", user)
+        try:
+            authorized_datasets = await get_authorized_existing_datasets([dataset_id], "read", user)
+        except PermissionDeniedError:
+            return _dataset_not_found_response(dataset_id)
 
-        if dataset is None:
-            return JSONResponse(
-                status_code=404, content={"detail": f"Dataset ({dataset_id}) not found."}
-            )
+        if not authorized_datasets:
+            return _dataset_not_found_response(dataset_id)
 
-        dataset_data = await get_dataset_data(dataset[0].id)
+        dataset_data = await get_dataset_data(authorized_datasets[0].id)
 
         if dataset_data is None:
             raise DataNotFoundError(message=f"No data found in dataset ({dataset_id}).")
@@ -543,12 +551,7 @@ def get_datasets_router() -> APIRouter:
                 message=f"Data ({data_id}) not found in dataset ({dataset_id})."
             )
 
-        data = await get_data(user.id, data_id)
-
-        if data is None:
-            raise DataNotFoundError(
-                message=f"Data ({data_id}) not found in dataset ({dataset_id})."
-            )
+        data = matching_data[0]
 
         raw_location = data.raw_data_location
         parsed_uri = urlparse(raw_location)
