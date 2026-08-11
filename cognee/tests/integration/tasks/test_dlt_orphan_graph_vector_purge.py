@@ -1,20 +1,19 @@
-"""Regression: DLT orphan cleanup must purge the *per-dataset* graph + vector
-stores under multi-user access control, not just the relational store.
+"""A row hard-deleted upstream must vanish from ALL per-dataset stores
+(relational, graph, vector) after a re-sync, under multi-user access control.
 
-``_delete_dlt_orphans`` forgets a deleted DLT row's graph nodes + vector
-embeddings via ``delete_data_nodes_and_edges``, which resolves the graph/vector
-engines from the *ambient* async context. Under ``ENABLE_BACKEND_ACCESS_CONTROL``
-those engines are per-dataset, and the cleanup call path does not always run
-inside the dataset's DB context — the background-ingest path (``add()`` with
-``run_in_background=True``) invokes ``orphan_cleanup`` *before* any pipeline
-establishes the context. Without an explicit dataset-context wrapper the purge
-silently targets the default engines and the forgotten row's chunks/entities
-stay in the per-dataset graph + vector stores (still searchable).
+Mechanism, under stable manifest identity: the re-sync updates the SAME
+manifest Data record in place (DataItem.content_hash pierces the add
+pipeline's completed-skip), and the deleted row's derived artifacts are
+purged by ``purge_stale_dlt_source_artifacts`` at the head of the DLT route
+during re-cognify — inside the run's per-dataset DB context, so the purge
+hits the per-dataset graph + vector stores, not the default engines.
+(Historically this scenario went through ``_delete_dlt_orphans`` at add
+time: a changed source produced a NEW content-addressed id and orphaned the
+old manifest. Stable ids removed that churn; ``_delete_dlt_orphans`` now
+only handles sources that disappear entirely.)
 
-This reproduces that fresh-context condition (reset the graph/vector context
-vars, mirroring the background path) and asserts the row is purged from the
-per-dataset graph + vector stores. Local Ladybug + LanceDB, mocked LLM +
-``MOCK_EMBEDDING`` — no live credentials, no network.
+Local Ladybug + LanceDB, mocked LLM + ``MOCK_EMBEDDING`` — no live
+credentials, no network.
 """
 
 import hashlib
@@ -185,7 +184,7 @@ async def _store_counts(dataset):
 
 
 @pytest.mark.asyncio
-async def test_dlt_orphan_cleanup_purges_graph_and_vector_under_access_control(clean_env):
+async def test_deleted_row_purged_from_per_dataset_stores_on_resync(clean_env):
     user = await get_default_user()
     kwargs = dict(primary_key="id", write_disposition="merge", max_rows_per_table=0)
 
@@ -216,19 +215,17 @@ async def test_dlt_orphan_cleanup_purges_graph_and_vector_under_access_control(c
         nodes_before, vec_before = await _store_counts(dataset)
         assert nodes_before > 0 and vec_before == 2  # graph populated, 2 chunks
 
-        # Delete 'b' upstream and re-sync through the real add pipeline. Under
-        # the manifest model the whole source is one content-addressed Data
-        # record: the re-sync commits a fresh manifest (rows: only 'a') and the
-        # foreground add then runs the deferred orphan cleanup, which purges
-        # the previous manifest (rows: a, b) and all its derived artifacts.
-        # Cleanup runs *after* the pipeline's dataset context has exited — the
-        # exact condition the dataset-context wrapper in _delete_dlt_orphans
-        # exists for; without it the graph + vector purge would resolve the
-        # default engines and miss the per-dataset stores.
+        # Delete 'b' upstream and re-sync through the real add pipeline. The
+        # manifest keeps its STABLE Data id: the re-sync updates the record in
+        # place (content hash changed -> the completed-skip is pierced and
+        # pipeline_status cleared), so nothing is orphaned and the source is
+        # never absent from the relational store.
         await cognee.add(
             _dlt_source([{"id": "b", "_deleted": True}]), dataset_name=DATASET, **kwargs
         )
-        # Re-cognify the fresh manifest so the surviving row's chunk is rebuilt
+        # Re-cognify: purge_stale_dlt_source_artifacts drops the source's
+        # previous graph/vector artifacts (including row 'b') inside the
+        # run's per-dataset DB context, then the surviving row is re-emitted
         # (deterministic DLT pipeline — no LLM involved).
         await cognee.cognify(datasets=[DATASET])
 
