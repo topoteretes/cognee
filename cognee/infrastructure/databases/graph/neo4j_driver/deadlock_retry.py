@@ -17,9 +17,6 @@ def deadlock_retry(max_retries=10):
 
     Args:
         max_retries: Maximum number of retry attempts.
-        initial_backoff: Initial backoff time in seconds.
-        backoff_factor: Multiplier for exponential backoff.
-        jitter: Jitter factor to avoid the thundering herd problem.
 
     Returns:
         The decorated async function.
@@ -54,7 +51,7 @@ def deadlock_retry(max_retries=10):
                     else:
                         raise  # Re-raise the original error
                 except DatabaseUnavailable:
-                    if attempt >= max_retries:
+                    if attempt > max_retries:
                         raise  # Re-raise the original error
 
                     await wait()
