@@ -149,8 +149,6 @@ docs = [
 codegraph = [
     "fastembed<=0.8.0 ; python_version < '3.14'",
     "transformers>=4.46.3,<5",
-    "tree-sitter>=0.24.0,<0.25",
-    "tree-sitter-python>=0.23.6,<0.24",
 ]
 evals = [
     "plotly>=6.0.0,<7",
@@ -241,11 +239,6 @@ packages = ["cognee", "cognee_db_workers", "kuzu"]
 [tool.uv]
 # Note: exclude newer packages that are less than 2 days old
 exclude-newer = "2 days"
-# docling-full needs docling-core[chunking]>=2.86 (tree-sitter>=0.25) while
-# codegraph pins tree-sitter<0.25, so the two extras cannot be co-installed.
-conflicts = [
-    [{ extra = "docling-full" }, { extra = "codegraph" }],
-]
 constraint-dependencies = [
     "protobuf>=5.29.6, !=6.30.*, !=6.31.*, !=6.32.*, !=6.33.1, !=6.33.2, !=6.33.3, !=6.33.4", # protobuf 6.33.5 and higher versions + version 5.29.6
     "pyasn1>=0.6.2",
