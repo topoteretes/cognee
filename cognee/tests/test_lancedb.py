@@ -297,8 +297,11 @@ async def main():
         print(f"{result}\n")
 
     user = await get_default_user()
-    history = await get_history(user.id)
-    assert len(history) == 8, "Search history is not correct."
+    # Two datasets, so an unscoped search records a query and a result per
+    # dataset while a scoped one records a single pair: 2 + 1 + 1 + 2 = 6 queries, each with its result.
+    # limit=0 lifts get_history's default cap of 10.
+    history = await get_history(user.id, limit=0)
+    assert len(history) == 12, "Search history is not correct."
 
     await test_vector_engine_search_none_limit()
 
