@@ -55,22 +55,23 @@ Everything reduces to one relation — **a grant**: *principal* × *permission*
    `share` on the target datasets, then any principal (user, role, or
    tenant) can be granted any permission. Revocation mirrors this
    (`authorized_revoke_permission_on_datasets.py`).
-3. **Capabilities — tenant-wide grants without a dataset** (landing via
-   PR #4302, in review): the `RoleDefaultPermissions` and
-   `TenantDefaultPermissions` tables carry no dataset column, which makes
-   them a capability system mirroring how ACL grants dataset access — a
-   grant of *what a principal may do* rather than *which data it may
-   touch*. #4302 wires them up: a `PrincipalCapability` model + migration,
-   `grant_capability` / `revoke_capability` /
-   `get_effective_capabilities` methods, capability endpoints on the
-   permissions router, and resolution gated on tenant membership checked
-   once at the top (`require_tenant_membership`). Two deliberate limits:
-   `UserDefaultPermissions` stays unread (it is keyed on the user alone,
-   so honouring it would grant the capability in every tenant; a
-   per-person capability needs a `(user, tenant, permission)` triple that
-   does not exist yet), and role capability resolution only applies within
-   the role's tenant. Until #4302 merges, these tables are dormant and
-   nothing consults them.
+3. **Capabilities — tenant-scoped grants of actions, not data** (landing
+   via PR #4302, currently in review): a new `principal_capabilities`
+   table, keyed on `(principal, tenant, capability)`. Where an ACL row
+   grants access to *a dataset*, a capability grants *an action inside a
+   tenant* — the first one being `manage_users`. The catalog of capability
+   names is code (`CAPABILITY_TYPES` in `permission_types.py`), not a
+   database table, "because the code is what gives each name meaning";
+   only the assignment of a capability to a principal is data. `tenant_id`
+   is stored on every row even where it is derivable from the principal —
+   deliberate redundancy, so "a grant leaking across tenants becomes
+   unrepresentable instead of merely forbidden". Resolution
+   (`get_effective_capabilities(user, tenant)`) returns the union of what
+   the tenant grants all of its members, what the user's roles in that
+   tenant grant, and what the user was granted personally — there is no
+   deny in the model, resolution is gated on actual tenant membership, and
+   the tenant owner short-circuits as holding every capability.
+   Grant/revoke endpoints ride the permissions router.
 
 ## Where permissions are enforced
 
@@ -103,9 +104,10 @@ Two behaviors worth knowing:
   (currently `{"admin"}`, `permissions/permission_types.py`). That
   name-matching is a known footgun — any customer group that happens to be
   called "admin" gets user management — and PR #4302 replaces it: the
-  check becomes a granted *capability*, with the role-name set demoted to
-  a deprecated fallback so existing `admin` roles keep working until they
-  are granted the capability explicitly.
+  check becomes "does the requester hold the `manage_users` capability in
+  this tenant" (owner always passes), with the role-name match kept only
+  as a deprecated fallback so tenants upgrading from the old check don't
+  lose user management until their `admin` role is granted the capability.
 - **Role visibility**: members of a role can see the role itself and their
   co-members; anyone with user-management permission sees all
   (`tenants/methods/get_users_in_role.py`). Lookups are tenant-scoped — a
@@ -155,8 +157,8 @@ than query it.
 ## Key files map
 
 - Models: `cognee/modules/users/models/` — `ACL`, `Principal`, `Permission`,
-  `Role`, `Tenant`, `UserRole`, `UserTenant`, `*DefaultPermissions`,
-  `DatasetDatabase`
+  `Role`, `Tenant`, `UserRole`, `UserTenant`, `DatasetDatabase` (and
+  `PrincipalCapability` once #4302 lands)
 - Methods: `cognee/modules/users/permissions/methods/` — grant/revoke,
   checks, dataset resolution, document filtering
 - Enforcement chokepoint: `cognee/modules/data/methods/`
