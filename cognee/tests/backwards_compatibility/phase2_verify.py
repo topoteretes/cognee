@@ -35,7 +35,12 @@ is inaccessible:
   owner goes, and the graph ends empty. Delete resolves nodes via the ledger
   (``nodes.slug``), so this is the end-to-end proof of ledger/graph lockstep: a
   stale ledger id makes delete silently orphan a migrated node, which the static
-  checks above can't catch.
+  checks above can't catch. Fork rows are deleted through their PRE-FORK id.
+* fork — Phase 1 added identical content to two datasets (one shared legacy
+  row). The dataset-scoping backfill must split it into a keeper and a fork
+  row recording ``legacy_id``; the pre-fork id must resolve in both datasets
+  through ``get_data`` with dataset context, and the context-free lookup must
+  refuse with ``AmbiguousDataIdError`` naming both candidates.
 
 Completion searches are still exercised afterwards as a smoke check (must not
 raise), just not used as the accessibility gate.
@@ -90,6 +95,10 @@ Loren Ipsum Dolor sit amet, Lorem ipsum.
 
 DATASET = "lorem_ipsum"
 SEARCH_QUERY = "What is Lorem Ipsum and where does it come from?"
+
+# Fork verification — dataset names must stay in sync with phase1_seed.py.
+FORK_DATASET_A = "fork_shared_a"
+FORK_DATASET_B = "fork_shared_b"
 
 # Session takeover checks — markers must stay in sync with phase1_seed.py.
 COMPAT_SESSION_ID = "compat_session"
@@ -427,6 +436,95 @@ async def _verify_session_takeover(stage: str) -> None:
     )
 
 
+async def _verify_fork_resolution(stage: str) -> None:
+    """The legacy shared row split correctly, and the pre-fork id keeps resolving.
+
+    Phase 1 added identical content to two datasets — one shared legacy Data
+    row. The backfill must split it: one dataset keeps the original id (the
+    keeper), the other gets a fresh row recording it as ``legacy_id``. The
+    contract verified here through API calls:
+
+    * ``get_data`` with dataset context resolves the PRE-FORK id in BOTH
+      datasets, each to its own dataset's row;
+    * ``get_data`` without dataset context refuses the now-ambiguous id with
+      ``AmbiguousDataIdError`` listing both candidates (never silently returns
+      the wrong dataset's document);
+    * deletion by the pre-fork id is exercised later by the delete sweep,
+      which deletes every fork row through its legacy id (see _verify_delete).
+    """
+    from cognee.modules.data.exceptions import AmbiguousDataIdError
+    from cognee.modules.data.methods import get_data
+
+    print(f"\n[{stage}] Verifying fork split + pre-fork id resolution")
+
+    user = await get_default_user()
+    rows_by_dataset = {}
+    for dataset_name in (FORK_DATASET_A, FORK_DATASET_B):
+        datasets = await get_datasets_by_name([dataset_name], user.id)
+        if not datasets:
+            _fail(f"[{stage}] fork dataset '{dataset_name}' not found — Phase 1 seeding broke.")
+        rows = await get_dataset_data(datasets[0].id)
+        if len(rows) != 1:
+            _fail(f"[{stage}] expected 1 document in '{dataset_name}', found {len(rows)}.")
+        rows_by_dataset[dataset_name] = (datasets[0], rows[0])
+
+    (dataset_a, row_a), (dataset_b, row_b) = (
+        rows_by_dataset[FORK_DATASET_A],
+        rows_by_dataset[FORK_DATASET_B],
+    )
+
+    if row_a.id == row_b.id:
+        _fail(
+            f"[{stage}] both datasets still share one row ({row_a.id}) — the backfill "
+            "did not split the shared legacy row."
+        )
+
+    keepers = [row for row in (row_a, row_b) if row.legacy_id is None]
+    forks = [row for row in (row_a, row_b) if row.legacy_id is not None]
+    if len(keepers) != 1 or len(forks) != 1:
+        _fail(
+            f"[{stage}] expected exactly one keeper and one fork, got "
+            f"legacy_ids ({row_a.legacy_id}, {row_b.legacy_id})."
+        )
+    if str(forks[0].legacy_id) != str(keepers[0].id):
+        _fail(
+            f"[{stage}] fork legacy_id {forks[0].legacy_id} does not record the keeper id "
+            f"{keepers[0].id} — pre-fork lineage lost."
+        )
+    pre_fork_id = keepers[0].id
+
+    # Scoped resolution: the pre-fork id finds each dataset's OWN row.
+    for dataset, row in ((dataset_a, row_a), (dataset_b, row_b)):
+        resolved = await get_data(user.id, pre_fork_id, dataset.id)
+        if resolved is None or resolved.id != row.id:
+            _fail(
+                f"[{stage}] pre-fork id {pre_fork_id} resolved to "
+                f"{resolved.id if resolved else None} in dataset '{dataset.name}', "
+                f"expected {row.id}."
+            )
+
+    # Context-free lookup must refuse loudly, naming both candidates.
+    try:
+        await get_data(user.id, pre_fork_id)
+    except AmbiguousDataIdError as error:
+        candidate_datasets = {str(candidate["dataset_id"]) for candidate in error.candidates}
+        if not {str(dataset_a.id), str(dataset_b.id)} <= candidate_datasets:
+            _fail(
+                f"[{stage}] AmbiguousDataIdError candidates {candidate_datasets} do not "
+                f"cover both fork datasets."
+            )
+    else:
+        _fail(
+            f"[{stage}] context-free get_data({pre_fork_id}) returned silently — expected "
+            "AmbiguousDataIdError for a forked id."
+        )
+
+    print(
+        f"  [fork] shared row split (keeper {keepers[0].id}, fork {forks[0].id}); pre-fork id "
+        "resolves in both datasets; context-free lookup refuses with both candidates — OK"
+    )
+
+
 async def _verify_delete(stage: str) -> None:
     """Hard-delete documents one by one, checking the graph after each.
 
@@ -445,7 +543,7 @@ async def _verify_delete(stage: str) -> None:
     async with db_engine.get_async_session() as session:
         pairs = (
             await session.execute(
-                select(_ScopedData.id, _ScopedData.dataset_id).where(
+                select(_ScopedData.id, _ScopedData.dataset_id, _ScopedData.legacy_id).where(
                     _ScopedData.dataset_id.is_not(None)
                 )
             )
@@ -457,7 +555,7 @@ async def _verify_delete(stage: str) -> None:
     dataset_rows = await get_dataset_databases()
     owner_by_dataset = {row.dataset_id: row.owner_id for row in dataset_rows} or None
 
-    for index, (data_id, dataset_id) in enumerate(pairs, start=1):
+    for index, (data_id, dataset_id, legacy_id) in enumerate(pairs, start=1):
         expected_gone_nodes, expected_gone_edges = await _ledger_expectations(
             data_id, dataset_id, scope_to_dataset=owner_by_dataset is not None
         )
@@ -465,7 +563,11 @@ async def _verify_delete(stage: str) -> None:
             dataset_id, owner_by_dataset
         )
 
-        await cognee.delete(data_id=data_id, dataset_id=dataset_id, mode="hard")
+        # Fork rows are deleted through their PRE-FORK id on purpose: this is
+        # the end-to-end proof that every id ever issued keeps resolving in
+        # the public delete API. Ledger expectations above stay keyed to the
+        # canonical id, so a resolution failure shows up as missed nodes.
+        await cognee.delete(data_id=legacy_id or data_id, dataset_id=dataset_id, mode="hard")
 
         after_nodes, _, after_edges = await _snapshot_dataset_graph(dataset_id, owner_by_dataset)
         doc_tag = f"document {index}/{len(pairs)} ({data_id})"
@@ -569,6 +671,10 @@ async def main():
 
     # ── Step 1: legacy data must be accessible & correctly migrated ───────────
     await _verify_access("Step 1 — legacy data after migration")
+
+    # ── Step 1b: the shared legacy row split into keeper + fork, and the
+    # pre-fork id keeps resolving through the API (both datasets + ambiguity) ──
+    await _verify_fork_resolution("Step 1b — fork split + pre-fork id resolution")
 
     # ── Step 2: re-add + re-cognify with the current branch ───────────────────
     # Re-cognifying the same dataset is what surfaced #2510's EntityAlreadyExistsError.

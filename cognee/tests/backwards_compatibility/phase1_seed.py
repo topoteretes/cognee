@@ -37,6 +37,19 @@ when an unknown printer scrambled a passage of text to make a type specimen book
 
 SEARCH_QUERY = "What is Lorem Ipsum and where does it come from?"
 
+# Fork seeding: the SAME content added to TWO datasets. Under the legacy
+# version this creates ONE shared Data row (content-derived id) with a
+# membership in each dataset — the exact shape the dataset-scoping backfill
+# later splits into a keeper and a fork row. Phase 2 verifies the pre-fork id
+# keeps resolving in both datasets through the public API. Keep the dataset
+# names in sync with phase2_verify.py.
+FORK_DATASET_A = "fork_shared_a"
+FORK_DATASET_B = "fork_shared_b"
+FORK_TEXT = """
+The lighthouse keeper Mirna Kalan logged every storm in a leather almanac.
+Her brother Tomaz Kalan ground the lamp lenses from Murano glass.
+"""
+
 # Session seeding (only on legacy versions that already have session memory).
 # The facts carry distinctive markers Phase 2 greps for, so keep them in sync
 # with phase2_verify.py.
@@ -84,6 +97,12 @@ async def main():
     print(f"Phase 1 search OK. Got {len(results)} result(s):")
     for result in results:
         print(f"  - {result}")
+
+    print("Seeding the shared-row fork shape (same content in two datasets)...")
+    await cognee.add(FORK_TEXT, dataset_name=FORK_DATASET_A)
+    await cognee.add(FORK_TEXT, dataset_name=FORK_DATASET_B)
+    await cognee.cognify(datasets=[FORK_DATASET_A, FORK_DATASET_B])
+    print(f"Seeded '{FORK_DATASET_A}' and '{FORK_DATASET_B}' with identical content.")
 
     await seed_session()
 
