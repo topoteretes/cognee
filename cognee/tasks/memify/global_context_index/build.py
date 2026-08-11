@@ -37,6 +37,9 @@ class BuildOptions:
     entity_weight: float
     type_weight: float
     pattern_weight: float
+    entity_relations: list[tuple[str, str, str]]
+    edge_type_embeddings: Mapping[str, list[float]]
+    pattern_distance_threshold: float
     ctx: PipelineContext | None
 
 
@@ -86,6 +89,10 @@ def place_graph_items(
             type_idf_weights=options.type_idf_weights,
             entity_weight=options.entity_weight,
             type_weight=options.type_weight,
+            entity_relations=options.entity_relations,
+            edge_type_embeddings=options.edge_type_embeddings,
+            pattern_weight=options.pattern_weight,
+            pattern_distance_threshold=options.pattern_distance_threshold,
         )
 
     return rebuild_graph_buckets_for_level(
@@ -100,6 +107,10 @@ def place_graph_items(
         type_idf_weights=options.type_idf_weights,
         entity_weight=options.entity_weight,
         type_weight=options.type_weight,
+        entity_relations=options.entity_relations,
+        edge_type_embeddings=options.edge_type_embeddings,
+        pattern_weight=options.pattern_weight,
+        pattern_distance_threshold=options.pattern_distance_threshold,
     )
 
 
@@ -228,6 +239,9 @@ async def build_context_index(
     entity_weight: float = 1.0,
     type_weight: float = 0.0,
     pattern_weight: float = 0.0,
+    entity_relations: list[tuple[str, str, str]] | None = None,
+    edge_type_embeddings: Mapping[str, list[float]] | None = None,
+    pattern_distance_threshold: float = 0.5,
     ctx: PipelineContext | None = None,
 ) -> tuple[list[GlobalContextSummary], list[BucketAssignment]]:
     """
@@ -258,6 +272,9 @@ async def build_context_index(
         entity_weight=entity_weight,
         type_weight=type_weight,
         pattern_weight=pattern_weight,
+        entity_relations=entity_relations or [],
+        edge_type_embeddings=edge_type_embeddings or {},
+        pattern_distance_threshold=pattern_distance_threshold,
         ctx=ctx,
     )
 

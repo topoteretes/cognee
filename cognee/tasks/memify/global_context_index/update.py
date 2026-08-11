@@ -14,7 +14,7 @@ from cognee.modules.pipelines.tasks.task import task_summary
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.summarization.models import GlobalContextSummary
 
-from .bucketing.graph.inputs import load_graph_bucketing_inputs
+from .bucketing.graph.inputs import GraphBucketingInputs, load_graph_bucketing_inputs
 from .bucketing.graph.placement import (
     validate_graph_buckets_can_be_extended,
     validate_vector_buckets_can_be_extended,
@@ -26,7 +26,6 @@ from .models import GlobalContextIndexUpdateData, SummaryNode
 from .persist import delete_context_index_nodes, persist_context_index_edges
 
 logger = get_logger("global_context_index")
-GraphBucketingInputs = tuple[dict[str, set[str]], dict[str, float], dict[str, str], dict[str, float]]
 
 
 @dataclass
@@ -219,9 +218,16 @@ async def ensure_graph_bucketing_inputs(
 
 def unpack_graph_bucketing_inputs(
     graph_bucketing_inputs: GraphBucketingInputs | None,
-) -> tuple[dict[str, set[str]], dict[str, float], dict[str, str], dict[str, float]]:
+) -> GraphBucketingInputs:
     if graph_bucketing_inputs is None:
-        return {}, {}, {}, {}
+        return GraphBucketingInputs(
+            entities_by_summary_id={},
+            idf_weights={},
+            entity_type_by_entity_id={},
+            type_idf_weights={},
+            entity_relations=[],
+            edge_type_embeddings={},
+        )
     return graph_bucketing_inputs
 
 
@@ -236,9 +242,7 @@ async def build_and_persist_context_index(
     graph_bucketing_inputs: GraphBucketingInputs | None,
     ctx: PipelineContext | None,
 ) -> list[GlobalContextSummary]:
-    entities_by_summary_id, idf_weights, entity_type_by_entity_id, type_idf_weights = (
-        unpack_graph_bucketing_inputs(graph_bucketing_inputs)
-    )
+    inputs = unpack_graph_bucketing_inputs(graph_bucketing_inputs)
     context_datapoints, assignments = await build_context_index(
         new_text_summaries=new_summaries,
         text_summaries_all=scope.text_summaries,
@@ -250,10 +254,12 @@ async def build_and_persist_context_index(
         placement_distance_threshold=placement_distance_threshold,
         bucketing_strategy=bucketing_strategy,
         min_overlap=min_overlap,
-        entities_by_summary_id=entities_by_summary_id,
-        idf_weights=idf_weights,
-        entity_type_by_entity_id=entity_type_by_entity_id,
-        type_idf_weights=type_idf_weights,
+        entities_by_summary_id=inputs.entities_by_summary_id,
+        idf_weights=inputs.idf_weights,
+        entity_type_by_entity_id=inputs.entity_type_by_entity_id,
+        type_idf_weights=inputs.type_idf_weights,
+        entity_relations=inputs.entity_relations,
+        edge_type_embeddings=inputs.edge_type_embeddings,
         ctx=ctx,
     )
 

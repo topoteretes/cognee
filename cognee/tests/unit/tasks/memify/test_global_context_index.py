@@ -8,6 +8,9 @@ import pytest
 from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge, Node
 from cognee.modules.pipelines.models import PipelineContext
+from cognee.tasks.memify.global_context_index.bucketing.graph.inputs import (
+    GraphBucketingInputs,
+)
 from cognee.tasks.memify.global_context_index.constants import SUMMARIZED_IN
 from cognee.tasks.memify.global_context_index.load import (
     extract_context_index_input,
@@ -189,12 +192,16 @@ def _graph_input(
     idf_weights: dict[str, float],
     entity_type_by_entity_id: dict[str, str] | None = None,
     type_idf_weights: dict[str, float] | None = None,
-) -> tuple[dict[str, set[str]], dict[str, float], dict[str, str], dict[str, float]]:
-    return (
-        entities_by_summary_id,
-        idf_weights,
-        entity_type_by_entity_id or {},
-        type_idf_weights or {},
+    entity_relations: list[tuple[str, str, str]] | None = None,
+    edge_type_embeddings: dict[str, list[float]] | None = None,
+) -> GraphBucketingInputs:
+    return GraphBucketingInputs(
+        entities_by_summary_id=entities_by_summary_id,
+        idf_weights=idf_weights,
+        entity_type_by_entity_id=entity_type_by_entity_id or {},
+        type_idf_weights=type_idf_weights or {},
+        entity_relations=entity_relations or [],
+        edge_type_embeddings=edge_type_embeddings or {},
     )
 
 

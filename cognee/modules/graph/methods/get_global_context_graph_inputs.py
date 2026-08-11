@@ -23,6 +23,11 @@ _ENTITY_TYPE_NODE_TYPE = "EntityType"
 _MADE_FROM = "made_from"
 _CONTAINS = "contains"
 _IS_A = "is_a"
+# Relationship names that are structural (chunk/entity-type bookkeeping), never
+# a genuine domain relationship between two Entity nodes. Excluded defensively
+# from entity-to-entity relation queries even though "is_a"/"made_from" are
+# not normally Entity-to-Entity edges (ontology-derived edges occasionally are).
+_STRUCTURAL_RELATIONSHIP_NAMES = {_MADE_FROM, _CONTAINS, _IS_A}
 
 
 @dataclass
@@ -51,6 +56,7 @@ class DatasetGraphEntityInput:
     summary_entities: SummaryEntityLoadResult
     entity_counts: DatasetEntityCounts
     entity_types: EntityTypeInfo
+    entity_relations: list[tuple[str, str, str]]
 
 
 def coerce_graph_uuid(value: str | UUID, field_name: str) -> UUID:
@@ -133,6 +139,15 @@ def _graph_provenance_entity_input(
         and source_id in entity_ids
         and type_of.get(target_id) == _ENTITY_TYPE_NODE_TYPE
     ]
+    entity_relation_triples = [
+        (source_id, target_id, relationship_name)
+        for source_id, target_id, relationship_name in edges
+        if relationship_name not in _STRUCTURAL_RELATIONSHIP_NAMES
+        and source_id in entity_ids
+        and target_id in entity_ids
+        and type_of.get(source_id) == _ENTITY_TYPE
+        and type_of.get(target_id) == _ENTITY_TYPE
+    ]
 
     summary_chunk_rows = [
         (
@@ -155,6 +170,14 @@ def _graph_provenance_entity_input(
         )
         for source_id, target_id in entity_type_pairs
     ]
+    entity_relation_rows = [
+        (
+            str(coerce_graph_uuid(source_id, "entity node id")),
+            str(coerce_graph_uuid(target_id, "entity node id")),
+            relationship_name,
+        )
+        for source_id, target_id, relationship_name in entity_relation_triples
+    ]
 
     return DatasetGraphEntityInput(
         summary_entities=_build_summary_entity_load_result(
@@ -164,6 +187,7 @@ def _graph_provenance_entity_input(
         ),
         entity_counts=_build_dataset_entity_counts(summary_chunk_rows, chunk_entity_rows),
         entity_types=_build_entity_type_info(chunk_entity_rows, entity_type_rows),
+        entity_relations=entity_relation_rows,
     )
 
 
@@ -244,6 +268,7 @@ async def _load_dataset_graph_entity_input(
             summary_entities=_build_summary_entity_load_result(set(), [], []),
             entity_counts=DatasetEntityCounts(chunk_count=0, entity_chunk_counts={}),
             entity_types=EntityTypeInfo(entity_type_by_entity_id={}, entity_type_chunk_counts={}),
+            entity_relations=[],
         )
 
     graph_engine = await _resolve_graph_provenance_engine()
@@ -258,6 +283,7 @@ async def _load_dataset_graph_entity_input(
     chunk_entity_rows = await _load_chunk_entity_rows(dataset_uuid, chunk_ids, session)
     entity_ids = {entity_id for _, entity_id in chunk_entity_rows}
     entity_type_rows = await _load_entity_type_rows(dataset_uuid, entity_ids, session)
+    entity_relation_rows = await _load_entity_relation_rows(dataset_uuid, entity_ids, session)
 
     return DatasetGraphEntityInput(
         summary_entities=_build_summary_entity_load_result(
@@ -267,6 +293,10 @@ async def _load_dataset_graph_entity_input(
         ),
         entity_counts=_build_dataset_entity_counts(summary_chunk_rows, chunk_entity_rows),
         entity_types=_build_entity_type_info(chunk_entity_rows, entity_type_rows),
+        entity_relations=[
+            (str(source_id), str(target_id), relationship_name)
+            for source_id, target_id, relationship_name in entity_relation_rows
+        ],
     )
 
 
@@ -375,6 +405,18 @@ async def _load_entity_type_rows(
     return [(row[0], row[1]) for row in result.all()]
 
 
+async def _load_entity_relation_rows(
+    dataset_id: UUID,
+    entity_ids: set[UUID],
+    session: AsyncSession,
+) -> list[tuple[UUID, UUID, str]]:
+    if not entity_ids:
+        return []
+
+    result = await session.execute(_entity_relation_statement(dataset_id, entity_ids))
+    return [(row[0], row[1], row[2]) for row in result.all()]
+
+
 def _summary_chunk_statement(dataset_id: UUID, expected_summary_ids: set[UUID]):
     summary_node = aliased(Node)
     chunk_node = aliased(Node)
@@ -474,6 +516,43 @@ def _entity_type_statement(dataset_id: UUID, entity_ids: set[UUID]):
                 entity_node.dataset_id == dataset_id,
                 entity_node.type == "Entity",
                 entity_node.slug.in_(entity_ids),
+            )
+        )
+        .distinct()
+    )
+
+
+def _entity_relation_statement(dataset_id: UUID, entity_ids: set[UUID]):
+    source_node = aliased(Node)
+    target_node = aliased(Node)
+    relation_edge = aliased(Edge)
+
+    return (
+        select(source_node.slug, target_node.slug, relation_edge.relationship_name)
+        .select_from(source_node)
+        .join(
+            relation_edge,
+            and_(
+                source_node.slug == relation_edge.source_node_id,
+                relation_edge.dataset_id == dataset_id,
+                relation_edge.label != _CONTAINS,
+                relation_edge.relationship_name.notin_(_STRUCTURAL_RELATIONSHIP_NAMES),
+            ),
+        )
+        .join(
+            target_node,
+            and_(
+                target_node.slug == relation_edge.destination_node_id,
+                target_node.dataset_id == dataset_id,
+                target_node.type == "Entity",
+                target_node.slug.in_(entity_ids),
+            ),
+        )
+        .where(
+            and_(
+                source_node.dataset_id == dataset_id,
+                source_node.type == "Entity",
+                source_node.slug.in_(entity_ids),
             )
         )
         .distinct()

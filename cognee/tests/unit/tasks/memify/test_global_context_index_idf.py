@@ -5,8 +5,11 @@ import pytest
 from cognee.tasks.memify.global_context_index.bucketing.graph.scoring import (
     combined_similarity,
     compute_idf_from_counts,
+    cosine_distance,
     entities_weight,
     entity_weight,
+    pattern_similarity,
+    relationship_match,
     type_similarity,
     weighted_jaccard,
 )
@@ -117,3 +120,108 @@ def test_combined_similarity_lets_type_score_matter_when_entity_score_is_zero():
 
 def test_combined_similarity_returns_zero_when_all_weights_are_zero():
     assert combined_similarity(0.9, 0.9, 0.9, 0.0, 0.0, 0.0) == 0.0
+
+
+def test_cosine_distance_is_zero_for_identical_direction_vectors():
+    assert cosine_distance([1.0, 2.0], [2.0, 4.0]) == pytest.approx(0.0)
+
+
+def test_cosine_distance_is_one_for_orthogonal_vectors():
+    assert cosine_distance([1.0, 0.0], [0.0, 1.0]) == pytest.approx(1.0)
+
+
+def test_cosine_distance_is_two_for_opposite_vectors():
+    assert cosine_distance([1.0, 0.0], [-1.0, 0.0]) == pytest.approx(2.0)
+
+
+def test_cosine_distance_returns_one_for_zero_vector():
+    assert cosine_distance([0.0, 0.0], [1.0, 0.0]) == 1.0
+
+
+def test_relationship_match_is_true_for_identical_names_without_embeddings():
+    assert relationship_match("goes_to", "goes_to", {}, distance_threshold=0.5) is True
+
+
+def test_relationship_match_uses_embedding_distance_for_different_names():
+    embeddings = {
+        "goes_to": [1.0, 0.0],
+        "travels_to": [0.9, 0.1],
+        "unrelated": [0.0, 1.0],
+    }
+
+    assert relationship_match("goes_to", "travels_to", embeddings, distance_threshold=0.5) is True
+    assert relationship_match("goes_to", "unrelated", embeddings, distance_threshold=0.5) is False
+
+
+def test_relationship_match_is_false_when_embedding_missing():
+    assert relationship_match("goes_to", "travels_to", {}, distance_threshold=0.5) is False
+
+
+def test_pattern_similarity_discards_pair_on_relation_mismatch():
+    score = pattern_similarity(
+        ("alice", "alps", "goes_to"),
+        ("alice", "alps", "lives_in"),
+        entity_type_by_entity_id={},
+        idf_weights={"alice": 1.5, "alps": 2.0},
+        type_idf_weights={},
+        edge_type_embeddings={},
+        distance_threshold=0.5,
+    )
+
+    assert score == 0.0
+
+
+def test_pattern_similarity_is_one_for_identical_endpoints_and_relation():
+    score = pattern_similarity(
+        ("alice", "alps", "goes_to"),
+        ("alice", "alps", "goes_to"),
+        entity_type_by_entity_id={},
+        idf_weights={"alice": 1.5, "alps": 2.0},
+        type_idf_weights={},
+        edge_type_embeddings={},
+        distance_threshold=0.5,
+    )
+
+    assert score == pytest.approx(1.0)
+
+
+def test_pattern_similarity_scores_same_type_different_entity_endpoints():
+    """Alice/goes_to/Alps vs Bob/goes_to/Balkans: no shared entity at all, but
+    both endpoints share an entity type and the relation matches exactly."""
+    entity_type_by_entity_id = {
+        "alice": "person",
+        "bob": "person",
+        "alps": "location",
+        "balkans": "location",
+    }
+    type_idf_weights = {"person": 1.0, "location": 1.0}
+
+    score = pattern_similarity(
+        ("alice", "alps", "goes_to"),
+        ("bob", "balkans", "goes_to"),
+        entity_type_by_entity_id=entity_type_by_entity_id,
+        idf_weights={},
+        type_idf_weights=type_idf_weights,
+        edge_type_embeddings={},
+        distance_threshold=0.5,
+        entity_weight=0.0,
+        type_weight=1.0,
+    )
+
+    assert score == pytest.approx(1.0)
+
+
+def test_pattern_similarity_uses_embedding_distance_for_relationship_match():
+    embeddings = {"goes_to": [1.0, 0.0], "travels_to": [0.95, 0.05]}
+
+    score = pattern_similarity(
+        ("alice", "alps", "goes_to"),
+        ("alice", "alps", "travels_to"),
+        entity_type_by_entity_id={},
+        idf_weights={"alice": 1.5, "alps": 2.0},
+        type_idf_weights={},
+        edge_type_embeddings=embeddings,
+        distance_threshold=0.5,
+    )
+
+    assert score == pytest.approx(1.0)

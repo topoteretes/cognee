@@ -67,6 +67,17 @@ def type_similarity(
     return weighted_jaccard(left_type_ids, right_type_ids, type_idf_weights)
 
 
+def type_ids_for_entities(
+    entity_ids: Iterable[str],
+    entity_type_by_entity_id: Mapping[str, str],
+) -> set[str]:
+    return {
+        entity_type_by_entity_id[entity_id]
+        for entity_id in entity_ids
+        if entity_id in entity_type_by_entity_id
+    }
+
+
 def combined_similarity(
     entity_score: float,
     type_score: float,
@@ -87,3 +98,87 @@ def combined_similarity(
     return (
         entity_weight * entity_score + type_weight * type_score + pattern_weight * pattern_score
     ) / total_weight
+
+
+def cosine_distance(left_vector: Iterable[float], right_vector: Iterable[float]) -> float:
+    left = list(left_vector)
+    right = list(right_vector)
+
+    dot_product = sum(
+        left_component * right_component for left_component, right_component in zip(left, right)
+    )
+    left_norm = math.sqrt(sum(component * component for component in left))
+    right_norm = math.sqrt(sum(component * component for component in right))
+    if left_norm == 0 or right_norm == 0:
+        return 1.0
+
+    return 1.0 - dot_product / (left_norm * right_norm)
+
+
+def relationship_match(
+    left_relationship_name: str,
+    right_relationship_name: str,
+    edge_type_embeddings: Mapping[str, list[float]],
+    distance_threshold: float,
+) -> bool:
+    """
+    Two relationship names count as "the same relationship" if they're
+    identical, or if their embeddings are close enough (below
+    ``distance_threshold``, measured on real synonym/non-synonym pairs, not
+    assumed).
+    """
+    if left_relationship_name == right_relationship_name:
+        return True
+
+    left_vector = edge_type_embeddings.get(left_relationship_name)
+    right_vector = edge_type_embeddings.get(right_relationship_name)
+    if left_vector is None or right_vector is None:
+        return False
+
+    return cosine_distance(left_vector, right_vector) < distance_threshold
+
+
+def pattern_similarity(
+    left_edge: tuple[str, str, str],
+    right_edge: tuple[str, str, str],
+    entity_type_by_entity_id: Mapping[str, str],
+    idf_weights: Mapping[str, float],
+    type_idf_weights: Mapping[str, float],
+    edge_type_embeddings: Mapping[str, list[float]],
+    distance_threshold: float,
+    entity_weight: float = 1.0,
+    type_weight: float = 0.0,
+) -> float:
+    """
+    Compare two (source_entity_id, target_entity_id, relationship_name)
+    triples. The relationship is a hard gate, checked first: if it doesn't
+    match (exactly, or close enough by embedding distance), the pair is
+    discarded (score 0) without comparing source/target at all.
+
+    If the relationship matches, source and target similarity are each
+    computed with the same entity+type ``combined_similarity`` used at the
+    summary level, just applied to single entities via singleton sets. The
+    final score is the mean of the two endpoint similarities, keeping the
+    result in [0, 1] like every other signal.
+    """
+    left_source, left_target, left_relationship_name = left_edge
+    right_source, right_target, right_relationship_name = right_edge
+
+    if not relationship_match(
+        left_relationship_name, right_relationship_name, edge_type_embeddings, distance_threshold
+    ):
+        return 0.0
+
+    def endpoint_similarity(left_entity_id: str, right_entity_id: str) -> float:
+        entity_score = weighted_jaccard({left_entity_id}, {right_entity_id}, idf_weights)
+        type_score = weighted_jaccard(
+            type_ids_for_entities({left_entity_id}, entity_type_by_entity_id),
+            type_ids_for_entities({right_entity_id}, entity_type_by_entity_id),
+            type_idf_weights,
+        )
+        return combined_similarity(entity_score, type_score, 0.0, entity_weight, type_weight, 0.0)
+
+    return (
+        endpoint_similarity(left_source, right_source)
+        + endpoint_similarity(left_target, right_target)
+    ) / 2

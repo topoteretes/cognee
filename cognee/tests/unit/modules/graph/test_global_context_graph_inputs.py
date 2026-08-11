@@ -10,6 +10,7 @@ from cognee.modules.graph.methods.get_global_context_graph_inputs import (
     EntityTypeInfo,
     SummaryEntityLoadResult,
     _chunk_entity_statement,
+    _entity_relation_statement,
     _entity_type_statement,
     _summary_chunk_statement,
     get_dataset_chunk_entity_counts,
@@ -74,6 +75,7 @@ async def test_load_summary_entities_preserves_missing_and_no_entity_diagnostics
             (summary_without_entity, chunk_without_entity),
         ],
         [(chunk_with_entity, entity_id)],
+        [],
         [],
     )
 
@@ -145,6 +147,7 @@ async def test_dataset_chunk_entity_counts_use_distinct_chunks_per_entity():
             (second_chunk, other_entity),
         ],
         [],
+        [],
     )
 
     counts = await get_dataset_chunk_entity_counts(
@@ -172,6 +175,7 @@ async def test_combined_graph_entity_input_loads_rows_once_for_entities_and_coun
         [(first_summary, first_chunk), (second_summary, second_chunk)],
         [(first_chunk, shared_entity), (second_chunk, shared_entity)],
         [],
+        [],
     )
 
     result = await load_dataset_graph_entity_input(
@@ -192,7 +196,8 @@ async def test_combined_graph_entity_input_loads_rows_once_for_entities_and_coun
         entity_type_by_entity_id={},
         entity_type_chunk_counts={},
     )
-    assert session.execute.await_count == 3
+    assert result.entity_relations == []
+    assert session.execute.await_count == 4
 
 
 @pytest.mark.asyncio
@@ -220,6 +225,7 @@ async def test_graph_bucketing_input_provider_computes_idf_weights(monkeypatch):
                 entity_type_by_entity_id={str(entity_id): str(entity_type_id)},
                 entity_type_chunk_counts={str(entity_type_id): 1},
             ),
+            entity_relations=[],
         )
 
     monkeypatch.setattr(
@@ -228,14 +234,14 @@ async def test_graph_bucketing_input_provider_computes_idf_weights(monkeypatch):
         load_graph_entity_input,
     )
 
-    entities_by_summary_id, idf_weights, entity_type_by_entity_id, type_idf_weights = (
-        await load_graph_bucketing_inputs(dataset_id, [summary_id])
-    )
+    inputs = await load_graph_bucketing_inputs(dataset_id, [summary_id])
 
-    assert entities_by_summary_id == {str(summary_id): {str(entity_id)}}
-    assert idf_weights[str(entity_id)] == pytest.approx(1.3862943611)
-    assert entity_type_by_entity_id == {str(entity_id): str(entity_type_id)}
-    assert type_idf_weights[str(entity_type_id)] == pytest.approx(1.3862943611)
+    assert inputs.entities_by_summary_id == {str(summary_id): {str(entity_id)}}
+    assert inputs.idf_weights[str(entity_id)] == pytest.approx(1.3862943611)
+    assert inputs.entity_type_by_entity_id == {str(entity_id): str(entity_type_id)}
+    assert inputs.type_idf_weights[str(entity_type_id)] == pytest.approx(1.3862943611)
+    assert inputs.entity_relations == []
+    assert inputs.edge_type_embeddings == {}
 
 
 @pytest.mark.asyncio
@@ -255,6 +261,7 @@ async def test_graph_bucketing_input_provider_omits_none_session(monkeypatch):
             ),
             entity_counts=DatasetEntityCounts(chunk_count=0, entity_chunk_counts={}),
             entity_types=EntityTypeInfo(entity_type_by_entity_id={}, entity_type_chunk_counts={}),
+            entity_relations=[],
         )
 
     monkeypatch.setattr(
@@ -284,6 +291,7 @@ async def test_graph_bucketing_input_provider_rejects_missing_made_from(monkeypa
             ),
             entity_counts=DatasetEntityCounts(chunk_count=0, entity_chunk_counts={}),
             entity_types=EntityTypeInfo(entity_type_by_entity_id={}, entity_type_chunk_counts={}),
+            entity_relations=[],
         )
 
     monkeypatch.setattr(
@@ -348,6 +356,26 @@ def test_entity_type_query_filters_is_a_and_entity_type_target():
     assert "is_a" in params
     assert "Entity" in params
     assert "EntityType" in params
+
+
+def test_entity_relation_query_filters_structural_names_and_contains_label():
+    dataset_id = uuid4()
+    entity_id = uuid4()
+    statement = _entity_relation_statement(dataset_id, {entity_id})
+
+    sql = str(statement)
+    params = list(statement.compile().params.values())
+
+    assert "slug" in sql
+    assert "source_node_id" in sql
+    assert "destination_node_id" in sql
+    assert "relationship_name" in sql
+    assert "label" in sql
+    assert "dataset_id" in sql
+    assert "contains" in params
+    assert "is_a" not in params
+    assert "made_from" not in params
+    assert "Entity" in params
 
 
 # ---------------------------------------------------------------------------
@@ -433,3 +461,29 @@ async def test_graph_provenance_entity_input_builds_entity_type_map(monkeypatch)
 
     assert result.entity_types.entity_type_by_entity_id == {e1: t1, e2: t1}
     assert result.entity_types.entity_type_chunk_counts == {t1: 2}
+
+
+@pytest.mark.asyncio
+async def test_graph_provenance_entity_input_builds_entity_relation_triples(monkeypatch):
+    s1, c1, e1, e2, e3 = (str(uuid4()) for _ in range(5))
+    nodes = [
+        (s1, {"type": "TextSummary"}),
+        (c1, {"type": "DocumentChunk"}),
+        (e1, {"type": "Entity"}),
+        (e2, {"type": "Entity"}),
+        (e3, {"type": "Entity"}),
+    ]
+    edges = [
+        (s1, c1, "made_from", {}),
+        (c1, e1, "contains", {}),
+        (c1, e2, "contains", {}),
+        (e1, e2, "goes_to", {}),  # genuine Entity->Entity domain relation
+        (e1, e3, "goes_to", {}),  # e3 was never "contains"-linked from a chunk -> excluded
+        (c1, e1, "made_from", {}),  # structural relationship name -> excluded
+    ]
+    engine = _FakeGraphNativeEngine({s1, c1, e1, e2, e3}, nodes, edges)
+    monkeypatch.setattr(gci, "_resolve_graph_provenance_engine", AsyncMock(return_value=engine))
+
+    result = await load_dataset_graph_entity_input(uuid4(), [s1], session=AsyncMock())
+
+    assert result.entity_relations == [(e1, e2, "goes_to")]

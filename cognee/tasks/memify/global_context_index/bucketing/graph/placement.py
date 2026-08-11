@@ -1,26 +1,23 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 
 from ..common import (
     create_bucket_node,
     mark_bucket_for_persistence,
     record_bucket_assignment,
 )
-from .scoring import combined_similarity, entities_weight, weighted_jaccard
+from .scoring import (
+    combined_similarity,
+    entities_weight,
+    pattern_similarity,
+    type_ids_for_entities,
+    weighted_jaccard,
+)
 from ...ids import create_bucket_id
 from ...models import BucketAssignment, SummaryNode
 
-
-def _type_ids_for_entities(
-    entity_ids: set[str],
-    entity_type_by_entity_id: Mapping[str, str],
-) -> set[str]:
-    return {
-        entity_type_by_entity_id[entity_id]
-        for entity_id in entity_ids
-        if entity_id in entity_type_by_entity_id
-    }
+Triple = tuple[str, str, str]
 
 
 def rebuild_graph_buckets_for_level(
@@ -35,6 +32,10 @@ def rebuild_graph_buckets_for_level(
     type_idf_weights: Mapping[str, float] | None = None,
     entity_weight: float = 1.0,
     type_weight: float = 0.0,
+    entity_relations: list[Triple] | None = None,
+    edge_type_embeddings: Mapping[str, list[float]] | None = None,
+    pattern_weight: float = 0.0,
+    pattern_distance_threshold: float = 0.5,
 ) -> tuple[dict[str, SummaryNode], list[BucketAssignment]]:
     """
     Build graph-based buckets from in-memory summary/entity inputs.
@@ -47,6 +48,8 @@ def rebuild_graph_buckets_for_level(
 
     entity_type_by_entity_id = entity_type_by_entity_id or {}
     type_idf_weights = type_idf_weights or {}
+    entity_relations = entity_relations or []
+    edge_type_embeddings = edge_type_embeddings or {}
 
     entity_summaries, misc_summaries = _partition_summaries(
         summaries, entities_by_summary_id, idf_weights
@@ -55,6 +58,7 @@ def rebuild_graph_buckets_for_level(
     entity_type_to_summary_ids = _build_entity_type_to_summary_ids(
         entity_summaries, entities_by_summary_id, entity_type_by_entity_id
     )
+    pattern_index = _build_pattern_index(entity_relations, edge_type_embeddings)
 
     buckets_to_persist: dict[str, SummaryNode] = {}
     assignments: list[BucketAssignment] = []
@@ -77,6 +81,9 @@ def rebuild_graph_buckets_for_level(
             entity_weight,
             type_weight,
             entity_type_to_summary_ids,
+            pattern_index,
+            pattern_weight,
+            pattern_distance_threshold,
         )
         _add_entity_bucket(
             child_ids,
@@ -112,6 +119,10 @@ def place_graph_summaries_incrementally(
     type_idf_weights: Mapping[str, float] | None = None,
     entity_weight: float = 1.0,
     type_weight: float = 0.0,
+    entity_relations: list[Triple] | None = None,
+    edge_type_embeddings: Mapping[str, list[float]] | None = None,
+    pattern_weight: float = 0.0,
+    pattern_distance_threshold: float = 0.5,
 ) -> tuple[dict[str, SummaryNode], list[BucketAssignment]]:
     if level != 0:
         raise ValueError("Graph incremental placement is only supported for level 0.")
@@ -120,6 +131,8 @@ def place_graph_summaries_incrementally(
 
     entity_type_by_entity_id = entity_type_by_entity_id or {}
     type_idf_weights = type_idf_weights or {}
+    entity_relations = entity_relations or []
+    edge_type_embeddings = edge_type_embeddings or {}
 
     validate_graph_buckets_can_be_extended(existing_buckets)
 
@@ -133,6 +146,7 @@ def place_graph_summaries_incrementally(
     entity_type_to_bucket_ids = _build_entity_type_to_bucket_ids(
         existing_buckets, entity_type_by_entity_id
     )
+    pattern_index = _build_pattern_index(entity_relations, edge_type_embeddings)
     misc_bucket_ids = _build_misc_bucket_ids(existing_buckets)
     assignments: list[BucketAssignment] = []
 
@@ -164,6 +178,9 @@ def place_graph_summaries_incrementally(
             entity_weight,
             type_weight,
             entity_type_to_bucket_ids,
+            pattern_index,
+            pattern_weight,
+            pattern_distance_threshold,
         )
         if bucket is None:
             bucket = _create_new_graph_bucket(
@@ -293,8 +310,96 @@ def _index_bucket_entity_types(
     if bucket.graph_bucket_entity_ids is None:
         return
 
-    for type_id in _type_ids_for_entities(bucket.graph_bucket_entity_ids, entity_type_by_entity_id):
+    for type_id in type_ids_for_entities(bucket.graph_bucket_entity_ids, entity_type_by_entity_id):
         entity_type_to_bucket_ids.setdefault(type_id, set()).add(bucket.id)
+
+
+class _PatternIndex:
+    """
+    Precomputed, dataset-wide lookup needed to score relationship-pattern
+    similarity without re-scanning every triple on each candidate comparison:
+    entity id -> triples that mention it (as either endpoint), so "which
+    triples are fully contained in this entity set" can be answered directly.
+
+    No separate index is needed to *shortlist* pattern-only candidates: any
+    triple pair that can score above 0 in ``pattern_similarity`` necessarily
+    shares an entity id at a matching endpoint (when ``entity_weight > 0``) or
+    an entity type (when ``type_weight > 0``), since ``pattern_similarity``
+    reuses those same weights for its endpoint comparison. Both cases are
+    already covered by the existing entity/entity-type candidate indices.
+    """
+
+    def __init__(
+        self,
+        relation_index: Mapping[str, list[Triple]],
+        edge_type_embeddings: Mapping[str, list[float]],
+    ) -> None:
+        self.relation_index = relation_index
+        self.edge_type_embeddings = edge_type_embeddings
+
+
+def _build_pattern_index(
+    entity_relations: Iterable[Triple],
+    edge_type_embeddings: Mapping[str, list[float]],
+) -> _PatternIndex:
+    relation_index: dict[str, list[Triple]] = {}
+    for triple in entity_relations:
+        source_id, target_id, _ = triple
+        relation_index.setdefault(source_id, []).append(triple)
+        relation_index.setdefault(target_id, []).append(triple)
+
+    return _PatternIndex(relation_index, edge_type_embeddings)
+
+
+def _relations_within(
+    entity_ids: set[str],
+    relation_index: Mapping[str, list[Triple]],
+) -> list[Triple]:
+    seen: set[Triple] = set()
+    result: list[Triple] = []
+    for entity_id in entity_ids:
+        for triple in relation_index.get(entity_id, []):
+            if triple in seen:
+                continue
+            source_id, target_id, _ = triple
+            if source_id in entity_ids and target_id in entity_ids:
+                seen.add(triple)
+                result.append(triple)
+    return result
+
+
+def _pattern_score(
+    left_relations: list[Triple],
+    right_relations: list[Triple],
+    entity_type_by_entity_id: Mapping[str, str],
+    idf_weights: Mapping[str, float],
+    type_idf_weights: Mapping[str, float],
+    edge_type_embeddings: Mapping[str, list[float]],
+    pattern_distance_threshold: float,
+    entity_weight: float,
+    type_weight: float,
+) -> float:
+    if not left_relations or not right_relations:
+        return 0.0
+
+    return max(
+        (
+            pattern_similarity(
+                left_edge,
+                right_edge,
+                entity_type_by_entity_id,
+                idf_weights,
+                type_idf_weights,
+                edge_type_embeddings,
+                pattern_distance_threshold,
+                entity_weight,
+                type_weight,
+            )
+            for left_edge in left_relations
+            for right_edge in right_relations
+        ),
+        default=0.0,
+    )
 
 
 def _build_misc_bucket_ids(
@@ -326,7 +431,7 @@ def _build_entity_type_to_summary_ids(
     entity_type_to_summary_ids: dict[str, set[str]] = {}
     for summary in summaries:
         summary_entity_ids = entities_by_summary_id.get(summary.id, set())
-        for type_id in _type_ids_for_entities(summary_entity_ids, entity_type_by_entity_id):
+        for type_id in type_ids_for_entities(summary_entity_ids, entity_type_by_entity_id):
             entity_type_to_summary_ids.setdefault(type_id, set()).add(summary.id)
     return entity_type_to_summary_ids
 
@@ -343,10 +448,17 @@ def _choose_existing_graph_bucket(
     entity_weight: float = 1.0,
     type_weight: float = 0.0,
     entity_type_to_bucket_ids: Mapping[str, set[str]] | None = None,
+    pattern_index: _PatternIndex | None = None,
+    pattern_weight: float = 0.0,
+    pattern_distance_threshold: float = 0.5,
 ) -> SummaryNode | None:
     entity_type_by_entity_id = entity_type_by_entity_id or {}
     type_idf_weights = type_idf_weights or {}
-    summary_type_ids = _type_ids_for_entities(summary_entity_ids, entity_type_by_entity_id)
+    summary_type_ids = type_ids_for_entities(summary_entity_ids, entity_type_by_entity_id)
+
+    relation_index = pattern_index.relation_index if pattern_index is not None else {}
+    edge_type_embeddings = pattern_index.edge_type_embeddings if pattern_index is not None else {}
+    summary_relations = _relations_within(summary_entity_ids, relation_index)
 
     candidate_bucket_ids: set[str] = set()
     for entity_id in summary_entity_ids:
@@ -366,11 +478,25 @@ def _choose_existing_graph_bucket(
         entity_score = weighted_jaccard(summary_entity_ids, bucket_entity_ids, idf_weights)
         type_score = weighted_jaccard(
             summary_type_ids,
-            _type_ids_for_entities(bucket_entity_ids, entity_type_by_entity_id),
+            type_ids_for_entities(bucket_entity_ids, entity_type_by_entity_id),
             type_idf_weights,
         )
+        pattern_score = 0.0
+        if pattern_weight > 0:
+            bucket_relations = _relations_within(bucket_entity_ids, relation_index)
+            pattern_score = _pattern_score(
+                summary_relations,
+                bucket_relations,
+                entity_type_by_entity_id,
+                idf_weights,
+                type_idf_weights,
+                edge_type_embeddings,
+                pattern_distance_threshold,
+                entity_weight,
+                type_weight,
+            )
         score = combined_similarity(
-            entity_score, type_score, 0.0, entity_weight, type_weight, 0.0
+            entity_score, type_score, pattern_score, entity_weight, type_weight, pattern_weight
         )
         if score < min_overlap:
             continue
@@ -525,6 +651,9 @@ def _build_entity_bucket_child_ids(
     entity_weight: float = 1.0,
     type_weight: float = 0.0,
     entity_type_to_summary_ids: Mapping[str, set[str]] | None = None,
+    pattern_index: _PatternIndex | None = None,
+    pattern_weight: float = 0.0,
+    pattern_distance_threshold: float = 0.5,
 ) -> list[str]:
     entity_type_by_entity_id = entity_type_by_entity_id or {}
     type_idf_weights = type_idf_weights or {}
@@ -546,6 +675,9 @@ def _build_entity_bucket_child_ids(
             entity_weight,
             type_weight,
             entity_type_to_summary_ids,
+            pattern_index,
+            pattern_weight,
+            pattern_distance_threshold,
         )
         if candidate_id is None:
             break
@@ -569,10 +701,17 @@ def _choose_best_candidate(
     entity_weight: float = 1.0,
     type_weight: float = 0.0,
     entity_type_to_summary_ids: Mapping[str, set[str]] | None = None,
+    pattern_index: _PatternIndex | None = None,
+    pattern_weight: float = 0.0,
+    pattern_distance_threshold: float = 0.5,
 ) -> str | None:
     entity_type_by_entity_id = entity_type_by_entity_id or {}
     type_idf_weights = type_idf_weights or {}
-    bucket_type_ids = _type_ids_for_entities(bucket_entity_ids, entity_type_by_entity_id)
+    bucket_type_ids = type_ids_for_entities(bucket_entity_ids, entity_type_by_entity_id)
+
+    relation_index = pattern_index.relation_index if pattern_index is not None else {}
+    edge_type_embeddings = pattern_index.edge_type_embeddings if pattern_index is not None else {}
+    bucket_relations = _relations_within(bucket_entity_ids, relation_index)
 
     candidate_ids = set()
     for entity_id in bucket_entity_ids:
@@ -590,12 +729,26 @@ def _choose_best_candidate(
         candidate_entity_ids = entities_by_summary_id.get(candidate_id, set())
         entity_score = weighted_jaccard(candidate_entity_ids, bucket_entity_ids, idf_weights)
         type_score = weighted_jaccard(
-            _type_ids_for_entities(candidate_entity_ids, entity_type_by_entity_id),
+            type_ids_for_entities(candidate_entity_ids, entity_type_by_entity_id),
             bucket_type_ids,
             type_idf_weights,
         )
+        pattern_score = 0.0
+        if pattern_weight > 0:
+            candidate_relations = _relations_within(candidate_entity_ids, relation_index)
+            pattern_score = _pattern_score(
+                candidate_relations,
+                bucket_relations,
+                entity_type_by_entity_id,
+                idf_weights,
+                type_idf_weights,
+                edge_type_embeddings,
+                pattern_distance_threshold,
+                entity_weight,
+                type_weight,
+            )
         score = combined_similarity(
-            entity_score, type_score, 0.0, entity_weight, type_weight, 0.0
+            entity_score, type_score, pattern_score, entity_weight, type_weight, pattern_weight
         )
         if score < min_overlap:
             continue
