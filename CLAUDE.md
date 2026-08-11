@@ -367,7 +367,36 @@ GRAPH_DATABASE_URL=postgresql+asyncpg://cognee:cognee@localhost:5432/cognee_db
 CACHE_BACKEND=sqlite
 # Optional explicit SQLAlchemy URL for sqlite/postgres cache backends (overrides defaults)
 CACHE_DB_URL=postgresql+asyncpg://cognee:cognee@localhost:5432/cognee_db
+# Session-search execution mode: concurrent (default) or sequential
+SESSION_SEARCH_MODE=concurrent
 ```
+
+#### Session Search Modes
+
+A session search (a `search()` with an active session cache) runs in one of two modes,
+chosen deployment-wide by `SESSION_SEARCH_MODE`. There is no per-request override.
+
+Both modes make the same two LLM calls per turn — one to analyze the turn for session
+context, one to answer. They differ in how those calls are sequenced:
+
+- **`concurrent`** (default) — analysis runs **concurrently** with retrieval and
+  answering, so a turn costs one answer call of wall-clock time. Retrieval compensates
+  for not having the analysis's rewritten query by running two lanes: the raw question,
+  and a deterministic (LLM-free) rewrite built from the last two turns. Their results are
+  merged by the retriever before context is formatted.
+- **`sequential`** — analysis runs **first**, its rewritten query drives a single
+  retrieval, and its context updates are applied before the answer is generated.
+
+The practical difference: in sequential mode, guidance the user states this turn can
+influence this turn's answer. In concurrent mode it applies from the next turn onward.
+
+Concurrent mode applies only to `GraphCompletionRetriever`,
+`HybridRetriever`, `CompletionRetriever` (`RAG_COMPLETION`), and `TripletRetriever`
+(`TRIPLET_COMPLETION`), and only through `search()`. Calling a retriever's
+`get_completion()` directly always takes the sequential path. Subclasses, batch queries,
+`only_context`, `FEELING_LUCKY`, and sessionless calls fall back to sequential mode
+automatically. With `AUTO_FEEDBACK=false`
+neither mode analyzes the turn.
 
 ### Memory & Performance Tuning Flags
 
