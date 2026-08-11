@@ -7,14 +7,19 @@ holds the document node under the pre-fork id. Then runs the real chain
 migration and asserts:
 
   1. the graph document node moves to the canonical id, properties intact;
-  2. the chunks' ``is_part_of`` edges follow, and their ``document_id``
-     display property is updated;
+  2. the chunks' ``is_part_of`` edges follow, and their ``document_id`` is
+     updated in the graph AND in the vector index payload (search Evidence);
   3. the migration is idempotent (second run changes nothing);
   4. end to end: deletion by the PRE-FORK id through the real API cleans the
-     re-keyed graph completely — with the legacy heal never needed.
+     re-keyed graph completely — with the legacy heal never needed;
+  5. the ledger-backend branch honors dataset scoping (and global mode);
+  6. downgrade fully reverses the store state (graph node, chunk properties,
+     vector payloads, provenance refs), is idempotent, and the round trip
+     re-migrate -> delete-by-pre-fork-id still converges.
 
-Runs on the default local stack (kuzu + lancedb + sqlite), mocked LLM and
-embeddings — CI-safe, no API keys.
+All scenarios share one event loop (cached engines bind asyncio locks to the
+first loop). Runs on the default local stack (kuzu + lancedb + sqlite),
+mocked LLM and embeddings — CI-safe, no API keys.
 """
 
 import asyncio
@@ -105,37 +110,28 @@ def _para(tag: str) -> str:
     return f"Paragraph {tag} ENT{tag.upper()} {words}.\n"
 
 
-def test_rekey_fork_migration_end_to_end(rekey_env):
-    asyncio.run(_scenario())
-
-
-async def _scenario():
+async def _cognify_document(dataset_name: str):
+    """Add + cognify one marker document; return (user, dataset, data_row)."""
     import cognee
-    from cognee.infrastructure.databases.graph import get_graph_engine
-    from cognee.infrastructure.databases.relational import get_relational_engine
-    from cognee.infrastructure.databases.vector import get_vector_engine_async
     from cognee.modules.data.methods import get_datasets
     from cognee.modules.data.methods.get_dataset_data import get_dataset_data
+    from cognee.modules.users.methods import get_default_user
+
+    text = "".join(_para(tag) for tag in ["a", "b", "c", "d"])
+    await cognee.add(text, dataset_name=dataset_name)
+    user = await get_default_user()
+    dataset = next(d for d in await get_datasets(user.id) if d.name == dataset_name)
+    await cognee.cognify(datasets=[dataset.id], chunk_size=CHUNK_TOKENS)
+    return user, dataset, (await get_dataset_data(dataset.id))[0]
+
+
+async def _simulate_backfill_fork(old_id):
+    """Copy the Data row under a fresh id with legacy_id, repoint ledger, drop old."""
+    from cognee.infrastructure.databases.relational import get_relational_engine
     from cognee.modules.data.models import Data
     from cognee.modules.graph.models import Node as LedgerNode
-    from cognee.modules.migrations.migration import MigrationContext
-    from cognee.modules.migrations.versions.rekey_fork_document_ids import migrate
-    from cognee.modules.users.methods import get_default_user
     from sqlalchemy import insert as sql_insert, select, update as sql_update
 
-    # --- Cognify a real document ------------------------------------------- #
-    text = "".join(_para(tag) for tag in ["a", "b", "c", "d"])
-    await cognee.add(text, dataset_name="fork_mig")
-    user = await get_default_user()
-    dataset = next(d for d in await get_datasets(user.id) if d.name == "fork_mig")
-    await cognee.cognify(datasets=[dataset.id], chunk_size=CHUNK_TOKENS)
-    old_row = (await get_dataset_data(dataset.id))[0]
-    old_id = old_row.id
-
-    graph = await get_graph_engine()
-    assert await graph.get_node(str(old_id)) is not None, "doc node exists under the old id"
-
-    # --- Simulate the backfill fork ---------------------------------------- #
     new_id = uuid4()
     engine = get_relational_engine()
     async with engine.get_async_session() as session:
@@ -149,11 +145,63 @@ async def _scenario():
         )
         await session.execute(Data.__table__.delete().where(Data.id == old_id))
         await session.commit()
+    return new_id
+
+
+async def _doc_chunk_ids(graph, document_id) -> list:
+    """Ids of the chunks attached to a document node via is_part_of."""
+    chunk_ids = []
+    for source, edge, _target in await graph.get_connections(str(document_id)):
+        if "is_part_of" in str(edge.get("relationship_name", "")):
+            source_id = str(edge.get("source_node_id") or source.get("id"))
+            if source_id != str(document_id):
+                chunk_ids.append(source_id)
+    return chunk_ids
+
+
+async def _vector_payload_document_ids(vector_engine, chunk_ids: list) -> set:
+    """The distinct document_id payload scalars on the chunks' vector rows."""
+    table = await vector_engine.get_collection("DocumentChunk_text")
+    escaped = [chunk_id.replace("'", "''") for chunk_id in chunk_ids]
+    where = "id IN ({})".format(", ".join(f"'{chunk_id}'" for chunk_id in escaped))
+    rows = await table.query().where(where).to_list()
+    assert len(rows) == len(chunk_ids), "every chunk has exactly one vector row"
+    return {str((row.get("payload") or {}).get("document_id")) for row in rows}
+
+
+def test_rekey_fork_migration_end_to_end(rekey_env):
+    # One event loop for every scenario: cached engines hold asyncio locks
+    # created on first use, and a second asyncio.run would strand them on a
+    # closed loop (the same reason the scoped suite runs one loop per module).
+    async def _all_scenarios():
+        await _scenario()
+        await _ledger_scenario()
+        await _downgrade_scenario()
+
+    asyncio.run(_all_scenarios())
+
+
+async def _scenario():
+    from cognee.infrastructure.databases.graph import get_graph_engine
+    from cognee.infrastructure.databases.vector import get_vector_engine_async
+    from cognee.modules.data.methods.get_dataset_data import get_dataset_data
+    from cognee.modules.migrations.migration import MigrationContext
+    from cognee.modules.migrations.versions.rekey_fork_document_ids import migrate
+
+    # --- Cognify a real document, then simulate the backfill fork ----------- #
+    user, dataset, old_row = await _cognify_document("fork_mig")
+    old_id = old_row.id
+
+    graph = await get_graph_engine()
+    assert await graph.get_node(str(old_id)) is not None, "doc node exists under the old id"
+
+    new_id = await _simulate_backfill_fork(old_id)
 
     # --- Run the chain migration ------------------------------------------- #
+    vector_engine = await get_vector_engine_async()
     context = MigrationContext(
         graph_engine=graph,
-        vector_engine=await get_vector_engine_async(),
+        vector_engine=vector_engine,
         dataset_id=None,  # global mode (access control off)
     )
     await migrate(context)
@@ -163,23 +211,23 @@ async def _scenario():
     assert new_node is not None, "doc node exists under the canonical id"
     assert new_node.get("name") == old_row.name, "document properties preserved"
 
-    # Chunks follow: is_part_of edges land on the new node; document_id updated.
-    chunk_ids = []
-    for source, edge, target in await graph.get_connections(str(new_id)):
-        if "is_part_of" in str(edge.get("relationship_name", "")):
-            source_id = str(edge.get("source_node_id") or source.get("id"))
-            if source_id != str(new_id):
-                chunk_ids.append(source_id)
+    # Chunks follow: is_part_of edges land on the new node; document_id updated
+    # in the graph AND in the vector index payload (search Evidence).
+    chunk_ids = await _doc_chunk_ids(graph, new_id)
     assert chunk_ids, "chunks are attached to the re-keyed document node"
     for chunk in await graph.get_nodes(chunk_ids):
         assert str(chunk.get("document_id")) == str(new_id), (
             "chunk document_id display property follows the canonical id"
         )
+    assert await _vector_payload_document_ids(vector_engine, chunk_ids) == {str(new_id)}, (
+        "chunk vector payloads cite the canonical document id"
+    )
 
     # --- Idempotency -------------------------------------------------------- #
     await migrate(context)
     assert await graph.get_node(str(new_id)) is not None
     assert await graph.get_node(str(old_id)) is None
+    assert await _vector_payload_document_ids(vector_engine, chunk_ids) == {str(new_id)}
 
     # --- End to end: delete by the PRE-FORK id, heal never needed ----------- #
     import importlib
@@ -211,17 +259,13 @@ async def _scenario():
     assert not leftover, f"stranded graph nodes after delete: {leftover}"
 
 
-def test_update_ledger_references_scoped_and_global(rekey_env):
+async def _ledger_scenario():
     """The ledger-backend branch: slug / edge-endpoint updates honor dataset scope.
 
     Graph-provenance stacks never write the ledger (scenario above); backends
     that do keep it need the migration's plain-column updates to move exactly
     the scoped rows — and all rows in global mode — without touching counts.
     """
-    asyncio.run(_ledger_scenario())
-
-
-async def _ledger_scenario():
     from sqlalchemy import select
 
     from cognee.infrastructure.databases.relational import get_relational_engine
@@ -281,3 +325,79 @@ async def _ledger_scenario():
     await _update_ledger_references({str(old_id): str(new_id)}, None)
     slugs, targets = await snapshot()
     assert slugs[dataset_b] == new_id and targets[dataset_b] == new_id
+
+
+async def _downgrade_scenario():
+    """Downgrade fully reverses the migration, and the round trip converges.
+
+    migrate -> downgrade must restore the exact pre-migration store state:
+    document node back under the pre-fork id, chunk ``document_id`` reverted
+    in graph and vector payloads, provenance source refs back on the legacy
+    key. Downgrade is idempotent, a re-migrate lands canonical again, and the
+    re-migrated state still deletes cleanly by the pre-fork id.
+    """
+    from cognee.api.v1.datasets.datasets import datasets as datasets_api
+    from cognee.infrastructure.databases.graph import get_graph_engine
+    from cognee.infrastructure.databases.provenance import make_source_ref_key
+    from cognee.infrastructure.databases.vector import get_vector_engine_async
+    from cognee.modules.data.methods.get_dataset_data import get_dataset_data
+    from cognee.modules.migrations.migration import MigrationContext
+    from cognee.modules.migrations.versions.rekey_fork_document_ids import downgrade, migrate
+
+    user, dataset, old_row = await _cognify_document("fork_down")
+    old_id = old_row.id
+    graph = await get_graph_engine()
+    vector_engine = await get_vector_engine_async()
+
+    chunk_ids = await _doc_chunk_ids(graph, old_id)
+    assert chunk_ids, "cognify attached chunks to the document"
+    assert await _vector_payload_document_ids(vector_engine, chunk_ids) == {str(old_id)}
+
+    new_id = await _simulate_backfill_fork(old_id)
+    old_key = make_source_ref_key(dataset.id, old_id)
+    new_key = make_source_ref_key(dataset.id, new_id)
+
+    context = MigrationContext(graph_engine=graph, vector_engine=vector_engine, dataset_id=None)
+
+    async def assert_state(document_id, other_id, document_key, other_key, label):
+        assert await graph.get_node(str(document_id)) is not None, f"{label}: doc node present"
+        assert await graph.get_node(str(other_id)) is None, f"{label}: other id absent"
+        assert set(await _doc_chunk_ids(graph, document_id)) == set(chunk_ids), (
+            f"{label}: chunk edges attached"
+        )
+        for chunk in await graph.get_nodes(chunk_ids):
+            assert str(chunk.get("document_id")) == str(document_id), f"{label}: graph document_id"
+        assert await _vector_payload_document_ids(vector_engine, chunk_ids) == {str(document_id)}, (
+            f"{label}: vector payload document_id"
+        )
+        assert await graph.find_nodes_by_source_ref(document_key), f"{label}: provenance refs"
+        assert not await graph.find_nodes_by_source_ref(other_key), (
+            f"{label}: no stale provenance refs"
+        )
+
+    # --- migrate: canonical everywhere -------------------------------------- #
+    await migrate(context)
+    await assert_state(new_id, old_id, new_key, old_key, "after migrate")
+
+    # --- downgrade: exact pre-migration store state -------------------------- #
+    await downgrade(context)
+    await assert_state(old_id, new_id, old_key, new_key, "after downgrade")
+
+    # --- downgrade idempotency ----------------------------------------------- #
+    await downgrade(context)
+    await assert_state(old_id, new_id, old_key, new_key, "after second downgrade")
+
+    # --- round trip: re-migrate lands canonical again ------------------------ #
+    await migrate(context)
+    await assert_state(new_id, old_id, new_key, old_key, "after re-migrate")
+
+    # --- and the re-migrated state still deletes cleanly by the pre-fork id -- #
+    await datasets_api.delete_data(dataset.id, old_id, user=user)
+    assert await get_dataset_data(dataset.id) == []
+    nodes, _ = await graph.get_graph_data()
+    leftover = [
+        props
+        for _, props in nodes
+        if props.get("type") in ("DocumentChunk", "TextDocument", "TextSummary")
+    ]
+    assert not leftover, f"stranded graph nodes after roundtrip delete: {leftover}"

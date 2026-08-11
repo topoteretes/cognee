@@ -13,11 +13,13 @@ This migration closes that gap, per database pair:
    database's dataset (or all datasets in global mode).
 2. Skip pairs whose graph holds no old node (nothing to do) or already holds
    the new node (idempotent re-run).
-3. Derived stores first (README rule 3): relational ledger ``slug`` /
-   edge-endpoint references are updated in place (plain column updates — the
-   ledger is only written on non-graph-provenance backends); the
-   ``document_id`` display property on the document's chunk nodes is updated
-   in the graph.
+3. Derived stores first (README rule 3): the chunks' vector index rows are
+   re-upserted so their ``document_id`` payload scalar (search Evidence)
+   cites the canonical id — chunk POINT ids never change; relational ledger
+   ``slug`` / edge-endpoint references are updated in place (plain column
+   updates — the ledger is only written on non-graph-provenance backends);
+   the ``document_id`` display property on the document's chunk nodes is
+   updated in the graph.
 4. Graph: the document node is re-keyed with full property preservation,
    incident edges recreated on the new endpoint, provenance snapshots
    restored, survivors re-asserted — all via the shared ``_migrate_graph``
@@ -32,11 +34,11 @@ After this runs, delete/read paths reach fork documents by their canonical id
 with no legacy awareness; the ``legacy_delete`` legacy_id heal becomes a
 belt-and-braces fallback rather than a load-bearing path.
 
-Deliberate boundary: vector-store chunk payload ``document_id`` values (used
-only for citation display, never for row or point resolution) are updated on
-the graph side; vector payloads follow on the natural rewrite of each point
-(next update of the document). Chunk POINT ids are untouched — nothing
-recomputes them from the document id on this code line.
+Deliberate boundary: chunk POINT ids are untouched — nothing recomputes them
+from the document id on this code line. The payload sync goes through
+``index_data_points`` (cognify's own write path), so the stored row shape
+matches production writes on every vector backend; text is unchanged, so the
+re-embedded vector is equivalent.
 
 Fork rows are rare (same user, identical content, several datasets, before
 the upgrade), so this is cheap: one indexed relational query in the common
@@ -56,6 +58,7 @@ from cognee.infrastructure.databases.provenance import (
 )
 from cognee.infrastructure.databases.provenance.markers import stores_provenance_in_graph
 from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.infrastructure.engine import DataPoint
 from cognee.modules.data.models import Data
 from cognee.modules.migrations.migration import MigrationContext
 from cognee.shared.logging_utils import get_logger
@@ -171,11 +174,88 @@ async def _rekey_graph_provenance(graph_engine, fork_rows: list) -> None:
         )
 
 
+class ForkChunkIndexPoint(DataPoint):
+    """Carrier for re-upserting a fork chunk's vector index row.
+
+    Passed to ``vector_engine.index_data_points`` — the same write path cognify
+    uses — so the adapter builds its own ``IndexSchema`` row from these fields
+    (reference scalars pulled via ``getattr``) and the stored payload shape
+    matches every existing row, on every vector backend. The point id is the
+    chunk id, which never changes; only the ``document_id`` payload scalar
+    moves.
+    """
+
+    text: str
+    document_id: Optional[str] = None
+    document_name: Optional[str] = None
+    chunk_index: Optional[int] = None
+    source_chunk_id: Optional[str] = None
+    metadata: dict = {"index_fields": ["text"]}
+
+
+async def _sync_chunk_vector_payloads(
+    vector_engine, properties_by_node: dict, normalized_edges: list, fork_rows: list
+) -> None:
+    """Re-upsert fork chunks' vector rows so payload ``document_id`` is canonical.
+
+    The chunk index payload carries ``document_id`` as a search-Evidence
+    scalar; without this it would cite the pre-fork id until the document's
+    next natural rewrite. Driven by the fork rows (edges into either the
+    legacy or the canonical document node are matched), so a run interrupted
+    around the graph re-key converges here on re-run; the upsert is
+    idempotent. Text is unchanged, so re-embedding yields an equivalent
+    vector. Skipped when the chunk collection does not exist (graph-only
+    pipelines never vector-index chunks).
+    """
+    if vector_engine is None:
+        return
+
+    doc_targets: dict = {}
+    for old_id, new_id, _dataset_id in fork_rows:
+        doc_targets[old_id] = new_id
+        doc_targets[new_id] = new_id
+
+    carriers = []
+    for source_id, target_id, relationship_name, _properties in normalized_edges:
+        target = doc_targets.get(target_id)
+        if relationship_name != _IS_PART_OF or target is None:
+            continue
+        chunk_properties = properties_by_node.get(source_id)
+        if not chunk_properties or "text" not in chunk_properties:
+            continue
+        carriers.append(
+            ForkChunkIndexPoint(
+                id=UUID(source_id),
+                text=chunk_properties["text"],
+                document_id=target,
+                document_name=chunk_properties.get("document_name"),
+                chunk_index=chunk_properties.get("chunk_index"),
+                source_chunk_id=chunk_properties.get("source_chunk_id"),
+                importance_weight=chunk_properties.get("importance_weight"),
+                belongs_to_set=chunk_properties.get("belongs_to_set"),
+            )
+        )
+    if not carriers:
+        return
+
+    if not await vector_engine.has_collection("DocumentChunk_text"):
+        return
+    await vector_engine.index_data_points("DocumentChunk", "text", carriers)
+    logger.info(
+        "rekey_fork_document_ids: synced document_id payload on %d chunk vector row(s)",
+        len(carriers),
+    )
+
+
 async def _apply(context: MigrationContext, fork_rows: list) -> None:
     graph_engine = context.graph_engine
     id_map_all = {old_id: new_id for old_id, new_id, _dataset_id in fork_rows}
     nodes, edges = await graph_engine.get_graph_data()
     properties_by_node = {str(node_id): dict(props or {}) for node_id, props in nodes}
+    normalized_edges = [
+        (str(edge[0]), str(edge[1]), edge[2], (edge[3] if len(edge) > 3 else {}) or {})
+        for edge in edges
+    ]
 
     id_map: dict = {}
     properties_by_id: dict = {}
@@ -189,9 +269,14 @@ async def _apply(context: MigrationContext, fork_rows: list) -> None:
         properties_by_id[old_id] = properties
         id_map[old_id] = new_id
 
+    # Derived store, fork-rows-driven: chunk vector payloads first.
+    await _sync_chunk_vector_payloads(
+        context.vector_engine, properties_by_node, normalized_edges, fork_rows
+    )
+
     if id_map:
         await _rekey_graph_nodes(
-            graph_engine, id_map, properties_by_id, properties_by_node, edges, context
+            graph_engine, id_map, properties_by_id, properties_by_node, normalized_edges, context
         )
 
     # Provenance refs move last: the node re-key restores the pre-fork keys
@@ -204,14 +289,9 @@ async def _rekey_graph_nodes(
     id_map: dict,
     properties_by_id: dict,
     properties_by_node: dict,
-    edges: list,
+    normalized_edges: list,
     context: MigrationContext,
 ) -> None:
-    normalized_edges = [
-        (str(edge[0]), str(edge[1]), edge[2], (edge[3] if len(edge) > 3 else {}) or {})
-        for edge in edges
-    ]
-
     # Derived stores first: relational ledger references move before the graph.
     await _update_ledger_references(id_map, context.dataset_id)
 
