@@ -43,30 +43,39 @@ async def update_node_access_timestamps(items: Any):
 
 
 async def _find_origin_documents_via_projection(graph_engine, node_ids):
-    """Find origin documents using graph projection instead of DB queries"""
-    # Project the entire graph with necessary properties
-    memory_fragment = CogneeGraph()
-    await memory_fragment.project_graph_from_db(
-        graph_engine,
-        node_properties_to_project=["id", "type"],
-        edge_properties_to_project=["relationship_name"],
-    )
-
-    # Find origin documents by traversing the in-memory graph
+    """Find origin documents using targeted neighborhood queries instead of DB graph projections"""
     doc_ids = set()
-    for node_id in node_ids:
-        node = memory_fragment.get_node(node_id)
-        if node and node.get_attribute("type") == "DocumentChunk":
-            # Traverse edges to find connected documents
-            for edge in node.get_skeleton_edges():
-                # Get the neighbor node
-                neighbor = (
-                    edge.get_destination_node()
-                    if edge.get_source_node().id == node_id
-                    else edge.get_source_node()
-                )
-                if neighbor and neighbor.get_attribute("type") in ["TextDocument", "Document"]:
-                    doc_ids.add(neighbor.id)
+
+    if not node_ids:
+        return []
+
+    # Get immediate neighborhood instead of pulling the entire graph into memory
+    nodes, edges = await graph_engine.get_neighborhood(list(node_ids), depth=1)
+
+    # Handle node tuple variations across different graph adapters
+    node_type_map = {}
+    for n in nodes:
+        if isinstance(n, (list, tuple)) and len(n) >= 2 and isinstance(n[1], dict):
+            node_type_map[str(n[0])] = n[1].get("type")
+
+    for edge in edges:
+        if not isinstance(edge, (list, tuple)) or len(edge) < 2:
+            continue
+
+        # Extract source and target IDs defensively (handles Ladybug vs Neo4j vs Kuzu formats)
+        src = edge[0]
+        tgt = edge[2] if isinstance(edge[1], str) and isinstance(edge[2], dict) else edge[1] # Handle Ladybug (dict, str, dict)
+        
+        source_id = str(src.get("id", src) if isinstance(src, dict) else src)
+        target_id = str(tgt.get("id", tgt) if isinstance(tgt, dict) else tgt)
+
+        # Check both directions for chunk-to-document links
+        if source_id in node_ids and node_type_map.get(source_id) == "DocumentChunk":
+            if node_type_map.get(target_id) in ["TextDocument", "Document"]:
+                doc_ids.add(target_id)
+        elif target_id in node_ids and node_type_map.get(target_id) == "DocumentChunk":
+            if node_type_map.get(source_id) in ["TextDocument", "Document"]:
+                doc_ids.add(source_id)
 
     return list(doc_ids)
 

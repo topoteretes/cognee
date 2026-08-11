@@ -72,6 +72,7 @@ def create_cache_engine(
     agentic_lock_expire: int = 240,
     agentic_lock_timeout: int = 300,
     session_ttl_seconds: int | None = 604800,
+    max_session_history_items: int | None = 1000,
     tapes_ingest_url: str = "http://localhost:8082",
     tapes_provider: str = "openai",
     tapes_agent_name: str = "cognee",
@@ -93,6 +94,8 @@ def create_cache_engine(
     - log_key: Identifier used for usage logging.
     - agentic_lock_expire: Duration to hold the lock after acquisition.
     - agentic_lock_timeout: Max time to wait for the lock before failing.
+    - session_ttl_seconds: Time-to-live for Redis session keys in seconds.
+    - max_session_history_items: Max number of items kept in fast-cache per session.
     - cache_db_url: SQLAlchemy async URL for the SQL cache backends.
     - cache_purge_interval_seconds: Minimum interval between global TTL purge sweeps.
 
@@ -103,7 +106,9 @@ def create_cache_engine(
     config = get_cache_config()
     if config.caching or config.usage_logging:
         if config.cache_backend == "redis":
-            from cognee.infrastructure.databases.cache.redis.RedisAdapter import RedisAdapter
+            from cognee.infrastructure.databases.cache.redis.RedisAdapter import (
+                RedisAdapter,
+            )
 
             return RedisAdapter(
                 host=cache_host,
@@ -117,6 +122,7 @@ def create_cache_engine(
                 timeout=agentic_lock_expire,
                 blocking_timeout=agentic_lock_timeout,
                 session_ttl_seconds=session_ttl_seconds,
+                max_session_history_items=max_session_history_items,
             )
         elif config.cache_backend == "fs":
             return FSCacheAdapter(session_ttl_seconds=session_ttl_seconds)
@@ -139,13 +145,17 @@ def create_cache_engine(
             )
 
             try:
-                connection_string = _resolve_cache_db_url(config.cache_backend, cache_db_url)
+                connection_string = _resolve_cache_db_url(
+                    config.cache_backend, cache_db_url
+                )
             except CacheConnectionError as error:
                 # An explicitly chosen backend must fail loudly. The implicit
                 # sqlite default, however, can land on deployments it cannot
                 # serve (e.g. system root on S3) - degrade to the filesystem
                 # cache there so sessions keep working out of the box.
-                explicitly_chosen = "cache_backend" in getattr(config, "model_fields_set", set())
+                explicitly_chosen = "cache_backend" in getattr(
+                    config, "model_fields_set", set()
+                )
                 if config.cache_backend != "sqlite" or explicitly_chosen:
                     raise
                 logger.warning(
@@ -194,6 +204,7 @@ def get_cache_engine(
         agentic_lock_expire=config.agentic_lock_expire,
         agentic_lock_timeout=config.agentic_lock_timeout,
         session_ttl_seconds=config.session_ttl_seconds,
+        max_session_history_items=config.max_session_history_items,
         tapes_ingest_url=config.tapes_ingest_url,
         tapes_provider=config.tapes_provider,
         tapes_agent_name=config.tapes_agent_name,
