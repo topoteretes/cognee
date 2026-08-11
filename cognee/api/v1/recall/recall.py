@@ -578,7 +578,9 @@ async def recall(
             from cognee.modules.recall.methods.normalize_search_payload import (
                 normalize_search_payload,
             )
+
             from cognee.modules.search.methods.search import authorized_search
+            from cognee.modules.search.operations import log_search_history
 
             if user is None:
                 try:
@@ -649,6 +651,12 @@ async def recall(
                 llm_config=llm_config,
                 embedding_config=embedding_config,
             )
+
+            # /v1/search records every question it answers; recall never did,
+            # because it calls authorized_search() directly and skips the
+            # logging that search() wraps around it. Agents recall through this
+            # endpoint, so their questions were absent from history entirely.
+            await log_search_history(query_text, local_query_type.value, user.id, graph_results)
 
             tagged = []
             for r in graph_results:
