@@ -36,8 +36,9 @@ This migration closes that gap, per database pair:
    converges on re-run.
 
 After this runs, delete/read paths reach fork documents by their canonical id
-with no legacy awareness; the ``legacy_delete`` legacy_id heal becomes a
-belt-and-braces fallback rather than a load-bearing path.
+with no legacy awareness. There is deliberately no runtime fallback for
+un-migrated stores: a fork delete there fails fast (DocumentSubgraphNotFoundError)
+instead of mutating stores the migration has not touched.
 
 Deliberate boundary: chunk POINT ids are untouched — nothing recomputes them
 from the document id on this code line. The payload sync goes through

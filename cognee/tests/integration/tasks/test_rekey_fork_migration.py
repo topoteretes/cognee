@@ -11,7 +11,7 @@ migration and asserts:
      updated in the graph AND in the vector index payload (search Evidence);
   3. the migration is idempotent (second run changes nothing);
   4. end to end: deletion by the PRE-FORK id through the real API cleans the
-     re-keyed graph completely — with the legacy heal never needed;
+     re-keyed graph completely — entering it by the canonical id only;
   5. the ledger-backend branch honors dataset scoping (and global mode);
   6. downgrade fully reverses the store state (graph node, chunk properties,
      vector payloads, provenance refs), is idempotent, and the round trip
@@ -243,7 +243,7 @@ async def _scenario():
     assert await graph.get_node(str(old_id)) is None
     assert await _vector_payload_document_ids(vector_engine, chunk_ids) == {str(new_id)}
 
-    # --- End to end: delete by the PRE-FORK id, heal never needed ----------- #
+    # --- End to end: delete by the PRE-FORK id ------------------------------- #
     import importlib
 
     legacy_delete_module = importlib.import_module("cognee.modules.graph.methods.legacy_delete")
@@ -251,13 +251,13 @@ async def _scenario():
 
     original_subgraph_delete = legacy_delete_module.delete_document_subgraph
 
-    async def _no_heal(document_id, mode="soft"):
+    async def _canonical_only(document_id, mode="soft"):
         assert str(document_id) == str(new_id), (
             "post-migration deletion must enter the graph by the canonical id only"
         )
         return await original_subgraph_delete(document_id, mode)
 
-    legacy_delete_module.delete_document_subgraph = _no_heal
+    legacy_delete_module.delete_document_subgraph = _canonical_only
     try:
         await datasets_api.delete_data(dataset.id, old_id, user=user)
     finally:

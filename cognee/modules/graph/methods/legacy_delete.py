@@ -26,16 +26,12 @@ def _get_edge_vector_text(edge: dict) -> str:
 async def legacy_delete(data: Data, mode: str = "soft"):
     """Delete a single document by its content hash."""
 
-    # Delete from graph database
-    try:
-        deleted_node_ids = await delete_document_subgraph(data.id, mode)
-    except DocumentSubgraphNotFoundError:
-        # A backfill-split row: its graph document node still carries the
-        # pre-split id until the next full rebuild — delete under that id.
-        if getattr(data, "legacy_id", None):
-            deleted_node_ids = await delete_document_subgraph(data.legacy_id, mode)
-        else:
-            raise
+    # Delete from graph database. A fork row's graph node is re-keyed to the
+    # canonical id by the rekey_fork_document_ids startup migration; if that
+    # migration has not run (ENABLE_AUTO_MIGRATIONS=false without
+    # `cognee-cli upgrade`), this raises DocumentSubgraphNotFoundError on
+    # purpose — un-migrated stores must not be mutated by guesswork.
+    deleted_node_ids = await delete_document_subgraph(data.id, mode)
 
     # Delete from vector database
     vector_engine = await get_vector_engine_async()
