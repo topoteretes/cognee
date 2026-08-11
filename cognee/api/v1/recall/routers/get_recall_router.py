@@ -131,6 +131,8 @@ def get_recall_router() -> APIRouter:
         text: str
         user: str
         created_at: datetime
+        # Null when the recall was not scoped to a single dataset.
+        dataset_id: Optional[UUID] = None
 
     @router.get("", response_model=list[RecallHistoryItem])
     async def get_recall_history(user: User = Depends(get_authenticated_user)):

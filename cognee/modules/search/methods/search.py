@@ -37,6 +37,20 @@ from cognee.shared.utils import send_telemetry
 logger = get_logger()
 
 
+def _single_dataset_id(dataset_ids: Union[list[UUID], UUID, None]) -> Optional[UUID]:
+    """Return the dataset a search is scoped to, when it is exactly one.
+
+    Searches fan out across every dataset they are given, and ``None`` means
+    "every dataset the user can read". Neither case has a single dataset to
+    attribute the logged query to, so both record ``None``.
+    """
+    if dataset_ids is None:
+        return None
+    if isinstance(dataset_ids, UUID):
+        return dataset_ids
+    return dataset_ids[0] if len(dataset_ids) == 1 else None
+
+
 async def search(
     query_text: str,
     query_type: SearchType,
@@ -76,7 +90,8 @@ async def search(
     Notes:
         Searching by dataset is only available in ENABLE_BACKEND_ACCESS_CONTROL mode
     """
-    query = await log_query(query_text, query_type.value, user.id)
+    logged_dataset_id = _single_dataset_id(dataset_ids)
+    query = await log_query(query_text, query_type.value, user.id, logged_dataset_id)
     send_telemetry(
         "cognee.search EXECUTION STARTED",
         user.id,
@@ -145,6 +160,7 @@ async def search(
         query.id,
         json.dumps(completions) if completions else "[]",
         user.id,
+        logged_dataset_id,
     )
 
     return _backwards_compatible_search_results(search_results, verbose)
