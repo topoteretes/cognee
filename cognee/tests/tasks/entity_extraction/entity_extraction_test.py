@@ -51,13 +51,18 @@ async def main():
 
     original_file_path = await save_data_item_to_storage(file_path)
 
+    await cognee.add(file_path)
+
+    # Dedup is a dataset-scoped lookup now: resolve the ingested row's id
+    # AFTER the add, through the dataset that received it.
+    from cognee.modules.data.methods import get_datasets
+
+    user = await get_default_user()
+    dataset = next(d for d in await get_datasets(user.id) if d.name == "main_dataset")
     async with open_data_file(original_file_path) as file:
         classified_data = ingestion.classify(file)
-
-        # data_id is the hash of original file contents + owner id to avoid duplicate data
-        data_id = await ingestion.identify(classified_data, await get_default_user())
-
-    await cognee.add(file_path)
+        data_id = await ingestion.identify(classified_data, user, dataset.id)
+    assert data_id is not None, "ingested content must resolve to its Data row"
 
     text_document = TextDocument(
         id=data_id,

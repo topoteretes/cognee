@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from uuid import uuid4
-from sqlalchemy import UUID, Column, DateTime, String, JSON, Integer, Float
+from sqlalchemy import UUID, Column, DateTime, Index, String, JSON, Integer, Float
 from sqlalchemy.ext.mutable import MutableDict
 from sqlalchemy.orm import relationship
 
@@ -11,6 +11,10 @@ from .DatasetData import DatasetData
 
 class Data(Base):
     __tablename__ = "data"
+    # Dedup is a lookup, not an identity: adding content already present in a
+    # dataset reuses that row via this index; the id itself carries no content
+    # information and stays stable when the document's content changes.
+    __table_args__ = (Index("data_dataset_content_lookup", "dataset_id", "content_hash"),)
 
     id = Column(UUID, primary_key=True, default=uuid4)
     label = Column(String, nullable=True)
@@ -24,6 +28,13 @@ class Data(Base):
     original_data_location = Column(String)
     owner_id = Column(UUID, index=True)
     tenant_id = Column(UUID, index=True, nullable=True)
+    # Dataset that owns this content row. Rows are dataset-scoped: the same
+    # content in two datasets is two rows with two ids, so updating one
+    # document can never touch another dataset's data. NULL marks a legacy
+    # shared row (pre-refactor deterministic id, possibly member of several
+    # datasets); those are resolved by membership and split copy-on-write on
+    # their first content update.
+    dataset_id = Column(UUID, index=True, nullable=True)
     content_hash = Column(String)
     raw_content_hash = Column(String)
     external_metadata = Column(JSON)

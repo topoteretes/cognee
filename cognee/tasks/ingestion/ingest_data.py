@@ -1,13 +1,14 @@
 import json
 import inspect
-from uuid import UUID
+from uuid import UUID, uuid4
 from typing import Union, BinaryIO, Any, List, Optional
 
 import cognee.modules.ingestion as ingestion
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.models import Data
+from cognee.modules.data.models.DatasetData import DatasetData
 from cognee.modules.ingestion.exceptions import IngestionError
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_default_user
@@ -83,10 +84,13 @@ async def ingest_data(
 
         db_engine = get_relational_engine()
 
-        # Pre-loop: compute data_id for every item and cache intermediate results
-        # to avoid repeating expensive I/O in the main loop.
+        # Pre-loop: resolve or mint data_id for every item and cache intermediate
+        # results to avoid repeating expensive I/O in the main loop. Dedup is a
+        # dataset-scoped LOOKUP (identify); a miss mints a random id — two
+        # identical items in one batch share the first mint.
         data_point_ids = []
         precomputed_items = {}
+        batch_id_by_hash: dict = {}
         for data_item in data:
             underlying_data = data_item.data if isinstance(data_item, DataItem) else data_item
             item_data_id = data_item.data_id if isinstance(data_item, DataItem) else None
@@ -96,10 +100,14 @@ async def ingest_data(
 
             async with open_data_file(actual_file_path) as file:
                 classified_data = ingestion.classify(file)
-                data_id = await ingestion.identify(classified_data, user)
+                item_content_hash = classified_data.get_identifier()
+                data_id = await ingestion.identify(classified_data, user, dataset.id)
 
             if item_data_id is not None:
                 data_id = item_data_id
+            elif data_id is None:
+                data_id = batch_id_by_hash.get(item_content_hash) or uuid4()
+            batch_id_by_hash.setdefault(item_content_hash, data_id)
 
             data_point_ids.append(data_id)
             precomputed_items[id(data_item)] = {
@@ -173,6 +181,33 @@ async def ingest_data(
                 new_content_hash = original_file_metadata["content_hash"]
                 content_changed = str(data_point.content_hash) != str(new_content_hash)
 
+                if data_point.dataset_id is None:
+                    # Legacy shared row (pre-dataset-scoping). Adopt it into this
+                    # dataset when it is the sole member; NEVER mutate its content
+                    # while other datasets still reference it — that would rewrite
+                    # their stored text underneath their graphs.
+                    async with db_engine.get_async_session() as session:
+                        membership_count = (
+                            await session.execute(
+                                select(func.count())
+                                .select_from(DatasetData)
+                                .filter(DatasetData.data_id == data_point.id)
+                            )
+                        ).scalar_one()
+                    if membership_count <= 1:
+                        data_point.dataset_id = dataset.id
+                    elif content_changed:
+                        raise IngestionError(
+                            f"Data {data_point.id} is shared by {membership_count} datasets; "
+                            "its content cannot be updated in place. The update flow must "
+                            "split it into a dataset-private row first (full update path)."
+                        )
+                elif content_changed and str(data_point.dataset_id) != str(dataset.id):
+                    raise IngestionError(
+                        f"Data {data_point.id} belongs to dataset {data_point.dataset_id}; "
+                        f"refusing to rewrite its content from dataset {dataset.id}."
+                    )
+
                 data_point.name = original_file_metadata["name"]
                 data_point.raw_data_location = cognee_storage_file_path
                 data_point.original_data_location = original_file_metadata["file_path"]
@@ -205,6 +240,7 @@ async def ingest_data(
 
                 data_point = Data(
                     id=data_id,
+                    dataset_id=dataset.id,
                     name=original_file_metadata["name"],
                     raw_data_location=cognee_storage_file_path,
                     original_data_location=original_file_metadata["file_path"],
@@ -249,10 +285,12 @@ async def ingest_data(
 
         return existing_data_points + dataset_new_data_points + new_datapoints
 
-    # data.id is a content hash, so concurrent ingests of the same content both
-    # see it as missing and try to INSERT the same primary key — the loser hits
-    # "UNIQUE constraint failed: data.id". Retrying re-reads the now-committed row
-    # and takes the existing-data branch (update + link) instead of inserting.
+    # Legacy rows still carry content-derived ids, so concurrent ingests of the
+    # same legacy content can both try to INSERT the same primary key — the loser
+    # hits "UNIQUE constraint failed: data.id"; retrying re-reads the committed row
+    # and takes the existing-data branch. Dataset-scoped rows mint random ids and
+    # dedup by lookup instead: a concurrent same-content race there can produce
+    # two rows, which under document semantics are simply two documents.
     # File writes are content-addressed, so re-running is idempotent.
     try:
         return await store_data_to_dataset(
