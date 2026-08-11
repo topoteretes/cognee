@@ -149,6 +149,14 @@ class datasets:
         # Same per-dataset lock as pipeline runs: wait for any in-flight pipeline
         # on this dataset and exclude concurrent deletes.
         async with dataset_lock(dataset.id):
+            # Every id ever issued keeps resolving: exact id first, then the
+            # recorded original of a backfill-split row (split_from_data_id).
+            from cognee.modules.data.methods import resolve_data_id
+
+            resolved_id = await resolve_data_id(dataset.id, data_id)
+            if resolved_id is not None:
+                data_id = resolved_id
+
             dataset_data = [
                 data for data in await get_dataset_data(dataset.id) if data.id == data_id
             ]

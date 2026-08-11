@@ -10,7 +10,9 @@ ingestion layer (no cognify, no LLM):
      the other dataset's row, stored text, and content hash untouched;
   3. re-adding content a dataset already holds reuses the row (idempotent);
   4. a data_id pinned from another dataset is refused outright — no linking,
-     no mutation. (Legacy-row semantics live in the backfill migration test:
+     no mutation;
+  5. every id ever issued keeps resolving: a backfill-split row is found
+     (and deletable through the real API) by its pre-split id. (Legacy-row semantics live in the backfill migration test:
      tests/unit/modules/data/test_dataset_scoped_backfill.py.)
 
 Runs on the default local stack (sqlite), no API keys.
@@ -187,3 +189,34 @@ async def _scenario():
     assert await _read_text(beta_rows[0]) == beta_text_before, (
         "a refused foreign pin must leave the target dataset untouched"
     )
+
+    # --- 5. every id ever issued keeps resolving --------------------------- #
+    # Simulate a backfill-split row: beta's row records a pre-split original
+    # id. Resolution must find the row by the OLD id within the dataset.
+    from uuid import uuid4 as _mint
+    from sqlalchemy import update as sql_update
+    from cognee.infrastructure.databases.relational import get_relational_engine
+    from cognee.modules.data.methods import resolve_data_id
+    from cognee.modules.data.models import Data
+
+    pre_split_id = _mint()
+    engine = get_relational_engine()
+    async with engine.get_async_session() as session:
+        await session.execute(
+            sql_update(Data).where(Data.id == beta_data.id).values(split_from_data_id=pre_split_id)
+        )
+        await session.commit()
+
+    assert await resolve_data_id(beta.id, beta_data.id) == beta_data.id, "exact id wins"
+    assert await resolve_data_id(beta.id, pre_split_id) == beta_data.id, (
+        "the pre-split id must resolve to the canonical row within its dataset"
+    )
+    assert await resolve_data_id(alpha.id, pre_split_id) is None, (
+        "the old id means nothing in an unrelated dataset"
+    )
+
+    # And the real entry point honors it: delete by the OLD id removes the row.
+    from cognee.api.v1.datasets.datasets import datasets as datasets_api
+
+    await datasets_api.delete_data(beta.id, pre_split_id, user=user)
+    assert await get_dataset_data(beta.id) == [], "delete by pre-split id must succeed"
