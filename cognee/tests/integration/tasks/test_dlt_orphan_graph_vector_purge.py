@@ -240,3 +240,81 @@ async def test_deleted_row_purged_from_per_dataset_stores_on_resync(clean_env):
     assert nodes_after < nodes_before, (
         f"per-dataset graph not purged: {nodes_before} -> {nodes_after}"
     )
+
+
+@pytest.mark.asyncio
+async def test_legacy_content_addressed_manifest_purged_on_first_resync(clean_env):
+    """The one manifest job _delete_dlt_orphans still owns: upgrade cleanup.
+
+    Pre-stable-id deployments hold manifests whose Data id embeds a content
+    hash. On the first re-add after upgrade, the fresh manifest gets the
+    stable id, the legacy record's id is no longer in the fresh set, and the
+    orphan path purges it — manifest, graph nodes, and vectors — inside the
+    per-dataset context. This pins the "one final orphan-cycle reprocess, no
+    manual step" migration promise.
+    """
+    import sys
+    from unittest.mock import patch
+
+    import dlt
+
+    # Own dataset + source names: dlt keeps process-global pipeline state
+    # keyed by name, so tests in one process must not share identities.
+    legacy_dataset = "dlt_purge_legacy_ds"
+
+    def _legacy_source(source_rows):
+        @dlt.resource(
+            name="widgets_legacy",
+            primary_key="id",
+            write_disposition="merge",
+            columns={"_deleted": {"data_type": "bool", "hard_delete": True}},
+        )
+        def widgets_legacy():
+            yield from source_rows
+
+        return widgets_legacy
+
+    resolve_module = sys.modules["cognee.tasks.ingestion.resolve_dlt_sources"]
+    real_get_unique_data_id = resolve_module.get_unique_data_id
+
+    async def _legacy_style_id(identifier, user):
+        # Emulate the retired scheme: identity varies with content.
+        if identifier.startswith("dlt_source:"):
+            identifier = f"{identifier}:deadbeefcafebabe"
+        return await real_get_unique_data_id(identifier, user)
+
+    user = await get_default_user()
+    kwargs = dict(primary_key="id", write_disposition="merge", max_rows_per_table=0)
+    rows = [
+        {"id": "a", "body": "alpha runbook restart the payments service", "_deleted": False},
+        {"id": "b", "body": "beta onboarding request vpn access from it", "_deleted": False},
+    ]
+
+    with _mock_llm():
+        # 1. Ingest under the LEGACY id scheme and cognify — a pre-upgrade store.
+        with patch.object(resolve_module, "get_unique_data_id", _legacy_style_id):
+            await cognee.add(_legacy_source(rows), dataset_name=legacy_dataset, **kwargs)
+        await cognee.cognify(datasets=[legacy_dataset])
+
+        dataset = (
+            await get_authorized_existing_datasets(
+                user=user, permission_type="read", datasets=[legacy_dataset]
+            )
+        )[0]
+        legacy_ids = {d.id for d in await get_dataset_data(dataset.id)}
+        nodes_before, vec_before = await _store_counts(dataset)
+        assert vec_before == 2, "pre-upgrade store must hold both row vectors"
+
+        # 2. First re-add after 'upgrade' (unpatched, stable id): the legacy
+        # manifest is orphaned and purged; the stable-id manifest replaces it.
+        await cognee.add(_legacy_source(rows), dataset_name=legacy_dataset, **kwargs)
+        await cognee.cognify(datasets=[legacy_dataset])
+
+    records = await get_dataset_data(dataset.id)
+    assert len(records) == 1, f"expected exactly the stable-id manifest, got {len(records)}"
+    assert records[0].id not in legacy_ids, "the legacy-id manifest must be gone"
+    assert await _dlt_pks(dataset) == ["a", "b"], "rows survive under the new identity"
+
+    nodes_after, vec_after = await _store_counts(dataset)
+    assert vec_after == 2, "row vectors rebuilt under the stable id, no leftovers"
+    assert nodes_after <= nodes_before, "no orphaned graph artifacts accumulate"
