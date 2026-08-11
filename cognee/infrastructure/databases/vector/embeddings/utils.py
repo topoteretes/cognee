@@ -22,6 +22,21 @@ def is_embeddable(s: str) -> bool:
     return False
 
 
+def _strip_surrogates(s: str) -> str:
+    """
+    Replace unpaired UTF-16 surrogate code points that cannot be encoded to UTF-8.
+
+    A lone/unpaired surrogate (e.g. a mis-decoded character from a Windows console or
+    clipboard boundary) is a valid Python `str` but is not valid UTF-8. Left unstripped it
+    crashes the tokenizer's `encode_batch()` with `TypeError: TextEncodeInput must be
+    Union[...]` (and equivalent 422 errors in other embedding engines this function feeds),
+    since embedding text is eventually encoded to bytes. Round-tripping through UTF-8 with
+    `errors="replace"` removes/replaces surrogates while leaving normal text -- including
+    valid multi-byte characters and properly paired surrogate emoji -- unchanged.
+    """
+    return s.encode("utf-8", errors="replace").decode("utf-8")
+
+
 def sanitize_embedding_text_inputs(text: Union[str, List[str]]) -> List[str]:
     """
     Transform invalid/empty inputs into a safe dummy to prevent API 422 embedding errors while
@@ -31,7 +46,7 @@ def sanitize_embedding_text_inputs(text: Union[str, List[str]]) -> List[str]:
     text_list = [text] if isinstance(text, str) else text
     dummy_value = "."
 
-    return [t if is_embeddable(t) else dummy_value for t in text_list]
+    return [_strip_surrogates(t) if is_embeddable(t) else dummy_value for t in text_list]
 
 
 def handle_embedding_response(
