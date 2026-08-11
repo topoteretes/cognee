@@ -63,9 +63,7 @@ class TestSettingsAuthorization:
         )
 
     def test_superuser_can_modify_settings(self, client):
-        headers = self._get_auth_header(
-            client, DEFAULT_SUPERUSER_EMAIL, DEFAULT_SUPERUSER_PASSWORD
-        )
+        headers = self._get_auth_header(client, DEFAULT_SUPERUSER_EMAIL, DEFAULT_SUPERUSER_PASSWORD)
 
         response = client.get("/api/v1/settings", headers=headers)
         assert response.status_code == 200
