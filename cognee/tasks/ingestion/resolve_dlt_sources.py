@@ -14,10 +14,7 @@ import json
 from typing import Any, Callable, List, Optional, Set
 from uuid import UUID
 
-from cognee.modules.data.methods.get_unique_data_id import (
-    get_unique_data_id,
-    get_unique_data_ids,
-)
+from cognee.modules.data.methods.get_unique_data_id import get_unique_data_id
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
 
@@ -250,15 +247,13 @@ async def _build_source_manifest_item(
     dlt_db_name = rows[0].dlt_db_name
     unique_rows = _dedupe_rows(rows, source_name)
 
-    # Stable per-row node ids, resolved in one batch query. FK lookup maps
-    # (table, pk_value) → node_id; when multiple rows share a PK value, the
-    # last one wins (best-effort).
-    row_identifiers = [
-        f"dlt:{row.table_name}:{row.primary_key_value}:{row.content_hash}"
-        for row in unique_rows.values()
-    ]
-    row_node_ids = await get_unique_data_ids(row_identifiers, user)
-    node_ids: dict[tuple[str, str, str], UUID] = dict(zip(unique_rows, row_node_ids))
+    # Stable per-row node ids via the shared identifier formula. FK lookup
+    # maps (table, pk_value) → node_id; when multiple rows share a PK value,
+    # the last one wins (best-effort).
+    node_ids: dict[tuple[str, str, str], UUID] = {
+        key: await get_unique_data_id(_dlt_row_identifier(row), user)
+        for key, row in unique_rows.items()
+    }
 
     fk_lookup: dict[tuple[str, str], UUID] = {}
     for key, row in unique_rows.items():
