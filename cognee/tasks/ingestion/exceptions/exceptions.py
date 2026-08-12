@@ -50,3 +50,13 @@ class LabelCountMismatchError(CogneeValidationError):
         status_code: int = status.HTTP_400_BAD_REQUEST,
     ):
         super().__init__(message, name, status_code)
+
+
+class InvalidLabelsError(CogneeValidationError):
+    def __init__(
+        self,
+        message: str = 'labels must be a JSON array of strings, e.g. ["finance", ""].',
+        name: str = "InvalidLabelsError",
+        status_code: int = status.HTTP_400_BAD_REQUEST,
+    ):
+        super().__init__(message, name, status_code)

@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field, WithJsonSchema
 from cognee.memory import QAEntry, TraceEntry, FeedbackEntry, SkillRunEntry
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
-from cognee.tasks.ingestion.data_item import pair_labels_with_data
+from cognee.tasks.ingestion.data_item import pair_labels_with_data, parse_labels
 from cognee.shared.utils import send_telemetry
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.usage_logger import log_usage
@@ -114,15 +114,18 @@ def get_remember_router() -> APIRouter:
     @log_usage(function_name="POST /v1/remember", log_type="api_endpoint")
     async def remember(
         data: List[UploadFile] = File(default=None),
-        label: Optional[List[EmptyExampleStr]] = Form(
+        labels: Optional[str] = Form(
             default=None,
-            examples=[[]],
+            examples=[""],
             description=(
-                "Per-file labels, paired positionally: the Nth label applies to the Nth "
-                "uploaded file, so provide one entry per file (leave an entry empty to "
-                "skip labeling that file). Stored on each file's data record during "
-                "ingestion. Only supported for normal ingestion — rejected when combined "
-                "with session_id or content_type, whose storage paths carry no data records."
+                'JSON array of per-file labels, e.g. ["finance", "people", ""]. Paired '
+                "positionally: the Nth label applies to the Nth uploaded file, so provide "
+                "one entry per file (an empty entry skips that file). Sent as a single "
+                "JSON string because multipart clients — Swagger UI included — cannot "
+                "reliably repeat array form fields. Stored on each file's data record "
+                "during ingestion. Only supported for normal ingestion — rejected when "
+                "combined with session_id or content_type, whose storage paths carry no "
+                "data records."
             ),
         ),
         datasetName: Optional[str] = Form(
@@ -253,10 +256,10 @@ def get_remember_router() -> APIRouter:
 
         ## Request Parameters
         - **data** (List[UploadFile]): Files to upload and process.
-        - **label** (Optional[List[str]]): Per-file labels, paired positionally with the
-          uploaded files (one entry per file; an empty entry skips that file). Stored on
-          each file's data record. Normal ingestion only — rejected with session_id or
-          content_type.
+        - **labels** (Optional[str]): JSON array of per-file labels, e.g.
+          ["finance", "people", ""], paired positionally with the uploaded files (one
+          entry per file; an empty entry skips that file). Stored on each file's data
+          record. Normal ingestion only — rejected with session_id or content_type.
         - **datasetName** (Optional[str]): Name of the target dataset.
         - **datasetId** (Optional[UUID]): UUID of an existing dataset.
         - **session_id** (Optional[str]): Session to attribute this memory to. When set,
@@ -296,15 +299,18 @@ def get_remember_router() -> APIRouter:
                 detail="Either datasetId or datasetName must be provided.",
             )
 
+        # Invalid JSON raises InvalidLabelsError (400) via the global handler.
+        parsed_labels = parse_labels(labels)
+
         # Labels live on the Data records that normal add+cognify ingestion
         # creates. The session-cache, skills, and archive paths never create
         # those records, so a label there would be silently dropped — reject it
-        # instead. Untouched Swagger array entries arrive as "" and don't count.
-        if any(label or []) and (session_id or content_type):
+        # instead.
+        if any(parsed_labels or []) and (session_id or content_type):
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    "label is only supported for normal ingestion — "
+                    "labels is only supported for normal ingestion — "
                     "remove session_id and content_type to use it."
                 ),
             )
@@ -312,7 +318,7 @@ def get_remember_router() -> APIRouter:
         # Labels ride on DataItems, which ingestion unwraps to store each
         # label on its file's Data record. A count mismatch raises
         # LabelCountMismatchError (400), returned by the global handler.
-        data = pair_labels_with_data(data, label)
+        data = pair_labels_with_data(data, parsed_labels)
 
         if content_type == "cogx-archive":
             if not data:

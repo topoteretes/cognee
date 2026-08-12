@@ -8,7 +8,7 @@ from pydantic import WithJsonSchema
 
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
-from cognee.tasks.ingestion.data_item import pair_labels_with_data
+from cognee.tasks.ingestion.data_item import pair_labels_with_data, parse_labels
 from cognee.shared.utils import send_telemetry
 from cognee.modules.pipelines.models import PipelineRunErrored
 from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunInfo
@@ -22,11 +22,6 @@ logger = get_logger()
 # NOTE: Needed because of: https://github.com/fastapi/fastapi/discussions/14975
 #       Once issue is resolved on Swagger side it can be removed.
 UploadFile = Annotated[UF, WithJsonSchema({"type": "string", "format": "binary"})]
-
-# Swagger UI prefills newly added array items from the ITEM-level example;
-# without one it inserts the literal "string". An empty item example keeps
-# "Add item" runnable (empty entries mean "no label for this file").
-EmptyExampleStr = Annotated[str, WithJsonSchema({"type": "string", "example": ""})]
 
 
 def get_add_router() -> APIRouter:
@@ -45,14 +40,16 @@ def get_add_router() -> APIRouter:
     @log_usage(function_name="POST /v1/add", log_type="api_endpoint")
     async def add(
         data: List[UploadFile] = File(default=None),
-        label: Optional[List[EmptyExampleStr]] = Form(
+        labels: Optional[str] = Form(
             default=None,
-            examples=[[]],
+            examples=[""],
             description=(
-                "Per-file labels, paired positionally: the Nth label applies to the Nth "
-                "uploaded file, so provide one entry per file (leave an entry empty to "
-                "skip labeling that file). Stored on each file's data record and returned "
-                "when listing dataset data."
+                'JSON array of per-file labels, e.g. ["finance", "people", ""]. Paired '
+                "positionally: the Nth label applies to the Nth uploaded file, so provide "
+                "one entry per file (an empty entry skips that file). Sent as a single "
+                "JSON string because multipart clients — Swagger UI included — cannot "
+                "reliably repeat array form fields. Stored on each file's data record "
+                "and returned when listing dataset data."
             ),
         ),
         datasetName: Optional[str] = Form(
@@ -87,9 +84,10 @@ def get_add_router() -> APIRouter:
           - HTTP URLs (if ALLOW_HTTP_REQUESTS is enabled)
           - GitHub repository URLs (will be cloned and processed)
           - Regular file uploads
-        - **label** (Optional[List[str]]): Per-file labels, paired positionally with the
-                 uploaded files (one entry per file; an empty entry skips that file).
-                 Stored on each file's data record.
+        - **labels** (Optional[str]): JSON array of per-file labels, e.g.
+                 ["finance", "people", ""], paired positionally with the uploaded files
+                 (one entry per file; an empty entry skips that file). Stored on each
+                 file's data record.
         - **datasetName** (Optional[str]): Name of the dataset to add data to
         - **datasetId** (Optional[UUID]): UUID of an already existing dataset
         - **node_set** Optional[list[str]]: List of node identifiers for graph organization and access control.
@@ -134,9 +132,9 @@ def get_add_router() -> APIRouter:
             )
 
         # Labels ride on DataItems, which ingestion unwraps to store each
-        # label on its file's Data record. A count mismatch raises
-        # LabelCountMismatchError (400), returned by the global handler.
-        data = pair_labels_with_data(data, label)
+        # label on its file's Data record. Invalid JSON or a count mismatch
+        # raises a CogneeApiError (400), returned by the global handler.
+        data = pair_labels_with_data(data, parse_labels(labels))
 
         try:
             add_run = await cognee_add(
