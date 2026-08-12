@@ -20,6 +20,19 @@ async def update_node_access_timestamps(items: Any):
     if os.getenv("ENABLE_LAST_ACCESSED", "false").lower() != "true":
         return
 
+    # Imported here rather than at module scope: context_global_variables pulls in
+    # the database/LLM configs and the user methods, and this module is imported
+    # from the retrieval path they in turn reach.
+    from cognee.context_global_variables import suppress_access_tracking
+
+    # A retrieval made to *measure* memory (the recall-coverage replay) must not
+    # also refresh it: last_accessed drives cleanup_unused_data's retention cutoff
+    # and the activity feed, so stamping it here would let an analyser keep stale
+    # documents alive and report access no human made.
+    if suppress_access_tracking.get():
+        logger.debug("Access tracking suppressed for this retrieval.")
+        return
+
     # In case there are no retrievable node ids, skip processing.
     if not items:
         return

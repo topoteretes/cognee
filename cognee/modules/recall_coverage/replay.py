@@ -28,6 +28,14 @@ one:
   from inside an authenticated request with ``CACHING=true`` would write a
   session-cache QA turn per replayed question and could fire an AUTO_FEEDBACK
   LLM call each time — the run would be editing the memory it is measuring.
+* **``Data.last_accessed`` stamping is suppressed.**
+  ``get_retriever_output`` calls ``update_node_access_timestamps`` on every
+  retrieval, outside the ``only_context`` guard, and ``cleanup_unused_data``
+  deletes ``Data`` whose ``last_accessed`` is older than its cutoff. With
+  ``ENABLE_LAST_ACCESSED=true`` a nightly run would therefore keep every document
+  it retrieved alive for ever and make ``GET /activity`` report access no human
+  performed — measurement changing a retention decision. See
+  :func:`without_access_tracking`.
 * **Retrieval only: ``only_context=True``.** The completion is a judge-phase
   call, made only for rows that scored above zero (spec section 2 phase 3 step
   12). Letting the retriever generate one here would bill a completion for every
@@ -46,7 +54,7 @@ from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Iterator, Optional, Sequence
 from uuid import UUID
 
-from cognee.context_global_variables import session_user
+from cognee.context_global_variables import session_user, suppress_access_tracking
 from cognee.modules.recall_coverage.dedup import DedupedQuestion
 from cognee.modules.recall_coverage.types import CoverageParams
 from cognee.modules.search.methods.search import authorized_search
@@ -94,6 +102,27 @@ class ReplayedRow:
     @property
     def has_context(self) -> bool:
         return bool(self.retrieval_context)
+
+
+@contextmanager
+def without_access_tracking() -> Iterator[None]:
+    """Run a block with ``Data.last_accessed`` stamping suppressed.
+
+    ``get_retriever_output`` calls ``update_node_access_timestamps`` on every
+    retrieval, and it is not behind ``only_context``. With
+    ``ENABLE_LAST_ACCESSED=true`` a run would therefore stamp every document it
+    retrieved as accessed: ``cleanup_unused_data`` deletes ``Data`` whose
+    ``last_accessed`` predates its cutoff, so a nightly coverage run would keep
+    stale documents alive for ever, and ``GET /activity`` would report access no
+    human performed. The run must not edit the memory it is measuring — the same
+    rule as the ``queries`` rows and the session cache, applied to the third write
+    path in the search call.
+    """
+    token = suppress_access_tracking.set(True)
+    try:
+        yield
+    finally:
+        suppress_access_tracking.reset(token)
 
 
 @contextmanager
@@ -197,7 +226,7 @@ async def replay_question(
     search_fn = search or authorized_search
     dataset_ids = [question.dataset_id] if question.dataset_id else None
 
-    with without_session_user():
+    with without_session_user(), without_access_tracking():
         payloads = await search_fn(
             query_type=REPLAY_QUERY_TYPE,
             query_text=question.text,
@@ -282,5 +311,6 @@ __all__ = [
     "flatten_context",
     "replay_question",
     "replay_questions",
+    "without_access_tracking",
     "without_session_user",
 ]

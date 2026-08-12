@@ -310,6 +310,47 @@ async def test_replay_writes_no_search_history(monkeypatch):
     assert rows[0].dataset_name == "infra-docs"
 
 
+@pytest.mark.asyncio
+async def test_replay_stamps_no_last_accessed_on_the_data_it_retrieves(monkeypatch):
+    """The real ``update_node_access_timestamps``, with ``ENABLE_LAST_ACCESSED`` on.
+
+    The call is not behind ``only_context``, and ``last_accessed`` drives
+    ``cleanup_unused_data``'s retention cutoff and the activity feed — so a run
+    that stamped it would keep stale documents alive and report access no human
+    made. The third write path in the search call, after the ``queries`` rows and
+    the session cache.
+    """
+    monkeypatch.setenv("ENABLE_LAST_ACCESSED", "true")
+
+    tracking = importlib.import_module("cognee.modules.retrieval.utils.access_tracking")
+
+    def _explode(*args, **kwargs):
+        raise AssertionError("recall-coverage replay must not stamp last_accessed")
+
+    # Everything the real function would reach once it decided to proceed.
+    monkeypatch.setattr(tracking, "_extract_access_node_ids", _explode)
+    monkeypatch.setattr(tracking, "_find_origin_documents_via_projection", _explode)
+    monkeypatch.setattr(tracking, "_update_sql_records", _explode)
+
+    async def fake_search(**kwargs):
+        # Stands in for get_retriever_output, which calls this unconditionally.
+        await tracking.update_node_access_timestamps({"chunks": [{"id": str(uuid4())}]})
+        return [_payload("the runbooks live in infra-docs")]
+
+    rows = await replay_questions(
+        [_question()],
+        params=_params(),
+        user_cache=ReplayUserCache(loader=lambda user_id: _resolved(SimpleNamespace(id=user_id))),
+        search=fake_search,
+    )
+
+    assert rows[0].error is None
+
+    # And the suppression is scoped: outside the replay, tracking still runs.
+    with pytest.raises(AssertionError, match="must not stamp"):
+        await tracking.update_node_access_timestamps({"chunks": [{"id": str(uuid4())}]})
+
+
 # --------------------------------------------------------------------------
 # Dataset scoping and context shaping
 # --------------------------------------------------------------------------

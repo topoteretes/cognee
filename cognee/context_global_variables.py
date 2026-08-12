@@ -33,6 +33,11 @@ current_dataset_id: ContextVar[Optional[UUID]] = ContextVar("current_dataset_id"
 llm_config: ContextVar[Optional[LLMConfig]] = ContextVar("llm_config", default=None)
 embedding_config = ContextVar("embedding_config", default=None)
 session_user = ContextVar("session_user", default=None)
+# Set while a retrieval is an *analysis* of memory rather than a use of it — the
+# recall-coverage replay — so `update_node_access_timestamps` does not stamp
+# `Data.last_accessed` for reads no human performed. Left at False everywhere
+# else, so ordinary retrieval keeps tracking access exactly as before.
+suppress_access_tracking: ContextVar[bool] = ContextVar("suppress_access_tracking", default=False)
 # Labels the pipeline stage (extraction | summarization | query) whose LLM
 # config is currently active on `llm_config`, for tracing (see pipeline_stage).
 current_pipeline_stage: ContextVar[Optional[str]] = ContextVar(
