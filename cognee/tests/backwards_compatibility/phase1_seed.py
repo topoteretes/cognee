@@ -20,6 +20,8 @@ persistence watermark takeover (see phase2_verify docstring).
 import asyncio
 import sys
 
+from sqlalchemy.exc import StatementError
+
 import cognee
 from cognee.api.v1.search import SearchType
 
@@ -77,15 +79,19 @@ async def seed_dlt() -> None:
     try:
         await cognee.cognify(datasets=[DLT_COMPAT_DATASET])
         print(f"Seeded and cognified dataset '{DLT_COMPAT_DATASET}'.")
-    except Exception as error:
-        # v1.2.0's legacy DLT cognify is broken on SQLite (upsert_edges binds
-        # string UUIDs into a UUID column -> "'str' object has no attribute
-        # 'hex'"). The tag is immutable, so tolerate it: the per-row Data
-        # records with their source == "dlt" stamps ARE the compat surface
-        # Phase 2 verifies (migration, tombstone, re-add conversion).
+    except StatementError as error:
+        # EXACTLY ONE known failure is tolerated: v1.2.0's legacy DLT cognify
+        # is broken on SQLite — upsert_edges binds string UUIDs into a UUID
+        # column ("'str' object has no attribute 'hex'"). The tag is
+        # immutable, so tolerate that specific bug: the per-row Data records
+        # with their source == "dlt" stamps ARE the compat surface Phase 2
+        # verifies (migration, tombstone, re-add conversion). Anything else,
+        # including any other StatementError, propagates.
+        if "'str' object has no attribute 'hex'" not in str(error):
+            raise
         print(
-            f"KNOWN-ISSUE: legacy cognify of '{DLT_COMPAT_DATASET}' failed on this "
-            f"backend ({type(error).__name__}); seeded per-row records only."
+            f"KNOWN-ISSUE: legacy cognify of '{DLT_COMPAT_DATASET}' hit v1.2.0's "
+            "str-UUID bind bug on this backend; seeded per-row records only."
         )
 
 
