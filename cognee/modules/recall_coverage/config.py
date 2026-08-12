@@ -163,7 +163,11 @@ class RecallCoverageConfig(BaseSettings):
 
         Malformed JSON or a wrong shape raises, so a misconfigured deployment
         fails loudly instead of silently resolving every label to no prefixes
-        (which would report "nothing asked yet" for every agent).
+        (which would report "nothing asked yet" for every agent). So does the same
+        prefix appearing under two labels: "longest prefix wins" only makes
+        classification a partition when each prefix has one owner, and two labels
+        claiming ``claude_`` would report the same traffic twice under two names
+        and replay and judge the identical window at double the LLM cost.
         """
         if not self.agent_prefix_map.strip():
             return dict(DEFAULT_AGENT_PREFIX_MAP)
@@ -188,6 +192,17 @@ class RecallCoverageConfig(BaseSettings):
                     f"RECALL_COVERAGE_AGENT_PREFIX_MAP entry '{label}' has an empty prefix"
                 )
             prefix_map[label] = prefixes
+
+        owner_of: dict[str, str] = {}
+        for label, prefixes in prefix_map.items():
+            for prefix in prefixes:
+                if owner_of.setdefault(prefix, label) != label:
+                    raise ValueError(
+                        f"RECALL_COVERAGE_AGENT_PREFIX_MAP gives prefix '{prefix}' to both "
+                        f"'{owner_of[prefix]}' and '{label}'; one prefix belongs to one label, "
+                        "otherwise the same sessions are counted under two agents"
+                    )
+
         return prefix_map
 
     def override_ceilings(self) -> dict[str, int]:

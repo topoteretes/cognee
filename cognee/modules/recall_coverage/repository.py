@@ -1355,6 +1355,15 @@ async def benchmark_cells(run_ids_by_label: Mapping[str, UUID]) -> list[Benchmar
     ``AVG`` and the scored count both ignore NULL scores, which is the same rule
     :mod:`cognee.modules.recall_coverage.aggregate` applies in Python: a row we
     could not judge is absent from the mean rather than counted as a zero.
+
+    Because the scope predicate is a join, ``DELETE /curated-questions/{id}``
+    removes that question's rows from **every** run's cells here. That is the
+    matrix being live rather than frozen (spec section 5 route 12 specifies a
+    direct ``GROUP BY``, and section 3's curated table has no soft delete): this
+    view is "the benchmark set, as it stands now, across each label's latest run",
+    and retiring a benchmark question retires it from the comparison. The frozen
+    view of a finished run — its ``summary``, including ``benchmark_score_pct`` —
+    is on route 3 and is unaffected.
     """
     if not run_ids_by_label:
         return []

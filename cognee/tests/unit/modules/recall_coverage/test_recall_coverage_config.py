@@ -116,6 +116,25 @@ def test_malformed_prefix_map_fails_loudly(raw):
         _config(agent_prefix_map=raw).prefix_map()
 
 
+def test_two_labels_may_not_claim_the_same_prefix():
+    """ "Longest prefix wins" is only a partition when each prefix has one owner.
+
+    Two labels owning ``claude_`` match the same rows: ``GET /agents`` would report
+    the same traffic twice under two names, and two runs would replay and judge the
+    identical window at double the LLM cost while presenting as two agents.
+    """
+    raw = json.dumps({"claude-code": ["claude_", "cc_"], "my-fork": ["claude_"]})
+
+    with pytest.raises(ValueError, match="claude_"):
+        _config(agent_prefix_map=raw).prefix_map()
+
+    # A label repeating its own prefix is harmless, and stays accepted.
+    duplicated = json.dumps({"claude-code": ["claude_", "claude_"]})
+    assert _config(agent_prefix_map=duplicated).prefix_map() == {
+        "claude-code": ("claude_", "claude_")
+    }
+
+
 def test_query_types_are_recall_not_lookups():
     query_types = _config().query_types()
     assert query_types == [
