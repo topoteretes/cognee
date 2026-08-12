@@ -7,6 +7,7 @@ This module provides a unified interface for interacting with Cognee, supporting
 """
 
 import os
+import re
 import sys
 import base64
 import hashlib
@@ -33,14 +34,47 @@ except ImportError:
 logger = get_logger()
 
 
-def normalize_api_url(api_url: Optional[str]) -> Optional[str]:
+# A scheme is "scheme://", per RFC 3986 (letter, then letters/digits/+-.).
+# Deliberately requires the "//" so a bare "localhost:8000" is treated as a
+# schemeless host:port rather than a URL whose scheme is "localhost" — the
+# reading urlsplit() gives it.
+_SCHEME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.\-]*://")
+# ...and the same prefix with a single slash, the common typo ("https:/host").
+_SINGLE_SLASH_SCHEME_RE = re.compile(r"^([a-zA-Z][a-zA-Z0-9+.\-]*):/(?!/)")
+
+_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "0.0.0.0", "::1", "[::1]"})
+
+
+def _assumed_scheme(url: str) -> str:
+    """Pick the scheme to assume for a schemeless URL from its host.
+
+    Loopback hosts are self-hosted dev servers that almost never speak TLS —
+    assuming https there swaps the "missing protocol" error for an equally
+    cryptic "[SSL: WRONG_VERSION_NUMBER]". Everything else is a real host and
+    should get https.
+    """
+    host = url.split("/", 1)[0].rsplit("@", 1)[-1]
+    if host.startswith("["):  # bracketed IPv6, e.g. [::1]:8000
+        host = host[: host.find("]") + 1]
+    else:
+        host = host.split(":", 1)[0]  # strip :port
+    return "http" if host.lower() in _LOOPBACK_HOSTS else "https"
+
+
+def normalize_api_url(
+    api_url: Optional[str], source: str = "COGNEE_BASE_URL/--api-url"
+) -> Optional[str]:
     """Normalize a Cognee base URL so requests never fail on a missing scheme.
 
     Users routinely paste a bare tenant host (e.g. ``tenant-xxx.aws.cognee.ai``)
     into ``COGNEE_BASE_URL`` / ``--api-url``. Without a scheme, httpx raises the
     cryptic "Request URL is missing an 'http://' or 'https://' protocol" only on
-    the first request (e.g. remember), long after startup. Assume ``https://`` for
-    a schemeless URL and warn, so the common case just works and the fix is clear.
+    the first request (e.g. remember), long after startup. Infer the scheme for a
+    schemeless URL and warn, so the common case just works and the fix is clear.
+
+    ``source`` names the setting the value came from; it is echoed in the warning
+    so the reader is pointed at the knob they actually set (serve mode resolves
+    ``COGNEE_SERVICE_URL`` / ``--serve-url``, not ``COGNEE_BASE_URL``).
     """
     if not api_url:
         return api_url
@@ -49,15 +83,30 @@ def normalize_api_url(api_url: Optional[str]) -> Optional[str]:
     if not url:
         return None
 
-    if "://" not in url:
-        logger.warning(
-            "COGNEE_BASE_URL/--api-url %r has no scheme; assuming https://. "
-            "Set the full URL (e.g. https://your-tenant.aws.cognee.ai) to silence this.",
-            url,
-        )
-        url = f"https://{url}"
+    if _SCHEME_RE.match(url):
+        return url
 
-    return url
+    # Repair near-misses rather than prefixing them into nonsense: "https:/host"
+    # would otherwise become "https://https:/host", and the protocol-relative
+    # "//host" would become "https:////host".
+    repaired = _SINGLE_SLASH_SCHEME_RE.sub(r"\1://", url, count=1)
+    if repaired != url:
+        logger.warning(
+            "%s %r is missing a slash after the scheme; reading it as %r.", source, url, repaired
+        )
+        return repaired
+
+    host_part = url.lstrip("/")
+    scheme = _assumed_scheme(host_part)
+    normalized = f"{scheme}://{host_part}"
+    logger.warning(
+        "%s %r has no scheme; assuming %s://. Set the full URL (e.g. %s) to silence this.",
+        source,
+        url,
+        scheme,
+        normalized,
+    )
+    return normalized
 
 
 # Read-only GETs (dataset list/status) should fail fast rather than inherit the
@@ -116,8 +165,6 @@ class CogneeClient:
         # Extract tenant ID from tenant URL pattern: tenant-<uuid>.*.cognee.ai
         self.tenant_id: Optional[str] = None
         if self.api_url:
-            import re
-
             match = re.search(r"tenant-([0-9a-f-]{36})", self.api_url)
             if match:
                 self.tenant_id = match.group(1)

@@ -1245,6 +1245,56 @@ def test_normalize_api_url_strips_whitespace():
     assert normalize_api_url("  tenant-abc.aws.cognee.ai  ") == "https://tenant-abc.aws.cognee.ai"
 
 
+def test_normalize_api_url_assumes_http_for_loopback():
+    # A self-hosted server on localhost almost never speaks TLS; assuming https
+    # would trade "missing protocol" for an equally cryptic SSL handshake error.
+    assert normalize_api_url("localhost:8000") == "http://localhost:8000"
+    assert normalize_api_url("127.0.0.1:8000") == "http://127.0.0.1:8000"
+    assert normalize_api_url("[::1]:8000") == "http://[::1]:8000"
+    assert normalize_api_url("localhost") == "http://localhost"
+
+
+def test_normalize_api_url_keeps_https_for_remote_host_with_port():
+    assert (
+        normalize_api_url("tenant-abc.aws.cognee.ai:8000")
+        == "https://tenant-abc.aws.cognee.ai:8000"
+    )
+
+
+def test_normalize_api_url_repairs_near_miss_schemes():
+    # Neither may be blindly prefixed: that yields "https://https:/host" and
+    # "https:////host" respectively.
+    assert (
+        normalize_api_url("https:/tenant-abc.aws.cognee.ai") == "https://tenant-abc.aws.cognee.ai"
+    )
+    assert normalize_api_url("//tenant-abc.aws.cognee.ai") == "https://tenant-abc.aws.cognee.ai"
+
+
+def test_normalize_api_url_leaves_explicit_non_http_scheme_alone():
+    # Not ours to rewrite — httpx reports the unsupported protocol clearly.
+    assert normalize_api_url("ftp://weird.host") == "ftp://weird.host"
+
+
+def test_normalize_api_url_warning_names_the_setting_it_was_given(monkeypatch):
+    # Serve mode resolves COGNEE_SERVICE_URL, so pointing the reader at
+    # COGNEE_BASE_URL would send them to a knob they never set.
+    warnings = []
+    client_module = importlib.import_module("src.cognee_client")
+    monkeypatch.setattr(
+        client_module.logger,
+        "warning",
+        lambda msg, *args, **kwargs: warnings.append(msg % args if args else msg),
+    )
+
+    normalize_api_url("tenant-abc.aws.cognee.ai", source="COGNEE_SERVICE_URL/--serve-url")
+
+    assert len(warnings) == 1
+    assert "COGNEE_SERVICE_URL/--serve-url" in warnings[0]
+    assert "COGNEE_BASE_URL" not in warnings[0]
+    # The suggested value is the actual fix, ready to paste.
+    assert "https://tenant-abc.aws.cognee.ai" in warnings[0]
+
+
 def test_normalize_api_url_passthrough_empty():
     assert normalize_api_url(None) is None
     assert normalize_api_url("") == ""

@@ -2023,19 +2023,28 @@ async def main():
 
     args = parser.parse_args()
 
+    # Normalize once here, not just inside CogneeClient: the mode decisions below
+    # must agree with the client about what counts as a URL, or a blank-but-present
+    # COGNEE_BASE_URL reads as "remote" (skipping migrations) while the client
+    # falls back to direct mode.
+    api_url = normalize_api_url(args.api_url)
+
     # Initialize the global CogneeClient
-    cognee_client = CogneeClient(api_url=args.api_url, api_token=args.api_token)
+    cognee_client = CogneeClient(api_url=api_url, api_token=args.api_token)
 
     host = args.host
     port = int(args.port)
     apply_tool_mode(args.tool_mode)
 
     # Resolve cloud connection: CLI args take precedence over env vars
-    serve_url = normalize_api_url(args.serve_url or os.environ.get("COGNEE_SERVICE_URL", ""))
+    serve_url = normalize_api_url(
+        args.serve_url or os.environ.get("COGNEE_SERVICE_URL", ""),
+        source="COGNEE_SERVICE_URL/--serve-url",
+    )
     serve_api_key = args.serve_api_key or os.environ.get("COGNEE_API_KEY", "")
 
     # Connect to Cognee Cloud if configured (before migrations — cloud handles its own DB)
-    if serve_url and not args.api_url:
+    if serve_url and not api_url:
         import cognee
 
         serve_kwargs = {"url": serve_url}
@@ -2045,7 +2054,7 @@ async def main():
         logger.info(f"Connected to Cognee Cloud: {serve_url}")
 
     # Skip migrations when in API or Cloud mode (remote handles its own database)
-    is_remote = bool(args.api_url) or bool(serve_url)
+    is_remote = bool(api_url) or bool(serve_url)
     if not args.no_migration and not is_remote:
         from cognee.modules.engine.operations.setup import setup
         from cognee.run_migrations import run_migrations
