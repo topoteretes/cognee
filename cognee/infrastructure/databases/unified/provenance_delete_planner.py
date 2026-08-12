@@ -6,13 +6,22 @@ source ref remains -> hard delete) versus which merely *survive* (some ref
 remains -> detach the targeted refs only). It then performs the removal in a
 retry-safe order:
 
-  1. delete vectors for unowned artifacts (from snapshots only),
-  2. ``remove_*_source_refs`` for the targeted refs on ALL matched artifacts
-     (idempotent),
-  3. ``delete_nodes`` / ``delete_edge_triples`` for the unowned artifacts.
+  1. delete per-edge triplet vectors for unowned edges (from snapshots only),
+  2. ``remove_*_source_refs`` for the targeted refs on SURVIVING matched
+     artifacts (idempotent),
+  3. ``delete_edge_triples`` for the unowned edges (edge-first),
+  4. retention check: an unowned-candidate node that is still an endpoint of any
+     remaining relationship is NOT hard-deleted — backends implement node
+     deletion as a detaching delete, which would destroy foreign-owned incident
+     relationships. Such nodes only lose the targeted refs (idempotent) and keep
+     their vectors,
+  5. delete vectors for the remaining truly-unowned nodes, then ``delete_nodes``
+     for them (they have no incident relationships at this point, so the
+     backend's detach semantics cannot remove anything foreign-owned).
 
-Vectors are deleted first so that a failure leaves graph provenance intact and a
-retry converges. All three steps are individually idempotent.
+Unowned artifacts keep their source refs until their hard delete, so a failure
+at any step leaves them rediscoverable by source ref and a retry converges. All
+steps are individually idempotent.
 
 Vector ids mirror ``delete_from_graph_and_vector``:
   - node -> collection ``f"{node_type}_{field}"`` for each indexed field,
@@ -77,18 +86,10 @@ async def execute_source_ref_removal(
             unowned_edges.append(edge)
 
     # ------------------------------------------------------------------
-    # 2. Delete vectors for unowned artifacts (from snapshots only).
+    # 2. Delete per-edge triplet vectors for unowned edges (from snapshots
+    #    only). Node vectors are deleted later, after the surviving-endpoint
+    #    retention check decides which nodes are actually hard-deleted.
     # ------------------------------------------------------------------
-    node_vector_collections: dict[str, list[str]] = {}
-    for node_id in unowned_node_ids:
-        data = node_data[node_id]
-        for field in data.indexed_fields:
-            collection_name = f"{data.node_type}_{field}"
-            node_vector_collections.setdefault(collection_name, []).append(node_id)
-
-    for collection, ids in node_vector_collections.items():
-        await _delete_vector_points(vector_engine, collection, ids)
-
     if unowned_edges:
         # Per-edge triplet vectors are tied to a single deleted edge instance, so
         # they are safe to delete here. EdgeType vectors are keyed by *shared*
@@ -135,20 +136,71 @@ async def execute_source_ref_removal(
         await graph_engine.remove_edge_source_refs(edges, list(removed_refs))
 
     # ------------------------------------------------------------------
-    # 4. Hard-delete unowned artifacts.
+    # 4. Hard-delete unowned edges FIRST. Node deletion is a detaching delete
+    #    on graph backends, so deleting nodes before edges would also destroy
+    #    incident relationships that still carry foreign ownership — including
+    #    relationships that never matched the targeted refs at all.
     # ------------------------------------------------------------------
-    if unowned_node_ids:
-        await graph_engine.delete_nodes(unowned_node_ids)
-
     if unowned_edges:
         await graph_engine.delete_edge_triples(unowned_edges)
 
     # ------------------------------------------------------------------
-    # 5. Post-delete cleanup parity with delete_from_graph_and_vector
-    #    (best-effort, non-fatal).
+    # 5. Surviving-endpoint retention check. With the unowned edges gone, any
+    #    relationship still incident to an unowned-candidate node is by
+    #    definition foreign-owned and must survive; the node is retained as its
+    #    endpoint, loses only the targeted refs, and keeps its vectors.
+    # ------------------------------------------------------------------
+    retained_node_ids: list[str] = []
+    deletable_node_ids: list[str] = []
+    for node_id in unowned_node_ids:
+        incident_edges = await graph_engine.get_edges(node_id)
+        if incident_edges:
+            retained_node_ids.append(node_id)
+        else:
+            deletable_node_ids.append(node_id)
+
+    if retained_node_ids:
+        logger.info(
+            "Retained %d unowned node(s) still incident to surviving relationships",
+            len(retained_node_ids),
+        )
+
+    retained_by_removed_refs: dict[tuple[str, ...], list[str]] = {}
+    for node_id in retained_node_ids:
+        removed = refs_by_node.get(node_id, [])
+        if not removed:
+            continue
+        retained_by_removed_refs.setdefault(tuple(removed), []).append(node_id)
+
+    for removed_refs, node_ids in retained_by_removed_refs.items():
+        await graph_engine.remove_node_source_refs(node_ids, list(removed_refs))
+
+    # ------------------------------------------------------------------
+    # 6. Delete vectors for the truly-unowned nodes, then hard-delete them.
+    #    They have no incident relationships at this point, so the backend's
+    #    detach semantics cannot remove anything foreign-owned. Refs stay on
+    #    the nodes until this delete, keeping a failed run rediscoverable.
+    # ------------------------------------------------------------------
+    node_vector_collections: dict[str, list[str]] = {}
+    for node_id in deletable_node_ids:
+        data = node_data[node_id]
+        for field in data.indexed_fields:
+            collection_name = f"{data.node_type}_{field}"
+            node_vector_collections.setdefault(collection_name, []).append(node_id)
+
+    for collection, ids in node_vector_collections.items():
+        await _delete_vector_points(vector_engine, collection, ids)
+
+    if deletable_node_ids:
+        await graph_engine.delete_nodes(deletable_node_ids)
+
+    # ------------------------------------------------------------------
+    # 7. Post-delete cleanup parity with delete_from_graph_and_vector
+    #    (best-effort, non-fatal). NodeSet tag cleanup only considers nodes
+    #    that were actually hard-deleted; retained NodeSet nodes keep tags.
     # ------------------------------------------------------------------
     await _cleanup_orphaned_edge_types(graph_engine, vector_engine, unowned_edges, edge_data)
-    await _cleanup_orphaned_nodeset_tags(graph_engine, vector_engine, unowned_node_ids, node_data)
+    await _cleanup_orphaned_nodeset_tags(graph_engine, vector_engine, deletable_node_ids, node_data)
 
 
 async def _cleanup_orphaned_edge_types(
