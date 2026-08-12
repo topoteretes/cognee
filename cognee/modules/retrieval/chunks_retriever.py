@@ -2,7 +2,6 @@ from typing import Any, Optional, List, Union
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.modules.retrieval.base_retriever import BaseRetriever
-from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.infrastructure.databases.vector.exceptions.exceptions import CollectionNotFoundError
 
 logger = get_logger("ChunksRetriever")
@@ -97,7 +96,7 @@ class ChunksRetriever(BaseRetriever):
         """
         Retrieves document chunks context based on the query.
         Searches for document chunks relevant to the specified query using a vector engine.
-        Raises a NoDataError if no data is found in the system.
+        A missing chunk collection yields an empty result list.
         Parameters:
         -----------
             - query (str): The query string to search for relevant document chunks.
@@ -125,6 +124,10 @@ class ChunksRetriever(BaseRetriever):
 
             return found_chunks
 
-        except CollectionNotFoundError as error:
-            logger.error("DocumentChunk_text collection not found in vector database")
-            raise NoDataError("No data found in the system, please add data first.") from error
+        except CollectionNotFoundError:
+            # A dataset without this collection is a legitimate state (e.g. it
+            # holds only non-document data or was never cognified) — it
+            # contributes zero results. Raising here poisons multi-dataset
+            # searches: one such dataset would abort the whole merged query.
+            logger.info("DocumentChunk_text collection not found; returning no chunks")
+            return []

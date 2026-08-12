@@ -51,8 +51,8 @@ class TripletRetriever(BaseRetriever):
         Retrieves relevant triplets.
 
         Fetches triplets based on a query from a vector engine.
-        Returns empty list if no triplets are found. Raises NoDataError if the collection is not
-        found.
+        Returns empty list if no triplets are found. Raises NoDataError with setup
+        guidance when triplet embeddings were never created.
 
         Parameters:
         -----------
@@ -86,9 +86,13 @@ class TripletRetriever(BaseRetriever):
                 return []
 
             return found_triplets
-        except CollectionNotFoundError as error:
-            logger.error("Triplet_text collection not found")
-            raise NoDataError("No data found in the system, please add data first.") from error
+        except CollectionNotFoundError:
+            # Race window only: the has_collection guard above already raised
+            # the actionable "run create_triplet_embeddings" error when the
+            # collection never existed. A vanish between guard and search
+            # contributes zero results rather than a misleading error.
+            logger.info("Triplet_text collection not found; returning no triplets")
+            return []
 
     def _extract_context_object_ids(self, retrieved_objects: Any) -> Optional[Dict[str, List[str]]]:
         """Triplets are non-elementary graph objects; do not report IDs for session QA - object ids cannot be resolved"""

@@ -49,7 +49,6 @@ async def retrieve_hybrid_chunks(
             candidate_limit,
             node_name,
             node_name_filter_operator,
-            required=True,
             query_vector=query_vector,
         ),
         search_collection(
@@ -148,7 +147,6 @@ async def search_collection(
     node_name: Optional[list[str]],
     node_name_filter_operator: str,
     *,
-    required: bool = False,
     apply_node_filter: bool = True,
     query_vector: Optional[list[float]] = None,
 ) -> list[Any]:
@@ -167,10 +165,9 @@ async def search_collection(
             node_name=search_node_name,
             node_name_filter_operator=search_operator,
         )
-    except CollectionNotFoundError as error:
-        if required:
-            logger.error("%s collection not found", collection_name)
-            raise NoDataError("No data found in the system, please add data first.") from error
+    except CollectionNotFoundError:
+        # A dataset without this collection is a legitimate state; the
+        # channel contributes nothing instead of aborting the whole search.
         logger.debug("%s collection not found; using empty channel", collection_name)
         return []
 

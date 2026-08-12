@@ -55,8 +55,9 @@ async def test_get_context_success(mock_vector_engine):
 
 
 @pytest.mark.asyncio
-async def test_get_context_collection_not_found_error(mock_vector_engine):
-    """Test that CollectionNotFoundError is converted to NoDataError."""
+async def test_get_context_collection_not_found_returns_empty(mock_vector_engine):
+    """A missing collection is a legitimate dataset state: the retriever
+    contributes zero results instead of aborting a multi-dataset search."""
     mock_vector_engine.search.side_effect = CollectionNotFoundError("Collection not found")
 
     retriever = ChunksRetriever()
@@ -65,8 +66,7 @@ async def test_get_context_collection_not_found_error(mock_vector_engine):
         "cognee.modules.retrieval.chunks_retriever.get_unified_engine",
         return_value=_make_unified_mock(mock_vector_engine),
     ):
-        with pytest.raises(NoDataError, match="No data found"):
-            await retriever.get_retrieved_objects("test query")
+        assert await retriever.get_retrieved_objects("test query") == []
 
 
 @pytest.mark.asyncio

@@ -6,7 +6,6 @@ from cognee.modules.retrieval.utils.completion import generate_completion
 from cognee.infrastructure.session.get_session_manager import get_session_manager
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.utils.used_graph_elements import extract_from_scored_results
-from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 from cognee.context_global_variables import session_user
 from cognee.infrastructure.databases.cache.config import CacheConfig
@@ -57,9 +56,12 @@ class CompletionRetriever(BaseRetriever):
             )
 
             return found_chunks
-        except CollectionNotFoundError as error:
-            logger.error("DocumentChunk_text collection not found")
-            raise NoDataError("No data found in the system, please add data first.") from error
+        except CollectionNotFoundError:
+            # A dataset without document chunks is a legitimate state — it
+            # contributes zero results instead of aborting a multi-dataset
+            # search; the completion then answers over an empty context.
+            logger.info("DocumentChunk_text collection not found; returning no chunks")
+            return []
 
     def _extract_context_object_ids(self, retrieved_objects: Any) -> Optional[Dict[str, List[str]]]:
         """Extract node_ids from ScoredResult-like list for session QA."""
@@ -72,7 +74,7 @@ class CompletionRetriever(BaseRetriever):
         Retrieves relevant document chunks as context.
 
         Fetches document chunks based on a query from a vector engine and combines their text.
-        Returns empty string if no chunks are found. Raises NoDataError if the collection is not
+        Returns empty string if no chunks are found or the collection is not
         found.
 
         Parameters:

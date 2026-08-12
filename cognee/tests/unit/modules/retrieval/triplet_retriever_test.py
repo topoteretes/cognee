@@ -79,8 +79,11 @@ async def test_get_context_empty_results(mock_vector_engine):
 
 
 @pytest.mark.asyncio
-async def test_get_objects_collection_not_found_error(mock_vector_engine):
-    """Test that CollectionNotFoundError is converted to NoDataError."""
+async def test_get_objects_collection_not_found_returns_empty(mock_vector_engine):
+    """The race window between the has_collection guard and the search
+    contributes zero results instead of a misleading error. (A collection
+    that never existed still raises the actionable memify guidance — see
+    test above.)"""
     mock_vector_engine.has_collection.side_effect = CollectionNotFoundError("Collection not found")
 
     retriever = TripletRetriever()
@@ -89,8 +92,7 @@ async def test_get_objects_collection_not_found_error(mock_vector_engine):
         "cognee.modules.retrieval.triplet_retriever.get_vector_engine_async",
         return_value=mock_vector_engine,
     ):
-        with pytest.raises(NoDataError, match="No data found"):
-            await retriever.get_retrieved_objects("test query")
+        assert await retriever.get_retrieved_objects("test query") == []
 
 
 @pytest.mark.asyncio

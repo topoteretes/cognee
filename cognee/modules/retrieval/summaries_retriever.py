@@ -3,7 +3,6 @@ from typing import Any, Optional, List, Union
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.modules.retrieval.base_retriever import BaseRetriever
-from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.infrastructure.databases.vector.exceptions.exceptions import CollectionNotFoundError
 
 logger = get_logger("SummariesRetriever")
@@ -31,8 +30,7 @@ class SummariesRetriever(BaseRetriever):
         """
         Retrieves text summary objects based on the query.
 
-        On encountering a missing collection, raises NoDataError with a message to add data
-        first.
+        A missing summary collection yields an empty result list.
 
         Parameters:
         -----------
@@ -58,16 +56,19 @@ class SummariesRetriever(BaseRetriever):
             logger.info(f"Found {len(summaries_results)} summaries from vector search")
 
             return summaries_results
-        except CollectionNotFoundError as error:
-            logger.error("TextSummary_text collection not found in vector database")
-            raise NoDataError("No data found in the system, please add data first.") from error
+        except CollectionNotFoundError:
+            # A dataset without summaries is a legitimate state (e.g. its
+            # pipeline route skips summarization) — it contributes zero
+            # results instead of aborting a multi-dataset search.
+            logger.info("TextSummary_text collection not found; returning no summaries")
+            return []
 
     async def get_context_from_objects(self, query: str, retrieved_objects: Any) -> str:
         """
         Retrieves relevant summaries as context.
 
         Fetches text summaries based on a query from a vector engine and combines their text.
-        Returns empty string if no summaries are found. Raises NoDataError if the collection is not
+        Returns empty string if no summaries are found or the collection is not
         found.
 
         Parameters:

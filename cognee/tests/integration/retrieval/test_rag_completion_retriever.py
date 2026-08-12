@@ -10,7 +10,6 @@ from cognee.tasks.storage import add_data_points
 from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.modules.chunking.models import DocumentChunk
 from cognee.modules.data.processing.document_types import TextDocument
-from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.modules.retrieval.completion_retriever import CompletionRetriever
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.data.processing.document_types import Document
@@ -316,12 +315,12 @@ async def test_rag_completion_context_top_k_limits_results(
 
 @pytest.mark.asyncio
 async def test_get_rag_completion_context_on_empty_graph(setup_test_environment_empty):
-    """Integration test: verify CompletionRetriever handles empty graph correctly."""
+    """Integration test: an absent chunk collection yields zero results
+    (a legitimate dataset state), not an aborted search."""
     retriever = CompletionRetriever()
     query = "Christina Mayer"
 
-    with pytest.raises(NoDataError):
-        await retriever.get_retrieved_objects(query)
+    assert await retriever.get_retrieved_objects(query) == []
 
     vector_engine = await get_vector_engine_async()
     await vector_engine.create_collection(

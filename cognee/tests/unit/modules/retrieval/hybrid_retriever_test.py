@@ -145,7 +145,9 @@ async def test_query_batch_is_rejected_before_work_starts():
 
 
 @pytest.mark.asyncio
-async def test_missing_document_chunk_collection_raises_no_data_error():
+async def test_missing_document_chunk_collection_is_empty_channel():
+    """A dataset without document chunks must not abort hybrid search — the
+    vector-chunk channel contributes nothing and the fusion continues."""
     vector = MagicMock()
     vector.search = _vector_search(missing_collections={"DocumentChunk_text"})
     graph = MagicMock()
@@ -157,8 +159,9 @@ async def test_missing_document_chunk_collection_raises_no_data_error():
         new_callable=AsyncMock,
         return_value=_unified(vector=vector, graph=graph),
     ):
-        with pytest.raises(NoDataError, match="No data found"):
-            await retriever.get_retrieved_objects(query="q")
+        retrieved = await retriever.get_retrieved_objects(query="q")
+
+    assert retrieved["chunks"] == []
 
 
 @pytest.mark.asyncio
