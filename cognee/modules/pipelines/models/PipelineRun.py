@@ -1,7 +1,7 @@
 import enum
 from uuid import uuid4
 from datetime import datetime, timezone
-from sqlalchemy import Column, DateTime, JSON, Enum, UUID, String
+from sqlalchemy import Column, DateTime, Integer, JSON, Enum, UUID, String
 from cognee.infrastructure.databases.relational import Base
 
 
@@ -37,3 +37,15 @@ class PipelineRun(Base):
     # first task, or a row written before this column existed. Readers fall
     # back to created_at in that case.
     last_heartbeat_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Which process owns this run, so liveness can be a fact rather than an
+    # inference. A heartbeat only ever says "it was alive N seconds ago"; the
+    # owner says "ask the operating system". Recorded on the STARTED row.
+    #
+    # owner_node_id defaults to the hostname, which is deliberate: processes
+    # that share a hostname share a process table, so owner_pid is meaningful
+    # exactly when the ids match. Containers get distinct hostnames and
+    # correctly fall through to the heartbeat instead of reading each other's
+    # pids. Override with COGNEE_NODE_ID when hostname is not stable per host.
+    owner_node_id = Column(String, nullable=True)
+    owner_pid = Column(Integer, nullable=True)
