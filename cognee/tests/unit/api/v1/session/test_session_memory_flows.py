@@ -609,6 +609,16 @@ def _get_recall_module():
     return importlib.import_module("cognee.api.v1.recall.recall")
 
 
+@pytest.fixture(autouse=True)
+def _stub_search_history():
+    """These tests mock recall/search internals (users, routed query types), and
+    the history write would bind those mocks into a real INSERT. History is not
+    under test here — it has its own coverage in test_recall_logs_query_history.py
+    — so stub it at its source module (recall imports it inside the function)."""
+    with patch("cognee.modules.search.operations.log_search_history", AsyncMock()):
+        yield
+
+
 class TestRecallSessionMode:
     @pytest.fixture(autouse=True)
     def _disable_telemetry(self, monkeypatch):
