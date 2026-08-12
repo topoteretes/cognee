@@ -208,7 +208,7 @@ jobs:
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-        run: uv run python ./examples/demos/custom_pipelines/agentic_reasoning_procurement_example.py
+        run: uv run python ./examples/demos/agentic/agentic_reasoning_procurement_example.py
 
   test-memify:
     name: Run Memify Example

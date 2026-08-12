@@ -120,6 +120,11 @@ Every demo lives in a topic folder.
 |---|---|
 | [`cognee_comprehensive_example.py`](demos/comprehensive_example/cognee_comprehensive_example.py) | Three sources, node sets, ontology, memify, filtered recall — stitched together |
 
+### [`agentic/`](demos/agentic/) — agents reasoning over memory
+| Script | Demonstrates |
+|---|---|
+| [`agentic_reasoning_procurement_example.py`](demos/agentic/agentic_reasoning_procurement_example.py) | Research-then-decide over `node_set`-categorized memory: scoped recalls per category, then an LLM decision justified by the evidence |
+
 ### [`sessions/`](demos/sessions/) — session memory in action
 | Script | Demonstrates |
 |---|---|
@@ -151,7 +156,6 @@ Every demo lives in a topic folder.
 | [`custom_pipeline_single_object_example.py`](demos/custom_pipelines/custom_pipeline_single_object_example.py) | Deferred-call pipeline pattern with typed `DataPoint`s |
 | [`memify_coding_agent_rule_extraction_example.py`](demos/custom_pipelines/memify_coding_agent_rule_extraction_example.py) | Distilling coding-agent traces into reusable rules |
 | [`relational_database_to_knowledge_graph_migration_example.py`](demos/custom_pipelines/relational_database_to_knowledge_graph_migration_example.py) | Migration config + tuned recalls |
-| [`agentic_reasoning_procurement_example.py`](demos/custom_pipelines/agentic_reasoning_procurement_example.py) | Multi-step reasoning over a procurement scenario |
 | [`organizational_hierarchy/`](demos/custom_pipelines/organizational_hierarchy/) | Org-chart ingestion — high-level and low-level variants |
 
 ### [`permissions/`](demos/permissions/) — multi-tenancy (set `ENABLE_BACKEND_ACCESS_CONTROL=True`)
@@ -208,7 +212,7 @@ while staying on that one topic. May be long and may read bundled files, but the
 name the basic guide it builds on and state what it adds.
 
 **`demos/`** — multiple cognee features stitched together, or a realistic scenario/use case.
-Lives in a topic subfolder (`sessions/`, `feedback/`, `ingestion_and_migration/`,
+Lives in a topic subfolder (`agentic/`, `sessions/`, `feedback/`, `ingestion_and_migration/`,
 `custom_pipelines/`, `permissions/`) — never loose at the `demos/` root. Scenario folders keep
 their own `data/`. If your demo really demonstrates one feature and its length is padding,
 it's a guide that grew — trim it.
