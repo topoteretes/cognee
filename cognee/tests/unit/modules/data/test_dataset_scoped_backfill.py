@@ -84,6 +84,7 @@ def test_backfill_preserves_sole_ids_and_splits_shared_rows():
 
     dataset_a, dataset_b = uuid.uuid4(), uuid.uuid4()
     sole_id, shared_id, scoped_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    orphan_id, ghost_id = uuid.uuid4(), uuid.uuid4()
     now = datetime.now(timezone.utc)
 
     data_table = Data.__table__
@@ -108,6 +109,7 @@ def test_backfill_preserves_sole_ids_and_splits_shared_rows():
         add_row(sole_id, name="sole")
         add_row(shared_id, name="shared")
         add_row(scoped_id, dataset_id=dataset_a, name="scoped")
+        add_row(orphan_id, name="orphan")  # NULL-scoped, no membership
 
         def add_membership(dataset_id, data_id, created_at):
             conn.execute(
@@ -120,20 +122,27 @@ def test_backfill_preserves_sole_ids_and_splits_shared_rows():
         add_membership(dataset_a, shared_id, now)  # oldest -> keeper
         add_membership(dataset_b, shared_id, now + timedelta(minutes=1))
         add_membership(dataset_a, scoped_id, now)
+        # Shared memberships whose data row is MISSING: must be skipped whole —
+        # in particular their ledger rows must not be repointed at a fork that
+        # is never created.
+        add_membership(dataset_a, ghost_id, now)
+        add_membership(dataset_b, ghost_id, now + timedelta(minutes=1))
 
-        # Ledger rows for the shared document in both datasets.
-        for ds in (dataset_a, dataset_b):
-            conn.execute(
-                sa.insert(nodes_table).values(
-                    id=uuid.uuid4(),
-                    slug=uuid.uuid4(),
-                    user_id=uuid.uuid4(),
-                    data_id=shared_id,
-                    dataset_id=ds,
-                    type="DocumentChunk",
-                    indexed_fields=[],
+        # Ledger rows for the shared document in both datasets — and for the
+        # ghost (missing-row) memberships, which must stay untouched.
+        for ledger_data_id in (shared_id, ghost_id):
+            for ds in (dataset_a, dataset_b):
+                conn.execute(
+                    sa.insert(nodes_table).values(
+                        id=uuid.uuid4(),
+                        slug=uuid.uuid4(),
+                        user_id=uuid.uuid4(),
+                        data_id=ledger_data_id,
+                        dataset_id=ds,
+                        type="DocumentChunk",
+                        indexed_fields=[],
+                    )
                 )
-            )
 
     with engine.connect() as conn:
         context = MigrationContext.configure(conn)
@@ -171,11 +180,30 @@ def test_backfill_preserves_sole_ids_and_splits_shared_rows():
         assert split_row.id != shared_id
         assert split_row.name == "shared"
 
-        # Ledger repoint: dataset_b's nodes follow the new id; dataset_a's stay.
-        ledger = conn.execute(sa.select(nodes_table.c.dataset_id, nodes_table.c.data_id)).fetchall()
+        # Orphan (no membership): left exactly as it was.
+        assert by_id[orphan_id].dataset_id is None
+        assert by_id[orphan_id].legacy_id is None
+
+        # Ghost memberships (data row missing): no fork row minted for them.
+        assert ghost_id not in by_id
+        assert not [row for row in rows if row.legacy_id == ghost_id]
+
+        # Ledger repoint: dataset_b's nodes follow the new id; dataset_a's stay;
+        # the ghost's ledger rows are untouched in both datasets.
+        ledger = conn.execute(
+            sa.select(nodes_table.c.dataset_id, nodes_table.c.data_id).where(
+                nodes_table.c.data_id != ghost_id
+            )
+        ).fetchall()
         ledger_by_dataset = {row.dataset_id: row.data_id for row in ledger}
         assert ledger_by_dataset[dataset_a] == shared_id
         assert ledger_by_dataset[dataset_b] == split_row.id
+        ghost_ledger = conn.execute(
+            sa.select(sa.func.count())
+            .select_from(nodes_table)
+            .where(nodes_table.c.data_id == ghost_id)
+        ).scalar()
+        assert ghost_ledger == 2, "missing-row memberships must not repoint ledger rows"
 
         # Membership table is gone.
         assert "dataset_data" not in sa.inspect(conn).get_table_names()
@@ -275,3 +303,96 @@ def test_backfill_downgrade_recreates_memberships_without_data_loss():
             (dataset_a, shared_id),
             (dataset_b, split_row.id),
         }, "one membership per scoped row, fork membership points at the fork row"
+
+
+def test_backfill_executes_at_scale():
+    """The backfill's mechanics hold on a large table, not just toy fixtures.
+
+    50k sole-membership rows (stamped by ONE set-based UPDATE), 1,200 shared
+    rows split across two datasets (exercising the chunked IN-list path —
+    chunk size is 900). Asserts complete coverage: no row left unscoped,
+    every keeper kept its id, every shared row produced exactly one fork
+    with correct lineage, memberships table dropped.
+    """
+    engine = _make_engine()
+    membership = _create_schema(engine)
+
+    from cognee.modules.data.models import Data
+
+    dataset_a, dataset_b = uuid.uuid4(), uuid.uuid4()
+    now = datetime.now(timezone.utc)
+    data_table = Data.__table__
+
+    sole_ids = [uuid.uuid4() for _ in range(50_000)]
+    shared_ids = [uuid.uuid4() for _ in range(1_200)]
+
+    with engine.begin() as conn:
+        conn.execute(
+            sa.insert(data_table),
+            [
+                {
+                    "id": row_id,
+                    "dataset_id": None,
+                    "name": "doc",
+                    "content_hash": f"hash-{row_id.hex}",
+                    "raw_data_location": f"file:///tmp/{row_id.hex}.txt",
+                    "owner_id": dataset_a,
+                    "pipeline_status": {},
+                    "token_count": -1,
+                }
+                for row_id in sole_ids + shared_ids
+            ],
+        )
+        conn.execute(
+            sa.insert(membership),
+            [
+                {"dataset_id": dataset_a, "data_id": row_id, "created_at": now}
+                for row_id in sole_ids + shared_ids
+            ]
+            + [
+                {
+                    "dataset_id": dataset_b,
+                    "data_id": row_id,
+                    "created_at": now + timedelta(minutes=1),
+                }
+                for row_id in shared_ids
+            ],
+        )
+
+    with engine.connect() as conn:
+        context = MigrationContext.configure(conn)
+        with context.begin_transaction():
+            with Operations.context(context):
+                migration.upgrade()
+        conn.commit()
+
+    with engine.connect() as conn:
+        unscoped = conn.execute(
+            sa.select(sa.func.count())
+            .select_from(data_table)
+            .where(data_table.c.dataset_id.is_(None))
+        ).scalar()
+        assert unscoped == 0, "every legacy row must be stamped"
+
+        total = conn.execute(sa.select(sa.func.count()).select_from(data_table)).scalar()
+        assert total == len(sole_ids) + 2 * len(shared_ids), "one fork per shared row"
+
+        keeper_count = conn.execute(
+            sa.select(sa.func.count())
+            .select_from(data_table)
+            .where(data_table.c.dataset_id == dataset_a, data_table.c.legacy_id.is_(None))
+        ).scalar()
+        assert keeper_count == len(sole_ids) + len(shared_ids), "keepers keep their ids"
+
+        forks = conn.execute(
+            sa.select(data_table.c.legacy_id, data_table.c.id).where(
+                data_table.c.dataset_id == dataset_b
+            )
+        ).fetchall()
+        assert len(forks) == len(shared_ids)
+        assert {row.legacy_id for row in forks} == set(shared_ids), (
+            "every fork records its pre-fork original"
+        )
+        assert all(row.id not in set(shared_ids) for row in forks), "forks got fresh ids"
+
+        assert "dataset_data" not in sa.inspect(conn).get_table_names()
