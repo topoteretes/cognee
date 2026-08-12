@@ -101,9 +101,7 @@ class AssignmentResult:
         return len(self.sink_indices)
 
 
-def canonical_matrix(
-    questions: Sequence[DedupedQuestion], normalized: np.ndarray
-) -> np.ndarray:
+def canonical_matrix(questions: Sequence[DedupedQuestion], normalized: np.ndarray) -> np.ndarray:
     """Gather each question's canonical vector out of the ask-level matrix.
 
     Dedup records a ``canonical_index`` into the matrix the asks were embedded
@@ -114,9 +112,7 @@ def canonical_matrix(
     if not questions:
         return np.zeros((0, 0))
 
-    return np.asarray(
-        [normalized[question.canonical_index] for question in questions], dtype=float
-    )
+    return np.asarray([normalized[question.canonical_index] for question in questions], dtype=float)
 
 
 def require_matching_fingerprint(

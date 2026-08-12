@@ -549,9 +549,7 @@ async def test_two_agents_share_the_owners_topics_but_not_each_others_suggestion
     )
 
     topics = await repository.load_active_topics(owner_id)
-    assert [topic.id for topic in topics] and all(
-        topic.owner_id == owner_id for topic in topics
-    )
+    assert [topic.id for topic in topics] and all(topic.owner_id == owner_id for topic in topics)
     assert "Elsewhere" not in [topic.label for topic in topics]
 
     # Both labels' runs are scored against that same single topic.
