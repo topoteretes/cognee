@@ -207,8 +207,16 @@ async def _verify_graph_access(stage: str, nodes: list, edges: list) -> None:
 
 
 async def _verify_vector_access(stage: str) -> None:
-    """CHUNKS is raw vector retrieval (no LLM fallback); empty == inaccessible."""
-    results = await cognee.search(query_type=SearchType.CHUNKS, query_text=SEARCH_QUERY)
+    """CHUNKS is raw vector retrieval (no LLM fallback); empty == inaccessible.
+
+    Scoped to the lorem dataset: the dlt_compat dataset legitimately lacks
+    chunk/summary collections (legacy DLT skipped summarization; the SQLite
+    seed cannot cognify at all), and a cross-dataset search currently raises
+    CollectionNotFoundError when any one dataset misses the collection.
+    """
+    results = await cognee.search(
+        query_type=SearchType.CHUNKS, query_text=SEARCH_QUERY, datasets=[DATASET]
+    )
     if not results:
         _fail(f"[{stage}] CHUNKS search returned no results — vector data is not accessible.")
     print(f"  [vector] CHUNKS: {len(results)} result(s) — OK")
@@ -284,7 +292,7 @@ async def _verify_access(stage: str) -> None:
         SearchType.RAG_COMPLETION,
         SearchType.SUMMARIES,
     ):
-        await cognee.search(query_type=query_type, query_text=SEARCH_QUERY)
+        await cognee.search(query_type=query_type, query_text=SEARCH_QUERY, datasets=[DATASET])
     print("  [smoke] GRAPH_COMPLETION + RAG_COMPLETION + SUMMARIES ran without error — OK")
 
 
@@ -485,22 +493,23 @@ async def _verify_dlt_takeover(stage: str) -> None:
         )
     print(f"  [dlt] {len(legacy)} legacy per-row record(s), stamps in system_metadata — OK")
 
-    # B: the tombstone must reject cognifying legacy rows, loudly.
-    tombstone_fired = False
+    # B: classification must reject legacy rows loudly (the tombstone). Pinned
+    # via document_class_for directly rather than a cognify run: where the
+    # legacy version managed to cognify these rows (Postgres), their completed
+    # per-item status makes a new cognify SKIP them — routing is only consulted
+    # for records that need processing, and that is exactly what this pins.
+    from cognee.tasks.documents.classify_documents import document_class_for
+
     try:
-        run_info = await cognee.cognify(datasets=[DLT_COMPAT_DATASET])
-        statuses = list(run_info.values()) if isinstance(run_info, dict) else [run_info]
-        tombstone_fired = any("Errored" in type(status).__name__ for status in statuses)
-    except Exception as error:
-        tombstone_fired = "no longer supported" in str(error)
-        if not tombstone_fired:
-            raise
-    if not tombstone_fired:
+        document_class_for(legacy[0])
         _fail(
-            f"[{stage}] cognify over legacy per-row DLT records completed cleanly — "
-            "the tombstone must fail loudly instead."
+            f"[{stage}] classifying a legacy per-row DLT record did not raise — "
+            "the tombstone must fail loudly instead of routing it."
         )
-    print("  [dlt] cognify on legacy rows failed loudly (tombstone) — OK")
+    except ValueError as error:
+        if "no longer supported" not in str(error):
+            raise
+    print("  [dlt] legacy rows classify to a loud tombstone error — OK")
 
     # C: re-adding the same-named source converts to the manifest model and
     # the orphan sweep retires the legacy rows.
