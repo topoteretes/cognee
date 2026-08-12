@@ -218,6 +218,88 @@ async def test_row_level_update_processes_only_the_delta(clean_env):
 
 
 @pytest.mark.asyncio
+async def test_sequential_updates_chain(clean_env):
+    """Multiple updates one after another: each delta diffs against the
+    PREVIOUS update's state, a row removed and later re-added resurrects
+    under its original content-addressed node id, an identical re-update is
+    a pure no-op, and cognify still skips at the end of the chain."""
+    user = await get_default_user()
+    dataset_name = "dlt_row_chain_ds"
+    source = "people_chain"
+
+    def people(rows):
+        return _people(rows, name=source)
+
+    v1 = [
+        {"id": "1", "name": "Ada Lovelace", "role": "analytical engines"},
+        {"id": "2", "name": "Alan Turing", "role": "computability"},
+        {"id": "3", "name": "Grace Hopper", "role": "compilers"},
+    ]
+    await cognee.add([people(v1)], dataset_name, primary_key="id")
+    await cognee.cognify(datasets=[dataset_name])
+    dataset, manifest = await _manifest_record(user, dataset_name=dataset_name)
+    grace_id_v1 = next(nid for t, nid in (await _dlt_row_nodes()).items() if "compilers" in t)
+
+    # u1: edit 2, remove 3, add 4
+    v2 = [
+        {"id": "1", "name": "Ada Lovelace", "role": "analytical engines"},
+        {"id": "2", "name": "Alan Turing", "role": "computing pioneer"},
+        {"id": "4", "name": "John von Neumann", "role": "stored programs"},
+    ]
+    s1 = await cognee.update(
+        data_id=UUID(str(manifest.id)),
+        data=people(v2),
+        dataset_id=UUID(str(dataset.id)),
+        user=user,
+    )
+    assert (s1["rows_edited"], s1["rows_removed"], s1["rows_added"]) == (1, 1, 1), s1
+
+    # u2: remove 1, resurrect 3 with its ORIGINAL content, edit 4 — the diff
+    # base must be u1's state, not v1's.
+    v3 = [
+        {"id": "2", "name": "Alan Turing", "role": "computing pioneer"},
+        {"id": "3", "name": "Grace Hopper", "role": "compilers"},
+        {"id": "4", "name": "John von Neumann", "role": "architecture"},
+    ]
+    s2 = await cognee.update(
+        data_id=UUID(str(manifest.id)),
+        data=people(v3),
+        dataset_id=UUID(str(dataset.id)),
+        user=user,
+    )
+    assert (s2["rows_edited"], s2["rows_removed"], s2["rows_added"]) == (1, 1, 1), s2
+
+    rows = await _dlt_row_nodes()
+    assert len(rows) == 3
+    grace_id_v3 = next(nid for t, nid in rows.items() if "compilers" in t)
+    assert grace_id_v3 == grace_id_v1, "resurrected row must keep its original node id"
+    assert not any("analytical engines" in t for t in rows), "removed row remains"
+    assert any("architecture" in t for t in rows) and not any("stored programs" in t for t in rows)
+
+    # u3: identical source — a pure no-op, nothing embedded.
+    EMBEDDED.clear()
+    s3 = await cognee.update(
+        data_id=UUID(str(manifest.id)),
+        data=people(v3),
+        dataset_id=UUID(str(dataset.id)),
+        user=user,
+    )
+    assert s3 == {
+        "rows_added": 0,
+        "rows_edited": 0,
+        "rows_removed": 0,
+        "rows_unchanged": 3,
+        "fk_edges_repaired": 0,
+    }, s3
+    assert EMBEDDED == [], f"no-op update embedded texts: {EMBEDDED[:3]}"
+
+    # The chain ends in a consistent state cognify agrees with.
+    EMBEDDED.clear()
+    await cognee.cognify(datasets=[dataset_name])
+    assert EMBEDDED == [], "cognify reprocessed after a settled update chain"
+
+
+@pytest.mark.asyncio
 async def test_update_rejects_renamed_source(clean_env):
     user = await get_default_user()
 
