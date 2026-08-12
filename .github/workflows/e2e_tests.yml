@@ -1856,6 +1856,12 @@ jobs:
       # the data migrations and the session persistence watermark takeover.
       COGNEE_COMPATIBILITY_TEST_VERSION: v1.2.0
 
+      # Phase 1/2 run real dlt pipelines; dlt's telemetry thread (default ON,
+      # posts to telemetry.scalevector.ai) is non-daemon and a wedged call
+      # blocks interpreter exit — observed as a phase-1 step hanging ~25 min
+      # AFTER printing "Phase 1 completed successfully".
+      RUNTIME__DLTHUB_TELEMETRY: "false"
+
       ENV: dev
       LLM_PROVIDER: ${{ secrets.LLM_PROVIDER }}
       LLM_MODEL: ${{ secrets.LLM_MODEL }}
@@ -1937,6 +1943,12 @@ jobs:
     env:
       # Same pin as the sqlite job — see the comment there.
       COGNEE_COMPATIBILITY_TEST_VERSION: v1.2.0
+
+      # Phase 1/2 run real dlt pipelines; dlt's telemetry thread (default ON,
+      # posts to telemetry.scalevector.ai) is non-daemon and a wedged call
+      # blocks interpreter exit — observed as a phase-1 step hanging ~25 min
+      # AFTER printing "Phase 1 completed successfully".
+      RUNTIME__DLTHUB_TELEMETRY: "false"
 
       # Relational DB — PostgreSQL
       DB_PROVIDER: postgres
