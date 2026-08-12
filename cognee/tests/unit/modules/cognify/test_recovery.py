@@ -277,3 +277,121 @@ async def test_recover_falls_back_to_created_at_without_a_heartbeat(monkeypatch)
     await recovery_module.recover_stale_cognify_runs_on_startup()
 
     assert len(rollback_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_recover_skips_run_whose_owning_process_is_alive(monkeypatch):
+    """Ownership outranks the heartbeat in the safe direction.
+
+    The heartbeat here is ancient, so the threshold alone would roll this run
+    back. Its process is still running, so it must be left completely alone.
+    """
+    dataset_id = uuid4()
+    live_run = SimpleNamespace(
+        pipeline_name="cognify_pipeline",
+        dataset_id=dataset_id,
+        pipeline_run_id=uuid4(),
+        status=PipelineRunStatus.DATASET_PROCESSING_STARTED,
+        created_at=datetime.now(timezone.utc) - timedelta(days=3),
+        last_heartbeat_at=datetime.now(timezone.utc) - timedelta(days=2),
+        owner_node_id="node-a",
+        owner_pid=4242,
+    )
+
+    engine = _FakeEngine([_FakeSession(execute_result=_FakeExecuteResult([live_run]))])
+
+    rollback_calls = []
+
+    async def _rollback_handler(**kwargs):
+        rollback_calls.append(kwargs)
+
+    monkeypatch.setattr(recovery_module, "get_relational_engine", lambda: engine)
+    monkeypatch.setattr(recovery_module, "set_database_global_context_variables", _no_op_context)
+    monkeypatch.setattr(recovery_module, "cognify_rollback_handler", _rollback_handler)
+    monkeypatch.setattr(recovery_module, "is_owner_process_alive", lambda _node, _pid: True)
+
+    await recovery_module.recover_stale_cognify_runs_on_startup()
+
+    assert rollback_calls == []
+
+
+@pytest.mark.asyncio
+async def test_recover_reclaims_run_whose_owning_process_is_gone(monkeypatch):
+    """The other direction, and the reason ownership is worth having.
+
+    This run reported progress one second ago, so no threshold would ever
+    reclaim it, yet its process is gone and it can never resume. Waiting would
+    leave the dataset blocked as "already being processed".
+    """
+    dataset_id = uuid4()
+    owner_id = uuid4()
+    pipeline_run_id = uuid4()
+
+    dead_run = SimpleNamespace(
+        pipeline_name="cognify_pipeline",
+        dataset_id=dataset_id,
+        pipeline_run_id=pipeline_run_id,
+        status=PipelineRunStatus.DATASET_PROCESSING_STARTED,
+        created_at=datetime.now(timezone.utc) - timedelta(minutes=1),
+        last_heartbeat_at=datetime.now(timezone.utc) - timedelta(seconds=1),
+        owner_node_id="node-a",
+        owner_pid=4242,
+    )
+    dataset = SimpleNamespace(id=dataset_id, owner_id=owner_id)
+
+    engine = _FakeEngine(
+        [_FakeSession(execute_result=_FakeExecuteResult([dead_run])), _FakeSession(dataset=dataset)]
+    )
+
+    rollback_calls = []
+
+    async def _rollback_handler(**kwargs):
+        rollback_calls.append(kwargs)
+
+    async def _reset_status(**kwargs):
+        return None
+
+    monkeypatch.setattr(recovery_module, "get_relational_engine", lambda: engine)
+    monkeypatch.setattr(recovery_module, "set_database_global_context_variables", _no_op_context)
+    monkeypatch.setattr(recovery_module, "cognify_rollback_handler", _rollback_handler)
+    monkeypatch.setattr(recovery_module, "reset_pipeline_run_status", _reset_status)
+    monkeypatch.setattr(recovery_module, "is_owner_process_alive", lambda _node, _pid: False)
+
+    await recovery_module.recover_stale_cognify_runs_on_startup()
+
+    assert len(rollback_calls) == 1
+    assert rollback_calls[0]["pipeline_run_id"] == pipeline_run_id
+
+
+@pytest.mark.asyncio
+async def test_recover_falls_back_to_heartbeat_when_owner_is_unknown(monkeypatch):
+    """Runs owned by another node, or by no one, keep the threshold path."""
+    dataset_id = uuid4()
+    foreign_run = SimpleNamespace(
+        pipeline_name="cognify_pipeline",
+        dataset_id=dataset_id,
+        pipeline_run_id=uuid4(),
+        status=PipelineRunStatus.DATASET_PROCESSING_STARTED,
+        created_at=datetime.now(timezone.utc) - timedelta(days=3),
+        last_heartbeat_at=datetime.now(timezone.utc) - timedelta(seconds=30),
+        owner_node_id="some-other-host",
+        owner_pid=99,
+    )
+
+    engine = _FakeEngine([_FakeSession(execute_result=_FakeExecuteResult([foreign_run]))])
+
+    rollback_calls = []
+
+    async def _rollback_handler(**kwargs):
+        rollback_calls.append(kwargs)
+
+    monkeypatch.setattr(recovery_module, "get_relational_engine", lambda: engine)
+    monkeypatch.setattr(recovery_module, "set_database_global_context_variables", _no_op_context)
+    monkeypatch.setattr(recovery_module, "cognify_rollback_handler", _rollback_handler)
+    monkeypatch.setattr(recovery_module, "is_owner_process_alive", lambda _node, _pid: None)
+    monkeypatch.setattr(recovery_module, "STALE_RUN_MIN_AGE_SECONDS", 3600)
+
+    await recovery_module.recover_stale_cognify_runs_on_startup()
+
+    # Recent heartbeat, unknowable owner: left alone.
+    assert rollback_calls == []

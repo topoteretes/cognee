@@ -10,6 +10,7 @@ from cognee.modules.cognify.rollback import cognify_rollback_handler
 from cognee.modules.data.models import Dataset
 from cognee.modules.pipelines.methods import reset_pipeline_run_status
 from cognee.modules.pipelines.models import PipelineRun, PipelineRunStatus
+from cognee.modules.pipelines.utils import is_owner_process_alive
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("cognify.recovery")
@@ -72,9 +73,13 @@ async def recover_stale_cognify_runs_on_startup() -> None:
     is reset to ``DATASET_PROCESSING_INITIATED`` so it is no longer reported as
     "already being processed" and can be cognified again.
 
-    Candidates are filtered by the run's progress heartbeat rather than its
-    age, so a run that is genuinely still working, however long it has been
-    running, is never rolled back out from under a live worker.
+    Liveness is decided in two steps. If the run recorded an owner on a node
+    this process can see, the operating system answers exactly: a live pid
+    means the run is live no matter how quiet it has been, and a dead pid means
+    the run cannot resume no matter how recently it reported progress. Only
+    when ownership is unknown or belongs to another node does the decision fall
+    back to the progress heartbeat and its threshold, so a run that is still
+    working is never rolled back out from under a live worker.
     """
     db_engine = get_relational_engine()
 
@@ -111,17 +116,46 @@ async def recover_stale_cognify_runs_on_startup() -> None:
         return
 
     for pipeline_run in recovery_candidates:
-        last_progress_at = _last_progress_at(pipeline_run)
+        owner_alive = is_owner_process_alive(
+            getattr(pipeline_run, "owner_node_id", None),
+            getattr(pipeline_run, "owner_pid", None),
+        )
 
-        if not _has_stalled_past_threshold(last_progress_at):
+        if owner_alive is True:
             logger.info(
-                "Skipping startup recovery for run %s: last reported progress at %s "
-                "(less than %ds ago), treating it as a live run rather than a stale one.",
+                "Skipping startup recovery for run %s: its owning process (node=%s pid=%s) "
+                "is still running, so the run is live regardless of heartbeat age.",
                 pipeline_run.pipeline_run_id,
-                last_progress_at,
-                STALE_RUN_MIN_AGE_SECONDS,
+                pipeline_run.owner_node_id,
+                pipeline_run.owner_pid,
             )
             continue
+
+        if owner_alive is False:
+            # The owner died on this node. No threshold applies: a run whose
+            # process is gone cannot resume, however recently it reported
+            # progress. Recovering now also releases the dataset immediately
+            # rather than leaving it blocked as "already being processed".
+            logger.info(
+                "Recovering run %s: its owning process (node=%s pid=%s) is gone.",
+                pipeline_run.pipeline_run_id,
+                pipeline_run.owner_node_id,
+                pipeline_run.owner_pid,
+            )
+        else:
+            # Ownership is unknown or belongs to another node, so fall back to
+            # the progress heartbeat.
+            last_progress_at = _last_progress_at(pipeline_run)
+
+            if not _has_stalled_past_threshold(last_progress_at):
+                logger.info(
+                    "Skipping startup recovery for run %s: last reported progress at %s "
+                    "(less than %ds ago), treating it as a live run rather than a stale one.",
+                    pipeline_run.pipeline_run_id,
+                    last_progress_at,
+                    STALE_RUN_MIN_AGE_SECONDS,
+                )
+                continue
 
         async with db_engine.get_async_session() as session:
             dataset = await session.get(Dataset, pipeline_run.dataset_id)
