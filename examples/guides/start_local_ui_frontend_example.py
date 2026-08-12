@@ -11,6 +11,10 @@ import time
 import cognee
 
 
+def ignore_pid(pid):
+    """start_ui reports the server's process id through this required callback; unused here."""
+
+
 async def main():
     # First, let's add some data to cognee for the UI to display
     print("Adding sample data to cognee...")
@@ -27,11 +31,8 @@ async def main():
     print("=" * 60)
 
     # Start the UI server
-    def dummy_callback(pid):
-        pass
-
     server = cognee.start_ui(
-        pid_callback=dummy_callback,
+        pid_callback=ignore_pid,
         port=3000,
         open_browser=True,  # This will automatically open your browser
     )
